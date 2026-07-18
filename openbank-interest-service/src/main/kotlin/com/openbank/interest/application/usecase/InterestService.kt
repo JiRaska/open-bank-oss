@@ -12,6 +12,7 @@ import com.openbank.interest.domain.tax.WithholdingTaxPolicy
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -31,8 +32,11 @@ class InterestService(
     private val capitalizationRepo: InterestCapitalizationRepository,
     private val taxProfilePort: TaxProfilePort,
     private val ledgerPostingPort: LedgerPostingPort,
+    private val accountDirectoryPort: AccountDirectoryPort,
     @ConfigProperty(name = "openbank.interest.day-count-convention", defaultValue = "ACT_365")
     private val defaultDayCount: String,
+    @ConfigProperty(name = "openbank.interest.accruable-account-types", defaultValue = "SAVINGS")
+    private val accruableAccountTypes: String,
     private val clock: Clock,
 ) : AccrueInterestUseCase,
     CapitalizeInterestUseCase,
@@ -46,15 +50,20 @@ class InterestService(
         capitalizationRepo: InterestCapitalizationRepository,
         taxProfilePort: TaxProfilePort,
         ledgerPostingPort: LedgerPostingPort,
+        accountDirectoryPort: AccountDirectoryPort,
         @ConfigProperty(name = "openbank.interest.day-count-convention", defaultValue = "ACT_365")
         defaultDayCount: String,
+        @ConfigProperty(name = "openbank.interest.accruable-account-types", defaultValue = "SAVINGS")
+        accruableAccountTypes: String,
     ) : this(
         configRepo,
         accrualRepo,
         capitalizationRepo,
         taxProfilePort,
         ledgerPostingPort,
+        accountDirectoryPort,
         defaultDayCount,
+        accruableAccountTypes,
         Clock.systemUTC(),
     )
 
@@ -86,10 +95,66 @@ class InterestService(
             }
         }
 
+    /**
+     * The daily accrual run: discover every ACTIVE interest-bearing account fleet-wide (paged via
+     * account-service's ADR-0143 cursor list), read each one's booked balance, and post one accrual
+     * for [date]. Returns the number of accruals actually written.
+     *
+     * Per-account resilience: a missing rate config, an unavailable balance, or a duplicate (the
+     * `UNIQUE(account_id, accrual_date, product_id)` constraint — i.e. this account was already
+     * accrued for [date], so the run is safely **idempotent** and re-runnable) collapses that one
+     * account to a no-op (0), never aborting the batch. Accounts are processed sequentially
+     * (`concatenate`) to keep a bounded, polite load on account-service.
+     */
     override fun accrueAll(date: LocalDate): Uni<Int> {
-        // In production: fetch all active accounts with interest products and accrue
-        return Uni.createFrom().item(0)
+        val accruableTypes = accruableAccountTypes.split(",").map {
+            it.trim().uppercase()
+        }.filter { it.isNotEmpty() }.toSet()
+        return collectAccruableAccounts(cursor = null, acc = emptyList(), accruableTypes = accruableTypes)
+            .flatMap { accounts ->
+                if (accounts.isEmpty()) {
+                    Uni.createFrom().item(0)
+                } else {
+                    Multi.createFrom().iterable(accounts)
+                        .onItem().transformToUniAndConcatenate { account -> accrueOneForDate(account, date) }
+                        .collect().with(java.util.stream.Collectors.summingInt { it })
+                }
+            }
     }
+
+    /** Walk account-service's cursor pages, keeping only the accruable account types, until the
+     *  cursor is exhausted. Page count is small (fleet-wide ACTIVE set); recursion depth == pages. */
+    private fun collectAccruableAccounts(
+        cursor: String?,
+        acc: List<AccountSnapshot>,
+        accruableTypes: Set<String>,
+    ): Uni<List<AccountSnapshot>> = accountDirectoryPort.listActiveAccounts(cursor, ACCRUAL_PAGE_SIZE).flatMap { page ->
+        val kept = acc + page.items.filter { it.accountType.uppercase() in accruableTypes }
+        if (page.nextCursor == null) {
+            Uni.createFrom().item(kept)
+        } else {
+            collectAccruableAccounts(page.nextCursor, kept, accruableTypes)
+        }
+    }
+
+    /** Accrue one account for [date]; 1 if written, 0 if skipped (zero/negative balance, no rate
+     *  config, unavailable balance, or already accrued for [date]). Never fails the caller. */
+    private fun accrueOneForDate(account: AccountSnapshot, date: LocalDate): Uni<Int> =
+        accountDirectoryPort.bookedBalance(account.id).flatMap { balance ->
+            if (balance == null || balance.booked.signum() <= 0) {
+                Uni.createFrom().item(0)
+            } else {
+                accrue(
+                    AccrualRequest(
+                        accountId = account.id,
+                        productId = account.productId,
+                        balance = balance.booked,
+                        currency = balance.currency,
+                        accrualDate = date,
+                    ),
+                ).map { 1 }.onFailure().recoverWithItem(0)
+            }
+        }
 
     /**
      * Capitalizes one `(account, product)` period (ADR-0033 §B/§D): claim → post to the GL → commit.
@@ -406,5 +471,9 @@ class InterestService(
         } else {
             configRepo.update(config.copy(active = false, updatedAt = OffsetDateTime.now(clock)))
         }
+    }
+
+    private companion object {
+        const val ACCRUAL_PAGE_SIZE = 100
     }
 }
