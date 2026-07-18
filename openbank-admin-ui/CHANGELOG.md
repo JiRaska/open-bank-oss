@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.51.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.50.1...admin-ui-v0.51.0) (2026-07-18)
+
+
+### Features
+
+* **admin-ui:** animate the service map into a data-flow topology ([#1620](https://github.com/JiRaska/open-bank-oss/issues/1620)) ([182cdea](https://github.com/JiRaska/open-bank-oss/commit/182cdea4efb052085eae54c9d77014869a0b7346))
+
 ## [0.50.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.50.0...admin-ui-v0.50.1) (2026-07-17)
 
 
