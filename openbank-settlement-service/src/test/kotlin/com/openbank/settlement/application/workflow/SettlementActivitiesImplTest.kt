@@ -4,34 +4,59 @@
 
 package com.openbank.settlement.application.workflow
 
+import com.openbank.libs.audit.AuditEvent
+import com.openbank.libs.audit.AuditEventPublisher
+import com.openbank.libs.audit.AuditResult
 import com.openbank.settlement.application.port.out.CreditPort
 import com.openbank.settlement.application.port.out.DebitPort
 import com.openbank.settlement.application.port.out.LedgerPort
 import com.openbank.settlement.application.port.out.SettlementRepository
+import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
+import java.time.Instant
 import java.util.UUID
 
+/**
+ * Also covers issue #1502: each state transition below must emit an [AuditEvent] onto the shared
+ * libs audit pipeline so settlement-service has a DORA Art. 17 reconstructable audit trail.
+ */
 class SettlementActivitiesImplTest {
 
     private val settlementRepository: SettlementRepository = mockk(relaxed = true)
     private val debitPort: DebitPort = mockk(relaxed = true)
     private val creditPort: CreditPort = mockk(relaxed = true)
     private val ledgerPort: LedgerPort = mockk(relaxed = true)
+    private val auditPublisher: AuditEventPublisher = mockk(relaxed = true)
 
     private lateinit var activities: SettlementActivitiesImpl
+
+    private fun settlement(id: UUID, status: SettlementStatus) = Settlement(
+        id = id,
+        payerAccountId = UUID.randomUUID(),
+        payeeAccountId = UUID.randomUUID(),
+        amount = BigDecimal("10.00"),
+        currency = "CZK",
+        status = status,
+        createdAt = Instant.now(),
+        updatedAt = Instant.now(),
+    )
 
     @BeforeEach
     fun setUp() {
         // TestableActivities overrides runOnVertxContext to run synchronously — the production impl
         // needs a real Vert.x context (VertxContextSupport), which a plain unit test does not have.
-        activities = TestableActivities(settlementRepository, debitPort, creditPort, ledgerPort)
-        coEvery { settlementRepository.updateStatus(any(), any()) } returns mockk()
+        activities = TestableActivities(settlementRepository, debitPort, creditPort, ledgerPort, auditPublisher)
+        coEvery { settlementRepository.updateStatus(any(), any()) } answers {
+            settlement(firstArg(), secondArg())
+        }
     }
 
     @Test
@@ -40,6 +65,25 @@ class SettlementActivitiesImplTest {
         activities.debitPayer(id)
         coVerify { debitPort.debit(id) }
         coVerify { settlementRepository.updateStatus(id, SettlementStatus.DEBITED) }
+    }
+
+    @Test
+    fun `debitPayer publishes a settlement_debit audit event`() {
+        val id = UUID.randomUUID()
+        val events = mutableListOf<AuditEvent>()
+        coEvery { auditPublisher.publish(capture(events)) } returns Unit
+
+        activities.debitPayer(id)
+
+        assertThat(events).singleElement().satisfies({ e ->
+            assertThat(e.operation).isEqualTo("settlement.debit")
+            assertThat(e.actorId).isEqualTo("settlement-service")
+            assertThat(e.actorType).isEqualTo("SERVICE")
+            assertThat(e.resourceType).isEqualTo("settlement")
+            assertThat(e.resourceId).isEqualTo(id.toString())
+            assertThat(e.result).isEqualTo(AuditResult.SUCCESS)
+            assertThat(e.payload["status"]).isEqualTo("DEBITED")
+        })
     }
 
     @Test
@@ -90,6 +134,21 @@ class SettlementActivitiesImplTest {
         coVerify(exactly = 0) { creditPort.credit(any()) }
         coVerify { settlementRepository.updateStatus(id, SettlementStatus.REJECTED) }
     }
+
+    @Test
+    fun `rejectSettlement publishes a FAILURE settlement_reject audit event`() {
+        val id = UUID.randomUUID()
+        val events = mutableListOf<AuditEvent>()
+        coEvery { auditPublisher.publish(capture(events)) } returns Unit
+
+        activities.rejectSettlement(id)
+
+        assertThat(events).singleElement().satisfies({ e ->
+            assertThat(e.operation).isEqualTo("settlement.reject")
+            assertThat(e.result).isEqualTo(AuditResult.FAILURE)
+            assertThat(e.resourceId).isEqualTo(id.toString())
+        })
+    }
 }
 
 /** Runs the activity bodies synchronously, bypassing the real Vert.x-context bridge. */
@@ -98,6 +157,7 @@ private class TestableActivities(
     debitPort: DebitPort,
     creditPort: CreditPort,
     ledgerPort: LedgerPort,
-) : SettlementActivitiesImpl(settlementRepository, debitPort, creditPort, ledgerPort) {
+    auditPublisher: AuditEventPublisher,
+) : SettlementActivitiesImpl(settlementRepository, debitPort, creditPort, ledgerPort, auditPublisher) {
     override fun <T> runOnVertxContext(block: suspend () -> T): T = runBlocking { block() }
 }

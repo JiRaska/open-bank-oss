@@ -4,6 +4,7 @@
 
 package com.openbank.settlement.application.usecase
 
+import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.settlement.application.port.out.CreditPort
 import com.openbank.settlement.application.port.out.DebitPort
 import com.openbank.settlement.application.port.out.LedgerPort
@@ -40,6 +41,7 @@ class SettlementServiceTemporalSettleTest {
     private val creditPort: CreditPort = mockk(relaxed = true)
     private val ledgerPort: LedgerPort = mockk(relaxed = true)
     private val temporalConfig: TemporalConfig = mockk(relaxed = true)
+    private val auditPublisher: AuditEventPublisher = mockk(relaxed = true)
 
     private lateinit var env: TestWorkflowEnvironment
     private lateinit var worker: Worker
@@ -58,7 +60,15 @@ class SettlementServiceTemporalSettleTest {
         env.start()
         every { temporalConfig.enabled() } returns true
         every { temporalConfig.taskQueue() } returns TASK_QUEUE
-        service = SettlementService(repo, debitPort, creditPort, ledgerPort, temporalConfig, env.workflowClient)
+        service = SettlementService(
+            repo,
+            debitPort,
+            creditPort,
+            ledgerPort,
+            temporalConfig,
+            env.workflowClient,
+            auditPublisher,
+        )
     }
 
     @AfterEach

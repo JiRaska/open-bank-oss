@@ -4,6 +4,7 @@
 
 package com.openbank.settlement.application.usecase
 
+import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.settlement.application.port.out.CreditPort
 import com.openbank.settlement.application.port.out.DebitPort
 import com.openbank.settlement.application.port.out.LedgerPort
@@ -38,6 +39,7 @@ class SettlementServiceSettleTest {
     private val creditPort: CreditPort = mockk(relaxed = true)
     private val ledgerPort: LedgerPort = mockk(relaxed = true)
     private val temporalConfig: TemporalConfig = mockk(relaxed = true)
+    private val auditPublisher: AuditEventPublisher = mockk(relaxed = true)
 
     private fun pendingSettlement(id: UUID = UUID.randomUUID()) = Settlement(
         id = id,
@@ -53,7 +55,15 @@ class SettlementServiceSettleTest {
     @Test
     fun `settle throws when the settlement does not exist`() {
         val workflowClient: WorkflowClient = mockk(relaxed = true)
-        val service = SettlementService(repo, debitPort, creditPort, ledgerPort, temporalConfig, workflowClient)
+        val service = SettlementService(
+            repo,
+            debitPort,
+            creditPort,
+            ledgerPort,
+            temporalConfig,
+            workflowClient,
+            auditPublisher,
+        )
         val id = UUID.randomUUID()
         coEvery { repo.findById(id) } returns null
 
@@ -65,7 +75,15 @@ class SettlementServiceSettleTest {
     @Test
     fun `settle runs the legacy saga and reaches BOOKED when Temporal is disabled`() {
         val workflowClient: WorkflowClient = mockk(relaxed = true)
-        val service = SettlementService(repo, debitPort, creditPort, ledgerPort, temporalConfig, workflowClient)
+        val service = SettlementService(
+            repo,
+            debitPort,
+            creditPort,
+            ledgerPort,
+            temporalConfig,
+            workflowClient,
+            auditPublisher,
+        )
         val settlement = pendingSettlement()
         coEvery { repo.findById(settlement.id) } returns settlement
         every { temporalConfig.enabled() } returns false
@@ -83,7 +101,15 @@ class SettlementServiceSettleTest {
     @Test
     fun `settle loses the legacy claim race and returns the current status without re-processing`() {
         val workflowClient: WorkflowClient = mockk(relaxed = true)
-        val service = SettlementService(repo, debitPort, creditPort, ledgerPort, temporalConfig, workflowClient)
+        val service = SettlementService(
+            repo,
+            debitPort,
+            creditPort,
+            ledgerPort,
+            temporalConfig,
+            workflowClient,
+            auditPublisher,
+        )
         val settlement = pendingSettlement().copy(status = SettlementStatus.DEBITED)
         coEvery { repo.findById(settlement.id) } returnsMany listOf(
             settlement.copy(status = SettlementStatus.PENDING),
@@ -101,7 +127,15 @@ class SettlementServiceSettleTest {
     @Test
     fun `settle rejects when the legacy saga throws mid-flight`() {
         val workflowClient: WorkflowClient = mockk(relaxed = true)
-        val service = SettlementService(repo, debitPort, creditPort, ledgerPort, temporalConfig, workflowClient)
+        val service = SettlementService(
+            repo,
+            debitPort,
+            creditPort,
+            ledgerPort,
+            temporalConfig,
+            workflowClient,
+            auditPublisher,
+        )
         val settlement = pendingSettlement()
         coEvery { repo.findById(settlement.id) } returns settlement
         every { temporalConfig.enabled() } returns false

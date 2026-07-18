@@ -4,6 +4,9 @@
 
 package com.openbank.settlement.application.usecase
 
+import com.openbank.libs.audit.AuditEvent
+import com.openbank.libs.audit.AuditEventPublisher
+import com.openbank.libs.audit.AuditResult
 import com.openbank.settlement.application.port.`in`.OriginateSettlementCommand
 import com.openbank.settlement.application.port.`in`.SettlementUseCase
 import com.openbank.settlement.application.port.out.CreditPort
@@ -33,6 +36,7 @@ class SettlementService(
     private val ledgerPort: LedgerPort,
     private val temporalConfig: TemporalConfig,
     private val workflowClient: WorkflowClient,
+    private val auditPublisher: AuditEventPublisher,
     private val clock: Clock,
 ) : SettlementUseCase {
 
@@ -44,7 +48,17 @@ class SettlementService(
         ledgerPort: LedgerPort,
         temporalConfig: TemporalConfig,
         workflowClient: WorkflowClient,
-    ) : this(settlementRepository, debitPort, creditPort, ledgerPort, temporalConfig, workflowClient, Clock.systemUTC())
+        auditPublisher: AuditEventPublisher,
+    ) : this(
+        settlementRepository,
+        debitPort,
+        creditPort,
+        ledgerPort,
+        temporalConfig,
+        workflowClient,
+        auditPublisher,
+        Clock.systemUTC(),
+    )
 
     private val log = Logger.getLogger(SettlementService::class.java)
 
@@ -154,19 +168,52 @@ class SettlementService(
     private suspend fun runLegacySettle(settlementId: UUID): SettlementStatus = try {
         log.infof("Legacy settle: debiting payer for settlement %s (claimed → DEBITED)", settlementId)
         debitPort.debit(settlementId)
+        // claimForProcessing already flipped the row to DEBITED (atomic PENDING -> DEBITED CAS)
+        // before this method was ever called, so the audited row already carries that status.
+        settlementRepository.findById(settlementId)?.let { audit("settlement.debit", it) }
 
         log.infof("Legacy settle: crediting payee for settlement %s", settlementId)
         creditPort.credit(settlementId)
-        settlementRepository.updateStatus(settlementId, SettlementStatus.CREDITED)
+        val credited = settlementRepository.updateStatus(settlementId, SettlementStatus.CREDITED)
+        audit("settlement.credit", credited)
 
         log.infof("Legacy settle: booking settlement %s to ledger", settlementId)
         ledgerPort.book(settlementId)
-        settlementRepository.updateStatus(settlementId, SettlementStatus.BOOKED)
+        val booked = settlementRepository.updateStatus(settlementId, SettlementStatus.BOOKED)
+        audit("settlement.ledger-book", booked)
 
         SettlementStatus.BOOKED
     } catch (ex: Exception) {
         log.errorf(ex, "Legacy settle failed for settlement %s; rejecting", settlementId)
-        settlementRepository.updateStatus(settlementId, SettlementStatus.REJECTED)
+        val rejected = settlementRepository.updateStatus(settlementId, SettlementStatus.REJECTED)
+        audit("settlement.reject", rejected, result = AuditResult.FAILURE)
         SettlementStatus.REJECTED
+    }
+
+    /**
+     * Publishes an [AuditEvent] for a legacy-path settlement state transition (issue #1502).
+     * `actorId`/`actorType` are `settlement-service`/`SERVICE`: the legacy settle path is itself
+     * server-driven (originated by an authenticated REST call, but the debit/credit/book sequence
+     * that follows carries no per-step caller identity), same convention as the Temporal-activities
+     * audit trail in [com.openbank.settlement.application.workflow.SettlementActivitiesImpl].
+     */
+    private suspend fun audit(operation: String, settlement: Settlement, result: AuditResult = AuditResult.SUCCESS) {
+        auditPublisher.publish(
+            AuditEvent(
+                actorId = "settlement-service",
+                actorType = "SERVICE",
+                operation = operation,
+                resourceType = "settlement",
+                resourceId = settlement.id.toString(),
+                result = result,
+                payload = mapOf(
+                    "status" to settlement.status.name,
+                    "payerAccountId" to settlement.payerAccountId.toString(),
+                    "payeeAccountId" to settlement.payeeAccountId.toString(),
+                    "amount" to settlement.amount.toString(),
+                    "currency" to settlement.currency,
+                ),
+            ),
+        )
     }
 }
