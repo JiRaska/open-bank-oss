@@ -20,11 +20,18 @@
 #
 # derivedFrom (optional) — a dotted path into security-graph.json; when present
 # the UI overrides the authored status with the live-derived one:
-#   istio.mtls.strict            (bool)  → enforced / planned
-#   istio.jwt.present            (bool)
-#   istio.l7.defaultDeny         (bool)
-#   network.defaultDeny          (bool)
 #   supplyChain.enforced         (bool)  → enforced / audit
+#
+# The istio.* and network.defaultDeny signals that used to live here were
+# removed 2026-07 (see PR fixing this file): generate-security-graph.mjs
+# parses openbank-infra/k8s/base/{istio,network-policies}.yaml, a manifest
+# tree that is never applied to the sandbox (no ArgoCD Application or
+# Terraform resource references it — confirmed against origin/main). Those
+# signals were not "live", just a second copy of an aspirational file
+# re-parsed at Docker build time — so a `derivedFrom` on them could silently
+# flip an honestly-authored `partial` control to `enforced`. Controls that
+# depend on cluster-mesh reality are authored directly below instead, until
+# a real live probe exists.
 
 schema: openbank.compliance-controls/v1
 
@@ -54,37 +61,33 @@ controls:
     evidence: "Pod-scoped ingress allow-lists derived from declared GitOps edges (ADR-0081), every service namespace covered; VPC CNI enforcement via platform-tofu"
     evidenceSource: "openbank-infra/scripts/gen-network-policies.py"
     status: partial
-    derivedFrom: network.defaultDeny
 
   - id: encryption-in-transit
     title: "Encryption in transit (mTLS everywhere)"
     category: "Cryptography"
     frameworks: [NIS2, DORA, PCI-DSS]
     references: ["NIS2 Art. 21", "DORA Art. 9", "PCI DSS 4.0 Req. 4"]
-    evidence: "Istio STRICT mTLS for all east-west traffic"
-    evidenceSource: "openbank-infra/k8s/base/istio.yaml"
-    status: enforced
-    derivedFrom: istio.mtls.strict
+    evidence: "TLS terminated at ingress-nginx (cert-manager, letsencrypt-prod) for north-south traffic. East-west traffic between pods is NOT encrypted — no service mesh is deployed to the sandbox (openbank-infra/k8s/base/istio.yaml exists but is wired into neither ArgoCD nor Terraform; ADR-0098 notes explicitly that no mesh is deployed). In-cluster isolation today comes from NetworkPolicy default-deny (see net-segmentation), not from encryption."
+    evidenceSource: "openbank-infra/gitops/components/*/ingress.yaml"
+    status: planned
 
   - id: strong-auth
     title: "Strong customer / service authentication"
     category: "Identity & access"
     frameworks: [PSD2, EBA-ICT]
     references: ["PSD2 RTS Art. 4", "EBA ICT 3.4.2"]
-    evidence: "Keycloak-issued JWT validated at the mesh edge; sca-service for SCA"
-    evidenceSource: "openbank-infra/k8s/base/istio.yaml"
+    evidence: "Keycloak-issued JWT bearer tokens validated per-service via quarkus-oidc, wired to the openbank Keycloak realm fleet-wide (every service build.gradle.kts + application.yaml); sca-service for SCA. Not a mesh-edge check — no service mesh is deployed (see encryption-in-transit)"
+    evidenceSource: "openbank-*-service/src/main/resources/application.yaml (oidc.auth-server-url)"
     status: enforced
-    derivedFrom: istio.jwt.present
 
   - id: authz-least-privilege
     title: "Least-privilege authorization (default-deny)"
     category: "Identity & access"
     frameworks: [EBA-ICT, DORA]
     references: ["EBA ICT 3.4.3", "DORA Art. 9"]
-    evidence: "Istio L7 AuthorizationPolicy default-deny; OPA fine-grained authz (opt-in)"
-    evidenceSource: "openbank-infra/k8s/base/istio.yaml + openbank-infra/opa/"
+    evidence: "NetworkPolicy default-deny gates L3/L4 access fleet-wide (see net-segmentation); OPA fine-grained L7 authz is enforced on a subset of services, still advisory on others (ADR-0034 Phase 5) — not a mesh AuthorizationPolicy, no service mesh is deployed"
+    evidenceSource: "openbank-infra/scripts/gen-network-policies.py + openbank-infra/opa/"
     status: partial
-    derivedFrom: istio.l7.defaultDeny
 
   - id: secrets-management
     title: "Centralised secrets management (no secrets in git)"
