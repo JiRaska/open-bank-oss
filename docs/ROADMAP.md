@@ -11,7 +11,7 @@ milestone completion in releases, not by inferred dates.
 | # | Name | Goal | Effort (eng-weeks) | Status |
 |---|---|---|---|---|
 | **M1** | Foundation hardening | Audit-ready, testable, contributor-friendly repo | 2–3 | ✅ Complete |
-| **M2** | Resilience primitives | Outbox + saga + idempotency everywhere; coverage ≥ 70% | 3–4 | 🟡 In progress |
+| **M2** | Resilience primitives | Outbox + Temporal workflows + idempotency everywhere; coverage ≥ 70% | 3–4 | 🟡 In progress |
 | **M3** | Compliance evidence | Every regulatory requirement mapped to demonstrable evidence | 2–3 | 🟡 In progress |
 | **M4** | Observability & ops | OTel everywhere; SLOs; chaos engineering begins | 2–3 | 🟢 Largely done |
 | **M5** | Security baseline | OWASP ASVS L3 + SLSA L3 supply chain + independent pen-test | 3–4 | 🟡 In progress |
@@ -23,9 +23,10 @@ milestone completion in releases, not by inferred dates.
 - **M1 (Foundation)** is complete: all services build green, CI gates enforced fleet-wide
   (SAST/SBOM/gitleaks/OpenAPI/governance-as-code), branch protection on `main`, per-service SemVer and
   release-please changelogs live.
-- **M2 (Resilience)** — transactional outbox and saga patterns are fleet-wide; Temporal durable execution
-  is live (ADR-0101, FX + statement flows); idempotency coverage and integration-test depth are the
-  remaining gaps.
+- **M2 (Resilience)** — transactional outbox is fleet-wide (31 services); the original custom saga
+  framework (ADR-0045) is **superseded by Temporal** (ADR-0101/ADR-0120) — `libs/domain/saga` is gone
+  from the repo, and payment orchestration (transaction, SEPA, domestic) plus FX + statement flows now
+  run as Temporal workflows. Idempotency coverage and integration-test depth are the remaining gaps.
 - **M3 (Compliance)** — PSD2 XS2A developer portal live, GDPR Art. 17 erasure pipeline wired fleet-wide,
   EUDI/PID digital identity (OpenID4VP + OpenID4VCI) live, Verification of Payee (VoP) on outbound
   credit transfers live (ADR-0171). AnaCredit and FINREP regulatory-reporting services are deployed;
