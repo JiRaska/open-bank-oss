@@ -72,21 +72,19 @@ class ConsentRevocationOutboxIT {
 
     // conn.use closes the connection, cascading to its statement/result-set — kept flat to stay
     // within detekt's NestedBlockDepth.
-    private fun outboxRow(aggregateId: UUID): Pair<String, String>? =
-        dataSource.connection.use { conn ->
-            val ps = conn.prepareStatement("SELECT event_type, payload FROM consent_outbox WHERE aggregate_id = ?")
-            ps.setObject(1, aggregateId)
-            val rs = ps.executeQuery()
-            if (rs.next()) rs.getString("event_type") to rs.getString("payload") else null
-        }
+    private fun outboxRow(aggregateId: UUID): Pair<String, String>? = dataSource.connection.use { conn ->
+        val ps = conn.prepareStatement("SELECT event_type, payload FROM consent_outbox WHERE aggregate_id = ?")
+        ps.setObject(1, aggregateId)
+        val rs = ps.executeQuery()
+        if (rs.next()) rs.getString("event_type") to rs.getString("payload") else null
+    }
 
-    private fun consentStatus(id: UUID): String? =
-        dataSource.connection.use { conn ->
-            val ps = conn.prepareStatement("SELECT status FROM consents WHERE id = ?")
-            ps.setObject(1, id)
-            val rs = ps.executeQuery()
-            if (rs.next()) rs.getString("status") else null
-        }
+    private fun consentStatus(id: UUID): String? = dataSource.connection.use { conn ->
+        val ps = conn.prepareStatement("SELECT status FROM consents WHERE id = ?")
+        ps.setObject(1, id)
+        val rs = ps.executeQuery()
+        if (rs.next()) rs.getString("status") else null
+    }
 
     @Test
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])

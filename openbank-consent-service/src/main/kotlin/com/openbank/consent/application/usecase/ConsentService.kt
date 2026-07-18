@@ -4,11 +4,23 @@
 
 package com.openbank.consent.application.usecase
 
-import com.openbank.consent.application.port.`in`.*
+import com.openbank.consent.application.port.`in`.ActivateConsentUseCase
+import com.openbank.consent.application.port.`in`.CreateConsentCommand
+import com.openbank.consent.application.port.`in`.CreateConsentUseCase
+import com.openbank.consent.application.port.`in`.GetConsentUseCase
+import com.openbank.consent.application.port.`in`.RevokeConsentCommand
+import com.openbank.consent.application.port.`in`.RevokeConsentUseCase
+import com.openbank.consent.application.port.`in`.ValidateConsentCommand
+import com.openbank.consent.application.port.`in`.ValidateConsentUseCase
 import com.openbank.consent.application.port.out.ConsentRepository
 import com.openbank.consent.application.port.out.ScaChallengeClient
-import com.openbank.consent.domain.event.*
-import com.openbank.consent.domain.model.*
+import com.openbank.consent.domain.event.ConsentGranted
+import com.openbank.consent.domain.event.ConsentRejected
+import com.openbank.consent.domain.event.ConsentRevoked
+import com.openbank.consent.domain.model.Consent
+import com.openbank.consent.domain.model.ConsentScope
+import com.openbank.consent.domain.model.ConsentStatus
+import com.openbank.consent.domain.model.ConsentValidationResult
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
