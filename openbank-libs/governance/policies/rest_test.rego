@@ -42,6 +42,9 @@ rules_real := {
 		"openbank-clearing-service",
 		"openbank-sca-service",
 		"openbank-lending-service",
+		"openbank-fx-service",
+		"openbank-consent-service",
+		"openbank-sanctions-service",
 	],
 	"money_path_action_prefixes": {
 		"sepa-payment": ["sepaPayment"],
@@ -56,7 +59,7 @@ rules_real := {
 		"verbs": [
 			"transfer", "post", "reverse", "freeze", "release", "flip",
 			"transitionStatus", "recall", "settle", "disburse", "send", "credit", "debit",
-			"collateralRegister",
+			"collateralRegister", "convert", "grant", "revoke", "clear",
 		],
 		"actions": ["opsmessage.compose"],
 	},
@@ -315,6 +318,41 @@ test_four_eyes_not_required_for_lending_collateral_decide if {
 	# gating the second-eye action would be circular. Mirrors lending.approve (the loan-decision
 	# checker endpoint), which is likewise absent from four_eyes.verbs.
 	not rest.four_eyes_required with input as {"action": "lending.collateralDecide"}
+		with data.rules as rules_real
+}
+
+# ---------------------------------------------------------------------------------------
+# issue #1390: rules_real's four_eyes.verbs had drifted from the real rules.yaml, missing
+# convert/grant/revoke/clear (added per issue #938 follow-up). None of the existing
+# rules_real-driven tests exercised those four actions, so CI stayed green while the mock
+# silently stopped proving those four production maker-checker gates still fire. Pins each
+# against the real @Authorize action string documented alongside the verb in rules.yaml.
+# ---------------------------------------------------------------------------------------
+test_four_eyes_required_fx_convert_real_action if {
+	# FxResource.kt: @Authorize(action = "fx.convert", ...) -- execute a currency conversion
+	# at the current spot rate. Confirmed no M2M caller (fx-service's own rego).
+	rest.four_eyes_required with input as {"action": "fx.convert"}
+		with data.rules as rules_real
+}
+
+test_four_eyes_required_consent_grant_real_action if {
+	# ConsentResource.kt: @Authorize(action = "consent.grant", ...) -- create a new
+	# TPP<->customer data-access consent. Confirmed no M2M caller.
+	rest.four_eyes_required with input as {"action": "consent.grant"}
+		with data.rules as rules_real
+}
+
+test_four_eyes_required_consent_revoke_real_action if {
+	# ConsentResource.kt: @Authorize(action = "consent.revoke", ...) -- operator-initiated
+	# revocation of a customer's active consent. Confirmed no M2M caller.
+	rest.four_eyes_required with input as {"action": "consent.revoke"}
+		with data.rules as rules_real
+}
+
+test_four_eyes_required_sanctions_clear_real_action if {
+	# SanctionsResource.kt: @Authorize(action = "sanctions.clear", ...) -- decide a
+	# screening hit (CLEAR/HIT/POTENTIAL_HIT). Confirmed no M2M caller.
+	rest.four_eyes_required with input as {"action": "sanctions.clear"}
 		with data.rules as rules_real
 }
 
