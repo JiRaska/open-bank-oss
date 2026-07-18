@@ -28,7 +28,7 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 
 ## Project Status
 
-**Beta — M1 complete, M2/M3/M5 in progress.** 33 backend microservices in the repo (32 deployed to the AWS sandbox, 1 code-only/deploy-gated — FINREP; manifests exist but no ArgoCD Application wires them in yet); customer-edge + admin-UI + developer portal deployed. The intra-bank money path is end-to-end; the ISO 20022 pipeline and clearing simulator are wired; live interbank network connections and multi-region are later milestones. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full M1–M7 plan.
+**Beta — M1 complete, M2/M3/M5 in progress.** ~37 backend microservices in the repo, all now deployed to the AWS sandbox — FINREP (previously the lone code-only service) deploys via its own ArgoCD Application (#547), and the new Verification-of-Payee (VoP) service is live (ADR-0171); customer-edge + admin-UI + developer portal deployed. The intra-bank money path is end-to-end; the ISO 20022 pipeline and clearing simulator are wired; live interbank network connections and multi-region are later milestones. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full M1–M7 plan.
 
 | Area | Status |
 |---|---|
@@ -42,8 +42,9 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 | Cards, disputes, interest, standing orders, statements, onboarding | 🟢 Implemented + deployed; standing-order daily scheduler live |
 | Lending | 🟢 Deployed to sandbox (four-eyes KYC gate, ADR-0028); no live credit bureau integration |
 | SWIFT messaging | 🟡 Deployed (ISO 20022 MT/MX pipeline wired); no live SWIFT network connection |
+| Verification of Payee (VoP) | 🟢 Deployed to sandbox; name-match on outbound credit transfers, UI gate on SCT/SCT Inst (ADR-0171) |
 | AnaCredit, SDD, TPP registry | 🟢 Implemented, deployed to sandbox |
-| FINREP | 🟡 Implemented, code-only (manifests exist; not yet wired into an ArgoCD Application) |
+| FINREP | 🟢 Implemented, deployed to sandbox (ArgoCD Application registered, #547) |
 | Product catalog | 🟢 Implemented, deployed |
 | Customer edge (BFF) + mobile app | 🟡 BFF deployed (OPA enforce mode on); KMP/Compose app in active dev (separate repo) |
 | AI agent service (MCP, policy-gated) | 🟡 Fleet read tools + audit (ADR-0031); **copilot-service with LLM deployed in sandbox** |
@@ -54,7 +55,7 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 | Supply-chain security (SBOM, signing, SAST, pen-test P0–P2) | 🟢 CI-enforced (ADR-0030); external pen-test P0–P2 findings remediated |
 | CI/CD | 🟢 Self-hosted runners + path-scoped gates + GitOps auto-deploy (ADR-0040) |
 | Observability (OTel, Grafana, Prometheus, Loki, Tempo, Pyroscope) | 🟢 Live; GoAlert on-call, Pyrra SLO-as-code, GlitchTip errors, DomainMetrics fleet-wide |
-| Cloud substrate (AWS, OpenTofu, ArgoCD GitOps) | 🟢 Sandbox live (EKS + ArgoCD) — 33 backend microservices in repo, 32 deployed (FINREP code-only/deploy-gated) |
+| Cloud substrate (AWS, OpenTofu, ArgoCD GitOps) | 🟢 Sandbox live (EKS + ArgoCD) — full in-repo backend fleet deployed (no service code-only any longer) |
 
 ### What works right now (sandbox at open-bank.tech)
 
@@ -140,8 +141,8 @@ diagram, container diagram, key decisions, deployment topology, and security arc
 
 | Layer | Technology |
 |---|---|
-| Backend | Kotlin 2.3 + Quarkus 3.33 |
-| Database | PostgreSQL 16 (Flyway migrations); upgrading to 18 via CNPG (runbook 0003, in progress) |
+| Backend | Kotlin 2.3.20 + Quarkus 3.37 |
+| Database | PostgreSQL 18 via CNPG (Flyway migrations) — cluster fleet migrated 16 → 18 (runbook 0003); local Docker dev still on 16 |
 | Messaging | Apache Kafka (transactional outbox); Redpanda for per-JVM integration tests |
 | Schema registry | Apicurio 2.6 |
 | Cache | Valkey 7.2 |
