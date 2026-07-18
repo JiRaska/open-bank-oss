@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { Network, RefreshCw, CheckCircle2, XCircle, HelpCircle, Database, ArrowRight, ArrowLeft, Layers, BookOpen, Play, Pause, KeyRound, ShieldCheck, Boxes, Cloud, Send, Server } from 'lucide-react'
 import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
 import { svcUrl } from '@/lib/services/bff'
@@ -525,8 +525,10 @@ export default function ServiceMapPage() {
   const resolvedExternal = externalEdges
     .map(e => ({ ...e, fromId: moduleToId(e.from), kind: 'external' as const }))
     .filter((e): e is typeof e & { fromId: string } => !!e.fromId && !!LAYOUT.nodes[e.fromId!])
-  const infraIdsUsed = new Set(resolvedInfra.map(e => e.to))
-  const externalIdsUsed = new Set(resolvedExternal.map(e => e.to))
+  // Only count edges from a currently-VISIBLE service, so a group filter hides
+  // tier chips whose sole users are filtered out (no floating "CONNECTED (0)" chip).
+  const infraIdsUsed = new Set(resolvedInfra.filter(e => visibleIds.has(e.fromId)).map(e => e.to))
+  const externalIdsUsed = new Set(resolvedExternal.filter(e => visibleIds.has(e.fromId)).map(e => e.to))
   const renderInfraNodes = infraNodes.filter(n => infraIdsUsed.has(n.id))
   const renderExternalNodes = externalNodes.filter(n => externalIdsUsed.has(n.id))
   const hasInfra = renderInfraNodes.length > 0

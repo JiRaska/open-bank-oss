@@ -181,7 +181,7 @@ for (const name of modules) {
     if (kp.endsWith('datasource.reactive.url') || kp.endsWith('datasource.jdbc.url') || raw.includes('postgresql://')) svcInfra.add('postgres')
     if (kp.endsWith('oidc.auth-server-url') || raw.includes('/realms/')) svcInfra.add('keycloak')
     if (kp === 'opa.url' || kp.endsWith('.opa.url') || /:8181(\/|$)/.test(raw)) svcInfra.add('opa')
-    if (kp.includes('bootstrap-servers')) svcInfra.add('kafka')
+    if (/bootstrap[.-]servers/.test(kp)) svcInfra.add('kafka')
     // External — push/webhook detected by the integration's own enabled flag
     // (the endpoint/creds are injected at runtime, so the URL is usually empty).
     if (kp.endsWith('push.apns.enabled')) addExternal('apple-apns', 'push', envBool(value))
