@@ -84,6 +84,15 @@ updates:
       # compiler API (crashes reading ModuleKind 'Cjs').
       - dependency-name: "typescript"
         versions: ["7.x"]
+      # Tailwind v4 replaces tailwind.config.ts with a CSS-first @theme block,
+      # changes the PostCSS plugin package, and changes the darkMode strategy
+      # syntax. This app's design tokens are deeply wired through
+      # tailwind.config.ts + globals.css, so the bump needs a deliberate,
+      # visually-verified migration PR, not a mechanical Dependabot bump
+      # (#1329 fails typecheck: tailwind.config.ts(8,3) TS2322 on darkMode).
+      # Drop this entry once the migration in #1653 lands.
+      - dependency-name: "tailwindcss"
+        versions: ["4.x"]
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
