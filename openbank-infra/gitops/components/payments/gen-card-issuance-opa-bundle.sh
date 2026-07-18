@@ -12,67 +12,18 @@ MANIFEST=$REPO/openbank-infra/opa/bundle.manifest
 # infrastructure existed for this service before this bootstrap. card-issuance-service deploys
 # into the shared `payments` namespace/ArgoCD app (payments-services.yaml), not its own — this
 # generator lives alongside that manifest for the same reason the other payments/* bundles do.
-CARD_ISSUANCE_REST_EXT=$(cat << 'REGO'
-# SPDX-License-Identifier: Apache-2.0
-# Card-issuance-service REST extension (ADR-0034 Phase 5 bootstrap, issue #938).
-# Extends openbank.rest with card-domain allow reasons.
-# Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
 #
-# Actions gated (CardResource):
-#   card.create    — issueCard
-#   card.list      — listAll, listByAccount (#accountId), listByParty (#partyId)
-#   card.read      — getCard (#id)
-#   card.activate  — activate (#id)
-#   card.block     — block (#id) — ROLE_OPERATOR/ROLE_ADMIN/ROLE_COMPLIANCE (@RolesAllowed is a
-#                    disjunction: ROLE_COMPLIANCE widens the caller set, it does not narrow it)
-#   card.suspend   — suspend (#id) — customer-edge calls this on a customer's OWN card
-#                    (self-service freeze, /customer/v1/cards/{id}/freeze)
-#   card.resume    — resume (#id) — same, customer self-service unfreeze
-#
-# Base rest.rego already grants operator-read-any (ROLE_OPERATOR/ROLE_ADMIN) for card.list/.read
-# — no extension needed for those. The remaining actions have no generic base-rego grant.
-#
-# Verified caller: customer-edge calls card.list/card.suspend/card.resume on the customer's own
-# card via the shared `openbank-services` Keycloak client (service-account-openbank-services,
-# whose realmRoles include ROLE_OPERATOR) — see CustomerEdgeResource.kt cardAction(). Per the
-# documented fleet-wide limitation (rules.yaml authz_policy.principal_type_service_unreachable),
-# AuthorizeInterceptor cannot distinguish this M2M caller from a real human operator holding
-# ROLE_OPERATOR, so granting the role necessarily covers both — same stance as consent-service's
-# service-consent-m2m rule.
-
-package openbank.rest
-
-import rego.v1
-
-# Operators/admins may create, activate, block, suspend, or resume a card — mirroring
-# CardResource's @RolesAllowed on each method. block() is included: its
-# @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE") is a disjunction (any one role
-# admits the caller), so ROLE_COMPLIANCE is an ADDITIONAL grantee, not an extra requirement.
-# Omitting card.block here made the policy strictly narrower than the resource it guards: every
-# card.block by ROLE_OPERATOR/ROLE_ADMIN would 403 the moment AUTHZ_ENFORCE flips to true,
-# disabling the fraud response for a lost/stolen card for the only admin identity in the realm
-# (admin@openbank.local holds OPERATOR/ADMIN/VIEWER, not COMPLIANCE).
-allowed_reasons contains "operator-card-write" if {
-	input.principal.type == "HUMAN"
-	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-	role in input.principal.roles
-	input.action in {"card.create", "card.activate", "card.block", "card.suspend", "card.resume"}
-}
-
-# Blocking a card (fraud/compliance hold) is also grantable to ROLE_COMPLIANCE alone — a
-# compliance officer who holds neither ROLE_OPERATOR nor ROLE_ADMIN can still block, matching the
-# third role in CardResource's @RolesAllowed on block().
-allowed_reasons contains "compliance-card-block" if {
-	input.principal.type == "HUMAN"
-	"ROLE_COMPLIANCE" in input.principal.roles
-	input.action == "card.block"
-}
-REGO
-)
+# Extracted to a standalone .rego file (issue #1322) rather than an inline bash heredoc, so
+# `opa test` can load and cover it directly — see card_issuance_rest_ext_test.rego in this same
+# directory, which pins the card.block disjunction that #1323 found broken (a heredoc has nothing
+# on disk for `opa test` to discover; this is the fleet-wide gap issue #1322 tracks, established
+# here as a pattern for the other generators still on heredocs). Read exactly like REST_REGO/
+# AGENTS_REGO above — content is unchanged, only how it reaches this script.
+CARD_ISSUANCE_REST_EXT=$REPO/openbank-infra/gitops/components/payments/card_issuance_rest_ext.rego
 
 CHECKSUM=$(printf '%s\n' \
     "$(cat "$REST_REGO")" \
-    "$(echo "$CARD_ISSUANCE_REST_EXT")" \
+    "$(cat "$CARD_ISSUANCE_REST_EXT")" \
     "$(cat "$AGENTS_REGO")" \
     "$(cat "$AGENTS_YAML")" \
     "$(cat "$RULES_YAML")" \
@@ -98,7 +49,7 @@ OUT=$REPO/openbank-infra/gitops/components/payments/card-issuance-opa-bundle.yam
   echo "  rest.rego: |"
   sed 's/^/    /' "$REST_REGO" | sed 's/[[:space:]]*$//'
   echo "  card_issuance_rest_ext.rego: |"
-  echo "$CARD_ISSUANCE_REST_EXT" | sed 's/^/    /' | sed 's/[[:space:]]*$//'
+  sed 's/^/    /' "$CARD_ISSUANCE_REST_EXT" | sed 's/[[:space:]]*$//'
   echo "  agents.rego: |"
   sed 's/^/    /' "$AGENTS_REGO" | sed 's/[[:space:]]*$//'
   echo "  agents-data.yaml: |"
