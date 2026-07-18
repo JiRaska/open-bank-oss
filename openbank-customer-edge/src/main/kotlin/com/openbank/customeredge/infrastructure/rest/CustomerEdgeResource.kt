@@ -303,6 +303,34 @@ class CustomerEdgeResource(
         return node.get("annualRate")?.decimalValue()
     }
 
+    // --- Fees (ADR-0138 fee schedule transparency) ---
+
+    /**
+     * The fee schedule for one of the caller's OWN accounts: the fees the account's product can
+     * charge (monthly maintenance, transaction fees, card fees…), each with its amount, frequency and
+     * any waiver condition. Read-only transparency — product-catalog is the authority (the same
+     * `/products/{id}/fees` read billing-service uses). Ownership is enforced HERE (product-catalog is
+     * not party-scoped); an unavailable catalogue or a product with no schedule fail-soft to `[]` so
+     * the app draws an empty state rather than an error.
+     */
+    @GET
+    @Path("/accounts/{accountId}/fees")
+    @Authorize(action = "customer.accounts.read", resource = "#accountId")
+    @Blocking
+    fun getAccountFees(@PathParam("accountId") accountId: UUID): Response {
+        val customer = customer()
+        val accountJson = fetchAccount(accountId, customer.partyId)
+            ?: return forbidden("Account does not belong to caller")
+        if (extractOwnerPartyId(accountJson) != customer.partyId.toString()) {
+            return forbidden("Account does not belong to caller")
+        }
+        val productId = extractTextField(objectMapper, accountJson, "productId")
+            ?: return Response.ok("[]").type(MediaType.APPLICATION_JSON).build()
+        val resp = upstream.get("$productCatalogUrl/api/v1/products/$productId/fees", customer.partyId.toString())
+        val body = if (resp.status == 200) resp.entity?.toString()?.takeIf { it.isNotBlank() } ?: "[]" else "[]"
+        return Response.ok(body).type(MediaType.APPLICATION_JSON).build()
+    }
+
     // --- Currency pockets (ADR-0109) ---
     // Customer self-service over the account-service pocket lifecycle. All routes are
     // ownership-checked here (account-service also re-checks via the X-Customer-Party-Id
