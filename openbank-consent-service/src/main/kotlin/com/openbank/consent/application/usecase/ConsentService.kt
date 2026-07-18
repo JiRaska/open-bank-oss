@@ -18,7 +18,6 @@ import com.openbank.consent.domain.event.ConsentGranted
 import com.openbank.consent.domain.event.ConsentRejected
 import com.openbank.consent.domain.event.ConsentRevoked
 import com.openbank.consent.domain.model.Consent
-import com.openbank.consent.domain.model.ConsentScope
 import com.openbank.consent.domain.model.ConsentStatus
 import com.openbank.consent.domain.model.ConsentValidationResult
 import jakarta.enterprise.context.ApplicationScoped
@@ -60,13 +59,7 @@ class ConsentService(
 
     override suspend fun createConsent(command: CreateConsentCommand): Consent {
         val now = OffsetDateTime.now(clock)
-        val aispScopes = setOf(
-            ConsentScope.ACCOUNTS_READ,
-            ConsentScope.BALANCES_READ,
-            ConsentScope.TRANSACTIONS_READ,
-            ConsentScope.STATEMENTS_READ,
-        )
-        val maxDays = if (command.scopes.any { s -> s in aispScopes }) 90L else 365L
+        val maxDays = if (command.scopes.any { s -> s in Consent.AISP_SCOPES }) 90L else 365L
         val validTo = if (command.validTo.isAfter(now.plusDays(maxDays))) {
             now.plusDays(maxDays)
         } else {

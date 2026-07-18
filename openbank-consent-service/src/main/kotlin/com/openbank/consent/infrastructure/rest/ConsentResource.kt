@@ -13,7 +13,6 @@ import com.openbank.consent.application.port.`in`.RevokeConsentCommand
 import com.openbank.consent.application.port.`in`.RevokeConsentUseCase
 import com.openbank.consent.application.port.`in`.ValidateConsentCommand
 import com.openbank.consent.application.port.`in`.ValidateConsentUseCase
-import com.openbank.consent.domain.model.ConsentValidationResult
 import com.openbank.consent.infrastructure.rest.dto.ConsentResponse
 import com.openbank.consent.infrastructure.rest.dto.ConsentValidationResponse
 import com.openbank.consent.infrastructure.rest.dto.CreateConsentRequest
@@ -21,8 +20,6 @@ import com.openbank.consent.infrastructure.rest.dto.RevokeConsentRequest
 import com.openbank.consent.infrastructure.rest.dto.ValidateConsentRequest
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
-import org.eclipse.microprofile.openapi.annotations.Operation
-import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
@@ -37,6 +34,8 @@ import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.UriInfo
+import org.eclipse.microprofile.openapi.annotations.Operation
+import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.util.UUID
 
 // @Authorize alone is the fine-grained per-resource check; it must be paired with the coarse
@@ -167,10 +166,7 @@ class ConsentResource(
         val result = validateConsent.validateConsent(
             ValidateConsentCommand(id, request.granteeId, request.requiredScope, request.accountIban),
         )
-        return when (result) {
-            is ConsentValidationResult.Valid -> ConsentValidationResponse(true, null, null)
-            is ConsentValidationResult.Invalid -> ConsentValidationResponse(false, result.reason, result.code)
-        }
+        return ConsentValidationResponse.from(result)
     }
 
     private fun consentCreateKey(granteeId: String, partyId: UUID, requestId: String) =

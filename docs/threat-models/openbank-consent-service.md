@@ -39,7 +39,7 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 | **S**poofing | TPP impersonates party to create consent | OIDC + SCA binding; party identity verified upstream |
 | **T**ampering | Scope/grantee escalation after creation | Immutable scope post-activation; state machine; audit |
 | **R**epudiation | Party denies granting consent | AuditEvent per transition; SCA evidence retained |
-| **I**nfo disclosure | `validate` leaks consent details to wrong caller | Caller authz; minimal validate response (allow/deny + scope) |
+| **I**nfo disclosure | `validate` leaks consent details to wrong caller | Caller authz (`@Authorize consent.validate` + `@RolesAllowed`); response is a consent-scoped projection (scopes / covered IBANs / frequencyPerDay) to an already-authenticated resource server — no party PII |
 | **D**oS | Consent spam / validate flooding | Rate limit; cache validate decisions briefly |
 | **E**oP | Revoked consent still validates | Revocation is synchronous + event; validate reads live state, deny-by-default |
 
@@ -52,6 +52,15 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 
 ## 6. Change log
 
+- **2026-07-17** — Completed ADR-0126 §D2: `/validate` response now carries `scopes`, `grantedAccounts`
+  (covered IBANs; null = all of the party's accounts) and `frequencyPerDay` (PSD2 RTS Art. 10 AISP cap
+  = 4) so a resource server can cache within that window. Additive optional fields (openapi
+  `1.1.0`→`1.2.0`, non-breaking). **Info-disclosure surface widens** from `{valid, reason, code}` to
+  the consent-scoped projection above — but only to an authenticated, `@Authorize consent.validate` +
+  `@RolesAllowed`-gated resource server that already serves those accounts; no party PII
+  (name / birth number / contact) is exposed and the trust boundary is unchanged. Risk class =
+  **confidentiality** (bounded). No DB/event change. Verified by `ConsentTest` (frequencyPerDay) +
+  `ConsentValidationResponseTest` (projection). Rollback: revert the commit.
 - **2026-07-17** — Consent lifecycle events (grant/revoke/reject) and the expiration sweep now write
   their outbox row in the SAME transaction as the status change (ADR-0126 §D3/§D4). The prior
   direct-Kafka emit was a dual-write that silently dropped the event on a crash between the DB commit

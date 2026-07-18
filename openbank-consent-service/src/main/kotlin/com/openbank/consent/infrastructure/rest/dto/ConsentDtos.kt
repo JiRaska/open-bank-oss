@@ -54,4 +54,33 @@ data class ConsentResponse(
     }
 }
 
-data class ConsentValidationResponse(val valid: Boolean, val reason: String?, val code: String?)
+/**
+ * `/validate` result for a resource server (ADR-0126 §D2). On [valid] = true the projection fields
+ * describe what the consent grants so the caller can cache within the [frequencyPerDay] window;
+ * on false they are null and [reason]/[code] explain the denial. No PII.
+ */
+data class ConsentValidationResponse(
+    val valid: Boolean,
+    val reason: String?,
+    val code: String?,
+    /** Granted scopes (present when valid). */
+    val scopes: Set<ConsentScope>? = null,
+    /** Accounts the consent covers; null (when valid) = all of the party's accounts. */
+    val grantedAccounts: List<String>? = null,
+    /** PSD2 RTS Art. 10 AISP per-day read cap; null for non-AISP consents. */
+    val frequencyPerDay: Int? = null,
+) {
+    companion object {
+        fun from(result: ConsentValidationResult): ConsentValidationResponse = when (result) {
+            is ConsentValidationResult.Valid -> ConsentValidationResponse(
+                valid = true,
+                reason = null,
+                code = null,
+                scopes = result.consent.scopes,
+                grantedAccounts = result.consent.accountIbans,
+                frequencyPerDay = result.consent.frequencyPerDay(),
+            )
+            is ConsentValidationResult.Invalid -> ConsentValidationResponse(false, result.reason, result.code)
+        }
+    }
+}

@@ -125,6 +125,25 @@ class ConsentTest {
         }
     }
 
+    @Test
+    fun `frequencyPerDay returns the PSD2 AISP cap for AISP scopes`() {
+        val consent = consent(scopes = setOf(ConsentScope.ACCOUNTS_READ))
+
+        assertThat(consent.frequencyPerDay()).isEqualTo(Consent.AISP_MAX_ACCESSES_PER_DAY)
+    }
+
+    @Test
+    fun `frequencyPerDay is null for non-AISP scopes`() {
+        val consent = consent(
+            scopes = setOf(ConsentScope.TELEMETRY_RUM),
+            accountIbans = null,
+            validFrom = baseValidFrom,
+            validTo = baseValidFrom.plusDays(180),
+        )
+
+        assertThat(consent.frequencyPerDay()).isNull()
+    }
+
     private fun consent(
         scopes: Set<ConsentScope> = setOf(ConsentScope.PAYMENTS_INITIATE),
         accountIbans: List<String>? = listOf("CZ6508000000192000145399"),
