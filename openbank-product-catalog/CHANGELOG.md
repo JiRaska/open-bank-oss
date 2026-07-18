@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.10.2...product-catalog-v0.11.0) (2026-07-18)
+
+
+### Features
+
+* **fees:** surface the account fee schedule to the app + heal stale catalogue ([#1652](https://github.com/JiRaska/open-bank-oss/issues/1652)) ([7f49a11](https://github.com/JiRaska/open-bank-oss/commit/7f49a11d8e7a12aa1cf04c107cc86b3b68f6d6cb))
+
 ## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.10.1...product-catalog-v0.10.2) (2026-07-17)
 
 
