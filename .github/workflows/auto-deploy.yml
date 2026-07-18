@@ -989,113 +989,6 @@ jobs:
             }
             core.notice('could not enable auto-merge after retries — check the App token / GITOPS_PR_TOKEN / branch protection');
 
-      # Record that these service versions are now deployed to sandbox so that future
-      # can-i-deploy calls by consumers can verify against the correct provider version.
-      # Called optimistically at PR-open time (not after ArgoCD sync) — close enough for
-      # the advisory gate; tighten to ArgoCD post-sync hook when enforcement is flipped on.
-      - name: Record sandbox deployment in Pact broker
-        if: ${{ vars.PACT_BROKER_URL != '' && steps.rewrite.outputs.changed == 'true' }}
-        env:
-          PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
-          PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
-          PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
-          PACT_STANDALONE_VERSION: "2.6.2"
-        run: |
-          set -uo pipefail
-          ALL_CHANGED='${{ needs.changes.outputs.services }}'
-          # Defense in depth for #1348: never record when the gate ran but crashed before a
-          # verdict (GATE_RAN=true, DEPLOYABLE_SERVICES empty). The rewrite step already fails
-          # closed on this (changed=false), so this step's `if` should keep it from running at
-          # all — but if a future refactor decouples them, recording every service here is
-          # exactly the phantom that hard-blocks unrelated services later. GATE_RAN empty = no
-          # broker = the legitimate no-filter case, left to the logic below.
-          if [ "${GATE_RAN}" = "true" ] && [ -z "${DEPLOYABLE_SERVICES}" ]; then
-            echo "::error::can-i-deploy produced no verdict this run — refusing to record any deployment (would phantom-block later deploys, #1348)"
-            exit 1
-          fi
-          # Same filter as the "Rewrite image tags" step: only record-deploy services
-          # can-i-deploy actually confirmed this run (issue #846) — recording a service that
-          # was blocked (and therefore never got its manifest updated) would make the broker
-          # claim a version is deployed that isn't. Empty/unset DEPLOYABLE_SERVICES = can-i-
-          # deploy didn't run at all, no filter.
-          if [ -n "${DEPLOYABLE_SERVICES}" ]; then
-            SERVICES="$(echo "$ALL_CHANGED" | jq -c --argjson d "${DEPLOYABLE_SERVICES}" '[.[] | select(. as $s | $d | index($s) != null)]')"
-          else
-            SERVICES="$ALL_CHANGED"
-          fi
-          arch="$(uname -m)"; case "$arch" in aarch64|arm64) a=arm64 ;; *) a=x86_64 ;; esac
-          os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) o=osx ;; *) o=linux ;; esac
-          tgz="pact-${PACT_STANDALONE_VERSION}-${o}-${a}.tar.gz"
-          url="https://github.com/pact-foundation/pact-ruby-standalone/releases/download/v${PACT_STANDALONE_VERSION}/${tgz}"
-          if [ "$(echo "$SERVICES" | jq 'length')" -eq 0 ]; then
-            echo "No deployable services this run — nothing to record."
-            exit 0
-          fi
-          # record-deployment MUST be reliable: a silent skip here lets the broker's
-          # deployed-version matrix drift from reality, which then makes can-i-deploy
-          # PHANTOM-BLOCK future deploys of healthy services ("no version recorded as
-          # deployed" for a service that is actually running). Retry the flaky CLI
-          # download, then FAIL LOUD rather than skipping (ADR-0092).
-          dl_ok=0
-          for attempt in 1 2 3; do
-            if curl -fsSL --retry 2 --retry-delay 3 -o /tmp/pact.tgz "$url"; then dl_ok=1; break; fi
-            echo "::warning::pact standalone download attempt ${attempt}/3 failed; retrying in 5s"
-            sleep 5
-          done
-          if [ "$dl_ok" -ne 1 ]; then
-            echo "::error::could not download pact standalone after 3 attempts — record-deployment is mandatory (ADR-0092); skipping would drift the broker from reality and phantom-block later deploys"
-            exit 1
-          fi
-          mkdir -p /tmp/pact && tar -xzf /tmp/pact.tgz -C /tmp/pact
-          CLI="/tmp/pact/pact/bin/pact-broker"
-          rec_failed=0
-          for svc in $(echo "$SERVICES" | jq -r '.[]'); do
-            echo "==> record-deployment ${svc} @ ${GITHUB_SHA::8} → sandbox"
-            # record-deployment requires the version to exist in the broker. For a brand-new
-            # service (no prior pact publications), the version entry may be missing and the
-            # CLI returns 404 "not found" — not a contract failure, just a missing version row.
-            # Create the version via the REST API first (idempotent PUT; body is intentionally
-            # minimal — no tags needed here since can-i-deploy uses --latest main which comes
-            # from the CI test publication, not from this step).
-            ver_code="$(curl -s -o /dev/null -w '%{http_code}' \
-              -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
-              "${PACT_BROKER_URL}/pacticipants/${svc}/versions/${GITHUB_SHA}")"
-            if [ "$ver_code" = "404" ]; then
-              echo "  version not found in broker (new pacticipant?) — creating it via REST"
-              create_code="$(curl -s -o /tmp/pact-ver.json -w '%{http_code}' \
-                -X PUT \
-                -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
-                -H "Content-Type: application/json" \
-                -d '{}' \
-                "${PACT_BROKER_URL}/pacticipants/${svc}/versions/${GITHUB_SHA}")"
-              echo "  PUT /pacticipants/${svc}/versions/${GITHUB_SHA} → HTTP ${create_code}"
-              if [ "$create_code" -ge 400 ]; then
-                echo "::warning::could not create version for ${svc} (HTTP ${create_code}); record-deployment may fail"
-              fi
-            fi
-            ok=0
-            for attempt in 1 2 3; do
-              if "$CLI" record-deployment \
-                   --pacticipant "$svc" --version "$GITHUB_SHA" \
-                   --environment sandbox \
-                   --broker-base-url "$PACT_BROKER_URL" \
-                   --broker-username "$PACT_BROKER_USERNAME" \
-                   --broker-password "$PACT_BROKER_PASSWORD"; then
-                ok=1; echo "  ✓ recorded"; break
-              fi
-              echo "::warning::record-deployment ${svc} attempt ${attempt}/3 failed; retrying in 5s"
-              sleep 5
-            done
-            if [ "$ok" -ne 1 ]; then
-              echo "::error::record-deployment failed for ${svc} after 3 attempts"
-              rec_failed=1
-            fi
-          done
-          if [ "$rec_failed" -ne 0 ]; then
-            echo "::error::one or more record-deployments failed — broker matrix now diverges from what is actually deployed (ADR-0092)"
-            exit 1
-          fi
-
       # The failure this guards against is silent by construction: create-pull-request logs
       # "Commit verified: false; reason: unsigned" and exits 0, the PR opens with every check
       # green and auto-merge armed, and it simply never merges. That reads as healthy from
@@ -1103,10 +996,10 @@ jobs:
       # no-opped for five days and stranded seven deploy PRs at once (issue #1269).
       # Fail loudly instead: an unsigned commit means required_signatures WILL strand this PR.
       #
-      # LAST step in the job, and `always()`, both deliberate: core.setFailed() skips every
-      # subsequent step that is not always(), so putting this any earlier would silently
-      # starve record-deployment and diverge the Pact broker from reality (ADR-0092) on every
-      # run until the App is configured — trading one silent failure for another.
+      # `always()`, deliberate: this must report an unsigned deploy commit even if an earlier
+      # step failed. (record-deployment used to live in this job as the last step and is why
+      # ordering mattered here; it now runs on gitops-PR MERGE — record-deployment-on-merge.yml,
+      # issue #1420 — so this is simply the last check and can fail without starving anything.)
       - name: Verify the deploy commit is signed
         if: ${{ always() && steps.gitops_pr.outputs.pull-request-number != '' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
