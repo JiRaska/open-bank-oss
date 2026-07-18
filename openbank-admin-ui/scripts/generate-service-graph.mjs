@@ -16,7 +16,18 @@
 //
 // Honest by construction: a config that can't be parsed contributes no edges
 // (never a fabricated dependency). Targets that don't resolve to a known module
-// (OPA, Keycloak, datasources) are dropped — only inter-service edges are kept.
+// stay OUT of the inter-service `edges`/`nodes` (only module→module is kept there).
+//
+// Data-flow map extension (additive, same honesty rule): the animated topology in
+// the admin-ui also wants the *substrate* each service sits on and the *third
+// parties* it reaches, so this generator ALSO emits two extra tiers, parsed from
+// the same application.yaml (base profile only — `%dev`/`%test` overrides ignored):
+//   infraNodes/infraEdges     — Postgres, Kafka, Keycloak, OPA (presence-detected)
+//   externalNodes/externalEdges — Apple APNs, Firebase FCM, Slack, ČNB, GitHub,
+//                                 LLM providers, S3 (host- or enabled-flag-detected)
+// These are strictly additive: the original `nodes`/`edges` are unchanged, so every
+// existing consumer keeps working. A tier node is emitted only if ≥1 edge references
+// it — no orphan/fabricated nodes.
 //
 // Usage: node scripts/generate-service-graph.mjs [--repo <path>] [--out <file>]
 
@@ -63,9 +74,72 @@ function loadConfig(dir) {
   try { return parseYaml(raw) } catch { return null }
 }
 
+// --- Infra + external tier helpers ------------------------------------------
+// Recursively visit every scalar in the parsed YAML, yielding [dottedKeyPath,
+// value]. Profile overrides (`%dev`, `%test`, `%slack-it`) are skipped so the
+// tiers describe the BASE (production-shaped) config, matching the rest/kafka pass.
+function* walkScalars(obj, prefix = '') {
+  if (obj == null || typeof obj !== 'object') return
+  for (const [k, v] of Object.entries(obj)) {
+    if (k.startsWith('%')) continue
+    const keyPath = prefix ? `${prefix}.${k}` : k
+    if (v != null && typeof v === 'object') yield* walkScalars(v, keyPath)
+    else yield [keyPath, v]
+  }
+}
+
+// Resolve a Quarkus `${ENV:default}` wrapper (or a plain scalar) to its effective
+// value/boolean. `${APNS_ENABLED:false}` → 'false'; a bare value passes through.
+function envValue(v) {
+  const s = String(v ?? '').trim()
+  const m = s.match(/^\$\{[^:}]*:([^}]*)\}$/)
+  return (m ? m[1] : s).trim()
+}
+function envBool(v) { return envValue(v).toLowerCase() === 'true' }
+
+// Infra node catalog — id → {tech, label}. Presence-detected from config keys.
+const INFRA = {
+  postgres: { tech: 'postgres', label: 'PostgreSQL' },
+  kafka:    { tech: 'kafka',    label: 'Apache Kafka' },
+  keycloak: { tech: 'keycloak', label: 'Keycloak (OIDC)' },
+  opa:      { tech: 'opa',      label: 'OPA (authz)' },
+}
+const INFRA_EDGE_TYPE = { postgres: 'db', kafka: 'broker', keycloak: 'auth', opa: 'authz' }
+
+// External / 3rd-party catalog — id → {vendor, label}. Host- or flag-detected.
+const EXTERNAL = {
+  'apple-apns':   { vendor: 'Apple',         label: 'APNs (push)' },
+  'firebase-fcm': { vendor: 'Google',        label: 'Firebase FCM (push)' },
+  slack:          { vendor: 'Slack',         label: 'Slack webhook' },
+  cnb:            { vendor: 'ČNB',           label: 'Czech National Bank' },
+  github:         { vendor: 'GitHub',        label: 'GitHub API' },
+  'llm-gateway':  { vendor: 'LLM providers', label: 'LLM gateway' },
+  s3:             { vendor: 'AWS',           label: 'S3 object store' },
+}
+// Match a host against a registrable domain at a LABEL boundary — the host is
+// exactly the domain or a subdomain of it. A plain substring test would also
+// match a look-alike like `groq.com.attacker.example` or `notcnb.cz`, so we
+// anchor on the dot boundary (CodeQL: incomplete URL substring sanitization).
+const hostIn = (h, domain) => h === domain || h.endsWith('.' + domain)
+
+// Classify a URL host as a known EXTERNAL 3rd party. In-cluster hosts
+// (litellm.ai-platform, ollama, localhost, openbank-*) return null on purpose —
+// they are infra or inter-service edges elsewhere, so counting them here would
+// double up. Unknown public hosts also return null: never fabricate a vendor.
+function classifyHost(host) {
+  const h = host.toLowerCase()
+  if (hostIn(h, 'cnb.cz')) return { id: 'cnb', type: 'registry' }
+  if (hostIn(h, 'github.com')) return { id: 'github', type: 'api' }
+  if (hostIn(h, 'deepinfra.com') || hostIn(h, 'groq.com') || hostIn(h, 'nvidia.com')) return { id: 'llm-gateway', type: 'llm' }
+  if (hostIn(h, 'amazonaws.com')) return { id: 's3', type: 'api' }
+  return null
+}
+
 const restEdges = []                 // {from, to, via}
 const producers = new Map()          // topic -> Set(service)
 const consumers = new Map()          // topic -> Set(service)
+const infraEdges = []                // {from, to, type}
+const externalEdges = []             // {from, to, type, enabled}
 
 for (const name of modules) {
   const cfg = loadConfig(path.join(REPO, name))
@@ -95,6 +169,40 @@ for (const name of modules) {
       map.get(topic).add(name)
     }
   }
+
+  // --- Infra + external tiers (single walk over the base config) -----------
+  const svcInfra = new Set()                 // infra ids this service touches
+  const svcExternal = new Map()              // `${id}|${type}` -> enabled(bool)
+  const addExternal = (id, type, enabled) => {
+    const k = `${id}|${type}`
+    svcExternal.set(k, (svcExternal.get(k) ?? false) || enabled)
+  }
+  // Any Kafka channel means the service sits on the broker.
+  if (messaging?.outgoing || messaging?.incoming) svcInfra.add('kafka')
+
+  for (const [keyPath, value] of walkScalars(cfg)) {
+    const kp = keyPath.toLowerCase()
+    const raw = envValue(value)
+    // Infra — presence-detected.
+    if (kp.endsWith('datasource.reactive.url') || kp.endsWith('datasource.jdbc.url') || raw.includes('postgresql://')) svcInfra.add('postgres')
+    if (kp.endsWith('oidc.auth-server-url') || raw.includes('/realms/')) svcInfra.add('keycloak')
+    if (kp === 'opa.url' || kp.endsWith('.opa.url') || /:8181(\/|$)/.test(raw)) svcInfra.add('opa')
+    if (/bootstrap[.-]servers/.test(kp)) svcInfra.add('kafka')
+    // External — push/webhook detected by the integration's own enabled flag
+    // (the endpoint/creds are injected at runtime, so the URL is usually empty).
+    if (kp.endsWith('push.apns.enabled')) addExternal('apple-apns', 'push', envBool(value))
+    else if (kp.endsWith('push.fcm.enabled')) addExternal('firebase-fcm', 'push', envBool(value))
+    else if (kp.endsWith('webhook.slack.enabled')) addExternal('slack', 'webhook', envBool(value))
+    // External — any http(s) URL whose host is a known 3rd party.
+    const m = raw.match(/^https?:\/\/([^/:\s]+)/)
+    if (m) { const c = classifyHost(m[1]); if (c) addExternal(c.id, c.type, true) }
+  }
+
+  for (const id of svcInfra) infraEdges.push({ from: name, to: `infra:${id}`, type: INFRA_EDGE_TYPE[id] })
+  for (const [k, enabled] of svcExternal) {
+    const [id, type] = k.split('|')
+    externalEdges.push({ from: name, to: `ext:${id}`, type, enabled })
+  }
 }
 
 // Producer → consumer edges, one per (producer, consumer, topic) triple.
@@ -118,6 +226,16 @@ const edges = [
   ...kafkaEdges.map(e => ({ ...e, type: 'kafka' })),
 ]
 
+// Emit an infra/external node only if ≥1 edge references it (no orphan nodes).
+const usedInfra = new Set(infraEdges.map(e => e.to.slice('infra:'.length)))
+const infraNodes = [...usedInfra].sort()
+  .filter(id => INFRA[id])
+  .map(id => ({ id: `infra:${id}`, kind: 'infra', ...INFRA[id] }))
+const usedExternal = new Set(externalEdges.map(e => e.to.slice('ext:'.length)))
+const externalNodes = [...usedExternal].sort()
+  .filter(id => EXTERNAL[id])
+  .map(id => ({ id: `ext:${id}`, kind: 'external', ...EXTERNAL[id] }))
+
 // Per-node fan-in / fan-out, so the UI/agent can rank blast radius directly.
 const degree = {}
 for (const n of modules) degree[n] = { dependsOn: 0, dependedOnBy: 0 }
@@ -129,18 +247,31 @@ for (const e of edges) {
 const graph = {
   schema: 'openbank.service-graph/v1',
   generator: 'generate-service-graph.mjs',
-  source: 'code-derived (application.yaml: quarkus.rest-client + mp.messaging) — ADR-0029 D1',
+  source: 'code-derived (application.yaml: quarkus.rest-client + mp.messaging + infra/3rd-party tiers) — ADR-0029 D1',
   collectedAt: null,
   totals: {
     nodes: modules.length,
     restEdges: restEdges.length,
     kafkaEdges: kafkaEdges.length,
     danglingTopics: danglingTopics.length,
+    infraNodes: infraNodes.length,
+    externalNodes: externalNodes.length,
+    infraEdges: infraEdges.length,
+    externalEdges: externalEdges.length,
   },
   nodes: modules.map(n => ({ name: n, short: n.replace(/^openbank-/, ''), ...degree[n] })),
   edges,
   danglingTopics,
+  // Additive data-flow tiers (see header). Existing consumers ignore these.
+  infraNodes,
+  externalNodes,
+  infraEdges,
+  externalEdges,
 }
 
 writeFileSync(OUT, JSON.stringify(graph, null, 2) + '\n')
-console.log(`[generate-service-graph] ${modules.length} nodes, ${restEdges.length} REST + ${kafkaEdges.length} Kafka edges, ${danglingTopics.length} dangling topics → ${OUT}`)
+console.log(
+  `[generate-service-graph] ${modules.length} nodes, ${restEdges.length} REST + ${kafkaEdges.length} Kafka edges, ` +
+  `${danglingTopics.length} dangling topics · ${infraNodes.length} infra + ${externalNodes.length} external nodes ` +
+  `(${infraEdges.length} infra + ${externalEdges.length} external edges) → ${OUT}`,
+)
