@@ -105,6 +105,9 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.interest-service-url")
     lateinit var interestServiceUrl: String
 
+    @ConfigProperty(name = "openbank.edge.kyc-service-url")
+    lateinit var kycServiceUrl: String
+
     // ADR-0109 P2: product-catalog is the authority for which currencies a product permits.
     // Defaulted so a missing env doesn't break startup; reachable in-cluster.
     @ConfigProperty(
@@ -329,6 +332,52 @@ class CustomerEdgeResource(
         val resp = upstream.get("$productCatalogUrl/api/v1/products/$productId/fees", customer.partyId.toString())
         val body = if (resp.status == 200) resp.entity?.toString()?.takeIf { it.isNotBlank() } ?: "[]" else "[]"
         return Response.ok(body).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    // --- KYC / identity verification status (AML Act §8, ADR-0073) ---
+
+    /**
+     * The caller's OWN identity-verification (KYC) status. No path param — the party is taken from
+     * the JWT (`customer().partyId`), so a customer can only ever see their own case. Projects
+     * kyc-service's case down to a customer-safe shape: the overall [status], when it was verified,
+     * and the per-check outcomes (identity / address / sanctions…). Deliberately DROPS the internal
+     * risk level, due-diligence tier, notes and assignee — those are compliance-only. No case yet
+     * (404 upstream) or an unavailable kyc-service returns `{"status":"NONE","checks":[]}` so the app
+     * shows a "not verified yet" state rather than an error.
+     */
+    @GET
+    @Path("/kyc")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun getKycStatus(): Response {
+        val customer = customer()
+        val resp = upstream.get(
+            "$kycServiceUrl/api/v1/kyc/cases/party/${customer.partyId}",
+            customer.partyId.toString(),
+        )
+        val out = objectMapper.createObjectNode()
+        val case = if (resp.status == 200) {
+            runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") }.getOrNull()
+        } else {
+            null
+        }
+        if (case == null) {
+            out.put("status", "NONE")
+            out.set<com.fasterxml.jackson.databind.JsonNode>("checks", objectMapper.createArrayNode())
+            return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+        }
+        out.put("status", case.get("status")?.asText() ?: "NONE")
+        case.get("reviewedAt")?.takeIf { it.isTextual }?.let { out.put("verifiedAt", it.asText()) }
+        val checks = objectMapper.createArrayNode()
+        (case.get("checks") as? com.fasterxml.jackson.databind.node.ArrayNode)?.forEach { c ->
+            val row = objectMapper.createObjectNode()
+            row.put("type", c.get("checkType")?.asText() ?: "")
+            row.put("status", c.get("status")?.asText() ?: "")
+            c.get("performedAt")?.takeIf { it.isTextual }?.let { row.put("performedAt", it.asText()) }
+            checks.add(row)
+        }
+        out.set<com.fasterxml.jackson.databind.JsonNode>("checks", checks)
+        return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
     }
 
     // --- Currency pockets (ADR-0109) ---
