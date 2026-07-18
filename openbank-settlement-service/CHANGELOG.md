@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.7](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.4.6...settlement-service-v0.4.7) (2026-07-18)
+
+
+### Bug Fixes
+
+* **settlement:** emit audit events on every settlement state transition ([#1637](https://github.com/JiRaska/open-bank-oss/issues/1637)) ([5bb7f41](https://github.com/JiRaska/open-bank-oss/commit/5bb7f410e8937f7d2dab16b40ea462a7d9e6db06)), closes [#1502](https://github.com/JiRaska/open-bank-oss/issues/1502)
+
 ## [0.4.6](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.4.5...settlement-service-v0.4.6) (2026-07-12)
 
 
