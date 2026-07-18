@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.11.2...consent-service-v0.12.0) (2026-07-18)
+
+
+### Features
+
+* **consent:** /validate returns scopes, grantedAccounts, frequencyPerDay (ADR-0126 D2) ([#1609](https://github.com/JiRaska/open-bank-oss/issues/1609)) ([a4ffd2b](https://github.com/JiRaska/open-bank-oss/commit/a4ffd2bff993b3d14e694eec3c15f11ed1a9a53b)), closes [#1521](https://github.com/JiRaska/open-bank-oss/issues/1521)
+
 ## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.11.1...consent-service-v0.11.2) (2026-07-18)
 
 
