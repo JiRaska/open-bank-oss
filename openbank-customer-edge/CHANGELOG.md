@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.24.0...customer-edge-v0.25.0) (2026-07-18)
+
+
+### Features
+
+* **customer-edge:** expose GET /customer/v1/kyc (own identity-verification status) ([#1676](https://github.com/JiRaska/open-bank-oss/issues/1676)) ([6f3937c](https://github.com/JiRaska/open-bank-oss/commit/6f3937cd5c30d9b8a3d22f1dc504bd98ae62776c))
+
 ## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.23.0...customer-edge-v0.24.0) (2026-07-18)
 
 
