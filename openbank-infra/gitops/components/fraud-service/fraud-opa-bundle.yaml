@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fraud-service
     app.kubernetes.io/part-of: fraud
   annotations:
-    openbank.tech/policy-checksum: "d16e1927cc8ce984"
+    openbank.tech/policy-checksum: "2e4faa378e7f61f3"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1747,6 +1747,16 @@ data:
       - openbank-swift-service
       - openbank-fx-service
       - openbank-lending-service
+      - openbank-sdd-service                  # issue #1478: SddCollectionDebitConsumer posts a real debit via
+                                               # TransactionServiceClient for every authorised direct-debit collection
+                                               # (#1027, merged) — moves funds directly, not adjacent to it like
+                                               # sca/consent/vop below. Four-eyes not yet assessed for this service;
+                                               # revisit under issue #938's follow-up sweep.
+      - openbank-interest-service              # issue #1478: capitalize()/write-off post real GL journals
+                                               # (LendingJournalFactory-equivalent), and withholding-tax remittance
+                                               # (#999, in progress) will book a cash leg via transaction-service.
+                                               # Four-eyes not yet assessed for this service; revisit under issue
+                                               # #938's follow-up sweep.
       - openbank-sca-service                  # four-eyes assessed (issue #938 follow-up), NOT wired: device.enroll and
                                                # scaChallenge.consume are both real-payment/self-service actions with a
                                                # confirmed M2M automated caller (customer-edge) — gating either would brick
