@@ -22,6 +22,14 @@ interface InterestRateConfigRepository {
     fun findByProductId(productId: String): Uni<List<InterestRateConfig>>
     fun findAll(): Uni<List<InterestRateConfig>>
     fun findActiveForProduct(productId: String, date: LocalDate): Uni<InterestRateConfig?>
+
+    /**
+     * The rate that actually applies to [accountId] on [date]: an active account-specific override
+     * (accountId set) wins over the product-level default (accountId null, productId matches). Null
+     * when neither exists — the account earns no interest (e.g. a plain CURRENT account, whose
+     * product default is deactivated). This is what the accrual run and the app's rate view use.
+     */
+    fun findEffectiveRate(accountId: UUID, productId: String, date: LocalDate): Uni<InterestRateConfig?>
     fun update(config: InterestRateConfig): Uni<InterestRateConfig>
 }
 

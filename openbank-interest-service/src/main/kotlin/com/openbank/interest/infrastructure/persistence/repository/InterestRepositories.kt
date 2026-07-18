@@ -58,6 +58,21 @@ class InterestRateConfigRepositoryImpl @Inject constructor(
             ).setParameter("p", productId).setParameter("d", date).setMaxResults(1).singleResultOrNull
         }.map { it?.let(mapper::toDomain) }
 
+    @WithSession
+    override fun findEffectiveRate(accountId: UUID, productId: String, date: LocalDate): Uni<InterestRateConfig?> =
+        sf.withSession { s ->
+            // account-specific override (accountId set) OR the product-wide default (accountId null);
+            // the CASE orders overrides (0) before defaults (1) so setMaxResults(1) picks the override.
+            s.createQuery(
+                "FROM InterestRateConfigEntity WHERE active = true AND effectiveFrom <= :d " +
+                    "AND (effectiveTo IS NULL OR effectiveTo >= :d) " +
+                    "AND (accountId = :a OR (accountId IS NULL AND productId = :p)) " +
+                    "ORDER BY CASE WHEN accountId IS NULL THEN 1 ELSE 0 END, effectiveFrom DESC",
+                InterestRateConfigEntity::class.java,
+            ).setParameter("a", accountId).setParameter("p", productId).setParameter("d", date)
+                .setMaxResults(1).singleResultOrNull
+        }.map { it?.let(mapper::toDomain) }
+
     @WithTransaction
     override fun update(config: InterestRateConfig): Uni<InterestRateConfig> = sf.withTransaction { s ->
         s.find(InterestRateConfigEntity::class.java, config.id).flatMap { e ->

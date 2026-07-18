@@ -30,5 +30,9 @@ interface ManageRateConfigUseCase {
     fun createConfig(config: InterestRateConfig): Uni<InterestRateConfig>
     fun getConfig(id: UUID): Uni<InterestRateConfig?>
     fun listConfigs(productId: String?): Uni<List<InterestRateConfig>>
+
+    /** The rate that actually applies to [accountId] (account override, else product default), or
+     *  null if the account earns no interest. Drives the app's per-account rate view. */
+    fun effectiveRate(accountId: UUID, productId: String, date: LocalDate): Uni<InterestRateConfig?>
     fun deactivateConfig(id: UUID): Uni<InterestRateConfig>
 }

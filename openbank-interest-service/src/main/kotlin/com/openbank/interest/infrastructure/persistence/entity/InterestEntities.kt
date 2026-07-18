@@ -19,6 +19,8 @@ import java.util.UUID
 class InterestRateConfigEntity : PanacheEntityBase() {
     @Id @Column(columnDefinition = "uuid") var id: UUID = UUID.randomUUID()
     @Column(name = "product_id") var productId: String = ""
+    // Non-null => an account-specific override that wins over the product-level default (null).
+    @Column(name = "account_id", columnDefinition = "uuid") var accountId: UUID? = null
     @Column(name = "rate_type") @Enumerated(EnumType.STRING) var rateType: InterestRateType = InterestRateType.FIXED
     @Column(name = "annual_rate", precision = 10, scale = 6) var annualRate: BigDecimal = BigDecimal.ZERO
     @Column(name = "min_balance", precision = 20, scale = 4) var minBalance: BigDecimal = BigDecimal.ZERO
