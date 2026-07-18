@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.2](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.11.1...balance-service-v1.11.2) (2026-07-18)
+
+
+### Bug Fixes
+
+* **balance:** cross-pod exclusion for the daily reconciliation + freshness watchdog ([#1201](https://github.com/JiRaska/open-bank-oss/issues/1201)) ([#1601](https://github.com/JiRaska/open-bank-oss/issues/1601)) ([aa0aa97](https://github.com/JiRaska/open-bank-oss/commit/aa0aa97e713ba0ec968e6a1fe4de79cc0cf6cf13))
+
 ## [1.11.1](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.11.0...balance-service-v1.11.1) (2026-07-17)
 
 

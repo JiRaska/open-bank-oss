@@ -6,7 +6,7 @@
   "openbank-anacredit-service": "0.8.0",
   "openbank-audit-service": "0.9.6",
   "openbank-authz-policy-auditor": "0.3.0",
-  "openbank-balance-service": "1.11.1",
+  "openbank-balance-service": "1.11.2",
   "openbank-billing-service": "0.6.3",
   "openbank-card-issuance-service": "0.10.3",
   "openbank-clearing-service": "0.7.2",
