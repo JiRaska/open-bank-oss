@@ -12,8 +12,8 @@
       ],
       "request": {
         "body": {
-          "createdBy": "44444444-4444-4444-4444-444444444444",
-          "description": "pact lending disbursement journal",
+          "createdBy": "00000000-0000-0000-0000-0000000000aa",
+          "description": "Lending disbursement: pact-lending-journal-001",
           "entryDate": "2026-01-15",
           "idempotencyKey": "pact-lending-journal-001",
           "lines": [
@@ -23,9 +23,8 @@
               "baseCurrencyCode": "CZK",
               "currencyCode": "CZK",
               "fxRate": null,
-              "glAccountId": "a0000000-0000-0000-0000-000000000001",
-              "side": "DEBIT",
-              "subAccountId": null
+              "glAccountId": "a0000000-0000-0000-0000-000000001200",
+              "side": "DEBIT"
             },
             {
               "amount": 200.00,
@@ -33,12 +32,11 @@
               "baseCurrencyCode": "CZK",
               "currencyCode": "CZK",
               "fxRate": null,
-              "glAccountId": "a0000000-0000-0000-0000-000000000002",
-              "side": "CREDIT",
-              "subAccountId": null
+              "glAccountId": "a0000000-0000-0000-0000-000000001100",
+              "side": "CREDIT"
             }
           ],
-          "transactionId": "33333333-3333-3333-3333-333333333333",
+          "transactionId": "2b7840c6-f050-35d5-9d4e-1beefc3cc384",
           "valueDate": "2026-01-15"
         },
         "headers": {

@@ -12,10 +12,18 @@ import au.com.dius.pact.consumer.junit5.PactTestFor
 import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.openbank.billing.domain.FeeJournalCommand
+import com.openbank.billing.infrastructure.client.BillingJournalFactory
+import com.openbank.billing.infrastructure.client.BillingLedgerConfig
 import io.restassured.RestAssured.given
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import java.math.BigDecimal
+import java.time.LocalDate
+import java.util.UUID
 
 /**
  * Consumer-driven contract for the journal posting billing-service makes when charging (or
@@ -43,45 +51,48 @@ import org.junit.jupiter.api.extension.ExtendWith
  *
  * Unlike lending's/transaction's DTOs, billing's `LedgerJournalLineRequest` doesn't declare an
  * `fxRate` field at all (ledger's `PostJournalLineRequest.fxRate` defaults to null, so its
- * absence deserializes fine) — the request body below omits the key entirely to match what
- * billing's real Jackson serializer produces, not `"fxRate": null` like the other contracts.
+ * absence deserializes fine) — the request body omits the key entirely because it is now
+ * SERIALIZED FROM [BillingJournalFactory.buildRequest] itself, not hand-typed.
+ *
+ * Issue #1347: this pact used to hand-write its request body as a JSON literal that happened to
+ * match the factory's output on the day it was written — the contract verified nothing about
+ * [BillingJournalFactory], so a defect in the factory (e.g. #1316's `setScale(4)` bug in the
+ * sibling interest-service posting) would pass provider verification undetected. The body below is
+ * built by calling the real factory with a fixture command and serializing the result with the
+ * same Jackson stack the production REST client uses, so a change to the factory's output shape
+ * changes the recorded pact.
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(providerName = "openbank-ledger-service", pactVersion = PactSpecVersion.V3)
 class BillingLedgerPostJournalPactConsumerTest {
 
-    private val transactionId = "88888888-8888-8888-8888-888888888888"
     private val accountId = "99999999-9999-9999-9999-999999999999"
 
-    private val requestBody = """
-        {
-          "idempotencyKey": "fee-2026-07-pact-001-maintenance-CZK",
-          "transactionId": "$transactionId",
-          "entryDate": "2026-07-01",
-          "valueDate": "2026-07-01",
-          "description": "Fee charge: Maintenance",
-          "createdBy": "00000000-0000-0000-0000-0000000000bb",
-          "lines": [
-            {
-              "glAccountId": "a0000000-0000-0000-0000-000000000002",
-              "side": "DEBIT",
-              "amount": 150.00,
-              "currencyCode": "CZK",
-              "baseAmount": 150.00,
-              "baseCurrencyCode": "CZK",
-              "subAccountId": "$accountId"
-            },
-            {
-              "glAccountId": "a0000000-0000-0000-0000-000000004003",
-              "side": "CREDIT",
-              "amount": 150.00,
-              "currencyCode": "CZK",
-              "baseAmount": 150.00,
-              "baseCurrencyCode": "CZK"
-            }
-          ]
-        }
-    """.trimIndent()
+    private val accounts = object : BillingLedgerConfig.Gl {
+        override fun feeReceivable(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000000002")
+        override fun feeIncome(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000004003")
+    }
+    private val systemActorId = UUID.fromString("00000000-0000-0000-0000-0000000000bb")
+    private val entryDate = LocalDate.parse("2026-07-01")
+
+    private val feeCommand = FeeJournalCommand(
+        idempotencyKey = "fee-2026-07-pact-001-maintenance-CZK",
+        cycleId = "2026-07",
+        accountId = accountId,
+        feeId = "maintenance",
+        amount = BigDecimal("150.00"),
+        currency = "CZK",
+        description = "Fee charge: Maintenance",
+    )
+
+    // Same Jackson stack the real REST client (`quarkus-rest-client-reactive-jackson`) serializes
+    // with — this is what makes the pact body a proof about the factory's output, not a
+    // hand-maintained literal that merely happens to agree with it.
+    private val objectMapper = ObjectMapper().registerKotlinModule()
+
+    private val requestBody: String = objectMapper.writeValueAsString(
+        BillingJournalFactory.buildRequest(feeCommand, accounts, systemActorId, entryDate),
+    )
 
     @Pact(consumer = "openbank-billing-service", provider = "openbank-ledger-service")
     fun postBillingFeeJournalPact(builder: PactDslWithProvider): RequestResponsePact = builder
