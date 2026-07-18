@@ -35,7 +35,7 @@ class InterestService(
     private val accountDirectoryPort: AccountDirectoryPort,
     @ConfigProperty(name = "openbank.interest.day-count-convention", defaultValue = "ACT_365")
     private val defaultDayCount: String,
-    @ConfigProperty(name = "openbank.interest.accruable-account-types", defaultValue = "SAVINGS")
+    @ConfigProperty(name = "openbank.interest.accruable-account-types", defaultValue = "CURRENT,SAVINGS")
     private val accruableAccountTypes: String,
     private val clock: Clock,
 ) : AccrueInterestUseCase,
@@ -53,7 +53,7 @@ class InterestService(
         accountDirectoryPort: AccountDirectoryPort,
         @ConfigProperty(name = "openbank.interest.day-count-convention", defaultValue = "ACT_365")
         defaultDayCount: String,
-        @ConfigProperty(name = "openbank.interest.accruable-account-types", defaultValue = "SAVINGS")
+        @ConfigProperty(name = "openbank.interest.accruable-account-types", defaultValue = "CURRENT,SAVINGS")
         accruableAccountTypes: String,
     ) : this(
         configRepo,

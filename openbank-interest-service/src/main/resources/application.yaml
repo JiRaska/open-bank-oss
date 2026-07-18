@@ -165,9 +165,11 @@ openbank:
     accrual-cron: "0 0 1 * * ?"
     capitalization-cron: "0 0 2 1 * ?"
     # Account types the daily accrual run posts interest for (comma-separated, matched against
-    # account-service's accountType). Onboarding opens a SAVINGS account per retail customer; the
-    # CURRENT payment account is non-interest-bearing.
-    accruable-account-types: "SAVINGS"
+    # account-service's accountType). BOTH the everyday CURRENT account and SAVINGS earn interest —
+    # the onboarding balance lands on CURRENT, so interest must apply there or nearly every customer
+    # earns nothing. Each type accrues at its own product's rate (CURRENT 2.5% V10, SAVINGS 4% V9);
+    # an account whose product has no active rate config is simply skipped.
+    accruable-account-types: "CURRENT,SAVINGS"
     day-count-convention: ACT_365
     withholding:
       # #999: the bank's own operating/settlement account debited for the §38d odvod to the
