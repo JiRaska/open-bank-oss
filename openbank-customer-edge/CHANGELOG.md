@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.23.0...customer-edge-v0.24.0) (2026-07-18)
+
+
+### Features
+
+* **fees:** surface the account fee schedule to the app + heal stale catalogue ([#1652](https://github.com/JiRaska/open-bank-oss/issues/1652)) ([7f49a11](https://github.com/JiRaska/open-bank-oss/commit/7f49a11d8e7a12aa1cf04c107cc86b3b68f6d6cb))
+
 ## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.22.0...customer-edge-v0.23.0) (2026-07-18)
 
 
