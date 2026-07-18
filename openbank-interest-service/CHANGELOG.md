@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.11.0...interest-service-v0.12.0) (2026-07-18)
+
+
+### Features
+
+* **interest:** make the CURRENT account interest-bearing too, not just SAVINGS ([#1618](https://github.com/JiRaska/open-bank-oss/issues/1618)) ([#1642](https://github.com/JiRaska/open-bank-oss/issues/1642)) ([9ea756c](https://github.com/JiRaska/open-bank-oss/commit/9ea756c6d832cd181d2d4cd116b89e6eeb3536dd))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.10.1...interest-service-v0.11.0) (2026-07-18)
 
 
