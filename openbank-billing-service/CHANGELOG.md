@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.4](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.6.3...billing-service-v0.6.4) (2026-07-18)
+
+
+### Bug Fixes
+
+* **billing:** add missing quarkus-opentelemetry extension ([#1668](https://github.com/JiRaska/open-bank-oss/issues/1668)) ([12ccaa6](https://github.com/JiRaska/open-bank-oss/commit/12ccaa69daad6dba1f94e101eabc61f02ff3bc34)), closes [#669](https://github.com/JiRaska/open-bank-oss/issues/669)
+
 ## [0.6.3](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.6.2...billing-service-v0.6.3) (2026-07-17)
 
 
