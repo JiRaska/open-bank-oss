@@ -23,6 +23,13 @@ quarkus:
     level: INFO
     console:
       json: true
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-billing-service
   smallrye-openapi:
     path: /q/openapi
   swagger-ui:
