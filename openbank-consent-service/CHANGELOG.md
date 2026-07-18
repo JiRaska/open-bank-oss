@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.11.1...consent-service-v0.11.2) (2026-07-18)
+
+
+### Bug Fixes
+
+* **consent:** atomic outbox for lifecycle events; merge over persist ([#1553](https://github.com/JiRaska/open-bank-oss/issues/1553)) ([8347a34](https://github.com/JiRaska/open-bank-oss/commit/8347a343e6e5dd906865105745a619a2aa0297bb))
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.11.0...consent-service-v0.11.1) (2026-07-17)
 
 
