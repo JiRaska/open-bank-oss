@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.21.0...customer-edge-v0.22.0) (2026-07-18)
+
+
+### Features
+
+* **customer-edge:** expose GET /accounts/{id}/interest (rate + accrued) for the app ([#1615](https://github.com/JiRaska/open-bank-oss/issues/1615)) ([5a24a5e](https://github.com/JiRaska/open-bank-oss/commit/5a24a5ea0ae25d5486c12c074dd3be0f5640e1fb))
+
 ## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.20.2...customer-edge-v0.21.0) (2026-07-16)
 
 
