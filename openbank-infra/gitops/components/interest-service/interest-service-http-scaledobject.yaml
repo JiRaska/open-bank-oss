@@ -26,10 +26,18 @@
 # blocker to skip the service — the existing pilot itself shipped on JVM. Flagging this gap
 # rather than silently assuming native is live.
 #
-# minReplicas: 0 — safe because:
-#   - interest-service is NOT on the money path (rules.yaml money_path_services).
-#   - No resident listener depends on the pod staying warm (no live cron, see above).
-#   - The KEDA HTTP interceptor parks the first request rather than 5xx-ing it.
+# minReplicas: 1 — the premise for min:0 above ("no live cron") no longer holds. The daily
+#   accrual engine (openbank-interest-service #1618/#1614) adds an in-pod @Scheduled
+#   (InterestAccrualScheduler, openbank.interest.accrual-cron) that MUST fire once a day, and at 0
+#   replicas it never would — the pod is not up at cron time and nothing wakes it. interest also
+#   became customer-facing: customer-edge reads GET /accounts/{id}/interest on every savings-account
+#   view (#1615), and a warm pod avoids a KEDA cold-start on that read path. So this service is now a
+#   resident-scheduler + read-serving service, not the on-demand operator tool the T1 sweep assumed.
+#   The manifest above anticipated exactly this ("if/when the described external accrual scheduler is
+#   built…") — we chose the in-pod scheduler + min:1 over an external CronJob POSTing /accrue/all;
+#   either satisfies the daily trigger, and min:1 also fixes the read-path cold start. Reclaiming
+#   scale-to-zero later would mean moving the trigger to a K8s CronJob and accepting cold reads.
+#   Still NOT on the money path (rules.yaml money_path_services); the finops cost is one small JVM pod.
 #
 # maxReplicas: 1 — low-QPS operator/admin-driven traffic; no customer-facing fan-out measured, so a
 #   second replica buys no throughput. It does buy a concurrency hazard: capitalization and
@@ -63,7 +71,7 @@ spec:
     apiVersion: apps/v1
     port: 8125
   replicas:
-    min: 0
+    min: 1
     max: 1
   scaledownPeriod: 300
   targetPendingRequests: 50

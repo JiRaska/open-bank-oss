@@ -26,7 +26,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: interest-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-interest-service:sandbox-ffa5f44c
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-interest-service:sandbox-06e361d9
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8125}
@@ -80,6 +80,10 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # Fleet directory for the daily accrual run (#1618): discovers ACTIVE accounts
+            # (GET /accounts/active) and reads their booked balance (GET /accounts/{id}/balance).
+            - name: ACCOUNT_SERVICE_URL
+              value: "http://account-service.accounts.svc:8100"
             # OPA sidecar bootstrap (ADR-0034 Phase 5, issue #938). Advisory mode first
             # (AUTHZ_ENFORCE=false, @Authorize logs "would DENY" without blocking) — matches
             # every other service's rollout convention. Flip to true only after an observation
