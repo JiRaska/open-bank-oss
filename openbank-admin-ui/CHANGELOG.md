@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.52.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.51.0...admin-ui-v0.52.0) (2026-07-18)
+
+
+### Features
+
+* **admin-ui:** add an infrastructure topology page ([#1658](https://github.com/JiRaska/open-bank-oss/issues/1658)) ([361c909](https://github.com/JiRaska/open-bank-oss/commit/361c90952f24ae963b7dc5a59aa0f5495bffb7a3))
+
 ## [0.51.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.50.1...admin-ui-v0.51.0) (2026-07-18)
 
 
