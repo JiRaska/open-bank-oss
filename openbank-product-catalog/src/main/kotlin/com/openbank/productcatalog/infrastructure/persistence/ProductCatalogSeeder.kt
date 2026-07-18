@@ -75,15 +75,20 @@ class ProductCatalogSeeder(private val sf: Mutiny.SessionFactory, private val ma
             val seedById = ProductSeed.products
                 .filter { it.fees.isNotEmpty() }
                 .associateBy { ProductIds.canonicalId(it.id) }
-            s.createQuery("FROM ProductEntity", ProductEntity::class.java).resultList.map { entities ->
-                entities.count { e -> backfillFeesFor(e, seedById) }
+            s.createQuery("FROM ProductEntity", ProductEntity::class.java).resultList.flatMap { entities ->
+                val patched = entities.count { e -> backfillFeesFor(e, seedById) }
+                log.info(
+                    "Fee backfill: scanned ${entities.size} products, ${seedById.size} seed products have fees, patched $patched.",
+                )
+                // Explicit flush so the dirty managed entities are unambiguously written before commit.
+                if (patched > 0) s.flush().replaceWith(patched) else Uni.createFrom().item(patched)
             }
         }
     } ?: 0
 
     /**
      * Backfill [e]'s doc fees from the seed if — and only if — the seed has fees for it and its
-     * persisted doc has none. Returns true iff it patched (a managed entity, flushed on commit).
+     * persisted doc has none. Returns true iff it patched (a managed entity, flushed by the caller).
      */
     private fun backfillFeesFor(e: ProductEntity, seedById: Map<UUID, Product>): Boolean {
         val seedP = seedById[e.id] ?: return false
