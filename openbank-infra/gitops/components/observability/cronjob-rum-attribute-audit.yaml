@@ -5,7 +5,7 @@
 #
 # The audit covers the ADR-0070/0075 allow-listed attributes that the rum-gateway
 # redaction processor keeps. Values are queried via the Tempo HTTP API
-# (GET /api/v2/search/tag-values); the output is a JSON line per attribute.
+# (GET /api/v2/search/tag/.<attr>/values); the output is a JSON line per attribute.
 #
 # This is a READ-ONLY audit — it writes nothing to Tempo and has no side effects.
 # The job is NOT a replacement for the cardinality budget alert (O2); it provides
@@ -71,10 +71,18 @@ spec:
                   START="$(( END - ${LOOKBACK%h} * 3600 ))"
                   echo "{\"event\":\"rum-attribute-audit-start\",\"lookback\":\"${LOOKBACK}\"}"
                   for attr in $ATTRS; do
+                    # Tempo tag-values v2 lives at /api/v2/search/tag/<scope>.<tag>/values —
+                    # the previous /api/v2/search/tag-values?tagName= path does not exist and
+                    # returned 404, so `curl -sf` fell to the empty fallback for every attr.
+                    # The leading "." is the unscoped selector, matching the tag in any scope
+                    # (span or resource), which is what we want for a cardinality audit.
                     result=$(curl -sf --max-time 30 \
-                      "${TEMPO_URL}/api/v2/search/tag-values?tagName=${attr}&q={}&start=${START}&end=${END}" \
+                      "${TEMPO_URL}/api/v2/search/tag/.${attr}/values?start=${START}&end=${END}" \
                       2>/dev/null || echo '{"tagValues":[]}')
-                    count=$(echo "$result" | grep -o '"value"' | wc -l | tr -d ' ')
+                    # `grep` exits 1 when a tag has zero values; under `set -o pipefail` that
+                    # non-zero status would kill the whole job (it did, every run). Swallow it
+                    # so a legitimately-empty attribute counts as 0 instead of aborting.
+                    count=$(echo "$result" | { grep -o '"value"' || true; } | wc -l | tr -d ' ')
                     echo "{\"event\":\"rum-attribute-audit\",\"attribute\":\"${attr}\",\"unique_value_count\":${count},\"sample\":$(echo "$result" | head -c 512)}"
                   done
                   echo "{\"event\":\"rum-attribute-audit-done\"}"
