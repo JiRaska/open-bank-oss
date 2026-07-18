@@ -134,7 +134,7 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0123](0123-relicense-to-apache-2.0.md) | Relicense the platform from MPL-2.0 to Apache-2.0 | Accepted | Shipped | — |
 | [0124](0124-oss-readiness-and-public-launch-hardening.md) | OSS-readiness and public-launch hardening | Accepted | Partial | — |
 | [0125](0125-same-account-currency-exchange.md) | Same-account currency exchange (the app's currency swap) | Superseded by ADR-0110 | Superseded | — |
-| [0126](0126-unified-consent-lifecycle.md) | Unified Consent Lifecycle and GDPR Linkage | Accepted | Partial | — |
+| [0126](0126-unified-consent-lifecycle.md) | Unified Consent Lifecycle and GDPR Linkage | Accepted | Shipped | — |
 | [0132](0132-customer-edge-per-party-rate-limiting.md) | Per-party request rate limiting at the customer edge | Accepted | Shipped | — |
 | [0133](0133-tamper-evident-audit-chain.md) | ADR-0133: Tamper-evident audit chain | Accepted | Shipped | — |
 | [0134](0134-business-continuity-and-dora-ictrm.md) | ADR-0134: Business continuity plan and DORA ICT risk management framework | Accepted | Complete | — |

@@ -4,20 +4,17 @@
 |------------------|--------------------------------|
 | Status           | Accepted                       |
 | Decision-Status  | Accepted                       |
-| Delivery-Status  | Partial                        |
+| Delivery-Status  | Shipped                        |
 | Deciders         | Jiri Raska                     |
 | Date             | 2026-06-29                     |
 | Supersedes       | —                              |
 | Superseded by    | —                              |
 
-**Delivery note (updated 2026-07-17):** the header `Partial` is accurate, but two decision points below
-were mismarked "Shipped". D1, D4, D5 shipped — D5 in particular is real: consent-service runs live at
-`AUTHZ_ENFORCE=true` (`openbank-infra/gitops/components/consent/consent-service.yaml`). **D2 is Partial**
-(D3 shipped 2026-07-17 via #1553): D2's `/validate` response omits the promised
-`scope`/`grantedAccounts`/`frequencyPerDay` (returns only `{valid, reason, code}`). D3's revoke/reject
-formerly published via a direct Kafka emitter — a dual-write with no atomic guarantee on a money-path
-revoke; #1553 moved revoke/reject (and grant) onto the transactional outbox, so the lifecycle event is
-now durable with the status change. The header stays `Partial` until D2's DTO is completed. (Aside:
+**Delivery note (updated 2026-07-17):** all five decision points are now Shipped, and the header is
+flipped `Partial → Shipped`. D1/D4/D5 were already live; #1553 moved D3's revoke/reject (and grant)
+onto the transactional outbox — closing a money-path dual-write — and #1609 completed D2's `/validate`
+projection (`scope`/`grantedAccounts`/`frequencyPerDay`). The per-decision *Delivery reality* notes
+below keep the record of what was originally mismarked and how it was fixed. (Aside:
 ADR-0034's "consent still advisory, pending #266" line is itself stale — OPA enforcement is live here.)
 
 ## Context
@@ -71,11 +68,11 @@ The `Consent` aggregate root enforces these caps in its `init` block.
 
 `POST /api/v1/consents` creates a `PENDING_SCA` record. The TPP (or bank agent) then drives SCA via `openbank-sca-service`; `POST /api/v1/consents/{id}/activate` completes the binding after SCA succeeds. SCA session ID is stored on the consent for non-repudiation.
 
-### D2 — Consent validation by resource servers (Partial)
+### D2 — Consent validation by resource servers (✅ Shipped)
 
 `POST /api/v1/consents/{id}/validate` is the machine-to-machine gate called by `account-service`, `balance-service`, `transaction-service` etc. before returning data. Response: `{valid: true/false}` with `scope`, `grantedAccounts`, `frequencyPerDay`. No PII in the response.
 
-> **Delivery reality (2026-07-17):** the endpoint and its checks (grantee match, `isActive`, `hasScope`, `coversAccount`) are live, but the response DTO is `ConsentValidationResponse(valid, reason, code)` — it does **not** yet carry `scope`/`grantedAccounts`/`frequencyPerDay`, so a resource server cannot cache "for the configured `frequencyPerDay` window" as the Consequences section assumes. Partial until the DTO is completed.
+> **Delivery reality (2026-07-17, resolved #1609):** the endpoint and its checks (grantee match, `isActive`, `hasScope`, `coversAccount`) were live, but the response DTO originally carried only `{valid, reason, code}`. #1609 completed the projection: on a valid result the response now returns `scopes`, `grantedAccounts` (covered IBANs; null = all of the party's accounts) and `frequencyPerDay` (PSD2 RTS Art. 10 AISP cap = 4 via `Consent.frequencyPerDay()`; null for non-AISP), so a resource server can cache within that window (openapi `1.2.0`).
 
 ### D3 — Revocation propagation (✅ Shipped)
 
