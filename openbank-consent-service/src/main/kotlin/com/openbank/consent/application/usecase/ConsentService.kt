@@ -4,12 +4,23 @@
 
 package com.openbank.consent.application.usecase
 
-import com.openbank.consent.application.port.`in`.*
-import com.openbank.consent.application.port.out.ConsentEventPublisher
+import com.openbank.consent.application.port.`in`.ActivateConsentUseCase
+import com.openbank.consent.application.port.`in`.CreateConsentCommand
+import com.openbank.consent.application.port.`in`.CreateConsentUseCase
+import com.openbank.consent.application.port.`in`.GetConsentUseCase
+import com.openbank.consent.application.port.`in`.RevokeConsentCommand
+import com.openbank.consent.application.port.`in`.RevokeConsentUseCase
+import com.openbank.consent.application.port.`in`.ValidateConsentCommand
+import com.openbank.consent.application.port.`in`.ValidateConsentUseCase
 import com.openbank.consent.application.port.out.ConsentRepository
 import com.openbank.consent.application.port.out.ScaChallengeClient
-import com.openbank.consent.domain.event.*
-import com.openbank.consent.domain.model.*
+import com.openbank.consent.domain.event.ConsentGranted
+import com.openbank.consent.domain.event.ConsentRejected
+import com.openbank.consent.domain.event.ConsentRevoked
+import com.openbank.consent.domain.model.Consent
+import com.openbank.consent.domain.model.ConsentScope
+import com.openbank.consent.domain.model.ConsentStatus
+import com.openbank.consent.domain.model.ConsentValidationResult
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
@@ -33,7 +44,6 @@ class ConsentScaNotCompletedException(id: UUID, scaSessionId: UUID) :
 @ApplicationScoped
 class ConsentService(
     private val consentRepository: ConsentRepository,
-    private val eventPublisher: ConsentEventPublisher,
     private val scaChallengeClient: ScaChallengeClient,
     private val clock: Clock,
 ) : CreateConsentUseCase,
@@ -45,9 +55,8 @@ class ConsentService(
     @Inject
     constructor(
         consentRepository: ConsentRepository,
-        eventPublisher: ConsentEventPublisher,
         scaChallengeClient: ScaChallengeClient,
-    ) : this(consentRepository, eventPublisher, scaChallengeClient, Clock.systemUTC())
+    ) : this(consentRepository, scaChallengeClient, Clock.systemUTC())
 
     override suspend fun createConsent(command: CreateConsentCommand): Consent {
         val now = OffsetDateTime.now(clock)
@@ -111,21 +120,18 @@ class ConsentService(
         }
 
         val activated = consent.activate(scaSessionId, OffsetDateTime.now(clock))
-        val saved = consentRepository.save(activated)
-
-        eventPublisher.publish(
+        return consentRepository.save(
+            activated,
             ConsentGranted(
-                aggregateId = saved.id,
-                partyId = saved.partyId,
-                granteeId = saved.granteeId,
-                granteeType = saved.granteeType,
-                scopes = saved.scopes,
-                validTo = saved.validTo,
+                aggregateId = activated.id,
+                partyId = activated.partyId,
+                granteeId = activated.granteeId,
+                granteeType = activated.granteeType,
+                scopes = activated.scopes,
+                validTo = activated.validTo,
                 occurredAt = clock.instant(),
             ),
         )
-
-        return saved
     }
 
     override suspend fun rejectConsent(consentId: UUID, reason: String): Consent {
@@ -133,19 +139,16 @@ class ConsentService(
             ?: throw ConsentNotFoundException(consentId)
 
         val rejected = consent.reject(OffsetDateTime.now(clock))
-        val saved = consentRepository.save(rejected)
-
-        eventPublisher.publish(
+        return consentRepository.save(
+            rejected,
             ConsentRejected(
-                aggregateId = saved.id,
-                partyId = saved.partyId,
-                granteeId = saved.granteeId,
+                aggregateId = rejected.id,
+                partyId = rejected.partyId,
+                granteeId = rejected.granteeId,
                 reason = reason,
                 occurredAt = clock.instant(),
             ),
         )
-
-        return saved
     }
 
     override suspend fun revokeConsent(command: RevokeConsentCommand): Consent {
@@ -157,19 +160,16 @@ class ConsentService(
         }
 
         val revoked = consent.revoke(command.reason, OffsetDateTime.now(clock))
-        val saved = consentRepository.save(revoked)
-
-        eventPublisher.publish(
+        return consentRepository.save(
+            revoked,
             ConsentRevoked(
-                aggregateId = saved.id,
-                partyId = saved.partyId,
-                granteeId = saved.granteeId,
+                aggregateId = revoked.id,
+                partyId = revoked.partyId,
+                granteeId = revoked.granteeId,
                 reason = command.reason,
                 occurredAt = clock.instant(),
             ),
         )
-
-        return saved
     }
 
     override suspend fun getConsent(consentId: UUID): Consent =

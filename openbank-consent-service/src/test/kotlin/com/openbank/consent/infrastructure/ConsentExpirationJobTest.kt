@@ -4,16 +4,13 @@
 
 package com.openbank.consent.infrastructure
 
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
-import com.fasterxml.jackson.module.kotlin.registerKotlinModule
-import com.openbank.consent.application.port.out.ConsentOutboxRepository
 import com.openbank.consent.application.port.out.ConsentRepository
+import com.openbank.consent.domain.event.ConsentExpired
 import com.openbank.consent.domain.model.Consent
 import com.openbank.consent.domain.model.ConsentScope
 import com.openbank.consent.domain.model.ConsentStatus
 import com.openbank.consent.domain.model.GranteeType
-import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.domain.event.DomainEvent
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -30,14 +27,10 @@ import java.util.UUID
 class ConsentExpirationJobTest {
 
     private val consentRepo = mockk<ConsentRepository>()
-    private val outboxRepo = mockk<ConsentOutboxRepository>()
-    private val objectMapper = ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule())
     private val fixedClock = Clock.fixed(Instant.parse("2026-06-29T05:05:00Z"), ZoneOffset.UTC)
 
     private val job = ConsentExpirationJob().also {
         it.consentRepo = consentRepo
-        it.outboxRepo = outboxRepo
-        it.objectMapper = objectMapper
         it.clock = fixedClock
     }
 
@@ -74,53 +67,51 @@ class ConsentExpirationJobTest {
         val count = job.buildSweepPipeline(OffsetDateTime.now(fixedClock)).await().indefinitely()
 
         assertThat(count).isEqualTo(0)
-        verify(exactly = 0) { outboxRepo.persistInTransaction(any()) }
+        verify(exactly = 0) { consentRepo.markExpired(any(), any(), any()) }
     }
 
     @Test
-    fun `buildSweepPipeline - one expired consent - marks expired and enqueues outbox event`() {
+    fun `buildSweepPipeline - one expired consent - marks expired and enqueues ConsentExpired atomically`() {
         val c = consent()
-        val outboxSlot = slot<OutboxMessage>()
+        val eventSlot = slot<DomainEvent>()
 
         every { consentRepo.findExpiredActive(any()) } returns Uni.createFrom().item(listOf(c))
-        every { consentRepo.markExpired(c.id, any()) } returns Uni.createFrom().item(true)
-        every { outboxRepo.persistInTransaction(capture(outboxSlot)) } returns Uni.createFrom().voidItem()
+        every { consentRepo.markExpired(eq(c.id), any(), capture(eventSlot)) } returns Uni.createFrom().item(true)
 
         val count = job.buildSweepPipeline(OffsetDateTime.now(fixedClock)).await().indefinitely()
 
         assertThat(count).isEqualTo(1)
-        verify(exactly = 1) { consentRepo.markExpired(c.id, any()) }
-        assertThat(outboxSlot.captured.eventType).isEqualTo("ConsentExpired")
-        assertThat(outboxSlot.captured.aggregateId).isEqualTo(c.id)
+        verify(exactly = 1) { consentRepo.markExpired(eq(c.id), any(), any()) }
+        assertThat(eventSlot.captured).isInstanceOf(ConsentExpired::class.java)
+        assertThat(eventSlot.captured.eventType).isEqualTo("ConsentExpired")
+        assertThat(eventSlot.captured.aggregateId).isEqualTo(c.id)
     }
 
     @Test
-    fun `buildSweepPipeline - markExpired returns false (concurrent sweep race) - no outbox event`() {
+    fun `buildSweepPipeline - markExpired returns false (concurrent sweep race) - no event, counts zero`() {
         val c = consent()
 
         every { consentRepo.findExpiredActive(any()) } returns Uni.createFrom().item(listOf(c))
-        every { consentRepo.markExpired(c.id, any()) } returns Uni.createFrom().item(false)
+        every { consentRepo.markExpired(eq(c.id), any(), any()) } returns Uni.createFrom().item(false)
 
         val count = job.buildSweepPipeline(OffsetDateTime.now(fixedClock)).await().indefinitely()
 
         assertThat(count).isEqualTo(0)
-        verify(exactly = 0) { outboxRepo.persistInTransaction(any()) }
     }
 
     @Test
-    fun `buildSweepPipeline - two expired consents - both get outbox events`() {
+    fun `buildSweepPipeline - two expired consents - both transition and enqueue`() {
         val c1 = consent()
         val c2 = consent()
 
         every { consentRepo.findExpiredActive(any()) } returns Uni.createFrom().item(listOf(c1, c2))
-        every { consentRepo.markExpired(c1.id, any()) } returns Uni.createFrom().item(true)
-        every { consentRepo.markExpired(c2.id, any()) } returns Uni.createFrom().item(true)
-        every { outboxRepo.persistInTransaction(any()) } returns Uni.createFrom().voidItem()
+        every { consentRepo.markExpired(eq(c1.id), any(), any()) } returns Uni.createFrom().item(true)
+        every { consentRepo.markExpired(eq(c2.id), any(), any()) } returns Uni.createFrom().item(true)
 
         val count = job.buildSweepPipeline(OffsetDateTime.now(fixedClock)).await().indefinitely()
 
         assertThat(count).isEqualTo(2)
-        verify(exactly = 2) { outboxRepo.persistInTransaction(any()) }
+        verify(exactly = 2) { consentRepo.markExpired(any(), any(), any()) }
     }
 
     @Test

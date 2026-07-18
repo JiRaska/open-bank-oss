@@ -4,9 +4,13 @@
 
 package com.openbank.consent.infrastructure.persistence.repository
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.consent.application.port.out.ConsentOutboxRepository
 import com.openbank.consent.application.port.out.ConsentRepository
 import com.openbank.consent.domain.model.Consent
 import com.openbank.consent.infrastructure.persistence.entity.ConsentEntity
+import com.openbank.libs.domain.event.DomainEvent
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheRepository
 import io.smallrye.mutiny.Uni
@@ -16,15 +20,35 @@ import java.time.OffsetDateTime
 import java.util.UUID
 
 @ApplicationScoped
-class ConsentRepositoryImpl :
-    ConsentRepository,
+class ConsentRepositoryImpl(
+    private val outboxRepository: ConsentOutboxRepository,
+    private val objectMapper: ObjectMapper,
+) : ConsentRepository,
     PanacheRepository<ConsentEntity> {
 
-    override suspend fun save(consent: Consent): Consent {
-        val entity = ConsentEntity.fromDomain(consent)
-        Panache.withTransaction { persistAndFlush(entity) }.awaitSuspending()
-        return entity.toDomain()
-    }
+    // merge, not persist: the consent aggregate carries an application-assigned @Id, so persist()
+    // schedules an INSERT even for an existing row and fails on the PK for every lifecycle
+    // transition (activate/reject/revoke). merge is the upsert the transitions need.
+    override suspend fun save(consent: Consent): Consent =
+        Panache.withTransaction { mergeConsent(consent) }.awaitSuspending().toDomain()
+
+    override suspend fun save(consent: Consent, event: DomainEvent): Consent = Panache.withTransaction {
+        // Aggregate state change + outbox row in ONE transaction: the bare persist() inside
+        // persistInTransaction joins this @WithTransaction session (transactional outbox, ADR-0126 §D3).
+        mergeConsent(consent).flatMap { merged ->
+            outboxRepository.persistInTransaction(outboxMessage(event)).replaceWith(merged)
+        }
+    }.awaitSuspending().toDomain()
+
+    private fun mergeConsent(consent: Consent): Uni<ConsentEntity> =
+        Panache.getSession().flatMap { session -> session.merge(ConsentEntity.fromDomain(consent)) }
+
+    private fun outboxMessage(event: DomainEvent): OutboxMessage = OutboxMessage(
+        aggregateId = event.aggregateId,
+        eventType = event.eventType,
+        payload = objectMapper.writeValueAsString(event),
+        createdAt = event.occurredAt,
+    )
 
     override suspend fun findById(id: UUID): Consent? =
         Panache.withSession { find("id", id).firstResult<ConsentEntity>() }.awaitSuspending()?.toDomain()
@@ -46,11 +70,18 @@ class ConsentRepositoryImpl :
         find("status = 'ACTIVE' and validTo < ?1", threshold).list<ConsentEntity>()
     }.map { list -> list.map { it.toDomain() } }
 
-    override fun markExpired(id: UUID, expiredAt: OffsetDateTime): Uni<Boolean> = Panache.withTransaction {
-        update(
-            "status = 'EXPIRED', updatedAt = ?1 where id = ?2 and status = 'ACTIVE'",
-            expiredAt,
-            id,
-        )
-    }.map { count -> count > 0L }
+    override fun markExpired(id: UUID, expiredAt: OffsetDateTime, event: DomainEvent): Uni<Boolean> =
+        Panache.withTransaction {
+            update(
+                "status = 'EXPIRED', updatedAt = ?1 where id = ?2 and status = 'ACTIVE'",
+                expiredAt,
+                id,
+            ).flatMap { count ->
+                if (count > 0L) {
+                    outboxRepository.persistInTransaction(outboxMessage(event)).replaceWith(true)
+                } else {
+                    Uni.createFrom().item(false)
+                }
+            }
+        }
 }

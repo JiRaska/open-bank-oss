@@ -15,8 +15,9 @@ Služba dodržuje hexagonální architekturu OpenBank (ADR 0002): doménu bez fr
         │                             │ porty out                   │
         │     ┌───────────────────────┼───────────────────────┐    │
         │     ▼                       ▼                       ▼     │
-        │ ConsentRepository    ConsentEventPublisher   ScaChallengeClient
-        │  (Panache/PG)         (insert do outboxu)     (REST → sca)  │
+        │ ConsentRepository    ConsentOutboxRepository ScaChallengeClient
+        │  (stav + outbox,      (dispatch → Kafka)      (REST → sca)  │
+        │   jedna transakce)                                         │
         └─────┬───────────────────────┬───────────────────┬─────────┘
               ▼                        ▼                   ▼
         PostgreSQL              consent_outbox        sca-service
@@ -39,14 +40,14 @@ Služba dodržuje hexagonální architekturu OpenBank (ADR 0002): doménu bez fr
 ### Aplikace (`application/`)
 
 - **Vstupní porty** (`port/in/ConsentUseCases.kt`): `CreateConsentUseCase`, `ActivateConsentUseCase`, `RevokeConsentUseCase`, `GetConsentUseCase`, `ValidateConsentUseCase` se svými command DTO.
-- **Výstupní porty** (`port/out/`): `ConsentRepository`, `ConsentEventPublisher`, `ScaChallengeClient` plus outbox porty (`ConsentOutboxRepository`, `ConsentOutboxEventPublisher`).
+- **Výstupní porty** (`port/out/`): `ConsentRepository` (jeho `save(consent, event)` uloží změnu stavu i řádek outboxu v jedné transakci), `ScaChallengeClient` plus outbox porty (`ConsentOutboxRepository`, `ConsentOutboxEventPublisher`).
 - `usecase/ConsentService.kt` — jediná `@ApplicationScoped` implementace všech pěti vstupních portů. Rovněž defenzivně znovu aplikuje strop platnosti a definuje typované doménové výjimky (např. `ConsentNotFoundException`, `ConsentNotOwnedByPartyException`, `ConsentScaNotCompletedException`).
 
 ### Adaptéry (`infrastructure/`)
 
 - **REST in** — `rest/ConsentResource.kt` (`@Path("/api/v1/consents")`), DTO v `rest/dto/` a `rest/ExceptionMappers.kt` mapující doménové výjimky na `ApiError` + HTTP status.
 - **Perzistence** — `persistence/entity/ConsentEntity.kt` + `ConsentOutboxEntity.kt` (Panache reactive), `persistence/repository/ConsentRepositoryImpl.kt` + `ConsentOutboxRepositoryImpl.kt`.
-- **Messaging / outbox** — `outbox/ConsentOutboxDispatcher.kt` (scheduled), `messaging/KafkaConsentOutboxEventPublisher.kt` a `messaging/KafkaConsentEventPublisher.kt`.
+- **Messaging / outbox** — `outbox/ConsentOutboxDispatcher.kt` (scheduled) a `messaging/KafkaConsentOutboxEventPublisher.kt`. Události životního cyklu se do Kafky dostávají výhradně přes outbox (přímý publisher neexistuje).
 - **SCA klient** — `client/ScaChallengeClient.kt`: MicroProfile `@RegisterRestClient(configKey = "sca-service")` obalený odolným adaptérem.
 - **Authz** — `authz/AuthzProducer.kt` produkuje `OpaSidecarPolicyDecisionPoint` pro libs interceptor `@Authorize` (ADR 0034).
 - **Idempotence** — `idempotency/IdempotencyConfig.kt` napojuje libs `IdempotencyStore` (Redis).
@@ -93,8 +94,7 @@ Dispatcher polyká chyby na nejvyšší úrovni, takže scheduler nikdy nespadne
 | Port | Směr | Adaptér |
 |---|---|---|
 | `CreateConsentUseCase` / `ActivateConsentUseCase` / `RevokeConsentUseCase` / `GetConsentUseCase` / `ValidateConsentUseCase` | in | `ConsentResource` |
-| `ConsentRepository` | out | `ConsentRepositoryImpl` (Panache reactive, PostgreSQL) |
-| `ConsentEventPublisher` | out | insert do outboxu (poté dispatcher → Kafka) |
+| `ConsentRepository` | out | `ConsentRepositoryImpl` (Panache reactive, PostgreSQL); `save(consent, event)` zapíše změnu stavu + řádek outboxu v jedné transakci (poté dispatcher → Kafka) |
 | `ConsentOutboxRepository` / `ConsentOutboxEventPublisher` | out | `ConsentOutboxRepositoryImpl` / `KafkaConsentOutboxEventPublisher` |
 | `ScaChallengeClient` | out | `ResilientScaChallengeClient` → `sca-service` |
 | `PolicyDecisionPoint` | out | `OpaSidecarPolicyDecisionPoint` (OPA sidecar) |

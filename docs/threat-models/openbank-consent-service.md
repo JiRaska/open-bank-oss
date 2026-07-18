@@ -46,10 +46,23 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 ## 5. Residual risks / assumptions
 
 - **SCA linkage** (sca-service) must gate activation — see `sca.md`.
-- Revocation propagation latency to resource servers must be bounded.
+- Revocation propagation latency to resource servers must be bounded; the event is now durably
+  enqueued in the transactional outbox within the revocation's own transaction (at-least-once via
+  `ConsentOutboxDispatcher`), closing the prior dual-write that could drop it entirely.
 
 ## 6. Change log
 
+- **2026-07-17** — Consent lifecycle events (grant/revoke/reject) and the expiration sweep now write
+  their outbox row in the SAME transaction as the status change (ADR-0126 §D3/§D4). The prior
+  direct-Kafka emit was a dual-write that silently dropped the event on a crash between the DB commit
+  and the send, breaking the GDPR Art. 17 / PSD2 "cease processing" propagation guarantee for the
+  notification / analytics / psd2 consumers (a **repudiation/integrity** risk). The same change fixed
+  a latent persistence bug where lifecycle transitions used `persist` (INSERT) instead of `merge` on
+  the assigned-`@Id` aggregate, so every revoke/reject/activate returned HTTP 500 against a real DB —
+  masked because unit tests mocked the repository. No new external surface; the direct-emit
+  `ConsentEventPublisher` / `KafkaConsentEventPublisher` are retired. Verified by
+  `ConsentRevocationOutboxIT` (real Postgres: status change + outbox row commit together) plus the
+  updated `ConsentServiceTest` / `ConsentExpirationJobTest`.
 - **2026-05-30** — Added `consent_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/
   surface/boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
   Rollback: `DROP SEQUENCE`.
