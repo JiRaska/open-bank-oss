@@ -113,18 +113,18 @@ const EDGES: EdgeDef[] = [
   { from: 'strimzi', to: 'kafka', type: 'manages' },
   { from: 'postgres', to: 's3', type: 'backs-up' },
   { from: 'external-secrets', to: 'openbao', type: 'secrets' },
-  { from: 'keda', to: 'kafka', type: 'scales' },
+  { from: 'keda', to: 'kafka', type: 'scales' }, // KEDA scales workloads ON Kafka consumer-lag (see label)
   { from: 'kyverno', to: 'eks', type: 'admits' },
   { from: 'cert-manager', to: 'ingress-nginx', type: 'issues' },
   { from: 'cert-manager', to: 'istio', type: 'issues' },
   { from: 'ingress-nginx', to: 'keycloak', type: 'routes' },
   { from: 'ingress-nginx', to: 'grafana', type: 'routes' },
-  { from: 'istio', to: 'kafka', type: 'mesh' },
   // Backing-service usage
   { from: 'keycloak', to: 'postgres', type: 'uses' },
   { from: 'temporal', to: 'postgres', type: 'uses' },
   { from: 'schema-registry', to: 'kafka', type: 'uses' },
-  { from: 'keycloak', to: 'opa', type: 'auth' },
+  { from: 'kafka-ui', to: 'kafka', type: 'uses' },
+  { from: 'opa', to: 'keycloak', type: 'auth' }, // OPA fetches JWKS to validate Keycloak-issued JWTs
   // Observability pipeline
   { from: 'alloy', to: 'prometheus', type: 'scrapes' },
   { from: 'alloy', to: 'loki', type: 'scrapes' },
@@ -153,8 +153,8 @@ const edgeTypeLabel = (type: EdgeType, t: (cs: string, en: string) => string): s
   deploys: t('nasazuje', 'deploys'), provisions: t('provisiony', 'provisions'), admits: t('admission', 'admits'),
   issues: t('vydává cert', 'issues cert'), manages: t('spravuje', 'manages'), uses: t('používá', 'uses'),
   'backs-up': t('zálohuje', 'backs up'), secrets: t('tajemství', 'secrets'), pulls: t('stahuje', 'pulls'),
-  routes: t('routuje', 'routes'), auth: t('autorizace', 'auth'), scales: t('škáluje', 'scales'),
-  scrapes: t('sběr', 'scrapes'), queries: t('dotazuje', 'queries'), alerts: t('alerty', 'alerts'), mesh: t('mesh mTLS', 'mesh mTLS'),
+  routes: t('routuje', 'routes'), auth: t('validuje JWT', 'validates JWT'), scales: t('škáluje dle lagu', 'scales on lag'),
+  scrapes: t('odesílá', 'ships'), queries: t('dotazuje', 'queries'), alerts: t('alerty', 'alerts'), mesh: t('mesh mTLS', 'mesh mTLS'),
 }[type])
 
 // ---------------------------------------------------------------------------
@@ -443,7 +443,7 @@ export default function InfraTopologyPage() {
           <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', display: 'flex', gap: '18px', flexWrap: 'wrap' }}>
             {([['control', t('Řízení (nasazení · admission · cert)', 'Control (deploy · admit · cert)')],
                ['data', t('Data (spravuje · používá · zálohuje)', 'Data (manages · uses · backs up)')],
-               ['flow', t('Tok (škálování · sběr · alerty · mesh)', 'Flow (scale · scrape · alerts · mesh)')]] as [EdgeCat, string][]).map(([cat, lbl]) => (
+               ['flow', t('Tok (škálování · telemetrie · alerty)', 'Flow (scale · telemetry · alerts)')]] as [EdgeCat, string][]).map(([cat, lbl]) => (
               <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
                 <svg width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke={CAT_COLOR[cat]} strokeWidth="1.6" strokeDasharray={CAT_DASHED[cat] ? '5,3' : undefined} markerEnd={`url(#ix-arrow-${cat})`} /></svg>
                 {lbl}
