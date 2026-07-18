@@ -230,3 +230,15 @@ not change any existing request's outcome until explicitly flipped.
   active book — acceptable because the roles are staff/M2M only and the same information is
   already reachable via repeated `/search` paging; gateway rate limits apply. No DB change, no
   new index (status + PK keyset uses the existing primary key). Rollback: revert the commit.
+- **2026-07-17** — Fixed `AccountAuthorizationRepositoryImpl`: every method ran without a reactive
+  session/transaction, and `save` mapped the domain to a fresh entity and `persist`ed it. Against a
+  real DB the whole authorization feature was non-functional — grant returned 422 (`No current
+  Mutiny.Session found`) and revoke/suspend/reinstate would have hit `account_authorizations_pkey`
+  on the application-assigned `@Id` (INSERT scheduled for an existing row). Masked because
+  `AuthorizationServiceTest` mocks the repository and no IT exercised the flow. Reads now wrap
+  `Panache.withSession`; `save` wraps `Panache.withTransaction` + `session.merge` (upsert). This is
+  an **integrity/availability** fix — access-grant/revocation on an account is a security control
+  (an un-revocable authorization is a real EoP risk); it must actually persist. No API/DB change.
+  Verified by `AccountAuthorizationLifecycleIT` (real Postgres: grant→revoke→REVOKED; fails-first on
+  the old code with 422). Same `persist`-vs-`merge` class as consent-service #1553; tracked in #1600.
+  Rollback: revert the commit.
