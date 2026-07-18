@@ -5,6 +5,7 @@
 package com.openbank.notification.application
 
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.notification.domain.HtmlEscape
 import com.openbank.notification.domain.model.OperatorMessageTemplate
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
@@ -158,16 +159,25 @@ class OperatorMessageService {
      * `vars.getValue(key)` is safe: [compose] already rejected any request whose `variables`
      * don't exactly match `template.variables` (extra AND missing), so every declared key is
      * guaranteed present by the time render() runs — no fallback-to-"" indirection needed.
+     *
+     * Every value interpolated into the HTML *body* is [HtmlEscape.escape]d (issue #1382): this
+     * is the operator-reachable half of that issue — `note` (`GENERIC_NOTICE`) and
+     * `ticketReference` (`SUPPORT_FOLLOWUP`) previously reached `Mail.withHtml` completely
+     * unescaped, so `ROLE_OPERATOR` free text like `<img src=x onerror=...>` rendered live in the
+     * customer's mail client. `subject` is deliberately NOT escaped: it becomes the mail
+     * `Subject:` header, not HTML, so HTML-entity-encoding it would corrupt the visible subject
+     * line rather than protect anything (header injection there is already closed by
+     * [validateRequest]'s recipient pattern; `subject` itself carries no address/header syntax).
      */
     private fun render(template: OperatorMessageTemplate, vars: Map<String, String>): Pair<String, String> =
         when (template) {
             OperatorMessageTemplate.GENERIC_NOTICE ->
                 (vars.getValue("subject").ifBlank { "A message from OpenBank" }) to
-                    "<p>${vars.getValue("note")}</p>"
+                    "<p>${HtmlEscape.escape(vars.getValue("note"))}</p>"
             OperatorMessageTemplate.SUPPORT_FOLLOWUP ->
                 "Following up on your support request" to
                     "<p>We are following up on your support request " +
-                    "(reference <b>${vars.getValue("ticketReference")}</b>). " +
+                    "(reference <b>${HtmlEscape.escape(vars.getValue("ticketReference"))}</b>). " +
                     "Please reply to this message if you have further questions.</p>"
         }
 

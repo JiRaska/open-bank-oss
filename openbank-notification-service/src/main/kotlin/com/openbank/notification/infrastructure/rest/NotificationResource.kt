@@ -6,6 +6,8 @@ package com.openbank.notification.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
 import com.openbank.notification.domain.model.NotificationTemplate
+import com.openbank.notification.domain.model.OperatorMessageTemplate
+import com.openbank.notification.domain.model.OperatorMessageTemplateSensitivity
 import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
 import jakarta.annotation.security.RolesAllowed
@@ -135,14 +137,37 @@ class NotificationResource {
      * way out, so two controls must both fail to leak an OTP to an operator. Same
      * defense-in-depth shape as the ADR-0059 D3 scrubber.
      *
-     * An unrecognised template returns [stored] verbatim rather than redacting. That is safe
-     * because the write path only ever persists a value that parsed into [NotificationTemplate]
-     * (a payload with any other template is rejected as poison), so an unknown value here means
-     * the enum shrank after the row was written — and any such row was already redacted by the
-     * write path or by V9. Fail-open keeps a legacy row readable instead of 500-ing on it.
+     * Checks BOTH template enums that can legitimately own this column (issue #1386): the
+     * `template` string here is not exclusively [NotificationTemplate] — since ADR-0176,
+     * [com.openbank.notification.application.OperatorMessageService] persists an
+     * [OperatorMessageTemplate] name into the same column. The original single-enum lookup
+     * failed open (returned [stored] unredacted with no check at all) for every
+     * `OperatorMessageTemplate` row, silently reintroducing the exact secret-leak shape issue
+     * #1325 closed for `NotificationTemplate`. Both current `OperatorMessageTemplate` constants
+     * are non-secret, so this was latent, not exploitable — but a future one that embeds
+     * something sensitive now has a real classifier to extend
+     * ([OperatorMessageTemplateSensitivity]) instead of silently inheriting the fail-open path.
+     *
+     * A template string matching NEITHER enum returns [stored] verbatim rather than redacting.
+     * That remains safe for the same reason as before: the write paths only ever persist a value
+     * that parsed into one of these two enums (any other template is rejected as poison), so an
+     * unmatched value here means an enum shrank after the row was written — and any such row was
+     * already redacted by its write path or by V9. Fail-open keeps a legacy row readable instead
+     * of 500-ing on it.
      */
     private fun bodyForRead(template: String, stored: String): String {
-        val known = NotificationTemplate.entries.firstOrNull { it.name == template } ?: return stored
-        return if (TemplateSensitivity.isSecret(known)) TemplateSensitivity.REDACTED_BODY else stored
+        val known = NotificationTemplate.entries.firstOrNull { it.name == template }
+        if (known != null) {
+            return if (TemplateSensitivity.isSecret(known)) TemplateSensitivity.REDACTED_BODY else stored
+        }
+        val operatorKnown = OperatorMessageTemplate.entries.firstOrNull { it.name == template }
+        if (operatorKnown != null) {
+            return if (OperatorMessageTemplateSensitivity.isSecret(operatorKnown)) {
+                TemplateSensitivity.REDACTED_BODY
+            } else {
+                stored
+            }
+        }
+        return stored
     }
 }
