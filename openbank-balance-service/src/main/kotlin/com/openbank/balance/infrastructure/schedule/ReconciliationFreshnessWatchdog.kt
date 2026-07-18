@@ -5,6 +5,7 @@
 package com.openbank.balance.infrastructure.schedule
 
 import com.openbank.balance.application.port.out.ReconciliationRecordRepository
+import com.openbank.libs.persistence.lock.ClusterLock
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
@@ -24,11 +25,17 @@ import java.time.Instant
  * This watchdog runs hourly and escalates the ABSENCE of a fresh tie-out to ERROR, so the log-based
  * alerting stack (Alloy → Loki) pages instead of the gap sitting silent — a missed daily control is
  * now loud. It is read-only and never touches a balance.
+ *
+ * **Cross-pod exclusion (#1201).** Read-only and idempotent, so two pods both checking is not a
+ * correctness bug — but during every canary window it would otherwise double every log line and
+ * double-fire the Loki alert for the same incident. [ClusterLock.tryRunExclusively] wraps the
+ * check so only one pod's tick actually logs.
  */
 @ApplicationScoped
 class ReconciliationFreshnessWatchdog(
     private val recordRepo: ReconciliationRecordRepository,
     private val clock: Clock,
+    private val clusterLock: ClusterLock,
 ) {
     private val log = Logger.getLogger(ReconciliationFreshnessWatchdog::class.java)
 
@@ -42,30 +49,37 @@ class ReconciliationFreshnessWatchdog(
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     suspend fun checkFreshness() {
-        val latest = recordRepo.findLatest()
-        if (latest == null) {
-            log.error(
-                "Balance reconciliation freshness: NO tie-out has ever succeeded — the daily " +
-                    "control-account ⇄ sub-ledger reconciliation (ADR-0039) is absent. Investigate.",
-            )
-            return
-        }
-        val ageHours = Duration.between(latest.generatedAt.toInstant(), Instant.now(clock)).toHours()
-        if (ageHours > staleAfter.toHours()) {
-            log.errorf(
-                "Balance reconciliation freshness: STALE — last successful tie-out was %dh ago " +
-                    "(as-of %s), past the %dh daily SLA; a scheduled run was likely missed.",
-                ageHours,
-                latest.asOf,
-                staleAfter.toHours(),
-            )
-        } else {
-            log.debugf("Balance reconciliation freshness OK: last tie-out %dh ago (as-of %s).", ageHours, latest.asOf)
+        clusterLock.tryRunExclusively(JOB_NAME) {
+            val latest = recordRepo.findLatest()
+            if (latest == null) {
+                log.error(
+                    "Balance reconciliation freshness: NO tie-out has ever succeeded — the daily " +
+                        "control-account ⇄ sub-ledger reconciliation (ADR-0039) is absent. Investigate.",
+                )
+                return@tryRunExclusively
+            }
+            val ageHours = Duration.between(latest.generatedAt.toInstant(), Instant.now(clock)).toHours()
+            if (ageHours > staleAfter.toHours()) {
+                log.errorf(
+                    "Balance reconciliation freshness: STALE — last successful tie-out was %dh ago " +
+                        "(as-of %s), past the %dh daily SLA; a scheduled run was likely missed.",
+                    ageHours,
+                    latest.asOf,
+                    staleAfter.toHours(),
+                )
+            } else {
+                log.debugf(
+                    "Balance reconciliation freshness OK: last tie-out %dh ago (as-of %s).",
+                    ageHours,
+                    latest.asOf,
+                )
+            }
         }
     }
 
     private companion object {
         // 24h daily cadence + 1h grace for run duration / a delayed scheduler.
         const val DAILY_SLA_HOURS = 25L
+        const val JOB_NAME = "balance.reconciliation.freshness"
     }
 }

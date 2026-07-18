@@ -62,6 +62,8 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.redpanda)
+    // NoOpClusterLock for scheduler unit tests (#1201 proposed fix 2).
+    testImplementation(project(":openbank-libs-testing"))
 }
 
 kover {
