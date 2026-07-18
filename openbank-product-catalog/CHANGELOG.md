@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.11.0...product-catalog-v0.11.1) (2026-07-18)
+
+
+### Bug Fixes
+
+* **product-catalog:** flush the fee backfill (managed edit wasn't persisting) ([#1670](https://github.com/JiRaska/open-bank-oss/issues/1670)) ([2a0e787](https://github.com/JiRaska/open-bank-oss/commit/2a0e78750f8cf2ecb73c855e26307aee8f312f4b))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.10.2...product-catalog-v0.11.0) (2026-07-18)
 
 
