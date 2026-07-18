@@ -86,19 +86,7 @@ data class Consent(
         require(scopes.isNotEmpty()) { "Consent must have at least one scope" }
         require(validTo.isAfter(validFrom)) { "validTo must be after validFrom" }
         // PSD2 RTS Art. 10: max 90 days for AISP
-        val maxDays = if (scopes.any {
-                it in setOf(
-                    ConsentScope.ACCOUNTS_READ,
-                    ConsentScope.BALANCES_READ,
-                    ConsentScope.TRANSACTIONS_READ,
-                    ConsentScope.STATEMENTS_READ,
-                )
-            }
-        ) {
-            90L
-        } else {
-            365L
-        }
+        val maxDays = if (scopes.any { it in AISP_SCOPES }) 90L else 365L
         require(!validTo.isAfter(validFrom.plusDays(maxDays))) {
             "Consent validity exceeds maximum allowed $maxDays days"
         }
@@ -128,6 +116,27 @@ data class Consent(
         status = ConsentStatus.REJECTED,
         updatedAt = now,
     )
+
+    /**
+     * PSD2 RTS Art. 10(2)(b) access-frequency cap for this consent's scopes: an AISP may read the
+     * account data at most [AISP_MAX_ACCESSES_PER_DAY] times per day without fresh SCA. Returned by
+     * `/validate` so a resource server can cache within that window. null when no AISP scope applies
+     * (PISP/CBPII/agent/telemetry consents carry no per-day read cap).
+     */
+    fun frequencyPerDay(): Int? = if (scopes.any { it in AISP_SCOPES }) AISP_MAX_ACCESSES_PER_DAY else null
+
+    companion object {
+        /** PSD2 RTS Art. 10 AISP scopes: SCA-gated, 90-day validity cap, ≤4 reads/day without SCA. */
+        val AISP_SCOPES = setOf(
+            ConsentScope.ACCOUNTS_READ,
+            ConsentScope.BALANCES_READ,
+            ConsentScope.TRANSACTIONS_READ,
+            ConsentScope.STATEMENTS_READ,
+        )
+
+        /** PSD2 RTS Art. 10(2)(b): max AISP accesses per day without fresh SCA. */
+        const val AISP_MAX_ACCESSES_PER_DAY = 4
+    }
 }
 
 // ─── Consent Validation Result ───────────────────────────────────────────────

@@ -5,7 +5,7 @@ info:
   title: Consent Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.0 -> 1.1): additive
   # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
-  version: 1.1.0
+  version: 1.2.0
   description: >-
     Data sharing consent lifecycle — create, activate, reject, revoke, validate. PATCH
     /approvals/{id} decides a four-eyes approval paused by the platform's ADR-0155 maker-checker
@@ -172,6 +172,30 @@ paths:
                 properties:
                   valid:
                     type: boolean
+                  reason:
+                    type: string
+                    nullable: true
+                    description: Human-readable denial reason (present when valid=false).
+                  code:
+                    type: string
+                    nullable: true
+                    description: Machine denial code, e.g. CONSENT_NOT_ACTIVE (present when valid=false).
+                  scopes:
+                    type: array
+                    nullable: true
+                    description: Granted scopes (present when valid=true).
+                    items:
+                      type: string
+                  grantedAccounts:
+                    type: array
+                    nullable: true
+                    description: Covered account IBANs; null (when valid) = all of the party's accounts.
+                    items:
+                      type: string
+                  frequencyPerDay:
+                    type: integer
+                    nullable: true
+                    description: PSD2 RTS Art. 10 AISP per-day read cap (4); null for non-AISP consents.
         '403':
           $ref: '#/components/responses/Forbidden'
 
