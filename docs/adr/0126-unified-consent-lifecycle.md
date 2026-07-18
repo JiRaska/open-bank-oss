@@ -12,12 +12,13 @@
 
 **Delivery note (updated 2026-07-17):** the header `Partial` is accurate, but two decision points below
 were mismarked "Shipped". D1, D4, D5 shipped — D5 in particular is real: consent-service runs live at
-`AUTHZ_ENFORCE=true` (`openbank-infra/gitops/components/consent/consent-service.yaml`). **D2 and D3 are
-Partial:** D2's `/validate` response omits the promised `scope`/`grantedAccounts`/`frequencyPerDay`
-(returns only `{valid, reason, code}`); D3's revoke/reject publishes via a direct Kafka emitter, **not**
-the transactional outbox this ADR's D3 text promises — a dual-write with no atomic guarantee on a
-money-path revoke. (Aside: ADR-0034's "consent still advisory, pending #266" line is itself stale —
-OPA enforcement is live here.)
+`AUTHZ_ENFORCE=true` (`openbank-infra/gitops/components/consent/consent-service.yaml`). **D2 is Partial**
+(D3 shipped 2026-07-17 via #1553): D2's `/validate` response omits the promised
+`scope`/`grantedAccounts`/`frequencyPerDay` (returns only `{valid, reason, code}`). D3's revoke/reject
+formerly published via a direct Kafka emitter — a dual-write with no atomic guarantee on a money-path
+revoke; #1553 moved revoke/reject (and grant) onto the transactional outbox, so the lifecycle event is
+now durable with the status change. The header stays `Partial` until D2's DTO is completed. (Aside:
+ADR-0034's "consent still advisory, pending #266" line is itself stale — OPA enforcement is live here.)
 
 ## Context
 
@@ -76,11 +77,11 @@ The `Consent` aggregate root enforces these caps in its `init` block.
 
 > **Delivery reality (2026-07-17):** the endpoint and its checks (grantee match, `isActive`, `hasScope`, `coversAccount`) are live, but the response DTO is `ConsentValidationResponse(valid, reason, code)` — it does **not** yet carry `scope`/`grantedAccounts`/`frequencyPerDay`, so a resource server cannot cache "for the configured `frequencyPerDay` window" as the Consequences section assumes. Partial until the DTO is completed.
 
-### D3 — Revocation propagation (Partial)
+### D3 — Revocation propagation (✅ Shipped)
 
 `DELETE /api/v1/consents/{id}` (customer-initiated) or `POST /api/v1/consents/{id}/reject` (SCA failure) publishes `ConsentRevoked` / `ConsentRejected` via the transactional outbox to the `consent.events` Kafka topic. Idempotency key prevents duplicate processing.
 
-> **Delivery reality (2026-07-17):** events ARE published, but by `KafkaConsentEventPublisher` — a direct `@Channel` `MutinyEmitter.send`, **not** the transactional outbox described above (the outbox path is wired only into D4's expiration sweep). Revoke/reject is therefore a dual-write: a crash between the DB commit and the Kafka send drops the `ConsentRevoked`/`ConsentRejected` event with no retry, on a money-path service. Partial until revoke/reject moves onto the outbox.
+> **Delivery reality (2026-07-17, resolved #1553):** revoke/reject formerly published via `KafkaConsentEventPublisher` — a direct `@Channel` `MutinyEmitter.send`, a dual-write that could drop the `ConsentRevoked`/`ConsentRejected` event on a crash between the DB commit and the Kafka send, on a money-path service. #1553 routes revoke/reject **and** grant through `ConsentRepository.save(consent, event)`, which persists the status change and the outbox row in one Hibernate Reactive transaction; the direct publisher is retired. The same PR also fixed a latent defect where the aggregate `save` used `persist` on an application-assigned `@Id` (INSERT-only → every revoke/reject/activate returned HTTP 500), and made D4's sweep enqueue genuinely in-transaction. Proven by `ConsentRevocationOutboxIT` (real Postgres).
 
 ### D4 — Scheduled expiration sweep (✅ Shipped)
 
