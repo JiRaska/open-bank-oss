@@ -11,6 +11,7 @@ import com.openbank.libs.audit.AuditResult
 import com.openbank.notification.application.port.out.OversightWebhookPublisher
 import com.openbank.notification.application.port.out.PushMessage
 import com.openbank.notification.application.port.out.PushSender
+import com.openbank.notification.domain.HtmlEscape
 import com.openbank.notification.domain.model.NotificationChannel
 import com.openbank.notification.domain.model.NotificationRequest
 import com.openbank.notification.domain.model.NotificationStatus
@@ -438,13 +439,20 @@ class NotificationConsumer {
 }
 
 /**
- * Reads a declared template variable, or "" when the caller omitted it.
+ * Reads a declared template variable, HTML-escaped, or "" when the caller omitted it.
  *
  * The schema is closed against **undeclared** keys, not against missing ones (see
  * [NotificationTemplate.variables]): rejecting a partial request would silently drop a real
  * message, since poison payloads are acked. An omitted variable renders empty, as it always has.
  *
+ * Escaping happens HERE, not per call site (issue #1382): every one of [renderTemplate]'s ~16
+ * reads interpolates straight into an HTML body (or, for `PASSWORD_RESET`'s `resetLink`, an
+ * `href="..."` attribute) with zero escaping between a domain-event-supplied variable and the
+ * mail actually sent — a `reason`, `documentType`, or `scope` containing markup rendered verbatim
+ * in the customer's mail client. Escaping the shared accessor closes every call site in one place
+ * instead of relying on each of the 16 to remember it.
+ *
  * Top-level rather than a member so `renderTemplate` reads as copy instead of null-handling — the
  * 16 inline `?: ""` reads it replaces were most of that function's cyclomatic complexity.
  */
-private fun Map<String, String>.v(key: String): String = this[key] ?: ""
+private fun Map<String, String>.v(key: String): String = HtmlEscape.escape(this[key] ?: "")

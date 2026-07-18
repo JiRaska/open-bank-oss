@@ -180,4 +180,38 @@ class OperatorMessageServiceIT {
 
         assertThat(bodyFor(partyId)).isNull()
     }
+
+    /**
+     * Issue #1382: an operator's free-text `note` reached `Mail.withHtml` completely unescaped,
+     * so a payload like `<img src=x onerror=...>` rendered live markup in the customer's mail
+     * client instead of literal text. `render()` now runs every body variable through
+     * [com.openbank.notification.domain.HtmlEscape] before interpolation.
+     */
+    @Test
+    fun `an operator-supplied note cannot inject HTML into the delivered or stored body`() {
+        val partyId = UUID.randomUUID()
+        mailbox.clear()
+        val payload = "<img src=x onerror=alert(document.cookie)>"
+
+        onVertxContext {
+            service.compose(
+                OperatorMessageRequest(
+                    partyId = partyId,
+                    template = OperatorMessageTemplate.GENERIC_NOTICE,
+                    recipient = "notice@example.com",
+                    variables = mapOf("subject" to "Heads up", "note" to payload),
+                ),
+            )
+        }
+
+        val sent = mailbox.getMailMessagesSentTo("notice@example.com")
+        assertThat(sent).hasSize(1)
+        assertThat(sent.first().html).doesNotContain(payload)
+        assertThat(sent.first().html).contains("&lt;img")
+
+        val stored = bodyFor(partyId)
+        assertThat(stored).isNotNull()
+        assertThat(stored).doesNotContain(payload)
+        assertThat(stored).contains("&lt;img")
+    }
 }
