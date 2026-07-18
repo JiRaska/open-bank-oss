@@ -116,16 +116,22 @@ const EXTERNAL = {
   'llm-gateway':  { vendor: 'LLM providers', label: 'LLM gateway' },
   s3:             { vendor: 'AWS',           label: 'S3 object store' },
 }
+// Match a host against a registrable domain at a LABEL boundary — the host is
+// exactly the domain or a subdomain of it. A plain substring test would also
+// match a look-alike like `groq.com.attacker.example` or `notcnb.cz`, so we
+// anchor on the dot boundary (CodeQL: incomplete URL substring sanitization).
+const hostIn = (h, domain) => h === domain || h.endsWith('.' + domain)
+
 // Classify a URL host as a known EXTERNAL 3rd party. In-cluster hosts
 // (litellm.ai-platform, ollama, localhost, openbank-*) return null on purpose —
 // they are infra or inter-service edges elsewhere, so counting them here would
 // double up. Unknown public hosts also return null: never fabricate a vendor.
 function classifyHost(host) {
   const h = host.toLowerCase()
-  if (h.includes('cnb.cz')) return { id: 'cnb', type: 'registry' }
-  if (h === 'api.github.com' || h.endsWith('.github.com')) return { id: 'github', type: 'api' }
-  if (h.includes('deepinfra.com') || h.includes('groq.com') || h.includes('nvidia.com')) return { id: 'llm-gateway', type: 'llm' }
-  if (h.includes('amazonaws.com')) return { id: 's3', type: 'api' }
+  if (hostIn(h, 'cnb.cz')) return { id: 'cnb', type: 'registry' }
+  if (hostIn(h, 'github.com')) return { id: 'github', type: 'api' }
+  if (hostIn(h, 'deepinfra.com') || hostIn(h, 'groq.com') || hostIn(h, 'nvidia.com')) return { id: 'llm-gateway', type: 'llm' }
+  if (hostIn(h, 'amazonaws.com')) return { id: 's3', type: 'api' }
   return null
 }
 
