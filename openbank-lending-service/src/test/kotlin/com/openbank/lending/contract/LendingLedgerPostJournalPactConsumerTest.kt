@@ -12,61 +12,70 @@ import au.com.dius.pact.consumer.junit5.PactTestFor
 import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.openbank.lending.application.port.out.LedgerPosting
+import com.openbank.lending.application.port.out.PostingKind
+import com.openbank.lending.infrastructure.client.LendingGlAccounts
+import com.openbank.lending.infrastructure.client.LendingJournalFactory
+import com.openbank.libs.domain.money.Money
 import io.restassured.RestAssured.given
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import java.math.BigDecimal
+import java.time.LocalDate
+import java.util.UUID
 
 /**
  * Consumer-driven contract for the journal posting lending-service makes when booking a loan
- * disbursement or repayment ([com.openbank.lending.infrastructure.client.LedgerRestClient],
- * ADR-0063 P2 Batch B). Mirrors the transaction-service P1 contract: same endpoint, same
- * stable seeded GL accounts, same response shape. The ledger-service provider verification
- * (LedgerPactProviderVerificationTest) picks this up automatically via @PactBroker — it
- * handles all consumers of openbank-ledger-service.
+ * disbursement or repayment ([LendingJournalFactory.buildRequest], ADR-0063 P2 Batch B). Mirrors
+ * the transaction-service P1 contract: same endpoint, same response shape. The ledger-service
+ * provider verification (LedgerPactProviderVerificationTest) picks this up automatically via
+ * @PactBroker — it handles all consumers of openbank-ledger-service.
  *
- * GL accounts are from ledger V3 migration (stable UUIDs):
- * - a0000000-...-001 = 1100 Customer Cash Clearing (DEBIT / ASSET)
- * - a0000000-...-002 = 2100 Customer Deposit Control (CREDIT / LIABILITY)
+ * Issue #1347: this pact used to hand-write a JSON literal that named `1100 Customer Cash
+ * Clearing` / `2100 Customer Deposit Control` (transaction-service's GL pair) as if it were a
+ * lending disbursement, and included a `"subAccountId": null` field on every line even though
+ * lending's own [com.openbank.lending.infrastructure.client.JournalLineRequest] never declares a
+ * `subAccountId` at all — Jackson would never emit that key. Neither divergence would have been
+ * caught by provider verification, because the recorded body was independent of
+ * [LendingJournalFactory] and [com.openbank.lending.infrastructure.client.LendingLedgerConfig]'s
+ * real defaults. The body below is built from the real factory + real config default GL accounts
+ * (`a0000000-...-001200` loans receivable / `a0000000-...-001100` funding clearing, ADR-0028
+ * D3/D4) for a DISBURSEMENT posting, serialized with the same Jackson stack the production REST
+ * client uses.
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(providerName = "openbank-ledger-service", pactVersion = PactSpecVersion.V3)
 class LendingLedgerPostJournalPactConsumerTest {
 
-    private val transactionId = "33333333-3333-3333-3333-333333333333"
+    private val accounts = LendingGlAccounts(
+        loansReceivable = UUID.fromString("a0000000-0000-0000-0000-000000001200"),
+        fundingClearing = UUID.fromString("a0000000-0000-0000-0000-000000001100"),
+        interestIncome = UUID.fromString("a0000000-0000-0000-0000-000000004100"),
+        interestReceivable = UUID.fromString("a0000000-0000-0000-0000-000000001300"),
+        loanLossExpense = UUID.fromString("a0000000-0000-0000-0000-000000005100"),
+        loanLossAllowance = UUID.fromString("a0000000-0000-0000-0000-000000001400"),
+    )
+    private val systemActorId = UUID.fromString("00000000-0000-0000-0000-0000000000aa")
+    private val entryDate = LocalDate.parse("2026-01-15")
 
-    private val requestBody = """
-        {
-          "idempotencyKey": "pact-lending-journal-001",
-          "transactionId": "$transactionId",
-          "entryDate": "2026-01-15",
-          "valueDate": "2026-01-15",
-          "description": "pact lending disbursement journal",
-          "lines": [
-            {
-              "glAccountId": "a0000000-0000-0000-0000-000000000001",
-              "side": "DEBIT",
-              "amount": 200.00,
-              "currencyCode": "CZK",
-              "fxRate": null,
-              "baseAmount": 200.00,
-              "baseCurrencyCode": "CZK",
-              "subAccountId": null
-            },
-            {
-              "glAccountId": "a0000000-0000-0000-0000-000000000002",
-              "side": "CREDIT",
-              "amount": 200.00,
-              "currencyCode": "CZK",
-              "fxRate": null,
-              "baseAmount": 200.00,
-              "baseCurrencyCode": "CZK",
-              "subAccountId": null
-            }
-          ],
-          "createdBy": "44444444-4444-4444-4444-444444444444"
-        }
-    """.trimIndent()
+    private val disbursement = LedgerPosting(
+        reference = "pact-lending-journal-001",
+        partyId = UUID.fromString("22222222-2222-2222-2222-222222222222"),
+        amount = Money.of(BigDecimal("200.00"), "CZK"),
+        kind = PostingKind.DISBURSEMENT,
+    )
+
+    // Same Jackson stack the real REST client (`quarkus-rest-client-reactive-jackson`) serializes
+    // with — this is what makes the pact body a proof about the factory's output, not a
+    // hand-maintained literal that merely happens to agree with it.
+    private val objectMapper = ObjectMapper().registerKotlinModule()
+
+    private val requestBody: String = objectMapper.writeValueAsString(
+        LendingJournalFactory.buildRequest(disbursement, accounts, systemActorId, entryDate),
+    )
 
     @Pact(consumer = "openbank-lending-service", provider = "openbank-ledger-service")
     fun postLendingJournalPact(builder: PactDslWithProvider): RequestResponsePact = builder
