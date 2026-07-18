@@ -4,7 +4,10 @@
 
 package com.openbank.productcatalog.infrastructure.persistence
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
+import com.openbank.productcatalog.domain.Product
 import com.openbank.productcatalog.domain.ProductIds
 import com.openbank.productcatalog.domain.ProductSeed
 import io.quarkus.runtime.StartupEvent
@@ -14,6 +17,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
 import org.hibernate.reactive.mutiny.Mutiny
 import org.jboss.logging.Logger
+import java.util.UUID
 
 /**
  * Idempotent first-boot seed of the canonical catalogue (ADR-0105 P1). Flyway (V1) owns the schema;
@@ -49,6 +53,46 @@ class ProductCatalogSeeder(private val sf: Mutiny.SessionFactory, private val ma
             }
         }
         if (inserted > 0) log.info("Seeded $inserted canonical products (ADR-0105 P1).")
+        // Heal rows seeded before a fee schedule was added to ProductSeed (the fee-schedule addition
+        // never reached an already-seeded catalogue, since seed() only runs on an empty table).
+        val patched = try {
+            backfillFees()
+        } catch (e: RuntimeException) {
+            if (isUniqueViolation(e)) 0 else throw e
+        }
+        if (patched > 0) log.info("Backfilled fee schedules for $patched catalogue product(s) from the seed.")
+    }
+
+    /**
+     * Heals stale catalogue rows that predate a fee-schedule addition to [ProductSeed]: for each seed
+     * product that exists in the DB but whose persisted doc has an empty `fees` array, backfill the
+     * fees from the seed. Deliberately narrow — it ONLY touches products with no fees, so an operator
+     * who curated a product's fees (via the PUT endpoint) is never overwritten, keeping the seeder's
+     * "never clobber operator edits" contract while leaving [ProductSeed] the single source of truth.
+     */
+    private fun backfillFees(): Int = VertxContextSupport.subscribeAndAwait {
+        sf.withTransaction { s ->
+            val seedById = ProductSeed.products
+                .filter { it.fees.isNotEmpty() }
+                .associateBy { ProductIds.canonicalId(it.id) }
+            s.createQuery("FROM ProductEntity", ProductEntity::class.java).resultList.map { entities ->
+                entities.count { e -> backfillFeesFor(e, seedById) }
+            }
+        }
+    } ?: 0
+
+    /**
+     * Backfill [e]'s doc fees from the seed if — and only if — the seed has fees for it and its
+     * persisted doc has none. Returns true iff it patched (a managed entity, flushed on commit).
+     */
+    private fun backfillFeesFor(e: ProductEntity, seedById: Map<UUID, Product>): Boolean {
+        val seedP = seedById[e.id] ?: return false
+        val doc = mapper.readTree(e.doc) as? ObjectNode ?: return false
+        val fees = doc.get("fees")
+        if (fees != null && fees.isArray && fees.size() > 0) return false // already has fees — leave it
+        doc.set<JsonNode>("fees", mapper.valueToTree(seedP.fees))
+        e.doc = mapper.writeValueAsString(doc)
+        return true
     }
 
     private fun seed(): Int = VertxContextSupport.subscribeAndAwait {
