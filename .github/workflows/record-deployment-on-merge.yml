@@ -1,0 +1,134 @@
+# -----------------------------------------------------------------------------
+# Record sandbox deployment in the Pact broker — at gitops-PR MERGE, not open.
+#
+# WHY (issue #1420). record-deployment used to run inside auto-deploy.yml's `gitops-pr` job,
+# in the same run that OPENS the `chore/gitops-auto-deploy-<sha>` PR — i.e. before the PR
+# merges and before ArgoCD syncs the image onto the pods. A fleet-wide change (a shared-libs
+# or dependency bump) opens one deploy PR covering the whole fleet and records every service
+# as deployed at once. If that PR never merges (conflict, abandoned) or simply hasn't synced
+# yet, the broker's deployed-version matrix diverges from reality — and can-i-deploy then
+# PHANTOM-BLOCKS healthy services against those never-deployed versions. On 2026-07-18 that had
+# stranded 35 of 50 services (11 money-path) on 3–5-day-old images. See #1420 for the audit.
+#
+# Recording at MERGE fixes it at the source: an abandoned deploy PR records nothing, and a
+# merged one records only after the change has actually landed on `main`'s gitops (ArgoCD sync
+# after merge is minutes, not the open→maybe-never gap). The old in-`gitops-pr` step is removed
+# in the same change.
+#
+# Pure bash + the pact standalone CLI — no Gradle, no Docker.
+# -----------------------------------------------------------------------------
+name: Record deployment (gitops-PR merge)
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Serialise per source-sha so two overlapping gitops merges can't interleave their records.
+  group: record-deployment-${{ github.event.pull_request.head.ref }}
+  cancel-in-progress: false
+
+jobs:
+  record:
+    name: record-deployment
+    # Only bot-authored gitops auto-deploy PRs that actually merged. `pull_request` (not
+    # `_target`) keeps this in the merged-head context with same-repo secrets; these PRs are
+    # always same-repo (peter-evans/create-pull-request bot branch), never forks.
+    if: >-
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'chore/gitops-auto-deploy-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
+      PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
+      PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
+      PACT_STANDALONE_VERSION: "2.6.2"
+      # Untrusted-ish inputs pulled into env (never interpolated into a run: script directly):
+      # the ref is bot-generated but we validate it to a 40-hex sha before use anyway.
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Record deployed services in the broker
+        if: ${{ vars.PACT_BROKER_URL != '' }}
+        run: |
+          set -uo pipefail
+          # The deployed version is the source sha the deploy PR was cut for — it is in the
+          # branch name (chore/gitops-auto-deploy-<sha>), the commit message, and the image tag.
+          # Validate it to a 40-hex sha so a hand-crafted ref name can never inject a shell token
+          # or a bogus pacticipant version.
+          SHA="${HEAD_REF#chore/gitops-auto-deploy-}"
+          if ! printf '%s' "$SHA" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "::error::head ref '${HEAD_REF}' does not carry a 40-hex sha — refusing to record"
+            exit 1
+          fi
+          SHORT="${SHA:0:8}"
+
+          # The services this PR actually deployed = the manifests it changed to :sandbox-<sha>.
+          # Read them from the PR's own diff (added lines only), so an abandoned/other PR can
+          # never cause a record here. Pacticipant name == the image name (openbank-<svc>).
+          mapfile -t SERVICES < <(
+            gh pr diff "$PR_NUMBER" \
+              | grep -E "^\+.*openbank-[a-z0-9-]+:sandbox-${SHORT}" \
+              | grep -oE "openbank-[a-z0-9-]+:sandbox-${SHORT}" \
+              | sed -E 's/:sandbox-.*//' \
+              | sort -u
+          )
+          if [ "${#SERVICES[@]}" -eq 0 ]; then
+            echo "No openbank-*:sandbox-${SHORT} image changes in PR #${PR_NUMBER} — nothing to record."
+            exit 0
+          fi
+          echo "Recording ${#SERVICES[@]} service(s) at ${SHORT} → sandbox: ${SERVICES[*]}"
+
+          # Download the pact standalone CLI (retry the flaky github.com release download, then
+          # fail loud — a silent skip would leave the broker behind reality, the very drift this
+          # workflow exists to prevent; ADR-0092).
+          arch="$(uname -m)"; case "$arch" in aarch64|arm64) a=arm64 ;; *) a=x86_64 ;; esac
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) o=osx ;; *) o=linux ;; esac
+          url="https://github.com/pact-foundation/pact-ruby-standalone/releases/download/v${PACT_STANDALONE_VERSION}/pact-${PACT_STANDALONE_VERSION}-${o}-${a}.tar.gz"
+          dl_ok=0
+          for attempt in 1 2 3; do
+            if curl -fsSL --retry 2 --retry-delay 3 -o /tmp/pact.tgz "$url"; then dl_ok=1; break; fi
+            echo "::warning::pact standalone download attempt ${attempt}/3 failed; retrying in 5s"; sleep 5
+          done
+          [ "$dl_ok" -eq 1 ] || { echo "::error::could not download pact standalone after 3 attempts (ADR-0092)"; exit 1; }
+          mkdir -p /tmp/pact && tar -xzf /tmp/pact.tgz -C /tmp/pact
+          CLI="/tmp/pact/pact/bin/pact-broker"
+
+          rec_failed=0
+          for svc in "${SERVICES[@]}"; do
+            echo "==> record-deployment ${svc} @ ${SHORT} → sandbox"
+            # record-deployment needs the version to exist in the broker. A version that CI
+            # never published (path-scoped build skipped this service on that sha) 404s; create
+            # it idempotently first, matching the old in-gitops-pr behaviour.
+            ver_code="$(curl -s -o /dev/null -w '%{http_code}' \
+              -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
+              "${PACT_BROKER_URL}/pacticipants/${svc}/versions/${SHA}")"
+            if [ "$ver_code" = "404" ]; then
+              echo "  version not in broker yet — creating it via REST (idempotent PUT)"
+              curl -s -o /dev/null -w '  PUT version → HTTP %{http_code}\n' \
+                -X PUT -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
+                -H "Content-Type: application/json" -d '{}' \
+                "${PACT_BROKER_URL}/pacticipants/${svc}/versions/${SHA}"
+            fi
+            ok=0
+            for attempt in 1 2 3; do
+              if "$CLI" record-deployment \
+                   --pacticipant "$svc" --version "$SHA" --environment sandbox \
+                   --broker-base-url "$PACT_BROKER_URL" \
+                   --broker-username "$PACT_BROKER_USERNAME" \
+                   --broker-password "$PACT_BROKER_PASSWORD"; then
+                ok=1; echo "  ✓ recorded"; break
+              fi
+              echo "::warning::record-deployment ${svc} attempt ${attempt}/3 failed; retrying in 5s"; sleep 5
+            done
+            [ "$ok" -eq 1 ] || { echo "::error::record-deployment failed for ${svc} after 3 attempts"; rec_failed=1; }
+          done
+          if [ "$rec_failed" -ne 0 ]; then
+            echo "::error::one or more record-deployments failed — broker matrix diverges from reality (ADR-0092)"
+            exit 1
+          fi
