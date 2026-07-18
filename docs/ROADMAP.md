@@ -27,8 +27,9 @@ milestone completion in releases, not by inferred dates.
   is live (ADR-0101, FX + statement flows); idempotency coverage and integration-test depth are the
   remaining gaps.
 - **M3 (Compliance)** — PSD2 XS2A developer portal live, GDPR Art. 17 erasure pipeline wired fleet-wide,
-  EUDI/PID digital identity (OpenID4VP + OpenID4VCI) live. AnaCredit/FINREP reporting and full AML vendor
-  feed integration are pending.
+  EUDI/PID digital identity (OpenID4VP + OpenID4VCI) live, Verification of Payee (VoP) on outbound
+  credit transfers live (ADR-0171). AnaCredit and FINREP regulatory-reporting services are deployed;
+  live regulator submission and full AML vendor-feed integration are the remaining gaps.
 - **M4 (Observability)** — OTel fleet-wide, DomainMetrics on every service, GoAlert on-call,
   Pyrra SLO-as-code, GlitchTip error tracking, Grafana dashboards. Chaos engineering is deferred to M6.
 - **M5 (Security)** — external pen-test P0–P2 findings remediated, SBOM + cosign signing in CI,
@@ -58,7 +59,7 @@ schemes directly — operators do. AI-driven account-opening / payment decisions
 
 ## Known gaps (honest list)
 
-Current limitations as of the Beta (June 2026). Updated as milestones ship:
+Current limitations as of the Beta (July 2026). Updated as milestones ship:
 
 - **Interbank rails do not connect to live networks.** ISO 20022 pipeline and clearing simulator are
   wired and flags are on (ADR-0104/0108); money moves end-to-end with a simulated counterparty. Real
@@ -68,24 +69,25 @@ Current limitations as of the Beta (June 2026). Updated as milestones ship:
   deployed with OPA enforce mode on, but app stores releases are not yet public.
 - **KYC/AML vendors are stubs** — screening logic is real (sanctions uses pg_trgm fuzzy matching) but
   runs against in-memory/seed lists, not real providers (Refinitiv, ComplyAdvantage, EBA feed).
-- **One service is code-only, not deployed** — `finrep` is implemented and its gitops manifests
-  exist, but no ArgoCD Application wires it into the sandbox cluster yet. `anacredit`, `sdd`, and
-  `tpp-registry` were in this same state until 2026-07-01 and are now deployed. (`lending` and
-  `psd2` are deployed; `swift-service` is deployed with ISO 20022 MT/MX but without a live SWIFT
-  network connection.)
+- **Regulatory-reporting services generate reports but do not submit to a live regulator.** The full
+  in-repo backend fleet is now deployed — `finrep`, the last code-only service, deploys via its own
+  ArgoCD Application (#547, 2026-07-08), joining `anacredit`, `sdd`, and `tpp-registry` (deployed since
+  2026-07-01). `finrep`/`anacredit` build the CNB/EBA reports but do not yet transmit them to a live
+  supervisory endpoint. (`lending` and `psd2` are deployed; `swift-service` is deployed with ISO 20022
+  MT/MX but without a live SWIFT network connection.)
 - **SCA is maturing, not complete** — passkey RP, settlement gate and non-repudiation hash chain are
   in (ADR-0086), but full FIDO2 attestation / real OTP delivery are not finished.
-- **AI copilot is sandbox-only** — a real LLM (meta/llama-3.1-70b-instruct) runs in the sandbox
-  copilot-service; production model gateway, rate-limiting, and abuse guardrails are not hardened for
-  public traffic.
+- **AI copilot is sandbox-only** — a real LLM (deepseek-ai/DeepSeek-V3.2, via DeepInfra) runs in the
+  sandbox copilot-service; the backend is model-agnostic (swap by env). Production model gateway,
+  rate-limiting, and abuse guardrails are not hardened for public traffic.
 - **Contract tests are thin** — Pact Broker is live (pact.open-bank.tech) but published pact coverage
   across the fleet is a known gap.
 - **HA on money-path DBs only; DR still unproven** — all 17 money-path CNPG clusters run
   `instances: 2` with live-verified switchover ([ADR-0159](adr/0159-cnpg-ha-money-path.md), shipped
   2026-07-12); non-money-path databases remain `instances: 1`. Single region, single cluster: the
   automated DR restore-verify workflow exists but is dispatch-only and not yet on its quarterly
-  schedule, so RTO/RPO targets (M6) are stated, not demonstrated. PostgreSQL is upgrading to 18
-  (CNPG, runbook in progress).
+  schedule, so RTO/RPO targets (M6) are stated, not demonstrated. The CNPG fleet now runs
+  PostgreSQL 18 (migrated from 16; runbook 0003); local Docker dev still ships 16.
 - **Not licensed to operate as a bank.** See the disclaimer in the README.
 
 ---
