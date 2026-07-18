@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.22.0...customer-edge-v0.23.0) (2026-07-18)
+
+
+### Features
+
+* **interest:** per-account rate override; CURRENT defaults to zero interest ([#1618](https://github.com/JiRaska/open-bank-oss/issues/1618)) ([#1645](https://github.com/JiRaska/open-bank-oss/issues/1645)) ([743090b](https://github.com/JiRaska/open-bank-oss/commit/743090b38ab59a27becd05ff3665045c18c2f793))
+
 ## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.21.0...customer-edge-v0.22.0) (2026-07-18)
 
 
