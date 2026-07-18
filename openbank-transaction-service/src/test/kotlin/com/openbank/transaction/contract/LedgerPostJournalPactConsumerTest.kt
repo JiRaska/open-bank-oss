@@ -12,15 +12,27 @@ import au.com.dius.pact.consumer.junit5.PactTestFor
 import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.openbank.libs.domain.money.Money
+import com.openbank.transaction.application.usecase.PaymentJournalFactory
+import com.openbank.transaction.domain.model.Transaction
+import com.openbank.transaction.domain.model.TransactionStatus
+import com.openbank.transaction.domain.model.TransactionType
+import com.openbank.transaction.infrastructure.client.PostJournalRequest
 import io.restassured.RestAssured.given
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import java.math.BigDecimal
+import java.time.Instant
+import java.time.LocalDate
+import java.util.UUID
 
 /**
- * Consumer-driven contract for the ledger postJournal call the payment saga makes
- * ([com.openbank.transaction.infrastructure.client.LedgerRestClient.postJournal], ADR-0063 P1).
- * The generated pact is committed to `pacts/` (git-pact) and replayed by
+ * Consumer-driven contract for the ledger postJournal call the payment workflow makes
+ * ([com.openbank.transaction.infrastructure.client.LedgerRestClient.postJournal], ADR-0063 P1,
+ * ADR-0120 P1). The generated pact is committed to `pacts/` (git-pact) and replayed by
  * LedgerPactProviderVerificationTest in openbank-ledger-service.
  *
  * The request posts a balanced two-line CZK journal against the standard chart of accounts that
@@ -30,49 +42,66 @@ import org.junit.jupiter.api.extension.ExtendWith
  * balance check both pass) without any custom state seeding — the empty-DB Testcontainer already
  * carries the chart from the migration.
  *
- * This is the consumer's view of the contract shape (request fields + the {id, transactionId,
- * status} response); it is not a substitute for the saga orchestration tests.
+ * Issue #1347: `lines` used to be a hand-written literal independent of
+ * [PaymentJournalFactory.buildLines] — both lines carried `"subAccountId": null`, a shape that
+ * [PaymentJournalFactory.sameCurrencyLines] never actually produces (an incoming credit sets
+ * `subAccountId` on the deposit-control leg to the target account, ADR-0039 Phase B). Below,
+ * `lines` is built by calling the real factory against a fixture [Transaction] (an incoming CZK
+ * credit — DEBIT cash-clearing / CREDIT deposit-control with `subAccountId = targetAccountId`,
+ * matching this GL pair), so a change to the factory's GL-selection or subAccountId logic changes
+ * the recorded pact instead of leaving it silently agreeing with a stale literal. The envelope
+ * fields (`idempotencyKey`, `createdBy`) mirror the literal formula in
+ * [com.openbank.transaction.application.workflow.PaymentActivitiesImpl.buildJournalRequest] — that
+ * assembly lives inline there, not in a factory, so it is out of scope for this issue.
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(providerName = "openbank-ledger-service", pactVersion = PactSpecVersion.V3)
 class LedgerPostJournalPactConsumerTest {
 
-    private val transactionId = "11111111-1111-1111-1111-111111111111"
+    private val transactionId = UUID.fromString("11111111-1111-1111-1111-111111111111")
+    private val targetAccountId = UUID.fromString("55555555-5555-5555-5555-555555555555")
 
-    // Stable seeded GL accounts (ledger V3 migration): 1100 cash-clearing (debit) + 2100
-    // deposit-control (credit), both CZK. Balanced 100.00 / 100.00 → double-entry init passes.
-    private val requestBody = """
-        {
-          "idempotencyKey": "pact-post-journal-001",
-          "transactionId": "$transactionId",
-          "entryDate": "2026-01-15",
-          "valueDate": "2026-01-15",
-          "description": "pact contract journal",
-          "lines": [
-            {
-              "glAccountId": "a0000000-0000-0000-0000-000000000001",
-              "side": "DEBIT",
-              "amount": 100.00,
-              "currencyCode": "CZK",
-              "fxRate": null,
-              "baseAmount": 100.00,
-              "baseCurrencyCode": "CZK",
-              "subAccountId": null
-            },
-            {
-              "glAccountId": "a0000000-0000-0000-0000-000000000002",
-              "side": "CREDIT",
-              "amount": 100.00,
-              "currencyCode": "CZK",
-              "fxRate": null,
-              "baseAmount": 100.00,
-              "baseCurrencyCode": "CZK",
-              "subAccountId": null
-            }
-          ],
-          "createdBy": "22222222-2222-2222-2222-222222222222"
-        }
-    """.trimIndent()
+    // Mirrors PaymentActivitiesImpl's private `systemActor` constant — the Temporal path's
+    // envelope field, not part of PaymentJournalFactory.
+    private val systemActor = UUID.fromString("00000000-0000-0000-0000-000000000001")
+
+    private val transaction = Transaction(
+        id = transactionId,
+        referenceNumber = "pact-post-journal-001",
+        type = TransactionType.CREDIT,
+        sourceAccountId = null,
+        targetAccountId = targetAccountId,
+        amount = Money.of(BigDecimal("100.00"), "CZK"),
+        fxRate = null,
+        baseAmount = Money.of(BigDecimal("100.00"), "CZK"),
+        status = TransactionStatus.PENDING,
+        description = "pact contract journal",
+        valueDate = LocalDate.parse("2026-01-15"),
+        bookingDate = LocalDate.parse("2026-01-15"),
+        initiatedAt = Instant.parse("2026-01-15T00:00:00Z"),
+        completedAt = null,
+        failedAt = null,
+        failureReason = null,
+        idempotencyKey = "pact-post-journal-001",
+        version = 0,
+    )
+
+    // Same Jackson stack the real REST client (`quarkus-rest-client-reactive-jackson`) serializes
+    // with — this is what makes the pact body a proof about the factory's output, not a
+    // hand-maintained literal that merely happens to agree with it.
+    private val objectMapper = ObjectMapper().registerKotlinModule()
+
+    private val requestBody: String = objectMapper.writeValueAsString(
+        PostJournalRequest(
+            idempotencyKey = "workflow-${transaction.id}-ledger",
+            transactionId = transaction.id,
+            entryDate = transaction.bookingDate.toString(),
+            valueDate = transaction.valueDate.toString(),
+            description = transaction.description,
+            lines = PaymentJournalFactory.buildLines(transaction),
+            createdBy = systemActor,
+        ),
+    )
 
     @Pact(consumer = "openbank-transaction-service", provider = "openbank-ledger-service")
     fun postBalancedJournalPact(builder: PactDslWithProvider): RequestResponsePact = builder
