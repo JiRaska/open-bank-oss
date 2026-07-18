@@ -102,6 +102,9 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.balance-service-url")
     lateinit var balanceServiceUrl: String
 
+    @ConfigProperty(name = "openbank.edge.interest-service-url")
+    lateinit var interestServiceUrl: String
+
     // ADR-0109 P2: product-catalog is the authority for which currencies a product permits.
     // Defaulted so a missing env doesn't break startup; reachable in-cluster.
     @ConfigProperty(
@@ -223,6 +226,77 @@ class CustomerEdgeResource(
             return forbidden("Account does not belong to caller")
         }
         return upstream.get("$balanceServiceUrl/api/v1/balances/$accountId", customer.partyId.toString())
+    }
+
+    // --- Interest (ADR-0033) ---
+
+    /**
+     * The interest view for one of the caller's OWN accounts: the product's annual rate and the
+     * interest accrued so far this period. Only interest-bearing products (SAVINGS) have a rate
+     * config — for anything else (a CURRENT payment account) this returns `{"eligible": false}`
+     * with 200, so the app can simply not draw the interest card rather than treating it as an error.
+     *
+     * Ownership is enforced HERE (interest-service scopes only by accountId) — same IDOR guard as the
+     * balances / statements reads. The projection is deliberately tiny: the app needs the headline
+     * rate and the running accrued amount, not the daily accrual ledger.
+     */
+    @GET
+    @Path("/accounts/{accountId}/interest")
+    @Authorize(action = "customer.accounts.read", resource = "#accountId")
+    @Blocking
+    fun getAccountInterest(@PathParam("accountId") accountId: UUID): Response {
+        val customer = customer()
+        val accountJson = fetchAccount(accountId, customer.partyId)
+            ?: return forbidden("Account does not belong to caller")
+        if (extractOwnerPartyId(accountJson) != customer.partyId.toString()) {
+            return forbidden("Account does not belong to caller")
+        }
+        val productId = extractTextField(objectMapper, accountJson, "productId")
+        val annualRate = productId?.let { fetchActiveAnnualRate(it, customer.partyId) }
+        val out = objectMapper.createObjectNode()
+        if (annualRate == null) {
+            // No active rate config for this product — not interest-bearing (or interest-service is
+            // down): report ineligible rather than a spurious 0 % rate.
+            return Response.ok(out.put("eligible", false)).type(MediaType.APPLICATION_JSON).build()
+        }
+        out.put("eligible", true)
+        // 0.040000 -> "4"; annualRate is a decimal fraction in interest-service.
+        out.put(
+            "annualRatePercent",
+            annualRate.multiply(java.math.BigDecimal(100)).stripTrailingZeros().toPlainString(),
+        )
+
+        val summaryResp = upstream.get(
+            "$interestServiceUrl/api/v1/interest/accruals/$accountId/summary",
+            customer.partyId.toString(),
+        )
+        val summary = if (summaryResp.status == 200) {
+            runCatching { objectMapper.readTree(summaryResp.entity?.toString() ?: "") }.getOrNull()
+        } else {
+            null
+        }
+        out.put("accruedAmount", summary?.get("totalAccrued")?.asText() ?: "0")
+        out.put(
+            "currency",
+            summary?.get("currency")?.asText()
+                ?: extractTextField(objectMapper, accountJson, "currencyCode") ?: "CZK",
+        )
+        summary?.get("fromDate")?.asText()?.let { out.put("periodFrom", it) }
+        summary?.get("toDate")?.asText()?.let { out.put("periodTo", it) }
+        return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /** The active annual rate (decimal fraction) for [productId], or null if the product has no
+     *  active interest config or interest-service is unavailable (fail-soft — the caller reports
+     *  ineligible rather than failing the whole request). */
+    private fun fetchActiveAnnualRate(productId: String, partyId: UUID): java.math.BigDecimal? {
+        val resp = upstream.get("$interestServiceUrl/api/v1/interest/rates?productId=$productId", partyId.toString())
+        if (resp.status != 200) return null
+        val arr =
+            runCatching { objectMapper.readTree(resp.entity?.toString() ?: return null) }.getOrNull() ?: return null
+        if (!arr.isArray) return null
+        val active = arr.firstOrNull { it.get("active")?.asBoolean(false) == true } ?: return null
+        return active.get("annualRate")?.decimalValue()
     }
 
     // --- Currency pockets (ADR-0109) ---
