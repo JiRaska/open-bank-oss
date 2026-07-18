@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.12.0...interest-service-v0.13.0) (2026-07-18)
+
+
+### Features
+
+* **interest:** per-account rate override; CURRENT defaults to zero interest ([#1618](https://github.com/JiRaska/open-bank-oss/issues/1618)) ([#1645](https://github.com/JiRaska/open-bank-oss/issues/1645)) ([743090b](https://github.com/JiRaska/open-bank-oss/commit/743090b38ab59a27becd05ff3665045c18c2f793))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.11.0...interest-service-v0.12.0) (2026-07-18)
 
 
