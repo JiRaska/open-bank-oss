@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.5](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.15.4...account-service-v0.15.5) (2026-07-18)
+
+
+### Bug Fixes
+
+* **account:** make account authorizations persist; merge + session on the repo ([#1602](https://github.com/JiRaska/open-bank-oss/issues/1602)) ([b6b039f](https://github.com/JiRaska/open-bank-oss/commit/b6b039f0361b8ef381e4e41aa103aaf3e81a39a6)), closes [#1600](https://github.com/JiRaska/open-bank-oss/issues/1600)
+
 ## [0.15.4](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.15.3...account-service-v0.15.4) (2026-07-17)
 
 
