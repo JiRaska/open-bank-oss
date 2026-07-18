@@ -16,6 +16,12 @@ export const dynamic = 'force-dynamic'
 
 interface Edge { from: string; to: string; via: string; type: 'rest' | 'kafka' }
 interface Node { name: string; short: string; dependsOn: number; dependedOnBy: number }
+// Additive data-flow tiers (generate-service-graph.mjs). Optional so an older
+// snapshot without them still parses; consumers default each to [].
+interface InfraNode { id: string; kind: 'infra'; tech: string; label: string }
+interface ExternalNode { id: string; kind: 'external'; vendor: string; label: string }
+interface InfraEdge { from: string; to: string; type: 'db' | 'broker' | 'auth' | 'authz' }
+interface ExternalEdge { from: string; to: string; type: 'push' | 'webhook' | 'registry' | 'api' | 'llm'; enabled: boolean }
 interface ServiceGraph {
   schema: string
   source: string
@@ -24,6 +30,10 @@ interface ServiceGraph {
   nodes: Node[]
   edges: Edge[]
   danglingTopics: { topic: string; producedBy: string[]; consumedBy: string[] }[]
+  infraNodes?: InfraNode[]
+  externalNodes?: ExternalNode[]
+  infraEdges?: InfraEdge[]
+  externalEdges?: ExternalEdge[]
   available?: boolean
 }
 
@@ -39,6 +49,10 @@ const UNAVAILABLE: ServiceGraph = {
   nodes: [],
   edges: [],
   danglingTopics: [],
+  infraNodes: [],
+  externalNodes: [],
+  infraEdges: [],
+  externalEdges: [],
   available: false,
 }
 

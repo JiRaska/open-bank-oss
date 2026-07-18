@@ -3,8 +3,8 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect } from 'react'
-import { Network, RefreshCw, CheckCircle2, XCircle, HelpCircle, Database, ArrowRight, ArrowLeft, Layers, BookOpen } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { Network, RefreshCw, CheckCircle2, XCircle, HelpCircle, Database, ArrowRight, ArrowLeft, Layers, BookOpen, Play, Pause, KeyRound, ShieldCheck, Boxes, Cloud, Send, Server } from 'lucide-react'
 import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
 import { svcUrl } from '@/lib/services/bff'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
@@ -290,6 +290,111 @@ function LegoBrick({ cx, cy, color, degree, selected }: { cx: number; cy: number
   )
 }
 
+// ---------------------------------------------------------------------------
+// Data-flow tiers (infra substrate + external 3rd parties). Nodes/edges arrive
+// from /api/catalog/graph (generate-service-graph.mjs) — parsed from real
+// application.yaml, never hand-authored. Presentation-only metadata (colour,
+// icon, bilingual copy) lives here; the topology itself is code-derived.
+// ---------------------------------------------------------------------------
+type InfraNodeT = { id: string; kind: 'infra'; tech: string; label: string }
+type ExternalNodeT = { id: string; kind: 'external'; vendor: string; label: string }
+type InfraEdgeT = { from: string; to: string; type: 'db' | 'broker' | 'auth' | 'authz' }
+type ExternalEdgeT = { from: string; to: string; type: 'push' | 'webhook' | 'registry' | 'api' | 'llm'; enabled: boolean }
+type TierMeta = { color: string; Icon: typeof Database; labelCs: string; labelEn: string; descCs: string; descEn: string }
+
+const INFRA_META: Record<string, TierMeta> = {
+  'infra:postgres': { color: '#0ea5e9', Icon: Database, labelCs: 'PostgreSQL', labelEn: 'PostgreSQL', descCs: 'Perzistentní stav služeb (účty, ledger, transakce). Podvojné úložiště, reactive Vert.x klient.', descEn: 'Per-service persistent state (accounts, ledger, transactions). Reactive Vert.x client.' },
+  'infra:kafka': { color: '#6366f1', Icon: Boxes, labelCs: 'Apache Kafka', labelEn: 'Apache Kafka', descCs: 'Asynchronní páteř událostí — produkce/konzumace topiců, outbox dispatch mezi službami.', descEn: 'Async event backbone — topic produce/consume, cross-service outbox dispatch.' },
+  'infra:keycloak': { color: '#0891b2', Icon: KeyRound, labelCs: 'Keycloak (OIDC)', labelEn: 'Keycloak (OIDC)', descCs: 'Vydavatel identit a tokenů (OIDC). Ověřuje operátory i M2M client-credentials tok.', descEn: 'Identity & token issuer (OIDC). Authenticates operators and M2M client-credentials flows.' },
+  'infra:opa': { color: '#16a34a', Icon: ShieldCheck, labelCs: 'OPA (autorizace)', labelEn: 'OPA (authz)', descCs: 'Rozhodovací bod autorizace (ADR-0034). Sidecar vyhodnocuje rest.rego politiky per požadavek.', descEn: 'Authorization decision point (ADR-0034). Sidecar evaluates rest.rego per request.' },
+}
+const EXT_META: Record<string, TierMeta> = {
+  'ext:apple-apns': { color: '#0f172a', Icon: Send, labelCs: 'Apple APNs', labelEn: 'Apple APNs', descCs: 'Push notifikace na iOS zařízení (adapter v notification-service).', descEn: 'Push notifications to iOS devices (notification-service adapter).' },
+  'ext:firebase-fcm': { color: '#f59e0b', Icon: Send, labelCs: 'Firebase FCM', labelEn: 'Firebase FCM', descCs: 'Push notifikace přes Google FCM.', descEn: 'Push notifications via Google FCM.' },
+  'ext:slack': { color: '#7c3aed', Icon: Send, labelCs: 'Slack webhook', labelEn: 'Slack webhook', descCs: 'Odchozí oversight signály (ADR-0059).', descEn: 'Outbound oversight signals (ADR-0059).' },
+  'ext:cnb': { color: '#dc2626', Icon: Cloud, labelCs: 'ČNB', labelEn: 'Czech National Bank', descCs: 'Veřejné feedy ČNB — seznam bank (JERR) a devizové kurzy.', descEn: 'CNB public feeds — bank registry (JERR) and FX rates.' },
+  'ext:github': { color: '#0f172a', Icon: Cloud, labelCs: 'GitHub API', labelEn: 'GitHub API', descCs: 'Rozhraní pro platformní/agentní služby (release, governance).', descEn: 'Interface for platform/agent services (release, governance).' },
+  'ext:llm-gateway': { color: '#0d9488', Icon: Cloud, labelCs: 'LLM brána', labelEn: 'LLM gateway', descCs: 'Externí LLM poskytovatelé (DeepInfra, Groq, NVIDIA) pro AI agenty.', descEn: 'External LLM providers (DeepInfra, Groq, NVIDIA) for AI agents.' },
+  'ext:s3': { color: '#f97316', Icon: Cloud, labelCs: 'AWS S3', labelEn: 'AWS S3', descCs: 'Objektové úložiště (export analytiky, artefakty).', descEn: 'Object store (analytics export, artifacts).' },
+}
+const tierMeta = (id: string): TierMeta | undefined => INFRA_META[id] ?? EXT_META[id]
+
+// Edge-type palette + bilingual label for the legend / detail panel.
+const EDGE_TYPE_COLOR: Record<string, string> = {
+  db: '#38bdf8', broker: '#818cf8', auth: '#22d3ee', authz: '#4ade80',
+  push: '#fb923c', webhook: '#a78bfa', registry: '#f87171', api: '#94a3b8', llm: '#2dd4bf',
+}
+const edgeTypeLabel = (type: string, t: (cs: string, en: string) => string): string => ({
+  db: t('perzistence', 'persistence'), broker: t('události', 'events'), auth: t('identita', 'auth'),
+  authz: t('autorizace', 'authz'), push: t('push', 'push'), webhook: t('webhook', 'webhook'),
+  registry: t('registr', 'registry'), api: 'API', llm: 'LLM',
+}[type] ?? type)
+
+// Tier band geometry — two full-width bands below the service grid.
+const CHIP_H = 32
+const BAND_HEAD = 30
+const BAND_PAD_Y = 14
+const BAND_GAP = 24
+const CHIP_GAP = 16
+const chipWidth = (label: string) => Math.max(96, 30 + label.length * 6.6 + 14)
+
+type TierPos = { cx: number; cy: number; w: number }
+type BandBox = { key: 'infra' | 'external'; x: number; y: number; w: number; h: number }
+// Deterministic flow-layout: centre chips per row, wrapping to the canvas width.
+function layoutBand(nodes: { id: string; label: string }[], availW: number, startY: number) {
+  const rows: { id: string; label: string; w: number }[][] = [[]]
+  let rowW = 0
+  for (const n of nodes) {
+    const w = chipWidth(n.label)
+    const cur = rows[rows.length - 1]
+    if (cur.length && rowW + CHIP_GAP + w > availW) { rows.push([]); rowW = 0 }
+    rows[rows.length - 1].push({ ...n, w })
+    rowW += (cur.length ? CHIP_GAP : 0) + w
+  }
+  const pos: Record<string, TierPos> = {}
+  let y = startY + BAND_HEAD
+  for (const row of rows) {
+    const total = row.reduce((s, r) => s + r.w, 0) + CHIP_GAP * Math.max(0, row.length - 1)
+    let x = CANVAS_PAD + Math.max(0, (availW - total) / 2)
+    for (const r of row) { pos[r.id] = { cx: x + r.w / 2, cy: y + CHIP_H / 2, w: r.w }; x += r.w + CHIP_GAP }
+    y += CHIP_H + CHIP_GAP
+  }
+  const h = BAND_HEAD + rows.length * (CHIP_H + CHIP_GAP) - CHIP_GAP + BAND_PAD_Y
+  return { pos, height: h }
+}
+
+// A moving particle bound to an edge path (SMIL). Its parent decides whether to
+// mount it at all (flow toggled off / reduced-motion / edge hidden → not rendered).
+function FlowParticle({ pathId, color, dur, begin, r = 2.6 }: { pathId: string; color: string; dur: number; begin: number; r?: number }) {
+  return (
+    <circle r={r} fill={color} stroke="var(--surface)" strokeWidth={0.5}>
+      <animateMotion dur={`${dur}s`} begin={`${begin}s`} repeatCount="indefinite" rotate="auto" calcMode="linear">
+        <mpath href={`#${pathId}`} />
+      </animateMotion>
+    </circle>
+  )
+}
+
+// A rounded "pill" node for an infra/external tier — visually distinct from the
+// LEGO-brick services so the three tiers read apart at a glance.
+function TierChip({ pos, color, label, active, dim, faded, onClick, onEnter, onLeave }: {
+  pos: TierPos; color: string; label: string; active: boolean; dim: boolean; faded: boolean
+  onClick: () => void; onEnter: () => void; onLeave: () => void
+}) {
+  const { cx, cy, w } = pos
+  const x = cx - w / 2, y = cy - CHIP_H / 2
+  return (
+    <g opacity={dim ? 0.25 : 1} style={{ cursor: 'pointer', transition: 'opacity 0.15s' }}
+      onClick={onClick} onMouseEnter={onEnter} onMouseLeave={onLeave}>
+      <rect x={x} y={y} width={w} height={CHIP_H} rx={CHIP_H / 2}
+        fill={active ? color : 'var(--surface)'} stroke={color} strokeWidth={active ? 1.8 : 1.3}
+        strokeDasharray={faded ? '4,3' : undefined} opacity={faded ? 0.75 : 1} filter="url(#node-shadow)" />
+      <circle cx={x + 15} cy={cy} r={4} fill={color} opacity={faded ? 0.5 : 1} />
+      <text x={x + 27} y={cy + 4} fontSize="11" fontWeight="600" fill={active ? '#fff' : 'var(--text-primary)'}>{label}</text>
+    </g>
+  )
+}
+
 // Governance data is code-derived since ADR-0071: it arrives from the
 // /api/services/governance fetch (now backed by governance.json), not a build-time
 // import of the hand-edited manifest. Seed empty; the fetch fills it.
@@ -308,6 +413,22 @@ export default function ServiceMapPage() {
   // Per-service degree (upstream + downstream) from the graph → drives brick size.
   const [degrees, setDegrees] = useState<Record<string, number>>({})
   const [isChecking, setIsChecking] = useState(false)
+  // Data-flow tiers (infra substrate + external 3rd parties), from the same graph fetch.
+  const [infraNodes, setInfraNodes] = useState<InfraNodeT[]>([])
+  const [externalNodes, setExternalNodes] = useState<ExternalNodeT[]>([])
+  const [infraEdges, setInfraEdges] = useState<InfraEdgeT[]>([])
+  const [externalEdges, setExternalEdges] = useState<ExternalEdgeT[]>([])
+  // Animation + tier visibility controls. Infra has ~130 edges → hidden by default
+  // (revealed per-service on hover, or globally via its toggle); external is sparse → shown.
+  const [flow, setFlow] = useState(true)
+  const [showInfra, setShowInfra] = useState(false)
+  const [showExternal, setShowExternal] = useState(true)
+
+  // Respect the OS "reduce motion" setting: start with flow off (static diagram).
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) setFlow(false)
+  }, [])
 
   const checkHealth = async () => {
     setIsChecking(true)
@@ -338,6 +459,10 @@ export default function ServiceMapPage() {
         const graph = await graphRes.json() as {
           edges?: { from: string; to: string; via: string; type: 'rest' | 'kafka' }[]
           nodes?: { name: string; dependsOn?: number; dependedOnBy?: number }[]
+          infraNodes?: InfraNodeT[]
+          externalNodes?: ExternalNodeT[]
+          infraEdges?: InfraEdgeT[]
+          externalEdges?: ExternalEdgeT[]
         }
         setGraphEdges(Array.isArray(graph.edges) ? graph.edges : [])
         const deg: Record<string, number> = {}
@@ -346,6 +471,10 @@ export default function ServiceMapPage() {
           if (id) deg[id] = (n.dependsOn ?? 0) + (n.dependedOnBy ?? 0)
         }
         setDegrees(deg)
+        setInfraNodes(Array.isArray(graph.infraNodes) ? graph.infraNodes : [])
+        setExternalNodes(Array.isArray(graph.externalNodes) ? graph.externalNodes : [])
+        setInfraEdges(Array.isArray(graph.infraEdges) ? graph.infraEdges : [])
+        setExternalEdges(Array.isArray(graph.externalEdges) ? graph.externalEdges : [])
       }
     } catch {
     } finally {
@@ -358,6 +487,7 @@ export default function ServiceMapPage() {
   }, [])
 
   const selectedSvc = SERVICES.find(s => s.id === selected)
+  const selectedTier: InfraNodeT | ExternalNodeT | undefined = [...infraNodes, ...externalNodes].find(n => n.id === selected)
   // Deterministically resolve the manifest service-name from the UI node id
   // This prevents mismatches where the UI human-readable name doesn't match the internal serviceName.
   const govEntry = selectedSvc ? governanceData[SERVICE_ID_TO_NAME[selectedSvc.id]] : null;
@@ -381,6 +511,66 @@ export default function ServiceMapPage() {
 
 
   const svcMap = Object.fromEntries(SERVICES.map(s => [s.id, s]))
+  const activeNode = selected ?? hovered
+  const pathId = (a: string, b: string, i: number) => `fx-${a}-${b}-${i}`.replace(/[^a-zA-Z0-9_-]/g, '_')
+
+  // --- Data-flow tiers: resolve each infra/external edge's source module to a
+  // node on this map. Edges whose source service isn't drawn here are dropped
+  // (honest — never a half-anchored line); that also picks which tier nodes to
+  // render (only those with ≥1 anchored edge → no floating nodes).
+  const moduleToId = (m: string) => SERVICE_NAME_TO_ID[stripPrefix(m)]
+  const resolvedInfra = infraEdges
+    .map(e => ({ ...e, fromId: moduleToId(e.from), kind: 'infra' as const, enabled: true }))
+    .filter((e): e is typeof e & { fromId: string } => !!e.fromId && !!LAYOUT.nodes[e.fromId!])
+  const resolvedExternal = externalEdges
+    .map(e => ({ ...e, fromId: moduleToId(e.from), kind: 'external' as const }))
+    .filter((e): e is typeof e & { fromId: string } => !!e.fromId && !!LAYOUT.nodes[e.fromId!])
+  const infraIdsUsed = new Set(resolvedInfra.map(e => e.to))
+  const externalIdsUsed = new Set(resolvedExternal.map(e => e.to))
+  const renderInfraNodes = infraNodes.filter(n => infraIdsUsed.has(n.id))
+  const renderExternalNodes = externalNodes.filter(n => externalIdsUsed.has(n.id))
+  const hasInfra = renderInfraNodes.length > 0
+  const hasExternal = renderExternalNodes.length > 0
+
+  // Tier band geometry below the service grid (computed each render — a handful
+  // of chips, cheap). When a tier has no nodes, its band is skipped entirely so
+  // the empty-graph page keeps the original height.
+  const availW = LAYOUT.width - CANVAS_PAD * 2
+  const chipLabel = (id: string, fallback: string) => t(tierMeta(id)?.labelCs ?? fallback, tierMeta(id)?.labelEn ?? fallback)
+  const tierPos: Record<string, TierPos> = {}
+  const bandBoxes: (BandBox & { count: number })[] = []
+  {
+    let y = LAYOUT.height
+    const place = (key: 'infra' | 'external', nodes: (InfraNodeT | ExternalNodeT)[]) => {
+      y += BAND_GAP
+      const b = layoutBand(nodes.map(n => ({ id: n.id, label: chipLabel(n.id, n.label) })), availW, y)
+      Object.assign(tierPos, b.pos)
+      bandBoxes.push({ key, x: CANVAS_PAD - 12, y, w: LAYOUT.width - (CANVAS_PAD - 12) * 2, h: b.height, count: nodes.length })
+      y += b.height
+    }
+    if (hasInfra) place('infra', renderInfraNodes)
+    if (hasExternal) place('external', renderExternalNodes)
+  }
+  const svgHeight = bandBoxes.length ? bandBoxes[bandBoxes.length - 1].y + bandBoxes[bandBoxes.length - 1].h + CANVAS_PAD : LAYOUT.height
+
+  // Which tier edges to actually draw: the band toggle, OR always when the edge
+  // touches the active (hovered/selected) node — so hovering a service reveals
+  // exactly the substrate + 3rd parties it uses even with the band toggled off.
+  const tierEdges = [...resolvedInfra, ...resolvedExternal]
+    .filter(e => visibleIds.has(e.fromId) && tierPos[e.to])
+  const tierEdgeShown = (e: { kind: 'infra' | 'external'; fromId: string; to: string }) => {
+    const band = e.kind === 'infra' ? showInfra : showExternal
+    const touchesActive = !!activeNode && (e.fromId === activeNode || e.to === activeNode)
+    return band || touchesActive
+  }
+  // Services (drawn on this map) that connect to the selected tier node.
+  const tierConsumers = selectedTier
+    ? tierEdges.filter(e => e.to === selectedTier.id).map(e => ({
+        svc: svcMap[e.fromId] as (typeof SERVICES)[number] | undefined,
+        type: e.type,
+        enabled: 'enabled' in e ? e.enabled : true,
+      })).filter(c => c.svc)
+    : []
 
   // Render-site translations for strings that live in the module-scope data
   // arrays (GROUP_LABELS, SERVICES.desc) — the hook can't run at module scope.
@@ -443,7 +633,7 @@ export default function ServiceMapPage() {
             <Network size={18} style={{ color: 'var(--accent)' }} />
             {t('Mapa architektury služeb', 'Service Architecture Map')}
           </h1>
-          <p className="page-subtitle">{t(`Interaktivní mapa ${SERVICES.length} mikroslužeb a jejich závislostí · klikněte na službu pro detail`, `Interactive map of ${SERVICES.length} microservices and their dependencies · click a service for detail`)}</p>
+          <p className="page-subtitle">{t(`Animovaná mapa toku dat napříč ${SERVICES.length} službami, infrastrukturou a 3. stranami · sync i async · najeďte myší na uzel pro zvýraznění cesty`, `Animated data-flow map across ${SERVICES.length} services, infrastructure and 3rd parties · sync and async · hover a node to highlight its path`)}</p>
         </div>
       </div>
 
@@ -463,21 +653,40 @@ export default function ServiceMapPage() {
               }}>{label}</button>
           ))}
         </div>
-        <button 
-          onClick={checkHealth}
-          disabled={isChecking}
-          className="btn btn-secondary"
-          style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}
-        >
-          <RefreshCw size={14} className={isChecking ? 'animate-spin' : ''} />
-          {isChecking ? t('Zjišťuji…', 'Checking...') : t('Obnovit stav', 'Refresh Status')}
-        </button>
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {([
+            { key: 'flow', on: flow, toggle: () => setFlow(v => !v), icon: flow ? <Pause size={13} /> : <Play size={13} />, label: t('Tok dat', 'Data flow') },
+            { key: 'infra', on: showInfra, toggle: () => setShowInfra(v => !v), icon: <Server size={13} />, label: t('Infra', 'Infra') },
+            { key: 'external', on: showExternal, toggle: () => setShowExternal(v => !v), icon: <Cloud size={13} />, label: t('3. strany', '3rd parties') },
+          ]).map(c => (
+            <button key={c.key} onClick={c.toggle} aria-pressed={c.on}
+              title={t('Přepnout', 'Toggle') + ' ' + c.label}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', fontSize: '12px', fontWeight: 600,
+                borderRadius: '20px', cursor: 'pointer', fontFamily: 'inherit',
+                border: `1px solid ${c.on ? 'var(--accent)' : 'var(--border)'}`,
+                background: c.on ? 'var(--accent)' : 'var(--surface)',
+                color: c.on ? '#fff' : 'var(--text-secondary)',
+              }}>
+              {c.icon}{c.label}
+            </button>
+          ))}
+          <button
+            onClick={checkHealth}
+            disabled={isChecking}
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}
+          >
+            <RefreshCw size={14} className={isChecking ? 'animate-spin' : ''} />
+            {isChecking ? t('Zjišťuji…', 'Checking...') : t('Obnovit stav', 'Refresh Status')}
+          </button>
+        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: selectedSvc ? '1fr 320px' : '1fr', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: (selectedSvc || selectedTier) ? '1fr 320px' : '1fr', gap: '16px' }}>
         {/* SVG Map */}
         <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
-          <svg viewBox={`0 0 ${LAYOUT.width} ${LAYOUT.height}`} style={{ width: '100%', height: 'auto', display: 'block', background: 'var(--surface)' }}>
+          <svg viewBox={`0 0 ${LAYOUT.width} ${svgHeight}`} style={{ width: '100%', height: 'auto', display: 'block', background: 'var(--surface)' }}>
             <defs>
               <marker id="arrow-sync" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto">
                 <path d="M0,0 L0,6 L7,3 z" fill="#94a3b8" />
@@ -510,11 +719,53 @@ export default function ServiceMapPage() {
             {(() => {
               const active = selected ?? hovered
               const isNeighbor = (id: string) =>
-                !!active && (active === id || EDGES.some(e =>
-                  (e.from === active && e.to === id) || (e.to === active && e.from === id)))
+                !!active && (active === id
+                  || EDGES.some(e => (e.from === active && e.to === id) || (e.to === active && e.from === id))
+                  || tierEdges.some(e => (e.to === active && e.fromId === id) || (e.fromId === active && e.to === id)))
 
               return (
                 <>
+                  {/* Tier bands (infra + external) — full-width backgrounds below the grid */}
+                  {bandBoxes.map(band => {
+                    const meta = band.key === 'infra'
+                      ? { color: '#64748b', label: t('Infrastruktura', 'Infrastructure') }
+                      : { color: '#0ea5e9', label: t('Externí / 3. strany', 'External / 3rd parties') }
+                    return (
+                      <g key={band.key}>
+                        <rect x={band.x} y={band.y} width={band.w} height={band.h} rx="16"
+                          fill={`${meta.color}0a`} stroke={`${meta.color}33`} strokeWidth="1" strokeDasharray="4,4" />
+                        <text x={band.x + 18} y={band.y + 20} fontSize="11" fill={meta.color} fontWeight="700" letterSpacing="0.08em">
+                          {meta.label.toUpperCase()}
+                        </text>
+                      </g>
+                    )
+                  })}
+
+                  {/* Tier edges: service → infra/external substrate */}
+                  {tierEdges.map((e, i) => {
+                    if (!tierEdgeShown(e)) return null
+                    const a = LAYOUT.nodes[e.fromId], b = tierPos[e.to]
+                    if (!a || !b) return null
+                    const hhAll = (BRICK_H + STUD_H) / 2
+                    const aHalf = { hw: brickSize(degrees[e.fromId] ?? 0).w / 2, hh: hhAll }
+                    const bHalf = { hw: b.w / 2, hh: CHIP_H / 2 }
+                    const { d } = edgeGeometry(a, b, aHalf, bHalf)
+                    const color = EDGE_TYPE_COLOR[e.type] ?? '#94a3b8'
+                    const dashed = e.type === 'broker' || e.type === 'push' || e.type === 'webhook'
+                    const off = e.kind === 'external' && e.enabled === false
+                    const touches = !!activeNode && (e.fromId === activeNode || e.to === activeNode)
+                    const dim = !!activeNode && !touches
+                    const pid = pathId(e.fromId, e.to, 10000 + i)
+                    return (
+                      <g key={`t${i}`} opacity={off ? 0.3 : dim ? 0.12 : touches ? 1 : 0.55} style={{ transition: 'opacity 0.15s' }}>
+                        <path id={pid} d={d} fill="none" stroke={off ? '#94a3b8' : color}
+                          strokeWidth={touches ? 2 : 1.3}
+                          strokeDasharray={off ? '2,4' : dashed ? '5,4' : undefined} />
+                        {flow && !off && <FlowParticle pathId={pid} color={color} dur={2.6 + (i % 4) * 0.3} begin={(i % 6) * 0.2} r={2.3} />}
+                      </g>
+                    )
+                  })}
+
                   {/* Edges — curved, boundary-trimmed; labels only when active */}
                   {visibleEdges.map((e, i) => {
                     const a = LAYOUT.nodes[e.from], b = LAYOUT.nodes[e.to]
@@ -528,13 +779,15 @@ export default function ServiceMapPage() {
                     const { d, lx, ly } = edgeGeometry(a, b, aHalf, bHalf)
                     const baseColor = isAsync ? '#c4b5fd' : '#cbd5e1'
                     const hiColor = isAsync ? '#8b5cf6' : '#64748b'
+                    const pid = pathId(e.from, e.to, i)
                     return (
                       <g key={i} opacity={dim ? 0.08 : touches ? 1 : 0.5} style={{ transition: 'opacity 0.15s' }}>
-                        <path d={d} fill="none"
+                        <path id={pid} d={d} fill="none"
                           stroke={touches ? hiColor : baseColor}
                           strokeWidth={touches ? 2 : 1.4}
                           strokeDasharray={isAsync ? '5,4' : undefined}
                           markerEnd={`url(#arrow-${e.type}${touches ? '-hi' : ''})`} />
+                        {flow && <FlowParticle pathId={pid} color={hiColor} dur={2.3 + (i % 5) * 0.28} begin={(i % 7) * 0.17} r={isAsync ? 2.8 : 2.4} />}
                         {touches && (() => {
                           const lbl = prettyEdgeLabel(e.label, e.type)
                           if (!lbl) return null
@@ -584,6 +837,28 @@ export default function ServiceMapPage() {
                       </g>
                     )
                   })}
+
+                  {/* Tier chips (on top) — infra substrate + external 3rd parties */}
+                  {[...renderInfraNodes, ...renderExternalNodes].map(n => {
+                    const p = tierPos[n.id]
+                    if (!p) return null
+                    const meta = tierMeta(n.id)
+                    const color = meta?.color ?? '#64748b'
+                    const isSel = selected === n.id
+                    const rel = !!activeNode && (activeNode === n.id
+                      || tierEdges.some(e => e.to === n.id && (e.fromId === activeNode || e.to === activeNode)))
+                    const emphasized = !activeNode || rel
+                    // "faded" when every edge into this external node is disabled (wired but off).
+                    const faded = n.kind === 'external' && externalEdges.filter(e => e.to === n.id).length > 0
+                      && externalEdges.filter(e => e.to === n.id).every(e => e.enabled === false)
+                    return (
+                      <TierChip key={n.id} pos={p} color={color} label={chipLabel(n.id, n.label)}
+                        active={isSel} dim={!emphasized} faded={faded}
+                        onClick={() => setSelected(s => s === n.id ? null : n.id)}
+                        onEnter={() => setHovered(n.id)}
+                        onLeave={() => setHovered(h => h === n.id ? null : h)} />
+                    )
+                  })}
                 </>
               )
             })()}
@@ -598,6 +873,18 @@ export default function ServiceMapPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
               <svg width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke="#c4b5fd" strokeWidth="1.5" strokeDasharray="5,3" /></svg>
               {t('Async (události Kafka)', 'Async (Kafka events)')}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+              <svg width="14" height="14"><rect x="1" y="4" width="12" height="6" rx="3" fill="none" stroke="#64748b" strokeWidth="1.3" /></svg>
+              {t('Infrastruktura (DB · Kafka · OIDC · OPA)', 'Infrastructure (DB · Kafka · OIDC · OPA)')}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+              <svg width="14" height="14"><rect x="1" y="4" width="12" height="6" rx="3" fill="none" stroke="#0ea5e9" strokeWidth="1.3" /></svg>
+              {t('Externí 3. strany (push · API)', 'External 3rd parties (push · API)')}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+              <svg width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke="#94a3b8" strokeWidth="1.3" strokeDasharray="2,4" /></svg>
+              {t('Zapojená, ale vypnutá integrace', 'Wired but disabled integration')}
             </div>
           </div>
         </div>
@@ -811,6 +1098,64 @@ export default function ServiceMapPage() {
             </div>
           </div>
         )}
+
+        {/* Detail panel — infra/external tier node */}
+        {selectedTier && !selectedSvc && (() => {
+          const meta = tierMeta(selectedTier.id)
+          const color = meta?.color ?? '#64748b'
+          const isExt = selectedTier.kind === 'external'
+          const anyEnabled = tierConsumers.some(c => c.enabled)
+          const Icon = meta?.Icon ?? Server
+          return (
+            <div className="card" style={{ padding: '20px', alignSelf: 'start' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+                <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: `${color}1a`, display: 'flex', alignItems: 'center', justifyContent: 'center', color }}>
+                  <Icon size={16} />
+                </div>
+                <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{chipLabel(selectedTier.id, selectedTier.label)}</div>
+                <div style={{ marginLeft: 'auto', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '2px 8px', borderRadius: '12px', background: `${color}1a`, color }}>
+                  {isExt ? t('3. strana', '3rd party') : t('Infra', 'Infra')}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '3px' }}>{isExt ? t('DODAVATEL', 'VENDOR') : t('TECHNOLOGIE', 'TECHNOLOGY')}</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{isExt ? (selectedTier as ExternalNodeT).vendor : (selectedTier as InfraNodeT).tech}</div>
+                </div>
+
+                {meta && (
+                  <div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '3px' }}>{t('POPIS', 'DESCRIPTION')}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{t(meta.descCs, meta.descEn)}</div>
+                  </div>
+                )}
+
+                {isExt && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: anyEnabled ? 'var(--success)' : 'var(--warning)' }} />
+                    <span style={{ color: 'var(--text-secondary)' }}>{anyEnabled ? t('Integrace zapnutá', 'Integration enabled') : t('Zapojená, ale vypnutá (no-op)', 'Wired but disabled (no-op)')}</span>
+                  </div>
+                )}
+
+                <div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '6px' }}>{t('PŘIPOJENÉ SLUŽBY', 'CONNECTED SERVICES')} ({tierConsumers.length})</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {tierConsumers.map((c, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
+                        <span style={{ color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>→</span>
+                        <span style={{ color: c.svc!.color, fontWeight: 600 }}>{c.svc!.name}</span>
+                        <span style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--text-tertiary)', background: 'var(--surface-2)', padding: '2px 6px', borderRadius: '4px' }}>
+                          {edgeTypeLabel(c.type, t)}{isExt && !c.enabled ? ' · ' + t('vyp', 'off') : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
       </div>
     </div>
   )
