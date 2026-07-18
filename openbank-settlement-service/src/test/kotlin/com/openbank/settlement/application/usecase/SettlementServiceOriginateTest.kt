@@ -4,6 +4,7 @@
 
 package com.openbank.settlement.application.usecase
 
+import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.settlement.application.port.`in`.OriginateSettlementCommand
 import com.openbank.settlement.application.port.out.CreditPort
 import com.openbank.settlement.application.port.out.DebitPort
@@ -33,8 +34,17 @@ class SettlementServiceOriginateTest {
     private val ledgerPort: LedgerPort = mockk(relaxed = true)
     private val temporalConfig: TemporalConfig = mockk(relaxed = true)
     private val workflowClient: WorkflowClient = mockk(relaxed = true)
+    private val auditPublisher: AuditEventPublisher = mockk(relaxed = true)
 
-    private val service = SettlementService(repo, debitPort, creditPort, ledgerPort, temporalConfig, workflowClient)
+    private val service = SettlementService(
+        repo,
+        debitPort,
+        creditPort,
+        ledgerPort,
+        temporalConfig,
+        workflowClient,
+        auditPublisher,
+    )
 
     @Test
     fun `originate persists a PENDING settlement from the command and starts settlement`() {
