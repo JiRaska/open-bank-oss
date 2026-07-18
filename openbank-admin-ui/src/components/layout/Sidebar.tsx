@@ -15,7 +15,7 @@ import {
   DollarSign, Globe, Repeat, Zap, AlertOctagon, ScanLine,
   Layers, TrendingUp, MessageSquareWarning, Package, Receipt, Server, ShieldAlert, FlaskConical, Cloud,
   PiggyBank, GitBranch, Lock, ClipboardList, Scale, Smartphone,
-  ClipboardCheck, Activity, Boxes, Bluetooth, Fingerprint, FileSignature,
+  ClipboardCheck, Activity, Boxes, Bluetooth, Fingerprint, FileSignature, Network,
 } from 'lucide-react'
 import { hasPermission, Permission } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -99,6 +99,7 @@ const sysNav: NavItem[] = [
   { nameCs: 'Zdraví systému',   nameEn: 'System Health',   href: '/system/health',    icon: HeartPulse,        permission: 'system:view' },
   { nameCs: 'Tech Inventory',   nameEn: 'Tech Inventory',  href: '/system/inventory', icon: Package,           permission: 'system:view' },
   { nameCs: 'Infrastruktura',   nameEn: 'Infrastructure',  href: '/infrastructure',   icon: Server,            permission: 'system:view' },
+  { nameCs: 'Topologie infra',  nameEn: 'Infra Topology',  href: '/infrastructure/topology', icon: Network,     permission: 'system:view' },
   { nameCs: 'Test Coverage',    nameEn: 'Test Coverage',   href: '/system/tests',     icon: FlaskConical,      permission: 'system:view' },
   { nameCs: 'Připravenost prod',nameEn: 'Prod Readiness',  href: '/system/readiness', icon: ClipboardCheck,    permission: 'system:view' },
   { nameCs: 'Konfigurace',      nameEn: 'Configuration',   href: '/system/config',    icon: SlidersHorizontal, permission: 'system:config' },
