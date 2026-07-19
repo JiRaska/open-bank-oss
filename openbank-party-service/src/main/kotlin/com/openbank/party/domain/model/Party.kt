@@ -8,7 +8,13 @@ import java.time.Instant
 import java.util.UUID
 
 enum class PartyType { INDIVIDUAL, SOLE_TRADER, COMPANY, TRUST }
-enum class PartyStatus { PENDING_KYC, ACTIVE, SUSPENDED, CLOSED }
+
+/**
+ * [CLOSED] and [MERGED] are both terminal, and deliberately distinct (ADR-0179): CLOSED is written
+ * only by GDPR Art. 17 erasure, which anonymizes PII; MERGED retires a duplicate identity and
+ * preserves everything, pointing at the survivor via [Party.mergedIntoPartyId].
+ */
+enum class PartyStatus { PENDING_KYC, ACTIVE, SUSPENDED, CLOSED, MERGED }
 enum class DocumentType { NATIONAL_ID, PASSPORT, DRIVING_LICENCE, COMPANY_REGISTRATION, TAX_ID }
 
 data class Party(
@@ -48,6 +54,11 @@ data class Party(
      * the original onboarding-time value.
      */
     val consentMarketingUpdatedAt: Instant? = null,
+    /**
+     * ADR-0179: the surviving party this one was merged into. Non-null iff [status] is
+     * [PartyStatus.MERGED] — the DB carries the same biconditional as a CHECK constraint.
+     */
+    val mergedIntoPartyId: UUID? = null,
 )
 
 data class Address(

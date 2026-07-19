@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Party Service API
-  version: 1.6.0
+  version: 1.7.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -129,6 +129,35 @@ paths:
       responses:
         '200':
           description: Updated
+
+  /api/v1/parties/{id}/merge:
+    post:
+      tags: [Parties]
+      summary: Merge a duplicate party into a surviving party (ADR-0179)
+      description: >-
+        Retires {id} as a duplicate of mergedIntoPartyId, setting status MERGED. All PII and
+        history are preserved and a PARTY_MERGED event is emitted — this is NOT GDPR Art. 17
+        erasure (DELETE /api/v1/parties/{id}), which anonymizes instead. Refused with 409 while
+        the duplicate still owns an open account: sweep the balances with a ledger ADJUSTMENT
+        journal entry and close the account first.
+      operationId: mergeParty
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MergePartyRequest'
+      responses:
+        '200':
+          description: The retired party, carrying status MERGED and mergedIntoPartyId
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            A merge precondition failed — already merged, the target is itself merged (chains are
+            refused), a party is erased, or the duplicate still owns an open account.
 
   /api/v1/parties/{id}/consent:
     patch:
@@ -409,6 +438,26 @@ components:
           type: string
         address:
           $ref: '#/components/schemas/AddressDto'
+
+    MergePartyRequest:
+      type: object
+      required: [mergedIntoPartyId, reason]
+      properties:
+        mergedIntoPartyId:
+          type: string
+          format: uuid
+          description: >-
+            The surviving party. Must be live and must not itself be merged — resolve chains to
+            the final survivor before calling.
+        reason:
+          type: string
+          description: Operator-supplied justification, recorded on the audit event.
+        approvalReference:
+          type: string
+          nullable: true
+          description: >-
+            The ledger approval that authorised the balance sweep, linking the ADJUSTMENT journal
+            entries to this identity retirement.
 
     UpdateConsentRequest:
       type: object

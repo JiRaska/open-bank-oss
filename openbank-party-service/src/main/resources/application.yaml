@@ -46,6 +46,20 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     tls:
       verification: none
+  # ADR-0179: M2M client_credentials for the merge account guard. Reuses the same confidential
+  # client as the resource-server block above (the fleet convention) — the token resolves to
+  # ROLE_OPERATOR, which is what account-service's list endpoint actually accepts.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+  rest-client:
+    account-service:
+      # account-service listens on 8100 in the `accounts` namespace (gitops
+      # components/accounts/account-service.yaml). 8102 is transaction-service — this repo has
+      # already been bitten once by a copy-pasted neighbouring port.
+      url: ${ACCOUNT_SERVICE_URL:http://account-service.accounts:8100}
   smallrye-reactive-messaging:
     kafka:
       bootstrap-servers: localhost:29092

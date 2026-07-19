@@ -117,6 +117,10 @@ class PartyRepositoryImpl :
                 it.addressPostalCode = party.address?.postalCode
                 it.addressCountryCode = party.address?.countryCode
                 it.updatedAt = party.updatedAt
+                // Written in the same UPDATE as `status`: the DB enforces
+                // (status = 'MERGED') = (merged_into IS NOT NULL) as a CHECK, so setting one
+                // without the other fails the statement (ADR-0179).
+                it.mergedInto = party.mergedIntoPartyId
             }
         }.replaceWith(party)
     }.awaitSuspending()
@@ -155,6 +159,7 @@ class PartyRepositoryImpl :
         it.consentMarketing = consentMarketing
         it.consentCapturedAt = consentCapturedAt
         it.consentMarketingUpdatedAt = consentMarketingUpdatedAt
+        it.mergedInto = mergedIntoPartyId
     }
 
     private fun PartyEntity.toDomain() = Party(
@@ -184,6 +189,7 @@ class PartyRepositoryImpl :
         consentMarketing = consentMarketing,
         consentCapturedAt = consentCapturedAt,
         consentMarketingUpdatedAt = consentMarketingUpdatedAt,
+        mergedIntoPartyId = mergedInto,
     )
 }
 
