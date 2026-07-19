@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fx-service
     app.kubernetes.io/part-of: fx
   annotations:
-    openbank.tech/policy-checksum: "d644ca924ce55a92"
+    openbank.tech/policy-checksum: "a9ff49b1711f2e26"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1954,6 +1954,13 @@ data:
                                              # and consent.revoke are NOT granted to M2M clients").
         - revoke                            # consent: operator-initiated revocation of a customer's active consent. Confirmed no M2M caller
                                              # (same rego note as consent.grant above).
+        - sweep                             # transaction: move a duplicate party's balance to the surviving party during an
+                                             # identity merge (ADR-0179). Confirmed no M2M caller — POST /transactions/merge-sweep
+                                             # is a NEW endpoint introduced with this verb, admits only ROLE_OPERATOR/ROLE_ADMIN
+                                             # (no ROLE_SERVICE), and has no in-repo caller other than a human operator console.
+                                             # It exists as its own action precisely so the verb can be gated here: the equivalent
+                                             # movement through transaction.create could NOT be, since `create` is on the M2M
+                                             # payment rails — the distinct-operator-only-action pattern this guardrail prescribes.
         - clear                             # sanctions: decide a screening hit (CLEAR/HIT/POTENTIAL_HIT) — a wrongly-cleared true positive
                                              # is a real sanctions violation; distinct from `release` (payment-hold release) for clean audit
                                              # separation. Confirmed no M2M caller (@RolesAllowed on POST /sanctions/review admits only
