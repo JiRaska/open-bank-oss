@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.54.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.53.0...admin-ui-v0.54.0) (2026-07-19)
+
+
+### Features
+
+* **admin-ui:** add a Temporal workflow flow page ([#1700](https://github.com/JiRaska/open-bank-oss/issues/1700)) ([0ef9de8](https://github.com/JiRaska/open-bank-oss/commit/0ef9de88b11654b050ea1138427fabed451533bf))
+
 ## [0.53.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.52.1...admin-ui-v0.53.0) (2026-07-19)
 
 
