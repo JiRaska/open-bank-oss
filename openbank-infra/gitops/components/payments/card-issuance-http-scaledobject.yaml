@@ -27,12 +27,11 @@
 # base; no native/Mandrel build lane exists here or anywhere in this repo, including the
 # product-catalog T1 pilot itself). Flagged as a gap, not a blocker, per the issue's guidance.
 #
-# minReplicas: 0 — safe because:
-#   - card-issuance-service is NOT on the money path (rules.yaml money_path_services).
-#   - No PodDisruptionBudget or karpenter.sh/do-not-disrupt annotation found on this Deployment
-#     (verified live in sandbox 2026-07-05); the only PDB in the `payments` namespace protects
-#     the CNPG db-primary pods, unrelated to this Deployment.
-#   - The KEDA HTTP interceptor parks the first request rather than 5xx-ing it.
+# minReplicas: 1 (see the `replicas` block below) — the "interceptor parks the first request"
+# assumption does NOT hold here: the customer-edge calls the Service directly (not the interceptor),
+# and the 25s JVM cold-start exceeds the edge's 10s upstream timeout, so min:0 made every first
+# Cards load spin ~90s. Kept warm like interest-service. (Still not on the money path; the only
+# payments-ns PDB protects the CNPG db-primary, unrelated to this Deployment.)
 #
 # maxReplicas: 3 — matches the product-catalog pilot's cap; revise once live traffic is measured.
 # scaledownPeriod: 300s — same conservative idle window as the pilot.
@@ -61,7 +60,14 @@ spec:
     apiVersion: apps/v1
     port: 8118
   replicas:
-    min: 0
+    # min:1, NOT 0. The customer-edge calls card-issuance-service.payments.svc:8118 DIRECTLY (see
+    # its Deployment env / netpol), not through the KEDA HTTP interceptor — so at min:0 the edge
+    # hits a Service with zero endpoints. Worse, the JVM cold-start measured 25s while the edge
+    # upstream request-timeout is 10s (customer-edge application.yaml), so even a parked request is
+    # abandoned before the pod is ready: every first Cards load spun ~90s (3× the app's 30s GET
+    # retry) before falling back to empty. Cards is a frequently-opened customer screen, so keep one
+    # warm — same call as interest-service. Regressed from the 2026-07-17 min:1 fix; re-pinning.
+    min: 1
     max: 3
   scaledownPeriod: 300
   targetPendingRequests: 75
