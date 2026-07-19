@@ -60,6 +60,10 @@ import java.util.Base64
 @Path("/customer/v1/webauthn")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
+// One method per WebAuthn endpoint (register/auth begin+complete, session refresh/revoke) — the
+// count is inherent to the RP surface, not a cohesion smell; splitting the resource would only
+// scatter one ceremony's begin/complete across classes.
+@Suppress("TooManyFunctions")
 class WebAuthnResource(
     private val ticketService: EnrollmentTicketService,
     private val challengeStore: ChallengeStore,
@@ -295,6 +299,20 @@ class WebAuthnResource(
         val (accessToken, refreshToken) = keycloakClient.impersonate(keycloakUserId)
         val rotated = deviceSessions.issue(keycloakUserId)
         return Response.ok(TokenPairDto(accessToken, refreshToken, rotated)).build()
+    }
+
+    /**
+     * Revoke a device session on logout (ADR-0066 F2). Idempotent — a missing/already-consumed id is
+     * a no-op. Public: the opaque id is the only credential, and revoking it can only ever end a
+     * session, never start one. The app calls this before dropping its local tokens so a logged-out
+     * device cannot silently resume even if its Keychain copy of the id somehow survives.
+     */
+    @POST
+    @Path("/session/revoke")
+    @Blocking
+    fun sessionRevoke(request: SessionRefreshRequestDto): Response {
+        deviceSessions.revoke(request.deviceSessionId)
+        return Response.noContent().build()
     }
 
     // ── Internals ─────────────────────────────────────────────────────────────────────────
