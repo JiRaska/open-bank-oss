@@ -60,6 +60,10 @@ import java.util.Base64
 @Path("/customer/v1/webauthn")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
+// One method per WebAuthn endpoint (register/auth begin+complete, session refresh/revoke) — the
+// count is inherent to the RP surface, not a cohesion smell; splitting the resource would only
+// scatter one ceremony's begin/complete across classes.
+@Suppress("TooManyFunctions")
 class WebAuthnResource(
     private val ticketService: EnrollmentTicketService,
     private val challengeStore: ChallengeStore,
