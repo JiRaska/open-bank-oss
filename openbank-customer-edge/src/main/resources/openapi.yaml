@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.13.0
+  version: 1.14.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1017,6 +1017,12 @@ components:
           type: string
         refresh_token:
           type: string
+        device_session_id:
+          type: string
+          description: >-
+            Opaque device-session id (ADR-0066 F2). The passkey-exchange refresh_token is not
+            refreshable by openbank-app, so the app resumes via /webauthn/session/refresh with
+            this id. Emitted by the passkey register/authenticate completion; absent otherwise.
 
     RegisterPartyRequest:
       type: object
