@@ -55,7 +55,8 @@
         "statements:read",
         "sca:enroll-device",
         "sca:decide",
-        "telemetry:rum"
+        "telemetry:rum",
+        "offline_access"
       ],
       "protocolMappers": [
         {

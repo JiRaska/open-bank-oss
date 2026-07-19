@@ -156,8 +156,14 @@ class WebAuthnKeycloakClient {
      */
     fun impersonate(keycloakUserId: String): Pair<String, String?> {
         val grantType = URLEncoder.encode(TOKEN_EXCHANGE_GRANT_TYPE, StandardCharsets.UTF_8)
+        // scope=offline_access → the minted refresh token is an OFFLINE token (long-lived, survives
+        // the 30-min online SSO idle) so the app can silently resume a session behind the on-device
+        // biometric for days instead of re-running a full passkey ceremony on every cold start. The
+        // openbank-app client carries offline_access as an optional scope; offlineSessionIdleTimeout
+        // (30d) bounds it server-side, the app's 14-day window + biometric LockScreen bound it on the
+        // device. Native passkey path (ADR-0066 F2).
         val formBody = "grant_type=$grantType&client_id=$clientId&client_secret=$clientSecret" +
-            "&requested_subject=$keycloakUserId&audience=openbank-app"
+            "&requested_subject=$keycloakUserId&audience=openbank-app&scope=offline_access"
         val resp = http.send(
             HttpRequest.newBuilder()
                 .uri(URI.create("$adminUrl/realms/$realm/protocol/openid-connect/token"))
