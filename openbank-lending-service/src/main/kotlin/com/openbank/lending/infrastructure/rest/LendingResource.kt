@@ -114,6 +114,17 @@ class LendingResource(
     @GET
     @Path("/loans/{id}")
     @Operation(summary = "Get a loan")
+    // Read endpoint: widen past the class-level staff-only roles so the customer-edge (ROLE_OPERATOR)
+    // can serve a customer their own loan. OPA (lending.read + operator-read-any / customer scoping)
+    // and the edge's per-caller partyId ownership check remain the fine-grained gate.
+    @RolesAllowed(
+        "ROLE_VIEWER",
+        "ROLE_OPERATOR",
+        "ROLE_LENDING_OFFICER",
+        "ROLE_CREDIT_RISK",
+        "ROLE_COMPLIANCE",
+        "ROLE_ADMIN",
+    )
     @Authorize(action = "lending.read", resource = "#id")
     fun getLoan(@PathParam("id") id: UUID): Uni<Response> =
         servicing.getLoan(LoanId(id)).map { it?.let { l -> Response.ok(l).build() } ?: Response.status(404).build() }
@@ -121,12 +132,28 @@ class LendingResource(
     @GET
     @Path("/loans/{id}/schedule")
     @Operation(summary = "Get a loan's repayment schedule")
+    @RolesAllowed(
+        "ROLE_VIEWER",
+        "ROLE_OPERATOR",
+        "ROLE_LENDING_OFFICER",
+        "ROLE_CREDIT_RISK",
+        "ROLE_COMPLIANCE",
+        "ROLE_ADMIN",
+    )
     @Authorize(action = "lending.read", resource = "#id")
     fun getSchedule(@PathParam("id") id: UUID) = servicing.getSchedule(LoanId(id))
 
     @GET
     @Path("/loans")
     @Operation(summary = "List a party's loans")
+    @RolesAllowed(
+        "ROLE_VIEWER",
+        "ROLE_OPERATOR",
+        "ROLE_LENDING_OFFICER",
+        "ROLE_CREDIT_RISK",
+        "ROLE_COMPLIANCE",
+        "ROLE_ADMIN",
+    )
     @Authorize(action = "lending.list", resource = "")
     fun listLoans(@QueryParam("partyId") partyId: UUID) = servicing.listLoans(partyId)
 
