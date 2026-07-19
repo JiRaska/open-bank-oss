@@ -21,7 +21,9 @@ dependencies {
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.oidc)
-    // ADR-0179: M2M call to account-service for the merge precondition guard.
+    // The oidc-client filter mints the shared openbank-services M2M token: ADR-0179's call
+    // to account-service for the merge precondition guard, and the GDPR Art. 15 aggregation
+    // hops to kyc-service / card-issuance-service (both endpoints are @RolesAllowed).
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.oidc.client.reactive.filter)

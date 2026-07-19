@@ -69,14 +69,27 @@ interface PartyDocumentFileRepository {
 }
 
 /**
+ * Raised when a GDPR Art. 15 aggregation hop is rejected by the downstream's authorization layer
+ * (401/403). Deliberately NOT folded into the best-effort degradation below: an auth failure means
+ * the data subject's PII exists and we were refused it, which is categorically different from
+ * "this party has no KYC case". Silently returning null there ships an export that is incomplete
+ * and indistinguishable from a complete one — the caller must see a 502 instead.
+ */
+class GdprAggregationAuthException(service: String, status: Int) :
+    RuntimeException("GDPR aggregation refused by $service: HTTP $status")
+
+/**
  * Outbound port for GDPR Art. 15 aggregation: fetches PII from downstream services
  * on a best-effort basis (null = service unavailable, export proceeds with party PII only).
+ *
+ * Best-effort covers *absence* and *unavailability* only. An authorization rejection throws
+ * [GdprAggregationAuthException] rather than degrading — see its KDoc.
  */
 interface GdprAggregationPort {
-    /** Returns the latest KYC case for [partyId], or null if unavailable. */
+    /** Returns the latest KYC case for [partyId], or null if absent/unavailable. */
     suspend fun fetchKycData(partyId: java.util.UUID): Map<String, Any?>?
 
-    /** Returns all cards for [partyId], or empty list if unavailable. */
+    /** Returns all cards for [partyId], or empty list if absent/unavailable. */
     suspend fun fetchCardData(partyId: java.util.UUID): List<Map<String, Any?>>
 }
 
