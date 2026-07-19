@@ -7,6 +7,7 @@ package com.openbank.party.infrastructure.rest
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
 import com.openbank.libs.flags.FeatureDisabledException
+import com.openbank.party.application.port.out.GdprAggregationAuthException
 import com.openbank.party.application.usecase.PartyAlreadyExistsException
 import com.openbank.party.application.usecase.PartyNotFoundException
 import io.vertx.pgclient.PgException
@@ -68,4 +69,27 @@ class FeatureDisabledMapper : ExceptionMapper<FeatureDisabledException> {
     override fun toResponse(e: FeatureDisabledException) = Response.status(404).entity(
         ApiError(UUID.randomUUID().toString(), 404, ErrorCode.NOT_FOUND.code, "feature '${e.flag}' is not enabled"),
     ).build()
+}
+
+/**
+ * Maps a [GdprAggregationAuthException] to 502. An Art. 15 export whose KYC/card hop was refused
+ * on authz grounds is NOT a valid export — returning 200 with those sections absent would be
+ * indistinguishable from a subject who genuinely holds no KYC case and no cards, and the data
+ * subject would receive a silently incomplete Right-of-Access response. Fail loudly so the DPO
+ * re-runs it rather than files it.
+ */
+@Provider
+class GdprAggregationAuthMapper : ExceptionMapper<GdprAggregationAuthException> {
+    override fun toResponse(e: GdprAggregationAuthException) = Response.status(BAD_GATEWAY).entity(
+        ApiError(
+            UUID.randomUUID().toString(),
+            BAD_GATEWAY,
+            "GDPR_AGGREGATION_DENIED",
+            e.message ?: "GDPR aggregation refused by a downstream service",
+        ),
+    ).build()
+
+    companion object {
+        private const val BAD_GATEWAY = 502
+    }
 }

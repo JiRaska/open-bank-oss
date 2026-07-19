@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Party Service API
-  version: 1.6.0
+  version: 1.7.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -277,9 +277,13 @@ paths:
       tags: [Parties]
       summary: Export all PII held for a party — GDPR Art. 15 Right of Access
       description: >-
-        Returns the party-service-direct PII for the data subject (personal details,
-        address, and identity-document metadata). KYC and card PII are held by the
-        respective services; aggregating them is a tracked follow-up (ADR-0118 §6).
+        Returns the full PII set held for the data subject: the party-service-direct data
+        (personal details, address, identity-document metadata) plus the KYC case and card
+        records aggregated from kyc-service and card-issuance-service (ADR-0118 §6).
+        A downstream that is unreachable or holds no record degrades to an absent section;
+        a downstream that *refuses* the aggregation call on authorization grounds fails the
+        whole export with 502, because a silently incomplete Art. 15 response is
+        indistinguishable from a complete one.
       operationId: exportPartyGdpr
       security:
         - bearerAuth: []
@@ -294,6 +298,14 @@ paths:
                 $ref: '#/components/schemas/GdprExport'
         '404':
           $ref: '#/components/responses/NotFound'
+        '502':
+          description: >-
+            A downstream aggregation hop (kyc-service or card-issuance-service) refused the
+            call with 401/403. The export is NOT returned — retry once the M2M grant is fixed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
 components:
   parameters:

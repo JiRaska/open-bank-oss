@@ -67,6 +67,15 @@ spec:
                 secretKeyRef:
                   name: party-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # GDPR Art. 15 aggregation hops (ADR-0118 §6). Declared here — not only in
+            # application.yaml — because gen-network-policies.py derives the NetworkPolicy
+            # edges from the env URLs a Deployment declares: without these two entries the
+            # party → kyc / party → card-issuance calls are DROPPED by the VPC CNI agent
+            # even when the M2M bearer is correct.
+            - name: OPENBANK_KYC_SERVICE_URL
+              value: http://kyc-service.kyc.svc:8114
+            - name: OPENBANK_CARD_SERVICE_URL
+              value: http://card-issuance-service.payments.svc:8118
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG

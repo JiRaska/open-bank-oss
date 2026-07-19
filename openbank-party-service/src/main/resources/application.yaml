@@ -46,6 +46,23 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     tls:
       verification: none
+  # Outbound M2M token for the GDPR Art. 15 aggregation hops. The export reads another service's
+  # PII on the data subject's behalf, so party-service authenticates as the service, not as the
+  # human caller (whose own token has no KYC/card role and never leaves customer-edge anyway).
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+  rest-client:
+    kyc-service:
+      url: ${OPENBANK_KYC_SERVICE_URL:http://localhost:8114}
+      scope: jakarta.inject.Singleton
+    card-service:
+      url: ${OPENBANK_CARD_SERVICE_URL:http://localhost:8118}
+      scope: jakarta.inject.Singleton
   smallrye-reactive-messaging:
     kafka:
       bootstrap-servers: localhost:29092
@@ -120,6 +137,8 @@ mp:
         json: false
     oidc:
       enabled: false
+    oidc-client:
+      enabled: false
 "%test":
   quarkus:
     datasource:
@@ -132,6 +151,8 @@ mp:
     management:
       enabled: false
     oidc:
+      enabled: false
+    oidc-client:
       enabled: false
     devservices:
       enabled: false
@@ -151,8 +172,6 @@ openbank:
     commit: "${GIT_COMMIT:unknown}"
   gdpr:
     retention-days: 2555
-    kyc-service-url: "${OPENBANK_KYC_SERVICE_URL:http://kyc-service.kyc:8114}"
-    card-service-url: "${OPENBANK_CARD_SERVICE_URL:http://card-issuance-service.card-issuance:8118}"
   # Feature flags (ADR-0067) — first pilot adopter. flagd serves OFREP HTTP on :8016
   # (8013 is gRPC, 8014 is management). Fail-static: no sidecar reachable → every flag
   # resolves to its caller default, so the same image runs locally without flagd.
