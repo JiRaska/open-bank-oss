@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.11.2...lending-service-v0.11.3) (2026-07-19)
+
+
+### Bug Fixes
+
+* **lending:** let the customer-edge read a customer's own loans ([#1694](https://github.com/JiRaska/open-bank-oss/issues/1694)) ([3add309](https://github.com/JiRaska/open-bank-oss/commit/3add309f2092bce6c158467fd5909c19fff0ed4b))
+
 ## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.11.1...lending-service-v0.11.2) (2026-07-17)
 
 
