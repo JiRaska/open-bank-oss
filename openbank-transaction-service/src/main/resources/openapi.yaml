@@ -3,9 +3,11 @@
 openapi: 3.1.0
 info:
   title: Transaction Service API
-  # Kept in lockstep with version.txt / quarkus.application.version
-  # (ADR-0029 D2 single-source invariant).
-  version: 1.7.1
+  # The API-contract version (ADR-0048), an axis INDEPENDENT of the release version in
+  # version.txt — classified from the OpenAPI diff, never forced equal to it. The two have not
+  # been in lockstep for a long time (version.txt is 1.14.2); the note that used to claim they
+  # were invited exactly the wrong "fix".
+  version: 1.8.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -173,6 +175,36 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/transactions/merge-sweep:
+    post:
+      tags: [Transactions]
+      summary: Sweep a duplicate party's balance to the surviving party during an identity merge (ADR-0179)
+      description: >-
+        Operator-only bookkeeping correction, posted through the ordinary saga as an ADJUSTMENT.
+        Deliberately its own action (`transaction.sweep`) rather than a flavour of
+        `transaction.create`: `create` is on the M2M payment rails, so a four-eyes verb matching it
+        could never be enabled without pausing automated payments. The server mints a structured
+        `MERGE-SWEEP <ref>: party <a> -> <b>` description — the ledger has no entry-type or
+        reason-code column, so that string is what makes the correction distinguishable from a
+        customer transfer. `initiatedByPartyId` is forced null (bank-initiated, so no SCA challenge
+        exists); the request carries no SCA fields.
+      operationId: mergeSweep
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MergeSweepRequest'
+      responses:
+        '201':
+          description: The adjustment transaction
+        '403':
+          description: Caller is not an operator or admin, or four-eyes approval is required
+        '422':
+          description: Insufficient available balance on the source pocket, or an unknown account
+
   /api/v1/transactions/{transactionId}/reverse:
     post:
       tags: [Transactions]
@@ -229,6 +261,46 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    MergeSweepRequest:
+      type: object
+      required:
+        [idempotencyKey, sourceAccountId, targetAccountId, sourcePartyId, survivingPartyId,
+         amount, currencyCode, valueDate, mergeReference]
+      properties:
+        idempotencyKey:
+          type: string
+          description: Idempotency key — re-submitting the same key returns the existing adjustment
+        sourceAccountId:
+          type: string
+          format: uuid
+          description: The duplicate party's account, debited
+        targetAccountId:
+          type: string
+          format: uuid
+          description: The surviving party's account, credited. Its pocket for this currency must already exist
+        sourcePartyId:
+          type: string
+          format: uuid
+          description: The duplicate identity being retired — recorded in the journal description
+        survivingPartyId:
+          type: string
+          format: uuid
+          description: The surviving identity — recorded in the journal description
+        amount:
+          type: number
+          description: Amount to sweep, in the pocket's currency
+        currencyCode:
+          type: string
+          description: ISO-4217. Source and target pockets must both be this currency; no FX is performed
+        valueDate:
+          type: string
+          format: date
+        mergeReference:
+          type: string
+          description: >-
+            Ties the posting to the approved merge case. The same value appears in party-service's
+            `party.merge` audit event as `approval_reference`, so either end resolves the other.
+
     ReverseTransactionRequest:
       type: object
       required: [idempotencyKey, reason]

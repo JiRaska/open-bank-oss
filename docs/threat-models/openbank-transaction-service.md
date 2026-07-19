@@ -93,6 +93,42 @@ maker's retry reuses the existing DFD edge.
 **Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do not
 change any existing request's outcome until explicitly flipped.
 
+## 4b. Merge balance sweep (ADR-0179) — STRIDE supplement
+
+`POST /api/v1/transactions/merge-sweep` (`transaction.sweep`) moves a duplicate party's pocket
+balance to the surviving party's pocket during an identity merge. It posts through the existing
+saga (`InitiateTransactionCommand`, `type = ADJUSTMENT`), so the money mechanics, cover hold and
+ledger projection are unchanged — the new surface is the endpoint and its action.
+
+**Why a separate endpoint rather than `transaction.create` with `type = ADJUSTMENT`.** Two
+independent reasons, both structural:
+
+1. `four_eyes_required` is computed from the action name alone, with no awareness of the caller
+   (`rules.yaml: four_eyes` guardrail). `transaction.create` is on the M2M payment rails, so a
+   verb matching it could never be gated without pausing every automated payment the moment
+   enforcement flips. A distinct operator-only action is the pattern the guardrail prescribes —
+   the same conclusion sca-service reached for `device.enroll`.
+2. `PaymentJournalFactory` never reads `transaction.type`. Passing `ADJUSTMENT` to the ordinary
+   endpoint yields a journal byte-identical to a customer payment, so the correction would be
+   indistinguishable from a transfer of value between two persons in the trial balance and on a
+   statement. The structured `MERGE-SWEEP <ref>: party <a> -> <b>` description minted server-side
+   is what carries the distinction into the ledger, which has no entry-type or reason-code column.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **E**oP | An M2M caller uses the sweep to move funds between arbitrary accounts, bypassing the payment rails' SCA and rail controls | `@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)` — no `Roles.SERVICE`; the new `sweep` verb is in `rules.yaml: four_eyes.verbs`, so it is maker-checker gated once `authz.four-eyes.enforce` flips (still `false`, as for `transaction.reverse` above) |
+| **T**ampering | An operator sweeps to an account belonging to a third party, laundering a balance out of the duplicate under cover of a merge | `sourcePartyId`/`survivingPartyId` are recorded in the journal description, so the posting itself states the identity claim it was justified by; party-service's merge endpoint independently refuses to retire a party that still owns a non-CLOSED account, so a sweep to a wrong target cannot be completed into a merge without leaving the source account open and visible |
+| **R**epudiation | The money movement cannot be tied back to the merge that authorised it | `mergeReference` is required and mint into the description; the party-service `party.merge` audit event carries the same reference in `approval_reference`, so either end resolves the other |
+| **S**poofing | A caller forges `initiatedByPartyId` to make a bank correction look customer-initiated | The endpoint hard-codes `initiatedByPartyId = null` and drops any SCA fields — the request DTO has no such field to supply |
+| **I**nfo disclosure | Party ids in a journal description leak into statements | The description carries party **ids**, never names, emails or RČ; it is already the field customer statements render, and an opaque UUID discloses nothing a statement holder does not already own |
+| **D**oS | Repeated sweeps drain a pocket via replay | `idempotencyKey` is required and enforced by the existing transaction idempotency guard, identically to `POST /transactions` |
+
+**DFD update:** adds `Operator → POST /api/v1/transactions/merge-sweep` alongside the existing
+initiate edge; downstream (saga → ledger → balance projection) is unchanged.
+**Risk class:** integrity (segregation of duties, auditability of a correction).
+**Rollback:** revert the endpoint; the `sweep` verb is inert while `authz.four-eyes.enforce=false`,
+and no existing request's outcome changes.
+
 ## 5. Residual risks / assumptions
 
 - **Booked balance is now a ledger projection (ADR-0039 Phase D-2).** The saga no longer debits/credits
@@ -184,3 +220,13 @@ change any existing request's outcome until explicitly flipped.
   refresh), so no per-scrape DB query. No new endpoint, DB change, data flow, or trust boundary
   (read-only count over the existing `tx_outbox` table). Risk class = **confidentiality** (metric
   cardinality), mitigated by `TransactionOutboxBacklogGaugeTest`.
+- **2026-07-19** — ADR-0179 merge balance sweep: new `POST /api/v1/transactions/merge-sweep`
+  (`transaction.sweep`, OPERATOR/ADMIN only) and a new `sweep` entry in `rules.yaml:
+  four_eyes.verbs`. Posts through the existing saga with `type = ADJUSTMENT` and a structured,
+  server-minted description — no change to the money mechanics, cover hold, or ledger projection.
+  Touches the **E — elevation of privilege** and **T — tampering** rows (§4b): the action is
+  deliberately distinct from `transaction.create` so it can be four-eyes gated without pausing the
+  M2M payment rails, and so the resulting journal is distinguishable from a customer payment.
+  Risk class = **integrity** (segregation of duties + auditability of a correction), mitigated by
+  `MergeSweepDescriptionTest` and `TransactionResourceMergeSweepTest`. `authz.four-eyes.enforce`
+  remains `false`; the verb is inert until that flip.

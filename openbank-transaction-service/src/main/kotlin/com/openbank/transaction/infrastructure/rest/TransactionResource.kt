@@ -182,9 +182,98 @@ class TransactionResource(
         )
         return Response.ok(reversal.toResponse()).build()
     }
+
+    /**
+     * ADR-0179 — sweep a duplicate party's pocket into the surviving party's pocket as part of an
+     * identity merge.
+     *
+     * A **dedicated endpoint with its own action**, deliberately not a flavour of
+     * `transaction.create`. Two reasons, and both are load-bearing:
+     *
+     *  1. `transaction.create` is on the M2M payment rails. `four_eyes_required` is computed from
+     *     the action name alone with no awareness of the caller, so adding a four-eyes verb that
+     *     matches `create` would pause every automated payment the moment enforcement is switched
+     *     on (`rules.yaml: four_eyes` guardrail). A distinct operator-only action is the pattern
+     *     that guardrail prescribes.
+     *  2. The resulting journal must be *identifiable* as a bookkeeping correction. Passing
+     *     `type = ADJUSTMENT` to the ordinary endpoint would not achieve that:
+     *     [com.openbank.transaction.application.usecase.PaymentJournalFactory] never reads
+     *     `transaction.type`, so the posting would be byte-identical to a customer payment. The
+     *     structured description minted here is what carries the distinction into the ledger.
+     *
+     * `initiatedByPartyId` is deliberately left null — this is a bank-initiated correction, not a
+     * customer-initiated movement, so it takes the documented system-posting path past the SCA
+     * gate rather than carrying a challenge that no customer ever answered.
+     */
+    @POST
+    @Path("/merge-sweep")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "transaction.sweep", resource = "")
+    @Operation(
+        summary = "Sweep a duplicate party's balance to the surviving party during an identity merge (ADR-0179)",
+    )
+    suspend fun mergeSweep(request: MergeSweepRequest, @Context securityContext: SecurityContext): Response {
+        val initiatedBy = runCatching { UUID.fromString(securityContext.userPrincipal?.name) }
+            .getOrDefault(UUID.fromString("00000000-0000-0000-0000-000000000000"))
+        val command = InitiateTransactionCommand(
+            idempotencyKey = request.idempotencyKey,
+            type = TransactionType.ADJUSTMENT,
+            sourceAccountId = request.sourceAccountId,
+            targetAccountId = request.targetAccountId,
+            amount = request.amount,
+            currencyCode = request.currencyCode,
+            settlementCurrencyCode = request.currencyCode,
+            settlementAmount = request.amount,
+            description = MergeSweepDescription.of(request),
+            valueDate = LocalDate.parse(request.valueDate),
+            initiatedBy = initiatedBy,
+            // Bank-initiated correction: no customer initiated it, so no SCA challenge exists.
+            initiatedByPartyId = null,
+            scaChallengeId = null,
+            scaExemption = null,
+            rail = null,
+            instructionType = null,
+        )
+        val tx = transactionUseCase.initiateTransaction(command)
+        return Response.created(URI.create("/api/v1/transactions/${tx.id}"))
+            .entity(tx.toResponse())
+            .type(MediaType.APPLICATION_JSON)
+            .build()
+    }
+}
+
+/**
+ * Mints the journal description for a merge sweep (ADR-0179).
+ *
+ * The ledger has no entry-type or reason-code column — a journal's only free field is
+ * `description` — so this prefix is the sole thing distinguishing a merge correction from an
+ * ordinary customer transfer in the trial balance, on a statement, and to an auditor. It is
+ * therefore built here in one place and asserted in tests, not composed ad hoc by callers.
+ */
+object MergeSweepDescription {
+    const val PREFIX = "MERGE-SWEEP"
+
+    fun of(request: MergeSweepRequest): String =
+        "$PREFIX ${request.mergeReference}: party ${request.sourcePartyId} -> ${request.survivingPartyId}"
 }
 
 data class ReverseTransactionRequest(val idempotencyKey: String, val reason: String)
+
+/**
+ * ADR-0179. [mergeReference] ties the posting back to the approved merge case, so the money
+ * movement and the identity retirement are traceable to one another from either end.
+ */
+data class MergeSweepRequest(
+    val idempotencyKey: String,
+    val sourceAccountId: UUID,
+    val targetAccountId: UUID,
+    val sourcePartyId: UUID,
+    val survivingPartyId: UUID,
+    val amount: BigDecimal,
+    val currencyCode: String,
+    val valueDate: String,
+    val mergeReference: String,
+)
 
 data class InitiateTransactionRequest(
     val idempotencyKey: String,
