@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.31.0...customer-edge-v0.32.0) (2026-07-19)
+
+
+### Features
+
+* **edge:** revoke device-session on logout ([#1762](https://github.com/JiRaska/open-bank-oss/issues/1762)) ([a06445c](https://github.com/JiRaska/open-bank-oss/commit/a06445c36d8c08976a9f13a7fb81fcc05beb8473))
+
 ## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.30.0...customer-edge-v0.31.0) (2026-07-19)
 
 
