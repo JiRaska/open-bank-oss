@@ -90,12 +90,16 @@ export async function loadComplianceCatalog(): Promise<ComplianceCatalog | null>
   const authored = parsed.controls ?? []
 
   // Join live status from the derived security posture where declared.
+  // Symmetric: a true signal promotes to `enforced`; a false signal demotes
+  // an authored `enforced` back down (the live signal disproved the claim),
+  // but leaves an already-honest partial/audit/planned status untouched.
   const posture = await loadSecurityPosture()
   const controls: ComplianceControl[] = authored.map(c => {
     if (!c.derivedFrom) return c
     const signal = signalValue(posture, c.derivedFrom)
     if (signal === undefined) return c
-    return { ...c, status: signal ? 'enforced' : c.status, live: true }
+    if (signal) return { ...c, status: 'enforced', live: true }
+    return { ...c, status: c.status === 'enforced' ? 'planned' : c.status, live: true }
   })
 
   // Per-framework coverage roll-up.
