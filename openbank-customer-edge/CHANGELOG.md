@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.28.0...customer-edge-v0.29.0) (2026-07-19)
+
+
+### Features
+
+* **edge:** SEPA Direct Debit mandates (inkasa) read view for customers ([#1732](https://github.com/JiRaska/open-bank-oss/issues/1732)) ([321e985](https://github.com/JiRaska/open-bank-oss/commit/321e985270dbdd42b61c44fbc44e61890fcb4cae)), closes [#1730](https://github.com/JiRaska/open-bank-oss/issues/1730)
+
 ## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.27.0...customer-edge-v0.28.0) (2026-07-19)
 
 
