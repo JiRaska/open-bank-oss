@@ -15,7 +15,7 @@ import {
   DollarSign, Globe, Repeat, Zap, AlertOctagon, ScanLine,
   Layers, TrendingUp, MessageSquareWarning, Package, Receipt, Server, ShieldAlert, FlaskConical, Cloud,
   PiggyBank, GitBranch, Lock, ClipboardList, Scale, Smartphone,
-  ClipboardCheck, Activity, Boxes, Bluetooth, Fingerprint, FileSignature, Network,
+  ClipboardCheck, Activity, Boxes, Bluetooth, Fingerprint, FileSignature, Network, Waypoints,
 } from 'lucide-react'
 import { hasPermission, Permission } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -79,6 +79,7 @@ const docsNav: NavItem[] = [
   { nameCs: 'Cloud architektura', nameEn: 'Cloud Architecture', href: '/docs/cloud-architecture', icon: Cloud, permission: 'docs:view' },
   { nameCs: 'Cluster & kontejner', nameEn: 'Cluster & Container', href: '/docs/cluster', icon: Boxes, permission: 'docs:view' },
   { nameCs: 'Mapa služeb',    nameEn: 'Service Map',        href: '/docs/service-map', icon: Map,         permission: 'docs:view' },
+  { nameCs: 'Datová lineage', nameEn: 'Data Lineage',       href: '/docs/lineage',     icon: Waypoints,   permission: 'docs:view' },
   { nameCs: 'BPMN',           nameEn: 'BPMN',               href: '/docs/bpmn',        icon: FileCode,    permission: 'docs:view' },
   { nameCs: 'Katalog API',    nameEn: 'API Catalog',        href: '/docs/api',         icon: FileCode,    permission: 'docs:view' },
   { nameCs: 'Feature flagy',  nameEn: 'Feature Flags',      href: '/docs/flags',       icon: Flag,        permission: 'docs:view' },
