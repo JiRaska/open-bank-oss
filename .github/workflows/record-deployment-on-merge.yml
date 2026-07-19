@@ -52,6 +52,11 @@ jobs:
       HEAD_REF: ${{ github.event.pull_request.head.ref }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # `gh pr diff` shells out to git and needs either a checkout or an explicit repo. This job
+      # has no checkout, so without --repo it dies "not a git repository", returns nothing, and
+      # every run silently records zero services ("nothing to record") — the deploy tracking then
+      # goes stale with no error. Pass the repo explicitly so it works API-only.
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Record deployed services in the broker
         if: ${{ vars.PACT_BROKER_URL != '' }}
@@ -72,7 +77,7 @@ jobs:
           # Read them from the PR's own diff (added lines only), so an abandoned/other PR can
           # never cause a record here. Pacticipant name == the image name (openbank-<svc>).
           mapfile -t SERVICES < <(
-            gh pr diff "$PR_NUMBER" \
+            gh pr diff "$PR_NUMBER" --repo "$GH_REPO" \
               | grep -E "^\+.*openbank-[a-z0-9-]+:sandbox-${SHORT}" \
               | grep -oE "openbank-[a-z0-9-]+:sandbox-${SHORT}" \
               | sed -E 's/:sandbox-.*//' \
