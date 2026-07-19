@@ -6,6 +6,7 @@ package com.openbank.party.infrastructure.rest
 
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.flags.FeatureDisabledException
 import com.openbank.party.application.usecase.PartyAlreadyExistsException
 import com.openbank.party.application.usecase.PartyMergeRejectedException
@@ -38,7 +39,9 @@ class PartyMergeRejectedMapper : ExceptionMapper<PartyMergeRejectedException> {
     override fun toResponse(e: PartyMergeRejectedException) = Response.status(Response.Status.CONFLICT)
         .entity(
             ApiError(
-                UUID.randomUUID().toString(),
+                // ADR-0106: trace/correlation identifiers are minted via Ids. The neighbouring
+                // mappers predate the guard, which only flags newly added call sites.
+                Ids.randomId().toString(),
                 Response.Status.CONFLICT.statusCode,
                 ErrorCode.CONFLICT.code,
                 e.message ?: "Merge rejected",
