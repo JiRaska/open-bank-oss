@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.3](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.11.2...balance-service-v1.11.3) (2026-07-19)
+
+
+### Bug Fixes
+
+* **balance:** reconcile the sub-ledger on the ledger's value-date basis ([#1747](https://github.com/JiRaska/open-bank-oss/issues/1747)) ([d2423c5](https://github.com/JiRaska/open-bank-oss/commit/d2423c5d949fe546a1a2a85052dd65a737055f56))
+
 ## [1.11.2](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.11.1...balance-service-v1.11.2) (2026-07-18)
 
 
