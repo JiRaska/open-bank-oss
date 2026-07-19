@@ -4,6 +4,7 @@
 
 package com.openbank.party.infrastructure.client
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.party.application.port.out.PartyAccountGuardPort
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
@@ -42,10 +43,25 @@ interface AccountServiceRestClient {
     ): Uni<AccountPageBody>
 }
 
-data class AccountPageBody(val items: List<AccountSummaryBody> = emptyList(), val pageInfo: PageInfoBody? = null)
+/**
+ * Mirrors `com.openbank.libs.api.pagination.CursorPage` as account-service actually serializes it:
+ * `data` + `pagination`, NOT `items` + `pageInfo`. Getting these names wrong is not a loud failure
+ * — Jackson leaves the list empty, `findOpenAccounts` returns nothing, and the fail-closed guard
+ * silently becomes fail-OPEN. `AccountServiceClientContractTest` pins the shape against a real
+ * CursorPage payload for exactly that reason.
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AccountPageBody(val data: List<AccountSummaryBody> = emptyList(), val pagination: PageInfoBody? = null)
 
-data class AccountSummaryBody(val id: UUID? = null, val iban: String? = null, val status: String? = null)
+/**
+ * Subset of account-service's `AccountResponse` — the identifier is `accountNumber`, not `iban`.
+ * `ignoreUnknown` is deliberate: this guard needs three fields, and account-service adding a
+ * fourth (it carries productId, goal fields, timestamps…) must not start throwing here.
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AccountSummaryBody(val id: UUID? = null, val accountNumber: String? = null, val status: String? = null)
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 data class PageInfoBody(val nextCursor: String? = null, val hasNextPage: Boolean = false)
 
 /**
@@ -68,11 +84,13 @@ class AccountServiceClient(@RestClient private val client: AccountServiceRestCli
         // PAGE_SIZE accounts pass the guard on a technicality.
         while (true) {
             val page = client.listByParty(partyId, PAGE_SIZE, cursor).awaitSuspending()
-            page.items
+            page.data
                 .filter { !it.status.equals(STATUS_CLOSED, ignoreCase = true) }
-                .forEach { open += it.iban ?: it.id?.toString() ?: UNKNOWN_ACCOUNT }
-            val info = page.pageInfo
-            if (info == null || !info.hasNextPage || info.nextCursor == null) break
+                .forEach { open += it.accountNumber ?: it.id?.toString() ?: UNKNOWN_ACCOUNT }
+            val info = page.pagination
+            // Also break when the cursor fails to advance: a downstream that echoes the same
+            // cursor with hasNextPage=true would otherwise spin here forever.
+            if (info?.nextCursor == null || !info.hasNextPage || info.nextCursor == cursor) break
             cursor = info.nextCursor
         }
         return open

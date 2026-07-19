@@ -48,17 +48,45 @@ We will add an explicit, first-class merge operation to party-service, distinct 
 3. **`PARTY_MERGED`** is published to the existing party status-changed topic, carrying both ids
    and the approval reference. PII is preserved on the retired row; nothing is anonymised.
 
-4. **The balance transfer is an internal ledger ADJUSTMENT journal entry** (`POST /api/v1/journals`,
-   already four-eyes gated), referencing the merge approval id — never a customer-initiated
-   payment. The posting says what actually happened: a bookkeeping correction between two records
-   of one person, not a transfer of value between two persons.
+4. **The balance transfer is an internal adjustment, not a customer payment** — but that
+   distinction has to be *built*, and this ADR is where the gap is recorded rather than assumed.
+
+   Two things turned out not to be true of the platform as it stands:
+
+   - **`TransactionType.ADJUSTMENT` is inert.** `PaymentJournalFactory.buildLines` never reads
+     `transaction.type`; it branches only on currency and on source/target nullity. DEBIT,
+     TRANSFER and ADJUSTMENT produce byte-identical journals. Today the type is a label on the
+     transaction row and nothing else, so posting the sweep "as an ADJUSTMENT" would buy exactly
+     zero audit distinction from an ordinary payment.
+   - **Neither `ledger.create` nor `transaction.create` is four-eyes gated.** The OPA verb list
+     covers `post` and `reverse`, which no posting endpoint actually emits, and
+     `authz.four-eyes.enforce` defaults to `false` in ledger-service regardless.
+
+   So the sweep needs a distinguishable path of its own. We will add a dedicated operator-only
+   action rather than reusing `transaction.create` — that action is on the M2M payment rails, and
+   the OPA bundle's own guidance is that a verb may only join the four-eyes list when every
+   fleet-wide caller of it is a human operator. The mechanical shape already exists and is
+   correct: the `source != null && target != null` branch of `PaymentJournalFactory` posts two
+   deposit-control legs, the control account nets to zero, and only the sub-ledger dimension
+   moves — a bookkeeping correction between two records of one person, not a transfer of value
+   between two persons. What is missing is the type carried through to the journal, the reason
+   code, and the approval binding.
+
+   This lands as a separate money-path change (2 approvals + threat model). Until it does, the
+   merge endpoint's account guard is what prevents a half-finished merge: a duplicate with an
+   open account cannot be retired at all.
 
 Order is fixed and each step is separately auditable: approve merge case → open matching currency
-pockets on the surviving account → ADJUSTMENT journal per currency → close the source account →
-merge the party. Account closure does *not* check the balance
-([ADR-0109](0109-customer-managed-currency-pockets.md) option B), so the sweep must precede it;
-the merge endpoint therefore refuses a source party still owning an account with a non-zero
-balance, putting the check where the domain can enforce it.
+pockets on the surviving account (pockets are an account-service aggregate; the balance projection
+auto-creates a balance row but *not* a pocket, so skipping this leaves a balance with no owning
+pocket — a silent structural inconsistency, not an error) → sweep per currency → close the source
+account → merge the party.
+
+Account closure does *not* check the balance ([ADR-0109](0109-customer-managed-currency-pockets.md)
+option B), so the sweep must precede it. The merge endpoint therefore refuses a source party that
+still owns any non-CLOSED account, putting the check where the domain can enforce it. That guard is
+fail-closed: if account-service cannot be reached, the merge aborts, because "we could not ask"
+must never resolve to "owns nothing".
 
 ## Alternatives considered
 
