@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.27.0...customer-edge-v0.28.0) (2026-07-19)
+
+
+### Features
+
+* **edge:** international SWIFT (MT103) wire transfer for customers ([#1719](https://github.com/JiRaska/open-bank-oss/issues/1719)) ([b5bd667](https://github.com/JiRaska/open-bank-oss/commit/b5bd6672faba1e5729f9dfef001252240a886acc)), closes [#1718](https://github.com/JiRaska/open-bank-oss/issues/1718)
+
 ## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.26.1...customer-edge-v0.27.0) (2026-07-19)
 
 
