@@ -42,4 +42,10 @@ data class AuthCompleteRequestDto(
 data class TokenPairDto(
     @JsonProperty("access_token") val accessToken: String,
     @JsonProperty("refresh_token") val refreshToken: String?,
+    // Opaque, rotating device-session id the app stores and presents to /session/refresh to
+    // silently resume without a passkey ceremony (ADR-0066 F2 refresh fix, DeviceSessionStore).
+    @JsonProperty("device_session_id") val deviceSessionId: String? = null,
 )
+
+/** Body of POST /customer/v1/webauthn/session/refresh — the app's opaque device-session id. */
+data class SessionRefreshRequestDto(@JsonProperty("device_session_id") val deviceSessionId: String)
