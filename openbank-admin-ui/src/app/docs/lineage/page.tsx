@@ -11,6 +11,7 @@ import { edgeGeometry, mixHex, pathId } from '@/components/topology/geometry'
 import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
+import { layoutBands } from '@/components/topology/layout'
 
 // ---------------------------------------------------------------------------
 // Data-lineage flow (ADR-0071). Companion to the service map, but the graph here
@@ -62,39 +63,7 @@ const PILL_GAP = 14
 const HALF_H = PILL_H / 2
 const pillWidth = (label: string) => Math.max(96, 22 + label.length * 6.6 + 14)
 
-type Pos = { cx: number; cy: number; w: number }
-type Band = { key: Domain; y: number; h: number; count: number }
-
-function buildLayout(byDomain: Record<string, GovService[]>, domains: Domain[]) {
-  const availW = WIDTH - CANVAS_PAD * 2
-  const pos: Record<string, Pos> = {}
-  const bands: Band[] = []
-  let y = CANVAS_PAD
-  for (const dom of domains) {
-    const list = byDomain[dom] ?? []
-    if (!list.length) continue
-    const rows: { id: string; w: number }[][] = [[]]
-    let rowW = 0
-    for (const s of list) {
-      const w = pillWidth(prettyName(s.serviceName))
-      const cur = rows[rows.length - 1]
-      if (cur.length && rowW + PILL_GAP + w > availW) { rows.push([]); rowW = 0 }
-      rows[rows.length - 1].push({ id: s.serviceName, w })
-      rowW += (cur.length ? PILL_GAP : 0) + w
-    }
-    let ry = y + BAND_HEAD
-    for (const row of rows) {
-      const total = row.reduce((s, r) => s + r.w, 0) + PILL_GAP * Math.max(0, row.length - 1)
-      let x = CANVAS_PAD + Math.max(0, (availW - total) / 2)
-      for (const r of row) { pos[r.id] = { cx: x + r.w / 2, cy: ry + PILL_H / 2, w: r.w }; x += r.w + PILL_GAP }
-      ry += PILL_H + PILL_GAP
-    }
-    const h = BAND_HEAD + rows.length * (PILL_H + PILL_GAP) - PILL_GAP + BAND_PAD_Y
-    bands.push({ key: dom, y, h, count: list.length })
-    y += h + BAND_GAP
-  }
-  return { pos, bands, height: bands.length ? y - BAND_GAP + CANVAS_PAD : CANVAS_PAD }
-}
+const BAND_CFG = { width: WIDTH, pad: CANVAS_PAD, pillH: PILL_H, bandHead: BAND_HEAD, bandPadY: BAND_PAD_Y, bandGap: BAND_GAP, pillGap: PILL_GAP, measure: pillWidth }
 
 export default function LineageFlowPage() {
   const { t } = useLanguage()
@@ -145,7 +114,10 @@ export default function LineageFlowPage() {
   const visibleIds = new Set(visible.map(s => s.serviceName))
   const byDomain: Record<string, GovService[]> = {}
   for (const s of visible) (byDomain[domainOf(s)] ||= []).push(s)
-  const LAYOUT = buildLayout(byDomain, DOMAIN_ORDER)
+  const LAYOUT = layoutBands(
+    DOMAIN_ORDER.map(dom => ({ key: dom, items: (byDomain[dom] ?? []).map(s => ({ id: s.serviceName, label: prettyName(s.serviceName) })) })),
+    BAND_CFG,
+  )
 
   const visibleEdges = allEdges.filter(e =>
     visibleIds.has(e.from) && visibleIds.has(e.to) && (relFilter === 'all' || e.type === relFilter))
