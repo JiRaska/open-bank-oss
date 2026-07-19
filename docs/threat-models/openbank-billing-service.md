@@ -87,7 +87,14 @@ Trust boundaries: every inbound/outbound hop is service↔service over mTLS with
 - **Information disclosure** — `FeeContext` (balance/segment) is processed transiently and not
   re-persisted beyond the audit record; transport is TLS; reads are OPA-authorized.
 - **Denial of service** — assessment is idempotent and bounded per cycle; a redrive replays to the
-  same ledger journal rather than amplifying.
+  same ledger journal rather than amplifying. **Availability (self-inflicted):** a transient DB blip
+  can poison the reactive pg pool, and Quarkus leaves every pool self-heal lever off by default, so
+  the pool has no way to purge dead connections and wedges the service until a pod restart. The
+  datasource readiness probe does not catch this — it is a connectivity check (`SELECT 1` on a fresh
+  connection) that stays green while a reachable DB's pooled connections are dead, so the service
+  keeps receiving traffic it cannot serve, invisibly. Mitigated by `idle-timeout`/`max-lifetime`/
+  `max-size` on the reactive pool (bounds any wedge to `max-lifetime`) plus a 5xx-while-Ready alert
+  independent of the health probe (`BillingServerErrorsWhileHealthy`). Fleet follow-up: #1682.
 - **Elevation of privilege** — no customer-facing write path; only operator/system principals,
   RBAC via OIDC scopes + OPA.
 
