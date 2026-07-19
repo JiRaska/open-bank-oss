@@ -123,7 +123,10 @@ lending:
     system-actor-id: ${LENDING_LEDGER_SYSTEM_ACTOR_ID:00000000-0000-0000-0000-0000000000aa}
     gl:
       loans-receivable: ${LENDING_GL_LOANS_RECEIVABLE:a0000000-0000-0000-0000-000000001200}
-      funding-clearing: ${LENDING_GL_FUNDING_CLEARING:a0000000-0000-0000-0000-000000001100}
+      # NOT the "…-001100" code-based-suffix convention the other GL defaults use: ledger-service's
+      # shared "Customer Cash Clearing" account (code 1100) was seeded pre-convention in V3 with a
+      # sequential id. See LendingLedgerConfig.Gl.fundingClearing kdoc (issue #1720).
+      funding-clearing: ${LENDING_GL_FUNDING_CLEARING:a0000000-0000-0000-0000-000000000001}
       interest-income: ${LENDING_GL_INTEREST_INCOME:a0000000-0000-0000-0000-000000004100}
       interest-receivable: ${LENDING_GL_INTEREST_RECEIVABLE:a0000000-0000-0000-0000-000000001300}
       loan-loss-expense: ${LENDING_GL_LOAN_LOSS_EXPENSE:a0000000-0000-0000-0000-000000005100}
