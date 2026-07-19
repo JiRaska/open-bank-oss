@@ -65,6 +65,7 @@ class WebAuthnResource(
     private val challengeStore: ChallengeStore,
     private val credentialStore: WebAuthnStore,
     private val keycloakClient: WebAuthnKeycloakClient,
+    private val deviceSessions: DeviceSessionStore,
     private val jsonMapper: ObjectMapper,
 ) {
 
@@ -182,7 +183,8 @@ class WebAuthnResource(
         //
         // The response is additive: a client that only checked the status code keeps working.
         val (accessToken, refreshToken) = keycloakClient.impersonate(keycloakUserId)
-        return Response.ok(TokenPairDto(accessToken, refreshToken)).build()
+        val deviceSessionId = deviceSessions.issue(keycloakUserId)
+        return Response.ok(TokenPairDto(accessToken, refreshToken, deviceSessionId)).build()
     }
 
     // ── Authentication (returning-user login, no browser) ───────────────────────────────────
@@ -272,7 +274,27 @@ class WebAuthnResource(
         )
 
         val (accessToken, refreshToken) = keycloakClient.impersonate(stored.keycloakUserId)
-        return Response.ok(TokenPairDto(accessToken, refreshToken)).build()
+        val deviceSessionId = deviceSessions.issue(stored.keycloakUserId)
+        return Response.ok(TokenPairDto(accessToken, refreshToken, deviceSessionId)).build()
+    }
+
+    /**
+     * Silently resume a native-passkey session WITHOUT a passkey ceremony (ADR-0066 F2 refresh fix).
+     * The app presents the opaque device-session id it got at login; the edge validates+rotates it
+     * (single-use) and re-mints a fresh access token via impersonate() — the exchange-minted token is
+     * not refreshable by the public openbank-app client, so a normal refresh_token grant can't do it.
+     * Public (no bearer): the device-session id IS the credential, device-bound in the app Keychain.
+     */
+    @POST
+    @Path("/session/refresh")
+    @Blocking
+    fun sessionRefresh(request: SessionRefreshRequestDto): Response {
+        val keycloakUserId = deviceSessions.consume(request.deviceSessionId)
+            ?: return Response.status(Response.Status.UNAUTHORIZED)
+                .entity(mapOf("error" to "invalid_device_session")).build()
+        val (accessToken, refreshToken) = keycloakClient.impersonate(keycloakUserId)
+        val rotated = deviceSessions.issue(keycloakUserId)
+        return Response.ok(TokenPairDto(accessToken, refreshToken, rotated)).build()
     }
 
     // ── Internals ─────────────────────────────────────────────────────────────────────────

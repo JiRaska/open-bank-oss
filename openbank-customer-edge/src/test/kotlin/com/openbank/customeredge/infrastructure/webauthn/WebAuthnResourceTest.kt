@@ -24,12 +24,14 @@ class WebAuthnResourceTest {
     private val challengeStore = mockk<ChallengeStore>()
     private val credentialStore = mockk<WebAuthnStore>()
     private val keycloakClient = mockk<WebAuthnKeycloakClient>()
+    private val deviceSessions = mockk<DeviceSessionStore>(relaxed = true)
 
     private val resource = WebAuthnResource(
         ticketService,
         challengeStore,
         credentialStore,
         keycloakClient,
+        deviceSessions,
         ObjectMapper(),
     ).apply {
         rpId = "open-bank.tech"
