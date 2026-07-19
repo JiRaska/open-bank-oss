@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.26.1...customer-edge-v0.27.0) (2026-07-19)
+
+
+### Features
+
+* **customer-edge:** expose POST /customer/v1/sepa-instant (SCT Inst credit transfer) ([#1713](https://github.com/JiRaska/open-bank-oss/issues/1713)) ([08471c0](https://github.com/JiRaska/open-bank-oss/commit/08471c0f4faa3459481affe9c5a535e28f108a46))
+
 ## [0.26.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.26.0...customer-edge-v0.26.1) (2026-07-19)
 
 
