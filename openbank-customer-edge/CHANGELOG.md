@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.32.0...customer-edge-v0.33.0) (2026-07-19)
+
+
+### Features
+
+* **customer-edge:** customer complaint filing route (ADR-0085) ([#1766](https://github.com/JiRaska/open-bank-oss/issues/1766)) ([0b693b8](https://github.com/JiRaska/open-bank-oss/commit/0b693b8924b68f3f4460419b48a8841b68fb44bb))
+* **customer-edge:** list + recall SCT Inst payments (payment recall) ([#1770](https://github.com/JiRaska/open-bank-oss/issues/1770)) ([dd96adf](https://github.com/JiRaska/open-bank-oss/commit/dd96adf21b29e9528ac0db8d4b7aad458bc3e238))
+* **customer-edge:** notification detail route with body (in-app inbox) ([#1765](https://github.com/JiRaska/open-bank-oss/issues/1765)) ([3830d93](https://github.com/JiRaska/open-bank-oss/commit/3830d939e7dce5ba6b8d0f46ff4c5c2f3f0c565b))
+* **customer-edge:** permanent card block (report lost/stolen) ([#1769](https://github.com/JiRaska/open-bank-oss/issues/1769)) ([8405a07](https://github.com/JiRaska/open-bank-oss/commit/8405a071a3d7f66a2001f6f76a6b2af36ec851cd))
+
 ## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.31.0...customer-edge-v0.32.0) (2026-07-19)
 
 
