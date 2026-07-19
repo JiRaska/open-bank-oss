@@ -137,6 +137,16 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # swift-service's own domain-event stream (swift-events-out ->
+      # openbank.payments.swift.event). Missing here, the producer gets "Topic
+      # authorization failed" and a synchronous send HANGS on the failing publish —
+      # same trap fixed for sepa-instant above (#1717).
+      - resource:
+          type: topic
+          name: openbank.payments.swift.
+          patternType: prefix
+        operations: [Write, Describe, Create]
+        host: "*"
 ---
 # ── Consumer: transaction-service ───────────────────────────────────────────
 # Reads scheme-accepted, writes its DLQ, and joins its dedicated consumer group.

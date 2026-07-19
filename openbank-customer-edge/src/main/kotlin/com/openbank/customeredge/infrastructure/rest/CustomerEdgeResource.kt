@@ -37,6 +37,8 @@ import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
 import java.time.Clock
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 /**
@@ -131,6 +133,13 @@ class CustomerEdgeResource(
 
     @ConfigProperty(name = "openbank.edge.sepa-instant-service-url")
     lateinit var sepaInstantServiceUrl: String
+
+    @ConfigProperty(name = "openbank.edge.swift-service-url")
+    lateinit var swiftServiceUrl: String
+
+    /** The bank's own SWIFT/BIC — the senderBic on outbound MT103s. */
+    @ConfigProperty(name = "openbank.edge.bank-bic", defaultValue = "OPENCZPPXXX")
+    lateinit var bankBic: String
 
     @ConfigProperty(name = "openbank.edge.sca-service-url")
     lateinit var scaServiceUrl: String
@@ -1394,6 +1403,89 @@ class CustomerEdgeResource(
     }
 
     /**
+     * Initiate an international SWIFT (MT103) credit transfer from one of the caller's OWN accounts.
+     * The customer supplies only the beneficiary (name, account/IBAN, receiver BIC), amount, currency
+     * and reference; the edge assembles the bank-operational MT103 fields — senderBic (the bank's own
+     * BIC), message type, transaction reference, value date, the ordering-customer identity resolved
+     * from the debtor account/party, and the amount in minor units. Ownership + SCA gate as for the
+     * other payment rails.
+     */
+    @POST
+    @Path("/swift")
+    @Authorize(action = "customer.payments.initiate")
+    @Blocking
+    fun createSwift(
+        body: String,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?,
+    ): Response {
+        val customer = customer()
+        val debtor = parseDebtorAccountId(objectMapper, body)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return forbidden("Missing or malformed debtorAccountId")
+        val accountJson = fetchAccount(debtor, customer.partyId)
+            ?: return forbidden("Debtor account does not belong to caller")
+        if (extractOwnerPartyId(accountJson) != customer.partyId.toString()) {
+            return forbidden("Debtor account does not belong to caller")
+        }
+        val debtorIban = extractTextField(objectMapper, accountJson, "accountNumber")
+            ?: return badRequest("Cannot resolve debtor IBAN")
+        val debtorName = fetchPartyLegalName(customer.partyId) ?: return badRequest("Cannot resolve debtor name")
+        val beneficiaryIban = extractTextField(objectMapper, body, "creditorIban")
+            ?: return badRequest("Missing creditorIban")
+        val beneficiaryName = extractTextField(objectMapper, body, "creditorName")
+            ?: return badRequest("Missing creditorName")
+        val receiverBic = extractTextField(objectMapper, body, "bic")
+            ?: return badRequest("Missing beneficiary BIC")
+        val amount = extractAmountField(objectMapper, body) ?: return badRequest("Missing amount")
+        val currency = extractTextField(objectMapper, body, "currency") ?: "EUR"
+        scaGate(scaChallengeId, customer, amount, currency, beneficiaryIban, "payments.swift")?.let { return it }
+        val key = idempotencyKey?.takeIf { it.isNotBlank() } ?: "swift-$debtor-$beneficiaryIban-$amount"
+        val request = buildSwiftRequest(
+            key, debtor.toString(), debtorIban, debtorName, beneficiaryIban, beneficiaryName,
+            receiverBic, amount, currency, extractTextField(objectMapper, body, "reference"),
+        )
+        val resp = upstream.post("$swiftServiceUrl/api/v1/swift", customer.partyId.toString(), request, key)
+        auditPayment(resp, customer, "payments.swift", amount, currency, beneficiaryIban, scaChallengeId)
+        return resp
+    }
+
+    @Suppress("LongParameterList")
+    private fun buildSwiftRequest(
+        key: String,
+        debtorAccountId: String,
+        debtorIban: String,
+        debtorName: String,
+        beneficiaryIban: String,
+        beneficiaryName: String,
+        receiverBic: String,
+        amount: String,
+        currency: String,
+        reference: String?,
+    ): String {
+        val minor = runCatching { java.math.BigDecimal(amount).movePointRight(2).toLong() }.getOrDefault(0L)
+        val out = objectMapper.createObjectNode()
+        out.put("idempotencyKey", key)
+        out.put("messageType", "MT103")
+        out.put("senderBic", bankBic)
+        out.put("receiverBic", receiverBic)
+        // SWIFT transaction reference is Max16Text; strip non-alphanumerics and cap.
+        out.put("transactionReference", key.filter { it.isLetterOrDigit() }.take(SWIFT_REF_MAX_LEN))
+        // swift-service validates valueDate as YYYYMMDD (BASIC_ISO_DATE), not ISO with dashes.
+        out.put("valueDate", LocalDate.now(clock).format(DateTimeFormatter.BASIC_ISO_DATE))
+        out.put("currency", currency)
+        out.put("amountMinorUnits", minor)
+        out.put("orderingCustomerAccount", debtorIban)
+        out.put("orderingCustomerAccountId", debtorAccountId)
+        out.put("orderingCustomerName", debtorName)
+        out.put("beneficiaryAccount", beneficiaryIban)
+        out.put("beneficiaryName", beneficiaryName)
+        reference?.let { out.put("remittanceInfo", it) }
+        out.put("chargeCode", "SHA")
+        out.put("priority", "NORMAL")
+        return objectMapper.writeValueAsString(out)
+    }
+
+    /**
      * Read the current status of one of the caller's own SEPA payments (settlement-honest, ADR-0108).
      * The twin of [getDomesticPaymentStatus]: the app polls this after a create returns merely accepted
      * (RECEIVED/VALIDATED/PROCESSING) so the green success screen only appears once the payment is
@@ -2380,6 +2472,9 @@ class CustomerEdgeResource(
 
         /** SEPA endToEndId max length (ISO 20022 pain.001 Max35Text). */
         private const val E2E_ID_MAX_LEN = 35
+
+        /** SWIFT transactionReference is a Max16Text field. */
+        private const val SWIFT_REF_MAX_LEN = 16
 
         /** Amount may arrive as JSON number or string; normalise to its decimal text form. */
         internal fun extractAmountField(mapper: ObjectMapper, json: String): String? = runCatching {
