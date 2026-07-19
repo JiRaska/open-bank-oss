@@ -90,6 +90,15 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # OPA advisory mode (ADR-0034): sdd-service has no OPA policy-decision sidecar
+            # (unlike money-path services such as lending/payments/accounts), so @Authorize
+            # would otherwise fail closed ("OPA call failed") on every endpoint. Same posture
+            # as interest-service / anacredit — non-money-path services run authz advisory.
+            # Access stays enforced by JAX-RS @RolesAllowed (operator/viewer roles) and, for
+            # customer traffic, by the customer-edge ownership (IDOR) check before it ever
+            # reaches this service. Refs #1730.
+            - name: AUTHZ_ENFORCE
+              value: "false"
           startupProbe:
             tcpSocket:
               port: management
