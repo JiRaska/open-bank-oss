@@ -137,6 +137,9 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.swift-service-url")
     lateinit var swiftServiceUrl: String
 
+    @ConfigProperty(name = "openbank.edge.sdd-service-url")
+    lateinit var sddServiceUrl: String
+
     /** The bank's own SWIFT/BIC — the senderBic on outbound MT103s. */
     @ConfigProperty(name = "openbank.edge.bank-bic", defaultValue = "OPENCZPPXXX")
     lateinit var bankBic: String
@@ -453,6 +456,51 @@ class CustomerEdgeResource(
         val out = objectMapper.createArrayNode()
         arr.forEach { i -> out.add(projectInstallment(i)) }
         return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * The SEPA Direct Debit mandates (inkasa) authorised on one of the caller's OWN accounts.
+     * Ownership enforced HERE: sdd-service's list is scoped by accountId only, so the edge checks
+     * the account belongs to the JWT party (403 otherwise). Projects each mandate to a customer-safe
+     * shape (creditor, UMR, scheme, sequence, status, dates) — internal outbox/version fields dropped.
+     * Fail-soft to `[]` when sdd-service is unavailable (it is KEDA scale-to-zero — the first call
+     * cold-starts it).
+     */
+    @GET
+    @Path("/sdd/mandates")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun listSddMandates(@QueryParam("accountId") accountId: UUID?): Response {
+        val customer = customer()
+        val account = accountId ?: return badRequest("Missing accountId")
+        val accountJson = fetchAccount(account, customer.partyId)
+            ?: return forbidden("Account does not belong to caller")
+        if (extractOwnerPartyId(accountJson) != customer.partyId.toString()) {
+            return forbidden("Account does not belong to caller")
+        }
+        val resp = upstream.get("$sddServiceUrl/api/v1/sdd/mandates?accountId=$account", customer.partyId.toString())
+        val arr = if (resp.status == 200) {
+            runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") as? ArrayNode }.getOrNull()
+        } else {
+            null
+        } ?: return Response.ok("[]").type(MediaType.APPLICATION_JSON).build()
+        val out = objectMapper.createArrayNode()
+        arr.forEach { m -> out.add(projectMandate(m)) }
+        return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    private fun projectMandate(m: com.fasterxml.jackson.databind.JsonNode): ObjectNode {
+        val o = objectMapper.createObjectNode()
+        o.put("id", m.get("id")?.asText())
+        o.put("creditorName", m.get("creditorName")?.asText() ?: "")
+        o.put("creditorIdentifier", m.get("creditorIdentifier")?.asText() ?: "")
+        o.put("umr", m.get("umr")?.asText() ?: "")
+        o.put("scheme", m.get("scheme")?.asText() ?: "")
+        o.put("sequenceType", m.get("sequenceType")?.asText() ?: "")
+        o.put("status", m.get("status")?.asText() ?: "")
+        m.get("signatureDate")?.asText()?.let { o.put("signatureDate", it) }
+        m.get("lastCollectionDate")?.asText()?.takeIf { it.isNotBlank() }?.let { o.put("lastCollectionDate", it) }
+        return o
     }
 
     private fun projectLoan(l: com.fasterxml.jackson.databind.JsonNode): ObjectNode {
