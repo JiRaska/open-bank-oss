@@ -5,8 +5,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { RefreshCw, CheckCircle, Clock, AlertTriangle, Zap, Database, Shield, GitBranch, Activity, Server, ChevronRight, ArrowRight, CreditCard, Globe, BarChart2, Repeat2 } from 'lucide-react'
+import { RefreshCw, CheckCircle, Clock, AlertTriangle, Zap, Database, Shield, GitBranch, Activity, Server, ChevronRight, ArrowRight } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { MONEY_WORKFLOWS } from '@/lib/temporal/workflows'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 
 // ─── types ───────────────────────────────────────────────────────────────────
@@ -164,56 +165,6 @@ const COMPARISON = [
 
 // ─── money-path workflow map ──────────────────────────────────────────────────
 
-const MONEY_WORKFLOWS = [
-  {
-    icon: CreditCard,
-    color: '#6366f1',
-    serviceCs: 'Tuzemské platby',
-    serviceEn: 'Domestic payments',
-    svc: 'openbank-domestic-payment-service',
-    workflowCs: 'DomesticPaymentWorkflow',
-    stepsCs: ['Validace IBAN + limit', 'Rezervace sald', 'Odeslání na CERTIS/instant rail', 'Potvrzení settlement', 'Kompenzace při odmítnutí'],
-    stepsEn: ['IBAN + limit validation', 'Balance reservation', 'Submit to CERTIS/instant rail', 'Settlement confirmation', 'Compensation on rejection'],
-    flagCs: 'flag: domestic-payment-temporal-workflow=ON',
-    flagEn: 'flag: domestic-payment-temporal-workflow=ON',
-  },
-  {
-    icon: Globe,
-    color: '#8b5cf6',
-    serviceCs: 'SEPA platby',
-    serviceEn: 'SEPA payments',
-    svc: 'openbank-sepa-payment-service',
-    workflowCs: 'SepaPaymentWorkflow',
-    stepsCs: ['Validace BIC + SEPA pravidla', 'ISO 20022 pacs.008 sestavení', 'Odeslání do SWIFT/EBA', 'SCT/SCT Inst potvrzení', 'Kompenzace přes pacs.004'],
-    stepsEn: ['BIC + SEPA rules validation', 'ISO 20022 pacs.008 assembly', 'Submit to SWIFT/EBA', 'SCT/SCT Inst confirmation', 'Compensation via pacs.004'],
-    flagCs: 'flag: sepa-payment-temporal-workflow=ON',
-    flagEn: 'flag: sepa-payment-temporal-workflow=ON',
-  },
-  {
-    icon: Repeat2,
-    color: '#10b981',
-    serviceCs: 'FX konverze',
-    serviceEn: 'FX conversions',
-    svc: 'openbank-fx-service',
-    workflowCs: 'FxConversionWorkflow',
-    stepsCs: ['Sestavení kurzu (ECB + spread)', 'G5 screening', 'Odpis zdrojové měny', 'Připsání cílové měny', 'Journal entry pár (ADR-0039)'],
-    stepsEn: ['Rate assembly (ECB + spread)', 'G5 screening', 'Debit source currency', 'Credit target currency', 'Journal entry pair (ADR-0039)'],
-    flagCs: 'flag: fx-temporal-workflow=ON',
-    flagEn: 'flag: fx-temporal-workflow=ON',
-  },
-  {
-    icon: BarChart2,
-    color: '#f59e0b',
-    serviceCs: 'Uzávěrky (EoD/EoM/EoY)',
-    serviceEn: 'Closings (EoD/EoM/EoY)',
-    svc: 'openbank-statement-service',
-    workflowCs: 'StatementCloseWorkflow',
-    stepsCs: ['Agregace transakcí dne/měsíce/roku', 'Výpočet úrokových nákladů', 'Export na S3 + Kafka výpis', 'Potvrzení uzávěrky'],
-    stepsEn: ['Aggregate daily/monthly/yearly transactions', 'Compute interest charges', 'Export to S3 + Kafka statement', 'Closing confirmation'],
-    flagCs: 'flag: statement-temporal-workflow=ON',
-    flagEn: 'flag: statement-temporal-workflow=ON',
-  },
-]
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
