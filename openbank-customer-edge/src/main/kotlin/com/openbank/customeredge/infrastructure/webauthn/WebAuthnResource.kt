@@ -297,6 +297,20 @@ class WebAuthnResource(
         return Response.ok(TokenPairDto(accessToken, refreshToken, rotated)).build()
     }
 
+    /**
+     * Revoke a device session on logout (ADR-0066 F2). Idempotent — a missing/already-consumed id is
+     * a no-op. Public: the opaque id is the only credential, and revoking it can only ever end a
+     * session, never start one. The app calls this before dropping its local tokens so a logged-out
+     * device cannot silently resume even if its Keychain copy of the id somehow survives.
+     */
+    @POST
+    @Path("/session/revoke")
+    @Blocking
+    fun sessionRevoke(request: SessionRefreshRequestDto): Response {
+        deviceSessions.revoke(request.deviceSessionId)
+        return Response.noContent().build()
+    }
+
     // ── Internals ─────────────────────────────────────────────────────────────────────────
 
     /** Reads the `Authorization: Bearer <ticket>` header and resolves it to a partyId, or null. */
