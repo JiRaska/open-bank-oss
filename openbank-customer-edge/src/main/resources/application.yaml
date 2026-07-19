@@ -94,6 +94,7 @@ openbank:
     balance-service-url: ${BALANCE_SERVICE_URL:http://balance-service.balances.svc:8103}
     interest-service-url: ${INTEREST_SERVICE_URL:http://interest-service.interest.svc:8125}
     kyc-service-url: ${KYC_SERVICE_URL:http://kyc-service.kyc.svc:8114}
+    lending-service-url: ${LENDING_SERVICE_URL:http://lending-service.lending.svc:8126}
     transaction-service-url: ${TRANSACTION_SERVICE_URL:http://transaction-service.payments.svc:8102}
     domestic-payment-service-url: ${DOMESTIC_PAYMENT_SERVICE_URL:http://domestic-payment.payments.svc:8116}
     sepa-payment-service-url: ${SEPA_PAYMENT_SERVICE_URL:http://sepa-payment.payments.svc:8115}

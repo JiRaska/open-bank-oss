@@ -6,6 +6,7 @@ package com.openbank.customeredge.infrastructure.rest
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ArrayNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.openbank.customeredge.domain.model.CustomerIdentity
 import com.openbank.customeredge.infrastructure.audit.EdgeAuditPublisher
@@ -107,6 +108,9 @@ class CustomerEdgeResource(
 
     @ConfigProperty(name = "openbank.edge.kyc-service-url")
     lateinit var kycServiceUrl: String
+
+    @ConfigProperty(name = "openbank.edge.lending-service-url")
+    lateinit var lendingServiceUrl: String
 
     // ADR-0109 P2: product-catalog is the authority for which currencies a product permits.
     // Defaulted so a missing env doesn't break startup; reachable in-cluster.
@@ -378,6 +382,95 @@ class CustomerEdgeResource(
         }
         out.set<com.fasterxml.jackson.databind.JsonNode>("checks", checks)
         return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    // --- Loans (ADR lending; read-only customer view) ---
+
+    /**
+     * The caller's OWN loans. No path param — the party is taken from the JWT, so a customer only
+     * ever sees their own loans. Projects lending-service's [Loan] list to a customer-safe shape
+     * (principal, rate, term, status, dates) — internal application/version fields are dropped.
+     * Fail-soft to `[]` when lending-service is unavailable.
+     */
+    @GET
+    @Path("/loans")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun listLoans(): Response {
+        val customer = customer()
+        val resp = upstream.get(
+            "$lendingServiceUrl/api/v1/lending/loans?partyId=${customer.partyId}",
+            customer.partyId.toString(),
+        )
+        val arr = if (resp.status == 200) {
+            runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") as? ArrayNode }.getOrNull()
+        } else {
+            null
+        } ?: return Response.ok("[]").type(MediaType.APPLICATION_JSON).build()
+        val out = objectMapper.createArrayNode()
+        arr.forEach { l -> out.add(projectLoan(l)) }
+        return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * The repayment schedule for one of the caller's OWN loans. Ownership enforced HERE: the loan is
+     * fetched and its partyId compared to the caller (403 otherwise) — lending-service scopes by loan
+     * id only. Projects each installment to {number, dueDate, payment, principal, interest, paid}.
+     */
+    @GET
+    @Path("/loans/{loanId}/schedule")
+    @Authorize(action = "customer.profile.read", resource = "#loanId")
+    @Blocking
+    fun getLoanSchedule(@PathParam("loanId") loanId: UUID): Response {
+        val customer = customer()
+        val loanResp = upstream.get("$lendingServiceUrl/api/v1/lending/loans/$loanId", customer.partyId.toString())
+        if (loanResp.status != 200) return forbidden("Loan does not belong to caller")
+        val loan = runCatching { objectMapper.readTree(loanResp.entity?.toString() ?: "") }.getOrNull()
+        if (loan?.get("partyId")?.asText() != customer.partyId.toString()) {
+            return forbidden("Loan does not belong to caller")
+        }
+        val schedResp = upstream.get(
+            "$lendingServiceUrl/api/v1/lending/loans/$loanId/schedule",
+            customer.partyId.toString(),
+        )
+        val arr = if (schedResp.status == 200) {
+            runCatching { objectMapper.readTree(schedResp.entity?.toString() ?: "") as? ArrayNode }.getOrNull()
+        } else {
+            null
+        } ?: return Response.ok("[]").type(MediaType.APPLICATION_JSON).build()
+        val out = objectMapper.createArrayNode()
+        arr.forEach { i -> out.add(projectInstallment(i)) }
+        return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    private fun projectLoan(l: com.fasterxml.jackson.databind.JsonNode): ObjectNode {
+        val o = objectMapper.createObjectNode()
+        o.put("id", l.get("id")?.let { if (it.isObject) it.get("value")?.asText() else it.asText() })
+        val principal = l.get("principal")
+        o.put("principalAmount", principal?.get("amount")?.asText() ?: "0")
+        o.put("currency", principal?.get("currency")?.asText() ?: "CZK")
+        // nominalAnnualRate is a decimal fraction (0.089) — surface as a percent number "8.9".
+        l.get("nominalAnnualRate")?.decimalValue()?.let {
+            o.put("annualRatePercent", it.multiply(java.math.BigDecimal(100)).stripTrailingZeros().toPlainString())
+        }
+        o.put("termPeriods", l.get("termPeriods")?.asInt() ?: 0)
+        o.put("status", l.get("status")?.asText() ?: "")
+        l.get("firstDueDate")?.asText()?.let { o.put("firstDueDate", it) }
+        l.get("disbursedAt")?.asText()?.let { o.put("disbursedAt", it) }
+        return o
+    }
+
+    private fun projectInstallment(i: com.fasterxml.jackson.databind.JsonNode): ObjectNode {
+        val o = objectMapper.createObjectNode()
+        o.put("number", i.get("number")?.asInt() ?: 0)
+        i.get("dueDate")?.asText()?.let { o.put("dueDate", it) }
+        val payment = i.get("payment")
+        o.put("paymentAmount", payment?.get("amount")?.asText() ?: "0")
+        o.put("currency", payment?.get("currency")?.asText() ?: "CZK")
+        o.put("principalAmount", i.get("principal")?.get("amount")?.asText() ?: "0")
+        o.put("interestAmount", i.get("interest")?.get("amount")?.asText() ?: "0")
+        o.put("paid", i.get("paid")?.asBoolean(false) ?: false)
+        return o
     }
 
     // --- Currency pockets (ADR-0109) ---
