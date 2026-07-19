@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.9.2...party-service-v0.10.0) (2026-07-19)
+
+
+### Features
+
+* **party:** add duplicate party identity merge (ADR-0179) ([#1783](https://github.com/JiRaska/open-bank-oss/issues/1783)) ([ceab2c6](https://github.com/JiRaska/open-bank-oss/commit/ceab2c65039e3bfbbaae020444ca533afa5d3bcd))
+
 ## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.9.1...party-service-v0.9.2) (2026-07-17)
 
 
