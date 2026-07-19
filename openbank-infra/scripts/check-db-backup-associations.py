@@ -246,7 +246,7 @@ def main() -> int:
         drift = [(name, ns) for name, ns, _, _ in ours if name in declared and name not in applied]
         for name, namespace in drift:
             print(
-                f"::error::{name} (namespace {namespace}) is declared in {_rel(TF_FILE)} but has "
+                f"::{level}::{name} (namespace {namespace}) is declared in {_rel(TF_FILE)} but has "
                 f"NO live pod-identity association in AWS — db-backups.tf was never applied for it. "
                 f'Its WAL archiving fails "Unable to locate credentials". Run `tofu apply` in '
                 f"openbank-infra/aws/envs/sandbox-platform (expect adds only, 0 destroy)."
@@ -265,9 +265,10 @@ def main() -> int:
     if drift:
         problems.append(f"{len(drift)} declared association(s) not applied in AWS")
     print("\n" + "; ".join(problems) + ".", file=sys.stderr)
-    # Drift is a live, confirmed broken-backup state — fail regardless of --enforce. The static
-    # `missing` finding stays advisory unless --enforce (its historical contract).
-    return 1 if (args.enforce or drift) else 0
+    # Advisory unless --enforce, mirroring the static gate: a PR that merely REVEALS preexisting
+    # drift (e.g. this check's own introducing PR) must not be blocked by it. The scheduled run
+    # passes --enforce, so live drift is a red check there — that is the alarm.
+    return 1 if args.enforce else 0
 
 
 if __name__ == "__main__":

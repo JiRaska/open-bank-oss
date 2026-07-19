@@ -61,8 +61,12 @@ jobs:
       - name: aws CLI version (needs >= 2.15 for list-pod-identity-associations)
         run: aws --version
 
+      # Enforcing on schedule/dispatch (a live drift is a real broken-backup alarm); advisory on
+      # PR so a change that merely reveals preexisting drift isn't blocked by it.
       - name: "Live association gate — every declared CNPG backup association exists in AWS"
+        env:
+          ENFORCE: ${{ github.event_name != 'pull_request' && '--enforce' || '' }}
         run: |
           python3 openbank-infra/scripts/check-db-backup-associations.py \
-            --check-applied --enforce \
+            --check-applied ${ENFORCE} \
             --cluster-name "${EKS_CLUSTER}" --region "${AWS_REGION}"
