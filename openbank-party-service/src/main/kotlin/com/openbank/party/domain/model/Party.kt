@@ -28,7 +28,7 @@ data class Party(
     val createdAt: Instant,
     val updatedAt: Instant,
     val keycloakSub: String? = null,
-    /** AML screening outcome — the second key of the KYC+AML activation gate (ADR-0073). */
+    /** AML screening outcome — the second key of the KYC+AML activation gate. */
     val amlStatus: AmlStatus = AmlStatus.NOT_SCREENED,
     /** ADR-0072: HMAC-SHA256(pepper, canonical_rc) blind index — null if no RČ or non-Czech. */
     val rcBlindIndex: String? = null,

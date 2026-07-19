@@ -96,7 +96,7 @@ mp:
         topic: openbank.party.events
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
-      # KYC + AML activation gate (ADR-0073): consume the KYC and AML case-lifecycle
+      # KYC + AML activation gate: consume the KYC and AML case-lifecycle
       # topics and flip the party to ACTIVE only when both clear (two-key gate).
       kyc-events-in:
         connector: smallrye-kafka

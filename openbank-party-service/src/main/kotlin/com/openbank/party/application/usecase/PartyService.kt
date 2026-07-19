@@ -254,7 +254,7 @@ class PartyService : PartyUseCase {
 
     /**
      * Counts `openbank.parties.verified` once, on the transition INTO the verified (ACTIVE) state
-     * (ADR-0077 / ADR-0079). ACTIVE is the two-key terminal of [deriveStatus] (KYC APPROVED + AML
+     * (ADR-0077 §metric catalogue). ACTIVE is the two-key terminal of [deriveStatus] (KYC APPROVED + AML
      * CLEARED). Guards on the edge `previous != ACTIVE && current == ACTIVE` so it fires exactly
      * once on the verifying step — never on a rejection (→ SUSPENDED) and never on a status update
      * that leaves an already-ACTIVE party ACTIVE.
@@ -266,8 +266,11 @@ class PartyService : PartyUseCase {
     }
 
     /**
-     * Two-key activation gate (ADR-0073): a party becomes ACTIVE only when KYC is APPROVED
+     * Two-key activation gate: a party becomes ACTIVE only when KYC is APPROVED
      * AND AML is CLEARED. Any hard negative (KYC REJECTED or AML BLOCKED) suspends.
+     * No ADR records this conjunction — ADR-0069 defines the ACTIVE gate on the onboarding
+     * journey (KYC only) and ADR-0032 owns the `AmlCase` CLEARED/BLOCKED terminals; the
+     * two-key rule itself lives here in code.
      * Fail-closed: absent either positive signal the party stays PENDING_KYC; a CLOSED party
      * is never re-opened.
      */

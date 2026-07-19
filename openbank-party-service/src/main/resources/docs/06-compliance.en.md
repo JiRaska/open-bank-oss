@@ -7,7 +7,7 @@ party-service holds customer identity (PII) and the KYC/AML lifecycle, so it is 
 | Regulation | Relation to this service | Implementation |
 |---|---|---|
 | **GDPR** (Reg. (EU) 2016/679) | Holds the canonical PII record of every customer | Right-to-erasure endpoint (`DELETE /parties/{id}` → anonymise + tombstone), data-minimisation (no birth number, name-only search), explicit consent fields (`gdpr_consent_at/version`), retention windows |
-| **AMLD** (4/5/6 AML Directives) | Records KYC + AML outcomes, PEP, risk rating; drives activation gate | `kyc_status`/`aml_status`, two-key activation gate (ADR-0073 in code), `pep_flag`, `risk_rating`, `next_review_due`, sanctions-check metadata; column COMMENTs cite the articles |
+| **AMLD** (4/5/6 AML Directives) | Records KYC + AML outcomes, PEP, risk rating; drives activation gate | `kyc_status`/`aml_status`, two-key activation gate (in code, no ADR), `pep_flag`, `risk_rating`, `next_review_due`, sanctions-check metadata; column COMMENTs cite the articles |
 | **PSD2** (Reg. (EU) 2015/2366) | Identity backing account/consent flows | party is read-only resolved by `account-service`; no direct TPP access |
 | **FATCA / CRS** | Tax-residence reporting | `fatca_status`, `crs_status` columns on the party |
 | **DORA** (Reg. (EU) 2022/2554) | Operational resilience | health probes, fault-tolerant outbox (circuit breaker/retry/bulkhead/timeout), poison-pill-safe consumer, audit events, SLO, runbooks |
