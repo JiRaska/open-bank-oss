@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.52.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.52.0...admin-ui-v0.52.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** make compliance-controls live-signal join symmetric ([#1667](https://github.com/JiRaska/open-bank-oss/issues/1667)) ([a91bf26](https://github.com/JiRaska/open-bank-oss/commit/a91bf2626436b79400985794ab2db6f441f0f293)), closes [#1666](https://github.com/JiRaska/open-bank-oss/issues/1666)
+
 ## [0.52.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.51.0...admin-ui-v0.52.0) (2026-07-18)
 
 
