@@ -9,6 +9,10 @@ import {
   Cloud, GitBranch, Database, Eye, Server,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { edgeGeometry, mixHex, pathId } from '@/components/topology/geometry'
+import { FlowParticle } from '@/components/topology/FlowParticle'
+import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
+import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
 
 // ---------------------------------------------------------------------------
 // Infrastructure topology (ADR-0027/0029). A companion to the code-derived
@@ -203,48 +207,9 @@ const LAYOUT: { pos: Record<string, Pt>; bands: Band[]; height: number } = (() =
   return { pos, bands, height: y - BAND_GAP + CANVAS_PAD }
 })()
 
-// Curved, box-trimmed quadratic edge path (copied from the service map engine).
-type Half = { hw: number; hh: number }
-function edgeGeometry(a: Pt, b: Pt, aHalf: Half, bHalf: Half) {
-  const dx = b.cx - a.cx, dy = b.cy - a.cy
-  const dist = Math.hypot(dx, dy) || 1
-  const ux = dx / dist, uy = dy / dist
-  const boxT = (hw: number, hh: number) => {
-    const tx = Math.abs(ux) < 1e-6 ? Infinity : hw / Math.abs(ux)
-    const ty = Math.abs(uy) < 1e-6 ? Infinity : hh / Math.abs(uy)
-    return Math.min(tx, ty)
-  }
-  const ta = boxT(aHalf.hw, aHalf.hh) + 2
-  const tb = boxT(bHalf.hw, bHalf.hh) + 9
-  const sx = a.cx + ux * ta, sy = a.cy + uy * ta
-  const ex = b.cx - ux * tb, ey = b.cy - uy * tb
-  const mx = (sx + ex) / 2, my = (sy + ey) / 2
-  const curve = Math.min(46, dist * 0.14)
-  const cpx = mx - uy * curve, cpy = my + ux * curve
-  return { d: `M ${sx} ${sy} Q ${cpx} ${cpy} ${ex} ${ey}` }
-}
-
-function mixHex(hex: string, target: string, r: number): string {
-  const a = parseInt(hex.slice(1), 16), b = parseInt(target.slice(1), 16)
-  const ch = (s: number) => Math.round(((a >> s) & 255) + (((b >> s) & 255) - ((a >> s) & 255)) * r)
-  return '#' + ((1 << 24) + (ch(16) << 16) + (ch(8) << 8) + ch(0)).toString(16).slice(1)
-}
-
-// A moving particle bound to an edge path (SMIL). Parent decides whether to mount.
-function FlowParticle({ pathId, color, dur, begin, r = 2.5 }: { pathId: string; color: string; dur: number; begin: number; r?: number }) {
-  return (
-    <circle r={r} fill={color} stroke="var(--surface)" strokeWidth={0.5}>
-      <animateMotion dur={`${dur}s`} begin={`${begin}s`} repeatCount="indefinite" rotate="auto" calcMode="linear">
-        <mpath href={`#${pathId}`} />
-      </animateMotion>
-    </circle>
-  )
-}
-
 type LifeMap = Record<string, { urgency?: string }>
 
 const HALF_H = PILL_H / 2
-const pathId = (a: string, b: string, i: number) => `ix-${a}-${b}-${i}`.replace(/[^a-zA-Z0-9_-]/g, '_')
 
 export default function InfraTopologyPage() {
   const { t } = useLanguage()
@@ -253,12 +218,8 @@ export default function InfraTopologyPage() {
   const [selected, setSelected] = useState<string | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
   const [filter, setFilter] = useState<'all' | GroupKey>('all')
-  const [flow, setFlow] = useState(true)
+  const [flow, setFlow] = useFlowAnimation()
   const [isChecking, setIsChecking] = useState(false)
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) setFlow(false)
-  }, [])
 
   const load = async () => {
     setIsChecking(true)
@@ -354,13 +315,9 @@ export default function InfraTopologyPage() {
           <svg viewBox={`0 0 ${WIDTH} ${LAYOUT.height}`} style={{ width: '100%', height: 'auto', display: 'block', background: 'var(--surface)' }}>
             <defs>
               {(['control', 'data', 'flow'] as EdgeCat[]).map(cat => (
-                <marker key={cat} id={`ix-arrow-${cat}`} markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto">
-                  <path d="M0,0 L0,6 L7,3 z" fill={CAT_COLOR[cat]} />
-                </marker>
+                <ArrowMarker key={cat} id={`ix-arrow-${cat}`} color={CAT_COLOR[cat]} />
               ))}
-              <filter id="ix-shadow" x="-40%" y="-40%" width="180%" height="180%">
-                <feDropShadow dx="0" dy="1.5" stdDeviation="2.5" floodColor="#0f172a" floodOpacity="0.14" />
-              </filter>
+              <NodeShadow id="ix-shadow" />
             </defs>
 
             {/* Group bands */}
@@ -386,7 +343,7 @@ export default function InfraTopologyPage() {
               const touches = !!activeNode && (e.from === activeNode || e.to === activeNode)
               const dim = !!activeNode && !touches
               const { d } = edgeGeometry(a, b, { hw: a.w / 2, hh: HALF_H }, { hw: b.w / 2, hh: HALF_H })
-              const pid = pathId(e.from, e.to, i)
+              const pid = pathId('ix', e.from, e.to, i)
               return (
                 <g key={i} opacity={dim ? 0.1 : touches ? 1 : 0.5} style={{ transition: 'opacity 0.15s' }}>
                   <path id={pid} d={d} fill="none" stroke={touches ? mixHex(color, '#000000', 0.15) : color}

@@ -9,6 +9,10 @@ import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
 import { svcUrl } from '@/lib/services/bff'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { edgeGeometry, mixHex, pathId, type Pt, type Half } from '@/components/topology/geometry'
+import { FlowParticle } from '@/components/topology/FlowParticle'
+import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
+import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
 
 // Service definitions with positions for the map
 const SERVICES = [
@@ -133,7 +137,6 @@ const GROUP_GRID_COLS: Record<string, number> = {
   core: 4, payment: 4, psd2: 4, identity: 3, cards: 2, compliance: 3, platform: 3,
 }
 
-type Pt = { cx: number; cy: number }
 type GroupBox = { key: string; label: string; color: string; x: number; y: number; w: number; h: number }
 
 const LAYOUT: { nodes: Record<string, Pt>; groups: GroupBox[]; width: number; height: number } = (() => {
@@ -182,36 +185,7 @@ const LAYOUT: { nodes: Record<string, Pt>; groups: GroupBox[]; width: number; he
   }
 })()
 
-// Curved, boundary-trimmed edge path between two node centres. The control point
-// is offset perpendicular to the line so parallel edges fan out instead of
-// overlapping, and the apex (mx,my) is where a label sits when the edge is active.
-type Half = { hw: number; hh: number }
-// Trim each endpoint to the brick's bounding box (not a fixed circle) so the line
-// meets the brick edge cleanly regardless of how long the brick is.
-function edgeGeometry(a: Pt, b: Pt, aHalf: Half, bHalf: Half) {
-  const dx = b.cx - a.cx, dy = b.cy - a.cy
-  const dist = Math.hypot(dx, dy) || 1
-  const ux = dx / dist, uy = dy / dist
-  const boxT = (hw: number, hh: number) => {
-    const tx = Math.abs(ux) < 1e-6 ? Infinity : hw / Math.abs(ux)
-    const ty = Math.abs(uy) < 1e-6 ? Infinity : hh / Math.abs(uy)
-    return Math.min(tx, ty)
-  }
-  const ta = boxT(aHalf.hw, aHalf.hh) + 2
-  const tb = boxT(bHalf.hw, bHalf.hh) + 9 // extra gap for the arrowhead
-  const sx = a.cx + ux * ta, sy = a.cy + uy * ta
-  const ex = b.cx - ux * tb, ey = b.cy - uy * tb
-  const mx = (sx + ex) / 2, my = (sy + ey) / 2
-  const curve = Math.min(46, dist * 0.14)
-  const cpx = mx - uy * curve, cpy = my + ux * curve
-  // Label sits ~62% of the way toward the target (a point on the quadratic), not
-  // at the apex — so several edges leaving the same hub node spread their labels
-  // toward their distinct targets instead of stacking near the source.
-  const t = 0.62, mt = 1 - t
-  const lx = mt * mt * sx + 2 * mt * t * cpx + t * t * ex
-  const ly = mt * mt * sy + 2 * mt * t * cpy + t * t * ey
-  return { d: `M ${sx} ${sy} Q ${cpx} ${cpy} ${ex} ${ey}`, lx, ly }
-}
+// edgeGeometry / mixHex / pathId / Pt / Half — shared topology engine (@/components/topology).
 
 // Shorten edge labels so they stay legible: drop the openbank- / openbank. noise
 // and the -service suffix. Topics keep their dotted tail (account.created).
@@ -240,11 +214,6 @@ const STUD_W = 10
 const STUD_H = 6
 const BRICK_H = 21
 
-function mixHex(hex: string, target: string, r: number): string {
-  const a = parseInt(hex.slice(1), 16), b = parseInt(target.slice(1), 16)
-  const ch = (s: number) => Math.round(((a >> s) & 255) + (((b >> s) & 255) - ((a >> s) & 255)) * r)
-  return '#' + ((1 << 24) + (ch(16) << 16) + (ch(8) << 8) + ch(0)).toString(16).slice(1)
-}
 const lightFace = (c: string) => mixHex(c, '#ffffff', 0.72)
 const studTop = (c: string) => mixHex(c, '#ffffff', 0.84)
 const studHi = (c: string) => mixHex(c, '#ffffff', 0.45)
@@ -363,18 +332,6 @@ function layoutBand(nodes: { id: string; label: string }[], availW: number, star
   return { pos, height: h }
 }
 
-// A moving particle bound to an edge path (SMIL). Its parent decides whether to
-// mount it at all (flow toggled off / reduced-motion / edge hidden → not rendered).
-function FlowParticle({ pathId, color, dur, begin, r = 2.6 }: { pathId: string; color: string; dur: number; begin: number; r?: number }) {
-  return (
-    <circle r={r} fill={color} stroke="var(--surface)" strokeWidth={0.5}>
-      <animateMotion dur={`${dur}s`} begin={`${begin}s`} repeatCount="indefinite" rotate="auto" calcMode="linear">
-        <mpath href={`#${pathId}`} />
-      </animateMotion>
-    </circle>
-  )
-}
-
 // A rounded "pill" node for an infra/external tier — visually distinct from the
 // LEGO-brick services so the three tiers read apart at a glance.
 function TierChip({ pos, color, label, active, dim, faded, onClick, onEnter, onLeave }: {
@@ -420,15 +377,9 @@ export default function ServiceMapPage() {
   const [externalEdges, setExternalEdges] = useState<ExternalEdgeT[]>([])
   // Animation + tier visibility controls. Infra has ~130 edges → hidden by default
   // (revealed per-service on hover, or globally via its toggle); external is sparse → shown.
-  const [flow, setFlow] = useState(true)
+  const [flow, setFlow] = useFlowAnimation()
   const [showInfra, setShowInfra] = useState(false)
   const [showExternal, setShowExternal] = useState(true)
-
-  // Respect the OS "reduce motion" setting: start with flow off (static diagram).
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) setFlow(false)
-  }, [])
 
   const checkHealth = async () => {
     setIsChecking(true)
@@ -512,7 +463,6 @@ export default function ServiceMapPage() {
 
   const svcMap = Object.fromEntries(SERVICES.map(s => [s.id, s]))
   const activeNode = selected ?? hovered
-  const pathId = (a: string, b: string, i: number) => `fx-${a}-${b}-${i}`.replace(/[^a-zA-Z0-9_-]/g, '_')
 
   // --- Data-flow tiers: resolve each infra/external edge's source module to a
   // node on this map. Edges whose source service isn't drawn here are dropped
@@ -690,21 +640,11 @@ export default function ServiceMapPage() {
         <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
           <svg viewBox={`0 0 ${LAYOUT.width} ${svgHeight}`} style={{ width: '100%', height: 'auto', display: 'block', background: 'var(--surface)' }}>
             <defs>
-              <marker id="arrow-sync" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto">
-                <path d="M0,0 L0,6 L7,3 z" fill="#94a3b8" />
-              </marker>
-              <marker id="arrow-sync-hi" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto">
-                <path d="M0,0 L0,6 L7,3 z" fill="#475569" />
-              </marker>
-              <marker id="arrow-async" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto">
-                <path d="M0,0 L0,6 L7,3 z" fill="#c4b5fd" />
-              </marker>
-              <marker id="arrow-async-hi" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto">
-                <path d="M0,0 L0,6 L7,3 z" fill="#8b5cf6" />
-              </marker>
-              <filter id="node-shadow" x="-40%" y="-40%" width="180%" height="180%">
-                <feDropShadow dx="0" dy="1.5" stdDeviation="2.5" floodColor="#0f172a" floodOpacity="0.14" />
-              </filter>
+              <ArrowMarker id="arrow-sync" color="#94a3b8" />
+              <ArrowMarker id="arrow-sync-hi" color="#475569" />
+              <ArrowMarker id="arrow-async" color="#c4b5fd" />
+              <ArrowMarker id="arrow-async-hi" color="#8b5cf6" />
+              <NodeShadow id="node-shadow" />
             </defs>
 
             {/* Group backgrounds — sized to fit their nodes */}
@@ -757,7 +697,7 @@ export default function ServiceMapPage() {
                     const off = e.kind === 'external' && e.enabled === false
                     const touches = !!activeNode && (e.fromId === activeNode || e.to === activeNode)
                     const dim = !!activeNode && !touches
-                    const pid = pathId(e.fromId, e.to, 10000 + i)
+                    const pid = pathId('fx', e.fromId, e.to, 10000 + i)
                     return (
                       <g key={`t${i}`} opacity={off ? 0.3 : dim ? 0.12 : touches ? 1 : 0.55} style={{ transition: 'opacity 0.15s' }}>
                         <path id={pid} d={d} fill="none" stroke={off ? '#94a3b8' : color}
@@ -781,7 +721,7 @@ export default function ServiceMapPage() {
                     const { d, lx, ly } = edgeGeometry(a, b, aHalf, bHalf)
                     const baseColor = isAsync ? '#c4b5fd' : '#cbd5e1'
                     const hiColor = isAsync ? '#8b5cf6' : '#64748b'
-                    const pid = pathId(e.from, e.to, i)
+                    const pid = pathId('fx', e.from, e.to, i)
                     return (
                       <g key={i} opacity={dim ? 0.08 : touches ? 1 : 0.5} style={{ transition: 'opacity 0.15s' }}>
                         <path id={pid} d={d} fill="none"
