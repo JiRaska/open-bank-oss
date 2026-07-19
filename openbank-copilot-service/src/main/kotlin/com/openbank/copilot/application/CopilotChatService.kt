@@ -12,6 +12,7 @@ import com.openbank.copilot.domain.model.ChatRole
 import com.openbank.copilot.domain.model.ModelRequest
 import com.openbank.copilot.domain.model.StopReason
 import com.openbank.copilot.domain.model.ToolInvocation
+import com.openbank.copilot.infrastructure.persistence.ConversationStore
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
@@ -37,6 +38,7 @@ class CopilotChatService(
     private val tools: CopilotToolRegistry,
     private val actionTools: ActionToolRegistry,
     private val policyGate: CopilotPolicyGate,
+    private val conversations: ConversationStore,
     @ConfigProperty(name = "copilot.enabled", defaultValue = "false")
     private val enabled: Boolean,
 ) {
@@ -52,9 +54,15 @@ class CopilotChatService(
 
         val messages = mutableListOf(
             ChatMessage(ChatRole.SYSTEM, systemPrompt() + " " + PromptInjectionGuard.UNTRUSTED_PREAMBLE),
-            ChatMessage(ChatRole.USER, turn.message),
         )
-        return converse(turn.conversationId, messages, customerId)
+        messages += conversations.load(customerId, turn.conversationId)
+        messages += ChatMessage(ChatRole.USER, turn.message)
+
+        val outcome = converse(turn.conversationId, messages, customerId)
+        if (outcome is ChatOutcome.Replied && outcome.reply.reply.isNotBlank()) {
+            persistTurn(customerId, turn.conversationId, turn.message, outcome.reply.reply)
+        }
+        return outcome
     }
 
     /**
@@ -82,11 +90,22 @@ class CopilotChatService(
 
         val messages = mutableListOf(
             ChatMessage(ChatRole.SYSTEM, systemPrompt() + " " + PromptInjectionGuard.UNTRUSTED_PREAMBLE),
-            ChatMessage(ChatRole.USER, turn.message),
         )
+        messages += conversations.load(customerId, turn.conversationId)
+        messages += ChatMessage(ChatRole.USER, turn.message)
         val toolSpecs = tools.specs() + actionTools.specs()
         val proposals = mutableListOf<ActionProposal>()
         var offerTools = true
+
+        // Tool rounds emit no text (they generate only function specs), so every chunk the model
+        // streams belongs to the final answer — accumulate it to persist as this turn's ASSISTANT
+        // memory. The [PROGRESS]/[PROPOSAL] control markers go out via the raw onChunk below, so
+        // they never enter this buffer.
+        val finalText = StringBuilder()
+        val capturingChunk: suspend (String) -> Unit = { chunk ->
+            finalText.append(chunk)
+            onChunk(chunk)
+        }
 
         repeat(MAX_ITERATIONS) {
             val response = try {
@@ -100,7 +119,7 @@ class CopilotChatService(
                     ),
                     sensitive = false,
                     actorId = customerId,
-                    onChunk = onChunk,
+                    onChunk = capturingChunk,
                 )
             } catch (e: Exception) {
                 onChunk(degradeMessage(e))
@@ -109,6 +128,7 @@ class CopilotChatService(
 
             if (response.stopReason != StopReason.TOOL_USE || response.toolInvocations.isEmpty()) {
                 emitProposalSentinel(proposals, onChunk)
+                persistTurn(customerId, turn.conversationId, turn.message, finalText.toString())
                 return
             }
 
@@ -125,6 +145,23 @@ class CopilotChatService(
 
         log.warnf("stream chat loop hit MAX_ITERATIONS=%d", MAX_ITERATIONS)
         onChunk(MAX_STEPS_MESSAGE)
+    }
+
+    /**
+     * Persist the current exchange (USER message + final ASSISTANT text) into short-lived
+     * conversation memory so the next turn has context. No-op for a blank reply or a non-persistable
+     * conversation id (a stateless turn where the client sent no id) — [ConversationStore] guards both.
+     */
+    private fun persistTurn(customerId: String, conversationId: String, userMessage: String, assistantText: String) {
+        if (assistantText.isBlank()) return
+        conversations.append(
+            customerId,
+            conversationId,
+            listOf(
+                ChatMessage(ChatRole.USER, userMessage),
+                ChatMessage(ChatRole.ASSISTANT, assistantText),
+            ),
+        )
     }
 
     // Deliberately broad: any model/gateway/tool failure must degrade to a friendly reply, never a

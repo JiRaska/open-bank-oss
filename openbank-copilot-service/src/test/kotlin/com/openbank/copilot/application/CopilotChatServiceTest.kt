@@ -13,13 +13,16 @@ import com.openbank.copilot.domain.model.ModelResponse
 import com.openbank.copilot.domain.model.StopReason
 import com.openbank.copilot.domain.model.ToolInvocation
 import com.openbank.copilot.domain.model.ToolSpec
+import com.openbank.copilot.infrastructure.persistence.InMemoryConversationStore
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Clock
 
 class CopilotChatServiceTest {
 
@@ -28,8 +31,10 @@ class CopilotChatServiceTest {
     private val tools = mockk<CopilotToolRegistry>(relaxed = true)
     private val actionTools = mockk<ActionToolRegistry>(relaxed = true)
     private val policyGate = mockk<CopilotPolicyGate>()
+    private val conversations = InMemoryConversationStore(Clock.systemUTC())
 
-    private fun service(enabled: Boolean) = CopilotChatService(gateway, guard, tools, actionTools, policyGate, enabled)
+    private fun service(enabled: Boolean) =
+        CopilotChatService(gateway, guard, tools, actionTools, policyGate, conversations, enabled)
 
     @Test
     fun `disabled by default returns Disabled and never calls the model`() {
@@ -64,6 +69,68 @@ class CopilotChatServiceTest {
         val outcome = runBlocking { service(enabled = true).handle(ChatTurn("c1", "dobrý den"), "cust-1") }
 
         assertThat((outcome as ChatOutcome.Replied).reply.reply).isEqualTo("Dobrý den")
+    }
+
+    @Test
+    fun `threads prior turns into the next model request for the same conversation`() {
+        coEvery { guard.scanUserInput(any(), any()) } returns null
+        every { guard.blocks() } returns true
+        every { tools.specs() } returns emptyList()
+        val req = slot<com.openbank.copilot.domain.model.ModelRequest>()
+        coEvery { gateway.complete(any(), capture(req), any(), any()) } returnsMany listOf(
+            ModelResponse(content = "Máte dva účty.", stopReason = StopReason.END, modelId = "mock-echo"),
+            ModelResponse(content = "Spořicí má 0 Kč.", stopReason = StopReason.END, modelId = "mock-echo"),
+        )
+
+        val svc = service(enabled = true)
+        runBlocking {
+            svc.handle(ChatTurn("conv-42", "jaké mám účty?"), "cust-1")
+            svc.handle(ChatTurn("conv-42", "a na spořicím?"), "cust-1")
+        }
+
+        // The 2nd turn's request carries the 1st exchange: system + user1 + assistant1 + user2.
+        val contents = req.captured.messages.map { it.content }
+        assertThat(contents).contains("jaké mám účty?", "Máte dva účty.", "a na spořicím?")
+    }
+
+    @Test
+    fun `does not thread history across different customers`() {
+        coEvery { guard.scanUserInput(any(), any()) } returns null
+        every { guard.blocks() } returns true
+        every { tools.specs() } returns emptyList()
+        val req = slot<com.openbank.copilot.domain.model.ModelRequest>()
+        coEvery { gateway.complete(any(), capture(req), any(), any()) } returns
+            ModelResponse(content = "ok", stopReason = StopReason.END, modelId = "mock-echo")
+
+        val svc = service(enabled = true)
+        runBlocking {
+            svc.handle(ChatTurn("conv-42", "tajná zpráva zákazníka A"), "cust-A")
+            svc.handle(ChatTurn("conv-42", "dotaz zákazníka B"), "cust-B")
+        }
+
+        // Same conversationId, different customer → B must NOT see A's history (key is customer-scoped).
+        val contents = req.captured.messages.map { it.content }
+        assertThat(contents).doesNotContain("tajná zpráva zákazníka A")
+    }
+
+    @Test
+    fun `stateless turn without a conversation id is not remembered`() {
+        coEvery { guard.scanUserInput(any(), any()) } returns null
+        every { guard.blocks() } returns true
+        every { tools.specs() } returns emptyList()
+        val req = slot<com.openbank.copilot.domain.model.ModelRequest>()
+        coEvery { gateway.complete(any(), capture(req), any(), any()) } returns
+            ModelResponse(content = "ok", stopReason = StopReason.END, modelId = "mock-echo")
+
+        val svc = service(enabled = true)
+        runBlocking {
+            svc.handle(ChatTurn("new", "první"), "cust-1")
+            svc.handle(ChatTurn("new", "druhá"), "cust-1")
+        }
+
+        // The "new" sentinel means the client sent no id → no memory, each turn is standalone.
+        val contents = req.captured.messages.map { it.content }
+        assertThat(contents).doesNotContain("první")
     }
 
     @Test
