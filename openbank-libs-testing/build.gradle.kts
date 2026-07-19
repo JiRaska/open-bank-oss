@@ -88,7 +88,13 @@ dependencies {
 
     // Real JDBC round-trip in the kit's own self-test (PostgresTestResourcesTest) — not
     // pulled transitively by testcontainers-postgresql, which only drives the container.
-    testImplementation("org.postgresql:postgresql:42.7.4")
+    // Pinned to the same patched version openbank.dependency-vulnerability-pins.gradle.kts
+    // forces fleet-wide (issue #461) — this module applies openbank.static-analysis, not
+    // openbank.quarkus-service, so that force() block never reaches it; the vulnerable 42.7.4
+    // resolved here unnoticed until a newly-disclosed pgjdbc GHSA pair (insecure-auth fallback
+    // despite channelBinding=require, and unbounded PBKDF2 SCRAM iterations enabling a CPU-
+    // exhaustion DoS) failed dependency-review on the first PR to newly depend on this module.
+    testImplementation("org.postgresql:postgresql:42.7.11")
 
     testImplementation(libs.mockk)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
