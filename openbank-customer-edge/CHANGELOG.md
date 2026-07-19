@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.29.0...customer-edge-v0.30.0) (2026-07-19)
+
+
+### Features
+
+* **edge:** mint an offline_access token for the mobile app session ([#1741](https://github.com/JiRaska/open-bank-oss/issues/1741)) ([bb499c7](https://github.com/JiRaska/open-bank-oss/commit/bb499c73991e90d4cf04a52f5a4e485d8e3c688f)), closes [#1740](https://github.com/JiRaska/open-bank-oss/issues/1740)
+
 ## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.28.0...customer-edge-v0.29.0) (2026-07-19)
 
 
