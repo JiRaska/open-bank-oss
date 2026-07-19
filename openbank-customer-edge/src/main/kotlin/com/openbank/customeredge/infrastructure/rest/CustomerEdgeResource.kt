@@ -1422,6 +1422,73 @@ class CustomerEdgeResource(
         return resp
     }
 
+    /**
+     * List the caller's SCT Inst payments for ONE of their OWN accounts. accountId is required and
+     * ownership-checked (IDOR guard); sepa-instant's by-debtor list is account-scoped, so this can
+     * never surface another party's payments. Read-only.
+     */
+    @GET
+    @Path("/sepa-instant")
+    @Authorize(action = "customer.payments.read")
+    @Blocking
+    fun listSepaInstant(@QueryParam("accountId") accountId: UUID): Response {
+        val customer = customer()
+        if (!ownsAccount(accountId, customer.partyId)) return forbidden("Account does not belong to caller")
+        return upstream.get(
+            "$sepaInstantServiceUrl/api/v1/sepa-instant/debtor/$accountId",
+            customer.partyId.toString(),
+        )
+    }
+
+    /**
+     * Request a recall (camt.056) of a settled SCT Inst payment the caller sent from one of their
+     * OWN accounts — "I sent this by mistake". sepa-instant's recall/getById are NOT party-scoped,
+     * so the edge enforces ownership HERE: the owned account's IBAN (accountNumber) must equal the
+     * payment's debtorIban, else the payment is rejected as not-found (no existence oracle). Recall
+     * is a scheme REQUEST, not a guaranteed reversal — the counterparty bank may decline.
+     */
+    @POST
+    @Path("/sepa-instant/{paymentId}/recall")
+    @Authorize(action = "customer.payments.update", resource = "#paymentId")
+    @Blocking
+    fun recallSepaInstant(
+        @PathParam("paymentId") paymentId: UUID,
+        @QueryParam("accountId") accountId: UUID,
+        body: String,
+    ): Response {
+        val customer = customer()
+        val accountJson = fetchAccount(accountId, customer.partyId)
+            ?: return forbidden("Account does not belong to caller")
+        if (extractOwnerPartyId(accountJson) != customer.partyId.toString()) {
+            return forbidden("Account does not belong to caller")
+        }
+        val ownedIban = extractTextField(objectMapper, accountJson, "accountNumber")
+            ?: return badRequest("Cannot resolve account IBAN")
+        val payResp = upstream.get(
+            "$sepaInstantServiceUrl/api/v1/sepa-instant/$paymentId",
+            customer.partyId.toString(),
+        )
+        if (payResp.status != 200) return forbidden("Payment not found")
+        val payNode = runCatching { objectMapper.readTree((payResp.entity as? String).orEmpty()) }.getOrNull()
+            ?: return forbidden("Payment not found")
+        // Compare IBANs normalised (spaces stripped, upper-cased) so a formatting difference between
+        // account-service and sepa-instant can never false-reject a legitimate owner's recall.
+        val normOwned = ownedIban.replace(" ", "").uppercase()
+        val normDebtor = payNode.get("debtorIban")?.asText()?.replace(" ", "")?.uppercase()
+        if (normDebtor != normOwned) {
+            return forbidden("Payment does not belong to caller")
+        }
+        val reason = extractTextField(objectMapper, body, "reason")?.takeIf { it.isNotBlank() }
+            ?: "REQUESTED_BY_CUSTOMER"
+        return upstream.post(
+            "$sepaInstantServiceUrl/api/v1/sepa-instant/$paymentId/recall",
+            customer.partyId.toString(),
+            "{\"reason\":\"$reason\"}",
+            null,
+            emptyMap(),
+        )
+    }
+
     @Suppress("LongParameterList")
     private fun buildSctInstRequest(
         body: String,
