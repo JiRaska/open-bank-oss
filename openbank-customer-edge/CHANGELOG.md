@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.30.0...customer-edge-v0.31.0) (2026-07-19)
+
+
+### Features
+
+* **edge:** device-session refresh so passkey sessions can resume ([#1753](https://github.com/JiRaska/open-bank-oss/issues/1753)) ([85f04ac](https://github.com/JiRaska/open-bank-oss/commit/85f04ac049cc05170f68e2fb58151bd7eacb2017))
+
 ## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.29.0...customer-edge-v0.30.0) (2026-07-19)
 
 
