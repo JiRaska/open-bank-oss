@@ -6,8 +6,10 @@ package com.openbank.party.infrastructure.rest
 
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.flags.FeatureDisabledException
 import com.openbank.party.application.usecase.PartyAlreadyExistsException
+import com.openbank.party.application.usecase.PartyMergeRejectedException
 import com.openbank.party.application.usecase.PartyNotFoundException
 import io.vertx.pgclient.PgException
 import jakarta.ws.rs.core.Response
@@ -25,6 +27,26 @@ class PartyNotFoundMapper : ExceptionMapper<PartyNotFoundException> {
 class PartyAlreadyExistsMapper : ExceptionMapper<PartyAlreadyExistsException> {
     override fun toResponse(e: PartyAlreadyExistsException) = Response.status(409)
         .entity(ApiError(UUID.randomUUID().toString(), 409, ErrorCode.CONFLICT.code, e.message ?: "Conflict")).build()
+}
+
+/**
+ * ADR-0179: a merge precondition failed (already merged, chain, or the duplicate still owns an
+ * open account). 409 — the request is well-formed but the current state forbids it; the message
+ * names the blocking condition so the operator knows which step to do first.
+ */
+@Provider
+class PartyMergeRejectedMapper : ExceptionMapper<PartyMergeRejectedException> {
+    override fun toResponse(e: PartyMergeRejectedException) = Response.status(Response.Status.CONFLICT)
+        .entity(
+            ApiError(
+                // ADR-0106: trace/correlation identifiers are minted via Ids. The neighbouring
+                // mappers predate the guard, which only flags newly added call sites.
+                Ids.randomId().toString(),
+                Response.Status.CONFLICT.statusCode,
+                ErrorCode.CONFLICT.code,
+                e.message ?: "Merge rejected",
+            ),
+        ).build()
 }
 
 /**

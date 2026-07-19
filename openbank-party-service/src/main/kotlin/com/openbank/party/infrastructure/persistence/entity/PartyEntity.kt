@@ -95,6 +95,10 @@ class PartyEntity : PanacheEntity() {
 
     @Column(name = "consent_marketing_updated_at")
     var consentMarketingUpdatedAt: Instant? = null
+
+    /** ADR-0179: surviving party id — non-null iff [status] is MERGED. */
+    @Column(name = "merged_into")
+    var mergedInto: UUID? = null
 }
 
 @Entity

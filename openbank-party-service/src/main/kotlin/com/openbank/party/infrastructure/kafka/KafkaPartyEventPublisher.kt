@@ -39,6 +39,17 @@ class KafkaPartyEventPublisher : PartyEventPublisher {
         emitter.send(objectMapper.writeValueAsString(event))
     }
 
+    override suspend fun publishPartyMerged(merged: Party, survivingPartyId: UUID) {
+        val event = mapOf(
+            "eventType" to "PARTY_MERGED",
+            "partyId" to merged.id,
+            "mergedIntoPartyId" to survivingPartyId,
+            "status" to merged.status,
+            "occurredAt" to Instant.now(clock),
+        )
+        emitter.send(objectMapper.writeValueAsString(event))
+    }
+
     private fun publish(eventType: String, party: Party) {
         val event = mapOf(
             "eventType" to eventType,

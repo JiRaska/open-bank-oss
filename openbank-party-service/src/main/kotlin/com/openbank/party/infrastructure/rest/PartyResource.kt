@@ -14,6 +14,7 @@ import com.openbank.libs.flags.FeatureFlag
 import com.openbank.party.application.port.`in`.AddDocumentCommand
 import com.openbank.party.application.port.`in`.CreatePartyCommand
 import com.openbank.party.application.port.`in`.ErasePartyCommand
+import com.openbank.party.application.port.`in`.MergePartyCommand
 import com.openbank.party.application.port.`in`.PartyUseCase
 import com.openbank.party.application.port.`in`.ResolvePartyByRcCommand
 import com.openbank.party.application.port.`in`.SearchPartiesQuery
@@ -258,6 +259,46 @@ class PartyResource {
      * Actor is the authenticated operator (JWT subject); no raw PII is placed in the payload —
      * only the regulatory article reference, per the Art. 30 records-of-processing requirement.
      */
+    @POST
+    @Path("/{id}/merge")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "party.merge")
+    @Operation(
+        summary = "Merge a duplicate party into a surviving party (ADR-0179)",
+        description = "Retires {id} as a duplicate, preserving all PII and history. NOT erasure: " +
+            "no anonymization, no PARTY_ERASED event. Refuses while the duplicate still owns an " +
+            "open account — sweep the balances via a ledger ADJUSTMENT journal entry and close " +
+            "the account first.",
+    )
+    suspend fun mergeParty(@PathParam("id") id: UUID, req: MergePartyRequest): Response {
+        val merged = partyUseCase.mergeParty(
+            MergePartyCommand(
+                id = id,
+                mergedIntoPartyId = req.mergedIntoPartyId,
+                reason = req.reason,
+                approvalReference = req.approvalReference,
+            ),
+        )
+        // The retirement of an identity is a state-changing PII operation: record who did it,
+        // which survivor was chosen, and the approval that authorised the balance sweep.
+        auditPublisher.publish(
+            AuditEvent(
+                actorId = jwt?.subject ?: jwt?.name ?: "unknown",
+                actorType = "HUMAN",
+                operation = "party.merge",
+                resourceType = "party",
+                resourceId = id.toString(),
+                result = AuditResult.SUCCESS,
+                payload = mapOf(
+                    "merged_into_party_id" to req.mergedIntoPartyId.toString(),
+                    "reason" to req.reason,
+                    "approval_reference" to (req.approvalReference ?: ""),
+                ),
+            ),
+        )
+        return Response.ok(merged.toResponse()).build()
+    }
+
     private suspend fun auditGdpr(operation: String, partyId: UUID, gdprArticle: String) {
         auditPublisher.publish(
             AuditEvent(
@@ -486,6 +527,9 @@ data class UpdatePartyRequest(
     val tradingName: String?,
     val address: AddressRequest?,
 )
+
+/** ADR-0179. [approvalReference] links the ledger ADJUSTMENT journal that swept the balances. */
+data class MergePartyRequest(val mergedIntoPartyId: UUID, val reason: String, val approvalReference: String? = null)
 data class UpdateConsentRequest(val marketingConsent: Boolean)
 data class AddDocumentRequest(
     val documentType: String,
@@ -523,6 +567,9 @@ fun Party.toResponse() = mapOf(
     // UpdateMarketingConsentCommand kdoc) + the live, revocable marketing preference.
     "consentGdpr" to consentGdpr, "consentCapturedAt" to consentCapturedAt,
     "consentMarketing" to consentMarketing, "consentMarketingUpdatedAt" to consentMarketingUpdatedAt,
+    // ADR-0179: non-null only on a MERGED party — tells a consumer holding a stale id which
+    // party to follow instead.
+    "mergedIntoPartyId" to mergedIntoPartyId,
 )
 
 fun PartyGdprExport.toResponse() = mapOf(

@@ -56,6 +56,20 @@ data class CreatePartyCommand(
     val consentMarketing: Boolean? = null,
 )
 
+/**
+ * ADR-0179: retire [id] as a duplicate of [mergedIntoPartyId]. Both parties must be live, distinct,
+ * and the target must not itself be merged (the caller resolves chains to the final survivor).
+ * [reason] is free text for the audit trail; [approvalReference] links the ledger ADJUSTMENT
+ * journal entries that swept the balances, so the money movement and the identity retirement are
+ * traceable to one another.
+ */
+data class MergePartyCommand(
+    val id: UUID,
+    val mergedIntoPartyId: UUID,
+    val reason: String,
+    val approvalReference: String?,
+)
+
 data class UpdatePartyCommand(
     val id: UUID,
     val email: String?,
@@ -111,6 +125,12 @@ interface PartyUseCase {
      */
     suspend fun listParties(page: Int, size: Int, status: PartyStatus? = null): Map<String, Any>
     suspend fun eraseParty(cmd: ErasePartyCommand)
+
+    /**
+     * ADR-0179: retire a duplicate identity into a surviving party. Returns the retired party.
+     * Distinct from [eraseParty] — nothing is anonymized and no subject-rights event is emitted.
+     */
+    suspend fun mergeParty(cmd: MergePartyCommand): Party
 
     /** Self-registration from mobile: idempotent by keycloakSub. Returns existing party if already registered. */
     suspend fun selfRegisterParty(cmd: SelfRegisterPartyCommand): Pair<Party, Boolean> // Party, isNew

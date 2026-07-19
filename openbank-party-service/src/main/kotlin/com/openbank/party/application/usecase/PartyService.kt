@@ -28,6 +28,9 @@ class PartyNotFoundException(id: UUID) : RuntimeException("Party not found: $id"
 class PartyAlreadyExistsException(email: String) : RuntimeException("Party with email already exists: $email")
 class PartyKeycloakSubAlreadyBoundException(sub: String) : RuntimeException("Keycloak sub already registered: $sub")
 
+/** ADR-0179: a merge precondition failed. Carries an operator-readable reason (mapped to 409). */
+class PartyMergeRejectedException(message: String) : RuntimeException(message)
+
 @ApplicationScoped
 class PartyService : PartyUseCase {
 
@@ -40,6 +43,8 @@ class PartyService : PartyUseCase {
     @Inject lateinit var eventPublisher: PartyEventPublisher
 
     @Inject lateinit var gdprAggregation: GdprAggregationPort
+
+    @Inject lateinit var accountGuard: PartyAccountGuardPort
 
     @Inject lateinit var metrics: DomainMetrics
 
@@ -273,6 +278,9 @@ class PartyService : PartyUseCase {
      */
     private fun deriveStatus(kyc: KycStatus, aml: AmlStatus, current: PartyStatus): PartyStatus = when {
         current == PartyStatus.CLOSED -> PartyStatus.CLOSED
+        // ADR-0179: MERGED is terminal for the same reason CLOSED is — a late KYC or AML callback
+        // on a retired duplicate must not resurrect it into ACTIVE.
+        current == PartyStatus.MERGED -> PartyStatus.MERGED
         // EXPIRED is set by AbandonedRegistrationCleaner's daily sweep, which explicitly expects
         // this to suspend the party ("system expiry... party -> SUSPENDED") — without it here,
         // an abandoned registration silently reverted to PENDING_KYC instead.
@@ -288,6 +296,60 @@ class PartyService : PartyUseCase {
         documentFileRepo.deleteByPartyId(cmd.id)
         partyRepo.anonymize(cmd.id)
         eventPublisher.publishPartyErased(cmd.id)
+    }
+
+    /**
+     * ADR-0179: retire [cmd.id] as a duplicate of [cmd.mergedIntoPartyId].
+     *
+     * Every precondition is fail-closed, and the account guard deliberately lets its exception
+     * propagate: if we cannot establish that the retired party owns no open account, we must not
+     * merge. Account closure does not check the balance (ADR-0109 option B), so a funded account
+     * on a retired identity would strand silently with nothing downstream to catch it.
+     */
+    override suspend fun mergeParty(cmd: MergePartyCommand): Party {
+        if (cmd.id == cmd.mergedIntoPartyId) {
+            throw PartyMergeRejectedException("A party cannot be merged into itself: ${cmd.id}")
+        }
+        val source = partyRepo.findById(cmd.id) ?: throw PartyNotFoundException(cmd.id)
+        val target = partyRepo.findById(cmd.mergedIntoPartyId)
+            ?: throw PartyNotFoundException(cmd.mergedIntoPartyId)
+
+        if (source.status == PartyStatus.MERGED) {
+            throw PartyMergeRejectedException(
+                "Party ${source.id} is already merged into ${source.mergedIntoPartyId}",
+            )
+        }
+        if (source.status == PartyStatus.CLOSED) {
+            throw PartyMergeRejectedException("Party ${source.id} is erased (CLOSED) and cannot be merged")
+        }
+        // No chains: a survivor that is itself retired would leave consumers following two hops,
+        // and every consumer would have to implement the same loop. The caller resolves first.
+        if (target.status == PartyStatus.MERGED) {
+            throw PartyMergeRejectedException(
+                "Target ${target.id} is itself merged into ${target.mergedIntoPartyId}; " +
+                    "merge into the surviving party instead",
+            )
+        }
+        if (target.status == PartyStatus.CLOSED) {
+            throw PartyMergeRejectedException("Target ${target.id} is erased (CLOSED) and cannot receive a merge")
+        }
+
+        val openAccounts = accountGuard.findOpenAccounts(source.id)
+        if (openAccounts.isNotEmpty()) {
+            throw PartyMergeRejectedException(
+                "Party ${source.id} still owns ${openAccounts.size} open account(s): " +
+                    "${openAccounts.joinToString()}. Sweep the balances and close them first.",
+            )
+        }
+
+        val merged = source.copy(
+            status = PartyStatus.MERGED,
+            mergedIntoPartyId = target.id,
+            updatedAt = Instant.now(clock),
+        )
+        val saved = partyRepo.update(merged)
+        eventPublisher.publishPartyMerged(saved, target.id)
+        return saved
     }
 
     override suspend fun selfRegisterParty(cmd: SelfRegisterPartyCommand): Pair<Party, Boolean> {

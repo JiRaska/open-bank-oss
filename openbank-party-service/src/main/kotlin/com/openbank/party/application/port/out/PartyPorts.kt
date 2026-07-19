@@ -80,6 +80,22 @@ interface GdprAggregationPort {
     suspend fun fetchCardData(partyId: java.util.UUID): List<Map<String, Any?>>
 }
 
+/**
+ * ADR-0179: account-ownership guard for the merge precondition.
+ *
+ * Unlike [GdprAggregationPort] this is **fail-closed**: an unreachable account-service must abort
+ * the merge, never allow it. Merging a party that still owns a funded account would strand the
+ * balance on a retired identity — account closure does not check the balance
+ * (ADR-0109 option B), so nothing downstream would catch it.
+ */
+interface PartyAccountGuardPort {
+    /**
+     * Returns the ids of accounts owned by [partyId] that are not yet CLOSED, or throws if the
+     * answer cannot be established. An empty list is the only result that permits a merge.
+     */
+    suspend fun findOpenAccounts(partyId: UUID): List<String>
+}
+
 /** Outbound port for party domain events. */
 interface PartyEventPublisher {
 
@@ -90,4 +106,11 @@ interface PartyEventPublisher {
     suspend fun publishKycStatusChanged(party: Party)
 
     suspend fun publishPartyErased(id: UUID)
+
+    /**
+     * ADR-0179: [merged] is the retired duplicate (status MERGED); [survivingPartyId] is the party
+     * consumers should follow from now on. Deliberately NOT PARTY_ERASED — nothing was anonymized
+     * and no subject-rights request occurred.
+     */
+    suspend fun publishPartyMerged(merged: Party, survivingPartyId: UUID)
 }
