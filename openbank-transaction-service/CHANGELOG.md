@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.14.2...transaction-service-v1.15.0) (2026-07-19)
+
+
+### Features
+
+* **transaction:** add the ADR-0179 merge balance sweep ([#1789](https://github.com/JiRaska/open-bank-oss/issues/1789)) ([04069d0](https://github.com/JiRaska/open-bank-oss/commit/04069d034ba5dd9188ba49bab780548cc5ee44ed))
+
 ## [1.14.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.14.1...transaction-service-v1.14.2) (2026-07-17)
 
 
