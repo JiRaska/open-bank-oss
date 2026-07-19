@@ -129,6 +129,9 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.sepa-payment-service-url")
     lateinit var sepaPaymentServiceUrl: String
 
+    @ConfigProperty(name = "openbank.edge.sepa-instant-service-url")
+    lateinit var sepaInstantServiceUrl: String
+
     @ConfigProperty(name = "openbank.edge.sca-service-url")
     lateinit var scaServiceUrl: String
 
@@ -1315,6 +1318,82 @@ class CustomerEdgeResource(
     }
 
     /**
+     * Initiate a SEPA Instant (SCT Inst) credit transfer — sub-10s settlement, from one of the
+     * caller's OWN accounts. Same shape and guards as [createSepaPayment] (ownership, debtor
+     * IBAN/name resolution, SCA gate), but routed to sepa-instant on the instant rail. The debtor
+     * fields are resolved server-side; the app sends only creditorIban/creditorName/amount/reference.
+     */
+    @POST
+    @Path("/sepa-instant")
+    @Authorize(action = "customer.payments.initiate")
+    @Blocking
+    fun createSepaInstant(
+        body: String,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?,
+    ): Response {
+        val customer = customer()
+        val debtor = parseDebtorAccountId(objectMapper, body)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return forbidden("Missing or malformed debtorAccountId")
+        val accountJson = fetchAccount(debtor, customer.partyId)
+            ?: return forbidden("Debtor account does not belong to caller")
+        if (extractOwnerPartyId(accountJson) != customer.partyId.toString()) {
+            return forbidden("Debtor account does not belong to caller")
+        }
+        val debtorIban = extractTextField(objectMapper, accountJson, "accountNumber")
+            ?: return badRequest("Cannot resolve debtor IBAN")
+        val debtorName = fetchPartyLegalName(customer.partyId)
+            ?: return badRequest("Cannot resolve debtor name")
+        val creditorIban = extractTextField(objectMapper, body, "creditorIban")
+            ?: return badRequest("Missing creditorIban")
+        val creditorName = extractTextField(objectMapper, body, "creditorName")
+            ?: return badRequest("Missing creditorName")
+        val amount = extractAmountField(objectMapper, body) ?: return badRequest("Missing amount")
+        val currency = extractTextField(objectMapper, body, "currency") ?: "EUR"
+        scaGate(scaChallengeId, customer, amount, currency, creditorIban, "payments.sepaInstant")?.let { return it }
+        val key = idempotencyKey?.takeIf { it.isNotBlank() } ?: "scti-$debtor-$creditorIban-$amount"
+        val request = buildSctInstRequest(
+            body, key, debtor.toString(), debtorIban, debtorName, creditorIban, creditorName, amount, currency,
+        )
+        val resp = upstream.post(
+            "$sepaInstantServiceUrl/api/v1/sepa-instant",
+            customer.partyId.toString(),
+            request,
+            key,
+        )
+        auditPayment(resp, customer, "payments.sepaInstant", amount, currency, creditorIban, scaChallengeId)
+        return resp
+    }
+
+    @Suppress("LongParameterList")
+    private fun buildSctInstRequest(
+        body: String,
+        key: String,
+        debtorAccountId: String,
+        debtorIban: String,
+        debtorName: String,
+        creditorIban: String,
+        creditorName: String,
+        amount: String,
+        currency: String,
+    ): String {
+        val out = objectMapper.createObjectNode()
+        out.put("idempotencyKey", key)
+        out.put("debtorAccountId", debtorAccountId)
+        out.put("debtorIban", debtorIban)
+        out.put("debtorName", debtorName)
+        out.put("creditorIban", creditorIban)
+        out.put("creditorName", creditorName)
+        extractTextField(objectMapper, body, "creditorBic")?.let { out.put("creditorBic", it) }
+        out.put("amount", amount)
+        out.put("currency", currency)
+        extractTextField(objectMapper, body, "reference")?.let { out.put("remittanceInfo", it) }
+        // endToEndId is capped at the SEPA max; derive deterministically from the idempotency key (no random).
+        out.put("endToEndId", ("E2E" + key.filter { it.isLetterOrDigit() }).take(E2E_ID_MAX_LEN))
+        return objectMapper.writeValueAsString(out)
+    }
+
+    /**
      * Read the current status of one of the caller's own SEPA payments (settlement-honest, ADR-0108).
      * The twin of [getDomesticPaymentStatus]: the app polls this after a create returns merely accepted
      * (RECEIVED/VALIDATED/PROCESSING) so the green success screen only appears once the payment is
@@ -2298,6 +2377,9 @@ class CustomerEdgeResource(
 
         /** PSD2 RTS 2018/389 Art. 15: same-person, same-PSP transfers are SCA-exempt. */
         internal const val SCA_EXEMPTION_OWN_ACCOUNT = "PSD2_RTS_ART15_OWN_ACCOUNT"
+
+        /** SEPA endToEndId max length (ISO 20022 pain.001 Max35Text). */
+        private const val E2E_ID_MAX_LEN = 35
 
         /** Amount may arrive as JSON number or string; normalise to its decimal text form. */
         internal fun extractAmountField(mapper: ObjectMapper, json: String): String? = runCatching {
