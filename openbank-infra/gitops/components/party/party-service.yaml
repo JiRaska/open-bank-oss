@@ -22,6 +22,10 @@ spec:
       labels:
         app.kubernetes.io/name: party-service
         app.kubernetes.io/part-of: party
+      annotations:
+        # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-party-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "69baea7aa98a31d2"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -71,6 +75,20 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # OPA sidecar is now deployed (see the `opa` container below), so the @Authorize
+            # interceptor finally has a PDP to call at localhost:8181.
+            #
+            # This env var is NOT a behaviour change — it makes an existing default explicit.
+            # application.yaml already sets `authz.enforce: "${AUTHZ_ENFORCE:true}"`, and the
+            # var was never set here, so the live pod has been enforcing all along, against a
+            # PDP that did not exist. AuthorizeInterceptor fails CLOSED on an unreachable PDP,
+            # so every @Authorize action on this service (party.update, party.consent.update,
+            # and party.merge from ADR-0179) was bricked. It went unnoticed because none of
+            # them is exercised in sandbox — party.merge was simply the first one hit.
+            # Stating it here keeps the enforce posture visible next to the sidecar that
+            # justifies it, the same way account-service does.
+            - name: AUTHZ_ENFORCE
+              value: "true"
             # Kafka broker for the transactional-outbox dispatcher (party-events-out →
             # topic openbank.party.events). Without this the bootstrap defaults to
             # localhost, the producer can never connect, party events stay undispatched
@@ -202,9 +220,90 @@ spec:
             limits:
               cpu: 100m
               memory: 64Mi
+        # OPA policy-decision sidecar (ADR-0034 Phase 5). Serves
+        # data.openbank.rest.allow for every @Authorize-annotated endpoint in
+        # party-service (party.update, party.consent.update, party.merge). Bundle
+        # mounted from the party-opa-bundle ConfigMap. Until this existed the service
+        # enforced authz with no PDP and failed closed on all three.
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Bind on the pod network (not 127.0.0.1) so kubelet httpGet probes reach
+            # /health. The image is scratch (no shell), so an exec probe isn't possible.
+            # Reachability is fenced by the NetworkPolicy; OPA serves only policy decisions.
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/party_rest_ext.rego
+              subPath: party_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem.
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: party-opa-bundle
         - name: feature-flags
           configMap:
             name: party-feature-flags
