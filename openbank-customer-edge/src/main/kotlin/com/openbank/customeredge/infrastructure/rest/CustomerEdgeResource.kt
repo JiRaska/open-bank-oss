@@ -2324,6 +2324,31 @@ class CustomerEdgeResource(
         return upstream.get("$disputeServiceUrl/api/v1/disputes/account/$accountId", customer.partyId.toString())
     }
 
+    /**
+     * File a regulatory complaint (ADR-0085) from the app. dispute-service owns the statutory
+     * deadline clock and returns the case reference + dueDate, which the app shows the customer.
+     * The edge forces channel=APP; when an accountId is supplied it is ownership-checked (IDOR
+     * guard). A complaint carries no partyId upstream (only an optional accountId), so customer-
+     * facing complaint LISTING is a deliberate follow-up: dispute-service today exposes only an
+     * operator-wide list, and a per-party read needs a scoped query there (issue to follow).
+     */
+    @POST
+    @Path("/complaints")
+    @Authorize(action = "customer.complaints.create")
+    @Blocking
+    fun fileComplaint(body: String): Response {
+        val customer = customer()
+        val accountId = extractTextField(objectMapper, body, "accountId")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() ?: return badRequest("Malformed accountId") }
+        if (accountId != null && !ownsAccount(accountId, customer.partyId)) {
+            return forbidden("Account does not belong to caller")
+        }
+        val enriched = injectField(objectMapper, body, "channel", "APP")
+            ?: return badRequest("Malformed complaint body")
+        return upstream.post("$disputeServiceUrl/api/v1/complaints", customer.partyId.toString(), enriched)
+    }
+
     // --- Internal helpers ---
 
     /**
