@@ -33,7 +33,7 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 | Area | Status |
 |---|---|
 | Core domain (account, ledger, transaction, balance) | 🟢 Implemented, tested, deployed |
-| Payments — intra-bank (transaction saga → ledger → balance) | 🟢 End-to-end, deployed |
+| Payments — intra-bank (transaction Temporal workflow → ledger → balance) | 🟢 End-to-end, deployed |
 | Payments — interbank rails (SEPA, domestic, instant, clearing) | 🟡 ISO 20022 pipeline + clearing simulator wired (ADR-0104/0108); **live interbank network not connected** |
 | PSD2 / Open Banking (consent, SCA, TPP registry) | 🟢 Consent + SCA + XS2A developer portal live (developer.open-bank.tech); TPP registry deployed to sandbox |
 | EUDI / PID digital identity | 🟢 OpenID4VP + OpenID4VCI e2e live (ADR-0094); pid-service deployed |
@@ -63,7 +63,7 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 |---|---|---|
 | **Create account** | `POST https://api.open-bank.tech/api/v1/accounts` | Returns IBAN (Czech mod-11 BBAN) |
 | **Get balance** | `GET https://api.open-bank.tech/api/v1/balances/{accountId}` | Multi-currency pockets |
-| **SEPA payment** | `POST https://api.open-bank.tech/api/v1/sepa-payments` | Sanctions/AML gate, saga → ledger |
+| **SEPA payment** | `POST https://api.open-bank.tech/api/v1/sepa-payments` | Sanctions/AML gate, Temporal workflow → ledger |
 | **Domestic payment** | `POST https://api.open-bank.tech/api/v1/domestic-payments` | CERTIS-style Czech domestic |
 | **SEPA Instant** | `POST https://api.open-bank.tech/api/v1/sepa-instant-payments` | 10s settlement window |
 | **Standing orders** | `POST https://api.open-bank.tech/api/v1/standing-orders` | Daily due-date sweep, outbox-backed |
