@@ -43,6 +43,28 @@ class BalanceReconciliationServiceTest {
         }
 
     @Test
+    fun `reconcile uses the value-date basis so a future-value-dated journal is not drift`(): Unit = runBlocking {
+        // A future-value-dated credit batch (e.g. welcome bonuses value-dated tomorrow) is already
+        // booked in the running total but NOT yet in the ledger control, which is value-dated.
+        // The current running total is +500 over the control; the value-date-correct total ties out.
+        val ledger = FakeLedgerControl(mapOf("CZK" to BigDecimal("1000.00")))
+        val balanceRepo = FakeSumRepository(
+            sums = mapOf("CZK" to BigDecimal("1500.00")),
+            valueDatedSums = mapOf("CZK" to BigDecimal("1000.00")),
+        )
+        val records = FakeRecordRepository()
+        val metrics = mockk<DomainMetrics>(relaxed = true)
+        val service =
+            BalanceReconciliationService(balanceRepo, ledger, records, java.time.Clock.systemUTC(), metrics)
+
+        val report = service.reconcile(asOf)
+
+        assertFalse(report.hasDrift, "value-date-correct sub-ledger sum must tie out to the control")
+        assertEquals(asOf, balanceRepo.askedAsOf, "reconciliation must query the sub-ledger as of the tie-out date")
+        assertEquals(0, report.currencies.single().difference.compareTo(BigDecimal.ZERO))
+    }
+
+    @Test
     fun `reconcile flags drift when ledger and booked disagree`(): Unit = runBlocking {
         val ledger = FakeLedgerControl(mapOf("CZK" to BigDecimal("1000.00")))
         val balanceRepo = FakeSumRepository(mapOf("CZK" to BigDecimal("990.00")))
@@ -116,14 +138,25 @@ class BalanceReconciliationServiceTest {
         }
     }
 
-    private class FakeSumRepository(private val sums: Map<String, BigDecimal>) :
-        com.openbank.balance.application.port.out.BalanceRepository {
+    // [sums] is the raw current running total (`sumBookedByCurrency`); [valueDatedSums] is the
+    // value-date-correct total the reconciliation actually consumes (`sumBookedByCurrencyAsOf`).
+    // They differ exactly when a future-value-dated journal is already booked but not yet effective;
+    // by default they coincide so the older tests exercise the agree/disagree paths unchanged.
+    private class FakeSumRepository(
+        private val sums: Map<String, BigDecimal>,
+        private val valueDatedSums: Map<String, BigDecimal> = sums,
+    ) : com.openbank.balance.application.port.out.BalanceRepository {
+        var askedAsOf: LocalDate? = null
         override suspend fun findByAccountIdAndCurrency(accountId: UUID, currency: String) = null
         override suspend fun findAllByAccountId(accountId: UUID) =
             emptyList<com.openbank.balance.domain.model.Balance>()
         override suspend fun save(balance: com.openbank.balance.domain.model.Balance) = balance
         override suspend fun update(balance: com.openbank.balance.domain.model.Balance) = balance
         override suspend fun sumBookedByCurrency(): Map<String, BigDecimal> = sums
+        override suspend fun sumBookedByCurrencyAsOf(asOf: LocalDate): Map<String, BigDecimal> {
+            askedAsOf = asOf
+            return valueDatedSums
+        }
         override suspend fun sumBookedDeltaAfter(
             accountId: UUID,
             currency: String,

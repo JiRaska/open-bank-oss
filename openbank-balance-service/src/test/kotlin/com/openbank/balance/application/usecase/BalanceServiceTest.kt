@@ -274,6 +274,11 @@ class BalanceServiceTest {
 
         /** Booked delta the test wants reported as "applied after asOf" (defaults to none). */
         var futureDelta: BigDecimal = BigDecimal.ZERO
+
+        // Value-date-correct sum = current total less the future-value-dated portion (ADR-0178).
+        override suspend fun sumBookedByCurrencyAsOf(asOf: java.time.LocalDate): Map<String, BigDecimal> =
+            mapOf(seed.currency to (seed.bookedAmount - futureDelta))
+
         override suspend fun sumBookedDeltaAfter(
             accountId: UUID,
             currency: String,

@@ -25,6 +25,19 @@ interface BalanceRepository {
     suspend fun sumBookedByCurrency(): Map<String, BigDecimal>
 
     /**
+     * Booked sub-ledger total per currency **on the ledger's value-date basis** as of [asOf], for the
+     * reconciliation tie-out (ADR-0178). Computed as the materialized booked balance
+     * ([sumBookedByCurrency]) minus the future-value-dated tail — the projected deltas whose
+     * `entry_date > asOf` — so it mirrors the ledger trial balance's `entry_date <= :asOf` and a
+     * future-value-dated journal is excluded on both sides until its value date. Anchoring on the
+     * materialized `balances` (not on the audit sum) preserves the integrity coverage of the plain
+     * aggregate tie-out: a write-path bug that desynchronized `balances` from the projection audit
+     * still shows as drift rather than being hidden. Equals [sumBookedByCurrency] when no movement is
+     * value-dated after [asOf].
+     */
+    suspend fun sumBookedByCurrencyAsOf(asOf: java.time.LocalDate): Map<String, BigDecimal>
+
+    /**
      * Sum of booked deltas applied to ([accountId], [currency]) with a booking date *strictly after*
      * [asOf], read from the dated ledger-projection audit (`ledger_projection_event`). Used to rewind
      * the current booked balance to a point in time: `bookedAsOf = current − sumBookedDeltaAfter(asOf)`.

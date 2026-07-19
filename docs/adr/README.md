@@ -179,10 +179,11 @@ two-axis **Decision-Status** / **Delivery-Status** front-matter.
 | [0174](0174-ict-third-party-dependencies-and-exit-strategy.md) | ICT third-party dependencies and exit strategy | Accepted | Partial | — |
 | [0175](0175-data-residency-and-sovereignty.md) | Data residency and sovereignty | Accepted | Partial | — |
 | [0176](0176-operator-initiated-customer-messaging.md) | Operator-initiated customer messaging | Accepted | Partial | — |
+| [0178](0178-value-date-correct-balance-reconciliation-and-projection.md) | Value-date-correct balance reconciliation and projection | Accepted | Shipped (Phase 1); Phases 2–3 tracked as follow-up issues | — |
 
 ---
 
-**Numbering gaps:** 0015 0127 0128 0129 0130 0131 0157 do not correspond to a file in this repo's history —
+**Numbering gaps:** 0015 0127 0128 0129 0130 0131 0157 0177 do not correspond to a file in this repo's history —
 confirmed by `git log --diff-filter=A` across all branches, not just an absent
 current file. ADR-0132 was one of these gaps until it was cited in code/config
 comments before the file existed and has since been written down properly

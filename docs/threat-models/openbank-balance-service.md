@@ -131,6 +131,15 @@ also be deleted (nothing else in balance-service depends on it).
   at-least-once redelivery or a saga retry that replays a referenceId is a no-op. Mirrors
   `ledger_projection_event` for the projection path (ADR-0039 Phase D).
 - Reconciliation ties out **per currency** against ledger deposit-control accounts (2100–2103).
+- Reconciliation compares **on the ledger's value-date basis** (ADR-0178): the sub-ledger figure is the
+  materialized booked balance minus the future-value-dated tail (`Σ bookedAmount − Σ delta with
+  entry_date > asOf`), mirroring the ledger trial balance's `entry_date <= :asOf`. A future-value-dated
+  journal (booked now, effective later) must be excluded on **both** sides until its value date, or the
+  control raises a self-resolving false drift for the whole pre-value-date window — masking a genuine
+  mismatch and eroding trust in the control (a value-date gap is *sustained*, so the ADR-0160 `for:`
+  dampener does not contain it). Anchoring on the materialized `balances` (not on the audit sum) keeps
+  the tie-out able to catch a `balances`⇄projection-audit desync — it is not blind to a broken write
+  path (T2).
 
 ## 6. Open items / follow-ups
 
