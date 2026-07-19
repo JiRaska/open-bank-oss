@@ -42,9 +42,16 @@ import java.util.UUID
  * caught by provider verification, because the recorded body was independent of
  * [LendingJournalFactory] and [com.openbank.lending.infrastructure.client.LendingLedgerConfig]'s
  * real defaults. The body below is built from the real factory + real config default GL accounts
- * (`a0000000-...-001200` loans receivable / `a0000000-...-001100` funding clearing, ADR-0028
+ * (`a0000000-...-001200` loans receivable / `a0000000-...-000001` funding clearing, ADR-0028
  * D3/D4) for a DISBURSEMENT posting, serialized with the same Jackson stack the production REST
  * client uses.
+ *
+ * `fundingClearing` is `...-000001`, not the `...-001100` the "last UUID segment = account code"
+ * convention would predict — ledger-service's shared "Customer Cash Clearing" account (code 1100)
+ * was seeded pre-convention in V3 with a sequential id, so that's the id [LendingLedgerConfig]'s
+ * real default now points at too (issue #1720: the old `...-001100` default 422ed provider
+ * verification with "GL account not found" once this pact started deriving its body from the real
+ * config instead of a hand-written literal).
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(providerName = "openbank-ledger-service", pactVersion = PactSpecVersion.V3)
@@ -52,7 +59,7 @@ class LendingLedgerPostJournalPactConsumerTest {
 
     private val accounts = LendingGlAccounts(
         loansReceivable = UUID.fromString("a0000000-0000-0000-0000-000000001200"),
-        fundingClearing = UUID.fromString("a0000000-0000-0000-0000-000000001100"),
+        fundingClearing = UUID.fromString("a0000000-0000-0000-0000-000000000001"),
         interestIncome = UUID.fromString("a0000000-0000-0000-0000-000000004100"),
         interestReceivable = UUID.fromString("a0000000-0000-0000-0000-000000001300"),
         loanLossExpense = UUID.fromString("a0000000-0000-0000-0000-000000005100"),
