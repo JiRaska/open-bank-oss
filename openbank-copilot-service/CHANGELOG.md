@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.5.3...copilot-service-v0.6.0) (2026-07-19)
+
+
+### Features
+
+* **copilot:** short-lived conversation memory across turns ([#1778](https://github.com/JiRaska/open-bank-oss/issues/1778)) ([4e7d1b2](https://github.com/JiRaska/open-bank-oss/commit/4e7d1b2013cedf8129e957e65b1ef84d62f682da)), closes [#1777](https://github.com/JiRaska/open-bank-oss/issues/1777)
+
 ## [0.5.3](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.5.2...copilot-service-v0.5.3) (2026-07-16)
 
 
