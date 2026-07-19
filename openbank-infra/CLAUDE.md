@@ -79,6 +79,17 @@ out of it (they are path-scoped, not less important — several are live-inciden
   post-attest verify to the run by requiring the CycloneDX `serialNumber` trivy minted for THIS SBOM
   to appear among the envelopes that verified. `openbank-infra/scripts/lib/cosign-attest.sh` does
   both — source it, never hand-roll `attest` + `verify`.
+- **`gen-network-policies.py` derives ingress allow-lists ONLY from cross-namespace URLs in a
+  Deployment/Rollout `env` block — a URL that lives only in the service's `application.yaml`
+  produces no edge at all.** The caller's namespace is then silently absent from the callee's
+  allow-list and the traffic is DROPPED by the VPC CNI agent in standard mode (ADR-0060) — no
+  manifest error, no policy diff, just a hung call (party-service's GDPR Art. 15 hops to
+  kyc-service and card-issuance-service, #1784). Declare every cross-namespace URL in the gitops
+  manifest env, not only in `application.yaml`.
+- **The generator's `URL_RE` requires a literal `.svc` — `http://kyc-service.kyc:8114` does NOT
+  match, `http://kyc-service.kyc.svc:8114` does.** Write the short form and the generator exits 0
+  and changes nothing: a silent no-op indistinguishable from "already in sync". Always diff the
+  regenerated `network-policies.yaml` files; never trust the generator's exit code.
 
 ### OPA / Rego policies (ADR-0031/ADR-0034)
 - **Editing any shared policy source ripples the OPA bundle checksum of every service.** Each
