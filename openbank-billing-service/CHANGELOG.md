@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.5](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.6.4...billing-service-v0.6.5) (2026-07-19)
+
+
+### Bug Fixes
+
+* **billing:** self-heal the reactive pg pool so a DB blip can't wedge the service ([#1683](https://github.com/JiRaska/open-bank-oss/issues/1683)) ([3dde5bf](https://github.com/JiRaska/open-bank-oss/commit/3dde5bf5304e68cdfcdee0e8be8b4301ed89da1a))
+
 ## [0.6.4](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.6.3...billing-service-v0.6.4) (2026-07-18)
 
 
