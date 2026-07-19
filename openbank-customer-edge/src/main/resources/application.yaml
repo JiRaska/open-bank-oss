@@ -98,6 +98,7 @@ openbank:
     transaction-service-url: ${TRANSACTION_SERVICE_URL:http://transaction-service.payments.svc:8102}
     domestic-payment-service-url: ${DOMESTIC_PAYMENT_SERVICE_URL:http://domestic-payment.payments.svc:8116}
     sepa-payment-service-url: ${SEPA_PAYMENT_SERVICE_URL:http://sepa-payment.payments.svc:8115}
+    sepa-instant-service-url: ${SEPA_INSTANT_SERVICE_URL:http://sepa-instant.payments.svc:8127}
     sca-service-url:     ${SCA_SERVICE_URL:http://sca-service.sca.svc:8110}
     party-service-url:   ${PARTY_SERVICE_URL:http://party-service.party.svc:8111}
     pid-service-url:     ${PID_SERVICE_URL:http://pid-service.pid.svc:8105}
