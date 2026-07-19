@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.53.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.52.1...admin-ui-v0.53.0) (2026-07-19)
+
+
+### Features
+
+* **admin-ui:** add a data-lineage flow page ([#1693](https://github.com/JiRaska/open-bank-oss/issues/1693)) ([9106257](https://github.com/JiRaska/open-bank-oss/commit/9106257f67b29d1bccbf227afccdc9acc0c7ce46))
+
 ## [0.52.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.52.0...admin-ui-v0.52.1) (2026-07-19)
 
 
