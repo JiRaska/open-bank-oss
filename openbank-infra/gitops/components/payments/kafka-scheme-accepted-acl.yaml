@@ -77,6 +77,16 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # sepa-instant's own domain-event stream (kafka-producer-sct-inst-events-out ->
+      # openbank.sepa.instant.events). Missing here, the producer got "Topic authorization
+      # failed" once the cluster stopped allowing ANONYMOUS/no-ACL writes, and a submit blocked
+      # on the failing publish. Prefix covers the events topic + any sibling instant streams.
+      - resource:
+          type: topic
+          name: openbank.sepa.instant.
+          patternType: prefix
+        operations: [Write, Describe, Create]
+        host: "*"
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
