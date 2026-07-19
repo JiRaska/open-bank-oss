@@ -158,6 +158,8 @@ spec:
             # Declared here so gen-network-policies.py opens the edge->sepa-instant ingress allow.
             - name: SEPA_INSTANT_SERVICE_URL
               value: http://sepa-instant.payments.svc:8127
+            - name: SWIFT_SERVICE_URL
+              value: http://swift-service.payments.svc:8122
             - name: SCA_SERVICE_URL
               value: http://sca-service.sca.svc:8110
             # Bind management interface to all interfaces so kubelet probes (from node IP)
