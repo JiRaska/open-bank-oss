@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.26.0...customer-edge-v0.26.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **customer-edge:** read Money.currency.code in the loans projection ([#1703](https://github.com/JiRaska/open-bank-oss/issues/1703)) ([e4667d1](https://github.com/JiRaska/open-bank-oss/commit/e4667d1b99b19d043eebd68c9bcd1cd524348f48))
+
 ## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.25.0...customer-edge-v0.26.0) (2026-07-19)
 
 
