@@ -2198,6 +2198,29 @@ class CustomerEdgeResource(
     @Blocking
     fun unfreezeCard(@PathParam("id") id: UUID): Response = cardAction(id, "resume")
 
+    /**
+     * Permanently block one of the caller's OWN cards — the report-lost/stolen action. Unlike
+     * freeze (a reversible suspend), block is TERMINAL: card-issuance moves the card to BLOCKED and
+     * it cannot be resumed, so the app gates this behind an explicit confirm. Ownership is enforced
+     * here (same IDOR guard as freeze); the card-issuance audit reason is fixed to LOST_OR_STOLEN
+     * since that is the only customer-initiated block reason.
+     */
+    @POST
+    @Path("/cards/{id}/block")
+    @Authorize(action = "customer.cards.update", resource = "#id")
+    @Blocking
+    fun blockCard(@PathParam("id") id: UUID): Response {
+        val customer = customer()
+        if (!ownsCard(id, customer.partyId)) return forbidden("Card does not belong to caller")
+        return upstream.post(
+            "$cardIssuanceServiceUrl/api/v1/cards/$id/block",
+            customer.partyId.toString(),
+            "{\"reason\":\"LOST_OR_STOLEN\"}",
+            null,
+            mapOf("X-Operator-Id" to "customer:${customer.partyId}"),
+        )
+    }
+
     // Map the customer freeze/unfreeze to card-issuance's suspend/resume. card-issuance requires an
     // X-Operator-Id audit header; for a self-service freeze the actor IS the customer, so the party id
     // is the audit subject. Ownership is enforced here (the card must belong to the JWT party).
