@@ -1772,6 +1772,42 @@ class CustomerEdgeResource(
         )
     }
 
+    /**
+     * One notification's full detail, including the rendered [body] (the list route omits it). This
+     * is the message read-view for the in-app inbox — operator-initiated messages (ADR-0176) carry
+     * their content here. notification-service's detail route resolves by UUID and is NOT party-
+     * scoped, so the edge enforces ownership HERE: any notification whose `partyId` differs from the
+     * caller is rejected as if absent (no existence leak) — the same IDOR guard the account routes
+     * use. The body is already secret-redacted upstream (bodyForRead / TemplateSensitivity); the
+     * upstream `partyId`/`recipient` fields are stripped from the customer-facing response.
+     */
+    @GET
+    @Path("/notifications/{id}")
+    @Authorize(action = "customer.notifications.read", resource = "#id")
+    @Blocking
+    fun getNotification(@PathParam("id") id: UUID): Response {
+        val customer = customer()
+        val resp = upstream.get(
+            "$notificationServiceUrl/api/v1/notifications/$id",
+            customer.partyId.toString(),
+        )
+        if (resp.status != 200) return forbidden("Notification not found")
+        val node = runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") }.getOrNull()
+            ?: return forbidden("Notification not found")
+        if (node.get("partyId")?.asText() != customer.partyId.toString()) {
+            return forbidden("Notification does not belong to caller")
+        }
+        val out = objectMapper.createObjectNode()
+        out.put("id", node.get("id")?.asText())
+        node.get("template")?.asText()?.let { out.put("template", it) }
+        node.get("subject")?.asText()?.let { out.put("subject", it) }
+        out.put("body", node.get("body")?.asText() ?: "")
+        node.get("status")?.asText()?.let { out.put("status", it) }
+        node.get("readAt")?.asText()?.let { out.put("readAt", it) }
+        node.get("createdAt")?.asText()?.let { out.put("createdAt", it) }
+        return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+    }
+
     // --- SCA device enrollment (ADR-0021) ---
 
     @POST
