@@ -13,6 +13,7 @@ import { edgeGeometry, mixHex, pathId, type Pt, type Half } from '@/components/t
 import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
+import { layoutBand } from '@/components/topology/layout'
 
 // Service definitions with positions for the map
 const SERVICES = [
@@ -310,27 +311,7 @@ const chipWidth = (label: string) => Math.max(96, 30 + label.length * 6.6 + 14)
 type TierPos = { cx: number; cy: number; w: number }
 type BandBox = { key: 'infra' | 'external'; x: number; y: number; w: number; h: number }
 // Deterministic flow-layout: centre chips per row, wrapping to the canvas width.
-function layoutBand(nodes: { id: string; label: string }[], availW: number, startY: number) {
-  const rows: { id: string; label: string; w: number }[][] = [[]]
-  let rowW = 0
-  for (const n of nodes) {
-    const w = chipWidth(n.label)
-    const cur = rows[rows.length - 1]
-    if (cur.length && rowW + CHIP_GAP + w > availW) { rows.push([]); rowW = 0 }
-    rows[rows.length - 1].push({ ...n, w })
-    rowW += (cur.length ? CHIP_GAP : 0) + w
-  }
-  const pos: Record<string, TierPos> = {}
-  let y = startY + BAND_HEAD
-  for (const row of rows) {
-    const total = row.reduce((s, r) => s + r.w, 0) + CHIP_GAP * Math.max(0, row.length - 1)
-    let x = CANVAS_PAD + Math.max(0, (availW - total) / 2)
-    for (const r of row) { pos[r.id] = { cx: x + r.w / 2, cy: y + CHIP_H / 2, w: r.w }; x += r.w + CHIP_GAP }
-    y += CHIP_H + CHIP_GAP
-  }
-  const h = BAND_HEAD + rows.length * (CHIP_H + CHIP_GAP) - CHIP_GAP + BAND_PAD_Y
-  return { pos, height: h }
-}
+const BAND_CFG = { width: LAYOUT.width, pad: CANVAS_PAD, pillH: CHIP_H, bandHead: BAND_HEAD, bandPadY: BAND_PAD_Y, bandGap: BAND_GAP, pillGap: CHIP_GAP, measure: chipWidth }
 
 // A rounded "pill" node for an infra/external tier — visually distinct from the
 // LEGO-brick services so the three tiers read apart at a glance.
@@ -487,7 +468,6 @@ export default function ServiceMapPage() {
   // Tier band geometry below the service grid (computed each render — a handful
   // of chips, cheap). When a tier has no nodes, its band is skipped entirely so
   // the empty-graph page keeps the original height.
-  const availW = LAYOUT.width - CANVAS_PAD * 2
   const chipLabel = (id: string, fallback: string) => t(tierMeta(id)?.labelCs ?? fallback, tierMeta(id)?.labelEn ?? fallback)
   const tierPos: Record<string, TierPos> = {}
   const bandBoxes: (BandBox & { count: number })[] = []
@@ -495,7 +475,7 @@ export default function ServiceMapPage() {
     let y = LAYOUT.height
     const place = (key: 'infra' | 'external', nodes: (InfraNodeT | ExternalNodeT)[]) => {
       y += BAND_GAP
-      const b = layoutBand(nodes.map(n => ({ id: n.id, label: chipLabel(n.id, n.label) })), availW, y)
+      const b = layoutBand(nodes.map(n => ({ id: n.id, label: chipLabel(n.id, n.label) })), y, BAND_CFG)
       Object.assign(tierPos, b.pos)
       bandBoxes.push({ key, x: CANVAS_PAD - 12, y, w: LAYOUT.width - (CANVAS_PAD - 12) * 2, h: b.height, count: nodes.length })
       y += b.height

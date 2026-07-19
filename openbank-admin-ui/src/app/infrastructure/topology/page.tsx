@@ -13,6 +13,7 @@ import { edgeGeometry, mixHex, pathId } from '@/components/topology/geometry'
 import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
+import { layoutBands } from '@/components/topology/layout'
 
 // ---------------------------------------------------------------------------
 // Infrastructure topology (ADR-0027/0029). A companion to the code-derived
@@ -174,38 +175,11 @@ const BAND_GAP = 26
 const PILL_GAP = 16
 const pillWidth = (label: string) => Math.max(112, 34 + label.length * 7 + 20)
 
-type Pt = { cx: number; cy: number; w: number }
-type Band = { key: GroupKey; y: number; h: number }
-
-const LAYOUT: { pos: Record<string, Pt>; bands: Band[]; height: number } = (() => {
-  const availW = WIDTH - CANVAS_PAD * 2
-  const pos: Record<string, Pt> = {}
-  const bands: Band[] = []
-  let y = CANVAS_PAD
-  for (const g of GROUP_ORDER) {
-    const list = NODES.filter(n => n.group === g)
-    const rows: { id: string; w: number }[][] = [[]]
-    let rowW = 0
-    for (const n of list) {
-      const w = pillWidth(n.label)
-      const cur = rows[rows.length - 1]
-      if (cur.length && rowW + PILL_GAP + w > availW) { rows.push([]); rowW = 0 }
-      rows[rows.length - 1].push({ id: n.id, w })
-      rowW += (cur.length ? PILL_GAP : 0) + w
-    }
-    let ry = y + BAND_HEAD
-    for (const row of rows) {
-      const total = row.reduce((s, r) => s + r.w, 0) + PILL_GAP * Math.max(0, row.length - 1)
-      let x = CANVAS_PAD + Math.max(0, (availW - total) / 2)
-      for (const r of row) { pos[r.id] = { cx: x + r.w / 2, cy: ry + PILL_H / 2, w: r.w }; x += r.w + PILL_GAP }
-      ry += PILL_H + PILL_GAP
-    }
-    const h = BAND_HEAD + rows.length * (PILL_H + PILL_GAP) - PILL_GAP + BAND_PAD_Y
-    bands.push({ key: g, y, h })
-    y += h + BAND_GAP
-  }
-  return { pos, bands, height: y - BAND_GAP + CANVAS_PAD }
-})()
+const BAND_CFG = { width: WIDTH, pad: CANVAS_PAD, pillH: PILL_H, bandHead: BAND_HEAD, bandPadY: BAND_PAD_Y, bandGap: BAND_GAP, pillGap: PILL_GAP, measure: pillWidth }
+const LAYOUT = layoutBands(
+  GROUP_ORDER.map(g => ({ key: g, items: NODES.filter(n => n.group === g).map(n => ({ id: n.id, label: n.label })) })),
+  BAND_CFG,
+)
 
 type LifeMap = Record<string, { urgency?: string }>
 
