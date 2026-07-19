@@ -448,7 +448,7 @@ class CustomerEdgeResource(
         o.put("id", l.get("id")?.let { if (it.isObject) it.get("value")?.asText() else it.asText() })
         val principal = l.get("principal")
         o.put("principalAmount", principal?.get("amount")?.asText() ?: "0")
-        o.put("currency", principal?.get("currency")?.asText() ?: "CZK")
+        o.put("currency", principal?.get("currency")?.get("code")?.asText() ?: "CZK")
         // nominalAnnualRate is a decimal fraction (0.089) — surface as a percent number "8.9".
         l.get("nominalAnnualRate")?.decimalValue()?.let {
             o.put("annualRatePercent", it.multiply(java.math.BigDecimal(100)).stripTrailingZeros().toPlainString())
@@ -466,7 +466,7 @@ class CustomerEdgeResource(
         i.get("dueDate")?.asText()?.let { o.put("dueDate", it) }
         val payment = i.get("payment")
         o.put("paymentAmount", payment?.get("amount")?.asText() ?: "0")
-        o.put("currency", payment?.get("currency")?.asText() ?: "CZK")
+        o.put("currency", payment?.get("currency")?.get("code")?.asText() ?: "CZK")
         o.put("principalAmount", i.get("principal")?.get("amount")?.asText() ?: "0")
         o.put("interestAmount", i.get("interest")?.get("amount")?.asText() ?: "0")
         o.put("paid", i.get("paid")?.asBoolean(false) ?: false)
