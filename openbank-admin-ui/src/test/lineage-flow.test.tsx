@@ -6,7 +6,7 @@
 // real-shaped /api/catalog/governance payload and asserts the domain bands, the
 // derived lineage edges + SMIL flow, the detail panel, and graceful degradation.
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import React from 'react'
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
