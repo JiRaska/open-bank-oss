@@ -83,6 +83,16 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_billing
+      # Pool self-heal (#1682). Quarkus leaves all three levers OFF by default, so a
+      # transient DB blip that poisons pooled connections leaves them dead forever —
+      # the reactive pool has no way to purge them and wedges the service until a pod
+      # restart (billing sat unable to reach a healthy billing-db for ~8h, 0 restarts).
+      # idle-timeout evicts a dead idle connection within the cleaner period so the next
+      # acquire opens a fresh one; max-lifetime is the hard ceiling on how long any wedge
+      # can survive; max-size bounds the pool so a reconnect storm can't grow it unbounded.
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_billing
   flyway:

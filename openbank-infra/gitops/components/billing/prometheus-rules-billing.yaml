@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service PrometheusRule for openbank-billing-service (money-path, ADR-0143). Refs #1682.
+#
+# WHY 5xx-rate and not the obvious signals:
+#   * Readiness (`/q/health/ready`) is useless for a wedged DB pool. The default datasource
+#     readiness check is a CONNECTIVITY probe (`SELECT 1` on a fresh connection); when the DB is
+#     reachable but the pool holds poisoned connections, the probe grabs a fresh connection and
+#     reports UP while every real request fails. Billing sat green for ~8h through exactly this.
+#   * `openbank_outbox_backlog{service="billing"}` can't see it either — that gauge READS the
+#     outbox table, so during a DB wedge its own query fails and it serves a STALE cached value
+#     instead of rising.
+#   * Billing has no OpenTelemetry (#1668), so trace-based SLOs (traces_spanmetrics_*) have no
+#     series — the lending-style error-rate rule can't be reused here.
+# So the one signal that both fires during a wedge AND does not itself depend on the DB is the
+# micrometer HTTP server metric (quarkus-micrometer-registry-prometheus, scraped at /q/metrics):
+# a request that hits the wedged pool returns 500, and recording that metric needs no DB.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-billing-alerts
+  namespace: billing
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: billing-service
+spec:
+  groups:
+    - name: openbank.billing.health
+      rules:
+        - alert: BillingServerErrorsWhileHealthy
+          # Sustained 5xx on billing while the pod stays Ready = the silent-degradation signature
+          # (a wedged datasource pool, a downstream 500 storm, etc.) that readiness cannot surface.
+          # SERVER_ERROR is the stable micrometer outcome tag (covers 500/502/503/... in one series).
+          # On an idle sandbox there is simply no series and the alert never fires — a false negative
+          # with no caller is harmless; a real wedge always has failing callers.
+          expr: |
+            sum(rate(http_server_requests_seconds_count{namespace="billing", outcome="SERVER_ERROR"}[5m])) > 0.1
+          for: 10m
+          labels:
+            severity: critical
+            service: billing
+          annotations:
+            summary: "billing-service is returning 5xx while reporting Ready"
+            description: "billing-service has sustained >0.1 server-error/s for >10m while its readiness probe is green. The DB pool may be wedged (a healthy DB is still reachable for the SELECT-1 readiness check while pooled connections are dead) — verify the reactive pg pool, not just billing-db. Refs #1682."
