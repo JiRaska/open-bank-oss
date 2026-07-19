@@ -3,20 +3,22 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 // Server-side loader for the zero-trust security posture. The build derives
-// security-graph.json from the real platform manifests (istio.yaml,
-// network-policies.yaml, kyverno verify-images-policy.yaml) via
-// scripts/generate-security-graph.mjs — governance-as-code (ADR-0029), never a
-// hand-drawn claim. READ-ONLY consumer (CLAUDE rule #3). Mirrors the
-// service-graph.json sourcing (api/catalog/graph): $OPENBANK_SECURITY_GRAPH or
-// <cwd>/security-graph.json; degrades to null when no snapshot is bundled.
+// security-graph.json from the real, gitops-wired platform manifests
+// (gitops/components/*/network-policies.yaml, kyverno verify-images-policy.yaml)
+// via scripts/generate-security-graph.mjs — governance-as-code (ADR-0029),
+// never a hand-drawn claim. `istio` is unconditionally unavailable: no service
+// mesh runs in the sandbox (ADR-0098; #1666/#1667/#1710), so there is no live
+// signal to derive — see the generator's module comment. READ-ONLY consumer
+// (CLAUDE rule #3). Mirrors the service-graph.json sourcing (api/catalog/graph):
+// $OPENBANK_SECURITY_GRAPH or <cwd>/security-graph.json; degrades to null when
+// no snapshot is bundled.
 
 import { promises as fs } from 'fs'
 import path from 'path'
 
-export interface MtlsException {
-  name: string | null
-  mode: string
-  selector: Record<string, string> | null
+export interface NetworkCoverageGap {
+  namespace: string
+  service: string
 }
 
 export interface SecurityPosture {
@@ -25,16 +27,17 @@ export interface SecurityPosture {
   collectedAt: string | null
   istio: {
     available: boolean
-    mtls?: { mode: string; strict: boolean; exceptions: MtlsException[] }
-    jwt?: { issuer?: string | null; audiences?: string[]; present: boolean }
-    l7?: { action: string | null; defaultDeny: boolean; requiresJwt: boolean; allowsMeshServiceAccounts: boolean }
+    deployed?: boolean
+    note?: string
   }
   network: {
     available: boolean
     defaultDeny?: boolean
+    coverage?: { total: number; covered: number; gaps: NetworkCoverageGap[] }
     egressTargets?: { target: string; ports: number[] }[]
-    ingressRules?: { policy: string | null; ports: number[] }[]
+    ingressRules?: { policy: string | null; namespace?: string; ports: number[] }[]
     internetEgress?: 'opt-in' | 'open'
+    egressRestrictedApps?: string[]
   }
   supplyChain: {
     available: boolean
