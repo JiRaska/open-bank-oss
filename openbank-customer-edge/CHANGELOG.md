@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.25.0...customer-edge-v0.26.0) (2026-07-19)
+
+
+### Features
+
+* **customer-edge:** expose the customer's loans + repayment schedule (read-only) ([#1686](https://github.com/JiRaska/open-bank-oss/issues/1686)) ([54b6054](https://github.com/JiRaska/open-bank-oss/commit/54b60543b11992eb1c31efb46b602beb8f30d702))
+
 ## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.24.0...customer-edge-v0.25.0) (2026-07-18)
 
 
