@@ -43,7 +43,10 @@ class BalanceReconciliationService(
 
     override suspend fun reconcile(asOf: LocalDate): ReconciliationReport {
         val ledgerByCcy = ledgerControl.depositControlBalanceByCurrency(asOf)
-        val bookedByCcy = balanceRepo.sumBookedByCurrency()
+        // Value-date basis, matching the ledger trial balance's `entry_date <= asOf` (ADR-0178):
+        // a future-value-dated journal is POSTED but not yet in the ledger control, so counting it in
+        // the sub-ledger sum would surface a self-resolving false drift for the whole pre-value window.
+        val bookedByCcy = balanceRepo.sumBookedByCurrencyAsOf(asOf)
 
         val report = ReconciliationPolicy.reconcile(
             ledgerControlByCurrency = ledgerByCcy,

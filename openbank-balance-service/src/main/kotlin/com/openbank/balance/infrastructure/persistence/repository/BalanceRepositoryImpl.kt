@@ -88,6 +88,35 @@ class BalanceRepositoryImpl(private val repo: BalancePanacheRepo) : BalanceRepos
             (row.get("total", BigDecimal::class.java) ?: BigDecimal.ZERO)
     }
 
+    override suspend fun sumBookedByCurrencyAsOf(asOf: java.time.LocalDate): Map<String, BigDecimal> {
+        // Anchor on the MATERIALIZED booked balance (the authoritative customer state), then rewind the
+        // future-value-dated tail read from the projection audit — bookedAsOf = current − Σ(delta with
+        // entry_date > asOf). This mirrors the ledger trial balance's value-date basis (ADR-0178) AND
+        // preserves the integrity coverage of the old aggregate tie-out: the base is `balances`, not the
+        // audit, so a write-path bug that desynchronized `balances` from `ledger_projection_event` still
+        // surfaces as drift instead of being hidden by summing the audit alone.
+        val current = sumBookedByCurrency()
+        val futureDated = sumBookedDeltaAfterByCurrency(asOf)
+        return (current.keys + futureDated.keys).associateWith { ccy ->
+            (current[ccy] ?: BigDecimal.ZERO).subtract(futureDated[ccy] ?: BigDecimal.ZERO)
+        }
+    }
+
+    /** Σ of projected booked deltas whose value date is strictly after [asOf], grouped by currency. */
+    private suspend fun sumBookedDeltaAfterByCurrency(asOf: java.time.LocalDate): Map<String, BigDecimal> =
+        Panache.withSession {
+            Panache.getSession().flatMap { session ->
+                session.createQuery(
+                    "select e.currency as ccy, coalesce(sum(e.delta), 0) as total " +
+                        "from LedgerProjectionEventEntity e where e.entryDate > :asOf group by e.currency",
+                    Tuple::class.java,
+                ).setParameter("asOf", asOf).resultList
+            }
+        }.awaitSuspending().associate { row ->
+            row.get("ccy", String::class.java) to
+                (row.get("total", BigDecimal::class.java) ?: BigDecimal.ZERO)
+        }
+
     private fun BalanceEntity.toDomain() = Balance(
         id = balanceDomainId(accountId, currency),
         accountId = accountId,
