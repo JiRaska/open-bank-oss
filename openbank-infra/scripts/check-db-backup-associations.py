@@ -44,8 +44,11 @@ Advisory (exit 0 on findings) unless ``--enforce``.
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import re
+import shutil
+import subprocess
 import sys
 
 import yaml
@@ -58,6 +61,10 @@ TF_FILE = REPO_ROOT / "openbank-infra" / "aws" / "envs" / "sandbox-platform" / "
 # backing up HERE need an association against that bucket's role. One pointing elsewhere is
 # reported as a warning (unmanaged lifecycle/retention), never an error — see main().
 BACKUP_BUCKET = "openbank-sandbox-db-backups"
+
+# Default EKS cluster + region the associations live in (env.AWS_REGION in platform-tofu.yml).
+DEFAULT_EKS_CLUSTER = "openbank-sandbox"
+DEFAULT_AWS_REGION = "eu-north-1"
 
 CNPG_API_PREFIX = "postgresql.cnpg.io"
 
@@ -123,9 +130,51 @@ def backing_up_clusters(gitops_dir: pathlib.Path) -> list[tuple[str, str, str, s
     return found
 
 
+def parse_applied_associations(aws_json: str) -> set[str]:
+    """Service accounts with a LIVE pod-identity association, from `aws eks
+    list-pod-identity-associations --output json`. The CLI auto-paginates, so a single
+    invocation returns every association; each carries `serviceAccount` + `namespace`."""
+    data = json.loads(aws_json)
+    return {a["serviceAccount"] for a in data.get("associations", [])}
+
+
+def applied_associations(cluster_name: str, region: str) -> set[str]:
+    """Query AWS for the service accounts that actually have a pod-identity association.
+
+    This is the half the static (repo-only) check is blind to: db-backups.tf can *declare* an
+    association that was never `tofu apply`d, so the tf list and the gitops list agree (green)
+    while AWS has no association and every WAL archive fails "Unable to locate credentials"
+    (issue #1759). A missing/old aws CLI or a failed call is a HARD error — a live check that
+    silently passes when it could not actually look is the exact failure mode being fixed."""
+    if shutil.which("aws") is None:
+        print("::error::aws CLI not found — cannot run --check-applied", file=sys.stderr)
+        raise SystemExit(1)
+    cmd = [
+        "aws", "eks", "list-pod-identity-associations",
+        "--cluster-name", cluster_name, "--region", region, "--output", "json",
+    ]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=120).stdout
+    except subprocess.CalledProcessError as exc:
+        # list-pod-identity-associations needs aws CLI >= 2.15; an older CLI errors here.
+        print(f"::error::`{' '.join(cmd)}` failed: {exc.stderr.strip()}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    except subprocess.TimeoutExpired as exc:
+        print(f"::error::`{' '.join(cmd)}` timed out", file=sys.stderr)
+        raise SystemExit(1) from exc
+    return parse_applied_associations(out)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--enforce", action="store_true", help="exit non-zero on findings")
+    parser.add_argument(
+        "--check-applied",
+        action="store_true",
+        help="also assert each declared association is LIVE in AWS (needs aws creds + CLI >= 2.15)",
+    )
+    parser.add_argument("--cluster-name", default=DEFAULT_EKS_CLUSTER, help="EKS cluster name")
+    parser.add_argument("--region", default=DEFAULT_AWS_REGION, help="AWS region")
     args = parser.parse_args()
 
     if not TF_FILE.exists():
@@ -184,11 +233,41 @@ def main() -> int:
             f"(and add it to local.db_backup_clusters)."
         )
 
-    if not missing:
-        print("✓ every cluster targeting the managed bucket has an association")
+    # Live-AWS drift: a declared association that was never `tofu apply`d. The static checks
+    # above cannot see this — tf and gitops both list the cluster (green) while AWS has no
+    # association, so barman fails every archive with "Unable to locate credentials" (#1759).
+    # Opt-in (needs aws creds) and always an ERROR: unapplied credentials ARE broken backups.
+    drift: list[tuple[str, str]] = []
+    if args.check_applied:
+        applied = applied_associations(args.cluster_name, args.region)
+        print(f"pod-identity associations LIVE in AWS ({args.cluster_name}): {len(applied)}")
+        # Only clusters that target our bucket AND are declared in tf: an undeclared one is
+        # already reported as `missing` above; reporting it again as drift is just noise.
+        drift = [(name, ns) for name, ns, _, _ in ours if name in declared and name not in applied]
+        for name, namespace in drift:
+            print(
+                f"::{level}::{name} (namespace {namespace}) is declared in {_rel(TF_FILE)} but has "
+                f"NO live pod-identity association in AWS — db-backups.tf was never applied for it. "
+                f'Its WAL archiving fails "Unable to locate credentials". Run `tofu apply` in '
+                f"openbank-infra/aws/envs/sandbox-platform (expect adds only, 0 destroy)."
+            )
+
+    if not missing and not drift:
+        if args.check_applied:
+            print("✓ every managed cluster has an association declared AND live in AWS")
+        else:
+            print("✓ every cluster targeting the managed bucket has an association")
         return 0
 
-    print(f"\n{len(missing)} cluster(s) would silently never back up.", file=sys.stderr)
+    problems = []
+    if missing:
+        problems.append(f"{len(missing)} cluster(s) would silently never back up")
+    if drift:
+        problems.append(f"{len(drift)} declared association(s) not applied in AWS")
+    print("\n" + "; ".join(problems) + ".", file=sys.stderr)
+    # Advisory unless --enforce, mirroring the static gate: a PR that merely REVEALS preexisting
+    # drift (e.g. this check's own introducing PR) must not be blocked by it. The scheduled run
+    # passes --enforce, so live drift is a red check there — that is the alarm.
     return 1 if args.enforce else 0
 
 

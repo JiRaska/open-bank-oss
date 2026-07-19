@@ -150,5 +150,23 @@ class BackingUpClustersTest(unittest.TestCase):
         self.assertEqual(mod.backing_up_clusters(self.dir), [])
 
 
+class ParseAppliedAssociationsTest(unittest.TestCase):
+    def test_extracts_service_accounts(self):
+        payload = """
+        {"associations": [
+          {"serviceAccount": "anacredit-db", "namespace": "anacredit"},
+          {"serviceAccount": "accounts-db", "namespace": "accounts"}
+        ]}
+        """
+        self.assertEqual(mod.parse_applied_associations(payload), {"anacredit-db", "accounts-db"})
+
+    def test_empty_association_list(self):
+        self.assertEqual(mod.parse_applied_associations('{"associations": []}'), set())
+
+    def test_missing_key_is_empty(self):
+        # A well-formed but association-less response must read as "nothing live", not crash.
+        self.assertEqual(mod.parse_applied_associations("{}"), set())
+
+
 if __name__ == "__main__":
     unittest.main()
