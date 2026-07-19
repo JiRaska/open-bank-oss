@@ -83,6 +83,17 @@ spec:
           limits_config:
             allow_structured_metadata: true
             volume_enabled: true
+            # Global per-tenant push limits. Loki's defaults (4MiB/s rate, 6MiB
+            # burst) are sized for a single small app; here one single-binary
+            # ingests every namespace + ~38 services via Alloy. During a node
+            # roll, Alloy replays hours of buffered logs at once and the default
+            # limit drops them ("ingestion rate limit exceeded for user fake") —
+            # exactly the diagnostics you want during a node incident. Raise the
+            # ceiling; it is an in-memory buffer bound, no infra/$ cost.
+            ingestion_rate_mb: 16
+            ingestion_burst_size_mb: 32
+            per_stream_rate_limit: 8MB
+            per_stream_rate_limit_burst: 16MB
             # FinOps (ADR-0054): sandbox 7d retention (ADR-0088 D3). S3 lifecycle on the
             # bucket also expires objects at 7d (belt-and-suspenders).
             retention_period: 168h
