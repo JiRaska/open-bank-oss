@@ -286,3 +286,85 @@ em{font-style:normal;color:var(--cyan-2)}
   .hero-logo,.logo-glow{animation:none}
   .reveal{transition:none;opacity:1;transform:none}
 }
+
+/* ---- customer app + testflight section ---- */
+.appsec .app-grid{
+  display:grid;grid-template-columns:minmax(240px,.72fr) 1.28fr;gap:40px;align-items:start;
+  max-width:var(--maxw);margin:0 auto;padding:0 24px;
+}
+.app-phone{position:sticky;top:88px;display:flex;flex-direction:column;align-items:center;gap:14px}
+.app-phone img{
+  width:100%;max-width:300px;height:auto;display:block;position:relative;z-index:1;
+  filter:drop-shadow(0 34px 70px rgba(0,0,0,.6));
+  animation:phoneFloat 6s ease-in-out infinite;
+}
+.app-phone-glow{
+  position:absolute;top:6%;left:50%;transform:translateX(-50%);
+  width:78%;height:66%;border-radius:50%;z-index:0;pointer-events:none;
+  background:radial-gradient(closest-side, rgba(91,140,255,.5), rgba(139,124,255,.18), transparent 72%);
+  filter:blur(52px);
+}
+.app-phone-cap{font-size:.76rem;color:var(--muted-2);text-align:center;max-width:280px;z-index:1;line-height:1.4}
+.app-right{display:grid;gap:22px;align-content:start}
+@keyframes phoneFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+@media (prefers-reduced-motion: reduce){.app-phone img{animation:none}}
+.app-feats{display:grid;gap:16px}
+.app-feats p{
+  margin:0;padding:16px 18px;
+  background:var(--card);border:1px solid var(--card-bd);border-radius:14px;
+  color:var(--muted);line-height:1.6;
+}
+.app-feats b{color:var(--ink)}
+.app-feats code{font-size:.86em;color:var(--cyan-2);background:rgba(56,189,248,.08);padding:1px 6px;border-radius:6px}
+.tf-form{display:grid;gap:16px;margin:6px 0 14px}
+.tf-hp{position:absolute!important;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none}
+.tf-field{display:grid;gap:6px}
+.tf-label{font-size:.8rem;font-weight:600;letter-spacing:.02em;color:var(--muted)}
+.tf-field input{
+  width:100%;padding:12px 14px;border-radius:11px;
+  background:rgba(255,255,255,.04);border:1px solid var(--card-bd);
+  color:var(--ink);font:inherit;font-size:1rem;transition:border-color .15s,box-shadow .15s,background .15s;
+}
+.tf-field input::placeholder{color:var(--muted-2)}
+.tf-field input:focus{
+  outline:none;border-color:var(--cyan);background:rgba(56,189,248,.06);
+  box-shadow:0 0 0 3px rgba(56,189,248,.15);
+}
+.tf-consent{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:start;
+  font-size:.82rem;line-height:1.5;color:var(--muted)}
+.tf-consent input{margin-top:3px;width:16px;height:16px;accent-color:var(--cyan);flex:none}
+.tf-consent a{color:var(--cyan)}
+.h-captcha{margin:2px 0;min-height:78px;overflow-x:auto}
+.tf-submit{width:100%;justify-content:center;margin-top:2px}
+.tf-submit:disabled{opacity:.55;cursor:default}
+.tf-status{margin:0;font-size:.85rem;min-height:1.1em}
+.tf-status.ok{color:#34d399}
+.tf-status.err{color:#f87171}
+.tf-status.sending{color:var(--muted)}
+.why-prose{display:grid;gap:18px}
+.why-prose p{margin:0;color:var(--muted);line-height:1.7;font-size:1.05rem}
+.why-prose b{color:var(--ink)}
+.app-cta-card{
+  background:linear-gradient(180deg,rgba(91,140,255,.10),rgba(139,124,255,.05));
+  border:1px solid var(--card-bd);border-radius:var(--r);padding:26px 24px;
+}
+.app-cta-card h3{margin:12px 0 8px;font-size:1.35rem}
+.app-cta-card p{color:var(--muted);line-height:1.55;margin:0 0 16px}
+.app-cta-card .btn{width:100%;justify-content:center}
+.tf-tag,.modal-tag{display:inline-flex;align-items:center;gap:8px;font-size:.78rem;font-weight:600;letter-spacing:.02em;color:var(--cyan-2)}
+.tf-tag .live-dot,.modal-tag .live-dot{width:8px;height:8px;border-radius:50%;background:var(--cyan-2);box-shadow:0 0 0 4px rgba(34,211,238,.14);animation:pulse 2s infinite}
+.tf-fine{font-size:.82rem;color:var(--muted-2);line-height:1.5}
+.tf-fine a{color:var(--cyan)}
+.tf-collect{
+  background:rgba(255,255,255,.03);border:1px solid var(--card-bd);border-radius:14px;
+  padding:16px 18px;margin:6px 0 18px;
+}
+.tf-collect h4{margin:0 0 10px;font-size:.98rem;color:var(--ink)}
+.tf-collect ul{margin:0 0 10px;padding-left:18px;color:var(--muted);line-height:1.55}
+.tf-collect ul b{color:var(--ink)}
+@media (max-width:820px){
+  .appsec .app-grid{grid-template-columns:1fr;gap:28px}
+  .app-cta-card{position:static}
+  .app-phone{position:static}
+  .app-phone img{max-width:260px}
+}
