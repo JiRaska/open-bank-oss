@@ -223,7 +223,11 @@ class OnboardingDocumentService(
                 ),
             )
         } catch (e: DuplicateDocumentException) {
-            log.infof("Onboarding agreement already rendered for party %s (concurrent tap) — reusing.", partyRef)
+            // No partyRef in the message: it arrives from a token claim, i.e. a user-provided value,
+            // and must never be interpolated into a log line (CodeQL java/log-injection — the same
+            // reason OpenBaoClientSignatureAdapter logs only an exception's type). The event itself
+            // is what's diagnostic here; the losing party is recoverable from the request trace.
+            log.info("Onboarding agreement already rendered for this party (concurrent tap) — reusing.")
             documentQueryUseCase.findByIdempotencyKey(agreementKey)
                 ?: error("Duplicate agreement for $partyRef but no document under $agreementKey")
         }
