@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.54.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.54.0...admin-ui-v0.54.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** derive security-graph.json from real gitops manifests ([#1725](https://github.com/JiRaska/open-bank-oss/issues/1725)) ([5940ff3](https://github.com/JiRaska/open-bank-oss/commit/5940ff39e591da78538ff64b8008eb70be86f530)), closes [#1710](https://github.com/JiRaska/open-bank-oss/issues/1710)
+
 ## [0.54.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.53.0...admin-ui-v0.54.0) (2026-07-19)
 
 
