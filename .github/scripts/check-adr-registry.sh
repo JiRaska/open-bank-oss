@@ -246,6 +246,29 @@ for f in "${adrs[@]}"; do
     declared_sup="$declared_sup $num>$t"
   done <<< "$sup"
 
+  # 4j. an unfilled scaffold must not merge -------------------------------------
+  # The gate checked that a section EXISTS, not that anyone wrote it. So a
+  # `docs/adr/new.sh` scaffold with its tag corrected but its `summary:` left as the
+  # TODO placeholder passed cleanly — and `summary` is the one field the whole
+  # DIGEST.md tier rests on, so the placeholder would have been published as this
+  # ADR's entry in the decision history. Same for the TEMPLATE.md body prompts.
+  # These markers exist only in the scaffolding, so they cannot false-positive.
+  while IFS= read -r marker; do
+    [[ -z "$marker" ]] && continue
+    if grep -qF -- "$marker" "$f"; then
+      err "$base: still contains the unfilled scaffold placeholder \"$marker\" — write the ADR before merging it."
+    fi
+  done <<'MARKERS'
+TODO-pick-from-tags.txt
+summary: "TODO
+authors: [<name>]
+<Short noun phrase>
+<req refs>
+What forces are at play (technical, business, regulatory)?
+State the decision clearly in active voice
+- **Option A** — short description
+MARKERS
+
   # 4i. required body sections -------------------------------------------------
   # Hard-required, EXCEPT on superseded ADRs: those are immutable historical
   # records (ADR-0001) and some are a pointer to their successor and nothing else
