@@ -128,6 +128,14 @@ spec:
             # explicit `false` is load-bearing.
             - name: AUTHZ_ENFORCE
               value: "false"
+            # ADR-0179 merge account guard: party-service calls account-service to refuse a merge
+            # while the retired party still owns an open account. The `.svc`-qualified URL is what
+            # the network-policy generator's URL_RE scans to derive the party→accounts:8100 edge —
+            # without this env the manifest carries no account URL (it defaults inside the image),
+            # so the generator can't see the call and the guard connection times out under the
+            # default-deny NetworkPolicy. Resolves identically to the in-image default.
+            - name: ACCOUNT_SERVICE_URL
+              value: http://account-service.accounts.svc:8100
           startupProbe:
             tcpSocket:
               port: management
