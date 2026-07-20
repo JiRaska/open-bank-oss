@@ -71,11 +71,17 @@ export default async function ZeroTrustPage() {
     )
   }
 
-  const mtls = posture.istio?.mtls
-  const jwt = posture.istio?.jwt
-  const l7 = posture.istio?.l7
   const net = posture.network
   const sc = posture.supplyChain
+  const meshDeployed = Boolean(posture.istio?.available && posture.istio?.deployed)
+  const meshNote = posture.istio?.note ?? t('stav neznámý', 'status unknown')
+  const netGaps = net?.coverage?.gaps ?? []
+  // Partial fleet coverage reads as an "exception" (a known, bounded gap), not
+  // a flat "unknown" — we DO know the coverage number, we're just honest that
+  // it isn't 100%.
+  const netpolStatus: Status = !net?.coverage
+    ? 'unknown'
+    : netGaps.length === 0 ? 'enforced' : (net.coverage.covered > 0 ? 'exception' : 'unknown')
 
   // Perimeters, OUTER → INNER (the path a request travels toward the data plane).
   // Each status flag is read from the derived posture, never asserted.
@@ -86,43 +92,41 @@ export default async function ZeroTrustPage() {
     {
       key: 'netpol', icon: <Network size={15} />, color: '#0891b2',
       title: t('Síťová segmentace (L3/L4)', 'Network segmentation (L3/L4)'),
-      tech: 'Kubernetes NetworkPolicy',
-      status: net?.defaultDeny ? 'enforced' : 'unknown',
-      fact: net?.defaultDeny
-        ? t('default-deny baseline; povolen jen allow-list', 'default-deny baseline; only the allow-list passes')
+      tech: 'Kubernetes NetworkPolicy (gen-network-policies.py)',
+      status: netpolStatus,
+      fact: net?.coverage
+        ? t(`default-deny allow-list na ${net.coverage.covered}/${net.coverage.total} workloadech`
+            + (netGaps.length ? ` · mezery: ${netGaps.slice(0, 4).map(g => `${g.namespace}/${g.service}`).join(', ')}${netGaps.length > 4 ? '…' : ''}` : ''),
+            `default-deny allow-list on ${net.coverage.covered}/${net.coverage.total} workloads`
+            + (netGaps.length ? ` · gaps: ${netGaps.slice(0, 4).map(g => `${g.namespace}/${g.service}`).join(', ')}${netGaps.length > 4 ? '…' : ''}` : ''))
         : t('stav neznámý', 'status unknown'),
       regs: ['NIS2 Art. 21', 'DORA Art. 9'],
     },
     {
       key: 'mtls', icon: <Lock size={15} />, color: '#2563eb',
       title: t('Šifrovaný transport (mTLS)', 'Encrypted transport (mTLS)'),
-      tech: 'Istio PeerAuthentication',
-      status: mtls?.strict ? 'enforced' : 'unknown',
-      fact: mtls?.strict
-        ? t(`STRICT mTLS pro veškerý east-west provoz · ${mtls.exceptions.length} výjimka (edge)`,
-            `STRICT mTLS for all east-west traffic · ${mtls.exceptions.length} exception (edge)`)
-        : t('stav neznámý', 'status unknown'),
+      tech: 'Istio PeerAuthentication (not deployed)',
+      status: meshDeployed ? 'enforced' : 'unknown',
+      fact: meshDeployed ? t('STRICT mTLS pro veškerý east-west provoz', 'STRICT mTLS for all east-west traffic') : meshNote,
       regs: ['NIS2 Art. 21', 'DORA Art. 9'],
     },
     {
       key: 'jwt', icon: <KeyRound size={15} />, color: '#7c3aed',
       title: t('Ověření identity (JWT)', 'Identity authentication (JWT)'),
-      tech: 'Istio RequestAuthentication · Keycloak',
-      status: jwt?.present ? 'enforced' : 'unknown',
-      fact: jwt?.present
-        ? t(`tokeny z Keycloak · audience: ${(jwt.audiences ?? []).join(', ') || '—'}`,
-            `Keycloak-issued tokens · audience: ${(jwt.audiences ?? []).join(', ') || '—'}`)
-        : t('stav neznámý', 'status unknown'),
+      tech: 'Keycloak · quarkus-oidc (per-service, not a mesh edge)',
+      status: 'unknown',
+      fact: t('Keycloak JWT je ověřován per-service přes quarkus-oidc, ne na mesh hraně (žádný mesh není nasazen)',
+        'Keycloak JWT is validated per-service via quarkus-oidc, not at a mesh edge (no mesh is deployed)'),
       regs: ['PSD2 SCA', 'EBA ICT'],
     },
     {
       key: 'l7', icon: <ShieldCheck size={15} />, color: '#059669',
       title: t('Autorizace (L7 default-deny)', 'Authorization (L7 default-deny)'),
-      tech: 'Istio AuthorizationPolicy',
-      status: l7?.defaultDeny ? 'enforced' : 'unknown',
-      fact: l7?.defaultDeny
+      tech: 'Istio AuthorizationPolicy (not deployed)',
+      status: meshDeployed ? 'enforced' : 'unknown',
+      fact: meshDeployed
         ? t('projde jen platný JWT principal nebo in-mesh service account', 'only a valid JWT principal or in-mesh service account passes')
-        : t('stav neznámý', 'status unknown'),
+        : meshNote,
       regs: ['EBA ICT'],
     },
   ]
@@ -199,21 +203,20 @@ export default async function ZeroTrustPage() {
       attack: t('Cizí pod zkusí přímé L3/L4 spojení', 'Foreign pod attempts a direct L3/L4 connection'),
       stop: net?.defaultDeny
         ? t('Zahozeno — NetworkPolicy default-deny', 'Dropped — NetworkPolicy default-deny')
-        : t('Síťová vrstva', 'Network layer'),
+        : t(`Síťová vrstva — zahozeno na ${net?.coverage?.covered ?? 0}/${net?.coverage?.total ?? 0} workloadech s allow-listem, jinde otevřeno`,
+            `Network layer — dropped on ${net?.coverage?.covered ?? 0}/${net?.coverage?.total ?? 0} workloads with an allow-list, open elsewhere`),
     },
     {
       icon: <Lock size={14} />,
       attack: t('Clear-text east-west volání mezi službami', 'Clear-text east-west call between services'),
-      stop: mtls?.strict
+      stop: meshDeployed
         ? t('Odmítnuto — vyžadováno STRICT mTLS', 'Rejected — STRICT mTLS required')
-        : t('Transportní vrstva', 'Transport layer'),
+        : t('Transportní vrstva (žádný mesh — east-west je dnes plaintext)', 'Transport layer (no mesh — east-west is plaintext today)'),
     },
     {
       icon: <KeyRound size={14} />,
       attack: t('Požadavek bez platného JWT na gateway', 'Request without a valid JWT at the gateway'),
-      stop: (jwt?.present && l7?.defaultDeny)
-        ? t('Zamítnuto na L7 — default-deny authz', 'Denied at L7 — default-deny authz')
-        : t('Aplikační vrstva', 'Application layer'),
+      stop: t('Zamítnuto per-service — quarkus-oidc (Keycloak JWT), ne mesh L7', 'Denied per-service — quarkus-oidc (Keycloak JWT), not mesh L7'),
     },
   ]
 
@@ -233,8 +236,8 @@ export default async function ZeroTrustPage() {
           </h1>
           <p className="page-subtitle">
             {t(
-              'Obrana do hloubky odvozená z reálných manifestů (Istio, NetworkPolicy, Kyverno). Každý request musí projít všemi vrstvami, než se dostane k datům.',
-              'Defense in depth derived from the real manifests (Istio, NetworkPolicy, Kyverno). Every request must clear all layers before it reaches the data.',
+              'Obrana do hloubky odvozená z reálných, gitops-nasazených manifestů (NetworkPolicy, Kyverno). Žádný service mesh v sandboxu neběží — mTLS/JWT/L7 řádky níže to říkají otevřeně, ne jako "vynuceno".',
+              'Defense in depth derived from the real, gitops-deployed manifests (NetworkPolicy, Kyverno). No service mesh runs in the sandbox — the mTLS/JWT/L7 rows below say so plainly, not "enforced".',
             )}
           </p>
         </div>
