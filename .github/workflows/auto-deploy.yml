@@ -82,7 +82,7 @@ jobs:
       services: ${{ steps.detect.outputs.services }}
       any: ${{ steps.detect.outputs.any }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -256,7 +256,7 @@ jobs:
       # JSON map { "svc": "tag", … } written to $GITHUB_OUTPUT
       image_tags: ${{ steps.collect.outputs.image_tags }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
@@ -835,7 +835,7 @@ jobs:
       # Authorization extraheader in the git config AND peter-evans/create-pull-request
       # adds the token header too, so the branch push sends two Authorization headers
       # ("Duplicate header: Authorization" → git 400) and the gitops PR never opens.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
