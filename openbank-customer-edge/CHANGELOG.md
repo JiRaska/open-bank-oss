@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.34.0...customer-edge-v0.34.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* **document-service:** visible signature block, and stop duplicate agreements ([#1817](https://github.com/JiRaska/open-bank-oss/issues/1817)) ([b6b4faf](https://github.com/JiRaska/open-bank-oss/commit/b6b4faf3781c364efa5a11302e623be56463719f))
+
 ## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.33.0...customer-edge-v0.34.0) (2026-07-20)
 
 
