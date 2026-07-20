@@ -26,7 +26,8 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 ### Proposing features
 
 - Open a GitHub issue using the **Feature request** template.
-- Larger features benefit from a draft Architecture Decision Record (ADR) in `docs/adr/`. Create one with **`docs/adr/new.sh "Your decision title"`** — it allocates a collision-free number (checking your local tree, `origin/main`, and every open PR) and scaffolds [`docs/adr/TEMPLATE.md`](docs/adr/TEMPLATE.md) with the canonical two-axis (`Decision-Status` / `Delivery-Status`) header. Then open a PR promptly so the number is claimed; the `adr-registry` CI gate is the backstop against any residual collision.
+- Larger features benefit from a draft Architecture Decision Record (ADR) in `docs/adr/`. Create one with **`docs/adr/new.sh "Your decision title"`** — it allocates a collision-free number (checking your local tree, `origin/main`, and every open PR) and scaffolds the YAML front-matter defined in [`docs/adr/SCHEMA.md`](docs/adr/SCHEMA.md). Do not hand-copy an existing ADR: the header is a validated block with closed enums, a closed tag vocabulary ([`tags.txt`](docs/adr/tags.txt)), and a required `summary` — the `adr-registry` CI gate rejects anything else, including the scaffold's own placeholders. Fill in `tags` and `summary`, then run `bash docs/adr/gen-index.sh && bash .github/scripts/check-adr-registry.sh` before pushing (`README.md`, `DIGEST.md` and `index.json` are derived — never hand-edit them). Open a PR promptly so the number is claimed.
+- To find an existing decision, read [`docs/adr/DIGEST.md`](docs/adr/DIGEST.md) — the whole decision history at one line per ADR — rather than grepping the ADRs themselves.
 - Discuss design before writing significant code — saves everyone's time.
 
 ### Submitting changes

@@ -239,7 +239,18 @@ repo is the single source of truth.
 ## Where things are
 
 - Rules (authoritative): `openbank-libs/governance/rules.yaml`
-- Architecture decisions: `docs/adr/` (start at 0001; governance is 0029/0030)
+- Architecture decisions: `docs/adr/` (governance is 0029/0030).
+  - **Reading them: start at `docs/adr/DIGEST.md`, not at the ADRs.** It is the whole
+    decision history as one line per ADR (~16k tokens vs ~400k for the fleet). Read it,
+    then open only the ADRs it points you at. Grepping the fleet finds whichever ADR
+    matched a keyword, not the one that decided the thing.
+  - **Writing one: `docs/adr/new.sh "Title"`.** Never hand-copy an existing ADR — the
+    header is a validated YAML front-matter block (`docs/adr/SCHEMA.md`), with closed
+    enums and a closed tag vocabulary (`docs/adr/tags.txt`), and `new.sh` also allocates
+    a collision-free number. Fill in `tags` and `summary`; the scaffold's placeholders
+    are rejected by CI on purpose.
+  - Before pushing: `bash docs/adr/gen-index.sh && bash .github/scripts/check-adr-registry.sh`.
+    `README.md`, `DIGEST.md` and `index.json` are DERIVED — never hand-edit them.
 - Shared runtime plumbing (ADR-0122 domain/runtime split): pure domain logic —
   security, audit envelope, outbox ports, idempotency store — lives in
   `openbank-libs-domain/src/main/kotlin/com/openbank/libs/`; framework-touching

@@ -67,10 +67,12 @@ it was superseded. A shipped decision that a later ADR replaced is
 
 ### `summary` — the field that pays for the rest
 
-The fleet is ~225k words. Nothing and nobody loads it. `summary` is the tier that makes
-the registry usable without reading it: `DIGEST.md` is 174 of these lines, roughly 4k
-tokens, so a reviewer, an auditor or an AI agent can hold the *whole* decision history
-at once and open only the two ADRs that actually matter.
+The fleet is ~1.6 MB, on the order of 400k tokens. Nothing and nobody loads it.
+`summary` is the tier that makes the registry usable without reading it: `DIGEST.md`
+is one such line per ADR, ~16k tokens in total — a ~25x reduction, and more to the
+point the difference between a decision history you can hold in one read and one you
+cannot load at all. A reviewer, an auditor or an AI agent reads the digest and opens
+only the two ADRs that actually matter.
 
 That is worth writing properly:
 
