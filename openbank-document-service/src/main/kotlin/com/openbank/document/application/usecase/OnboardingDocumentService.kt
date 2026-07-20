@@ -225,7 +225,7 @@ class OnboardingDocumentService(
         } catch (e: DuplicateDocumentException) {
             log.infof("Onboarding agreement already rendered for party %s (concurrent tap) — reusing.", partyRef)
             documentQueryUseCase.findByIdempotencyKey(agreementKey)
-                ?: throw IllegalStateException("Duplicate agreement for $partyRef but no document under $agreementKey")
+                ?: error("Duplicate agreement for $partyRef but no document under $agreementKey")
         }
         val ceremony = openOrFindCeremony(document.id, partyRef)
         return OnboardingAgreement(

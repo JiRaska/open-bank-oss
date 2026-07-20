@@ -165,19 +165,14 @@ interface ClientSignatureIssuerPort {
      * unsigned. Passing null signs without a visible block (used where no signer identity is
      * available to display).
      */
-    suspend fun signAsClient(pdf: ByteArray, partyRef: String, visual: SignatureVisual? = null): ByteArray
+    suspend fun signAsClient(pdf: ByteArray, partyRef: String, document: SignedDocumentRef? = null): ByteArray
 }
 
 /**
- * What the visible signature block states. Assembled by the application layer (it owns the signer
- * lookup and the clock); rendered by the adapter, which owns the PDF mechanics.
+ * Identifies the document being signed, for the visible signature block. Null means "sign without a
+ * visible block" — the signer's name and the signing time are resolved by the adapter.
  */
-data class SignatureVisual(
-    val signerName: String,
-    val signedAt: String,
-    val documentId: String,
-    val fingerprint: String,
-)
+data class SignedDocumentRef(val documentId: String, val fingerprint: String)
 
 /**
  * Read-only lookup into `openbank-product-catalog`, scoped to exactly what the onboarding flow

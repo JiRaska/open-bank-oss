@@ -78,9 +78,12 @@ object PadesSigning {
     private const val LINE_SIZE = 8.5f
     private const val LINE_HEIGHT = 12f
     private const val BORDER_WIDTH = 0.7f
-    private val BORDER_GREY = Color(0x99, 0x99, 0x99)
-    private val TEXT_BLACK = Color(0x11, 0x11, 0x11)
-    private val TEXT_GREY = Color(0x55, 0x55, 0x55)
+    private const val BORDER_GREY_RGB = 0x999999
+    private const val TEXT_BLACK_RGB = 0x111111
+    private const val TEXT_GREY_RGB = 0x555555
+    private val BORDER_GREY = Color(BORDER_GREY_RGB)
+    private val TEXT_BLACK = Color(TEXT_BLACK_RGB)
+    private val TEXT_GREY = Color(TEXT_GREY_RGB)
 
     init {
         if (Security.getProvider(BC_PROVIDER) == null) {

@@ -10,9 +10,8 @@ import com.openbank.document.application.port.`in`.SignatureCeremonyUseCase
 import com.openbank.document.application.port.out.CeremonyRepositoryPort
 import com.openbank.document.application.port.out.ClientSignatureIssuerPort
 import com.openbank.document.application.port.out.DocumentRepositoryPort
-import com.openbank.document.application.port.out.PartyLookupPort
-import com.openbank.document.application.port.out.SignatureVisual
 import com.openbank.document.application.port.out.SignatureSealPort
+import com.openbank.document.application.port.out.SignedDocumentRef
 import com.openbank.document.application.port.out.SignerVerificationPort
 import com.openbank.document.domain.event.SignatureCeremonyCompleted
 import com.openbank.document.domain.model.CeremonyStatus
@@ -27,8 +26,6 @@ import com.openbank.libs.storage.ObjectStorePort
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
 import java.time.Instant
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 /**
@@ -47,7 +44,6 @@ class SignatureCeremonyService(
     private val objectStore: ObjectStorePort,
     private val sealPort: SignatureSealPort,
     private val clientSignaturePort: ClientSignatureIssuerPort,
-    private val partyLookupPort: PartyLookupPort,
     private val signerVerificationPort: SignerVerificationPort,
     private val clock: Clock,
     private val objectMapper: ObjectMapper,
@@ -147,28 +143,15 @@ class SignatureCeremonyService(
 
     private suspend fun signAsClient(document: Document, partyRef: String) {
         val pdf = objectStore.get(document.storageKey)
-        val signed = clientSignaturePort.signAsClient(pdf, partyRef, visualFor(document, partyRef))
-        objectStore.put(document.storageKey, signed, document.contentType)
-    }
-
-    /**
-     * What the visible signature block on the page will say. Resolving the signer's legal name is
-     * best-effort: a party-service hiccup must not abort a ceremony the customer has already
-     * authorised with SCA, so the block degrades to the party reference.
-     */
-    private suspend fun visualFor(document: Document, partyRef: String): SignatureVisual {
-        val signerName = runCatching { partyLookupPort.findById(UUID.fromString(partyRef))?.legalName }
-            .getOrNull()
-            ?.takeIf { it.isNotBlank() }
-            ?: partyRef
-        return SignatureVisual(
-            signerName = signerName,
-            signedAt = DateTimeFormatter.ofPattern(SIGNED_AT_PATTERN)
-                .withZone(ZoneOffset.UTC)
-                .format(clock.instant()),
-            documentId = document.id.toString(),
-            fingerprint = document.sha256.take(SHA_PREFIX_LENGTH),
+        val signed = clientSignaturePort.signAsClient(
+            pdf,
+            partyRef,
+            SignedDocumentRef(
+                documentId = document.id.toString(),
+                fingerprint = document.sha256.take(SHA_PREFIX_LENGTH),
+            ),
         )
+        objectStore.put(document.storageKey, signed, document.contentType)
     }
 
     private suspend fun sealDocument(ceremony: SignatureCeremony) {
@@ -198,7 +181,6 @@ class SignatureCeremonyService(
 
     companion object {
         const val EVENT_CEREMONY_COMPLETED = "signature-ceremony.completed.v1"
-        private const val SIGNED_AT_PATTERN = "dd.MM.yyyy HH:mm 'UTC'"
         private const val SHA_PREFIX_LENGTH = 16
     }
 }

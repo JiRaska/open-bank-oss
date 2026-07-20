@@ -10,7 +10,6 @@ import com.openbank.document.application.port.`in`.OpenCeremonyCommand
 import com.openbank.document.application.port.out.CeremonyRepositoryPort
 import com.openbank.document.application.port.out.ClientSignatureIssuerPort
 import com.openbank.document.application.port.out.DocumentRepositoryPort
-import com.openbank.document.application.port.out.PartyLookupPort
 import com.openbank.document.application.port.out.SignatureSealPort
 import com.openbank.document.application.port.out.SignerVerificationPort
 import com.openbank.document.domain.model.CeremonyStatus
@@ -47,14 +46,12 @@ class SignatureCeremonyServiceTest {
     private val sealPort: SignatureSealPort = mockk()
     private val clientSignaturePort: ClientSignatureIssuerPort = mockk()
     private val signerVerificationPort: SignerVerificationPort = mockk()
-    private val partyLookupPort: PartyLookupPort = mockk(relaxed = true)
     private val service = SignatureCeremonyService(
         ceremonyRepo = ceremonyRepo,
         documentRepo = documentRepo,
         objectStore = objectStore,
         sealPort = sealPort,
         clientSignaturePort = clientSignaturePort,
-        partyLookupPort = partyLookupPort,
         signerVerificationPort = signerVerificationPort,
         clock = Clock.fixed(FIXED_NOW, ZoneOffset.UTC),
         objectMapper = ObjectMapper().registerModule(JavaTimeModule()),
