@@ -46,6 +46,40 @@ class CustomerDocumentResourceTest {
     }
 
     @Test
+    fun `listDocuments queries upstream with the token party, never a client-supplied one`() {
+        val upstream = mockk<UpstreamClient>()
+        val urlSlot = slot<String>()
+        every { upstream.get(capture(urlSlot), any()) } returns Response.ok("[]").build()
+
+        resource(upstream).listDocuments()
+
+        assertThat(urlSlot.captured).isEqualTo("$docSvc/api/v1/documents?partyRef=$caller")
+    }
+
+    @Test
+    fun `listDocuments strips storage coordinates and drops foreign rows`() {
+        val upstream = mockk<UpstreamClient>()
+        val otherParty = UUID.randomUUID()
+        every { upstream.get(any(), any()) } returns Response.ok(
+            """
+            [
+              {"id":"$DOC_ID","partyRef":"$caller","templateCode":"RAMCOVA_SMLOUVA","templateVersion":"1",
+               "contentType":"application/pdf","sizeBytes":1024,"status":"SIGNED","createdAt":"2026-07-20T10:00:00Z",
+               "storageKey":"s3://bucket/secret-key","sha256":"deadbeef"},
+              {"id":"${UUID.randomUUID()}","partyRef":"$otherParty","templateCode":"VOP","status":"GENERATED"}
+            ]
+            """.trimIndent(),
+        ).build()
+
+        val body = resource(upstream).listDocuments().entity as String
+
+        assertThat(body).contains("RAMCOVA_SMLOUVA")
+        assertThat(body).doesNotContain("storageKey")
+        assertThat(body).doesNotContain("sha256")
+        assertThat(body).doesNotContain(otherParty.toString())
+    }
+
+    @Test
     fun `documentContent returns 404 for a document owned by another party (no existence leak)`() {
         val upstream = mockk<UpstreamClient>()
         val otherParty = UUID.randomUUID()
