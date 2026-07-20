@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.5](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.15.4...ledger-service-v1.15.5) (2026-07-20)
+
+
+### Bug Fixes
+
+* **lending:** point funding-clearing at the account ledger actually seeded ([#1731](https://github.com/JiRaska/open-bank-oss/issues/1731)) ([a5f6acc](https://github.com/JiRaska/open-bank-oss/commit/a5f6acc8a051462aeaa03067625f799aa039ecab)), closes [#1720](https://github.com/JiRaska/open-bank-oss/issues/1720)
+
 ## [1.15.4](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.15.3...ledger-service-v1.15.4) (2026-07-17)
 
 
