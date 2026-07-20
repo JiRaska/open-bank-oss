@@ -81,6 +81,10 @@ class CustomerDocumentResource(private val upstream: UpstreamClient) {
         val safe = docs.sortedByDescending { it.get("createdAt")?.asText().orEmpty() }.mapNotNull { doc ->
             // Defence in depth: drop anything the upstream returned that isn't actually the caller's.
             if (doc.get("partyRef")?.asText() != partyId) return@mapNotNull null
+            // ARCHIVED is a superseded revision (e.g. an agreement re-issued in another language).
+            // Listing it beside the live one shows the customer several apparently-equal contracts
+            // with no way to tell which one binds them.
+            if (doc.get("status")?.asText().equals(STATUS_ARCHIVED, ignoreCase = true)) return@mapNotNull null
             buildMap<String, Any?> {
                 put("id", doc.get("id")?.asText())
                 put("templateCode", doc.get("templateCode")?.asText())
@@ -171,5 +175,6 @@ class CustomerDocumentResource(private val upstream: UpstreamClient) {
         const val OK = 200
         const val NOT_FOUND = 404
         const val BAD_REQUEST = 400
+        const val STATUS_ARCHIVED = "ARCHIVED"
     }
 }

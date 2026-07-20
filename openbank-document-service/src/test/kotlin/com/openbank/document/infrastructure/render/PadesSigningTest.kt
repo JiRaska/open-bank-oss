@@ -7,6 +7,7 @@ package com.openbank.document.infrastructure.render
 import org.apache.pdfbox.Loader
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
+import org.apache.pdfbox.text.PDFTextStripper
 import org.assertj.core.api.Assertions.assertThat
 import org.bouncycastle.cert.X509CertificateHolder
 import org.bouncycastle.cms.CMSProcessableByteArray
@@ -37,6 +38,42 @@ class PadesSigningTest {
         assertThat(signatures[0].name).isEqualTo("Test Signer")
         assertThat(signatures[0].reason).isEqualTo("unit test signature")
         assertThat(verifies(signatures[0].getContents(signed), signatures[0].getSignedContent(signed))).isTrue()
+    }
+
+    @Test
+    fun `the visible signature block lands on the page and stays inside the signed byte range`() {
+        val pdf = blankPdf()
+        val identity = PadesSigning.generateEphemeralIdentity("party-42")
+
+        val stamped = PadesSigning.stampSignatureBlock(
+            pdf = pdf,
+            title = "Signed electronically",
+            lines = listOf("Signer: Adéla Bartošová", "Date: 20.07.2026 10:00 UTC"),
+        )
+        val signed = PadesSigning.applySignature(stamped, identity, "party-42", "client signature")
+
+        // Visible to a human: the text is real page content, not just a dictionary entry.
+        val text = PDFTextStripper().getText(Loader.loadPDF(signed))
+        assertThat(text).contains("Signed electronically")
+        assertThat(text).contains("Adéla Bartošová")
+
+        // ...and covered by the signature. Signing is an incremental update, so the stamped
+        // document is the literal prefix of the signed file, and the ByteRange's first segment
+        // spans it: those exact bytes are what the CMS signature commits to. (The block can't be
+        // grepped for in the raw bytes — page content is Flate-compressed — so prove containment
+        // by byte range instead.)
+        val signature = Loader.loadPDF(signed).use { it.signatureDictionaries.single() }
+        assertThat(verifies(signature.getContents(signed), signature.getSignedContent(signed))).isTrue()
+        assertThat(signed.copyOfRange(0, stamped.size)).isEqualTo(stamped)
+        assertThat(signature.byteRange[1]).isGreaterThanOrEqualTo(stamped.size)
+        assertThat(PDFTextStripper().getText(Loader.loadPDF(stamped))).contains("Adéla Bartošová")
+    }
+
+    @Test
+    fun `stamping is a no-op without lines so an unsigned-block document is left byte-identical`() {
+        val pdf = blankPdf()
+
+        assertThat(PadesSigning.stampSignatureBlock(pdf, "Signed electronically", emptyList())).isEqualTo(pdf)
     }
 
     @Test

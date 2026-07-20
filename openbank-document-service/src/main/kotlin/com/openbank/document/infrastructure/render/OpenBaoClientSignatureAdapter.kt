@@ -6,6 +6,7 @@ package com.openbank.document.infrastructure.render
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.document.application.port.out.ClientSignatureIssuerPort
+import com.openbank.document.application.port.out.SignatureVisual
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -84,14 +85,34 @@ class OpenBaoClientSignatureAdapter(
         .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
         .build()
 
-    override suspend fun signAsClient(pdf: ByteArray, partyRef: String): ByteArray = withContext(Dispatchers.IO) {
+    override suspend fun signAsClient(
+        pdf: ByteArray,
+        partyRef: String,
+        visual: SignatureVisual?,
+    ): ByteArray = withContext(Dispatchers.IO) {
         // Idempotent: a retry after a persistence failure must not layer a second signature for a
-        // signer who has already signed this document.
+        // signer who has already signed this document. This also protects the stamp below — it
+        // rewrites page content, which on an already-signed PDF would invalidate that signature.
         if (PadesSigning.hasSignatureNamed(pdf, partyRef)) {
             pdf
         } else {
             val identity = issueOneTimeIdentity(partyRef)
-            PadesSigning.applySignature(pdf, identity, partyRef, SIGNATURE_REASON)
+            // Stamp first, sign second, so the visible block is inside the signed byte range: the
+            // page and the signature dictionary then assert the same thing, and neither can be
+            // changed without breaking the other.
+            val stamped = visual?.let {
+                PadesSigning.stampSignatureBlock(
+                    pdf = pdf,
+                    title = SIGNATURE_BLOCK_TITLE,
+                    lines = listOf(
+                        "Signer / Podepsal(a): ${it.signerName}",
+                        "Date / Datum: ${it.signedAt}",
+                        "Document / Dokument: ${it.documentId}",
+                        "Fingerprint / Otisk (SHA-256): ${it.fingerprint}…",
+                    ),
+                )
+            } ?: pdf
+            PadesSigning.applySignature(stamped, identity, partyRef, SIGNATURE_REASON)
         }
     }
 
@@ -196,5 +217,6 @@ class OpenBaoClientSignatureAdapter(
         const val HTTP_OK = 200
         const val EPHEMERAL_VALIDITY_DAYS = 1L
         const val SIGNATURE_REASON = "Client electronic signature (one-time certificate)"
+        const val SIGNATURE_BLOCK_TITLE = "Signed electronically / Podepsáno elektronicky"
     }
 }

@@ -47,9 +47,15 @@ data class Document(
         return copy(status = DocumentStatus.SIGNED)
     }
 
+    /**
+     * Supersede this document. Archiving also RELEASES [idempotencyKey]: the key names the party's
+     * one *live* artifact of its kind, so holding it on a superseded row would permanently block the
+     * legitimate re-render that replaces it (e.g. an onboarding agreement re-issued in another
+     * language). The archived row keeps its content address and stays auditable.
+     */
     fun archive(): Document {
         require(status != DocumentStatus.ARCHIVED) { "Document is already ARCHIVED" }
-        return copy(status = DocumentStatus.ARCHIVED)
+        return copy(status = DocumentStatus.ARCHIVED, idempotencyKey = null)
     }
 
     companion object {

@@ -10,6 +10,7 @@ import com.openbank.document.application.port.`in`.OpenCeremonyCommand
 import com.openbank.document.application.port.out.CeremonyRepositoryPort
 import com.openbank.document.application.port.out.ClientSignatureIssuerPort
 import com.openbank.document.application.port.out.DocumentRepositoryPort
+import com.openbank.document.application.port.out.PartyLookupPort
 import com.openbank.document.application.port.out.SignatureSealPort
 import com.openbank.document.application.port.out.SignerVerificationPort
 import com.openbank.document.domain.model.CeremonyStatus
@@ -46,12 +47,14 @@ class SignatureCeremonyServiceTest {
     private val sealPort: SignatureSealPort = mockk()
     private val clientSignaturePort: ClientSignatureIssuerPort = mockk()
     private val signerVerificationPort: SignerVerificationPort = mockk()
+    private val partyLookupPort: PartyLookupPort = mockk(relaxed = true)
     private val service = SignatureCeremonyService(
         ceremonyRepo = ceremonyRepo,
         documentRepo = documentRepo,
         objectStore = objectStore,
         sealPort = sealPort,
         clientSignaturePort = clientSignaturePort,
+        partyLookupPort = partyLookupPort,
         signerVerificationPort = signerVerificationPort,
         clock = Clock.fixed(FIXED_NOW, ZoneOffset.UTC),
         objectMapper = ObjectMapper().registerModule(JavaTimeModule()),
@@ -74,7 +77,7 @@ class SignatureCeremonyServiceTest {
         // sealDocument) sees what signAsClient just put -- simulating the object store's own
         // read-your-writes behavior across the two sequential steps.
         coEvery { objectStore.get(document.storageKey) } returns pdf andThen clientSigned
-        coEvery { clientSignaturePort.signAsClient(pdf, "party-1") } returns clientSigned
+        coEvery { clientSignaturePort.signAsClient(pdf, "party-1", any()) } returns clientSigned
         coEvery { objectStore.put(document.storageKey, clientSigned, document.contentType) } returns Unit
         coEvery { sealPort.sealPades(clientSigned, any()) } returns sealed
         coEvery { objectStore.put(document.storageKey, sealed, document.contentType) } returns Unit
@@ -85,7 +88,7 @@ class SignatureCeremonyServiceTest {
 
         assertThat(result.status).isEqualTo(CeremonyStatus.COMPLETED)
         coVerifyOrder {
-            clientSignaturePort.signAsClient(pdf, "party-1")
+            clientSignaturePort.signAsClient(pdf, "party-1", any())
             sealPort.sealPades(clientSigned, any())
         }
         // The bug this pins: a completed ceremony used to seal the PDF bytes but never persist
@@ -109,7 +112,7 @@ class SignatureCeremonyServiceTest {
                 signerVerificationPort.verify("party-1", "evidence-1", document.sha256, ceremony.id.toString())
             } returns true
             coEvery { objectStore.get(document.storageKey) } returns pdf
-            coEvery { clientSignaturePort.signAsClient(any(), "party-1") } returns pdf
+            coEvery { clientSignaturePort.signAsClient(any(), "party-1", any()) } returns pdf
             coEvery { objectStore.put(any(), any(), any()) } returns Unit
             coEvery { sealPort.sealPades(any(), any()) } returns pdf
             coEvery { ceremonyRepo.saveWithOutbox(any(), any()) } answers { firstArg() }
@@ -158,14 +161,14 @@ class SignatureCeremonyServiceTest {
         } returns
             true
         coEvery { objectStore.get(document.storageKey) } returns pdf
-        coEvery { clientSignaturePort.signAsClient(any(), "party-1") } returns pdf
+        coEvery { clientSignaturePort.signAsClient(any(), "party-1", any()) } returns pdf
         coEvery { objectStore.put(any(), any(), any()) } returns Unit
         coEvery { ceremonyRepo.save(any()) } answers { firstArg() }
 
         val result = service.recordDecision(ceremony.id, "party-1", SignerStatus.SIGNED, "evidence-1")
 
         assertThat(result.status).isEqualTo(CeremonyStatus.PARTIALLY_SIGNED)
-        coVerify(exactly = 1) { clientSignaturePort.signAsClient(any(), "party-1") }
+        coVerify(exactly = 1) { clientSignaturePort.signAsClient(any(), "party-1", any()) }
         coVerify(exactly = 0) { sealPort.sealPades(any(), any()) }
         coVerify(exactly = 0) { ceremonyRepo.saveWithOutbox(any(), any()) }
     }
@@ -179,7 +182,7 @@ class SignatureCeremonyServiceTest {
         val result = service.recordDecision(ceremony.id, "party-1", SignerStatus.DECLINED, null)
 
         assertThat(result.status).isEqualTo(CeremonyStatus.DECLINED)
-        coVerify(exactly = 0) { clientSignaturePort.signAsClient(any(), any()) }
+        coVerify(exactly = 0) { clientSignaturePort.signAsClient(any(), any(), any()) }
         coVerify(exactly = 0) { sealPort.sealPades(any(), any()) }
     }
 
@@ -198,7 +201,7 @@ class SignatureCeremonyServiceTest {
         }
             .isInstanceOf(IllegalStateException::class.java)
 
-        coVerify(exactly = 0) { clientSignaturePort.signAsClient(any(), any()) }
+        coVerify(exactly = 0) { clientSignaturePort.signAsClient(any(), any(), any()) }
     }
 
     @Test
@@ -213,7 +216,7 @@ class SignatureCeremonyServiceTest {
             runBlocking { service.recordDecision(ceremony.id, "party-2", SignerStatus.SIGNED, "evidence-2") }
         }.isInstanceOf(IllegalArgumentException::class.java)
 
-        coVerify(exactly = 0) { clientSignaturePort.signAsClient(any(), any()) }
+        coVerify(exactly = 0) { clientSignaturePort.signAsClient(any(), any(), any()) }
         coVerify(exactly = 0) { signerVerificationPort.verify(any(), any(), any(), any()) }
     }
 
@@ -233,7 +236,7 @@ class SignatureCeremonyServiceTest {
 
         assertThat(result.status).isEqualTo(CeremonyStatus.COMPLETED)
         coVerify(exactly = 0) { signerVerificationPort.verify(any(), any(), any(), any()) }
-        coVerify(exactly = 0) { clientSignaturePort.signAsClient(any(), any()) }
+        coVerify(exactly = 0) { clientSignaturePort.signAsClient(any(), any(), any()) }
         coVerify(exactly = 0) { sealPort.sealPades(any(), any()) }
         coVerify(exactly = 0) { ceremonyRepo.save(any()) }
         coVerify(exactly = 0) { ceremonyRepo.saveWithOutbox(any(), any()) }
