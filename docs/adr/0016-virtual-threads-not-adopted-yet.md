@@ -1,9 +1,16 @@
-# Virtual Threads: not adopted yet — keep Kotlin coroutines
+---
+date: 2026-05-29
+decision-status: accepted
+delivery-status: n-a
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [architecture]
+summary: "Virtual Threads are not adopted; Kotlin coroutines plus reactive Mutiny already give non-blocking blocking-style code, so @RunOnVirtualThread is used only case-by-case for blocking SDKs or new imperative services."
+---
 
-Date: 2026-05-29
-Status: Accepted
-Delivery-Status: N/A
-Author(s): jiri.raska
+# Virtual Threads: not adopted yet — keep Kotlin coroutines
 
 ## Context
 

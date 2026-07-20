@@ -1,10 +1,16 @@
-# Agent services licensed AGPL-3.0-only in-repo (open-core)
+---
+date: 2026-06-29
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [licensing, ai-agents, governance]
+summary: "The four AI agent services are relicensed AGPL-3.0-only in-repo with a parallel commercial licence while the rest of the platform stays Apache-2.0, replacing the ADR-0031 separate-repo plan with a per-component open-core boundary."
+---
 
-Date: 2026-06-29
-Status: Accepted
-Decision-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiří Raška
+# Agent services licensed AGPL-3.0-only in-repo (open-core)
 
 ## Context
 

@@ -1,9 +1,16 @@
-# 154. Independent agent PR approval for non-sensitive changes
+---
+date: 2026-07-06
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ai-agents, ci, governance]
+summary: "Run an Agent review workflow that submits a real approve or request-changes review from a different model family (GitHub Models), while always deferring sensitive scopes such as money-path, governance and CI paths to humans."
+---
 
-Date: 2026-07-06
-Decision-Status: Accepted
-Delivery-Status: Shipped
-Author(s): jiri.raska
+# 154. Independent agent PR approval for non-sensitive changes
 
 ## Context
 

@@ -1,8 +1,16 @@
-# 3. Transactional outbox for Kafka event publishing
+---
+date: 2026-05-26
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [kafka, architecture, libs]
+summary: "Every service publishing Kafka events writes them to an outbox table in the same DB transaction and lets a separate dispatcher publish them; direct kafkaTemplate.send from request handling is forbidden."
+---
 
-Date: 2026-05-26
-Status: Accepted
-Delivery-Status: Shipped
+# 3. Transactional outbox for Kafka event publishing
 
 > **Amended (2026-07-16) — dispatch mechanism is the libs poller, not Debezium CDC.**
 > This ADR originally named Debezium CDC (WAL tailing) as the dispatch mechanism. The

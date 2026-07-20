@@ -1,8 +1,16 @@
-# 11. Testing pyramid: unit + integration (Testcontainers) + E2E + load
+---
+date: 2026-05-26
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [testing, ci]
+summary: "Testing follows a pyramid of unit, Testcontainers integration, Pact contract, Playwright/REST E2E, k6 load and chaos layers, with coverage and latency regression gates, built up from a zero-test baseline."
+---
 
-Date: 2026-05-26
-Status: Accepted
-Delivery-Status: Shipped
+# 11. Testing pyramid: unit + integration (Testcontainers) + E2E + load
 
 ## Context
 

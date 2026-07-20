@@ -1,9 +1,16 @@
-# Service self-reported SBOM and supply-chain attestation
+---
+date: 2026-06-28
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [supply-chain, security-ops, ci]
+summary: "SBOM is split into two axes: an operational self-reported SBOM generated host-side only and served at /q/openbank/sbom, and a syft-on-image SBOM signed with cosign attest on the existing KMS key and verified at Kyverno admission."
+---
 
-Date: 2026-06-28
-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska
+# Service self-reported SBOM and supply-chain attestation
 
 **Delivery note (updated 2026-07-05):** promoted from Proposed — the in-flight branches this
 ADR was written ahead of have long since merged and the decision held up in practice.

@@ -1,9 +1,16 @@
-# 49. openbank-libs consolidation Phase 4: convention plugin, shared config profile, finished outbox abstraction, observability
+---
+date: 2026-05-31
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [libs, ci, architecture]
+summary: "Phase 4 consolidates openbank-libs: a shared Gradle convention plugin, version.txt adoption, one AbstractOutboxDispatcher for all services, and a ban on service-local mappers for JDK exception types libs already maps."
+---
 
-Date: 2026-05-31
-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska
+# 49. openbank-libs consolidation Phase 4: convention plugin, shared config profile, finished outbox abstraction, observability
 
 **Delivery note (updated 2026-07-11):**
 - **D3 (outbox abstraction)** — ✅ Shipped: all 29 services migrated to `AbstractOutboxDispatcher`; 20 PRs merged.

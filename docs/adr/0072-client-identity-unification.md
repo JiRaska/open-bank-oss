@@ -1,9 +1,20 @@
+---
+date: 2026-06-07
+decision-status: accepted
+delivery-status: shipped
+authors: [OpenBank platform]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [onboarding, kyc, compliance]
+summary: "Identity resolution runs in pid-service before any party is created, using a deterministic blind index on the Czech birth number, a normalized candidate match otherwise, and a four-eyes manual case when ambiguous."
+---
+
 # 72. Client identity unification — one human, one party, deterministic dedup with a manual-verification fallback
 
-Date: 2026-06-07
-Status: Accepted (2026-06-16, under the ADR-0094 umbrella)
-Delivery-Status: Shipped
-Author(s): OpenBank platform
+> **Migrated status note.** The pre-schema `Status:` line carried this prose,
+> which the enum cannot hold; it is kept here rather than dropped:
+> 2026-06-16, under the ADR-0094 umbrella
 
 ## Context
 

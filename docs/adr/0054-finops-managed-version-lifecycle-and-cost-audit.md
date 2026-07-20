@@ -1,9 +1,16 @@
-# ADR-0054 — FinOps guardrails: managed-service version lifecycle + periodic cost audit
+---
+date: 2026-06-01
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [finops, infrastructure, ci]
+summary: "Any pinned managed-service version must be on standard support with at least six months of runway and chosen latest-minus-one, enforced by a CI gate at provisioning time plus a weekly cost and drift audit."
+---
 
-Date: 2026-06-01
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiri Raska
+# ADR-0054 — FinOps guardrails: managed-service version lifecycle + periodic cost audit
 
 **Delivery note (updated 2026-06-30):**
 - **Phase 1 (EKS version lifecycle)** — ✅ Shipped: N-1 + 6-month runway selection policy live; CI gate (`check-version-lifecycle.py`) and weekly audit automation in place.

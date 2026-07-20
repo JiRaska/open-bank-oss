@@ -1,8 +1,16 @@
-# 6. AsyncAPI 3.0 for all Kafka topics
+---
+date: 2026-05-26
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [kafka, api-contract, governance]
+summary: "Every Kafka topic is documented in AsyncAPI 3.0 under openbank-contracts, with a Schema Registry enforcing message schemas at runtime and CI blocking release on missing or stale specs."
+---
 
-Date: 2026-05-26
-Status: Accepted
-Delivery-Status: Partial
+# 6. AsyncAPI 3.0 for all Kafka topics
 
 **Delivery note (updated 2026-07-01):**
 - **CI linting gate** — ✅ Shipped: AsyncAPI specs linted in CI; missing or malformed specs block release.

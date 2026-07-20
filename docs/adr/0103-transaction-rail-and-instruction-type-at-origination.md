@@ -1,9 +1,16 @@
-# 103. Transaction rail & instruction type captured at origination
+---
+date: 2026-06-22
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [transactions, payments]
+summary: "The payment rail and instruction type become first-class controlled-vocabulary facts captured at origination and propagated through the journal, replacing the app-side heuristic that guessed transaction type."
+---
 
-Date: 2026-06-22
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiří Raška
+# 103. Transaction rail & instruction type captured at origination
 
 ## Context
 

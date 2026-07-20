@@ -1,8 +1,16 @@
-# 123. Relicense the platform from MPL-2.0 to Apache-2.0
+---
+date: 2026-06-27
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: [0012]
+superseded-by: []
+delivery-repos: []
+tags: [licensing, governance]
+summary: "The platform relicenses from MPL-2.0 to Apache-2.0 because copyleft friction cost more adoption than it bought, keeping DCO and the patent grant; the commercial moat moves to the AGPL agent services."
+---
 
-Date: 2026-06-27
-Status: Accepted
-Delivery-Status: Shipped
+# 123. Relicense the platform from MPL-2.0 to Apache-2.0
 
 Supersedes [ADR-0012](0012-mpl-license-and-dco.md) (MPL-2.0 + DCO).
 

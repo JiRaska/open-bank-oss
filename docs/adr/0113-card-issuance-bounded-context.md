@@ -1,9 +1,16 @@
-# 113. Card issuance bounded context — virtual-first, internal lifecycle, no external processor
+---
+date: 2026-06-25
+decision-status: accepted
+delivery-status: shipped
+authors: [Claude (paired with Jiří Raška)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [cards, architecture]
+summary: "Card-issuance is the card registry and lifecycle manager, not a processor: it owns the card state machine, synthetic sandbox PANs, reference-only spending limits and two outbox events; authorisation, 3DS and PIN stay out of scope."
+---
 
-Date: 2026-06-25
-Author: Claude (paired with Jiří Raška)
-Status: Accepted
-Delivery-Status: Shipped
+# 113. Card issuance bounded context — virtual-first, internal lifecycle, no external processor
 
 ## Context
 

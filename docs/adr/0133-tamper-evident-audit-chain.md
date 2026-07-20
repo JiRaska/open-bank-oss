@@ -1,10 +1,16 @@
-# ADR-0133: Tamper-evident audit chain
+---
+date: 2026-06-29
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [audit, compliance, crypto-keys]
+summary: "audit-service keeps a SHA-256 hash chain over every audit entry (prev_hash plus record_hash) with a verify endpoint reporting the first broken link, giving tamper-evidence without an external WORM store."
+---
 
-Date: 2026-06-29
-Status: Accepted
-Decision-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiri Raska
+# ADR-0133: Tamper-evident audit chain
 
 ## Context
 

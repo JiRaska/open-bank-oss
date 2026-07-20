@@ -1,8 +1,16 @@
-# 46. Daily FX revaluation mechanics and ČNB rate ingestion
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [fx, ledger, accounting-close]
+summary: "Daily FX revaluation ingests the CNB fixing as a new RateSource.CNB mid rate and books a pure-CZK entry against a per-currency CZK carrying anchor, so repricing changes value without moving the foreign position."
+---
 
-Date: 2026-05-30
-Status: Accepted
-Delivery-Status: Shipped
+# 46. Daily FX revaluation mechanics and ČNB rate ingestion
 
 ## Context
 

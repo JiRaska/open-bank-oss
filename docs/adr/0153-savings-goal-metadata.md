@@ -1,9 +1,16 @@
-# ADR-0153 — Savings goal metadata on account-service
+---
+date: 2026-07-03
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [accounts, mobile-app, customer-edge]
+summary: "Add an optional savings goal as three nullable columns (name, target minor units, target date) on account-service's existing Account aggregate, exposed via PUT/DELETE goal endpoints and proxied by customer-edge."
+---
 
-Date: 2026-07-03
-Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Shipped    <!-- Planned | Partial | Shipped | N/A — decision-only; the build-axis status, independent of the decision axis -->
-Author(s): jiri.raska
+# ADR-0153 — Savings goal metadata on account-service
 
 Shipped in PR #219 (account-service schema/endpoints + customer-edge proxy + GDPR Art. 17
 erasure hook). Issue #264 was opened two days after #219 merged, from a stale reading of

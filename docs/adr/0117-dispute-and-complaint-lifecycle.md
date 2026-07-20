@@ -1,9 +1,16 @@
-# 117. Dispute and complaint handling — PSD2 statutory deadlines, evidence chain, breach detection
+---
+date: 2026-06-25
+decision-status: accepted
+delivery-status: partial
+authors: [Claude (paired with Jiří Raška)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [disputes, compliance, audit]
+summary: "Disputes and complaints stay separate aggregates in one bounded context with PSD2 15/35 business-day deadline mechanics, a per-dispute SHA-256 evidence hash chain and an evidence-backed remediation outcome."
+---
 
-Date: 2026-06-25
-Author: Claude (paired with Jiří Raška)
-Status: Accepted
-Delivery-Status: Partial
+# 117. Dispute and complaint handling — PSD2 statutory deadlines, evidence chain, breach detection
 
 **Delivery note (updated 2026-07-09):**
 - **Core domain logic** — ✅ Shipped: `Dispute` + `Complaint` aggregates in `openbank-dispute-service`; PSD2 deadline mechanics (15/35 BD), `BusinessCalendar` domain logic, breach derivation (lazy per-read), and `DomainMetrics` live.

@@ -1,9 +1,16 @@
-# 111. SEPA R-Transaction Returns via pacs.004
+---
+date: 2026-06-24
+decision-status: accepted
+delivery-status: shipped
+authors: [Claude (paired with Jiří Raška)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [payments, transactions, compliance]
+summary: "Inbound pacs.004 SEPA return handling is added to sepa-payment-service and books its reversal through the existing transaction-service reversal path, completing the SCT lifecycle required by the EPC rulebook."
+---
 
-Date: 2026-06-24
-Author: Claude (paired with Jiří Raška)
-Status: Accepted
-Delivery-Status: Shipped
+# 111. SEPA R-Transaction Returns via pacs.004
 
 ## Context
 

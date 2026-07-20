@@ -1,9 +1,16 @@
-# 100. Deterministic Simulation Testing for the banking core
+---
+date: 2026-06-19
+decision-status: accepted
+delivery-status: partial
+authors: [OpenBank platform]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [testing, resilience, architecture]
+summary: "Deterministic simulation testing is adopted as the next test rung: an openbank-simulation harness with a deterministic scheduler, fault injection and money invariants drives the real domain aggregates of the core services."
+---
 
-Date: 2026-06-19
-Status: Accepted
-Delivery-Status: Partial
-Author(s): OpenBank platform
+# 100. Deterministic Simulation Testing for the banking core
 
 **Delivery note (updated 2026-07-06):**
 - **Layer 2 (DST harness — Pure JVM)** — ✅ Shipped: `openbank-simulation` module with deterministic scheduler, fault injector, in-memory adapters, payment scenario DSL, and Layer 3 invariants (double-entry balance, no-negative, idempotency, compensation completeness, audit completeness, SEPA/settlement completeness). Updated in ADR-0120 Phase 5+6 to work without the retired `PaymentSaga` aggregate.

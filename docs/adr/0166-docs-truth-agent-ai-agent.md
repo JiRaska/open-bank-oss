@@ -1,9 +1,16 @@
-# ADR-0166 — docs-truth-agent AI agent
+---
+date: 2026-07-13
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska (paired with Claude Sonnet 5)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ai-agents, docs, governance]
+summary: "A weekly docs-truth-agent greps every ADR Delivery-Status line against the artifacts it names, in both directions, because stale status lines caused duplicate work that had to be reverted."
+---
 
-Date: 2026-07-13
-Decision-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska (paired with Claude Sonnet 5)
+# ADR-0166 — docs-truth-agent AI agent
 
 ## Context
 

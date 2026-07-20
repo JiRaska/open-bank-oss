@@ -1,9 +1,16 @@
-# 105. Unified product identity across product-catalog and account-service
+---
+date: 2026-06-22
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [product-catalog, accounts, architecture]
+summary: "product-catalog owns a single canonical product UUID persisted in Postgres, and account-service.accounts.product_id references it with existing accounts backfilled, ending the code-versus-UUID identity mismatch."
+---
 
-Date: 2026-06-22
-Status: Accepted
-Delivery-Status: Complete
-Author(s): Jiří Raška
+# 105. Unified product identity across product-catalog and account-service
 
 ## Context
 

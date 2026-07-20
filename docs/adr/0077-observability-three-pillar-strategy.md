@@ -1,10 +1,16 @@
-# ADR-0077 — Observability Three-Pillar Strategy for OpenBank
+---
+date: 2026-06-10
+decision-status: accepted
+delivery-status: partial
+authors: [@JiRaska Relates to:** ADR-0008 (OpenTelemetry), ADR-0029 (Governance as Code), ADR-0054 (FinOps)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [observability, kubernetes]
+summary: "Observability is built as three pillars in four phases: domain business metrics, OTel traces into Tempo, structured JSON logs carrying correlation ids, and alerting, all on the self-hosted LGTM stack."
+---
 
-**Status:** Accepted  
-**Delivery-Status:** Partial
-**Date:** 2026-06-10  
-**Author:** @JiRaska  
-**Relates to:** ADR-0008 (OpenTelemetry), ADR-0029 (Governance as Code), ADR-0054 (FinOps)
+# ADR-0077 — Observability Three-Pillar Strategy for OpenBank
 
 > **Amendment 2026-06-19 — implementation complete (non-money-path; money-path pending approvals).**
 >

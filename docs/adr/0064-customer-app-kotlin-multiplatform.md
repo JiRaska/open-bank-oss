@@ -1,10 +1,16 @@
-# 64. Customer-facing app: Kotlin Multiplatform + Compose Multiplatform
+---
+date: 2026-06-05
+decision-status: accepted
+delivery-status: planned
+authors: [OpenBank platform]
+supersedes: []
+superseded-by: []
+delivery-repos: [openbank-app]
+tags: [mobile-app, architecture]
+summary: "The customer app is built on Kotlin Multiplatform with Compose Multiplatform in a dedicated repo, sharing domain types and OpenAPI-generated clients, with security primitives implemented natively via expect/actual."
+---
 
-Date: 2026-06-05
-Status: Accepted
-Delivery-Status: Planned
-Author(s): OpenBank platform
-Delivery-Repos: openbank-app
+# 64. Customer-facing app: Kotlin Multiplatform + Compose Multiplatform
 
 ## Context
 

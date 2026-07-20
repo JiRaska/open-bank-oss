@@ -1,9 +1,16 @@
-# ADR-0138 — Configuration-driven product fee rule engine
+---
+date: 2026-06-29
+decision-status: accepted
+delivery-status: partial
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [fees-billing, product-catalog, architecture]
+summary: "Fee waivers move to a configuration-driven rule engine: a closed whitelisted predicate model with a best-effort parser for the legacy free-text grammar and a pure evaluator that fails closed and charges the fee when a rule is unparseable."
+---
 
-Date: 2026-06-29
-Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only; phases 1a/1b shipped, phase 2 shipped under ADR-0143, phase 3 pending -->
-Author(s): Jiri Raska
+# ADR-0138 — Configuration-driven product fee rule engine
 
 **Delivery note (updated 2026-07-17):**
 - **Phase 1a (parser/evaluator)** — ✅ Shipped: structured whitelisted predicate model

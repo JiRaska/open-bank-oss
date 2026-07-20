@@ -1,9 +1,16 @@
-# 86. Customer payment non-repudiation — SCA settlement gate, identity threading, audit chain
+---
+date: 2026-06-12
+decision-status: accepted
+delivery-status: shipped
+authors: [OpenBank platform]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [sca, payments, audit, customer-edge]
+summary: "Payments are gated on an atomic single-use SCA challenge consume in sca-service, own-account transfers use the recorded RTS Art. 15 exemption, and customer identity is threaded into the money path and a hash-chained audit trail."
+---
 
-Date: 2026-06-12
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): OpenBank platform
+# 86. Customer payment non-repudiation — SCA settlement gate, identity threading, audit chain
 
 ## Context
 

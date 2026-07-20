@@ -1,9 +1,16 @@
-# Fraud detection bounded context — real-time transaction risk scoring
+---
+date: 2026-06-12
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [fraud, payments, kafka]
+summary: "A new openbank-fraud-service scores payments in real time, returning ALLOW/CHALLENGE/REVIEW/DECLINE verdicts, and builds behavioural aggregates from Kafka events; it fails open behind a flag during rollout."
+---
 
-Date: 2026-06-12
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiří Raška
+# Fraud detection bounded context — real-time transaction risk scoring
 
 > **Implementation note 2026-06-23 — all three delivery phases complete.**
 >

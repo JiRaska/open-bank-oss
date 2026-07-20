@@ -1,10 +1,20 @@
+---
+date: 2026-06-25
+decision-status: accepted
+delivery-status: shipped
+authors: [Claude (paired with Jiří Raška)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [testing, ledger, ci]
+summary: "openbank-simulation is an offline seed-driven property harness running real domain aggregates against five money-path invariants with fault injection, and it gates every money-path change in CI."
+---
+
 # 115. Deterministic simulation harness — seed-driven money-path invariant checker (ADR-0100 Layer 2/3)
 
-Date: 2026-06-25
-Author: Claude (paired with Jiří Raška)
-Status: Accepted (2026-06-28 — CI gate wired in `services-ci.yml`: DST harness runs on every
-money-path change via a dependency edge to `openbank-simulation`, under `Services CI / all-green`)
-Delivery-Status: Shipped
+> **Migrated status note.** The pre-schema `Status:` line carried this prose,
+> which the enum cannot hold; it is kept here rather than dropped:
+> 2026-06-28 — CI gate wired in `services-ci.yml`: DST harness runs on every money-path change via a dependency edge to `openbank-simulation`, under `Services CI / all-green`
 
 ## Context
 

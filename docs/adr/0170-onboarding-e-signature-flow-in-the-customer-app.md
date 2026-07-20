@@ -1,9 +1,16 @@
-# ADR-0170 — Onboarding e-signature flow in the customer app
+---
+date: 2026-07-15
+decision-status: proposed
+delivery-status: planned
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [mobile-app, onboarding, documents, sca]
+summary: "The app's mock agreement step splits: GDPR consent is captured pre-registration and actually sent to the edge, while the framework agreement is signed after account provisioning via a real PDF viewer and SCA biometric signature."
+---
 
-Date: 2026-07-15
-Decision-Status: Proposed
-Delivery-Status: Planned
-Author(s): jiri.raska
+# ADR-0170 — Onboarding e-signature flow in the customer app
 
 ## Context
 

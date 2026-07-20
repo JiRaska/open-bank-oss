@@ -1,14 +1,16 @@
-# ADR-0126 — Unified Consent Lifecycle and GDPR Linkage
+---
+date: 2026-06-29
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [compliance, privacy-gdpr, psd2-api]
+summary: "consent-service becomes the single authority for PSD2, GDPR and AI-agent delegation consents with one state machine, an expiry sweeper, outbox-published revoke and expire events, and a plan to flip OPA from advisory to enforce."
+---
 
-| Field            | Value                          |
-|------------------|--------------------------------|
-| Status           | Accepted                       |
-| Decision-Status  | Accepted                       |
-| Delivery-Status  | Shipped                        |
-| Deciders         | Jiri Raska                     |
-| Date             | 2026-06-29                     |
-| Supersedes       | —                              |
-| Superseded by    | —                              |
+# ADR-0126 — Unified Consent Lifecycle and GDPR Linkage
 
 **Delivery note (updated 2026-07-17):** all five decision points are now Shipped, and the header is
 flipped `Partial → Shipped`. D1/D4/D5 were already live; #1553 moved D3's revoke/reject (and grant)

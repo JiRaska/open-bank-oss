@@ -1,9 +1,16 @@
-# ADR-0062 — FinOps cost allocation: requests-weighted showback by service, domain and business flow
+---
+date: 2026-06-03
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [finops]
+summary: "Cloud spend is allocated to services by their declared resource requests, weighted half CPU and half RAM, then rolled up to domain and business flow; unattributable lines stay platform overhead rather than inflating services."
+---
 
-Date: 2026-06-03
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiri Raska
+# ADR-0062 — FinOps cost allocation: requests-weighted showback by service, domain and business flow
 
 ## Context
 

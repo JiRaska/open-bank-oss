@@ -1,8 +1,16 @@
-# 10. Kubernetes with ArgoCD GitOps deployment
+---
+date: 2026-05-26
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [kubernetes, gitops, infrastructure]
+summary: "Deployment is Kubernetes 1.30+ with Helm plus Kustomize packaging reconciled by ArgoCD from Git, alongside Cilium, cert-manager and External Secrets; Knative is explicitly not adopted."
+---
 
-Date: 2026-05-26
-Status: Accepted
-Delivery-Status: Shipped
+# 10. Kubernetes with ArgoCD GitOps deployment
 
 ## Context
 

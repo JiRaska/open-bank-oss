@@ -1,9 +1,16 @@
-# ADR-0147 — Cross-repo governance — delivery status beyond the monorepo
+---
+date: 2026-07-02
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [governance, docs]
+summary: "Record out-of-monorepo delivery with an optional Delivery-Repos front-matter field, validated against a known-repos allowlist and rendered in the ADR index, rather than building cross-repo CI status sync."
+---
 
-Date: 2026-07-02
-Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Shipped    <!-- Planned | Partial | Shipped | N/A — decision-only -->
-Author(s): jiri.raska
+# ADR-0147 — Cross-repo governance — delivery status beyond the monorepo
 
 **Delivery note (2026-07-02):** `docs/adr/known-repos.txt` (allowlist,
 `openbank-app` listed), `TEMPLATE.md` documents the optional

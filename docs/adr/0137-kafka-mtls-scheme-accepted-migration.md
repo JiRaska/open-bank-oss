@@ -1,10 +1,16 @@
-# Kafka mTLS migration — topic-scoped enforcement of payment.scheme-accepted
+---
+date: 2026-06-29
+decision-status: accepted
+delivery-status: shipped
+authors: [Claude (paired with Jiří Raška)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [kafka, security-ops, payments]
+summary: "The payment.scheme-accepted trust boundary is enforced by a new Strimzi tls:9093 listener plus five per-service KafkaUsers and ACLs with certs projected by External Secrets; the cluster-global allow-everyone gate stays on deliberately."
+---
 
-Date: 2026-06-29
-Status: Accepted
-Decision-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Claude (paired with Jiří Raška)
+# Kafka mTLS migration — topic-scoped enforcement of payment.scheme-accepted
 
 **Delivery note (updated 2026-06-30):**
 - **mTLS enforcement** — ✅ Shipped: mTLS + ACL enforcement live and e2e-verified; authorized producer consumed; anonymous and read-only principals denied Write.

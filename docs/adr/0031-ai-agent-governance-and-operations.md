@@ -1,9 +1,16 @@
-# 31. AI agent governance and operations: agents-as-code, policy-gated MCP, human-in-the-loop, AI-attributed audit
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ai-agents, authz, governance, audit]
+summary: "AI agents run as least-privilege workloads declared in agents.yaml, passing the same PR, CI and OPA gates as humans, with every MCP tools/call policy-gated and every action recorded as AI-attributed audit."
+---
 
-Date: 2026-05-30
-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska
+# 31. AI agent governance and operations: agents-as-code, policy-gated MCP, human-in-the-loop, AI-attributed audit
 
 **Delivery note (updated 2026-06-30):**
 - **D1 (agents-as-code)** — ✅ Shipped: `agents.yaml` charter registry; `CharterRegistry` + `CharterRateLimiter` in `agent-service`.

@@ -1,8 +1,16 @@
-# 1. Record Architecture Decisions
+---
+date: 2025-05-26
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [governance, docs, architecture]
+summary: "Significant architectural choices are recorded as Nygard-style Markdown ADRs in docs/adr, immutable once accepted and superseded only by a new ADR, so decisions stay defensible to auditors and the regulator."
+---
 
-Date: 2025-05-26
-Status: Accepted
-Delivery-Status: Shipped
+# 1. Record Architecture Decisions
 
 ## Context
 
@@ -25,6 +33,34 @@ Every ADR has the following sections:
 - **Context** — why this decision is needed, forces at play
 - **Decision** — the change we are proposing or have agreed to
 - **Consequences** — positive, negative, and neutral outcomes
+
+> **Amendment — machine-readable header and a digest tier.**
+>
+> The header above was prose, and by ~170 ADRs the fleet carried **four** coexisting
+> conventions for it (`Status:`, `**Status:**`, a `| Field | Value |` table, and the
+> later two-axis `Decision-Status:`/`Delivery-Status:`), plus an undocumented fifth
+> delivery value (`Complete`). Every consumer needed its own fallback regex, and the
+> generated index truncated statuses to 40 characters because values like
+> `Accepted (2026-06-14 — decision implemented: …)` are paragraphs, not values.
+>
+> The header is now a **YAML front-matter block** defined by [SCHEMA.md](SCHEMA.md)
+> and enforced by `.github/scripts/check-adr-registry.sh`: fixed keys, closed enums,
+> a closed tag vocabulary ([tags.txt](tags.txt)), and supersession that must be
+> recorded on **both** sides. The two status axes stay independent — `decision-status`
+> is whether the decision stands, `delivery-status` is whether it was built.
+>
+> The block also carries a `summary` (≤240 chars). Those summaries are generated into
+> [DIGEST.md](DIGEST.md), the whole decision history in ~4k tokens. That tier exists
+> because the consequence below — "onboarding is faster: new engineers can read ADRs"
+> — stopped being true at this scale: nobody, human or AI agent, loads ~225k words, so
+> a registry with no digest is a registry nobody reads.
+>
+> Section requirements are unchanged and now checked (`## Context`, `## Decision`,
+> `## Consequences`), except on superseded ADRs, which stay immutable historical
+> records. `## Alternatives considered` and `## Compliance impact` are advisory
+> warnings for now — 32 and 42 pre-schema ADRs respectively lack them, and
+> back-filling is authoring work, not something a structural gate can force in one
+> sweep. They graduate to errors under ADR-0144 once that backlog is closed.
 
 An ADR is **required** when:
 

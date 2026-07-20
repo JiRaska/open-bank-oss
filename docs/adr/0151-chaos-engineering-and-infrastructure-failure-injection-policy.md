@@ -1,9 +1,16 @@
-# ADR-0151 — Chaos engineering and infrastructure failure-injection policy
+---
+date: 2026-07-02
+decision-status: accepted
+delivery-status: planned
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [resilience, testing, kubernetes]
+summary: "Adopt Chaos Mesh for infrastructure failure injection, sandbox-only for now, with every experiment declaring a hypothesis and abort condition, run on a monthly rotation and recorded in the ICT register as DORA evidence."
+---
 
-Date: 2026-07-02
-Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
-Author(s): jiri.raska
+# ADR-0151 — Chaos engineering and infrastructure failure-injection policy
 
 ## Context
 

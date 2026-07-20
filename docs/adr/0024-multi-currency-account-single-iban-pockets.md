@@ -1,9 +1,16 @@
-# 24. Multi-currency current account: single IBAN + currency pockets
+---
+date: 2026-05-29
+decision-status: accepted
+delivery-status: partial
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [accounts, fx, ledger]
+summary: "A multi-currency current account is one Account with a single IBAN and N currency pockets, each with its own balance and overdraft; balances are never netted for cover and the consolidated view is indicative only."
+---
 
-Date: 2026-05-29
-Status: Accepted
-Delivery-Status: Partial
-Author(s): Jiří Raška
+# 24. Multi-currency current account: single IBAN + currency pockets
 
 **Delivery note (updated 2026-07-17):**
 - **Model decision** — ✅ Complete: one IBAN + N currency pockets per account, pocket-level balance/overdraft; architecture settled and documented.

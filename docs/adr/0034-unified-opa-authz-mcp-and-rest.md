@@ -1,9 +1,16 @@
-# 34. Unified OPA authorization — single sidecar serves both MCP tool-calls and REST endpoints
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: partial
+authors: [Claude (session: Phase 5b consolidation)]
+supersedes: [0018]
+superseded-by: []
+delivery-repos: []
+tags: [authz, ai-agents, libs]
+summary: "One OPA sidecar per service authorizes both MCP tool-calls and REST endpoints from a single bundle published by openbank-libs, sharing predicates so a rule is written once for AI agents and human operators alike."
+---
 
-Date: 2026-05-30
-Status: Accepted
-Delivery-Status: Partial
-Author(s): Claude (session: Phase 5b consolidation)
+# 34. Unified OPA authorization — single sidecar serves both MCP tool-calls and REST endpoints
 
 **Delivery note (updated 2026-07-17):** the enforcement axis — the part that was materially stale in
 the 2026-07-05 note — is now fully live; the header stays `Partial` only for the D2 bundle-distribution

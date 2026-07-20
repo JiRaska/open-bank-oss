@@ -1,8 +1,16 @@
-# 2. Hexagonal architecture per service
+---
+date: 2026-05-26
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [architecture, governance]
+summary: "Every JVM service uses hexagonal architecture with a fixed domain/application/infrastructure layout; the domain may not import any framework, so business rules are container-free testable and findable in one place."
+---
 
-Date: 2026-05-26
-Status: Accepted
-Delivery-Status: Shipped
+# 2. Hexagonal architecture per service
 
 ## Context
 

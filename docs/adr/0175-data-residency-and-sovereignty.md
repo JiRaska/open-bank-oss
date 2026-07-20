@@ -1,9 +1,16 @@
-# ADR-0175 — Data residency and sovereignty
+---
+date: 2026-07-16
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [privacy-gdpr, compliance, infrastructure]
+summary: "The estate's residency is fixed at eu-north-1 and decided here rather than in a README; document-service's eu-central-1 default is a defect to fix, and the un-enforced LLM prompt egress to a US provider is stated as an open exposure."
+---
 
-Date: 2026-07-16
-Decision-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska
+# ADR-0175 — Data residency and sovereignty
 
 ## Context
 

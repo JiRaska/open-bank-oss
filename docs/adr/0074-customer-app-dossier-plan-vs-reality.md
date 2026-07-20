@@ -1,9 +1,16 @@
-# Customer-app dossier: plan-vs-reality documentation in the admin console
+---
+date: 2026-06-08
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [mobile-app, docs, governance]
+summary: "A derived plan-vs-reality customer-app dossier ships in the admin console, with a derivedStatus code signal that warns when the curatorial capability status drifts from what the source actually shows."
+---
 
-Date: 2026-06-08
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiří Raška
+# Customer-app dossier: plan-vs-reality documentation in the admin console
 
 **Delivery note (updated 2026-07-05):**
 - **`derivedStatus` anti-rot signal (issue #26)** — ✅ Shipped: the curatorial `status`

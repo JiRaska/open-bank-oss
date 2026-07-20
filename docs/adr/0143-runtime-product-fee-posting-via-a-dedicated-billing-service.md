@@ -1,9 +1,16 @@
-# ADR-0143 — Runtime product fee posting via a dedicated billing service
+---
+date: 2026-06-29
+decision-status: accepted
+delivery-status: partial
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [fees-billing, ledger, architecture]
+summary: "Post product fees from a new money-path service, openbank-billing-service, which assesses fees per cycle with the shared waiver evaluator and posts balanced ledger journals through its own transactional outbox."
+---
 
-Date: 2026-06-29
-Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only; phases 1a/1b/2a/2b/2c/2c-ii/2d merged via PR #549, 2e via PR #672 (superseding #637), gitops DB/Redis via #683/#684; real-environment e2e verification + four-eyes enforcement flip still required before production -->
-Author(s): Jiri Raska
+# ADR-0143 — Runtime product fee posting via a dedicated billing service
 
 **Delivery note (updated 2026-07-10):**
 - **Service skeleton and logic** — ✅ Shipped: `openbank-billing-service` Dockerfile + GitOps added (PR #2813); phases 1a/1b/2a/2b/2c-i merged; four-eyes `post` verb, `@RestClient` ledger posting, idempotency, balance/account context reads designed.

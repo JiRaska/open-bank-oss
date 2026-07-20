@@ -1,11 +1,16 @@
-# ADR-0087 — Observability Correlation & Profiling Layer
+---
+date: 2026-06-11
+decision-status: accepted
+delivery-status: partial
+authors: [@JiRaska Relates to:** ADR-0008 (OpenTelemetry), ADR-0077 (Three-Pillar Observability), ADR-0075 (Mobile Crash Monitoring), ADR-0027 (Cloud Substrate, FinOps), ADR-0054 (FinOps)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [observability]
+summary: "A correlation layer keyed on trace_id and the correlation id links Loki 3.x, Tempo, Prometheus and Pyroscope into one navigable Grafana pane and adds continuous profiling as a fourth pillar; Alloy replaces EoL Promtail."
+---
 
-**Status:** Accepted
-**Delivery-Status:** Partial
-**Date:** 2026-06-11
-**Implemented:** 2026-06-25
-**Author:** @JiRaska
-**Relates to:** ADR-0008 (OpenTelemetry), ADR-0077 (Three-Pillar Observability), ADR-0075 (Mobile Crash Monitoring), ADR-0027 (Cloud Substrate / FinOps), ADR-0054 (FinOps)
+# ADR-0087 — Observability Correlation & Profiling Layer
 
 ---
 

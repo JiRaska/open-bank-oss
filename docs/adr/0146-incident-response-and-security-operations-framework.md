@@ -1,9 +1,16 @@
-# ADR-0146 — Incident response and security-operations framework
+---
+date: 2026-07-02
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [security-ops, resilience, compliance]
+summary: "Adopt a four-tier P1-P4 incident severity model with a recorded escalation path; every P1/P2 opens an auditable ICT register entry that starts and stops the RTO clock, and key ceremonies get annually rehearsed runbooks."
+---
 
-Date: 2026-07-02
-Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only -->
-Author(s): jiri.raska
+# ADR-0146 — Incident response and security-operations framework
 
 **Delivery note (updated 2026-07-17):** `docs/bcp/incident-response.md` ships the
 policy half — severity tiers, declaration timing, the ICT register field

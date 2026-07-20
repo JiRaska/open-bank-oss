@@ -1,9 +1,16 @@
-# Move runtime secrets from application.yaml to HashiCorp Vault
+---
+date: 2026-05-29
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [secrets, compliance]
+summary: "Runtime secrets move out of application.yaml into Vault, with dev defaults kept inert via a Quarkus profile guard; in practice OpenBao plus External Secrets Operator was delivered instead of the prescribed Vault extension."
+---
 
-Date: 2026-05-29
-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska
+# Move runtime secrets from application.yaml to HashiCorp Vault
 
 **Delivery note (updated 2026-07-17):** ⚠️ **The delivered mechanism is not the one this ADR
 decided.** The platform ships **OpenBao (an MPL-2.0 Vault fork) + External Secrets Operator (ESO) +

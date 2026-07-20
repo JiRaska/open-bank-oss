@@ -1,8 +1,16 @@
-# 9. Postgres per service (database-per-service)
+---
+date: 2026-05-26
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [database, architecture]
+summary: "Each service owns its own Postgres database and never queries another service's tables; inter-service data flows only via APIs or events, so a schema change cannot break neighbouring services."
+---
 
-Date: 2026-05-26
-Status: Accepted
-Delivery-Status: Shipped
+# 9. Postgres per service (database-per-service)
 
 ## Context
 

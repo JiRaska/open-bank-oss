@@ -1,9 +1,16 @@
-# 29. Versioning, release and governance as code: enforced conventions, per-service SemVer, signed provenance, code-derived catalog
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [release-versioning, governance, supply-chain, ci]
+summary: "Versioning, release notes, provenance and governance metadata become code-derived, CI-enforced and signed, with per-service SemVer, a generated service dependency graph and a tamper-evident audit chain, delivered in layers."
+---
 
-Date: 2026-05-30
-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska
+# 29. Versioning, release and governance as code: enforced conventions, per-service SemVer, signed provenance, code-derived catalog
 
 **Delivery note (updated 2026-06-30):**
 - **D1 (conventions-as-code)** — ✅ Shipped: `rules.yaml` live in `openbank-libs/governance/`; CI gates running; `CLAUDE.md` hierarchy in place; Claude skills in `.claude/skills/`; `service-graph.json` ⬜ not yet generated.

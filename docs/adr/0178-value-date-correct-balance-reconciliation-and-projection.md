@@ -1,9 +1,16 @@
-# Value-date-correct balance reconciliation and projection
+---
+date: 2026-07-19
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ledger, accounts, transactions]
+summary: "Booked-balance reconciliation moves onto the ledger's value-date basis by subtracting the future-value-dated tail from the materialized sub-ledger sum, with a value-date-aware effective balance and daily roll as later phases."
+---
 
-Date: 2026-07-19
-Status: Accepted
-Delivery-Status: Shipped (Phase 1); Phases 2–3 tracked as follow-up issues
-Author(s): jiri.raska
+# Value-date-correct balance reconciliation and projection
 
 ## Context
 

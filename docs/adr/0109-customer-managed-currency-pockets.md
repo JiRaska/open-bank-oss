@@ -1,9 +1,16 @@
-# 109. Customer-managed currency pockets (add / remove)
+---
+date: 2026-06-22
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [accounts, fx, mobile-app, customer-edge]
+summary: "Existing account-service pocket lifecycle endpoints are exposed through customer-edge as an ownership-checked thin proxy plus a Manage currencies app surface, so customers open and close non-primary pockets themselves."
+---
 
-Date: 2026-06-22
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiří Raška
+# 109. Customer-managed currency pockets (add / remove)
 
 ## Context
 

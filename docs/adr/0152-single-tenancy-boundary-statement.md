@@ -1,9 +1,16 @@
-# ADR-0152 — Single-tenancy boundary statement
+---
+date: 2026-07-02
+decision-status: accepted
+delivery-status: n-a
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [architecture, governance]
+summary: "Declare single-tenant-per-deployment an architectural invariant: one deployment serves exactly one regulated bank, no tenant dimension may enter any schema, domain model or OPA policy, and reversing this needs a superseding ADR."
+---
 
-Date: 2026-07-02
-Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: N/A — decision-only
-Author(s): jiri.raska
+# ADR-0152 — Single-tenancy boundary statement
 
 ## Context
 

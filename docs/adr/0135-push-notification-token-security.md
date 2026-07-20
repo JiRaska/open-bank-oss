@@ -1,10 +1,16 @@
-# ADR-0135: Push notification token security and lifecycle
+---
+date: 2026-06-29
+decision-status: accepted
+delivery-status: partial
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [notifications, mobile-app, security-ops]
+summary: "Push tokens bind to an SCA-passed session and device fingerprint, one active token per platform, invalidated on logout, after a 90-day refresh TTL or by APNs/FCM feedback; payloads carry no account, amount or PII data."
+---
 
-Date: 2026-06-29
-Status: Accepted
-Decision-Status: Accepted
-Delivery-Status: Partial
-Author(s): Jiri Raska
+# ADR-0135: Push notification token security and lifecycle
 
 **Delivery note (updated 2026-06-30):**
 - **Security model** — ✅ Complete: token binding to SCA session, 90-day TTL refresh, explicit logout `DELETE` endpoint (PR #2527), payload minimisation (title/template only, no PII), and per-platform registration limit designed.

@@ -1,9 +1,16 @@
-# Ledger as the golden source; balance-service as a ledger projection
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ledger, accounts, transactions]
+summary: "The ledger becomes the golden source of the booked balance and balance-service becomes its projection fed by per-account booked-delta events; balance-service keeps authority only over holds and reservations."
+---
 
-Date: 2026-05-30
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): jiri.raska
+# Ledger as the golden source; balance-service as a ledger projection
 
 ## Context
 

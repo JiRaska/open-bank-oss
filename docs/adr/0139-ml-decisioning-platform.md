@@ -1,9 +1,16 @@
-# ADR-0139 — Real-time ML decisioning platform: feature store, model serving, champion/challenger governance
+---
+date: 2026-06-29
+decision-status: accepted
+delivery-status: partial
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ml, fraud, architecture]
+summary: "Build a real-time ML decisioning platform in openbank-libs (event-fed feature store, in-process ONNX serving, shadow-to-champion promotion), first consumed by fraud scoring, keeping the deterministic rule layer as a permanent floor."
+---
 
-Date: 2026-06-29
-Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only -->
-Author(s): Jiri Raska
+# ADR-0139 — Real-time ML decisioning platform: feature store, model serving, champion/challenger governance
 
 **Delivery note (updated 2026-07-12):**
 - **Foundation** — ✅ Ready: governance substrate (ADR-0031 extended by ADR-0141) in place; feature-store topology and model-serving architecture sketched.

@@ -1,9 +1,16 @@
-# 94. EUDI-native identity hub — eIDAS 2.0 wallet onboarding, probabilistic record linkage, and durable orchestration
+---
+date: 2026-06-15
+decision-status: accepted
+delivery-status: partial
+authors: [OpenBank platform]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [onboarding, kyc, authn, compliance]
+summary: "Identity extends to an EUDI-native hub: eIDAS 2.0 wallet onboarding over OpenID4VP/OpenID4VCI, probabilistic Fellegi-Sunter record linkage as a candidate source only, and Temporal-orchestrated onboarding."
+---
 
-Date: 2026-06-15
-Status: Accepted
-Delivery-Status: Partial
-Author(s): OpenBank platform
+# 94. EUDI-native identity hub — eIDAS 2.0 wallet onboarding, probabilistic record linkage, and durable orchestration
 
 **Delivery note (updated 2026-06-30):**
 - **Architecture** — ✅ Settled: eIDAS 2.0 / EUDI Wallet positioning confirmed; `pid-service` + Splink probabilistic linkage + Temporal orchestration + four-eyes decision primitives designed.

@@ -1,9 +1,16 @@
-# Regulatory-grade transactional-outbox dispatch
+---
+date: 2026-05-31
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [kafka, ledger, resilience, compliance]
+summary: "Outbox dispatch becomes regulatory-grade: the scheduled dispatcher runs on the Vert.x event loop, keys Kafka records by aggregate, and carries a stable event id so consumers can dedupe at-least-once delivery."
+---
 
-Date: 2026-05-31
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): jiri.raska
+# Regulatory-grade transactional-outbox dispatch
 
 ## Context
 

@@ -1,9 +1,16 @@
-# ADR-0144 — Gate graduation — advisory rules carry an enforcement deadline
+---
+date: 2026-07-02
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [governance, ci]
+summary: "Every advisory or planned rule in rules.yaml must carry a target_enforce_date and a blocked_on field, and CI fails once that date passes while the rule still does not block, so gates cannot decay to permanently advisory."
+---
 
-Date: 2026-07-02
-Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Shipped    <!-- Planned | Partial | Shipped | N/A — decision-only -->
-Author(s): jiri.raska
+# ADR-0144 — Gate graduation — advisory rules carry an enforcement deadline
 
 **Delivery note (2026-07-02):** `.github/scripts/check-gate-graduation.sh`
 is wired into `ci.yml`, enforced. Every rule with `enforced: advisory` or

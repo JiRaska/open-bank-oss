@@ -1,9 +1,16 @@
-# 30. Supply-chain security and SSDLC hardening: VEX, vulnerability lifecycle, threat modeling, admission policy
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [supply-chain, security-ops, testing, governance]
+summary: "Supply-chain security gains a tracked vulnerability lifecycle with VEX and SLAs, mandatory threat models for money-path services, mutation and DAST testing, signature-verifying admission control and SBOM drift detection."
+---
 
-Date: 2026-05-30
-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska
+# 30. Supply-chain security and SSDLC hardening: VEX, vulnerability lifecycle, threat modeling, admission policy
 
 **Delivery note (updated 2026-07-11):**
 - **D2 (threat-model CI gate)** — ✅ Shipped, corrected 2026-07-11: `check-threat-models.py` runs as a required check in `Validate manifests`; all money-path services have STRIDE/DFD threat models at `docs/threat-models/<service>.md`. The diff-aware rule this note previously listed as pending **already shipped** (PR #389, `openbank-infra/scripts/check-threat-model-diff.py`, wired into `ci.yml`): a changed inbound/outbound trust boundary for a money-path service (new REST/client code, `application.yaml` auth/transport keys, or its gitops NetworkPolicy/Deployment) without a matching `docs/threat-models/<service>.md` change in the same diff is flagged — advisory today, per ADR-0144 gate graduation. The gate's own parser is now unit-tested (`check_threat_model_diff_test.py`) and the previously-unrun `openbank-infra/scripts/*_test.py` suites execute in CI.

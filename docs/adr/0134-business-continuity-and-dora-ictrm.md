@@ -1,10 +1,16 @@
-# ADR-0134: Business continuity plan and DORA ICT risk management framework
+---
+date: 2026-06-29
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [resilience, compliance, governance]
+summary: "A living BCP and DORA ICT risk framework in docs/bcp maps existing technical capabilities to DORA Art. 9-14, classifies services into four criticality tiers with RTO/RPO targets, and logs annual DR tests."
+---
 
-Date: 2026-06-29
-Status: Accepted
-Decision-Status: Accepted
-Delivery-Status: Complete
-Author(s): Jiri Raska
+# ADR-0134: Business continuity plan and DORA ICT risk management framework
 
 ## Context
 

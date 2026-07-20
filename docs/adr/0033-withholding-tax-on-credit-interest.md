@@ -1,9 +1,16 @@
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [tax, interest, compliance]
+summary: "Withholding tax on credit interest is computed at capitalization, not accrual, by a pure policy returning WITHHELD, NOT_WITHHELD or EXEMPT rounded down to whole CZK; an unresolved taxpayer profile fails safe to withholding."
+---
+
 # 33. Withholding tax on credit interest at capitalization
-
-Date: 2026-05-30
-
-Status: Accepted
-Delivery-Status: Shipped
 
 ## Context
 

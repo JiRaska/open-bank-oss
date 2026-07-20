@@ -1,8 +1,16 @@
-# 7. HashiCorp Vault for secrets management
+---
+date: 2026-05-26
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [secrets, infrastructure, crypto-keys]
+summary: "HashiCorp Vault (delivered as OpenBao) is the single source of truth for secrets, providing dynamic short-lived database credentials, PKI and eventually HSM-backed keys instead of static config values."
+---
 
-Date: 2026-05-26
-Status: Accepted
-Delivery-Status: Partial
+# 7. HashiCorp Vault for secrets management
 
 **Delivery note (updated 2026-07-16):**
 

@@ -1,13 +1,16 @@
-# ADR-0119 — AI DevOps Agent: proactive SSDLC / DORA observability and durable-fix proposals
+---
+date: 2026-06-27
+decision-status: accepted
+delivery-status: partial
+authors: [OpenBank Platform Team]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ai-agents, ci, observability]
+summary: "An openbank-devops-agent mirrors the finops-agent for the SSDLC/DORA axis: six detectors (CI health, DORA regression, runner capacity, deploy health and more) feed an LLM diagnosis that proposes durable PRs a human must approve."
+---
 
-| Field       | Value |
-|-------------|-------|
-| Status      | Accepted |
-| Delivery-Status | Partial |
-| Date        | 2026-06-27 |
-| Authors     | OpenBank Platform Team |
-| Relates to  | ADR-0031, ADR-0061, ADR-0053, ADR-0082, ADR-0101, ADR-0112, ADR-0002, ADR-0029 |
-| Issue       | #2284 |
+# ADR-0119 — AI DevOps Agent: proactive SSDLC / DORA observability and durable-fix proposals
 
 ## Context
 

@@ -119,13 +119,24 @@ fi
 out="$ADR_DIR/${next}-${slug}.md"
 [[ -e "$out" ]] && { echo "error: $out already exists" >&2; exit 1; }
 
-# Front-matter (owned here) + body spliced from TEMPLATE.md ("## Context" onward).
+# Front-matter (owned here, per docs/adr/SCHEMA.md) + body spliced from TEMPLATE.md
+# ("## Context" onward), so the template stays the single source for ADR structure.
+# `tags` and `summary` are deliberately left as placeholders the author must replace:
+# check-adr-registry.sh rejects an unknown tag and a too-short summary, so a
+# scaffolded-but-unwritten ADR cannot merge.
 {
+  printf -- '---\n'
+  printf 'date: %s\n' "$(date +%F)"
+  printf 'decision-status: proposed\n'
+  printf 'delivery-status: planned\n'
+  printf 'authors: [%s]\n' "$author"
+  printf 'supersedes: []\n'
+  printf 'superseded-by: []\n'
+  printf 'delivery-repos: []\n'
+  printf 'tags: [TODO-pick-from-tags.txt]\n'
+  printf 'summary: "TODO one or two sentences: what is decided and why. Max 240 chars."\n'
+  printf -- '---\n\n'
   printf '# ADR-%s — %s\n\n' "$next" "$title"
-  printf 'Date: %s\n' "$(date +%F)"
-  printf 'Decision-Status: Proposed   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->\n'
-  printf 'Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->\n'
-  printf 'Author(s): %s\n\n' "$author"
   awk '/^## /{f=1} f' "$TEMPLATE"
 } > "$out"
 

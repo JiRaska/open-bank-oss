@@ -1,8 +1,16 @@
-# 4. Saga for multi-service workflows
+---
+date: 2026-05-26
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [architecture, resilience, payments]
+summary: "Every multi-service write workflow is a saga with idempotent steps and explicit compensations, choreography by default and orchestration above four steps, because XA across microservices is not viable."
+---
 
-Date: 2026-05-26
-Status: Accepted
-Delivery-Status: Shipped
+# 4. Saga for multi-service workflows
 
 ## Context
 

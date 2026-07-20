@@ -1,9 +1,16 @@
-# ADR-0098 — Progressive Delivery for Money-Path Services via Argo Rollouts
+---
+date: 2026-06-19
+decision-status: accepted
+delivery-status: shipped
+authors: [@JiRaska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [kubernetes, gitops, resilience]
+summary: "Money-path services move from plain Deployments to Argo Rollouts weighted canaries gated by Prometheus AnalysisTemplates, bounding blast radius and giving DORA change-failure-rate a first-class deployment outcome."
+---
 
-**Status:** Accepted
-**Delivery-Status:** Shipped
-**Date:** 2026-06-19
-**Author:** @JiRaska
+# ADR-0098 — Progressive Delivery for Money-Path Services via Argo Rollouts
 
 **Relates to:** ADR-0029 (Governance as code), ADR-0030 (Threat model gate),
 ADR-0031 (AI-agent governance), ADR-0061 (DORA metrics), ADR-0077 (Three-Pillar Observability),

@@ -1,9 +1,16 @@
-# Serverless tier — scale-to-zero on the existing cluster, not FaaS
+---
+date: 2026-05-31
+decision-status: accepted
+delivery-status: partial
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [serverless, kubernetes, finops]
+summary: "A serverless tier is built on the existing EKS cluster using CronJobs, KEDA and Knative in that order of preference rather than managed FaaS; money-path services stay always-on with no scale-to-zero exposure."
+---
 
-Date: 2026-05-31
-Status: Accepted
-Delivery-Status: Partial
-Author(s): Jiri Raska
+# Serverless tier — scale-to-zero on the existing cluster, not FaaS
 
 **Delivery note (updated 2026-07-01):**
 - **Tier 1 pilot (CronJob)** — ⬜ Not shipped: no interest-accrual or EOD-reconciliation `CronJob`/`Job` exists in gitops; the only batch CronJobs are FinOps/ops (finops-scaledown, cost-collector, scanners).

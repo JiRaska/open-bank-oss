@@ -1,8 +1,16 @@
-# 5. OpenAPI 3.1 design-first for all external APIs
+---
+date: 2026-05-26
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [api-contract, governance, psd2-api]
+summary: "All externally exposed REST APIs are design-first: the OpenAPI 3.1 spec is the source, server stubs and client SDKs are generated from it, and CI lints it with Spectral so docs cannot drift from runtime."
+---
 
-Date: 2026-05-26
-Status: Accepted
-Delivery-Status: Shipped
+# 5. OpenAPI 3.1 design-first for all external APIs
 
 ## Context
 

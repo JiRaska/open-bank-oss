@@ -1,13 +1,20 @@
+---
+date: 2026-06-06
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [accounting-close, ledger, statements, compliance]
+summary: "Period-end close is modelled as completeness rather than atomicity, separating per-customer statement close from entity-level accounting close; daily, monthly and yearly closes get period locks and four-eyes attestation."
+---
+
 # Accounting close model: period-end taxonomy, completeness over atomicity
 
-Date: 2026-06-06
-Status: Accepted (2026-06-14 — implemented: End-of-Day, End-of-Month and
-End-of-Year closes are live (period lock + re-verify endpoint #985, four-eyes
-maker≠checker year-close attestation #1014); statement-close hardening (D3) and
-trial-balance attestation shipped. D5 entity-level statutory close remains
-explicitly out of scope per this ADR.)
-Delivery-Status: Partial
-Author(s): jiri.raska
+> **Migrated status note.** The pre-schema `Status:` line carried this prose,
+> which the enum cannot hold; it is kept here rather than dropped:
+> 2026-06-14 — implemented: End-of-Day, End-of-Month and End-of-Year closes are live (period lock + re-verify endpoint #985, four-eyes maker≠checker year-close attestation #1014); statement-close hardening (D3) and trial-balance attestation shipped. D5 entity-level statutory close remains explicitly out of scope per this ADR.
 
 **Delivery note (updated 2026-06-30):**
 - **Operational closes** — ✅ Shipped: End-of-Day, End-of-Month, End-of-Year closes live with period lock + re-verify endpoint, four-eyes maker≠checker attestation, statement-close hardening, and trial-balance attestation.

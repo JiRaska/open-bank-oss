@@ -1,9 +1,16 @@
-# ADR-0061 — DORA metrics from in-house sources, derived + snapshotted
+---
+date: 2026-06-03
+decision-status: accepted
+delivery-status: partial
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [observability, ci, analytics]
+summary: "DORA metrics are derived from the bank's own authoritative sources by a CI collector and served as a read-only snapshot, so no privileged GitHub or Prometheus token ever lives in the admin-ui pod."
+---
 
-Date: 2026-06-03
-Status: Accepted
-Delivery-Status: Partial
-Author(s): Jiri Raska
+# ADR-0061 — DORA metrics from in-house sources, derived + snapshotted
 
 **Delivery note (updated 2026-06-30):**
 - **Phase 1 (Deployment Frequency)** — ✅ Shipped: `scripts/collect-dora.mjs` derives Deployment Frequency from `git log --first-parent`; `dora.json` baked and served read-only.

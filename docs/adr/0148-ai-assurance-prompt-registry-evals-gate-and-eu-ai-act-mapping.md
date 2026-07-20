@@ -1,9 +1,16 @@
-# ADR-0148 — AI assurance — prompt registry, evals gate, and EU AI Act mapping
+---
+date: 2026-07-02
+decision-status: accepted
+delivery-status: planned
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ai-agents, governance, compliance]
+summary: "Add an AI assurance layer: an in-repo versioned prompt registry that every prompt_hash must resolve against, a per-charter evals gate blocking model or prompt promotion on regression, and a generated EU AI Act mapping."
+---
 
-Date: 2026-07-02
-Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
-Author(s): jiri.raska
+# ADR-0148 — AI assurance — prompt registry, evals gate, and EU AI Act mapping
 
 ## Context
 

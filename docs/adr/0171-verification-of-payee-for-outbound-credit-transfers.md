@@ -1,9 +1,16 @@
-# ADR-0171 — Verification of Payee for outbound credit transfers
+---
+date: 2026-07-16
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [payments, compliance]
+summary: "A new openbank-vop-service implements Verification of Payee for both PSP sides with a pure deterministic name-match policy returning four EPC outcomes; it warns rather than blocks and fails open as NO_DATA, unlike the sanctions gate."
+---
 
-Date: 2026-07-16
-Decision-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska
+# ADR-0171 — Verification of Payee for outbound credit transfers
 
 ## Context
 

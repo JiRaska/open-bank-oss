@@ -1,9 +1,16 @@
-# 25. Per-currency ledger balancing, FX position accounts, and revaluation
+---
+date: 2026-05-29
+decision-status: accepted
+delivery-status: partial
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ledger, fx, accounting-close]
+summary: "Journal entries must balance per currency rather than on a flat base sum; cross-currency events post through per-currency FX position accounts plus a shared exchange-difference account, with periodic revaluation."
+---
 
-Date: 2026-05-29
-Status: Accepted
-Delivery-Status: Partial
-Author(s): Jiří Raška
+# 25. Per-currency ledger balancing, FX position accounts, and revaluation
 
 **Delivery note (updated 2026-07-17):**
 - **Implemented** — ✅: per-currency `validateBalance()` is live in `JournalEntry.kt` (in the payment path) and the FX position / exchange-difference GL structure is migrations `V5__fx_position_accounts.sql` / `V6__fx_revaluation_counter_value_accounts.sql` — not merely designed.

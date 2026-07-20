@@ -1,8 +1,16 @@
-# 28. Lending / credit bounded context: origination, servicing, collateral, IFRS 9 provisioning
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [lending, architecture, ledger]
+summary: "Lending is one bounded context in a single openbank-lending-service covering origination, servicing, collateral and IFRS 9 provisioning; pure math lives in openbank-libs and the loan book posts cash to the ledger via REST."
+---
 
-Date: 2026-05-30
-Status: Accepted
-Delivery-Status: Partial
+# 28. Lending / credit bounded context: origination, servicing, collateral, IFRS 9 provisioning
 
 **Delivery note (updated 2026-07-09):**
 - **Phase 0 (domain primitives in libs)** — ✅ Shipped: `Amortization` (three methods: annuity, equal-principal, bullet), `Ifrs9` (three-stage ECL), `Delinquency` (DPD, CRR Art. 178 90-day trigger), typesafe identifiers (`LoanApplicationId`, `LoanId`, `CollateralId`); `LendingPrimitivesTest` green.

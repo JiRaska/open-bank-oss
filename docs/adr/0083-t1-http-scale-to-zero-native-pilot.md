@@ -1,9 +1,16 @@
-# ADR-0083 — T1 (HTTP → 0): native-image + KEDA HTTP add-on pilot on product-catalog
+---
+date: 2026-06-02
+decision-status: accepted
+delivery-status: partial
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [serverless, kubernetes, finops, capacity]
+summary: "T1 scale-to-zero is piloted on product-catalog as a Quarkus native image behind the KEDA HTTP add-on with minReplicas 0, promotion gated on a measured cold-start and p95 SLO that is not yet met."
+---
 
-Date: 2026-06-02
-Status: Accepted
-Delivery-Status: Partial
-Author(s): Jiri Raska
+# ADR-0083 — T1 (HTTP → 0): native-image + KEDA HTTP add-on pilot on product-catalog
 
 > **Correction (2026-07-05).** A prior edit (#2800, 2026-06-30) marked this ADR
 > `Delivery-Status: Shipped` and declared `openbank-product-catalog: T1` in

@@ -1,9 +1,16 @@
-# 22. Analytics/reporting layer: event-fed ClickHouse, not CDC, not a lakehouse
+---
+date: 2026-05-29
+decision-status: accepted
+delivery-status: partial
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [analytics, database, regulatory-reporting]
+summary: "The analytics layer is a ClickHouse warehouse fed from the existing outbox event stream, rejecting CDC out of the operational databases and rejecting a full lakehouse as too heavy for a small team."
+---
 
-Date: 2026-05-29
-Status: Accepted
-Delivery-Status: Partial
-Author(s): Jiří Raška
+# 22. Analytics/reporting layer: event-fed ClickHouse, not CDC, not a lakehouse
 
 **Delivery note (updated 2026-07-17):**
 - **Orchestration/decision logic** — ✅ Shipped: bronze/silver medallion views, PII masking, as-of/SCD2 reporting, reconciliation diffs, date-travel for regulatory snapshots all working and tested.

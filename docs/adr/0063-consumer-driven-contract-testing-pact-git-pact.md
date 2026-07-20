@@ -1,10 +1,16 @@
-# 63. Consumer-driven contract testing with Pact (git-pact) and pitest mutation testing
+---
+date: 2026-06-04
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [testing, ci, api-contract]
+summary: "Consumer-driven contract testing adopts Pact JVM with pact files committed to the monorepo instead of a broker, plus pitest mutation testing on money-path math; ADR-0092 later superseded the git-pact storage choice."
+---
 
-Date: 2026-06-04
-Status: Accepted
-Delivery-Status: Partial
-Extends: ADR-0011 (Layer 3 contract tests; pitest mutation section)
-Relates to: ADR-0029 (governance-as-code), ADR-0030 (SSDLC D3)
+# 63. Consumer-driven contract testing with Pact (git-pact) and pitest mutation testing
 
 **Delivery note (updated 2026-06-30):**
 - **Phase 1 pilot** — ✅ Shipped, and broader than first recorded: provider verification runs across **11 services** (12 `*PactProviderVerificationTest`), and the pitest weekly job (`pitest.yml`) covers **7 services** (ledger, balance, account, transaction, fx, fraud, sanctions) at 70% advisory — not just the balance→ledger pilot pair. admin-ui quality dashboard tabs (Contract, Mutation, Quality Score) present.

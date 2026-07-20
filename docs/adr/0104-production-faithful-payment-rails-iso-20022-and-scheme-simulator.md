@@ -1,9 +1,16 @@
-# 104. Production-faithful payment rails: real ISO 20022 messages + scheme simulator
+---
+date: 2026-06-22
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [payments, api-contract, testing]
+summary: "Payment rails build real XSD-validated ISO 20022 messages and settle against an in-house scheme simulator, making the platform production-faithful up to the network boundary with a clean swap-point for a real scheme."
+---
 
-Date: 2026-06-22
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiří Raška
+# 104. Production-faithful payment rails: real ISO 20022 messages + scheme simulator
 
 ## Context
 

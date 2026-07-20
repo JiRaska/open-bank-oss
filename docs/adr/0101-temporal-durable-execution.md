@@ -1,9 +1,16 @@
-# 101. Temporal durable execution for money-path workflows
+---
+date: 2026-06-19
+decision-status: accepted
+delivery-status: shipped
+authors: [OpenBank platform]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [payments, architecture, resilience]
+summary: "Temporal becomes the durable execution engine for all money-path orchestration, replacing hand-rolled saga coordinators, while the outbox pattern is retained inside activity implementations for exactly-once event publishing."
+---
 
-Date: 2026-06-19
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): OpenBank platform
+# 101. Temporal durable execution for money-path workflows
 
 ## Context
 

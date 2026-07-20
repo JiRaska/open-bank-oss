@@ -1,9 +1,16 @@
-# ADR-0142 — Credit decisioning engine on the ML decisioning platform
+---
+date: 2026-06-29
+decision-status: proposed
+delivery-status: planned
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [lending, ml, compliance]
+summary: "Build credit decisioning on the ML platform with stricter controls than fraud: no decision without machine-readable adverse-action reasons, deterministic affordability rules stay supreme, and declines route to mandatory four-eyes review."
+---
 
-Date: 2026-06-29
-Decision-Status: Proposed   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
-Author(s): Jiri Raska
+# ADR-0142 — Credit decisioning engine on the ML decisioning platform
 
 ## Context
 

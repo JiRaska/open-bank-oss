@@ -1,9 +1,16 @@
-# ADR-0092 — Pact Broker: broker-backed contract pipeline (enacts ADR-0063 follow-up)
+---
+date: 2026-06-15
+decision-status: accepted
+delivery-status: shipped
+authors: [@JiRaska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [testing, ci, api-contract, governance]
+summary: "A self-hosted Pact Broker replaces ADR-0063 git-pact storage, with CI publishing pacts and verification results and gating deploys on can-i-deploy, now that independent deploy cadences need that gate."
+---
 
-**Status:** Accepted
-**Delivery-Status:** Shipped
-**Date:** 2026-06-15
-**Author:** @JiRaska
+# ADR-0092 — Pact Broker: broker-backed contract pipeline (enacts ADR-0063 follow-up)
 
 > **Amendment 2026-06-19 — Pact Broker live.** Broker deployed at `pact.open-bank.tech` with
 > basic-auth ingress (OpenBao KV-backed credentials, ESO sync). CNPG `pact-broker-db` running.
