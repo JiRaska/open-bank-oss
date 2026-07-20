@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.33.0...customer-edge-v0.34.0) (2026-07-20)
+
+
+### Features
+
+* **customer-edge:** list the caller's documents ([#1801](https://github.com/JiRaska/open-bank-oss/issues/1801)) ([43d25d2](https://github.com/JiRaska/open-bank-oss/commit/43d25d25680e4e41a08b1993aaba5a8f0e21640b))
+
 ## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.32.0...customer-edge-v0.33.0) (2026-07-19)
 
 
