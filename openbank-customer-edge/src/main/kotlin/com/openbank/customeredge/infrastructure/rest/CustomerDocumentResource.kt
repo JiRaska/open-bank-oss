@@ -60,6 +60,40 @@ class CustomerDocumentResource(private val upstream: UpstreamClient) {
         return upstream.post("$documentServiceUrl/api/v1/documents/onboarding-agreement", partyId, upstreamBody)
     }
 
+    /**
+     * List the caller's documents (ADR-0169 D1). `partyRef` is forced to the token, so the upstream
+     * query can only ever return the caller's own rows. The upstream projection carries object-store
+     * coordinates (`storageKey`, `sha256`) that a customer client has no business seeing, so the
+     * response is re-projected onto a customer-safe field set rather than proxied verbatim.
+     */
+    @GET
+    @Path("/documents")
+    @Blocking
+    fun listDocuments(): Response {
+        val partyId = partyId()
+        val upstreamResp = upstream.get("$documentServiceUrl/api/v1/documents?partyRef=$partyId", partyId)
+        if (upstreamResp.status != OK) return upstreamResp
+        val body = upstreamResp.entity as? String ?: return Response.ok("[]").build()
+        val docs = runCatching { json.readTree(body) }.getOrNull()
+            ?: return Response.ok("[]").build()
+        // document-service returns rows unordered; a document list is read newest-first, so sort here
+        // rather than making every client do it.
+        val safe = docs.sortedByDescending { it.get("createdAt")?.asText().orEmpty() }.mapNotNull { doc ->
+            // Defence in depth: drop anything the upstream returned that isn't actually the caller's.
+            if (doc.get("partyRef")?.asText() != partyId) return@mapNotNull null
+            buildMap<String, Any?> {
+                put("id", doc.get("id")?.asText())
+                put("templateCode", doc.get("templateCode")?.asText())
+                put("templateVersion", doc.get("templateVersion")?.asText())
+                put("contentType", doc.get("contentType")?.asText())
+                put("sizeBytes", doc.get("sizeBytes")?.asLong())
+                put("status", doc.get("status")?.asText())
+                put("createdAt", doc.get("createdAt")?.asText())
+            }
+        }
+        return Response.ok(json.writeValueAsString(safe)).type(MediaType.APPLICATION_JSON).build()
+    }
+
     /** Stream a document's PDF bytes — only if it belongs to the caller. */
     @GET
     @Path("/documents/{id}/content")

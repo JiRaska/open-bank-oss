@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.14.0
+  version: 1.15.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -567,6 +567,34 @@ paths:
       responses:
         '200':
           description: Device list
+
+  /documents:
+    get:
+      tags: [Documents]
+      summary: List the authenticated customer's documents
+      description: >-
+        partyRef is taken from the JWT, never the query (IDOR). Object-store coordinates
+        (storageKey, sha256) are stripped — use /documents/{id}/content to fetch the bytes.
+      operationId: listDocuments
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The caller's documents, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid }
+                    templateCode: { type: string, example: RAMCOVA_SMLOUVA }
+                    templateVersion: { type: string }
+                    contentType: { type: string, example: application/pdf }
+                    sizeBytes: { type: integer, format: int64 }
+                    status: { type: string, enum: [GENERATED, PENDING_SIGNATURE, SIGNED, ARCHIVED] }
+                    createdAt: { type: string, format: date-time }
 
   /documents/agreements:
     post:
