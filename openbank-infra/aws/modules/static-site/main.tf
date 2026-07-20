@@ -5,8 +5,10 @@
 #   Route53 ALIAS  ->  CloudFront (TLS1.2+, HTTP->HTTPS, security headers)
 #                       -> S3 (PRIVATE, reachable only via Origin Access Control)
 #
-# No public S3, no compute, no cookies, no third-party JS. Fully isolated from
-# the banking EKS cluster — admin.open-bank.tech (NLB ingress) is untouched.
+# No public S3, no compute, no cookies. The only third-party JS is the TestFlight
+# beta signup (Web3Forms + hCaptcha), explicitly allowlisted in the CSP below.
+# Fully isolated from the banking EKS cluster — admin.open-bank.tech (NLB ingress)
+# is untouched.
 # ---------------------------------------------------------------------------
 
 # --- private origin bucket -------------------------------------------------
@@ -128,16 +130,22 @@ resource "aws_cloudfront_response_headers_policy" "sec" {
     }
     content_security_policy {
       override = true
+      # The TestFlight beta signup on the landing page posts to Web3Forms and renders an
+      # hCaptcha widget, so those origins have to be allowlisted or the form silently dies:
+      # script-src blocks the widget from ever rendering, connect-src blocks the POST, and
+      # frame-src (falling back to default-src) blocks the captcha iframe.
+      # Everything else stays deny-by-default. See web/landing/README-testflight.md.
       content_security_policy = join("; ", [
         "default-src 'self'",
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://*.hcaptcha.com",
         "font-src 'self' https://fonts.gstatic.com",
         "img-src 'self' data:",
-        "script-src 'self'",
-        "connect-src 'self'",
+        "script-src 'self' https://web3forms.com https://js.hcaptcha.com https://*.hcaptcha.com",
+        "connect-src 'self' https://api.web3forms.com https://*.hcaptcha.com",
+        "frame-src https://hcaptcha.com https://*.hcaptcha.com",
         "object-src 'none'",
         "base-uri 'self'",
-        "form-action 'self'",
+        "form-action 'self' https://api.web3forms.com",
         "frame-ancestors 'none'",
         "upgrade-insecure-requests",
       ])
@@ -187,7 +195,7 @@ resource "aws_cloudfront_distribution" "cdn" {
 
   default_cache_behavior {
     target_origin_id           = "s3-site"
-    viewer_protocol_policy      = "redirect-to-https"
+    viewer_protocol_policy     = "redirect-to-https"
     allowed_methods            = ["GET", "HEAD", "OPTIONS"]
     cached_methods             = ["GET", "HEAD"]
     compress                   = true
@@ -234,8 +242,8 @@ data "aws_iam_policy_document" "s3_oac" {
   # Block any non-HTTPS access (defence-in-depth; CloudFront already enforces
   # redirect-to-https, but belt-and-suspenders at the bucket level).
   statement {
-    sid    = "DenyInsecureTransport"
-    effect = "Deny"
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
     actions = ["s3:*"]
     resources = [
       aws_s3_bucket.site.arn,

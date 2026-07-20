@@ -29,6 +29,7 @@
       <a href="index.html#manifesto">Manifesto</a>
       <a href="index.html#framework">Framework</a>
       <a href="platform.html" class="active">Platform</a>
+      <a href="index.html#app">App</a>
       <a href="index.html#join">Join</a>
     </nav>
     <button class="btn btn-ghost nav-cta" data-open-demo type="button"><span class="play">▶</span> Live demo</button>
@@ -62,9 +63,9 @@
 
     <div class="reg-grid">
       <!-- each card: data-cov drives the ring + bar animation -->
-      <article class="reg-card reveal" data-cov="88">
+      <article class="reg-card reveal" data-cov="90">
         <div class="reg-top">
-          <div class="reg-ring" style="--cov:88"><span>88<i>%</i></span></div>
+          <div class="reg-ring" style="--cov:90"><span>90<i>%</i></span></div>
           <div class="reg-id"><h3>CNB</h3><p>Czech National Bank</p></div>
         </div>
         <ul class="reg-maps">
@@ -74,9 +75,9 @@
         </ul>
       </article>
 
-      <article class="reg-card reveal" data-cov="85">
+      <article class="reg-card reveal" data-cov="88">
         <div class="reg-top">
-          <div class="reg-ring" style="--cov:85"><span>85<i>%</i></span></div>
+          <div class="reg-ring" style="--cov:88"><span>88<i>%</i></span></div>
           <div class="reg-id"><h3>DORA</h3><p>Digital Operational Resilience</p></div>
         </div>
         <ul class="reg-maps">
@@ -86,69 +87,81 @@
         </ul>
       </article>
 
-      <article class="reg-card reveal" data-cov="82">
+      <article class="reg-card reveal" data-cov="86">
         <div class="reg-top">
-          <div class="reg-ring" style="--cov:82"><span>82<i>%</i></span></div>
+          <div class="reg-ring" style="--cov:86"><span>86<i>%</i></span></div>
+          <div class="reg-id"><h3>PSD2</h3><p>Payment Services Directive</p></div>
+        </div>
+        <ul class="reg-maps">
+          <li><b>Art.97</b> Strong auth (SCA) → sca-service · Keycloak</li>
+          <li><b>AISP/PISP</b> XS2A portal live → psd2 · tpp-registry</li>
+          <li><b>VoP</b> Verification of Payee → vop-service (ADR-0171)</li>
+        </ul>
+      </article>
+
+      <article class="reg-card reveal" data-cov="84">
+        <div class="reg-top">
+          <div class="reg-ring" style="--cov:84"><span>84<i>%</i></span></div>
           <div class="reg-id"><h3>5AMLD</h3><p>Anti-Money-Laundering</p></div>
         </div>
         <ul class="reg-maps">
           <li><b>Art.18</b> Screening before payout → compliance gate</li>
-          <li><b>Sanctions</b> Real-time list checks → sanction-screening</li>
-          <li><b>Monitoring</b> Transaction surveillance → audit trail</li>
+          <li><b>Sanctions</b> Real-time list checks → sanctions-service</li>
+          <li><b>CDD/KYC</b> Due diligence → kyc-service (pg_trgm)</li>
         </ul>
       </article>
 
-      <article class="reg-card reveal" data-cov="80">
+      <article class="reg-card reveal" data-cov="83">
         <div class="reg-top">
-          <div class="reg-ring" style="--cov:80"><span>80<i>%</i></span></div>
-          <div class="reg-id"><h3>PSD2</h3><p>Payment Services Directive</p></div>
+          <div class="reg-ring" style="--cov:83"><span>83<i>%</i></span></div>
+          <div class="reg-id"><h3>GDPR</h3><p>Data Protection</p></div>
         </div>
         <ul class="reg-maps">
-          <li><b>Art.97</b> Strong auth (SCA) → Keycloak</li>
-          <li><b>AISP/PISP</b> Open banking → open-banking-service</li>
-          <li><b>pacs.008</b> SEPA rails → sepa-payment / instant</li>
+          <li><b>Art.25</b> Protection by design → party-service PII masking</li>
+          <li><b>Art.17</b> Right to erasure → PARTY_ERASED fleet-wide</li>
+          <li><b>Consent</b> Lawful basis → consent-service</li>
         </ul>
       </article>
 
       <article class="reg-card reveal" data-cov="78">
         <div class="reg-top">
           <div class="reg-ring" style="--cov:78"><span>78<i>%</i></span></div>
-          <div class="reg-id"><h3>GDPR</h3><p>Data Protection</p></div>
-        </div>
-        <ul class="reg-maps">
-          <li><b>Art.25</b> Protection by design → party-service PII masking</li>
-          <li><b>Consent</b> Lawful basis → consent service</li>
-          <li><b>Erasure</b> Right to be forgotten → retention policy</li>
-        </ul>
-      </article>
-
-      <article class="reg-card reveal" data-cov="75">
-        <div class="reg-top">
-          <div class="reg-ring" style="--cov:75"><span>75<i>%</i></span></div>
           <div class="reg-id"><h3>EBA</h3><p>European Banking Authority</p></div>
         </div>
         <ul class="reg-maps">
           <li><b>ICT</b> Risk guidelines → BCP + observability</li>
-          <li><b>Outsourcing</b> Register → cloud architecture map</li>
-          <li><b>Incident</b> Reporting → audit + notifications</li>
+          <li><b>FINREP</b> Supervisory reporting → finrep-service</li>
+          <li><b>AnaCredit</b> Credit register → anacredit-service</li>
         </ul>
       </article>
 
-      <article class="reg-card reveal" data-cov="70">
+      <article class="reg-card reveal" data-cov="74">
         <div class="reg-top">
-          <div class="reg-ring" style="--cov:70"><span>70<i>%</i></span></div>
-          <div class="reg-id"><h3>PCI DSS</h3><p>Card Security</p></div>
+          <div class="reg-ring" style="--cov:74"><span>74<i>%</i></span></div>
+          <div class="reg-id"><h3>PCI DSS</h3><p>v4.0 · Card Security</p></div>
         </div>
         <ul class="reg-maps">
-          <li><b>Req.3.5</b> Key management → HashiCorp Vault / KMS</li>
+          <li><b>Req.3.5</b> Key management → OpenBao / KMS</li>
           <li><b>Isolation</b> Cardholder scope → card-issuance</li>
-          <li><b>SegNet</b> Network segmentation → namespaces</li>
+          <li><b>Req.4</b> TLS 1.2+ in transit → Kong gateway</li>
         </ul>
       </article>
 
-      <article class="reg-card reveal" data-cov="60">
+      <article class="reg-card reveal" data-cov="72">
         <div class="reg-top">
-          <div class="reg-ring" style="--cov:60"><span>60<i>%</i></span></div>
+          <div class="reg-ring" style="--cov:72"><span>72<i>%</i></span></div>
+          <div class="reg-id"><h3>eIDAS 2.0</h3><p>EUDI Wallet · digital identity</p></div>
+        </div>
+        <ul class="reg-maps">
+          <li><b>Art.5a</b> EUDI Wallet → pid-service (deployed)</li>
+          <li><b>OpenID4VP</b> Presentation → e2e live (ADR-0094)</li>
+          <li><b>OpenID4VCI</b> Credential issuance → e2e live</li>
+        </ul>
+      </article>
+
+      <article class="reg-card reveal" data-cov="66">
+        <div class="reg-top">
+          <div class="reg-ring" style="--cov:66"><span>66<i>%</i></span></div>
           <div class="reg-id"><h3>EU AI Act</h3><p>AI Governance</p></div>
         </div>
         <ul class="reg-maps">
@@ -170,26 +183,29 @@
 
     <div class="finops-wrap reveal">
       <div class="finops-summary">
-        <div class="fo-stat"><b data-count="61.30" data-prefix="$">$0.00</b><span>total run-cost / month</span></div>
-        <div class="fo-stat"><b data-count="14">0</b><span>business flows costed</span></div>
-        <div class="fo-stat"><b data-count="38">0</b><span>services attributed</span></div>
+        <div class="fo-stat"><b data-count="118.40" data-prefix="$">$0.00</b><span>total run-cost / month</span></div>
+        <div class="fo-stat"><b data-count="18">0</b><span>business flows costed</span></div>
+        <div class="fo-stat"><b data-count="46">0</b><span>services attributed</span></div>
         <div class="fo-stat"><b><span class="ok">live</span></b><span>cost feed status</span></div>
       </div>
 
       <div class="bars" id="finops-bars">
         <!-- value = USD, w = % of max for bar width -->
-        <div class="bar-row" data-w="100"><div class="bar-label">SEPA Credit Transfer<small>PSD2 · pacs.008</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="13.53" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="61"><div class="bar-label">SEPA Instant<small>PSD2 · 10s SLA</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="8.24" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="61"><div class="bar-label">Domestic Payment<small>CNB CERTIS</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="8.24" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="46"><div class="bar-label">SWIFT Cross-Border<small>pacs.008 · cross-border</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="6.18" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="30"><div class="bar-label">Double-Entry Ledger<small>CNB §4 · books of account</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="4.12" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="30"><div class="bar-label">FX Conversion<small>3 services</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="4.12" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="24"><div class="bar-label">Account Management<small>4 services</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="3.23" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="24"><div class="bar-label">Balance Projection<small>2 services</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="3.23" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="17"><div class="bar-label">Open Banking<small>PSD2 AISP/PISP</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="2.34" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="15"><div class="bar-label">Compliance Gate<small>5AMLD Art.18 · AML/Sanctions</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="2.06" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="15"><div class="bar-label">Card Issuance<small>PCI DSS</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="2.06" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="14"><div class="bar-label">Audit Trail<small>DORA Art.17 · immutable</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="1.85" data-prefix="$">$0</div></div>
+        <div class="bar-row" data-w="100"><div class="bar-label">SEPA Credit Transfer<small>PSD2 · pacs.008</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="22.80" data-prefix="$">$0</div></div>
+        <div class="bar-row" data-w="72"><div class="bar-label">AI Copilot (LLM)<small>copilot-service · inference</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="16.40" data-prefix="$">$0</div></div>
+        <div class="bar-row" data-w="61"><div class="bar-label">SEPA Instant<small>PSD2 · 10s SLA</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="13.90" data-prefix="$">$0</div></div>
+        <div class="bar-row" data-w="61"><div class="bar-label">Domestic Payment<small>CNB CERTIS</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="13.90" data-prefix="$">$0</div></div>
+        <div class="bar-row" data-w="46"><div class="bar-label">SWIFT Cross-Border<small>pacs.008 · cross-border</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="10.40" data-prefix="$">$0</div></div>
+        <div class="bar-row" data-w="38"><div class="bar-label">EUDI PID Issuance<small>eIDAS 2.0 · OpenID4VCI</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="8.60" data-prefix="$">$0</div></div>
+        <div class="bar-row" data-w="30"><div class="bar-label">Double-Entry Ledger<small>CNB §4 · books of account</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="6.90" data-prefix="$">$0</div></div>
+        <div class="bar-row" data-w="30"><div class="bar-label">FX Conversion<small>Temporal durable · 3 services</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="6.90" data-prefix="$">$0</div></div>
+        <div class="bar-row" data-w="24"><div class="bar-label">Account Management<small>4 services</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="5.40" data-prefix="$">$0</div></div>
+        <div class="bar-row" data-w="24"><div class="bar-label">Balance Projection<small>2 services</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="5.40" data-prefix="$">$0</div></div>
+        <div class="bar-row" data-w="18"><div class="bar-label">Verification of Payee<small>vop-service · name-match</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="4.10" data-prefix="$">$0</div></div>
+        <div class="bar-row" data-w="17"><div class="bar-label">Open Banking<small>PSD2 AISP/PISP</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="3.90" data-prefix="$">$0</div></div>
+        <div class="bar-row" data-w="15"><div class="bar-label">Compliance Gate<small>5AMLD Art.18 · AML/Sanctions</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="3.50" data-prefix="$">$0</div></div>
+        <div class="bar-row" data-w="15"><div class="bar-label">Card Issuance<small>PCI DSS</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="3.50" data-prefix="$">$0</div></div>
+        <div class="bar-row" data-w="14"><div class="bar-label">Audit Trail<small>DORA Art.17 · immutable</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="3.10" data-prefix="$">$0</div></div>
       </div>
       <p class="finops-note">Flows share services, so the per-flow sums overlap. Figures are fully-loaded sandbox run-cost.</p>
     </div>
@@ -204,10 +220,10 @@
     </div>
 
     <div class="bcp-status reveal">
-      <div class="bcp-stat"><span class="bcp-k">Overall</span><b class="warn">DEGRADED</b><small>20 / 38 services healthy</small></div>
+      <div class="bcp-stat"><span class="bcp-k">Overall</span><b class="ok">HEALTHY</b><small>39 / 46 services healthy</small></div>
       <div class="bcp-stat"><span class="bcp-k">Compliance gate</span><b class="ok">CLEAR</b><small>5AMLD Art.18 / DORA Art.12</small></div>
       <div class="bcp-stat"><span class="bcp-k">Payment processing</span><b class="ok">ENABLED</b><small>Tier 4 payment services</small></div>
-      <div class="bcp-stat"><span class="bcp-k">Target RTO</span><b class="grad-t">&lt; 8 min</b><small>pre-built Docker images</small></div>
+      <div class="bcp-stat"><span class="bcp-k">Target RTO</span><b class="grad-t">&lt; 8 min</b><small>pre-built images · GitOps</small></div>
     </div>
 
     <div class="bcp-tiers reveal">
@@ -215,11 +231,11 @@
         <div class="tier-head">
           <span class="tier-no t0">0</span>
           <div><h3>Tier 0 · Infrastructure prerequisites</h3><p>Prerequisite of every other tier</p></div>
-          <div class="tier-meta"><span>RTO <b>5 min</b></span><span>RPO <b>0</b></span><span class="t-prio">P0</span><span class="t-ok">6/6 ✓</span></div>
+          <div class="tier-meta"><span>RTO <b>5 min</b></span><span>RPO <b>0</b></span><span class="t-prio">P0</span><span class="t-ok">7/7 ✓</span></div>
         </div>
         <div class="nodes">
-          <span class="node up">PostgreSQL</span><span class="node up">Apache Kafka</span><span class="node up">Keycloak (IAM)</span>
-          <span class="node up">HashiCorp Vault</span><span class="node up">Valkey (Redis)</span><span class="node up">Schema Registry</span>
+          <span class="node up">PostgreSQL 18 (CNPG)</span><span class="node up">Apache Kafka</span><span class="node up">Keycloak (IAM)</span>
+          <span class="node up">OpenBao</span><span class="node up">Valkey (Redis)</span><span class="node up">Apicurio Registry</span><span class="node up">Temporal</span>
         </div>
       </div>
 
@@ -227,11 +243,11 @@
         <div class="tier-head">
           <span class="tier-no t1">1</span>
           <div><h3>Tier 1 · Core ledger &amp; identity</h3><p>CNB §4 accounts · DORA Art.17 audit online during incident</p></div>
-          <div class="tier-meta"><span>RTO <b>15 min</b></span><span>RPO <b>&lt;1 min</b></span><span class="t-prio">P1</span><span class="t-ok">4/5 ✓</span></div>
+          <div class="tier-meta"><span>RTO <b>15 min</b></span><span>RPO <b>&lt;1 min</b></span><span class="t-prio">P1</span><span class="t-ok">5/5 ✓</span></div>
         </div>
         <div class="nodes">
           <span class="node up">Account Service</span><span class="node up">Ledger Service</span><span class="node up">Transaction Service</span>
-          <span class="node unknown">Party Service</span><span class="node up">Audit Service</span>
+          <span class="node up">Party Service</span><span class="node up">Audit Service</span>
         </div>
       </div>
 
@@ -239,11 +255,11 @@
         <div class="tier-head">
           <span class="tier-no t2">2</span>
           <div><h3>Tier 2 · Compliance gate</h3><p>5AMLD Art.18 · payments must not run without AML/sanctions</p></div>
-          <div class="tier-meta"><span>RTO <b>20 min</b></span><span>RPO <b>&lt;5 min</b></span><span class="t-prio">P1</span><span class="t-ok warn">2/6 ✓</span></div>
+          <div class="tier-meta"><span>RTO <b>20 min</b></span><span>RPO <b>&lt;5 min</b></span><span class="t-prio">P1</span><span class="t-ok">5/6 ✓</span></div>
         </div>
         <div class="nodes">
-          <span class="node up">Sanction Screening</span><span class="node up">Compliance Service</span><span class="node unknown">Consent Service</span>
-          <span class="node down">Watchlist Sync</span><span class="node unknown">Case Mgmt</span><span class="node down">Reporting</span>
+          <span class="node up">Sanctions Service</span><span class="node up">AML Service</span><span class="node up">KYC Service</span>
+          <span class="node up">Consent Service</span><span class="node up">VoP Service</span><span class="node unknown">Case Mgmt</span>
         </div>
       </div>
     </div>
@@ -254,14 +270,14 @@
     <div class="section-head reveal">
       <span class="kicker">AIOps · AI governance</span>
       <h2>AI under the same gates as humans.</h2>
-      <p class="sub">ADR-0031 · Proposed. Agents propose; governance disposes. An agent never holds more privilege than a human. It holds less.</p>
+      <p class="sub">ADR-0031 · Accepted, deployed. Agents propose; governance disposes. An agent never holds more privilege than a human. It holds less. A customer-facing LLM copilot is live in the sandbox, bearer-auth + rate-limited at the ingress.</p>
     </div>
 
     <div class="ai-posture reveal">
-      <div class="ai-stat"><b>1/5</b><span>Phase</span><small>policy skeleton · deny-by-default</small></div>
-      <div class="ai-stat"><b>Advisory</b><span>Enforcement</span><small>default: deny</small></div>
-      <div class="ai-stat"><b>0</b><span>Agents acting</span><small>3 charters defined</small></div>
-      <div class="ai-stat"><b>1/9</b><span>Roadmap D1-D9</span><small>6 partial · 2 planned</small></div>
+      <div class="ai-stat"><b>3/5</b><span>Phase</span><small>policy enforced · deny-by-default</small></div>
+      <div class="ai-stat"><b>Enforce</b><span>Enforcement</span><small>OPA enforce mode on the edge</small></div>
+      <div class="ai-stat"><b>8</b><span>Agents in fleet</span><small>finops · devops · governance · release · docs · copilot</small></div>
+      <div class="ai-stat"><b>4/9</b><span>Roadmap D1-D9</span><small>3 partial · 2 planned</small></div>
     </div>
 
     <div class="ai-tiers reveal">
@@ -269,7 +285,7 @@
         <h4>read <span>read-only · PII masked</span></h4>
         <div class="chips">
           <span class="chip g">query.ledger.readonly</span><span class="chip g">read.catalog</span>
-          <span class="chip g">read.logs</span><span class="chip g">read.governance</span>
+          <span class="chip g">read.logs</span><span class="chip g">read.governance</span><span class="chip g">copilot.inference</span>
         </div>
       </div>
       <div class="ai-tier prop">
@@ -299,10 +315,10 @@
 
     <div class="cloud reveal">
       <div class="cloud-layer edge">
-        <div class="cl-title">Internet / Edge <span>ADR-0027 edge tier · not provisioned yet</span></div>
+        <div class="cl-title">Internet / Edge <span>Kong gateway live · WAF/ModSecurity on developer portal</span></div>
         <div class="nodes">
-          <span class="node planned">Route 53</span><span class="node planned">CloudFront + WAF + Shield</span>
-          <span class="node planned">ALB (AWS LB Controller)</span><span class="node planned">ACM (TLS certs)</span>
+          <span class="node up">Kong API gateway</span><span class="node up">WAF / ModSecurity</span>
+          <span class="node planned">Route 53</span><span class="node planned">CloudFront + Shield</span><span class="node planned">ACM (TLS certs)</span>
         </div>
       </div>
 
@@ -322,20 +338,22 @@
         <div class="nodes">
           <span class="node up">cert-manager</span><span class="node up">Karpenter</span><span class="node up">ArgoCD</span><span class="node up">ARC runners</span>
         </div>
-        <div class="cl-sub">stateful core <small>cnpg · messaging · iam</small></div>
+        <div class="cl-sub">stateful core <small>cnpg · messaging · iam · durable</small></div>
         <div class="nodes">
-          <span class="node up">CloudNativePG</span><span class="node up">Strimzi / Kafka</span><span class="node up">Apicurio</span>
-          <span class="node up">Keycloak</span><span class="node up">Valkey / Redis</span><span class="node up">Vault + ESO</span><span class="node planned">ClickHouse</span>
+          <span class="node up">CloudNativePG (PG 18)</span><span class="node up">Strimzi / Kafka</span><span class="node up">Apicurio</span>
+          <span class="node up">Keycloak</span><span class="node up">Valkey / Redis</span><span class="node up">OpenBao + ESO</span><span class="node up">Temporal</span><span class="node planned">ClickHouse</span>
         </div>
-        <div class="cl-sub">application <small>accounts · admin-ui · domain verticals</small></div>
+        <div class="cl-sub">application <small>~37 backend services · edge · AI fleet</small></div>
         <div class="nodes">
-          <span class="node up">account-service</span><span class="node up">admin-ui</span><span class="node partial">10+ domain verticals</span>
+          <span class="node up">30+ domain services</span><span class="node up">customer-edge (BFF)</span><span class="node up">admin-ui</span><span class="node up">developer-portal</span>
+          <span class="node up">pid-service (EUDI)</span><span class="node up">copilot-service (LLM)</span><span class="node up">agent-service (MCP)</span>
           <span class="node up">Notification Service</span><span class="node up">Security Scanner</span>
         </div>
-        <div class="cl-sub">observability</div>
+        <div class="cl-sub">observability <small>OTel · SLO · on-call · errors</small></div>
         <div class="nodes">
-          <span class="node up">Prometheus</span><span class="node up">Grafana</span><span class="node unknown">Loki</span>
-          <span class="node up">Tempo</span><span class="node up">OTel Collector</span>
+          <span class="node up">Prometheus</span><span class="node up">Grafana</span><span class="node up">Loki</span>
+          <span class="node up">Tempo</span><span class="node up">Pyroscope</span><span class="node up">OTel Collector</span>
+          <span class="node up">GoAlert</span><span class="node up">Pyrra (SLO)</span><span class="node up">GlitchTip</span>
         </div>
       </div>
     </div>
@@ -349,6 +367,7 @@
       <p>The admin portal you just scrolled through is running right now. Sign in with the demo account and click around: FinOps, BCP, AI governance, the live cloud map.</p>
       <div class="join-cta">
         <button class="btn btn-primary" data-open-demo type="button"><span class="play">▶</span> Open the live demo</button>
+        <a class="btn btn-ghost" href="https://github.com/JiRaska/open-bank-oss/" target="_blank" rel="noopener">Read the source · Apache-2.0</a>
         <a class="btn btn-ghost" href="index.html">Back to the vision</a>
       </div>
     </div>
@@ -360,7 +379,7 @@
       <img src="assets/openbank-logo.png" alt="" />
       <span>Open Bank <strong>Foundation</strong></span>
     </div>
-    <p class="footer-note">An open framework for banking in the AI era. Patterns shared, not hoarded.</p>
+    <p class="footer-note">An open framework for banking in the AI era. Patterns shared, not hoarded. Source: <a href="https://github.com/JiRaska/open-bank-oss/" target="_blank" rel="noopener">github.com/JiRaska/open-bank-oss</a> · Apache-2.0.</p>
     <p class="footer-fine">© <span id="year"></span> · A proposal by <a href="https://www.linkedin.com/in/jiriraska" target="_blank" rel="noopener">Jiří Raška</a>. Coverage figures reflect sandbox maturity, not a certified compliance statement.</p>
   </footer>
 

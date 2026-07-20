@@ -16,23 +16,28 @@ document.querySelectorAll('.reveal').forEach((el, i) => {
   io.observe(el);
 });
 
-// demo modal
-const modal = document.getElementById('demo-modal');
-if (modal) {
-  const open = () => { if (typeof modal.showModal === 'function') modal.showModal(); else modal.setAttribute('open', ''); };
-  const close = () => { if (typeof modal.close === 'function') modal.close(); else modal.removeAttribute('open'); };
-
-  document.querySelectorAll('[data-open-demo]').forEach(b => b.addEventListener('click', open));
-  document.querySelectorAll('[data-close-demo]').forEach(b => b.addEventListener('click', close));
-
-  // click on backdrop closes
-  modal.addEventListener('click', (e) => {
-    const card = modal.querySelector('.modal-card');
+// modals (demo + testflight) — shared open/close/backdrop wiring
+function wireModal(id, openSel, closeSel) {
+  const m = document.getElementById(id);
+  if (!m) return null;
+  const open = () => { if (typeof m.showModal === 'function') m.showModal(); else m.setAttribute('open', ''); };
+  const close = () => { if (typeof m.close === 'function') m.close(); else m.removeAttribute('open'); };
+  document.querySelectorAll(openSel).forEach(b => b.addEventListener('click', (e) => { e.preventDefault(); open(); }));
+  document.querySelectorAll(closeSel).forEach(b => b.addEventListener('click', close));
+  m.addEventListener('click', (e) => {
+    const card = m.querySelector('.modal-card');
     const r = card.getBoundingClientRect();
     const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
     if (!inside) close();
   });
+  return m;
+}
 
+wireModal('tf-modal', '[data-open-tf]', '[data-close-tf]');
+
+// demo modal
+const modal = wireModal('demo-modal', '[data-open-demo]', '[data-close-demo]');
+if (modal) {
   // copy-to-clipboard
   modal.querySelectorAll('.copy').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -49,6 +54,52 @@ if (modal) {
       btn.classList.add('copied');
       setTimeout(() => { btn.textContent = old; btn.classList.remove('copied'); }, 1400);
     });
+  });
+}
+
+// testflight signup form (Web3Forms, AJAX submit)
+const tfForm = document.getElementById('tf-form');
+if (tfForm) {
+  const status = document.getElementById('tf-status');
+  const submitBtn = tfForm.querySelector('.tf-submit');
+  tfForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    // hCaptcha gate: only enforce when the widget actually rendered.
+    // If it was blocked (CSP, ad-blocker, hCaptcha down) we fail open rather than
+    // locking everyone out — the honeypot and Web3Forms' server-side checks still apply.
+    const widget = tfForm.querySelector('.h-captcha');
+    const rendered = widget && widget.querySelector('iframe');
+    const captcha = tfForm.querySelector('[name="h-captcha-response"]');
+    if (rendered && (!captcha || !captcha.value)) {
+      status.className = 'tf-status err';
+      status.textContent = 'Please complete the "I\'m not a robot" check.';
+      return;
+    }
+    status.className = 'tf-status sending';
+    status.textContent = 'Sending…';
+    submitBtn.disabled = true;
+    try {
+      const res = await fetch(tfForm.action, {
+        method: 'POST',
+        headers: { 'Accept': 'application/json' },
+        body: new FormData(tfForm),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        tfForm.reset();
+        if (window.hcaptcha) { try { window.hcaptcha.reset(); } catch (_) {} }
+        status.className = 'tf-status ok';
+        status.textContent = "Thanks! We'll send your TestFlight invite soon.";
+      } else {
+        status.className = 'tf-status err';
+        status.textContent = (data && data.message) ? data.message : 'Something went wrong — email hello@open-bank.tech.';
+        submitBtn.disabled = false;
+      }
+    } catch (err) {
+      status.className = 'tf-status err';
+      status.textContent = 'Network error — email hello@open-bank.tech.';
+      submitBtn.disabled = false;
+    }
   });
 }
 
