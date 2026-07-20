@@ -1,9 +1,16 @@
-# 102. Agentic AI differentiation — tool-use banking agent, ML fraud, and LLM-assisted KYC
+---
+date: 2026-06-19
+decision-status: accepted
+delivery-status: planned
+authors: [OpenBank platform]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ai-agents, ml, fraud, kyc]
+summary: "Three AI capability tracks are committed on the existing governance substrate: a tool-use banking agent, an ML fraud scorer replacing brittle rules, and LLM-assisted KYC document extraction, all under model-proposes/bank-disposes."
+---
 
-Date: 2026-06-19
-Status: Accepted
-Delivery-Status: Planned
-Author(s): OpenBank platform
+# 102. Agentic AI differentiation — tool-use banking agent, ML fraud, and LLM-assisted KYC
 
 **Delivery note (updated 2026-06-30):**
 - **Governance foundation** — ✅ Ready: MCP + OPA policy gate, AI-attributed audit trail, model-proposes/bank-disposes invariant, and governance substrate all in place from ADR-0031; feature-flag gating (ADR-0067) available.

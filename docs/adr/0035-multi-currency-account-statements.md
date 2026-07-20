@@ -1,9 +1,16 @@
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [statements, accounts, fx]
+summary: "A dedicated openbank-statement-service assembles statements without posting authority; the per-pocket statement is the unit for camt.053 and MT940, and only the human-facing consolidated PDF adds an informational CZK total."
+---
+
 # 35. Multi-currency account statements (camt.053 / MT940 / PDF)
-
-Date: 2026-05-30
-
-Status: Accepted
-Delivery-Status: Shipped
 
 ## Context
 

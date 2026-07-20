@@ -1,9 +1,16 @@
-# Hardware-backed credential storage for the customer app
+---
+date: 2026-06-08
+decision-status: accepted
+delivery-status: planned
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [mobile-app, crypto-keys, secrets, authn]
+summary: "The customer app must meet a binding secure-storage contract before F2: tokens in Android Keystore or iOS Keychain, PINs kept only as salted KDF verifiers checked in constant time, and no in-memory placeholder."
+---
 
-Date: 2026-06-08
-Status: Accepted
-Delivery-Status: Planned
-Author(s): Jiří Raška
+# Hardware-backed credential storage for the customer app
 
 ## Context
 

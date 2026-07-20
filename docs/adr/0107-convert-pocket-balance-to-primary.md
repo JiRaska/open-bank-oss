@@ -1,9 +1,16 @@
-# 107. Convert a currency pocket's balance to the primary currency (sweep-to-close)
+---
+date: 2026-06-23
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [fx, accounts, ledger]
+summary: "A sell-specified own-account FX conversion sweeps a currency pocket into the primary currency by extending the existing cross-currency transaction saga, so no FX dust blocks pocket closure and the ledger stays authoritative."
+---
 
-Date: 2026-06-23
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiří Raška
+# 107. Convert a currency pocket's balance to the primary currency (sweep-to-close)
 
 ## Context
 

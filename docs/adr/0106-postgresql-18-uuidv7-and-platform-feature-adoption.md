@@ -1,9 +1,16 @@
-# PostgreSQL 18 — UUIDv7 as the identifier convention and low-cost platform wins
+---
+date: 2026-06-22
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [database, architecture]
+summary: "UUIDv7 becomes the identifier convention for new identifiers at both the DB and app seam, applied opportunistically with no sweep migration; expensive PostgreSQL 18 adoptions are deferred until measured evidence exists."
+---
 
-Date: 2026-06-22
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiri Raska
+# PostgreSQL 18 — UUIDv7 as the identifier convention and low-cost platform wins
 
 ## Context
 

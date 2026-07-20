@@ -1,9 +1,16 @@
-# ADR-0149 — Digital accessibility standard (WCAG 2.2 AA / EN 301 549)
+---
+date: 2026-07-02
+decision-status: accepted
+delivery-status: planned
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [i18n-a11y, compliance, admin-ui]
+summary: "Adopt WCAG 2.2 AA aligned with EN 301 549 as the conformance target for customer-facing surfaces; the internal admin UI gets only a non-blocking axe-core guard test, being outside European Accessibility Act scope."
+---
 
-Date: 2026-07-02
-Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
-Author(s): jiri.raska
+# ADR-0149 — Digital accessibility standard (WCAG 2.2 AA / EN 301 549)
 
 ## Context
 

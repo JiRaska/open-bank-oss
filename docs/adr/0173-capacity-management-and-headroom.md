@@ -1,9 +1,16 @@
-# ADR-0173 — Capacity management and headroom
+---
+date: 2026-07-16
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [capacity, kubernetes, finops]
+summary: "Karpenter NodePool limits (cpu 48, memory 128Gi) are declared the deliberate fleet capacity ceiling, resource requests are treated as a correctness input, and an alert is added so a binding cap stops failing silently as Pending pods."
+---
 
-Date: 2026-07-16
-Decision-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska
+# ADR-0173 — Capacity management and headroom
 
 ## Context
 

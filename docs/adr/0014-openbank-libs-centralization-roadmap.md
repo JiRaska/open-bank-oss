@@ -1,9 +1,16 @@
-# openbank-libs as the shared service-infrastructure layer
+---
+date: 2026-05-28
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [libs, architecture, governance]
+summary: "openbank-libs becomes the shared service-infrastructure layer rather than a generic utility module, absorbing REST filters, outbox, idempotency, security/audit primitives and a Gradle convention plugin in phases."
+---
 
-Date: 2026-05-28
-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska
+# openbank-libs as the shared service-infrastructure layer
 
 **Delivery note (updated 2026-07-01):**
 - **Phase 1 (house cleaning)** — ✅ Shipped: unified dependency declaration; 12 byte-identical `InfoResource.kt` deleted; Jandex plugin added to libs; `RedisIdempotencyStore` consolidated.

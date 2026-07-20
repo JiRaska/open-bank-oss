@@ -1,9 +1,16 @@
-# ADR-0161 — Object-storage standard for application binary artifacts
+---
+date: 2026-07-13
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [documents, infrastructure, libs]
+summary: "Standardize binary-artifact storage on a single framework-free ObjectStorePort in the domain libs, with S3 and Postgres adapters selected by one config key and a reusable WORM-by-default documents bucket in Terraform."
+---
 
-Date: 2026-07-13
-Decision-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska
+# ADR-0161 — Object-storage standard for application binary artifacts
 
 **Delivery note (updated 2026-07-17):** D1 + D2 shipped, D3 pending.
 - **D1 (`ObjectStorePort` in domain libs)** — ✅ Shipped: `openbank-libs-domain/.../storage/ObjectStorePort.kt`

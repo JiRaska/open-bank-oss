@@ -1,9 +1,16 @@
-# ADR-0164 — Governance-auditor AI agent
+---
+date: 2026-07-13
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska (paired with Claude Fable 5)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ai-agents, governance, audit]
+summary: "A read-only governance-auditor agent re-checks every merged PR against rules.yaml (approvals, threat model, GPG, linked issue, admin bypass), because branch protection let money-path PRs merge with zero reviews."
+---
 
-Date: 2026-07-13
-Decision-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska (paired with Claude Fable 5)
+# ADR-0164 — Governance-auditor AI agent
 
 ## Context
 

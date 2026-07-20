@@ -1,8 +1,16 @@
-# 20. Code coverage: Kover with a per-module regression floor
+---
+date: 2026-05-29
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [testing, ci, governance]
+summary: "Code coverage uses Kover rather than JaCoCo because the codebase is Kotlin-first, gated by a per-module regression floor that ratchets up but never lets coverage silently rot down."
+---
 
-Date: 2026-05-29
-Status: Accepted
-Delivery-Status: Shipped
+# 20. Code coverage: Kover with a per-module regression floor
 
 **Delivery note (updated 2026-07-17):** both phases delivered; the 2026-06-30 "per-service rollout pending" note was stale.
 - **Coverage gate (libs)** — ✅ Shipped: Kover wired into `check`. Since the ADR-0122 libs split the floors live per sub-module — `openbank-libs-domain` (30) and `openbank-libs-runtime` (50); the umbrella `openbank-libs` is `minValue = 0` (no source). `SecurityContextExtensions(.kt/Test.kt)` now sits in `openbank-libs-runtime`. (The old "39% on `openbank-libs` / libs-security 50→59%" wording predates that split.)

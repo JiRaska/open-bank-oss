@@ -1,9 +1,16 @@
-# 116. KYC engine — risk-based checks, ČNB four-eyes gate, sandbox straight-through mode
+---
+date: 2026-06-25
+decision-status: accepted
+delivery-status: shipped
+authors: [Claude (paired with Jiří Raška)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [kyc, aml-sanctions, compliance]
+summary: "The KYC engine runs five risk-based checks with a split opener/reviewer four-eyes gate, screens PEPs against the free OpenSanctions dataset (matches escalate to manual review, never auto-reject), with a sandbox straight-through mode."
+---
 
-Date: 2026-06-25
-Author: Claude (paired with Jiří Raška)
-Status: Accepted
-Delivery-Status: Shipped
+# 116. KYC engine — risk-based checks, ČNB four-eyes gate, sandbox straight-through mode
 
 **Delivery note (updated 2026-07-09):**
 - **Role-split** — ✅ Shipped: `ROLE_KYC_OPENER` (case opener, check updates) and

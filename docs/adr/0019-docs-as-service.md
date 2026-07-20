@@ -1,10 +1,16 @@
-# 19. Docs-as-Service — services self-publish their bundled documentation
+---
+date: 2026-05-29
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [docs, architecture, libs]
+summary: "Each service self-publishes its own bundled documentation over its own port via a shared libs DocsResource, so docs version with the code instead of being baked into the admin-ui image."
+---
 
-Date: 2026-05-29
-Status: Accepted
-Delivery-Status: Partial
-Supersedes: nothing (additive)
-Implements: openbank-libs `com.openbank.libs.docs`
+# 19. Docs-as-Service — services self-publish their bundled documentation
 
 **Delivery note (updated 2026-07-01):**
 - **Phases 1–3** — ✅ Shipped: `DocsResource`/`DocsCatalog`/`ClasspathMarkdownLoader` (now in `openbank-libs-domain`/`-runtime`, package `com.openbank.libs.docs`, after the ADR-0122 split); account-service and balance-service pilot (7 sections × 2 languages + diagrams); admin-ui server-rendered docs page with i18n cookie, version chip, and inline Mermaid rendering (embedded ` ```mermaid ` fences via `MermaidEnhancer`).

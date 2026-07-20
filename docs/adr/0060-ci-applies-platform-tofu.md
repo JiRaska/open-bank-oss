@@ -1,9 +1,16 @@
-# ADR-0060 — CI applies the platform OpenTofu (OIDC, manual-dispatch)
+---
+date: 2026-06-02
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ci, infrastructure, gitops]
+summary: "A Platform OpenTofu workflow plans on every PR and applies only by manual dispatch on main, authenticating via GitHub OIDC with two IAM roles split by blast radius and the apply role pinned to that workflow ref."
+---
 
-Date: 2026-06-02
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiri Raska
+# ADR-0060 — CI applies the platform OpenTofu (OIDC, manual-dispatch)
 
 **Delivery note (updated 2026-06-30):**
 - **Phase 1 (manual-dispatch)** — ✅ Shipped: GitHub OIDC → IAM, two roles split by blast radius (plan/apply), manual-dispatch safety valve implemented and tested; live since 2026-06.

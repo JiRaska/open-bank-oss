@@ -1,9 +1,16 @@
-# 65. Customer-facing edge (BFF + gateway) and a dedicated Keycloak customer realm
+---
+date: 2026-06-05
+decision-status: accepted
+delivery-status: shipped
+authors: [OpenBank platform]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [customer-edge, authn, mobile-app]
+summary: "Customers reach the cluster only through a dedicated customer edge backed by a separate Keycloak openbank-customers realm with a public PKCE client; it shares no realm, client or proxy with the admin plane."
+---
 
-Date: 2026-06-05
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): OpenBank platform
+# 65. Customer-facing edge (BFF + gateway) and a dedicated Keycloak customer realm
 
 **Delivery note (updated 2026-07-05):** the "Implementation — Pending" note below was stale
 — `openbank-customer-edge` (v0.17.1) has long since shipped: real gitops deployment

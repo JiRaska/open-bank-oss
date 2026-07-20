@@ -1,9 +1,16 @@
-# 23. Analytics layer: closing the 9 regulatory findings (CNB/EBA/DORA/GDPR/BCBS 239)
+---
+date: 2026-05-29
+decision-status: accepted
+delivery-status: partial
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [analytics, compliance, regulatory-reporting, audit]
+summary: "Nine CNB/EBA/DORA/GDPR/BCBS-239 findings against the analytics layer are closed with unit-tested controls in openbank-libs (integrity hashing, Merkle tamper-evidence, maker-checker, crypto-erasure) wired in through ports."
+---
 
-Date: 2026-05-29
-Status: Accepted
-Delivery-Status: Partial
-Author(s): Jiří Raška
+# 23. Analytics layer: closing the 9 regulatory findings (CNB/EBA/DORA/GDPR/BCBS 239)
 
 **Delivery note (updated 2026-06-30):**
 - **Five in-code controls (F1/F2/F3/F6/F7)** — ✅ Shipped: integrity hash (F1), Merkle-root tamper-evidence (F2), maker-checker (F3), crypto-erasure (F6), schema governance (F7) are build-time gated and tested.

@@ -1,9 +1,16 @@
-# AnaCredit granular credit-exposure reporting (overdrafts)
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: shipped
+authors: [OpenBank core-banking]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [regulatory-reporting, lending, compliance]
+summary: "A derive-only openbank-anacredit-service builds the AnaCredit credit dataset for a monthly reference date starting with overdrafts, with eligibility, mapping and return assembly in a framework-free pure domain."
+---
 
-Date: 2026-05-30
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): OpenBank core-banking
+# AnaCredit granular credit-exposure reporting (overdrafts)
 
 ## Context
 

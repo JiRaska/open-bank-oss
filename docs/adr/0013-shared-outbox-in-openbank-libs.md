@@ -1,9 +1,16 @@
-# Shared transactional outbox primitives in openbank-libs
+---
+date: 2026-05-28
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [libs, kafka, architecture]
+summary: "The invariant parts of the outbox pattern move into openbank-libs as shared DTOs, interfaces, a mapped-superclass entity and a dispatch loop, while services keep their own table, publisher and scheduled dispatcher."
+---
 
-Date: 2026-05-28
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): jiri.raska
+# Shared transactional outbox primitives in openbank-libs
 
 ## Context
 

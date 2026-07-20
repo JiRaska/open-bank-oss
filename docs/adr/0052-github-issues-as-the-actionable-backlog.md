@@ -1,9 +1,16 @@
-# GitHub Issues as the actionable backlog
+---
+date: 2026-06-01
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [governance, docs]
+summary: "GitHub Issues become the actionable backlog, with fleet-sweep and governance-task templates and labels managed as code; decisions stay in ADRs and changelog entries stay with release-please."
+---
 
-Date: 2026-06-01
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiri Raska
+# GitHub Issues as the actionable backlog
 
 ## Context
 

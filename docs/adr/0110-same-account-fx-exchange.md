@@ -1,13 +1,16 @@
-# ADR-0110 — Same-account currency exchange (pocket FX swap)
+---
+date: 2026-06-28
+decision-status: accepted
+delivery-status: shipped
+authors: [Platform Team]
+supersedes: [0125]
+superseded-by: []
+delivery-repos: []
+tags: [fx, accounts, mobile-app, customer-edge]
+summary: "A general discoverable same-account pocket-to-pocket currency exchange is exposed and settled as a single ledger-authoritative move on the ADR-0107 sell-specified primitive; this ADR consolidates and supersedes ADR-0125."
+---
 
-| Field | Value |
-|---|---|
-| **Status** | Accepted |
-| **Delivery-Status** | Shipped |
-| **Date** | 2026-06-28 |
-| **Deciders** | Platform Team |
-| **Supersedes** | ADR-0125 |
-| **Superseded by** | — |
+# ADR-0110 — Same-account currency exchange (pocket FX swap)
 
 > **Consolidation note (2026-06-28).** This ADR merges two overlapping decisions that two
 > sessions wrote for the *same* feature — a same-account pocket-to-pocket currency exchange

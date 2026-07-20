@@ -1,8 +1,20 @@
+---
+date: 2026-05-26
+decision-status: superseded
+delivery-status: n-a
+authors: [jiri.raska]
+supersedes: []
+superseded-by: [0123]
+delivery-repos: []
+tags: [licensing, governance]
+summary: "OpenBank ships under MPL-2.0 with DCO sign-off instead of a CLA, balancing commercial adoption against extraction-only forks; later superseded by the relicense to Apache-2.0."
+---
+
 # 12. MPL-2.0 licence + Developer Certificate of Origin
 
-Date: 2026-05-26
-Status: Superseded by [ADR-0123](0123-relicense-to-apache-2.0.md) on 2026-06-27 (amended 2026-05-30 — see Amendment)
-Delivery-Status: N/A
+> **Migrated status note.** The pre-schema `Status:` line carried this prose,
+> which the enum cannot hold; it is kept here rather than dropped:
+> on 2026-06-27 (amended 2026-05-30 — see Amendment)
 
 > **Superseded.** The platform was relicensed from MPL-2.0 to **Apache-2.0** on 2026-06-27 — see
 > [ADR-0123](0123-relicense-to-apache-2.0.md). The DCO contribution mechanism and the AGPL-3.0 +

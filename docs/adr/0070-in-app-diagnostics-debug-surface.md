@@ -1,9 +1,16 @@
-# In-app diagnostics / debug surface (customer app)
+---
+date: 2026-06-07
+decision-status: accepted
+delivery-status: partial
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [mobile-app, observability, security-ops]
+summary: "The customer app gets a hidden in-app diagnostics surface whose security boundary is build-gating (compiled out of release binaries), not the tap gesture; panels are read-mostly with tiered guarded actions."
+---
 
-Date: 2026-06-07
-Status: Accepted
-Delivery-Status: Partial
-Author(s): Jiří Raška
+# In-app diagnostics / debug surface (customer app)
 
 **Delivery note (updated 2026-06-30):**
 - **Core build-gating** — ✅ Shipped: `DebugGate.isDebugBuild` compilation-out for release binaries, 7-tap activation gesture, build-info/edge `/api/v1/info` panel live in `openbank-app`.

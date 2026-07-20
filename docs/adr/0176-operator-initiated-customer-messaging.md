@@ -1,9 +1,16 @@
-# ADR-0176 — Operator-initiated customer messaging
+---
+date: 2026-07-16
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [notifications, admin-ui, governance]
+summary: "Operator-initiated customer messaging ships as a catalogue-driven, service-message-only, maker-checker-gated capability with a closed per-template variable schema, because template-keyed secrecy flags cannot catch secret-shaped variables."
+---
 
-Date: 2026-07-16
-Decision-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska
+# ADR-0176 — Operator-initiated customer messaging
 
 **Correction note (2026-07-16, issue #1331).** The first version of this ADR shipped with a false
 premise. Force 3 claimed marketing consent did not exist; it does — live, revocable and audited

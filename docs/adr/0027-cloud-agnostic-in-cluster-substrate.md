@@ -1,13 +1,20 @@
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [infrastructure, kubernetes, gitops, finops]
+summary: "Everything stateful runs in-cluster on OSS operators on EKS with no FaaS in the money path; OpenTofu provisions the substrate, ArgoCD app-of-apps deploys it, and compute is arm64 Graviton Spot-first via Karpenter."
+---
+
 # Cloud-agnostic, in-cluster OSS substrate (GitOps + OpenTofu)
 
-Date: 2026-05-30
-Status: Accepted (file reconstructed 2026-06-14 — the original `0027-*.md` was missing
-from `docs/adr/` while being referenced 27× across the ADR set and the admin-ui
-`/docs/cloud-architecture` overlay; this record is rebuilt faithfully from those
-cross-references and the as-built sandbox. The decision itself long predates the
-reconstruction and is in force.)
-Delivery-Status: Shipped
-Author(s): Jiří Raška
+> **Migrated status note.** The pre-schema `Status:` line carried this prose,
+> which the enum cannot hold; it is kept here rather than dropped:
+> file reconstructed 2026-06-14 — the original `0027-*.md` was missing from `docs/adr/` while being referenced 27× across the ADR set and the admin-ui `/docs/cloud-architecture` overlay; this record is rebuilt faithfully from those cross-references and the as-built sandbox. The decision itself long predates the reconstruction and is in force.
 
 ## Context
 

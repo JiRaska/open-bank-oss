@@ -710,12 +710,21 @@ jobs:
       - name: "domain-purity gate — hexagonal invariant (ADR-0002, enforced)"
         run: bash .github/scripts/check-domain-purity.sh .
 
-      # Every ADR in docs/adr/ must carry a Status field with a canonical value
-      # (Accepted, Proposed, Superseded, Deprecated). Enforced as part of OSS-readiness
-      # (public launch gate E2): a missing status makes it impossible to machine-read
-      # the decision registry and breaks the ADR index generator.
-      - name: ADR status check
-        run: bash .github/scripts/check-adr-status.sh
+      # ADR registry integrity (OSS-readiness gate E2 + ADR-0001 schema).
+      #
+      # This replaced `check-adr-status.sh`, which grep'd for a Status field across
+      # five hand-maintained regex variants. That script was a FIFTH parser of the
+      # ADR header, and once the header became a machine-readable block
+      # (docs/adr/SCHEMA.md) it was both redundant and wrong — it started matching
+      # incidental `| Status |` table rows in ADR bodies instead of the real field.
+      # check-adr-registry.sh is a strict superset: it enforces the status field AND
+      # its closed enum AND the rest of the schema, through the single shared parser.
+      #
+      # Deliberately run here as well as in the `adr-registry` workflow: that one is
+      # path-filtered to docs/adr/**, but this gate's dangling-`ADR-NNNN`-reference
+      # check is repo-wide and is most useful on PRs that touch CODE, not ADRs.
+      - name: ADR registry integrity check
+        run: bash .github/scripts/check-adr-registry.sh
 
   # ---------------------------------------------------------------------------
   # Customer-app dossier content check (ADR-0074 invariant 5).

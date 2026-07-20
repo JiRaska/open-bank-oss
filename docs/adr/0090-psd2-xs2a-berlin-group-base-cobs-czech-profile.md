@@ -1,12 +1,20 @@
+---
+date: 2026-06-15
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [psd2-api, payments, api-contract, compliance]
+summary: "The public TPP interface becomes Berlin Group NextGenPSD2 XS2A 1.3.12 with a layered COBS v7.0 Czech profile on top, and the bespoke /open-banking/v2 API is deprecated rather than extended."
+---
+
 # ADR-0090 — PSD2 XS2A access: Berlin Group NextGenPSD2 base + ČOBS Czech profile
 
-**Status:** Accepted (2026-06-15 — all four phases implemented and released as
-psd2-service 0.5.0: P1 Berlin XS2A consent+AIS (#1117), P2 PIS (#1120), P3 ČOBS
-Czech products (#1121), P4 eIDAS QSEAL signing + bespoke-API deprecation (#1123).
-Sandbox deploy runs with QSEAL enforcement OFF — no TPP eIDAS certs in the sandbox.)
-**Delivery-Status:** Shipped
-**Date:** 2026-06-15
-**Relates to:** ADR-0021 (decoupled SCA / device approval), ADR-0030 (threat-model discipline for money-path), ADR-0034 (unified OPA authz), ADR-0048 (two version axes — API contract vs release), ADR-0039 (ledger golden source), ADR-0069 (party / `party_id`), consent-service (ČOBS-aware `ConsentScope`)
+> **Migrated status note.** The pre-schema `Status:` line carried this prose,
+> which the enum cannot hold; it is kept here rather than dropped:
+> 2026-06-15 — all four phases implemented and released as psd2-service 0.5.0: P1 Berlin XS2A consent+AIS (#1117), P2 PIS (#1120), P3 ČOBS Czech products (#1121), P4 eIDAS QSEAL signing + bespoke-API deprecation (#1123). Sandbox deploy runs with QSEAL enforcement OFF — no TPP eIDAS certs in the sandbox.
 
 ## Context
 

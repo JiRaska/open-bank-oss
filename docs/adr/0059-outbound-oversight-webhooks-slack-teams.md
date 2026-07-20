@@ -1,9 +1,16 @@
-# 59. Outbound oversight webhooks (Slack/Teams): anonymized, allow-listed, opt-in egress
+---
+date: 2026-06-02
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [notifications, privacy-gdpr, observability]
+summary: "Oversight signals reach Slack and Teams as an opt-in, allow-listed side-channel invoked inside dispatch, carrying a fixed safe schema only, so notification variables, recipients and other PII can never leak."
+---
 
-Date: 2026-06-02
-Status: Accepted
-Delivery-Status: Complete
-Author(s): jiri.raska
+# 59. Outbound oversight webhooks (Slack/Teams): anonymized, allow-listed, opt-in egress
 
 **Delivery note (updated 2026-07-17):** v1 scope fully delivered; the 2026-06-30 "renderers/delivery pending" note was stale (all of it had shipped by 2026-06-29).
 - **Security design** — ✅ Complete: allow-list schema (`OversightSignal`), a local defense-in-depth PII scrubber (`scrubPii`, IBAN/PAN/email — not the shared `openbank-libs/security` `PiiMask`), fail-closed egress, off-by-default + Vault secret pattern.

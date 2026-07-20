@@ -1,9 +1,16 @@
-# Governance manifest as derived data (per-service governance.yaml)
+---
+date: 2026-06-07
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [governance, admin-ui, docs]
+summary: "The admin-UI governance manifest becomes derived data: each service declares curatorial facts in its own governance.yaml, a generator emits governance.json, and every surface iterates it instead of hand-coded lists."
+---
 
-Date: 2026-06-07
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiří Raška
+# Governance manifest as derived data (per-service governance.yaml)
 
 ## Context
 

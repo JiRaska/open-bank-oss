@@ -1,9 +1,16 @@
-# ADR-0160 — End-to-end integration liveness and drift-detection standard
+---
+date: 2026-07-13
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska (paired with Claude Opus 4.8)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [governance, observability, ci]
+summary: "Turn end-to-end liveness claims into CI-checked facts through four mechanisms: an event-consumer liveness gate, a lineage-vs-code audit, a shared workflow-liveness watchdog, and drift qualification, each shipped advisory-first."
+---
 
-Date: 2026-07-13
-Decision-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska (paired with Claude Opus 4.8)
+# ADR-0160 — End-to-end integration liveness and drift-detection standard
 
 > **Delivery note (2026-07-13, updated same day).** Mechanism 1 shipped and validated: PR #995
 > (the gate itself, `check-event-consumer-liveness.py`) and PR #994 (the #889 fix it was built to

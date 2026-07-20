@@ -1,9 +1,16 @@
-# ADR-0091 — HolmesGPT: AI root-cause-analysis agent over observability signals
+---
+date: 2026-06-14
+decision-status: accepted
+delivery-status: shipped
+authors: [@JiRaska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ai-agents, observability, governance]
+summary: "HolmesGPT runs as the AI root-cause-analysis agent over the observability stack, read-only and on-demand only (no Alertmanager auto-trigger), charter-bound so every output is a proposal, never auto-remediation."
+---
 
-**Status:** Accepted
-**Delivery-Status:** Shipped
-**Date:** 2026-06-14
-**Author:** @JiRaska
+# ADR-0091 — HolmesGPT: AI root-cause-analysis agent over observability signals
 
 > **Amendment 2026-06-19 — deployed in PR #1025.** HolmesGPT is live in the sandbox via
 > `openbank-infra/gitops/apps/holmesgpt.yaml`. The `rca-investigator` charter is active in

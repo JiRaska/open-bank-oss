@@ -1,9 +1,16 @@
-# ADR-0150 — Internationalization and language-support strategy
+---
+date: 2026-07-02
+decision-status: accepted
+delivery-status: planned
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [i18n-a11y, admin-ui]
+summary: "Declare Czech and English the supported locale set and keep the admin-ui two-argument t() pattern as a deliberate choice, migrating to ICU catalogs only in the same PR that first adds a third locale."
+---
 
-Date: 2026-07-02
-Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
-Author(s): jiri.raska
+# ADR-0150 — Internationalization and language-support strategy
 
 ## Context
 

@@ -1,9 +1,16 @@
-# OPA (Open Policy Agent) for fine-grained per-resource authorization
+---
+date: 2026-05-29
+decision-status: superseded
+delivery-status: n-a
+authors: [jiri.raska]
+supersedes: []
+superseded-by: [0034]
+delivery-repos: []
+tags: [authz, security-ops]
+summary: "Open Policy Agent is adopted as a per-service sidecar with Rego policies and an @Authorize interceptor for resource-scoped and context-sensitive authorization that role annotations cannot express; superseded by ADR-0034."
+---
 
-Date: 2026-05-29
-Status: Superseded by ADR-0034
-Delivery-Status: N/A
-Author(s): jiri.raska
+# OPA (Open Policy Agent) for fine-grained per-resource authorization
 
 ## Context
 

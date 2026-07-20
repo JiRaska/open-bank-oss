@@ -1,16 +1,16 @@
-# ADR-0089 — Customer-Facing AI Assistant (Mobile Copilot)
+---
+date: 2026-06-14
+decision-status: accepted
+delivery-status: partial
+authors: [@JiRaska Relates to:** ADR-0031 (AI agent governance — reused primitives), ADR-0034 (unified OPA authz), ADR-0021, 0073 (SCA & device-bound credentials), ADR-0064 (customer app KMP), ADR-0065 (customer edge), ADR-0067 (feature flags & four-eyes on money-path flips), ADR-0030 (threat-model requirement), ADR-0027 (cloud substrate, FinOps), ADR-0002 (hexagonal), ADR-0048 (two version axes), ADR-0077 (DomainMetrics), ADR-0086 (payment non-repudiation & audit chain), ADR-0084 (fraud), ADR-0019 (Docs-as-Service — RAG corpus)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ai-agents, mobile-app, customer-edge, authz]
+summary: "A new openbank-copilot-service behind the customer edge is the customer-facing AI assistant; the model only routes and narrates, every figure comes from a tool call, and it never holds more privilege than the customer."
+---
 
-**Status:** Accepted
-**Delivery-Status:** Partial
-**Date:** 2026-06-14
-**Accepted:** 2026-06-25
-**Author:** @JiRaska
-**Relates to:** ADR-0031 (AI agent governance — reused primitives), ADR-0034 (unified OPA authz),
-ADR-0021/0073 (SCA & device-bound credentials), ADR-0064 (customer app KMP), ADR-0065 (customer edge),
-ADR-0067 (feature flags & four-eyes on money-path flips), ADR-0030 (threat-model requirement),
-ADR-0027 (cloud substrate / FinOps), ADR-0002 (hexagonal), ADR-0048 (two version axes),
-ADR-0077 (DomainMetrics), ADR-0086 (payment non-repudiation & audit chain), ADR-0084 (fraud),
-ADR-0019 (Docs-as-Service — RAG corpus)
+# ADR-0089 — Customer-Facing AI Assistant (Mobile Copilot)
 
 ---
 

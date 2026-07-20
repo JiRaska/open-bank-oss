@@ -1,9 +1,16 @@
-# Replace the managed NAT Gateway with fck-nat in the sandbox
+---
+date: 2026-06-02
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [finops, networking, infrastructure]
+summary: "The sandbox replaces the managed NAT Gateway with fck-nat behind an egress_mode toggle on the network module to cut NAT data-processing cost; production and HA-sensitive environments keep the managed NAT Gateway."
+---
 
-Date: 2026-06-02
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiri Raska
+# Replace the managed NAT Gateway with fck-nat in the sandbox
 
 ## Context
 

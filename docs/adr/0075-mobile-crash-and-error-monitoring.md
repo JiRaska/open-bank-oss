@@ -1,13 +1,20 @@
+---
+date: 2026-06-09
+decision-status: accepted
+delivery-status: partial
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [mobile-app, observability]
+summary: "The customer app gets production crash and error monitoring via a self-hosted in-cluster GlitchTip through the Sentry KMP SDK, off by default with a PII redaction allowlist, keeping data EU-resident and vendor-free."
+---
+
 # Mobile app crash & error monitoring (customer app)
 
-Date: 2026-06-09
-Status: Accepted (2026-06-14 — backend/infra implemented: GlitchTip deployed via
-GitOps (`openbank-infra/gitops/apps/glitchtip.yaml`, external-secrets wired) and
-live; the Sentry KMP SDK (off-by-default, redaction allowlist) landed in the
-openbank-app repo. Client-side wiring beyond the shared CrashMonitor seam is
-tracked in the app repo.)
-Delivery-Status: Partial
-Author(s): Jiří Raška
+> **Migrated status note.** The pre-schema `Status:` line carried this prose,
+> which the enum cannot hold; it is kept here rather than dropped:
+> 2026-06-14 — backend/infra implemented: GlitchTip deployed via GitOps (`openbank-infra/gitops/apps/glitchtip.yaml`, external-secrets wired) and live; the Sentry KMP SDK (off-by-default, redaction allowlist) landed in the openbank-app repo. Client-side wiring beyond the shared CrashMonitor seam is tracked in the app repo.
 
 **Delivery note (updated 2026-06-30):**
 - **Backend/infra** — ✅ Shipped: GlitchTip deployed via GitOps (`openbank-infra/gitops/apps/glitchtip.yaml`), ExternalSecrets wired, Sentry KMP SDK landed in `openbank-app` with off-by-default gate + PII redaction allowlist.

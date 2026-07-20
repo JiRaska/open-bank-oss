@@ -1,13 +1,16 @@
-# ADR-0112 — AI-FinOps Agent: proaktivní nákladová observabilita a optimalizace
+---
+date: 2026-06-25
+decision-status: accepted
+delivery-status: partial
+authors: [OpenBank Platform Team]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [finops, ai-agents, observability]
+summary: "A control-plane finops-agent detects cost precursors (NAT egress, cross-AZ traffic, node churn, EBS attach health, CI runner pressure) and proposes IaC fixes for human approval, plus AI token-cost dashboards."
+---
 
-| Field       | Value |
-|-------------|-------|
-| Status      | Accepted |
-| Delivery-Status | Partial |
-| Date        | 2026-06-25 |
-| Authors     | OpenBank Platform Team |
-| Relates to  | ADR-0031, ADR-0054, ADR-0057, ADR-0058, ADR-0062, ADR-0067, ADR-0088, ADR-0101 |
-| Issue       | #2137 |
+# ADR-0112 — AI-FinOps Agent: proaktivní nákladová observabilita a optimalizace
 
 ## Context
 

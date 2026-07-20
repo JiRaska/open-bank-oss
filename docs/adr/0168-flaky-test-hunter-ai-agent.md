@@ -1,9 +1,16 @@
-# ADR-0168 — flaky-test-hunter AI agent
+---
+date: 2026-07-13
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska (paired with Claude Sonnet 5)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ai-agents, testing, ci]
+summary: "A flaky-test-hunter agent, uniquely on the development plane, statically scans Kotlin test sources for silently-dropped and blind-spot tests, because the existing guard covers only one hardcoded runBlocking pattern."
+---
 
-Date: 2026-07-13
-Decision-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska (paired with Claude Sonnet 5)
+# ADR-0168 — flaky-test-hunter AI agent
 
 ## Context
 

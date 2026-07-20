@@ -1,9 +1,16 @@
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [aml-sanctions, payments, compliance]
+summary: "Sanctions screening runs synchronously at the RECEIVED to VALIDATED boundary after the payment row is persisted, and a pure policy returns BLOCK, REVIEW or CLEAR; sub-threshold hits are held for an analyst, not rejected."
+---
+
 # 32. Synchronous sanctions/AML screening gate in payment execution
-
-Date: 2026-05-30
-
-Status: Accepted
-Delivery-Status: Shipped
 
 ## Context
 

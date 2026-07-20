@@ -103,38 +103,187 @@ done
 # is deterministic, so a clean tree => no diff.
 if [[ -x "$ADR_DIR/gen-index.sh" || -f "$ADR_DIR/gen-index.sh" ]]; then
   bash "$ADR_DIR/gen-index.sh" >/dev/null
-  if ! git diff --quiet -- "$ADR_DIR/README.md" 2>/dev/null; then
-    err "docs/adr/README.md is stale — run 'bash $ADR_DIR/gen-index.sh' and commit the result."
-    echo "----- index drift (committed vs regenerated) -----" >&2
-    git --no-pager diff -- "$ADR_DIR/README.md" >&2 || true
-    git checkout -- "$ADR_DIR/README.md" 2>/dev/null || true
-  fi
+  for derived in README.md DIGEST.md index.json; do
+    if ! git diff --quiet -- "$ADR_DIR/$derived" 2>/dev/null; then
+      err "docs/adr/$derived is stale — run 'bash $ADR_DIR/gen-index.sh' and commit the result."
+      echo "----- $derived drift (committed vs regenerated) -----" >&2
+      git --no-pager diff -- "$ADR_DIR/$derived" >&2 || true
+      git checkout -- "$ADR_DIR/$derived" 2>/dev/null || true
+    fi
+  done
 else
   echo "::warning::check-adr-registry: $ADR_DIR/gen-index.sh missing — skipping index freshness check." >&2
 fi
 
-# --- 4. Delivery-Repos values must be in the known-repos allowlist (ADR-0147) ---
-# Catches a typo'd repo name at authoring time; does NOT verify the target repo's
-# actual state (out of scope — see known-repos.txt).
+# --- 4. Front-matter schema (docs/adr/SCHEMA.md) ------------------------------
+# The header used to be prose, in four coexisting conventions, so every consumer
+# needed its own fallback regex and the index truncated statuses to 40 chars to
+# cope. Now it is one machine-readable block, parsed by the one shared parser, and
+# validated here. Everything below is a structural check on that block.
+# shellcheck source=../../docs/adr/lib-frontmatter.sh
+. "$ADR_DIR/lib-frontmatter.sh"
+
 KNOWN_REPOS="$ADR_DIR/known-repos.txt"
+TAGS_FILE="$ADR_DIR/tags.txt"
+SCHEMA_KEYS="date decision-status delivery-status authors supersedes superseded-by delivery-repos tags summary"
+DECISION_ENUM="proposed accepted superseded deprecated rejected"
+DELIVERY_ENUM="planned partial shipped n-a"
+SUMMARY_MAX=240
+
+in_set() { case " $2 " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+
+allowed_tags=""
+if [[ -f "$TAGS_FILE" ]]; then
+  allowed_tags=$(grep -vE '^\s*(#|$)' "$TAGS_FILE" | tr '\n' ' ')
+else
+  echo "::warning::check-adr-registry: $TAGS_FILE missing — skipping tag allowlist check." >&2
+fi
+allowed_repos=""
 if [[ -f "$KNOWN_REPOS" ]]; then
-  for f in "${adrs[@]}"; do
-    base=$(basename "$f")
-    line=$(grep -m1 -E '^Delivery-Repos:' "$f" || true)
-    [[ -z "$line" ]] && continue
-    repos_raw="${line#Delivery-Repos:}"
-    IFS=',' read -ra repo_list <<< "$repos_raw"
-    for repo in "${repo_list[@]}"; do
-      repo="$(echo "$repo" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
-      [[ -z "$repo" ]] && continue
-      if ! grep -qxF "$repo" "$KNOWN_REPOS"; then
-        err "$base: Delivery-Repos names '$repo', which is not in $KNOWN_REPOS — add it there first (or fix the typo)."
-      fi
-    done
-  done
+  allowed_repos=$(grep -vE '^\s*(#|$)' "$KNOWN_REPOS" | tr '\n' ' ')
 else
   echo "::warning::check-adr-registry: $KNOWN_REPOS missing — skipping Delivery-Repos allowlist check." >&2
 fi
+
+# Collected for check 4h (bidirectional supersession) after the per-file pass.
+declared_supby=""   # "NNNN>TTTT" pairs: NNNN declares it is superseded by TTTT
+declared_sup=""     # "NNNN>TTTT" pairs: NNNN declares it supersedes TTTT
+soft=0
+
+for f in "${adrs[@]}"; do
+  base=$(basename "$f")
+  num=${base%%-*}
+
+  fm=""
+  if ! fm=$(fm_extract "$f" 2>/dev/null); then
+    case "$?" in
+      3) err "$base: no YAML front-matter block — the file must start with '---'. See docs/adr/SCHEMA.md." ;;
+      4) err "$base: front-matter block is never closed by a '---' line. See docs/adr/SCHEMA.md." ;;
+      *) err "$base: front-matter could not be parsed. See docs/adr/SCHEMA.md." ;;
+    esac
+    continue
+  fi
+
+  # 4a. malformed lines (nesting, block scalars, stray text) --------------------
+  while IFS=$'\t' read -r k v; do
+    [[ "$k" == "!malformed" ]] && err "$base: front-matter line is not a flat 'key: value': $v"
+  done <<< "$fm"
+
+  # 4b. every required key present; no unknown keys ----------------------------
+  # An unknown key is almost always a typo'd required one, which would otherwise
+  # read as "field simply absent" and be silently defaulted by every consumer.
+  for k in $SCHEMA_KEYS; do
+    fm_has "$fm" "$k" || err "$base: front-matter is missing required key '$k'."
+  done
+  while IFS=$'\t' read -r k v; do
+    [[ -z "$k" || "$k" == "!malformed" ]] && continue
+    in_set "$k" "$SCHEMA_KEYS" || err "$base: unknown front-matter key '$k' (typo? see docs/adr/SCHEMA.md)."
+  done <<< "$fm"
+
+  decision=$(fm_field "$fm" decision-status)
+  delivery=$(fm_field "$fm" delivery-status)
+  date=$(fm_field "$fm" date)
+  summary_raw=$(fm_field "$fm" summary)
+
+  # 4c. enums and date format ---------------------------------------------------
+  in_set "$decision" "$DECISION_ENUM" || err "$base: decision-status '$decision' is not one of: $DECISION_ENUM"
+  in_set "$delivery" "$DELIVERY_ENUM" || err "$base: delivery-status '$delivery' is not one of: $DELIVERY_ENUM"
+  [[ "$date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || err "$base: date '$date' is not YYYY-MM-DD."
+
+  # 4d. summary -- the field DIGEST.md is built from, so it is worth policing ---
+  if [[ "$summary_raw" != \"*\" ]]; then
+    err "$base: summary must be a double-quoted single-line string (see docs/adr/SCHEMA.md)."
+  else
+    summary=$(fm_unquote "$summary_raw")
+    if [[ ${#summary} -gt $SUMMARY_MAX ]]; then
+      err "$base: summary is ${#summary} chars, max $SUMMARY_MAX."
+    fi
+    if [[ ${#summary} -lt 20 ]]; then
+      err "$base: summary is ${#summary} chars — too short to be a real decision statement."
+    fi
+  fi
+
+  # 4e. authors non-empty ------------------------------------------------------
+  [[ -n "$(fm_list "$(fm_field "$fm" authors)")" ]] || err "$base: authors is empty."
+
+  # 4f. closed vocabularies ----------------------------------------------------
+  tag_count=0
+  while IFS= read -r t; do
+    [[ -z "$t" ]] && continue
+    tag_count=$((tag_count + 1))
+    if [[ -n "$allowed_tags" ]] && ! in_set "$t" "$allowed_tags"; then
+      err "$base: tag '$t' is not in $TAGS_FILE — add it there in this PR, or pick an existing tag."
+    fi
+  done <<< "$(fm_list "$(fm_field "$fm" tags)")"
+  if [[ $tag_count -lt 1 || $tag_count -gt 4 ]]; then
+    err "$base: has $tag_count tags — the schema allows 1 to 4."
+  fi
+  while IFS= read -r r; do
+    [[ -z "$r" ]] && continue
+    if [[ -n "$allowed_repos" ]] && ! in_set "$r" "$allowed_repos"; then
+      err "$base: delivery-repos names '$r', which is not in $KNOWN_REPOS — add it there first (or fix the typo)."
+    fi
+  done <<< "$(fm_list "$(fm_field "$fm" delivery-repos)")"
+
+  # 4g. supersession is internally consistent ----------------------------------
+  supby=$(fm_list "$(fm_field "$fm" superseded-by)")
+  sup=$(fm_list "$(fm_field "$fm" supersedes)")
+  if [[ -n "$supby" && "$decision" != "superseded" ]]; then
+    err "$base: superseded-by is set but decision-status is '$decision' — it must be 'superseded'."
+  fi
+  if [[ -z "$supby" && "$decision" == "superseded" ]]; then
+    err "$base: decision-status is 'superseded' but superseded-by is empty — name the ADR that replaced it."
+  fi
+  while IFS= read -r t; do
+    [[ -z "$t" ]] && continue
+    [[ "$t" == "$num" ]] && err "$base: superseded-by lists itself."
+    ls "$ADR_DIR/$t"-*.md >/dev/null 2>&1 || err "$base: superseded-by names ADR-$t, which has no file."
+    declared_supby="$declared_supby $num>$t"
+  done <<< "$supby"
+  while IFS= read -r t; do
+    [[ -z "$t" ]] && continue
+    [[ "$t" == "$num" ]] && err "$base: supersedes lists itself."
+    ls "$ADR_DIR/$t"-*.md >/dev/null 2>&1 || err "$base: supersedes names ADR-$t, which has no file."
+    declared_sup="$declared_sup $num>$t"
+  done <<< "$sup"
+
+  # 4i. required body sections -------------------------------------------------
+  # Hard-required, EXCEPT on superseded ADRs: those are immutable historical
+  # records (ADR-0001) and some are a pointer to their successor and nothing else
+  # — retro-fitting sections into them would be rewriting history, not fixing it.
+  if [[ "$decision" != "superseded" ]]; then
+    grep -q '^## Context' "$f"                        || err "$base: missing a '## Context' section."
+    grep -qiE '^## (The )?Decision' "$f"              || err "$base: missing a '## Decision' section."
+    grep -q '^## Consequences' "$f"                   || err "$base: missing a '## Consequences' section."
+    # Advisory, not blocking: 32 and 42 pre-schema ADRs respectively lack these,
+    # and back-filling them is a content job for their authors, not something a
+    # structural gate can or should force in one sweep. Graduate to `err` once the
+    # backlog is closed (ADR-0144 gate-graduation).
+    grep -q '^## Alternatives' "$f" || { soft=$((soft + 1)); echo "::warning file=$f::$base: no '## Alternatives considered' section."; }
+    grep -q '^## Compliance'   "$f" || { soft=$((soft + 1)); echo "::warning file=$f::$base: no '## Compliance impact' section."; }
+  fi
+done
+
+# 4h. supersession must be BIDIRECTIONAL -------------------------------------
+# The defect this prevents: ADR-A says "superseded by B" and B says nothing, so a
+# reader who opens B has no way to learn it replaced A. Seven such forward links
+# existed with no enforced back-link before this check.
+for pair in $declared_supby; do
+  a=${pair%%>*}; b=${pair##*>}
+  case " $declared_sup " in
+    *" $b>$a "*) ;;
+    *) err "ADR-$a declares superseded-by ADR-$b, but ADR-$b does not declare supersedes: [$a] — supersession must be recorded on both sides." ;;
+  esac
+done
+for pair in $declared_sup; do
+  a=${pair%%>*}; b=${pair##*>}
+  case " $declared_supby " in
+    *" $b>$a "*) ;;
+    *) err "ADR-$a declares supersedes ADR-$b, but ADR-$b does not declare superseded-by: [$a] — supersession must be recorded on both sides." ;;
+  esac
+done
+
+[[ "$soft" -gt 0 ]] && echo "::notice::check-adr-registry: $soft advisory section warning(s) — not blocking (see check 4i)." >&2
 
 # --- 5. Dangling ADR-NNNN references repo-wide -------------------------------
 # Every "ADR-NNNN" mention outside docs/adr/ (code comments, gitops YAML, other
@@ -169,4 +318,4 @@ if [[ "$fail" -ne 0 ]]; then
   echo "::error::check-adr-registry: ADR registry has integrity violations (see above)." >&2
   exit 1
 fi
-echo "check-adr-registry: OK — ${#adrs[@]} ADRs, unique numbers, headings match filenames, index fresh."
+echo "check-adr-registry: OK — ${#adrs[@]} ADRs: unique numbers, headings match filenames, front-matter valid, supersession bidirectional, derived artefacts fresh."

@@ -1,8 +1,16 @@
-# 97. Supervisory / prudential returns (FINREP / COREP) derived from the attested close
+---
+date: 2026-06-16
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [regulatory-reporting, compliance, accounting-close]
+summary: "FINREP and COREP supervisory returns are derived from the attested statutory close via a dedicated openbank-finrep-service, starting with F 01.01, F 02.00 and C 01.00 and flagging missing data as explicit zeroes."
+---
 
-Date: 2026-06-16
-Status: Accepted
-Delivery-Status: Partial
+# 97. Supervisory / prudential returns (FINREP / COREP) derived from the attested close
 
 Phase 1 implemented: openbank-finrep-service derives F01.01+F02.00 from ledger trial balance. Phase 2 (COREP+XBRL transmission) tracked separately.
 Author(s): @JiRaska

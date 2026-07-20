@@ -1,9 +1,16 @@
-# 69. Customer onboarding journey — operator-assisted Phase 1, self-service Phase 2
+---
+date: 2026-06-07
+decision-status: accepted
+delivery-status: partial
+authors: [OpenBank platform]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [onboarding, customer-edge, kyc, authn]
+summary: "Onboarding runs through the customer edge in two phases: Phase 1 operator-assisted party and Keycloak-user creation with a KYC gate before account opening, Phase 2 fully self-service."
+---
 
-Date: 2026-06-07
-Status: Accepted
-Delivery-Status: Partial
-Author(s): OpenBank platform
+# 69. Customer onboarding journey — operator-assisted Phase 1, self-service Phase 2
 
 **Delivery note (updated 2026-06-30):**
 - **Phase 1 (operator-assisted)** — ✅ Live: customer-edge M2M `POST /onboarding/start` → party-service → Keycloak user creation (manual operator step); KYC gate at account-opening logic working.

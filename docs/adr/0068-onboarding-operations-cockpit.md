@@ -1,9 +1,16 @@
-# 68. Onboarding operations cockpit — a read-model and four-eyes workflow over the onboarding state machine
+---
+date: 2026-06-06
+decision-status: accepted
+delivery-status: partial
+authors: [OpenBank platform]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [onboarding, admin-ui, kyc, audit]
+summary: "OpenBank builds an onboarding cockpit as a read-model projection plus a four-eyes maker-checker workflow; party, kyc and sca services keep sole authority over their own state transitions."
+---
 
-Date: 2026-06-06
-Status: Accepted
-Delivery-Status: Partial
-Author(s): OpenBank platform
+# 68. Onboarding operations cockpit — a read-model and four-eyes workflow over the onboarding state machine
 
 **Delivery note (updated 2026-06-30):**
 - **Governance primitives** — ✅ Ready (domain layer): read-model projection + canonical funnel-stage function, `com.openbank.libs.foureyes` maker-checker primitive (wired into kyc approve/reject), and audited/reasoned kyc decisions. ⚠️ Designed-not-wired on the onboarding read API: role-based `PiiMask` (PII still returned plaintext) and OPA `@Authorize` enforce (endpoints are `@RolesAllowed`).

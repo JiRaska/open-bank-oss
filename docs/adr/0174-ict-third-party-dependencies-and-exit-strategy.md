@@ -1,9 +1,16 @@
-# ADR-0174 — ICT third-party dependencies and exit strategy
+---
+date: 2026-07-16
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [compliance, infrastructure, governance]
+summary: "This ADR becomes the ICT third-party register of record with a criticality and exit position per provider, and states plainly that ADR-0031's LiteLLM/vLLM/Anthropic gateway topology is not deployed at all."
+---
 
-Date: 2026-07-16
-Decision-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska
+# ADR-0174 — ICT third-party dependencies and exit strategy
 
 ## Context
 

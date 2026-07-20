@@ -1,9 +1,16 @@
-# ADR-0169 — Customer document access & SCA-bound signing over customer-edge
+---
+date: 2026-07-15
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [customer-edge, documents, sca, authz]
+summary: "Customer-edge gains ownership-scoped ROLE_CUSTOMER document and signature-ceremony routes proxied with an M2M token, and SCA challenges become document-bound so an approval cannot sign an unrelated document."
+---
 
-Date: 2026-07-15
-Decision-Status: Accepted
-Delivery-Status: Shipped
-Author(s): jiri.raska
+# ADR-0169 — Customer document access & SCA-bound signing over customer-edge
 
 **Delivery note (updated 2026-07-17):** all four decisions shipped.
 - **D1 (customer-edge document/signature routes)** — ✅ Shipped: `CustomerDocumentResource` (ROLE_CUSTOMER,

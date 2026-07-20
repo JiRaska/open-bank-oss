@@ -1,11 +1,16 @@
-# ADR-0088 — Observability Extension: On-Call, SLO-as-Code, Durable Retention & Mobile RUM
+---
+date: 2026-06-13
+decision-status: accepted
+delivery-status: partial
+authors: [@JiRaska Relates to:** ADR-0008 (OpenTelemetry), ADR-0077 (Three-Pillar Observability), ADR-0087 (Correlation & Profiling Layer), ADR-0075 (Mobile Crash Monitoring), ADR-0056 (Grafana internal-only), ADR-0027 (Cloud Substrate, FinOps), ADR-0054 (FinOps lifecycle), ADR-0061 (DORA metrics)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [observability, mobile-app, resilience]
+summary: "Observability is extended with GoAlert plus ntfy for on-call, Pyrra for SLO-as-code, S3-backed durable retention for Loki and Tempo, and OpenTelemetry mobile RUM behind a hardened public OTLP ingest gateway."
+---
 
-**Status:** Accepted
-**Delivery-Status:** Partial
-**Date:** 2026-06-13
-**Accepted:** 2026-06-25
-**Author:** @JiRaska
-**Relates to:** ADR-0008 (OpenTelemetry), ADR-0077 (Three-Pillar Observability), ADR-0087 (Correlation & Profiling Layer), ADR-0075 (Mobile Crash Monitoring), ADR-0056 (Grafana internal-only), ADR-0027 (Cloud Substrate / FinOps), ADR-0054 (FinOps lifecycle), ADR-0061 (DORA metrics)
+# ADR-0088 — Observability Extension: On-Call, SLO-as-Code, Durable Retention & Mobile RUM
 
 > **Implementation summary 2026-06-25 — D1/D2/D3 confirmed live; D4 split-tracked.**
 >

@@ -1,9 +1,16 @@
-# ADR-0165 — Release-steward AI agent
+---
+date: 2026-07-13
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska (paired with Claude Fable 5)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ai-agents, release-versioning, ci]
+summary: "A read-only release-steward agent sweeps release-please manifest/config lockstep, admin-ui version sync and fleet-wide version overrides daily and after each release merge, because per-PR gates never look at the whole fleet."
+---
 
-Date: 2026-07-13
-Decision-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska (paired with Claude Fable 5)
+# ADR-0165 — Release-steward AI agent
 
 ## Context
 

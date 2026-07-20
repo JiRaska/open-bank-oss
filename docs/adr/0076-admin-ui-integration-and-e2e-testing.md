@@ -1,10 +1,16 @@
-# 76. Admin UI integration and E2E testing strategy
+---
+date: 2026-06-09
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [admin-ui, testing, ci]
+summary: "Admin-UI testing gets four layers: run the existing Vitest suite in CI, MSW integration tests for BFF routes, Playwright E2E for live-state pages, and a docs-as-service schema guard in service CI."
+---
 
-Date: 2026-06-09
-Status: Accepted
-Delivery-Status: Shipped
-Extends: ADR-0011 (testing pyramid, layers 2–3), ADR-0063 (contract tests, money-path)
-Relates to: ADR-0019 (Docs-as-Service), ADR-0051 (service discovery), ADR-0056 (BFF)
+# 76. Admin UI integration and E2E testing strategy
 
 ## Context
 

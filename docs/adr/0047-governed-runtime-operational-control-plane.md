@@ -1,9 +1,16 @@
-# Governed runtime operational control plane
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: partial
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [governance, security-ops, audit, compliance]
+summary: "A governed runtime control plane is limited to break-glass resilience controls and business-policy parameters; everything else stays in GitOps, and actions are declarative desired-state records with four-eyes, not per-pod RPC."
+---
 
-Date: 2026-05-30
-Status: Accepted
-Delivery-Status: Partial
-Author(s): Jiří Raška
+# Governed runtime operational control plane
 
 **Delivery note (updated 2026-06-30):**
 - **Governance primitives** — ✅ Shipped: `MakerChecker` state machine, `Proposal<T>` four-eyes logic, `AuditEvent` infrastructure live in `openbank-libs` and tested; readiness-probe drain and scheduler pause/resume operational knobs scoped.

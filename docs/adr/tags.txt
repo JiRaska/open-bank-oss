@@ -1,0 +1,81 @@
+# Closed tag vocabulary for ADR front-matter `tags:` (ADR-0001).
+#
+# WHY A CLOSED LIST: 174 flat files are navigable only by title unless something
+# groups them. Free-text tags would sprawl into synonyms (`auth`/`authn`/`authentication`)
+# within a month and the grouping would be worth nothing. check-adr-registry.sh rejects
+# any tag not listed here, so adding a tag is a deliberate, reviewed act — the same
+# discipline as known-repos.txt.
+#
+# Rules: kebab-case, one per line, 1-4 tags per ADR (the validator enforces the count).
+# Adding a tag: append it here in the SAME PR that first uses it, and say in the PR
+# description why an existing tag does not fit. Renaming or removing a tag is a
+# repo-wide sweep — the index and DIGEST are derived, but the ADR files are not.
+
+# --- banking domain ----------------------------------------------------------
+accounts
+payments
+cards
+lending
+interest
+tax
+fx
+ledger
+statements
+transactions
+fees-billing
+fraud
+disputes
+onboarding
+kyc
+aml-sanctions
+documents
+notifications
+product-catalog
+accounting-close
+
+# --- clients and external surfaces -------------------------------------------
+mobile-app
+admin-ui
+customer-edge
+psd2-api
+api-contract
+
+# --- security, privacy, compliance -------------------------------------------
+authn
+authz
+sca
+secrets
+crypto-keys
+privacy-gdpr
+compliance
+regulatory-reporting
+audit
+security-ops
+supply-chain
+
+# --- platform and infrastructure ---------------------------------------------
+kubernetes
+gitops
+infrastructure
+networking
+database
+kafka
+observability
+resilience
+capacity
+finops
+serverless
+
+# --- engineering process -----------------------------------------------------
+ci
+release-versioning
+testing
+governance
+docs
+architecture
+libs
+ai-agents
+ml
+analytics
+i18n-a11y
+licensing

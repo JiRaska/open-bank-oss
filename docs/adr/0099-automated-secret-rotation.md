@@ -1,10 +1,16 @@
-# ADR-0099 — Automated secret rotation: OpenBao dynamic credentials + CronJob rotator
+---
+date: 2026-06-19
+decision-status: accepted
+delivery-status: partial
+authors: [@JiRaska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [secrets, security-ops, database]
+summary: "Static per-service credentials give way to OpenBao dynamic database credentials plus a tiered CronJob rotator for OIDC, JWT and external tokens, so rotation stops depending on manual engineer action."
+---
 
-**Status:** Accepted
-**Delivery-Status:** Partial
-**Date:** 2026-06-19
-**Accepted:** 2026-06-25
-**Author:** @JiRaska
+# ADR-0099 — Automated secret rotation: OpenBao dynamic credentials + CronJob rotator
 
 **Implementation note (Tier 1 + Tier 2 scripts — shipped 2026-06-30, PR feat/secret-rotation):**
 All script and configuration bugs fixed; CronJobs un-suspended. One out-of-band

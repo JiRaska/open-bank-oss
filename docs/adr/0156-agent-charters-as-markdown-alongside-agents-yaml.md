@@ -1,9 +1,16 @@
-# ADR-0156 — Agent charters as Markdown alongside agents.yaml
+---
+date: 2026-07-08
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ai-agents, admin-ui, docs]
+summary: "Add a per-agent Markdown narrative layer under docs/agents alongside agents.yaml, with a CI id-parity gate and an admin-ui drill-down page, while enforced fields stay singly sourced in the YAML."
+---
 
-Date: 2026-07-08
-Decision-Status: Accepted
-Delivery-Status: Shipped
-Author(s): jiri.raska
+# ADR-0156 — Agent charters as Markdown alongside agents.yaml
 
 **Delivery note (2026-07-10):** all four decision points are merged and live —
 `docs/agents/<id>.md` charters + the id-parity CI gate (PR #598), the admin-ui

@@ -1,9 +1,16 @@
-# CI execution model and cost
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ci, finops, capacity]
+summary: "CI runs on a shared pool of four persistent, cache-warm self-hosted runners (two macOS, two Linux EC2) rather than ephemeral or Kubernetes-autoscaled ones, because the 28-service matrix serializes badly on fewer hosts."
+---
 
-Date: 2026-05-30
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiri Raska
+# CI execution model and cost
 
 ## Context
 

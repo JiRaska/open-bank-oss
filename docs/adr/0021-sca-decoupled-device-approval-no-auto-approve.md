@@ -1,8 +1,16 @@
-# 21. SCA push/biometric: decoupled device approval, never auto-approve
+---
+date: 2026-05-29
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [sca, payments, compliance]
+summary: "Push and biometric SCA stop auto-approving and fail closed, and a decoupled device-approval endpoint carrying a signature bound to amount and payee is added to satisfy PSD2 RTS dynamic linking."
+---
 
-Date: 2026-05-29
-Status: Accepted
-Delivery-Status: Shipped
+# 21. SCA push/biometric: decoupled device approval, never auto-approve
 
 ## Context
 

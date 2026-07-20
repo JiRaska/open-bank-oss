@@ -1,9 +1,16 @@
-# ADR-0162 — Document management, templating & e-signature architecture
+---
+date: 2026-07-13
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [documents, architecture, onboarding]
+summary: "A dedicated openbank-document-service owns versioned Handlebars templates, HTML-to-PDF rendering, a PAdES-B signature ceremony sealed via OpenBao PKI, and WORM storage, because no component could produce a signable document."
+---
 
-Date: 2026-07-13
-Decision-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska
+# ADR-0162 — Document management, templating & e-signature architecture
 
 **Delivery note (updated 2026-07-17):** D1–D5 + D7 shipped; D6 partial; D4 phase-2 deferred by this ADR.
 - **D1 (`openbank-document-service` bounded context)** — ✅ Shipped: released 0.8.4, gitops + threat model;

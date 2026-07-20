@@ -1,8 +1,16 @@
-# 8. OpenTelemetry for observability
+---
+date: 2026-05-26
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [observability]
+summary: "OpenTelemetry is the only instrumentation standard for traces, metrics and logs, with a Collector DaemonSet and a Grafana LGTM reference backend; vendor SDK integrations are forbidden to keep operators vendor-neutral."
+---
 
-Date: 2026-05-26
-Status: Accepted
-Delivery-Status: Shipped
+# 8. OpenTelemetry for observability
 
 ## Context
 

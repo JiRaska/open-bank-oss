@@ -1,11 +1,20 @@
+---
+date: 2026-06-15
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [psd2-api, docs, networking]
+summary: "A separate public static site, openbank-developer-portal, documents the XS2A API behind a hardened WAF edge, keeping the untrusted TPP audience off the internal-only admin-ui."
+---
+
 # ADR-0093 — Public developer portal for the PSD2 XS2A API
 
-**Status:** Accepted (2026-06-15 — Phase 1 implemented: static public docs + hardened edge)
-**Delivery-Status:** Partial
-**Date:** 2026-06-15
-**Relates to:** ADR-0090 (PSD2 XS2A Berlin + ČOBS), ADR-0056 (admin-ui is the internal-only console),
-ADR-0027 (cloud-agnostic in-cluster substrate), ADR-0030 (threat-model discipline for public boundaries),
-ADR-0081 (cluster segmentation / NetworkPolicy baseline)
+> **Migrated status note.** The pre-schema `Status:` line carried this prose,
+> which the enum cannot hold; it is kept here rather than dropped:
+> 2026-06-15 — Phase 1 implemented: static public docs + hardened edge
 
 ## Context
 

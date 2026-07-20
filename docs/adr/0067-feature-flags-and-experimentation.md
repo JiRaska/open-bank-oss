@@ -1,12 +1,20 @@
+---
+date: 2026-06-06
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [governance, libs, architecture]
+summary: "Feature flags adopt the OpenFeature standard with definitions as code in gitops and per-service flagd sidecar evaluation over OFREP, mirroring the OPA sidecar pattern, and fail static to the caller default."
+---
+
 # Feature flags and experimentation (flag-as-code, OpenFeature-aligned)
 
-Date: 2026-06-06
-Status: Accepted (2026-06-14 — decision implemented: `openbank-libs/.../flags`
-ships the OpenFeature-aligned surface (`FeatureClient`, `FlagdProvider`,
-`@FeatureFlag` + interceptor, `FlagDefinition`/`FlagExposure`) merged to `main`.
-Remaining tail is tracked as a follow-up issue, not a blocker: four-eyes
-enforcement on money-path flag flips — issue JiRaska/open-bank#419.)
-Delivery-Status: Shipped
+> **Migrated status note.** The pre-schema `Status:` line carried this prose,
+> which the enum cannot hold; it is kept here rather than dropped:
+> 2026-06-14 — decision implemented: `openbank-libs/.../flags` ships the OpenFeature-aligned surface (`FeatureClient`, `FlagdProvider`, `@FeatureFlag` + interceptor, `FlagDefinition`/`FlagExposure`) merged to `main`. Remaining tail is tracked as a follow-up issue, not a blocker: four-eyes enforcement on money-path flag flips — issue JiRaska/open-bank#419.
 
 **Delivery note (updated 2026-06-30):**
 Core feature-flag infrastructure shipped: `FeatureClient`, `FlagdProvider`, `@FeatureFlag`

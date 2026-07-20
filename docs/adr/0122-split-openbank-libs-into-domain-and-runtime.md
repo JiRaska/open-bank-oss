@@ -1,9 +1,16 @@
-# Split openbank-libs into domain and runtime modules
+---
+date: 2026-06-28
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [libs, architecture, ci]
+summary: "openbank-libs splits into openbank-libs-domain (framework-free) and openbank-libs-runtime along the Quarkus boundary, keeping the package namespace stable so only Gradle dependency lines change, cutting fleet-wide rebuild cost."
+---
 
-Date: 2026-06-28
-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska
+# Split openbank-libs into domain and runtime modules
 
 **Delivery note (updated 2026-07-01):**
 - **Phase 0** — ✅ Shipped (PR #2821 predecessor, dead `libs/temporal/` skeleton removed).

@@ -1,9 +1,16 @@
-# ADR-0140 — Feature store topology and point-in-time correctness
+---
+date: 2026-06-29
+decision-status: accepted
+delivery-status: partial
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ml, kafka, fraud]
+summary: "Adopt a dual-store feature topology with one feature definition: Valkey online, the Kafka event log offline, both computed by the same pure function so point-in-time correctness holds by construction and training/serving skew cannot arise."
+---
 
-Date: 2026-06-29
-Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Partial    <!-- Planned | Partial | Shipped | N/A — decision-only -->
-Author(s): Jiri Raska
+# ADR-0140 — Feature store topology and point-in-time correctness
 
 **Delivery note (updated 2026-07-12):**
 - **Specification** — ✅ Complete: dual-store feature design (online + offline, single computation) and point-in-time correctness guarantees architected; Kafka outbox + velocity aggregates designated as first feature source.

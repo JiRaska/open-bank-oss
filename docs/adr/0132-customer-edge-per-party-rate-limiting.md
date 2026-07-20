@@ -1,9 +1,16 @@
-# ADR-0132 — Per-party request rate limiting at the customer edge
+---
+date: 2026-06-29
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [customer-edge, security-ops, resilience]
+summary: "The customer edge enforces a fixed-window per-party rate limit (default 100/min) in Valkey keyed on the party_id JWT claim via a JAX-RS filter returning 429; unauthenticated traffic stays on the ingress per-IP limit."
+---
 
-Date: 2026-06-29
-Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Shipped    <!-- Planned | Partial | Shipped | N/A — decision-only; the build-axis status, independent of the decision axis -->
-Author(s): jiri.raska
+# ADR-0132 — Per-party request rate limiting at the customer edge
 
 ## Context
 

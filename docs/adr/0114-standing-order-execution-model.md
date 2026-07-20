@@ -1,9 +1,16 @@
-# 114. Standing order execution model — outbox-driven daily sweep
+---
+date: 2026-06-25
+decision-status: accepted
+delivery-status: shipped
+authors: [Claude (paired with Jiří Raška)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [payments, architecture]
+summary: "Standing orders execute via a Quartz-scheduled 03:00 UTC sweep that atomically advances the next date and writes an outbox event per due order, with rail callbacks and failure after 3 rejections; Temporal is rejected as overkill."
+---
 
-Date: 2026-06-25
-Author: Claude (paired with Jiří Raška)
-Status: Accepted
-Delivery-Status: Shipped
+# 114. Standing order execution model — outbox-driven daily sweep
 
 ## Context
 

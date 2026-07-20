@@ -1,9 +1,16 @@
-# 118. GDPR data lifecycle — PII classification, retention periods, erasure model
+---
+date: 2026-06-25
+decision-status: accepted
+delivery-status: shipped
+authors: [Claude (paired with Jiří Raška)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [privacy-gdpr, compliance, audit]
+summary: "GDPR lifecycle policy classifies PII into five tiers, sets statutory retention (10y ledger, 5y KYC/audit, 90d session logs) and makes erasure an anonymise-and-cascade model where AML and accounting duties override Art. 17."
+---
 
-Date: 2026-06-25
-Author: Claude (paired with Jiří Raška)
-Status: Accepted
-Delivery-Status: Shipped
+# 118. GDPR data lifecycle — PII classification, retention periods, erasure model
 
 **Delivery note (updated 2026-07-10):**
 - **Art. 17 erasure cascade** — ✅ Shipped: `party-service` anonymises in-place + deletes binary documents; `kyc-service` deletes documents and anonymises check results (`PartyEventConsumer.handleErased`); `notification-service` deletes preferences and history (`PartyErasureConsumer`); `card-issuance-service` anonymises `cardholderName`, `embossedName`, `deliveryAddress` (`PartyEventConsumer`). `audit-service`, `ledger-service`, `transaction-service` correctly retain data (AML/accounting override, Art. 17(3)(b)).

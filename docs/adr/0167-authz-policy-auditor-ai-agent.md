@@ -1,9 +1,16 @@
-# ADR-0167 — authz-policy-auditor AI agent
+---
+date: 2026-07-13
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska (paired with Claude Sonnet 5)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ai-agents, authz, governance]
+summary: "A weekly authz-policy-auditor statically analyses Rego policies and agents.yaml charters against the interceptor's real principal-type vocabulary, generalising a single hardcoded CI guard to the whole unreachable-rule defect class."
+---
 
-Date: 2026-07-13
-Decision-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska (paired with Claude Sonnet 5)
+# ADR-0167 — authz-policy-auditor AI agent
 
 ## Context
 

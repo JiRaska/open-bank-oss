@@ -1,9 +1,16 @@
-# Enforce branch protection on `main` (server-side governance gate)
+---
+date: 2026-05-31
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [governance, ci]
+summary: "Branch protection on main is enforced server-side in two phases: first PR-only merges gated on a proven-green subset of always-run checks, then a per-path ruleset enforcing the money-path two-approval and threat-model rule."
+---
 
-Date: 2026-05-31
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiri Raska
+# Enforce branch protection on `main` (server-side governance gate)
 
 > **Realization (2026-06-02, Phase 1 applied).** The `main-protection` ruleset is
 > live on `main` (`enforcement: active`), applied via

@@ -1,8 +1,16 @@
-# 45. Saga framework: lightweight custom, in openbank-libs
+---
+date: 2026-05-29
+decision-status: superseded
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: [0120]
+delivery-repos: []
+tags: [libs, architecture, resilience]
+summary: "Sagas use a lightweight custom primitive in openbank-libs rather than Temporal or Axon, keeping saga state in the existing per-service Postgres so an operator has no extra stateful system to run or bring into audit scope."
+---
 
-Date: 2026-05-29
-Status: Superseded by [ADR-0120](0120-migrate-transaction-payment-orchestration-to-temporal.md)
-Delivery-Status: Shipped
+# 45. Saga framework: lightweight custom, in openbank-libs
 
 **Delivery note (updated 2026-07-01):**
 The one saga this ADR covered (`PaymentSagaOrchestrator` in transaction-service) was migrated

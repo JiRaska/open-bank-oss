@@ -1,9 +1,16 @@
-# ADR-0082 — CI runner governance — trust-tiered persistent pools, no human in the merge path
+---
+date: 2026-06-01
+decision-status: superseded
+delivery-status: n-a
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: [0053]
+delivery-repos: []
+tags: [ci, governance, security-ops]
+summary: "Superseded by ADR-0053. It had chosen two trust-separated persistent runner pools (build without credentials, deploy with OIDC-scoped ones) and an always-on EC2 runner so no sleeping laptop blocks merges."
+---
 
-Date: 2026-06-01
-Status: Superseded by ADR-0053
-Delivery-Status: N/A
-Author(s): Jiri Raska
+# ADR-0082 — CI runner governance — trust-tiered persistent pools, no human in the merge path
 
 > **Renumbered 0051 → 0082 (2026-06-11).** This ADR was originally filed as ADR-0051, a
 > number it accidentally shared with the (more widely referenced) generic-service-discovery

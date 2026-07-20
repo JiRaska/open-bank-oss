@@ -1,9 +1,16 @@
-# 66. Passwordless customer authentication — passkey-first onboarding and login
+---
+date: 2026-06-05
+decision-status: accepted
+delivery-status: shipped
+authors: [OpenBank platform]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [authn, sca, mobile-app, onboarding]
+summary: "Customer authentication is passkey-first with no password ever created or used, and the login passkey stays a separate key pair from the SCA signing key so identity and payment consent remain distinct factors."
+---
 
-Date: 2026-06-05
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): OpenBank platform
+# 66. Passwordless customer authentication — passkey-first onboarding and login
 
 ## Context
 

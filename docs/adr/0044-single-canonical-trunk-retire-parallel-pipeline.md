@@ -1,13 +1,20 @@
+---
+date: 2026-05-31
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ci, governance, release-versioning]
+summary: "The ci/per-service-pipeline branch is merged into main and deleted, making main the single canonical trunk; no long-lived parallel trunk is permitted again and conflicts were resolved by fixed per-area rules."
+---
+
 # Single canonical trunk — retire the parallel `ci/per-service-pipeline` branch
 
-Date: 2026-05-31
-Status: Accepted (2026-06-14 — implemented: the parallel `ci/per-service-pipeline`
-branch is retired and no `per-service-pipeline` workflow remains under
-`.github/workflows/`; `main` is the single canonical trunk with the unchanged
-`all-green` aggregate gate. The two latent CI bugs noted here — Postgres readiness
-and under-build — were fixed in the consolidation.)
-Delivery-Status: Shipped
-Author(s): Jiri Raska
+> **Migrated status note.** The pre-schema `Status:` line carried this prose,
+> which the enum cannot hold; it is kept here rather than dropped:
+> 2026-06-14 — implemented: the parallel `ci/per-service-pipeline` branch is retired and no `per-service-pipeline` workflow remains under `.github/workflows/`; `main` is the single canonical trunk with the unchanged `all-green` aggregate gate. The two latent CI bugs noted here — Postgres readiness and under-build — were fixed in the consolidation.
 
 ## Context
 

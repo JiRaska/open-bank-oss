@@ -1,9 +1,16 @@
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [tax, interest, regulatory-reporting]
+summary: "Withholding-tax remittance lives inside openbank-interest-service, which idempotently assembles one monthly batch per tax period and advances records from RECORDED to REMITTED; the cash leg and filing are delegated downstream."
+---
+
 # 38. Withholding-tax remittance and lifecycle advance
-
-Date: 2026-05-30
-
-Status: Accepted
-Delivery-Status: Shipped
 
 ## Context
 

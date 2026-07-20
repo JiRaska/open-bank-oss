@@ -1,9 +1,16 @@
-# CI performance model — warm-reuse the persistent runner
+---
+date: 2026-05-31
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ci, testing]
+summary: "CI warm-reuses the persistent runner: the Gradle daemon and compose test stack stay up across jobs and one build cache is shared pool-wide, with isolation from per-job database recreation and Valkey flush instead of teardown."
+---
 
-Date: 2026-05-31
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiri Raska
+# CI performance model — warm-reuse the persistent runner
 
 > **Amendment 2026-06-19 — implemented in `.github/workflows/_service-ci.yml` + gitops.**
 >

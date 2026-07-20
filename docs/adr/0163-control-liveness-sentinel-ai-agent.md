@@ -1,9 +1,16 @@
-# ADR-0163 — Control-liveness-sentinel AI agent
+---
+date: 2026-07-13
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska (paired with Claude Fable 5)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ai-agents, observability, governance]
+summary: "A read-only control-liveness-sentinel agent correlates ADR-0160 liveness mechanisms fleet-wide and proposes tickets or PRs, because each mechanism only pages for itself and an uninstalled watchdog cannot page at all."
+---
 
-Date: 2026-07-13
-Decision-Status: Accepted
-Delivery-Status: Partial
-Author(s): jiri.raska (paired with Claude Fable 5)
+# ADR-0163 — Control-liveness-sentinel AI agent
 
 ## Context
 

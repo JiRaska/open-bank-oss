@@ -1,9 +1,16 @@
-# Generic service discovery and a single north-south gateway for the admin plane
+---
+date: 2026-06-01
+decision-status: accepted
+delivery-status: partial
+authors: [Platform]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [admin-ui, kubernetes, networking]
+summary: "The admin plane drops its hardcoded service lists: inventory and health come from the Kubernetes API via a least-privilege discovery route, and a single Kong north-south gateway becomes the data plane."
+---
 
-Date: 2026-06-01
-Status: Accepted
-Delivery-Status: Partial
-Author(s): Platform
+# Generic service discovery and a single north-south gateway for the admin plane
 
 **Delivery note (updated 2026-07-01):**
 - **Phase 1 (K8s-API discovery)** — ✅ Shipped: `/api/services/discovery` BFF route queries Kubernetes API for labeled Deployments in domain namespaces; returns `{ source: "k8s", services: [...] }` with `ready`/`desired`/`healthy`; System Health screen fixed ("0 healthy" defect resolved). `openbank-discovery-reader` ClusterRole + per-namespace `RoleBinding`s deployed via `gitops/components/admin-ui/rbac.yaml` (7 namespaces). Static fallback for dev (no in-cluster SA token).

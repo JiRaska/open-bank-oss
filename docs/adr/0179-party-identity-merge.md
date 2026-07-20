@@ -1,9 +1,16 @@
-# ADR-0179 — Duplicate party identity merge
+---
+date: 2026-07-19
+decision-status: proposed
+delivery-status: planned
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [kyc, accounts, ledger]
+summary: "Party-service gains a first-class merge operation (status MERGED plus merged_into, four-eyes gated, emitting PARTY_MERGED) distinct from GDPR erasure, because retiring a duplicate via erasure is a false compliance statement."
+---
 
-Date: 2026-07-19
-Decision-Status: Proposed   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
-Author(s): Jiri Raska
+# ADR-0179 — Duplicate party identity merge
 
 ## Context
 

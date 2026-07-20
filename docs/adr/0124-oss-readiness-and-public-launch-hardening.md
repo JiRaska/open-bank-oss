@@ -1,9 +1,16 @@
-# OSS-readiness and public-launch hardening
+---
+date: 2026-06-27
+decision-status: accepted
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [governance, security-ops, docs]
+summary: "A phased OSS-readiness program runs one ordered go-public cutover: purge committed CI artifacts from history, enable GitHub-native security, add discoverability, CI enforcement, community docs and honest single-maintainer governance."
+---
 
-Date: 2026-06-27
-Status: Accepted
-Decision-Status: Accepted
-Delivery-Status: Partial
+# OSS-readiness and public-launch hardening
 
 **Delivery note (updated 2026-07-17):** the go-public cutover executed; a governance-enforcement tail remains.
 The repo is public (topics, homepage, Discussions), history is clean of the ~190 MB CI artifacts (A1/A2), and

@@ -1,9 +1,16 @@
-# 108. Rail settlement runs through transaction-service (ADR-0039), not settlement-service
+---
+date: 2026-06-23
+decision-status: accepted
+delivery-status: shipped
+authors: [Claude (paired with Jiří Raška)]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [payments, ledger, transactions]
+summary: "Rail settlement runs through transaction-service, the real ADR-0039 settlement authority, rather than the orphaned settlement-service scaffold, avoiding a second money-movement seam."
+---
 
-Date: 2026-06-23
-Author: Claude (paired with Jiří Raška)
-Status: Accepted
-Delivery-Status: Shipped
+# 108. Rail settlement runs through transaction-service (ADR-0039), not settlement-service
 
 ## Context
 

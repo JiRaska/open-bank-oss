@@ -1,9 +1,16 @@
-# Cross-service search contract (bounded fulltext + keyset pagination)
+---
+date: 2026-06-01
+decision-status: accepted
+delivery-status: partial
+authors: [OpenBank platform]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [libs, api-contract, database]
+summary: "A shared openbank-libs search contract enforces keyset-only cursor pagination, page-size clamping and LIKE escaping centrally, while each service keeps its own domain SQL and indexes."
+---
 
-Date: 2026-06-01
-Status: Accepted
-Delivery-Status: Partial
-Author(s): OpenBank platform
+# Cross-service search contract (bounded fulltext + keyset pagination)
 
 **Delivery note (updated 2026-06-30):**
 - **Phase 1 (library contract)** — ✅ Shipped: `SearchRequest` + `CursorPage`/`CursorEncoder` in `openbank-libs`; page-size clamping [1,100], wildcard semantics, LIKE escaping, and comprehensive tests present (Amendment 2026-06-19).

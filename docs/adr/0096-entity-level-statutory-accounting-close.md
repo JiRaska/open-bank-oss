@@ -1,9 +1,16 @@
-# 96. Entity-level statutory accounting close (GL period freeze, attested trial balance, financial statements, EoY)
+---
+date: 2026-06-16
+decision-status: accepted
+delivery-status: planned
+authors: [@JiRaska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [accounting-close, ledger, compliance, regulatory-reporting]
+summary: "A net-new openbank-statutory-close-service builds the entity-level statutory close in-house with the ledger as sole golden source, freezing GL periods into an immutable attested trial balance."
+---
 
-Date: 2026-06-16
-Status: Accepted
-Delivery-Status: Planned
-Author(s): @JiRaska
+# 96. Entity-level statutory accounting close (GL period freeze, attested trial balance, financial statements, EoY)
 
 Relates to: ADR-0039 (ledger golden source, balance projection), ADR-0078 (per-customer
 statement close), ADR-0035 (statement periods), ADR-0026 (EoD reconciliation),

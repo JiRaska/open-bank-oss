@@ -1,9 +1,16 @@
-# Complaints handling — regulatory complaints as a first-class process
+---
+date: 2026-06-12
+decision-status: accepted
+delivery-status: partial
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [disputes, compliance, regulatory-reporting]
+summary: "Complaints handling extends dispute-service into a two-aggregate bounded context rather than a new service, adding a regulatory taxonomy, a statutory deadline clock as domain logic, and a register for CNB reporting."
+---
 
-Date: 2026-06-12
-Status: Accepted
-Delivery-Status: Partial
-Author(s): Jiří Raška
+# Complaints handling — regulatory complaints as a first-class process
 
 **Delivery note (updated 2026-06-30):**
 - **Model and deadline logic** — ✅ Architected: `Complaint` aggregate + taxonomy (PAYMENT_SERVICE/FEES/etc.), statutory deadline clock (15/35 BD), `BusinessCalendar` domain logic, breach derivation, and `DomainMetrics` (open gauge, breach counters) all designed.

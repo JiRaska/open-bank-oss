@@ -1,9 +1,16 @@
-# ADR-0158 — Account opening validates against product-catalog
+---
+date: 2026-07-09
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [accounts, product-catalog]
+summary: "Account opening validates productId against product-catalog through a new ProductCatalogPort, rejecting unknown or non-ACTIVE products but failing open when the catalog is unreachable, since it is reference data not money path."
+---
 
-Date: 2026-07-09
-Decision-Status: Accepted
-Delivery-Status: Complete
-Author(s): jiri.raska
+# ADR-0158 — Account opening validates against product-catalog
 
 **Delivery note (2026-07-09):**
 - ✅ Shipped: `AccountService.openAccount` now consults product-catalog via a new

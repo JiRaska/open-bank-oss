@@ -1,9 +1,16 @@
-# Scale-to-zero workload tiers and a FinOps classifier
+---
+date: 2026-06-01
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [finops, kubernetes, serverless]
+summary: "Every service is classified into four FinOps workload tiers with scale-to-zero the default for new services, implemented on KEDA over Karpenter spot rather than a proprietary FaaS and derived from measured traffic."
+---
 
-Date: 2026-06-01
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiri Raska
+# Scale-to-zero workload tiers and a FinOps classifier
 
 ## Context
 

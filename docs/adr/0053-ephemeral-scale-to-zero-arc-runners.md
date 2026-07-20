@@ -1,11 +1,16 @@
-# ADR-0053 — Ephemeral scale-to-zero ARC runners — supersedes ADR-0082
+---
+date: 2026-06-01
+decision-status: accepted
+delivery-status: shipped
+authors: [Jiri Raska Supersedes: ADR-0082 (CI runner governance — renumbered from ADR-0051 on 2026-06-11 to resolve a duplicate number with the service-discovery ADR-0051)]
+supersedes: [0082]
+superseded-by: []
+delivery-repos: []
+tags: [ci, finops, supply-chain]
+summary: "CI runners become per-job ephemeral scale-to-zero ARC scale sets on EKS Karpenter Graviton spot, split into build, batch and deploy pools, reversing ADR-0082 persistent runners because idle hours dominate cost."
+---
 
-Date: 2026-06-01
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): Jiri Raska
-Supersedes: ADR-0082 (CI runner governance — renumbered from ADR-0051 on 2026-06-11 to
-resolve a duplicate number with the service-discovery ADR-0051)
+# ADR-0053 — Ephemeral scale-to-zero ARC runners — supersedes ADR-0082
 
 ## Context
 

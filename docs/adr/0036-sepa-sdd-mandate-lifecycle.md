@@ -1,9 +1,16 @@
-# SEPA Direct Debit (SDD) mandate lifecycle
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: shipped
+authors: [OpenBank core-banking]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [payments, accounts]
+summary: "A dedicated openbank-sdd-service owns the debtor-side SEPA Direct Debit mandate vault as system of record, with an explicit pure lifecycle state machine and fail-closed collection authorisation; money movement is delegated."
+---
 
-Date: 2026-05-30
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): OpenBank core-banking
+# SEPA Direct Debit (SDD) mandate lifecycle
 
 ## Context
 

@@ -1,9 +1,16 @@
-# Admin-UI BFF as the sole browser→cluster path
+---
+date: 2026-06-01
+decision-status: accepted
+delivery-status: shipped
+authors: [OpenBank platform]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [admin-ui, security-ops]
+summary: "The admin-UI BFF is the only browser-to-cluster path: the browser makes same-origin requests only, the server tier does all egress, and the proxy refuses unauthenticated callers before touching a backend."
+---
 
-Date: 2026-06-01
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): OpenBank platform
+# Admin-UI BFF as the sole browser→cluster path
 
 ## Context
 

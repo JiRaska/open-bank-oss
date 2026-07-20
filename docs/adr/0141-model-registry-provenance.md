@@ -1,9 +1,16 @@
-# ADR-0141 — Model registry and provenance for ML decisioning
+---
+date: 2026-06-29
+decision-status: proposed
+delivery-status: planned
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ml, governance, supply-chain]
+summary: "Treat an ML model as a first-class governed artifact: an in-repo model card per model, a signed content-addressed ONNX artifact with in-toto attestation, and a GitOps deployment pointer driving promotion and rollback."
+---
 
-Date: 2026-06-29
-Decision-Status: Proposed   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Planned    <!-- Planned | Partial | Shipped | N/A — decision-only -->
-Author(s): Jiri Raska
+# ADR-0141 — Model registry and provenance for ML decisioning
 
 ## Context
 

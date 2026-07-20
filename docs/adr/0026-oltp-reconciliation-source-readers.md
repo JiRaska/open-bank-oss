@@ -1,9 +1,16 @@
-# 26. OLTP source-side reconciliation: per-service reconciliation-summary endpoints
+---
+date: 2026-05-30
+decision-status: accepted
+delivery-status: partial
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [analytics, api-contract, libs]
+summary: "Each service exposes a role-gated read-only reconciliation-summary endpoint returning per-aggregate max version and counts; the sink pulls them over HTTP and the contract lives in openbank-libs, not a new contracts module."
+---
 
-Date: 2026-05-30
-Status: Accepted
-Delivery-Status: Partial
-Author(s): Jiří Raška
+# 26. OLTP source-side reconciliation: per-service reconciliation-summary endpoints
 
 **Delivery note (updated 2026-06-30):**
 - **Warehouse-side reconciliation** — ✅ Shipped: `Reconciliation.countDiff`, `Completeness.gaps`, `AggregateKey` logic implemented; sink-side ClickHouse readers working.

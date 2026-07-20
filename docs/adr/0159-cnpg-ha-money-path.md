@@ -1,9 +1,16 @@
-# ADR-0159 — High-availability CNPG for money-path databases
+---
+date: 2026-07-11
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [database, resilience, kubernetes]
+summary: "Run every money-path CNPG cluster with two instances, a primary plus hot standby on different nodes with automated failover, so the database survives node loss and PodDisruptionBudgets no longer block node lifecycle drains."
+---
 
-Date: 2026-07-11
-Decision-Status: Accepted   <!-- Proposed | Accepted | Superseded by ADR-NNNN | Deprecated | Rejected -->
-Delivery-Status: Shipped    <!-- Planned | Partial | Shipped | N/A — decision-only -->
-Author(s): jiri.raska
+# ADR-0159 — High-availability CNPG for money-path databases
 
 > **Accepted (2026-07-12).** Shipped in full: all 17 money-path CNPG clusters (issue
 > #850) now run `instances: 2` with required hostname anti-affinity and a soft

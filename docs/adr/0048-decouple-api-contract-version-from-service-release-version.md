@@ -1,9 +1,16 @@
-# 48. Decouple the API contract version from the service release version: three independent version axes
+---
+date: 2026-05-31
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [api-contract, release-versioning, governance]
+summary: "The API contract version splits from the service release version into three independent axes, with response headers, the URL major and a CI OpenAPI diff classifier enforcing that the contract moves only when the contract changes."
+---
 
-Date: 2026-05-31
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): jiri.raska
+# 48. Decouple the API contract version from the service release version: three independent version axes
 
 **Delivery note (updated 2026-07-06):**
 - **D3** — ✅ Shipped: `ApiVersionResponseFilter` emits `X-API-Version: v{N}` (contract major) and

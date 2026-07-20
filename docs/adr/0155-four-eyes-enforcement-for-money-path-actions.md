@@ -1,9 +1,16 @@
-# ADR-0155 — Four-eyes enforcement for money-path actions
+---
+date: 2026-07-07
+decision-status: proposed
+delivery-status: partial
+authors: [jiri.raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [authz, governance]
+summary: "Enforce four-eyes on money-path REST calls via an opt-in two-phase approval flow: an ApprovalStore domain port with a Redis implementation, read by AuthorizeInterceptor, which forbids a maker from approving their own request."
+---
 
-Date: 2026-07-07
-Decision-Status: Proposed
-Delivery-Status: Partial — mechanism wired fleet-wide, enforcement off everywhere
-Author(s): jiri.raska
+# ADR-0155 — Four-eyes enforcement for money-path actions
 
 > **Delivery update (2026-07-12).** All 11 money-path services with a
 > `four_eyes.verbs`-matching action now have the `ApprovalStore`/decide-endpoint

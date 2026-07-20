@@ -1,9 +1,16 @@
-# Migrate transaction-service payment orchestration to Temporal
+---
+date: 2026-06-28
+decision-status: accepted
+delivery-status: shipped
+authors: [jiri.raska]
+supersedes: [0045]
+superseded-by: []
+delivery-repos: []
+tags: [payments, transactions, resilience]
+summary: "transaction-service payment orchestration moves from the hand-rolled saga and payment_sagas table to a Temporal PaymentWorkflow, rolled out flag-gated behind a canary; the outbox still guarantees exactly-once event publication."
+---
 
-Date: 2026-06-28
-Status: Accepted
-Delivery-Status: Shipped
-Author(s): jiri.raska
+# Migrate transaction-service payment orchestration to Temporal
 
 ## Context
 

@@ -1,10 +1,16 @@
-# QRlessPay — BLE proximity SPAYD payments
+---
+date: 2026-06-16
+decision-status: accepted
+delivery-status: partial
+authors: [Jiří Raška]
+supersedes: []
+superseded-by: []
+delivery-repos: [openbank-app]
+tags: [payments, mobile-app, crypto-keys]
+summary: "QRlessPay is defined as an open BLE proximity profile transferring an Ed25519-signed SPAYD descriptor phone-to-phone in a discovery plus GATT two-phase protocol, replacing the closed opaque-token nearby-pay loop."
+---
 
-Date: 2026-06-16
-Status: Accepted
-Delivery-Status: Partial
-Author(s): Jiří Raška
-Delivery-Repos: openbank-app
+# QRlessPay — BLE proximity SPAYD payments
 
 **Delivery note (2026-07-02, ADR-0147):** the client-side BLE
 peripheral/central implementation and the QR SPAYD flow it extends both
