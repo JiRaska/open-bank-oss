@@ -115,7 +115,7 @@ interface PartyUseCase {
     suspend fun exportPartyData(id: UUID): PartyGdprExport
     suspend fun updateKycStatus(partyId: UUID, status: KycStatus): Party
 
-    /** Record the AML screening outcome; re-evaluates the KYC+AML activation gate (ADR-0073). */
+    /** Record the AML screening outcome; re-evaluates the KYC+AML activation gate. */
     suspend fun updateAmlStatus(partyId: UUID, amlStatus: AmlStatus): Party
 
     /**

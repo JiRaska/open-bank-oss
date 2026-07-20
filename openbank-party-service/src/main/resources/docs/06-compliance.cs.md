@@ -7,7 +7,7 @@ party-service drží identitu zákazníka (PII) a životní cyklus KYC/AML, tak�
 | Regulace | Vztah k této službě | Implementace |
 |---|---|---|
 | **GDPR** (Nař. (EU) 2016/679) | Drží kanonický PII záznam o každém zákazníkovi | Endpoint Práva na výmaz (`DELETE /parties/{id}` → anonymizace + tombstone), minimalizace dat (žádné rodné číslo, vyhledávání jen podle jména), pole explicitního souhlasu (`gdpr_consent_at/version`), retenční okna |
-| **AMLD** (4./5./6. AML směrnice) | Zaznamenává výsledky KYC + AML, PEP, rizikové hodnocení; pohání aktivační bránu | `kyc_status`/`aml_status`, dvouklíčová aktivační brána (ADR-0073 v kódu), `pep_flag`, `risk_rating`, `next_review_due`, metadata sanctions kontroly; COMMENTy sloupců citují články |
+| **AMLD** (4./5./6. AML směrnice) | Zaznamenává výsledky KYC + AML, PEP, rizikové hodnocení; pohání aktivační bránu | `kyc_status`/`aml_status`, dvouklíčová aktivační brána (v kódu, bez ADR), `pep_flag`, `risk_rating`, `next_review_due`, metadata sanctions kontroly; COMMENTy sloupců citují články |
 | **PSD2** (Nař. (EU) 2015/2366) | Identita pod účet/consent toky | party je read-only resolvována `account-service`; žádný přímý TPP přístup |
 | **FATCA / CRS** | Reporting daňové rezidence | sloupce `fatca_status`, `crs_status` na party |
 | **DORA** (Nař. (EU) 2022/2554) | Provozní odolnost | health probes, fault-tolerantní outbox (circuit breaker/retry/bulkhead/timeout), poison-pill-safe consumer, audit eventy, SLO, runbooky |

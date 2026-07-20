@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test
 
 /**
  * The gauge registers a supplier backed by a cached value; the scheduled `suspend` tick refreshes
- * that cache from the repository (ADR-0077 / ADR-0079). Verifies the supplier reflects refreshes —
+ * that cache from the repository (ADR-0077 outbox gauge). Verifies the supplier reflects refreshes —
  * i.e. the cache, not a direct per-scrape reactive call, is what Micrometer reads.
  */
 class PartyOutboxBacklogGaugeTest {

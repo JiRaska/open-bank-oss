@@ -14,7 +14,7 @@ import org.jboss.logging.Logger
 import java.util.UUID
 
 /**
- * Drives the party KYC+AML activation gate (ADR-0073) from the compliance event streams.
+ * Drives the party KYC+AML activation gate from the compliance event streams.
  * party-service is the single authority that decides activation: it records the KYC and AML
  * outcomes and [PartyUseCase] flips the party to ACTIVE only when BOTH clear (two-key gate),
  * or to SUSPENDED on a hard negative.
