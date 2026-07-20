@@ -9,10 +9,16 @@
 #   - docs/adr/README.md is the deterministic output of gen-index.sh (no rot).
 #
 # Pure bash over docs/adr/ — no Gradle, no Docker — so it is seconds, not minutes,
-# and runs on the cheap always-on pool. Lives in its own workflow (like
-# issue-hygiene) so it is a small, named, required status check rather than a step
-# buried in the heavy services-ci matrix. The job name `adr-registry` is intended
-# to be a required check in the main-protection ruleset — do not rename it.
+# and runs on the cheap always-on pool. Lives in its own workflow (like issue-hygiene)
+# so it is a small, named check rather than a step buried in the heavy services-ci matrix.
+#
+# WHERE THE TEETH ACTUALLY ARE: `adr-registry` is NOT in the main-protection ruleset's
+# required-status-checks list (verified 2026-07-20) — an earlier comment here claimed it
+# was "intended to be" and that was read as if it were. The binding gate is the
+# `ADR registry integrity check` step inside the REQUIRED `Validate manifests` job in
+# ci.yml, which runs this same script. This workflow is the fast, path-filtered echo of
+# it, useful because it reports in seconds on a docs-only PR. Do not delete either
+# without moving the other into the ruleset.
 # -----------------------------------------------------------------------------
 name: ADR registry
 
