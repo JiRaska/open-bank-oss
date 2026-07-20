@@ -78,6 +78,13 @@ Vault is in scope of `openbank-infra/`; helm charts and ArgoCD apps will be adde
 
 Operators MAY substitute Vault with their preferred secret manager (AWS Secrets Manager, GCP Secret Manager, Azure Key Vault) at deployment time; the External Secrets Operator supports all major backends. The reference architecture assumes Vault.
 
+## Alternatives considered
+
+- **Secrets in environment variables committed to git** — static secret values checked into the repository. Rejected as wrong practice in itself; gitleaks would block it, but the ADR rejects the approach regardless.
+- **Secrets in Kubernetes Secrets stored unencrypted in etcd** — rely on K8s Secrets as the system of record. Rejected because the values sit unencrypted in etcd.
+- **Cloud-provider secret managers used as the reference backend** — AWS Secrets Manager, GCP Secret Manager or Azure Key Vault as the platform default. Rejected for the reference architecture because it is not portable/cloud-agnostic; operators MAY still substitute one at deployment time via the External Secrets Operator.
+- **Per-service ad-hoc secret handling** — each service manages its own secrets its own way. Rejected because the platform needs a single source of truth, dynamic short-lived credentials, PKI and an audit trail of every secret access.
+
 ## Consequences
 
 **Positive**
@@ -94,6 +101,14 @@ Operators MAY substitute Vault with their preferred secret manager (AWS Secrets 
 - Vault HA with auto-unseal eliminates manual unseal on restart.
 - External Secrets Operator caches secrets in K8s Secrets so steady-state operation does not depend on Vault availability.
 - Vault snapshot backups daily, tested restore quarterly.
+
+## Compliance impact
+
+- PCI DSS: not applicable — no cardholder data named in this ADR's scope.
+- DORA:    DORA Art. 9 (protection of information assets) — secrets management explicitly required, as cited in this ADR's References.
+- GDPR:    not applicable — secrets are credentials and keys, not personal data.
+- PSD2:    not applicable — no payment initiation or account-access interface here.
+- CNB:     not applicable — no CNB requirement is referenced in this ADR.
 
 ## References
 

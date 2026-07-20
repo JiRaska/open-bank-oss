@@ -115,3 +115,11 @@ Concretely:
 
 - Optional `/api/services/openapi-index` aggregation to collapse the catalog's fan-out.
 - Apply the same `svcUrl` discipline to any remaining surface that still hand-builds service URLs.
+
+## Compliance impact
+
+- PCI DSS: not applicable — operator docs surfaces carry no cardholder data.
+- DORA:    engaged — this is an ICT access-path control (single authenticated egress path, proxy refuses unauthenticated callers); specific articles not mapped in this ADR.
+- GDPR:    not applicable — proxies service metadata, health and changelogs only.
+- PSD2:    not applicable — internal operator tooling, no payment-service interface.
+- CNB:     not applicable — internal admin UI, no regulatory return affected.

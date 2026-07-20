@@ -118,6 +118,14 @@ Shipped in PRs: #1869 (tx-consumer + `TransactionSettledEvent`), #1870 (rail con
 #1862 (funds-in-transit GL + Flyway migration), #1872 (clearing-reserve journal entries),
 #1867 (settlement-service retire). All merged to `main`; sandbox-deployed.
 
+## Compliance impact
+
+- PCI DSS: not applicable — SEPA/domestic/SWIFT rail settlement, no cardholder data in scope.
+- DORA:    engaged — this is a money-path settlement control (idempotent posting, compensation, reconcilable settlement window); specific articles not mapped in this ADR.
+- GDPR:    engaged — the scheme-accepted event carries debtor/creditor IBANs and account ids; specific articles not mapped in this ADR.
+- PSD2:    engaged — this completes execution of customer payment transactions; specific articles not mapped in this ADR.
+- CNB:     not applicable — no supervisory reporting or licensing matter in this ADR.
+
 ## References
 
 - ADR-0039 — Ledger as golden source, balance as projection (the settlement engine this reuses)

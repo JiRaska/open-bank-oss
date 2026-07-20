@@ -54,6 +54,10 @@ Rules:
 
 CODEOWNERS for `domain/` and `application/` requires architect review; pure refactors in `infrastructure/` may merge with a single reviewer.
 
+## Alternatives considered
+
+- **Business logic coupled to framework code (the status quo)** — let domain rules live in Quarkus/Spring REST controllers and JPA entities, as the ADR says happened historically. Rejected: it makes domain logic untestable without spinning a container, leaks rules into controllers and entities, makes infrastructure (DB, broker) hard to replace without rewriting business logic, and leaves auditors unable to find where a business rule lives because it is scattered.
+
 ## Consequences
 
 **Positive**
@@ -69,6 +73,14 @@ CODEOWNERS for `domain/` and `application/` requires architect review; pure refa
 **Mitigation**
 - Use Kotlin's data classes + extension functions to minimise mapper boilerplate.
 - Code review enforces: business rules live in `domain/`, orchestration lives in `application/`.
+
+## Compliance impact
+
+- PCI DSS: not applicable — source layout decision, no cardholder data in scope.
+- DORA:    not applicable — code structure, no ICT resilience control claimed here.
+- GDPR:    not applicable — no personal data processing decided by this layout.
+- PSD2:    not applicable — internal service structure, no TPP-facing interface.
+- CNB:     engaged — the ADR claims auditors can locate business rules consistently in `domain/`; no specific provision cited in this ADR.
 
 ## References
 

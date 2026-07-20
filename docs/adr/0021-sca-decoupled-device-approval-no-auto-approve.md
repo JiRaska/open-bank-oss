@@ -64,6 +64,11 @@ The challenge state machine already supports this: `ScaChallenge` has `PENDING �
 (approval present) and `PENDING → FAILED` (denied / max attempts / expired). Only the
 verification *input* is missing, not the states.
 
+## Alternatives considered
+
+- **Keep the status quo: `verify` auto-approves `PUSH_NOTIFICATION` and `BIOMETRIC`** — the current code returns a literal `true` for both device-based methods. Rejected because it is critical audit finding K2, a full SCA bypass in which the possession/inherence factor is never checked and PSD2 RTS dynamic linking is not enforced.
+- **Wait and ship the whole decoupled approval channel in one release** — leave push/biometric as-is until device enrolment, key management and the `ScaDecisionStore` are all built. Rejected because step 2 depends on a device/credential registry that does not yet exist; the fail-closed change is shipped on its own first, since an unusable factor is strictly safer than a bypassable one and a system must not present a known SCA bypass while the substantive work lands.
+
 ## Consequences
 
 **Positive**
@@ -86,6 +91,14 @@ verification *input* is missing, not the states.
   keep working as the available SCA methods in the interim.
 - Track step 2 (device enrolment + WebAuthn/signed-push + `ScaDecisionStore`) as its own
   milestone; it is the substantive PSD2-compliance work.
+
+## Compliance impact
+
+- PCI DSS: not applicable — SCA challenge flow, no cardholder data in scope.
+- DORA:    not applicable — this ADR frames the gap as SCA correctness, not ICT resilience.
+- GDPR:    not applicable — no change to personal-data processing or retention.
+- PSD2:    engaged — PSD2 RTS, Commission Delegated Regulation (EU) 2018/389, Art. 4–5 (SCA elements and dynamic linking); the auto-approve path was a direct breach.
+- CNB:     not applicable — ADR cites the EU PSD2 RTS only, no CNB-specific requirement.
 
 ## References
 

@@ -153,3 +153,11 @@ live) will give the real run-rate within days — **decide on the real number, n
   while prod stays managed-NAT by default.
 - **This ADR applies nothing.** It is a proposal for approval; implementation is a
   follow-up PR with its own plan/review/cutover.
+
+## Compliance impact
+
+- PCI DSS: not applicable — sandbox outbound network path, no cardholder data.
+- DORA:    engaged — the swap changes the sandbox egress availability posture (single-instance SPOF, ASG auto-recovery, reversible cutover); specific articles not mapped in this ADR.
+- GDPR:    not applicable — egress-only NAT, no personal data processed.
+- PSD2:    not applicable — infrastructure cost change, no payment interface.
+- CNB:     not applicable — sandbox-scoped; prod keeps the managed NAT Gateway.

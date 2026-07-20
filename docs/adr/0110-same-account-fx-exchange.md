@@ -129,6 +129,14 @@ endpoint remains for operator/admin use and is documented in the account-service
 - **Outbox event from account-service:** eventual consistency complicates the client's "exchange
   now" UX and the FX rate may change between publish and consume — rejected.
 
+## Compliance impact
+
+- PCI DSS: not applicable — exchange between a customer's own currency pockets, no cardholder data.
+- DORA:    engaged — the §3 account-service path has a known non-atomic failure mode (dangling debit) with a monitoring alert as follow-up; specific articles not mapped in this ADR.
+- GDPR:    not applicable — same-account, own-funds movement, no new personal data processed.
+- PSD2:    PSD2 RTS Art. 15 — the exchange is an own-account operation and therefore SCA-exempt.
+- CNB:     not applicable — no supervisory reporting or licensing matter in this ADR.
+
 ## References
 
 - ADR-0021 (SCA scope), ADR-0024/0025 (pockets, per-currency ledger), ADR-0065 (edge proxy)

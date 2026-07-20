@@ -2,7 +2,7 @@
 date: 2026-06-10
 decision-status: accepted
 delivery-status: partial
-authors: [@JiRaska Relates to:** ADR-0008 (OpenTelemetry), ADR-0029 (Governance as Code), ADR-0054 (FinOps)]
+authors: [@JiRaska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
@@ -11,6 +11,8 @@ summary: "Observability is built as three pillars in four phases: domain busines
 ---
 
 # ADR-0077 — Observability Three-Pillar Strategy for OpenBank
+
+**Relates to:** ADR-0008 (OpenTelemetry), ADR-0029 (Governance as Code), ADR-0054 (FinOps)
 
 > **Amendment 2026-06-19 — implementation complete (non-money-path; money-path pending approvals).**
 >
@@ -305,3 +307,11 @@ Before production launch, the following must be in place:
 - [ ] Tier-1 alerts active and tested (runbook linked in each alert)
 - [ ] 30-day SLO baseline established for each payment rail
 - [ ] Outbox lag alert proven in chaos test (kill ledger-service, confirm alert fires < 15 min)
+
+## Compliance impact
+
+- PCI DSS: not applicable - no cardholder data in observability signals.
+- DORA:    engaged - this is an ICT monitoring, incident-detection and alerting control; specific articles not mapped in this ADR.
+- GDPR:    not applicable - telemetry carries no personal data; amounts excluded from labels.
+- PSD2:    engaged - the ADR states PSD2/EBA requires demonstrating payment instructions were processed within defined SLAs, and this metrics/trace/SLO evidence is what proves it; no article cited in this ADR.
+- CNB:     not applicable - no CNB-specific supervisory requirement identified in this ADR.

@@ -59,6 +59,12 @@ Note the operational footgun ADR-0050 documents: `openbank.outbox.dispatch-enabl
 `false`, so a service with an outbox entity that never sets it `true` silently never dispatches —
 enforced by `.github/scripts/check-outbox-dispatch-enabled.sh`.
 
+## Alternatives considered
+
+- **Dual write: update the DB and publish to Kafka directly (the status quo)** — call `kafkaTemplate.send(...)` from request-handling code alongside the business transaction. Rejected: the two operations are not atomic, producing lost events, duplicate events on retry after a crash, or ghost events for a transaction that rolled back — each of which the ADR says produces real money inconsistencies. Direct `kafkaTemplate.send(...)` from request handling is a code-review blocker.
+- **Distributed XA / 2PC across DB and broker** — make the state change and the publish one distributed transaction. Rejected: operationally heavy and not supported by Kafka.
+- **Debezium CDC (WAL tailing) as the dispatch mechanism** — tail the database write-ahead log to move outbox rows to Kafka. Originally specified by this ADR, but per the 2026-07-16 amendment the implementation never went that way; the mechanism of record is the `openbank-libs` application-level poller (ADR-0013, hardened by ADR-0050), and Debezium remains only for the ClickHouse analytics feed.
+
 ## Consequences
 
 **Positive**
@@ -78,6 +84,14 @@ enforced by `.github/scripts/check-outbox-dispatch-enabled.sh`.
 - Dispatch lag and backlog are exposed as per-service Micrometer gauges (ADR-0050); alerts key
   off backlog and `attempt_count` reaching `MAX_ATTEMPTS`.
 - Janitor is a scheduled job with alert on backlog > 1M rows.
+
+## Compliance impact
+
+- PCI DSS: not applicable — no cardholder data scoped to the outbox in this ADR.
+- DORA:    engaged — atomic publication, replay and dispatch alerting are ICT resilience controls; specific articles not mapped in this ADR.
+- GDPR:    not applicable — ADR does not scope personal data in event payloads.
+- PSD2:    not applicable — internal event publication, no TPP-facing interface.
+- CNB:     engaged — the ADR claims auditability and forensics of every published event; no specific provision cited in this ADR.
 
 ## References
 

@@ -322,3 +322,11 @@ adds the *measured* gate before flipping the declared tier.
   reads only.
 - **This ADR applies nothing.** It is a proposal; the native-build PR, the tofu add-on
   install, and the cutover are separate, individually-reviewed follow-ups.
+
+## Compliance impact
+
+- PCI DSS: not applicable - no cardholder data; product-catalog is a read-only catalog service.
+- DORA:    engaged - scaling a service to zero is an availability and resilience trade-off for an ICT service, gated here on a measured cold-start/latency SLO; specific articles not mapped in this ADR.
+- GDPR:    not applicable - no personal data processed by this packaging and autoscaling decision.
+- PSD2:    not applicable - money-path services never enter T1, staying always-on.
+- CNB:     not applicable - internal compute-tiering decision, no supervisory requirement cited.

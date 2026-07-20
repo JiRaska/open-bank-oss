@@ -105,6 +105,13 @@ regression). The pre-flip validation record: `authz-coverage-report.py` + the ge
 assertions replace a manual staging soak (there is no separate staging environment —
 sandbox is the validation stage, ADR-0042).
 
+## Alternatives considered
+
+- **Keep the status quo — three overlapping consent regimes with no unified ADR** — PSD2 account-access consents, GDPR data-processing consents and AI agent delegation scopes governed separately. Rejected: delivery gaps accumulated in the absence of a single lifecycle, notably no sweeper moving expired consents out of `ACTIVE`, no explicit GDPR propagation path for withdrawal, and no rationale or flip plan for advisory OPA.
+- **Leave OPA authorization in advisory mode (`authz.enforce=false`)** — the mode consent-service was previously running in. Rejected: it lacked explicit rationale and a flip plan; enforcement is now shipped with per-endpoint `@Authorize`, a consent-specific rego extension and `AUTHZ_ENFORCE=true` in gitops.
+- **Publish revocation events directly to Kafka from the service (`@Channel` emitter)** — the mechanism revoke/reject originally used. Rejected: it is a dual-write on a money-path service that could drop a `ConsentRevoked`/`ConsentRejected` event on a crash between the DB commit and the Kafka send; the transactional outbox persists the status change and the event row in one transaction instead.
+- **A manual staging soak before flipping OPA to enforce** — the conventional pre-flip validation. Rejected: there is no separate staging environment (sandbox is the validation stage), so the coverage report plus the policy generator's decision assertions serve as the pre-flip validation record, with rollout guarded by the money-path canary analysis.
+
 ## Consequences
 
 - **resource servers** must subscribe to `consent.events` and cache the validation result for the configured `frequencyPerDay` window to avoid hammering the consent API (ADR-0090 N3).
@@ -112,6 +119,14 @@ sandbox is the validation stage, ADR-0042).
 - The 90-day AISP cap is enforced at consent creation time by the domain model (hard constraint). A TPP re-consent flow is required after expiration — this is by PSD2 design, not a gap.
 - `TELEMETRY_RUM` consents are NOT subject to the SCA requirement or the 90-day cap. They are opt-in UX consents, not account-access consents.
 - `openbank-consent-service` is a **money-path service** (rules.yaml). Any change requires 2 approvals + threat model review (docs/threat-models/openbank-consent-service.md).
+
+## Compliance impact
+
+- PCI DSS: not applicable — consent records carry no cardholder data.
+- DORA:    not applicable — consent lifecycle governance, no ICT resilience control defined here.
+- GDPR:    engaged — GDPR Art. 7 (demonstrable consent, incl. `TELEMETRY_RUM`) and Art. 17 (processors cease processing within 72 h of `ConsentRevoked`/`ConsentExpired`).
+- PSD2:    engaged — PSD2 Directive (EU) 2015/2366 Art. 65/66/67 account-access consents and EBA RTS on SCA (EU) 2018/389 Art. 10 validity and frequency caps.
+- CNB:     engaged — the CZ national profile (COBS 2.x) scope group is covered by the same consent authority; no specific CNB provision is cited in this ADR.
 
 ## References
 

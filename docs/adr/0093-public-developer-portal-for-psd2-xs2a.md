@@ -81,3 +81,11 @@ on later.
 - The OpenAPI is duplicated into the portal image at build time; a content change in the service contract
   means a portal rebuild. Acceptable; the build copies from the service's source-of-truth spec.
 - WAF false positives are possible; CRS paranoia level starts at 1 and audit logs go to stdout for tuning.
+
+## Compliance impact
+
+- PCI DSS: not applicable — static documentation site, no cardholder data in scope.
+- DORA:    engaged — a new internet-facing ICT surface with WAF, rate limiting and a required threat model; specific articles not mapped in this ADR.
+- GDPR:    not applicable — zero-backend static docs, no personal data processed.
+- PSD2:    PSD2 RTS Art. 30 — the "usable dedicated interface" obligation this portal documents for TPPs.
+- CNB:     not applicable — no supervisory reporting or ČNB-facing artefact in this ADR.

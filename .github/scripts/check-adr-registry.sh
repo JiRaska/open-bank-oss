@@ -148,7 +148,6 @@ fi
 # Collected for check 4h (bidirectional supersession) after the per-file pass.
 declared_supby=""   # "NNNN>TTTT" pairs: NNNN declares it is superseded by TTTT
 declared_sup=""     # "NNNN>TTTT" pairs: NNNN declares it supersedes TTTT
-soft=0
 
 for f in "${adrs[@]}"; do
   base=$(basename "$f")
@@ -255,12 +254,18 @@ for f in "${adrs[@]}"; do
     grep -q '^## Context' "$f"                        || err "$base: missing a '## Context' section."
     grep -qiE '^## (The )?Decision' "$f"              || err "$base: missing a '## Decision' section."
     grep -q '^## Consequences' "$f"                   || err "$base: missing a '## Consequences' section."
-    # Advisory, not blocking: 32 and 42 pre-schema ADRs respectively lack these,
-    # and back-filling them is a content job for their authors, not something a
-    # structural gate can or should force in one sweep. Graduate to `err` once the
-    # backlog is closed (ADR-0144 gate-graduation).
-    grep -q '^## Alternatives' "$f" || { soft=$((soft + 1)); echo "::warning file=$f::$base: no '## Alternatives considered' section."; }
-    grep -q '^## Compliance'   "$f" || { soft=$((soft + 1)); echo "::warning file=$f::$base: no '## Compliance impact' section."; }
+    # GRADUATED to blocking (ADR-0144 gate-graduation). These were advisory while 32
+    # and 42 pre-schema ADRs respectively lacked them; that backlog is now closed, so
+    # the rule enforces instead of nagging — an advisory rule nobody can ever act on
+    # is just noise, and a rule with no remaining violations is free to enforce.
+    #
+    # On writing them: reconstruct, do not invent. An ADR whose alternatives were
+    # never recorded should say so explicitly rather than manufacture a plausible
+    # rejected option, and a compliance row must not carry an article or requirement
+    # number that does not appear in the ADR's own text. A confident fabrication in
+    # this directory is read by auditors as a claim about the platform.
+    grep -q '^## Alternatives' "$f" || err "$base: missing a '## Alternatives considered' section (see TEMPLATE.md; if none was recorded, say so explicitly)."
+    grep -q '^## Compliance'   "$f" || err "$base: missing a '## Compliance impact' section (see TEMPLATE.md; 'not applicable — <reason>' is a valid and common answer)."
   fi
 done
 
@@ -283,7 +288,6 @@ for pair in $declared_sup; do
   esac
 done
 
-[[ "$soft" -gt 0 ]] && echo "::notice::check-adr-registry: $soft advisory section warning(s) — not blocking (see check 4i)." >&2
 
 # --- 5. Dangling ADR-NNNN references repo-wide -------------------------------
 # Every "ADR-NNNN" mention outside docs/adr/ (code comments, gitops YAML, other

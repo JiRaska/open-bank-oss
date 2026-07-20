@@ -37,6 +37,10 @@ Internal east-west APIs (service-to-service within the cluster) may use code-fir
 
 Kafka topics are documented analogously via AsyncAPI 3.0 — see ADR-0006.
 
+## Alternatives considered
+
+- **Code-first** — write the implementation and generate the OpenAPI spec from annotations. Rejected for externally-exposed APIs: the ADR says it looks easier but consistently produces incomplete specs and incentivises ad-hoc additions, whereas design-first front-loads design rigour, produces consistent specs, and enables parallel client and server work. Code-first remains permitted for internal east-west APIs where the consumer is in the same repo and there is no external observer.
+
 ## Consequences
 
 **Positive**
@@ -53,6 +57,14 @@ Kafka topics are documented analogously via AsyncAPI 3.0 — see ADR-0006.
 **Mitigation**
 - Allow `application/x-experimental+json` content type for early prototyping; promote to spec when stabilised.
 - Pin openapi-generator version; pre-build CI caches.
+
+## Compliance impact
+
+- PCI DSS: not applicable — API contract governance, no cardholder data in scope.
+- DORA:    not applicable — contract discipline, no ICT resilience control claimed here.
+- GDPR:    not applicable — spec-authoring process, no personal data processing decided.
+- PSD2:    engaged — the ADR cites PSD2 conformance audits failing on spec drift and TPP integrators needing authoritative documentation; no specific article cited in this ADR.
+- CNB:     not applicable — ADR names EBA/TPP conformance, not CNB supervisory reporting.
 
 ## References
 

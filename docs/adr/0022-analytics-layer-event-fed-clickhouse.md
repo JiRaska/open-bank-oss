@@ -109,6 +109,15 @@ Yes, by design rather than by hope:
 - **Provability** — reconciliation + the in-libs projection give a point-in-time tie-out
   between OLTP and the warehouse for regulators.
 
+## Alternatives considered
+
+- **CDC out of the operational databases (Debezium/WAL replication)** — a second extraction path straight out of the per-service Postgres stores. Rejected because it couples analytics to physical OLTP schemas, adds replication-slot load and operational risk to the very databases the design protects, bypasses the domain meaning the services already encode, and duplicates the transactional outbox stream that is already paid for.
+- **A full lakehouse (Iceberg + Trino + dbt + Dagster)** — the "modern" analytics stack. Rejected as real infrastructure with real operational cost: overkill for OpenBank's volume and contradicting the project's operability philosophy for a small team. It can be adopted later as an opt-in without changing the producer contract, because the bronze layer is already an append-only log.
+- **Reporting queries against the operational per-service Postgres databases** — the status quo of having no separate analytics store. Rejected because a few months of growth plus analysts running ad-hoc queries would degrade customer-facing latency.
+- **Treat Kafka as the durable replay source** — the ADR's own addendum corrects claim (2): Kafka retention is finite, so the log of record is the bronze layer and the durable replay source is the per-service outbox or its archive/export.
+- **Mutate or delete original bronze rows to apply corrections** — rejected in favour of re-publishing a corrected batch at a higher `aggregateVersion`, so the log of record stays immutable and only the current-state view changes.
+- **Auto-remediate detected drift** — rejected: the reconciliation job reports drift only, because reloading a 10-year store is a deliberate operator action via the backfill endpoint.
+
 ## Consequences
 
 **Positive.** No OLTP read load from reporting; one well-understood store (ClickHouse) a small
@@ -173,6 +182,14 @@ record-keeping obligation, which is the documented, defensible position.
 **Still stubbed (honest):** the ClickHouse client, the outbox/export `BackfillSource` reader, and the
 OLTP/warehouse reconciliation readers are `@Default` no-ops so the service is offline-buildable. All
 *orchestration and decision logic* around them is implemented and unit-tested.
+
+## Compliance impact
+
+- PCI DSS: not applicable — event-fed warehouse, no cardholder data in scope.
+- DORA:    not applicable — specific ICT resilience obligations are not discussed in this ADR.
+- GDPR:    engaged — GDPR Art. 25/17 (PII masked at the sink so the long-lived bronze layer never holds raw identifiers) and Art. 17(3)(b) (pseudonymous `aggregateId` retained under the legal-obligation basis).
+- PSD2:    not applicable — reporting layer, no payment initiation or authentication surface.
+- CNB:     engaged — the layer exists to serve regulatory reports and point-in-time tie-out evidence; no specific requirement mapped in this ADR.
 
 ## References
 - ADR-0003 — transactional outbox + Kafka (the single extraction path)

@@ -34,6 +34,14 @@ OpenBank reference deployment uses:
 
 Operators MAY substitute equivalents (Linkerd for Istio, Flux for ArgoCD, etc.) per their existing standards.
 
+## Alternatives considered
+
+- **Ad-hoc `kubectl apply` deployment** — push manifests to the cluster by hand. Rejected because it is not reproducible and fails the cloud-agnostic test; GitOps instead keeps the cluster matching Git, makes rollback a git revert, and gives every change an audit trail with author and reviewer.
+- **Terraform-only deployment** — drive workloads from Terraform without a GitOps reconciler. Rejected on the same cloud-agnostic/reproducibility grounds.
+- **Vendor-specific deployment tooling** — a cloud provider's own deployment stack. Rejected because it fails the cloud-agnostic test.
+- **Knative** — serverless/scale-to-zero layer on Kubernetes. Explicitly NOT adopted; the ADR leaves it to be revisited if scale-to-zero proves needed.
+- **Equivalent substitutes (Linkerd for Istio, Flux for ArgoCD)** — not rejected as such: operators MAY substitute them per their existing standards, but the reference deployment picks ArgoCD and Istio.
+
 ## Consequences
 
 **Positive**
@@ -51,6 +59,14 @@ Operators MAY substitute equivalents (Linkerd for Istio, Flux for ArgoCD, etc.) 
 **Mitigation**
 - ADR documents each layer; debugging guide in runbooks.
 - Service mesh is opt-in per service initially; mandatory by M5.
+
+## Compliance impact
+
+- PCI DSS: not applicable — no cardholder data in scope of this ADR.
+- DORA:    engaged — this is an ICT change-management and resilience control (reproducible deployment, git-revert rollback, change audit trail); specific articles not mapped in this ADR.
+- GDPR:    not applicable — deployment topology, no personal data processed.
+- PSD2:    not applicable — runtime and packaging choice, no payment interface.
+- CNB:     not applicable — no CNB requirement is referenced in this ADR.
 
 ## References
 

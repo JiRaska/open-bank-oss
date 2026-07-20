@@ -112,6 +112,11 @@ Agent je **control-plane agent** (ADR-0031):
 | **P3 — Diagnose** | finops-agent Temporal service (collect+detect+diagnose) | feat/finops-agent-svc |
 | **P4 — Propose** | HITL queue + GitHub PR generování + IAOps approval UI | feat/finops-hitl-ui |
 
+## Alternatives considered
+
+- **Keep the status quo — post-hoc reaction to cost incidents** — NAT drain found on the invoice, EBS multi-attach found by pod crashloop, CI aio-max-nr exhaustion found by a red pipeline. Rejected: none of these incidents is unpredictable, all have measurable precursors at least an hour ahead, so detection after the fact is a choice rather than a limit.
+- **Let the agent apply infrastructure fixes directly to AWS** — instead of opening IaC pull requests for human approval. Rejected: the agent is a control-plane agent with deny-by-default policy and a read-only IAM role; it operates at the `write_proposal` tier and never writes directly to AWS, with HITL mandatory for anything that changes infrastructure.
+
 ## Consequences
 
 **Pozitivní:**
@@ -124,6 +129,14 @@ Agent je **control-plane agent** (ADR-0031):
 - Nový agent = nový Temporal workflow = další dependency na Temporal cluster
 - AWS Cost Explorer API má 1h granularitu — real-time NAT spike vyžaduje CloudWatch (nižší latence)
 - Langfuse→Prometheus bridge = nový exporter k maintainovat
+
+## Compliance impact
+
+- PCI DSS: not applicable — infrastructure cost telemetry, no cardholder data in scope.
+- DORA:    engaged — this is an ICT operational monitoring and resilience control; specific articles not mapped in this ADR.
+- GDPR:    not applicable — cost, cluster and token-usage metrics only, no personal data.
+- PSD2:    not applicable — no payment initiation or account access involved.
+- CNB:     not applicable — internal cloud cost tooling, no supervisory reporting affected.
 
 ## References
 

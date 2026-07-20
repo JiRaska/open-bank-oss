@@ -102,6 +102,13 @@ Data flows: CI produces `quality-report.json` (pitest XML + pact verification re
 the admin-ui image alongside the existing `test-results.json`). The page degrades gracefully when
 the file is absent (dev / no-CI environments).
 
+## Alternatives considered
+
+- **Leave Layer 3 and mutation testing at `enforced: planned` (status quo)** — the ADR-0011 pyramid had both unimplemented. Rejected: without contract tests, inter-service API drift is caught late, in integration environments or production; without mutation testing, statement coverage can be satisfied by assertions that never actually validate the financial arithmetic.
+- **A Pact Broker (PactFlow or self-hosted) instead of git-pact** — pacts published to a broker with a cross-service `can-i-deploy` gate. Rejected at the time: it adds operational burden and a deploy gate before the team has proven the workflow, and in a monorepo where consumer and provider co-evolve in a single PR, git storage is sufficient; a broker was recorded as the natural follow-up once services need independent deploy cadences. (The ADR notes this was later superseded in part by ADR-0092, which did introduce a broker.)
+- **Run pitest per-PR** — mutation testing on every pull request rather than a weekly scheduled job. Rejected: pitest is 10-50x slower than normal test execution and per-PR runs would exceed acceptable CI budgets on money-path services.
+- **Mutate the whole codebase, not just the domain package** — including infrastructure, REST resources and CDI producers. Rejected: mutation testing there would produce noise, not signal; the domain layer is where the financial arithmetic lives.
+
 ## Consequences
 
 **Positive**
@@ -116,6 +123,14 @@ the file is absent (dev / no-CI environments).
 - Pitest is slow; weekly-only means a mutation regression can persist up to a week.
 - Provider verification requires the ledger to boot (Testcontainers), which adds ~30 s to the
   ledger service CI job.
+
+## Compliance impact
+
+- PCI DSS: not applicable — test tooling and CI gates, no cardholder data.
+- DORA:    engaged — pre-deployment testing of ICT systems supporting money-path services; specific articles not mapped in this ADR.
+- GDPR:    not applicable — contract and mutation tests use no personal data.
+- PSD2:    not applicable — no payment-service interface is changed by this ADR.
+- CNB:     not applicable — internal engineering quality gate, no regulatory return affected.
 
 ## References
 

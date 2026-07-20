@@ -78,6 +78,13 @@ anything (e.g. the `@Provider` exception mappers in `libs/api/error`) is likewis
    the `kover {}` block into every `build.gradle.kts`. This lands with the build-logic
    consolidation work (roadmap Fáze 4).
 
+## Alternatives considered
+
+- **JaCoCo** — the de-facto JVM coverage standard, bundled with Gradle. Rejected because it is bytecode-based and does not understand Kotlin inline functions, `data class` synthetic members or coroutine state machines, so it systematically under-reports coverage on a Kotlin-first codebase and needs hand-maintained exclusion lists.
+- **A flat aspirational coverage target** (e.g. "70% everywhere") — one global threshold for all modules. Rejected because it would fail the build on day one (libs sits at ~40% line) and invite assertion-free tests written only to move the number.
+- **Keep the status quo: no coverage tooling at all** — the project had no coverage configured in any module, so "saga coverage" could not be measured and nothing signalled when a change removed tests or shipped untested code. Rejected because coverage was effectively unenforced.
+- **Copy a `kover {}` block into every service `build.gradle.kts`** — per-service duplication instead of a shared `build-logic/` convention plugin. Rejected to keep the recipe DRY across the service fleet.
+
 ## Consequences
 
 **Positive**
@@ -91,6 +98,14 @@ anything (e.g. the `@Provider` exception mappers in `libs/api/error`) is likewis
   (mitigated by the convention plugin carrying a sane default once rollout starts).
 - A floor can sit stale (true but unraised) if reviewers forget to bump it; it still prevents
   regression, which is the load-bearing guarantee.
+
+## Compliance impact
+
+- PCI DSS: not applicable — build-tooling decision, no cardholder data in scope.
+- DORA:    not applicable — code-coverage gate, no ICT resilience control claimed here.
+- GDPR:    not applicable — coverage measurement processes no personal data.
+- PSD2:    not applicable — no payment-service or authentication behaviour affected.
+- CNB:     not applicable — internal engineering quality gate, no supervisory reporting.
 
 ## References
 

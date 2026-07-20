@@ -35,6 +35,11 @@ OpenTelemetry is the **only** observability instrumentation standard for OpenBan
 
 Direct integrations to vendor SDKs (Datadog DD-trace, New Relic agent) are **forbidden** in this codebase. Operators choosing those vendors do so via OTel Collector exporters.
 
+## Alternatives considered
+
+- **Per-vendor observability solutions (Datadog, New Relic)** — instrument services directly against a vendor SDK such as DD-trace or the New Relic agent. The ADR accepts that these work, but rejects them because they lock operators into a single vendor and a single billing model, which fails the cloud-agnostic, operator-choice requirement; direct vendor SDK integrations are forbidden in the codebase, and operators who choose those vendors route to them through OTel Collector exporters instead.
+- **Status quo: no unified instrumentation** — engineers grep and correlate logs across 26 services by hand and outages surface as customer complaints rather than alerts. Rejected as operationally illegible for a banking platform.
+
 ## Consequences
 
 **Positive**
@@ -50,6 +55,14 @@ Direct integrations to vendor SDKs (Datadog DD-trace, New Relic agent) are **for
 **Mitigation**
 - Sampling: 100% of error traces, 10% of slow traces (> p95), 1% baseline.
 - Tail-based sampling at Collector for richer per-trace decisions.
+
+## Compliance impact
+
+- PCI DSS: not applicable — no cardholder data in the signals described here.
+- DORA:    engaged — this is an ICT monitoring and incident-detection control; specific articles not mapped in this ADR.
+- GDPR:    engaged — trace baggage carries a pseudonymous customer ID and tenant ID; specific articles not mapped in this ADR.
+- PSD2:    not applicable — instrumentation standard, no payment interface changed.
+- CNB:     not applicable — no CNB requirement is referenced in this ADR.
 
 ## References
 

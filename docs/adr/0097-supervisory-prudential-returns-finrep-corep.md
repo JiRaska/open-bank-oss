@@ -96,6 +96,13 @@ to the ledger). Reuse the AnaCredit render pattern (pure-domain mapper + builder
    statements-reconciliation tie-out result, and submission status. Derived, never hand-faked
    (ADR-0074/0079 house rule).
 
+## Alternatives considered
+
+- **Derive the returns from a live, point-in-time trial-balance query** — build FINREP/COREP straight off `GET /api/v1/ledger/trial-balance` instead of the attested close. Rejected as the target state — it would make the returns non-reproducible and non-reconcilable to the závěrka; this is exactly the interim gap the Phase 1/Phase 2 delivery note flags as open work against ADR-0096.
+- **Reuse the AnaCredit render-only shape (ADR-0037) with transmission as a follow-up** — render the dataset and defer the submission channel. Rejected — AnaCredit is the cautionary template: without a transmission path the regulatory output is never actually produced, so transmission is in scope here.
+- **Start Phase 2 on a COREP template other than C 01.00** — geographical-breakdown and ALMM/maturity-ladder templates were evaluated. Rejected — each carries the same missing-data dependency one layer down (exposure-class/risk-weight data, or contractual maturity-bucket data) that the platform also does not have.
+- **Omit or estimate the own-funds rows the ledger cannot source** — silently drop the rows or supply a guessed value where no capital-structure GL data exists. Rejected — every such row is reported as an explicit, flagged zero (`isDataGap` + `gapReason`), never a silently omitted or guessed value.
+
 ## Consequences
 
 **Positive:** real prudential returns reconciled to an attested close (CRR/CRD); transmission is
@@ -106,6 +113,14 @@ reuses the proven AnaCredit/hexagonal pattern.
 capital data not yet modelled (Phase 2 is materially larger); EBA XBRL/DPM taxonomy is heavy and
 versioned (a maintenance commitment); the ČNB transmission channel needs real credentials/onboarding
 (prereq-gated, like the AnaCredit SDMX channel). License-gated → **Proposed**.
+
+## Compliance impact
+
+- PCI DSS: not applicable — aggregated prudential returns, no cardholder data in scope.
+- DORA:    not applicable — supervisory financial reporting, not an ICT resilience control.
+- GDPR:    not applicable — entity-level aggregate cells, not personal data.
+- PSD2:    not applicable — no payment initiation or account-access interface involved.
+- CNB:     CRR (Regulation (EU) 575/2013) / CRD and the EBA Implementing Technical Standards on supervisory reporting (FINREP/COREP, DPM/XBRL taxonomy); ČNB supervisory reporting is the transmission destination.
 
 ## References
 - Issue #471; ADR-0096 (attested close), ADR-0037 (AnaCredit render-only + transmission gap), ADR-0039.

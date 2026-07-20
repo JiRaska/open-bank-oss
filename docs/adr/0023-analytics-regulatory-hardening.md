@@ -194,6 +194,17 @@ exist yet. The warehouse side is real, so the drift check runs one-sided until t
 F2's adapter now exists (`S3WormArchive`); it needs a provisioned S3 Object-Lock bucket (cloud) to be
 active in an environment — the code is no longer the gap.
 
+## Alternatives considered
+
+- **Keep the status quo from ADR-0022: bronze as the claimed "record of truth"** — rely on the ClickHouse `ReplacingMergeTree` bronze table as the legal record. Rejected because a bronze row can be rewritten by anyone with table access, so bronze alone is not a legal record (BCBS 239 §3 integrity); it is reframed as a derived, rebuildable projection with tamper-evidence moved to WORM-anchored Merkle roots.
+- **A strict global hash-chain over all events** — the obvious tamper-evidence construction. Rejected in favour of Merkle-per-batch (leaves sorted), which is parallel- and replay-friendly where a strict global chain is not.
+- **A flat 10-year retention for all data** — the original ADR-0022 retention floor applied uniformly. Rejected because it violates GDPR storage-limitation and left no erasure path; replaced by per-`DataCategory` retention with an Art. 17(3)(b) statutory hold only where it applies.
+- **MinIO as the Object-Lock target** — the obvious local WORM target. Rejected because its community edition was put into maintenance mode (Dec 2025) and the repository was archived as no longer maintained (2026).
+- **SeaweedFS (or similar lightweight local emulators) for local WORM** — rejected because SeaweedFS, though actively maintained, does not enforce Object-Lock retention as of 2026 (objects remain deletable), which would make the seal theatre.
+- **The ClickHouse `integrity_anchors` mirror as the authoritative seal** — rejected as only a queryable mirror, honestly logged at WARN as not authoritative because the store is operator-mutable; the S3 Object-Lock COMPLIANCE-mode seal is the genuine WORM guarantee.
+- **Adding Maven dependencies for the adapters (AWS SDK, ClickHouse client, registry client)** — rejected in favour of the JDK `HttpClient` with pure, unit-tested request building and signing, so the modules stay offline-buildable.
+- **Failing the boot when the schema registry is unreachable** — rejected: `ApicurioSchemaCatalogSource` returns an empty catalogue (gate open) and logs loudly instead, mirroring the "open by default" config source.
+
 ## Consequences
 
 **Positive.** Every examiner-visible gap now has a named, tested control and a clear assurance level;
@@ -207,6 +218,14 @@ mis-configured (Object-Lock-disabled) S3 bucket would silently weaken F1/F2/F4, 
 must be verified, not assumed. All the real adapters (F1/F2/F3/F6/F7) are build-time gated, so a
 deployment that forgets a gate silently keeps the no-op default — the gates must be part of the
 production profile.
+
+## Compliance impact
+
+- PCI DSS: not applicable — analytics warehouse controls, no cardholder data in scope.
+- DORA:    engaged — ICT monitoring and RPO (freshness/lag metrics and readiness gate, F8); specific articles not mapped in this ADR.
+- GDPR:    engaged — GDPR Art. 5(1)(e) storage limitation, Art. 17 erasure via crypto-shred against the append-only log, Art. 17(3)(b) statutory hold for AML/accounting/KYC, and Art. 44 data-residency guard (F9).
+- PSD2:    not applicable — reporting and integrity controls, no payment or authentication surface.
+- CNB:     engaged — the nine findings are framed as gaps a CNB/EBA examiner could write up (with BCBS 239 §3 and EBA/GL on outsourcing and segregation of duties cited); no specific CNB requirement number given.
 
 ## References
 - ADR-0022 — the analytics layer these findings harden

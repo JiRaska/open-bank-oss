@@ -194,6 +194,16 @@ are additive; each phase builds on the MSW handler definitions established in Ph
   ROI is low outside domain arithmetic (ADR-0063 scope).
 - **Performance / load testing** — admin UI is low-frequency operator tooling; not a priority.
 
+## Alternatives considered
+
+- **Cypress** - mature browser-automation ecosystem, considered as the E2E layer instead of Playwright. Rejected: CommonJS, slower startup, weaker TypeScript support, and Next.js recommends Playwright.
+- **Storybook + Chromatic** - visual regression testing of admin-UI components. Rejected: visual, not behavioral; it does not verify data-fetch correctness. Full Storybook visual regression is recorded as a distinct concern for a separate ADR.
+- **Supertest (Next.js `createServer`)** - fast, browser-free HTTP testing of the BFF. Rejected as the E2E layer: it tests only BFF routes, not page rendering.
+- **Extend Pact to the admin UI** - contract-level precision for the admin-UI-as-consumer gap (Gap 4). Rejected: Pact JVM is service-side while the admin UI is Next.js/TypeScript, requiring a different Pact client and more config; the Docs-as-Service schema is too simple to justify the Pact bootstrap. A REST-assured `DocsSchemaGuardTest` in the provider's own CI is taken instead. Revisit if the admin UI starts consuming money-path APIs directly.
+- **Keep the status quo (CI runs lint + type-check + build only)** - the existing `ui` job never calls `npm run test`, so the 14 existing test files and their guards are not enforced at PR time, and the BFF data-loading paths, live-state pages, and service-API contract have no coverage at all. Rejected: this is precisely the state the ADR's four audit gaps describe; Phase 0 adds `npm run test` to CI immediately.
+- **Mutation testing for the admin UI** - considered and placed out of scope: admin-UI logic is predominantly display/routing, so mutation-testing ROI is low outside domain arithmetic (ADR-0063 scope).
+- **Performance / load testing of the admin UI** - considered and placed out of scope: the admin UI is low-frequency operator tooling, not a priority.
+
 ## Consequences
 
 ### Positive

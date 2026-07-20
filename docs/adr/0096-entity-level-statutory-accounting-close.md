@@ -72,6 +72,13 @@ the GL-close engine would fork the source of truth) and **render** statements fr
    allocation journals it is asked to post). Statements + attestations surface in the admin-ui
    `regulatory` page. Scope of *this* ADR: statements + attested close. Prudential returns are ADR-0097.
 
+## Alternatives considered
+
+- **Outsource the GL-close engine to a vendor** — buy the close orchestration rather than build it. Rejected — the ledger already owns double-entry truth, and outsourcing the close would fork the source of truth; only the statement *forms* mapping is left open to a vendor template later.
+- **Keep the status quo: treat the existing per-customer statement close as the statutory close** — rely on ADR-0078/0035 period closes. Rejected — those close *customer sub-ledgers*, not the entity's general ledger, and emit no attested, immutable, entity-wide artefact.
+- **Keep the trial balance as a read API only** — continue serving `/api/v1/journals/trial-balance` as a point-in-time query. Rejected — a point-in-time query is not a frozen, reproducible, attestable record and does not satisfy průkaznost/úplnost.
+- **Rely on the existing point-in-time / event-fed reporting** (AnaCredit render-only ADR-0037, withholding tax, reconciliation, analytics). Rejected — these complement but do not substitute a close, as none derives from an attested period close.
+
 ## Consequences
 
 **Positive:** a real, attestable statutory close satisfying zákon 563/1991 + vyhláška 501/2002;
@@ -85,6 +92,14 @@ license-gated, so this is **Proposed** until a licence track is prioritised.
 
 **Build vs outsource:** build the orchestration + freeze (ledger-native); the statement *forms* mapping
 could later adopt a vendor template, but the attested TB and close stay in-house.
+
+## Compliance impact
+
+- PCI DSS: not applicable — entity-level general-ledger close, no cardholder data in scope.
+- DORA:    not applicable — accounting-close architecture, not an ICT resilience control.
+- GDPR:    not applicable — entity-level GL aggregates, not personal data.
+- PSD2:    not applicable — no payment initiation or account-access interface involved.
+- CNB:     zákon č. 563/1991 Sb. §18–19 (účetní závěrka, průkaznost/úplnost) and vyhláška ČNB č. 501/2002 Sb. (bank financial-statement forms); auditor attestation of the frozen trial balance.
 
 ## References
 - Issue #471 (gap placeholder); ADR-0039, ADR-0078, ADR-0035, ADR-0026, ADR-0037, ADR-0086.

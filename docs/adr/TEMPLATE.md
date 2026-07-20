@@ -41,6 +41,9 @@ State the decision clearly in active voice: "We will ..."
 - **Option A** — short description. Pros / cons. Why rejected.
 - **Option B** — short description. Pros / cons. Why rejected.
 
+<!-- Required (enforced). Reconstruct, never invent: if no alternative was genuinely
+     considered, say exactly that instead of manufacturing a plausible rejected option. -->
+
 ## Consequences
 
 **Positive**
@@ -53,6 +56,12 @@ State the decision clearly in active voice: "We will ..."
 - ...
 
 ## Compliance impact
+
+<!-- Required (enforced). Do NOT write an article, clause or requirement number unless
+     that exact citation appears in this ADR's own text — auditors read these rows as
+     claims about the platform. Otherwise name the engagement in plain words, or write
+     "not applicable — <specific reason>". For most internal engineering decisions,
+     four or five rows are honestly "not applicable". That is the right answer. -->
 
 - PCI DSS: <req refs> / not applicable
 - DORA:    <req refs> / not applicable

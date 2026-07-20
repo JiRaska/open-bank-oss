@@ -103,6 +103,14 @@ broker pipeline is demonstrably green across the fleet, a follow-up issue remove
 pacts, the `pact.rootDir` system property, and the `@IgnoreNoPactsToVerify` local-dev escape.
 This honours ADR-0063's "keep git-pact as fallback" until the broker is load-bearing.
 
+## Alternatives considered
+
+- **Keep git-pact storage (the ADR-0063 status quo)** - committed `pacts/*.json` verified by providers via `@PactFolder("../pacts")`. Rejected as the end state: git-pact structurally cannot provide a `can-i-deploy` gate, because there is no record of which provider version verified which consumer version in which environment, so an unverified contract change can ship. ADR-0063 itself named a broker as the natural follow-up once services need independent deploy cadences, and the workflow is now proven on 4 live contracts. git-pact is nonetheless retained as a fallback through the rollout, per ADR-0063's own condition, and retired for covered pairs only once the broker pipeline is green.
+- **PactFlow SaaS (a hosted broker) or a managed database behind it** - rejected: everything stateful stays in-cluster OSS per ADR-0027, so the broker runs self-hosted as `pactfoundation/pact-broker` on a single-owner CNPG Postgres.
+- **Keep the broker in-cluster only (no Ingress)** - the ADR-0056 default of no public pre-auth surface. Rejected: the `openbank-build` runner pool is mixed, and the external runners (Hetzner VMs, a Mac mini) cannot reach the broker over cluster DNS, so an in-cluster-only broker cannot serve the CI pipeline. The public Ingress is taken as a deliberate, documented exception, justified by Basic auth on every path except the heartbeat, a payload of API contracts rather than customer data, and a machine/CI rather than browser-console audience.
+- **Tighten the exposure instead - an nginx IP-allowlist to runner egress, or pinning the contract jobs to ARC-only runners** - considered and deferred rather than rejected outright; to be revisited if the external runners are retired.
+- **Back up `pact-broker-db`** - the treatment money-path databases get. Rejected: pact and verification data are fully reproducible because every CI build republishes them, which keeps the broker out of the backup-coverage obligation and at under $1/mo.
+
 ## Consequences
 
 - **Positive:** a real `can-i-deploy` gate; per-version/-branch/-environment contract history
@@ -117,3 +125,11 @@ This honours ADR-0063's "keep git-pact as fallback" until the broker is load-bea
   model (ADR-0030); it still requires 2 approvals as money-path PRs.
 - `rules.yaml: api_change` stays `advisory`; the broker does not change the gate's severity, it
   makes the "consumer-driven contract test updated (Pact)" requirement *enforceable at deploy*.
+
+## Compliance impact
+
+- PCI DSS: not applicable - no cardholder data; the broker stores API contracts only.
+- DORA:    engaged - a fail-closed deploy gate and contract-verification history are ICT change-control and testing evidence; specific articles not mapped in this ADR.
+- GDPR:    not applicable - payload is API contracts, not customer data, per this ADR.
+- PSD2:    not applicable - no payment-service interface obligation addressed by this pipeline.
+- CNB:     not applicable - internal CI and contract tooling, no supervisory requirement cited.

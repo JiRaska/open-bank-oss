@@ -148,6 +148,12 @@ Each bump is **additive only** — older clients ignore unknown fields. Removal
 of a field requires a major schema bump and a 6-month deprecation overlap
 identical to the API versioning rule from ADR 0009.
 
+## Alternatives considered
+
+- **Status quo: docs bundled into the admin-ui image** — per-service Markdown baked into the admin-ui Docker image at build time and served by a filesystem proxy in admin-ui, as in the original Docs-1/Docs-2/Docs-3 pilot. Rejected for three forcing problems: docs version drifts from code version (wrong by construction for audit and runbooks), the static bundle needs a dev host mount plus a custom bake step and gives no per-service live signal, and any docs change forces a fleet-wide admin-ui rebuild and bundle re-upload.
+- **Backstage TechDocs** — a portal that aggregates service-owned docs, the same idea at a higher level. Not adopted: the ADR states we don't need Backstage today, but keeps the file layout Backstage-compatible so a future migration is mechanical.
+- **BPMN diagram viewer** — deliberately out of scope; a heavy front-end dependency, so diagrams are Mermaid only.
+
 ## Consequences
 
 **Positive.**
@@ -194,3 +200,11 @@ identical to the API versioning rule from ADR 0009.
 - ADR 0020 — Kover coverage gate on libs (covers the docs primitives)
 - Pilot services: `openbank-libs/docs/`, `openbank-account-service/src/main/resources/docs/`,
   `openbank-balance-service/src/main/resources/docs/`
+
+## Compliance impact
+
+- PCI DSS: not applicable — no cardholder data in bundled service documentation.
+- DORA:    engaged — the ADR motivates the change by audit and operations-runbook accuracy; specific articles not mapped in this ADR.
+- GDPR:    not applicable — service documentation content, no personal data.
+- PSD2:    not applicable — documentation endpoint, no payment interface.
+- CNB:     not applicable — no CNB requirement is referenced in this ADR.

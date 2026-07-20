@@ -62,6 +62,11 @@ contributors under DCO with no third-party-assigned copyright that withholds con
 therefore within the project's authority. Any future external contributions are made under Apache-2.0 via
 the DCO sign-off on each commit.
 
+## Alternatives considered
+
+- **Keep MPL-2.0 (the status quo of ADR-0012)** — file-level weak copyleft on the whole platform, chosen to protect against pure-extraction forks. Rejected: many banks and large IT shops treat any copyleft as a legal-review trigger, which cost more adoption than the protection bought; the ecosystem OpenBank lives in defaults to Apache-2.0; and the anti-extraction moat had already moved to the AGPL-3.0-only agent services, so MPL was protecting the open core against a threat it does not need protection from.
+- **Introduce a CLA for the platform alongside the new licence** — instead of keeping the existing contribution mechanism. Rejected: Apache-2.0 plus DCO v1.1 is a standard, well-understood pairing, and keeping DCO adds no new contributor friction.
+
 ## Consequences
 
 **Positive**
@@ -79,6 +84,14 @@ the DCO sign-off on each commit.
 - Agent-runtime AGPL-3.0 + commercial open-core model (ADR-0031 D8) is untouched.
 - DCO, governance gates, and `version.txt`/release-please mechanics are unaffected — this is a licence
   metadata change, not a behaviour change.
+
+## Compliance impact
+
+- PCI DSS: not applicable — source licence metadata only, no cardholder data in scope.
+- DORA:    not applicable — licence change, no ICT risk or resilience control altered.
+- GDPR:    not applicable — no personal data processed by a licence header change.
+- PSD2:    not applicable — no payment or account-access behaviour is changed.
+- CNB:     not applicable — no regulated banking function or reporting is affected.
 
 ## References
 

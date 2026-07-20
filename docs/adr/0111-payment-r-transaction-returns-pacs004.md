@@ -100,6 +100,14 @@ PRs: feat/returns-pacs004-reader (libs `Pacs004Reader`), feat/returns-transactio
 (transaction-service `/reverse` endpoint), feat/returns-sepa-payment (sepa-payment-service
 `/returns` endpoint + state machine), feat/returns-clearing-simulator (sandbox `/returns`).
 
+## Compliance impact
+
+- PCI DSS: not applicable — SEPA credit-transfer returns, no cardholder data in scope.
+- DORA:    engaged — a new money-path reversal endpoint requiring threat-model review, plus XXE-hardened parsing of externally supplied XML; specific articles not mapped in this ADR.
+- GDPR:    not applicable — parsed return fields are references, amounts and reason codes.
+- PSD2:    engaged — return/reversal of an executed customer payment transaction; specific articles not mapped in this ADR.
+- CNB:     not applicable — EPC SCT Rulebook obligation (DS-04), not ČNB reporting.
+
 ## References
 
 - ADR-0039 — Ledger as golden source; reversal / REVERSAL type
