@@ -50,10 +50,13 @@ Every ADR has the following sections:
 > is whether the decision stands, `delivery-status` is whether it was built.
 >
 > The block also carries a `summary` (≤240 chars). Those summaries are generated into
-> [DIGEST.md](DIGEST.md), the whole decision history in ~4k tokens. That tier exists
-> because the consequence below — "onboarding is faster: new engineers can read ADRs"
-> — stopped being true at this scale: nobody, human or AI agent, loads ~225k words, so
-> a registry with no digest is a registry nobody reads.
+> [DIGEST.md](DIGEST.md), the whole decision history in ~16k tokens against ~400k for
+> the fleet. That tier exists because the consequence below — "onboarding is faster:
+> new engineers can read ADRs" — stopped being true at this scale: nobody, human or AI
+> agent, loads 1.6 MB of Markdown, so a registry with no digest is a registry nobody
+> reads. The honest claim is reach, not thrift: ~16k is a real cost, but it is a cost
+> you *can* pay, and it buys the complete decision history rather than whichever three
+> ADRs a grep happened to surface.
 >
 > Section requirements are unchanged and now checked (`## Context`, `## Decision`,
 > `## Consequences`), except on superseded ADRs, which stay immutable historical
