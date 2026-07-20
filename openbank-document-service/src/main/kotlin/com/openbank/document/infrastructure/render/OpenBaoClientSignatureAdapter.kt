@@ -6,6 +6,8 @@ package com.openbank.document.infrastructure.render
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.document.application.port.out.ClientSignatureIssuerPort
+import com.openbank.document.application.port.out.PartyLookupPort
+import com.openbank.document.application.port.out.SignedDocumentRef
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,7 +28,11 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.security.PrivateKey
 import java.security.cert.X509Certificate
+import java.time.Clock
 import java.time.Duration
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.UUID
 
 /**
  * [ClientSignatureIssuerPort] adapter (ADR-0162 D4 continued): issues a fresh, single-use
@@ -45,6 +51,11 @@ import java.time.Duration
  * evidence, exactly like the seal's own dev fallback.
  */
 @ApplicationScoped
+// LongParameterList: six of these nine are @ConfigProperty knobs CDI injects individually; the two
+// collaborators (party lookup, clock) are what the class actually depends on. Bundling the config
+// into a @ConfigMapping would read better but is a refactor of settings other deployments already
+// set by name, so it does not belong in a defect fix.
+@Suppress("LongParameterList")
 class OpenBaoClientSignatureAdapter(
     @ConfigProperty(name = "openbank.signature.client-pki.bao-addr", defaultValue = "http://openbao.vault.svc:8200")
     private val baoAddr: String,
@@ -76,6 +87,8 @@ class OpenBaoClientSignatureAdapter(
     private val requireTrustedIssuer: Boolean,
 
     private val objectMapper: ObjectMapper,
+    private val partyLookupPort: PartyLookupPort,
+    private val clock: Clock,
 ) : ClientSignatureIssuerPort {
 
     private val logger = Logger.getLogger(OpenBaoClientSignatureAdapter::class.java)
@@ -84,15 +97,48 @@ class OpenBaoClientSignatureAdapter(
         .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
         .build()
 
-    override suspend fun signAsClient(pdf: ByteArray, partyRef: String): ByteArray = withContext(Dispatchers.IO) {
-        // Idempotent: a retry after a persistence failure must not layer a second signature for a
-        // signer who has already signed this document.
-        if (PadesSigning.hasSignatureNamed(pdf, partyRef)) {
-            pdf
-        } else {
-            val identity = issueOneTimeIdentity(partyRef)
-            PadesSigning.applySignature(pdf, identity, partyRef, SIGNATURE_REASON)
+    override suspend fun signAsClient(pdf: ByteArray, partyRef: String, document: SignedDocumentRef?): ByteArray =
+        withContext(Dispatchers.IO) {
+            // Idempotent: a retry after a persistence failure must not layer a second signature for a
+            // signer who has already signed this document. This also protects the stamp below — it
+            // rewrites page content, which on an already-signed PDF would invalidate that signature.
+            if (PadesSigning.hasSignatureNamed(pdf, partyRef)) {
+                pdf
+            } else {
+                val identity = issueOneTimeIdentity(partyRef)
+                // Stamp first, sign second, so the visible block is inside the signed byte range: the
+                // page and the signature dictionary then assert the same thing, and neither can be
+                // changed without breaking the other.
+                val stamped = document?.let {
+                    PadesSigning.stampSignatureBlock(
+                        pdf = pdf,
+                        title = SIGNATURE_BLOCK_TITLE,
+                        lines = signatureBlockLines(partyRef, it),
+                    )
+                } ?: pdf
+                PadesSigning.applySignature(stamped, identity, partyRef, SIGNATURE_REASON)
+            }
         }
+
+    /**
+     * What the block states. Resolving the signer's legal name is best-effort: a party-service
+     * hiccup must not abort a ceremony the customer has already authorised with SCA, so the block
+     * degrades to the party reference rather than failing the signing act.
+     */
+    private suspend fun signatureBlockLines(partyRef: String, document: SignedDocumentRef): List<String> {
+        val signerName = runCatching { partyLookupPort.findById(UUID.fromString(partyRef))?.legalName }
+            .getOrNull()
+            ?.takeIf { it.isNotBlank() }
+            ?: partyRef
+        val signedAt = DateTimeFormatter.ofPattern(SIGNED_AT_PATTERN)
+            .withZone(ZoneOffset.UTC)
+            .format(clock.instant())
+        return listOf(
+            "Signer / Podepsal(a): $signerName",
+            "Date / Datum: $signedAt",
+            "Document / Dokument: ${document.documentId}",
+            "Fingerprint / Otisk (SHA-256): ${document.fingerprint}...",
+        )
     }
 
     @Suppress("TooGenericExceptionCaught")
@@ -196,5 +242,7 @@ class OpenBaoClientSignatureAdapter(
         const val HTTP_OK = 200
         const val EPHEMERAL_VALIDITY_DAYS = 1L
         const val SIGNATURE_REASON = "Client electronic signature (one-time certificate)"
+        const val SIGNATURE_BLOCK_TITLE = "Signed electronically / Podepsano elektronicky"
+        const val SIGNED_AT_PATTERN = "dd.MM.yyyy HH:mm 'UTC'"
     }
 }

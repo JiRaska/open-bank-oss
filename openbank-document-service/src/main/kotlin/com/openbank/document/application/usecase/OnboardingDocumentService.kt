@@ -175,10 +175,18 @@ class OnboardingDocumentService(
 
     private fun onboardingKey(accountId: UUID) = "$ONBOARDING_KEY_PREFIX$accountId"
 
+    /** Names the party's one LIVE framework agreement — language-independent on purpose, so a
+     *  language change supersedes the existing agreement rather than accumulating a second one. */
+    private fun agreementKey(partyRef: String) = "$AGREEMENT_KEY_PREFIX$partyRef"
+
     // ── Customer-driven, language-correct onboarding agreement (ADR-0169 D3) ────────────────────
 
+    // SwallowedException: DuplicateDocumentException IS the "a concurrent tap already rendered this"
+    // signal — caught to resolve to the winning agreement (idempotent), not an error to rethrow.
+    @Suppress("SwallowedException")
     override suspend fun ensureOnboardingAgreement(partyRef: String, lang: String): OnboardingAgreement {
         val wantCode = frameworkCode(lang)
+        val agreementKey = agreementKey(partyRef)
         val agreements = documentQueryUseCase.listByParty(partyRef)
             .filter { it.templateCode.startsWith(FRAMEWORK_BASE) && it.status != DocumentStatus.ARCHIVED }
 
@@ -194,20 +202,35 @@ class OnboardingDocumentService(
         //    returned for any SIGNED one, so everything left is GENERATED/PENDING_SIGNATURE.
         agreements.forEach { documentRepository.save(it.archive()) }
 
-        // 4. Render fresh in the requested language + open the ceremony.
+        // 4. Render fresh in the requested language + open the ceremony. Steps 1-3 are a
+        //    check-then-act over a list read, so two concurrent taps on SIGN can both reach here;
+        //    the idempotency key makes the DB the arbiter (partial unique index, V6) and the loser
+        //    reuses the winner's agreement instead of rendering a second contract. Step 3 released
+        //    the key on the rows it archived, so a language change is still free to re-render.
         val caseRef = "$AGREEMENT_KEY_PREFIX$partyRef"
-        val document = renderUseCase.render(
-            RenderDocumentCommand(
-                templateCode = wantCode,
-                templateVersion = null,
-                data = buildAgreementData(partyRef = partyRef, caseRef = caseRef),
-                contentType = "application/pdf",
-                partyRef = partyRef,
-                caseRef = caseRef,
-                productRef = null,
-                retainUntil = null,
-            ),
-        )
+        val document = try {
+            renderUseCase.render(
+                RenderDocumentCommand(
+                    templateCode = wantCode,
+                    templateVersion = null,
+                    data = buildAgreementData(partyRef = partyRef, caseRef = caseRef),
+                    contentType = "application/pdf",
+                    partyRef = partyRef,
+                    caseRef = caseRef,
+                    productRef = null,
+                    retainUntil = null,
+                    idempotencyKey = agreementKey,
+                ),
+            )
+        } catch (e: DuplicateDocumentException) {
+            // No partyRef in the message: it arrives from a token claim, i.e. a user-provided value,
+            // and must never be interpolated into a log line (CodeQL java/log-injection — the same
+            // reason OpenBaoClientSignatureAdapter logs only an exception's type). The event itself
+            // is what's diagnostic here; the losing party is recoverable from the request trace.
+            log.info("Onboarding agreement already rendered for this party (concurrent tap) — reusing.")
+            documentQueryUseCase.findByIdempotencyKey(agreementKey)
+                ?: error("Duplicate agreement for $partyRef but no document under $agreementKey")
+        }
         val ceremony = openOrFindCeremony(document.id, partyRef)
         return OnboardingAgreement(
             ceremonyId = ceremony.id,

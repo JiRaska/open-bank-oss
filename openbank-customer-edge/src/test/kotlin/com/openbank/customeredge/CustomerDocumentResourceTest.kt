@@ -80,6 +80,26 @@ class CustomerDocumentResourceTest {
     }
 
     @Test
+    fun `listDocuments hides superseded (ARCHIVED) revisions`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns Response.ok(
+            """
+            [
+              {"id":"$DOC_ID","partyRef":"$caller","templateCode":"RAMCOVA_SMLOUVA_CS","status":"SIGNED",
+               "createdAt":"2026-07-20T10:00:00Z"},
+              {"id":"${UUID.randomUUID()}","partyRef":"$caller","templateCode":"RAMCOVA_SMLOUVA_EN",
+               "status":"ARCHIVED","createdAt":"2026-07-19T10:00:00Z"}
+            ]
+            """.trimIndent(),
+        ).build()
+
+        val body = resource(upstream).listDocuments().entity as String
+
+        assertThat(body).contains("RAMCOVA_SMLOUVA_CS")
+        assertThat(body).doesNotContain("RAMCOVA_SMLOUVA_EN")
+    }
+
+    @Test
     fun `documentContent returns 404 for a document owned by another party (no existence leak)`() {
         val upstream = mockk<UpstreamClient>()
         val otherParty = UUID.randomUUID()

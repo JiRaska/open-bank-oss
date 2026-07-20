@@ -5,6 +5,7 @@
 package com.openbank.document.infrastructure.render
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.apache.pdfbox.Loader
 import org.apache.pdfbox.pdmodel.PDDocument
@@ -13,6 +14,9 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.io.ByteArrayOutputStream
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 
 /**
  * No real OpenBao is available in this test (or in local dev) — a nonexistent ServiceAccount
@@ -30,6 +34,8 @@ class OpenBaoClientSignatureAdapterTest {
         ttl = "300s",
         requireTrustedIssuer = requireTrustedIssuer,
         objectMapper = ObjectMapper(),
+        partyLookupPort = mockk(relaxed = true),
+        clock = Clock.fixed(Instant.parse("2026-07-20T10:00:00Z"), ZoneOffset.UTC),
     )
 
     @Test

@@ -11,6 +11,7 @@ import com.openbank.document.application.port.out.CeremonyRepositoryPort
 import com.openbank.document.application.port.out.ClientSignatureIssuerPort
 import com.openbank.document.application.port.out.DocumentRepositoryPort
 import com.openbank.document.application.port.out.SignatureSealPort
+import com.openbank.document.application.port.out.SignedDocumentRef
 import com.openbank.document.application.port.out.SignerVerificationPort
 import com.openbank.document.domain.event.SignatureCeremonyCompleted
 import com.openbank.document.domain.model.CeremonyStatus
@@ -142,7 +143,14 @@ class SignatureCeremonyService(
 
     private suspend fun signAsClient(document: Document, partyRef: String) {
         val pdf = objectStore.get(document.storageKey)
-        val signed = clientSignaturePort.signAsClient(pdf, partyRef)
+        val signed = clientSignaturePort.signAsClient(
+            pdf,
+            partyRef,
+            SignedDocumentRef(
+                documentId = document.id.toString(),
+                fingerprint = document.sha256.take(SHA_PREFIX_LENGTH),
+            ),
+        )
         objectStore.put(document.storageKey, signed, document.contentType)
     }
 
@@ -173,5 +181,6 @@ class SignatureCeremonyService(
 
     companion object {
         const val EVENT_CEREMONY_COMPLETED = "signature-ceremony.completed.v1"
+        private const val SHA_PREFIX_LENGTH = 16
     }
 }

@@ -55,6 +55,19 @@ class DocumentTest {
             .isInstanceOf(IllegalArgumentException::class.java)
     }
 
+    @Test
+    fun `archive releases the idempotency key so the replacement can claim it`() {
+        val live = document(status = DocumentStatus.PENDING_SIGNATURE)
+            .copy(idempotencyKey = "onboarding-agreement:party-1")
+
+        val archived = live.archive()
+
+        // The key names the party's one LIVE artifact. Holding it on a superseded row would make
+        // the partial unique index reject the very re-render that supersedes it (e.g. an agreement
+        // re-issued in another language), so archiving must hand it back.
+        assertThat(archived.idempotencyKey).isNull()
+    }
+
     private fun document(status: DocumentStatus) = Document(
         id = UUID.fromString("00000000-0000-0000-0000-000000000001"),
         templateCode = "LOAN_AGREEMENT",

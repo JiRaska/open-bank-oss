@@ -157,8 +157,22 @@ interface SignerVerificationPort {
  * certificate's own lifetime.
  */
 interface ClientSignatureIssuerPort {
-    suspend fun signAsClient(pdf: ByteArray, partyRef: String): ByteArray
+    /**
+     * Apply [partyRef]'s electronic signature to [pdf].
+     *
+     * [visual] is the human-readable evidence to draw onto the page before signing — a PAdES
+     * signature is otherwise invisible in ordinary viewers, so a customer's signed contract looks
+     * unsigned. Passing null signs without a visible block (used where no signer identity is
+     * available to display).
+     */
+    suspend fun signAsClient(pdf: ByteArray, partyRef: String, document: SignedDocumentRef? = null): ByteArray
 }
+
+/**
+ * Identifies the document being signed, for the visible signature block. Null means "sign without a
+ * visible block" — the signer's name and the signing time are resolved by the adapter.
+ */
+data class SignedDocumentRef(val documentId: String, val fingerprint: String)
 
 /**
  * Read-only lookup into `openbank-product-catalog`, scoped to exactly what the onboarding flow
