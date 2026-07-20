@@ -100,6 +100,25 @@ class CustomerDocumentResourceTest {
     }
 
     @Test
+    fun `listDocuments keeps an ARCHIVED document that nothing replaced`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns Response.ok(
+            """
+            [
+              {"id":"$DOC_ID","partyRef":"$caller","templateCode":"UCET_SMLOUVA_CS","status":"ARCHIVED",
+               "createdAt":"2026-07-17T17:13:45Z"}
+            ]
+            """.trimIndent(),
+        ).build()
+
+        val body = resource(upstream).listDocuments().entity as String
+
+        // Every account agreement in the sandbox sits in ARCHIVED. Hiding it would remove the
+        // customer's only copy of a contract they are party to.
+        assertThat(body).contains("UCET_SMLOUVA_CS")
+    }
+
+    @Test
     fun `documentContent returns 404 for a document owned by another party (no existence leak)`() {
         val upstream = mockk<UpstreamClient>()
         val otherParty = UUID.randomUUID()
