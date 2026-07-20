@@ -85,3 +85,11 @@ contributors submit to those services, so dual-licensing rights are preserved.
   licence.
 - `scripts/add-license-headers.sh` must be made path-aware (Apache by default, AGPL for the
   four agent paths) so new agent files get the right header — tracked as a follow-up.
+
+## Compliance impact
+
+- PCI DSS: not applicable — source licensing decision, no cardholder data in scope.
+- DORA:    not applicable — licence boundary only, no ICT risk or resilience control changed.
+- GDPR:    not applicable — no personal data involved in licence headers or texts.
+- PSD2:    not applicable — no payment or account-access behaviour is changed.
+- CNB:     not applicable — no regulated banking function or reporting is affected.

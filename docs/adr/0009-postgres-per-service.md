@@ -34,6 +34,11 @@ OpenBank adopts **database-per-service** as the default:
 
 Tier-A operators may shard further (per-customer-segment shards within a service); this is operator concern, not maintainer concern.
 
+## Alternatives considered
+
+- **Shared database** — multiple services read and write the same DB. Simple, but it couples services through the schema; the ADR holds that schema coupling is the single biggest source of cross-team breakage, where a "small ALTER" in one service breaks five others sharing the table.
+- **Schema-per-service in a shared DB cluster** — each service owns a Postgres schema inside one shared cluster, for operational simplicity. Not adopted as the default; it survives only as the documented minimum for services that genuinely share a bounded context (e.g. account + balance + ledger), which MAY co-locate in one cluster with separate schemas.
+
 ## Consequences
 
 **Positive**
@@ -51,6 +56,14 @@ Tier-A operators may shard further (per-customer-segment shards within a service
 - Use PgBouncer / managed Postgres to reduce per-cluster operational overhead.
 - Provide data-composition libraries (BFF pattern, GraphQL gateway) to handle UI joins.
 - Reference data sync via Kafka + CDC keeps duplicates consistent.
+
+## Compliance impact
+
+- PCI DSS: not applicable — no cardholder data storage discussed in this ADR.
+- DORA:    engaged — the ADR claims failure isolation between service databases; specific articles not mapped in this ADR.
+- GDPR:    not applicable — data-ownership pattern, no processing purpose changed.
+- PSD2:    not applicable — internal persistence topology, no payment interface.
+- CNB:     not applicable — no CNB requirement is referenced in this ADR.
 
 ## References
 

@@ -115,3 +115,11 @@ the account-opening path; mitigated by the fail-open posture (never blocks on an
 **Neutral:** no DB migration (validation only, no new persisted field); no change to the
 existing sanctions/IBAN checks; money-path controls (2 approvals, threat model) apply to
 this PR since `openbank-account-service` is in `rules.yaml: money_path_services`.
+
+## Compliance impact
+
+- PCI DSS: not applicable — product reference-data validation, no cardholder data in scope.
+- DORA:    engaged — this is an ICT dependency and failure-posture control (fail-open on catalogue outage); specific articles not mapped in this ADR.
+- GDPR:    not applicable — validates a product identifier, no personal data processed.
+- PSD2:    not applicable — account opening, not TPP access or payment initiation.
+- CNB:     not applicable — no supervisory reporting or CZ profile requirement cited here.

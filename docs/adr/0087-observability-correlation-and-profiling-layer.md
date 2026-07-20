@@ -2,7 +2,7 @@
 date: 2026-06-11
 decision-status: accepted
 delivery-status: partial
-authors: [@JiRaska Relates to:** ADR-0008 (OpenTelemetry), ADR-0077 (Three-Pillar Observability), ADR-0075 (Mobile Crash Monitoring), ADR-0027 (Cloud Substrate, FinOps), ADR-0054 (FinOps)]
+authors: [@JiRaska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
@@ -11,6 +11,8 @@ summary: "A correlation layer keyed on trace_id and the correlation id links Lok
 ---
 
 # ADR-0087 — Observability Correlation & Profiling Layer
+
+**Relates to:** ADR-0008 (OpenTelemetry), ADR-0077 (Three-Pillar Observability), ADR-0075 (Mobile Crash Monitoring), ADR-0027 (Cloud Substrate, FinOps), ADR-0054 (FinOps)
 
 ---
 
@@ -106,6 +108,17 @@ refreshed so the Past-EoL Loki/Tempo cards clear.
 5. **Business metrics sweep** — `DomainMetrics` callsites + outbox backlog per service *(follow-up, 1 PR/service; money-path + threat model)*.
 6. **Mobile shared-trace** — app emits W3C `trace_id` so crash links straight to backend trace *(openbank-app follow-up)*.
 
+## Alternatives considered
+
+- **Keep the status quo (three unlinked pillars on the existing stores)** - metrics, traces and logs stay as separate signals on the `loki-stack` chart with Loki 2.6.1 and bundled Promtail. Rejected: Loki 2.6.1 is Past-EoL (no TSDB, no structured metadata, no native OTLP) and Promtail is itself EoL; logs carried `correlationId` but not `trace_id`/`span_id`, so a log line could not link back to its trace, and a bank cannot debug a stuck payment across three disconnected tools.
+- **A commercial APM vendor** - a hosted APM product instead of the self-hosted LGTM(P) stack. Rejected: the decision is to maximise what the community stack gives a bank while staying fully self-hosted and EU-resident (ADR-0027), with no APM vendor.
+- **eBPF auto-instrumentation** - kernel-level auto-instrumentation as the source of service telemetry. Recorded as not in scope here, carrying forward the rejection in ADR-0077 alternative B; revisit for production.
+- **Per-service instrumentation for RED metrics and the service graph** - instrument every service to emit request/error/duration metrics and dependency edges. Rejected in favour of the Tempo metrics-generator, which produces fleet-wide `traces_spanmetrics_*` and `traces_service_graph_*` with zero service instrumentation.
+- **Promoting correlation ids to Loki stream labels** - carry `traceId`/`spanId`/`correlationId` as ordinary stream labels. Rejected: they would become high-cardinality stream labels; Alloy lifts them into Loki structured metadata instead, keeping them queryable and linkable without that cost. The ADR's cardinality contract is unchanged - amounts go to histograms, ids to structured metadata, neither becomes a label.
+- **Fleet-wide always-on JVM profiling** - enable the Pyroscope Java agent across all services by default. Rejected: profiling is opt-in and off by default because a bank enables profiling deliberately, never fleet-wide-on, and it carries roughly 1-2% CPU overhead per profiled JVM; piloted on `sepa-payment` first.
+- **OTLP-native log export to Tempo/OTel** - move logs onto the OTLP path rather than Loki. Recorded as not in scope; logs stay Loki-via-Alloy.
+- **Tail-based sampling** - sample traces on the OTel Collector after the fact. Recorded as not in scope here; deferred to a separate follow-up on the OTel Collector.
+
 ## Consequences
 
 ### Positive
@@ -150,3 +163,11 @@ follow-up issues as noted in the Phases section above.
 - [ ] Tier-1 alerts active and tested (outbox-backlog alert proven by chaos test).
 - [ ] 30-day SLO baseline per payment rail.
 - [ ] Control Tower shows no Past-EoL observability components.
+
+## Compliance impact
+
+- PCI DSS: not applicable - no cardholder data in traces, logs, metrics or profiles.
+- DORA:    engaged - this is an ICT incident-detection, correlation and reconstruction control, including alerting and SLO burn-rate rules; specific articles not mapped in this ADR.
+- GDPR:    not applicable - no personal-data handling decided here; ids stay non-label metadata.
+- PSD2:    engaged - the ADR claims regulatory-grade SLO and error-budget evidence for PSD2/EBA, exportable from this layer; no article cited in this ADR.
+- CNB:     not applicable - no CNB-specific supervisory requirement identified in this ADR.

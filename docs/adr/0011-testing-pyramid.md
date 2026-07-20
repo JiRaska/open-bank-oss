@@ -64,6 +64,14 @@ OpenBank adopts a standard testing pyramid with four explicit layers:
 - **Scope:** Critical services (ledger, payment, saga coordinators) only.
 - **Trigger:** Weekly; alert on mutation score < 70%.
 
+## Alternatives considered
+
+- **Status quo: no tests at all** — the repository has zero tests today. Rejected as not sustainable for a banking platform; a formal testing strategy is required before any production deployment.
+- **Inverted pyramid** — many slow E2E tests over few unit tests. Named as an anti-pattern to avoid, hence the pyramid shape with unit tests as the most numerous layer.
+- **Mock-heavy unit tests** — unit suites that end up testing the mocks rather than the code. Named as an anti-pattern to avoid.
+- **Integration tests sharing state across runs** — rejected as an anti-pattern; the decision instead runs integration tests on Testcontainers-provided real Postgres, Kafka and Redis.
+- **Load tests only before releases** — rejected because they never catch regressions; load tests are therefore run nightly with a p99 regression gate.
+
 ## Consequences
 
 **Positive**
@@ -80,6 +88,14 @@ OpenBank adopts a standard testing pyramid with four explicit layers:
 - Parallelise test execution in CI.
 - Cache Testcontainers images.
 - Run mutation + chaos out-of-band (weekly), not per PR.
+
+## Compliance impact
+
+- PCI DSS: not applicable — no cardholder data in scope of this ADR.
+- DORA:    engaged — this is an ICT testing and resilience-verification control, including chaos testing; specific articles not mapped in this ADR.
+- GDPR:    not applicable — test strategy, no personal data processing described.
+- PSD2:    not applicable — internal quality practice, no payment interface changed.
+- CNB:     not applicable — no CNB requirement is referenced in this ADR.
 
 ## References
 

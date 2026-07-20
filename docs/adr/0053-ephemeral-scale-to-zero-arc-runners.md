@@ -2,7 +2,7 @@
 date: 2026-06-01
 decision-status: accepted
 delivery-status: shipped
-authors: [Jiri Raska Supersedes: ADR-0082 (CI runner governance — renumbered from ADR-0051 on 2026-06-11 to resolve a duplicate number with the service-discovery ADR-0051)]
+authors: [Jiri Raska]
 supersedes: [0082]
 superseded-by: []
 delivery-repos: []
@@ -11,6 +11,8 @@ summary: "CI runners become per-job ephemeral scale-to-zero ARC scale sets on EK
 ---
 
 # ADR-0053 — Ephemeral scale-to-zero ARC runners — supersedes ADR-0082
+
+**Supersedes:** ADR-0082 (CI runner governance — renumbered from ADR-0051 on 2026-06-11 to resolve a duplicate number with the service-discovery ADR-0051)
 
 ## Context
 

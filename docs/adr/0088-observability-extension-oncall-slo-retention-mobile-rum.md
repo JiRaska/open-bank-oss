@@ -2,7 +2,7 @@
 date: 2026-06-13
 decision-status: accepted
 delivery-status: partial
-authors: [@JiRaska Relates to:** ADR-0008 (OpenTelemetry), ADR-0077 (Three-Pillar Observability), ADR-0087 (Correlation & Profiling Layer), ADR-0075 (Mobile Crash Monitoring), ADR-0056 (Grafana internal-only), ADR-0027 (Cloud Substrate, FinOps), ADR-0054 (FinOps lifecycle), ADR-0061 (DORA metrics)]
+authors: [@JiRaska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
@@ -11,6 +11,8 @@ summary: "Observability is extended with GoAlert plus ntfy for on-call, Pyrra fo
 ---
 
 # ADR-0088 — Observability Extension: On-Call, SLO-as-Code, Durable Retention & Mobile RUM
+
+**Relates to:** ADR-0008 (OpenTelemetry), ADR-0077 (Three-Pillar Observability), ADR-0087 (Correlation & Profiling Layer), ADR-0075 (Mobile Crash Monitoring), ADR-0056 (Grafana internal-only), ADR-0027 (Cloud Substrate, FinOps), ADR-0054 (FinOps lifecycle), ADR-0061 (DORA metrics)
 
 > **Implementation summary 2026-06-25 — D1/D2/D3 confirmed live; D4 split-tracked.**
 >
@@ -240,3 +242,11 @@ Three non-negotiables for a bank (these, not the SDK, are why this is an ADR):
 See **Explicitly rejected / deferred** above (Mimir, Beyla, Tetragon, Faro, full Sentry, session replay).
 The overarching alternative — an external APM (Datadog/New Relic) — was already rejected in ADR-0077
 (cost, data residency); this ADR keeps the strictly-OSS substrate.
+
+## Compliance impact
+
+- PCI DSS: not applicable - no cardholder data; amounts and IBANs are redacted before storage.
+- DORA:    engaged - the ADR cites DORA Art. 17 for both incident response (a reachable human with an escalation path) and incident reconstruction (traces and logs that outlive a node and span the audit window).
+- GDPR:    engaged - mobile RUM collects device-side telemetry from customer devices, so the ADR requires server-side PII scrubbing, pseudonymous party_id only, and consent with collection off by default; session replay is rejected outright as a GDPR/PII non-starter. No article cited in this ADR.
+- PSD2:    not applicable - no payment-service interface or SCA obligation addressed here.
+- CNB:     not applicable - no CNB-specific supervisory requirement identified in this ADR.

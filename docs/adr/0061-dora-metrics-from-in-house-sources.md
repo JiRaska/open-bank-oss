@@ -85,6 +85,14 @@ honest `available:false` when a source is absent. Each metric is sourced from th
   phases. The page states each honestly rather than showing a fabricated number.
 - A squash-merged trunk means Lead Time needs a deploy-event log (Phase 2 work).
 
+## Compliance impact
+
+- PCI DSS: not applicable — delivery metrics only, no cardholder data.
+- DORA:    DORA / EU 2022/2554 Art. 17 — MTTR is sourced from the mandated in-house ICT incident register rather than a SaaS proxy.
+- GDPR:    not applicable — aggregate deployment metrics, no personal data in scope here.
+- PSD2:    not applicable — internal DevOps reporting, no payment interface.
+- CNB:     not applicable — engineering metrics page, no CNB return involved.
+
 ## References
 
 - ADR-0029 — derive-from-code / show-in-UI; read-only consumer (rule #3).

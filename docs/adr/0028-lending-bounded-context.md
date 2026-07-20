@@ -231,6 +231,14 @@ change, not a domain change.
   event wiring to `openbank-anacredit-service` (which has no stage/DPD logic of its own today) — this is
   the remaining payoff that closes the downstream reporting/ICAAP gaps, tracked as a follow-up.
 
+## Alternatives considered
+
+- **No lending domain (status quo)** — deposits, payments, cards, FX and the compliance domains exist, but there is no loan account, repayment schedule, arrears tracking or impairment; the only traces of credit are a product-catalog enum value and a few comments. Rejected: it blocks AnaCredit (ECB/2016/13, CNB), FINREP F 18 / F 12 and the credit-risk input to ICAAP, none of which can be sourced without an exposure book.
+- **Split lending into four micro-services (one per capability)** — origination, servicing, collateral and provisioning as separate deployables. Rejected: it would scatter a single consistency boundary — a disbursement must atomically close the application, open the loan, register the schedule and emit the ledger posting — across network calls and sagas for no ownership benefit; they are one team's one book.
+- **Keep the credit mathematics inside the service** — `Amortization`, `Ifrs9` and `Delinquency` behind the service boundary rather than in `openbank-libs`. Rejected: the math is pure, deterministic and examiner-auditable, and is identical whether it runs in the service, a batch job, a test or a future reporting module, so it belongs in libs like the analytics reconciliation primitives (ADR-0026 D2).
+- **The loan book owning customer balances / the general ledger** — lending mutating balances directly. Rejected: those are owned by `openbank-balance-service` and `openbank-ledger-service`; every cash event in a loan's life is a ledger posting lending emits, never a balance it mutates itself.
+- **Outbox to Kafka as the ledger-posting channel** — carry cash events to the ledger over the existing transactional-outbox stream. Considered and rejected in the ADR: it could not reach the ledger end-to-end, because `openbank-ledger-service` ingests journals only through `POST /api/v1/journals` and has no Kafka posting consumer. The outbox is retained for the analytics/downstream plane only.
+
 ## Consequences
 
 **Positive.** The platform gains its largest missing business domain with the credit *mathematics*
@@ -250,6 +258,14 @@ separate, sizeable piece of work (and its own model-governance concern) not solv
 field-level mapping is genuinely large and deferred to Phase 3 — this ADR provides the primitives
 (stage, DPD bucket, impairment) those returns need, not the returns themselves. Introducing a new
 deployable adds one more service to the CI/build matrix and the operational footprint.
+
+## Compliance impact
+
+- PCI DSS: not applicable — no cardholder data in the loan book.
+- DORA:    engaged — the ledger-posting path is a guarded ICT dependency (retry, timeout, circuit breaker); specific articles not mapped in this ADR.
+- GDPR:    engaged — loan, schedule, arrears and impairment data are customer financial data; read endpoints are role-gated and access is audit-logged. No article cited in this ADR.
+- PSD2:    not applicable — credit origination and servicing, not a payment or account-access service.
+- CNB:     engaged — the ADR names CNB/AnaCredit (ECB Reg. 2016/13) granularity, FINREP F 18 / F 12, IFRS 9 §5.5, CRR Art. 178 and EBA/GL/2020/06 as the anchors lending must honour; the field-level AnaCredit/FINREP mapping is explicitly not yet built.
 
 ## References
 - ADR-0045 — lightweight ports + offline-buildable no-op defaults (the realization pattern)

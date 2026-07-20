@@ -59,11 +59,24 @@ Every ADR has the following sections:
 > ADRs a grep happened to surface.
 >
 > Section requirements are unchanged and now checked (`## Context`, `## Decision`,
-> `## Consequences`), except on superseded ADRs, which stay immutable historical
-> records. `## Alternatives considered` and `## Compliance impact` are advisory
-> warnings for now — 32 and 42 pre-schema ADRs respectively lack them, and
-> back-filling is authoring work, not something a structural gate can force in one
-> sweep. They graduate to errors under ADR-0144 once that backlog is closed.
+> `## Consequences`, `## Alternatives considered`, `## Compliance impact`), except on
+> superseded ADRs, which stay immutable historical records. The last two were advisory
+> at first, because 32 and 42 pre-schema ADRs respectively lacked them; that backlog
+> was back-filled and the rules graduated to errors under ADR-0144.
+>
+> **Writing those two sections honestly.** Making a rule blocking creates pressure to
+> satisfy it with something rather than nothing, and in this directory that pressure is
+> dangerous: these files are read by auditors and by the CNB, so a confident invention
+> is far worse than an acknowledged gap. Two standing rules:
+>
+> - **Alternatives** are *reconstructed, never invented.* If an ADR genuinely recorded
+>   no rejected option, it says so in as many words rather than manufacturing a
+>   plausible-looking one.
+> - **Compliance rows carry no article, clause or requirement number unless that exact
+>   citation appears in the ADR's own text.** Otherwise: name the engagement in plain
+>   words, or write `not applicable — <specific reason>`. For most internal engineering
+>   decisions four or five of the five rows are honestly "not applicable", and that is
+>   the correct answer, not a sign of a lazy ADR.
 
 An ADR is **required** when:
 
@@ -79,6 +92,13 @@ An ADR is **required** when:
 ADRs are **immutable once accepted**. To change a decision, write a new
 ADR with `Supersedes: ADR-NNNN` in the header, and update the old ADR
 status to `Superseded by ADR-MMMM`.
+
+## Alternatives considered
+
+- **Tribal knowledge (the status quo)** — leave significant architectural choices undocumented and carried by the people who made them. Rejected: the ADR states tribal knowledge is insufficient for a regulated platform, where decisions must be defensible to internal review, external auditors (Big-4, QSA) and the CNB, with rationale written down at the time of the decision.
+- **Prose ADR headers (the pre-amendment status quo)** — keep the header as free prose. Rejected in the amendment: by ~170 ADRs the fleet carried four coexisting header conventions plus an undocumented fifth delivery value, every consumer needed its own fallback regex, and the generated index truncated statuses to 40 characters; the header is now YAML front matter defined by SCHEMA.md and enforced in CI.
+- **A registry with no digest tier** — publish the ADRs and rely on readers loading them. Rejected in the amendment: at ~1.6 MB of Markdown nobody, human or AI agent, reads the fleet, so the consequence "onboarding is faster" stopped being true; DIGEST.md trades ~16k tokens for the complete decision history instead of whichever ADRs a grep surfaced.
+- **Editing accepted ADRs in place** — revise a decision by rewriting its record. Rejected: ADRs are immutable once accepted; a change requires a new ADR with `Supersedes: ADR-NNNN` and a status update on the old one, so the historical record stays intact.
 
 ## Consequences
 
@@ -97,6 +117,14 @@ status to `Superseded by ADR-MMMM`.
 - ADR template in this repo.
 - PR template asks whether an ADR is needed.
 - CODEOWNERS requires architect review for `docs/adr/`.
+
+## Compliance impact
+
+- PCI DSS: not applicable — decision-record governance, no cardholder data in scope.
+- DORA:    not applicable — documentation practice, no ICT resilience control claimed here.
+- GDPR:    not applicable — ADRs record design rationale, not personal data.
+- PSD2:    not applicable — no payment-service interface or TPP surface decided.
+- CNB:     engaged — the ADR requires decisions be defensible to the regulator; no specific provision cited in this ADR.
 
 ## References
 

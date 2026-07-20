@@ -39,6 +39,11 @@ Every Kafka topic in OpenBank MUST be documented in AsyncAPI 3.0 format:
 - Schema evolution rules: backward-compatible by default; breaking changes require a new topic version (`*-v2-events-out`) and parallel running until migration complete.
 - AsyncAPI specs are linted in CI; missing or stale specs block release.
 
+## Alternatives considered
+
+- **Undocumented Kafka topics as an implicit API (the status quo)** — let services produce and consume events with no formal contract. Rejected: schema changes break downstream consumers without warning, new consumers cannot discover what events exist or what they mean, auditors cannot trace which service emits which event for what reason, and there is no equivalent of OpenAPI for browsing or generating clients.
+- **Breaking a topic's schema in place** — evolve an existing topic incompatibly. Rejected: evolution is backward-compatible by default, and a breaking change requires a new topic version (`*-v2-events-out`) with parallel running until migration is complete.
+
 ## Consequences
 
 **Positive**
@@ -54,6 +59,14 @@ Every Kafka topic in OpenBank MUST be documented in AsyncAPI 3.0 format:
 **Mitigation**
 - Schema Registry is mature; managed offerings widely available.
 - CI scaffolding generates spec skeletons from message classes when missing.
+
+## Compliance impact
+
+- PCI DSS: not applicable — event-contract documentation, no cardholder data in scope.
+- DORA:    not applicable — documentation and schema governance, no resilience control claimed.
+- GDPR:    not applicable — ADR does not scope personal data in event payloads.
+- PSD2:    not applicable — internal Kafka topics, no TPP-facing interface decided.
+- CNB:     engaged — the ADR requires every topic have a documented purpose, producer and retention so auditors can trace event emission; no specific provision cited in this ADR.
 
 ## References
 

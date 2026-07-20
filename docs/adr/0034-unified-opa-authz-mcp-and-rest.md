@@ -215,6 +215,12 @@ versus ~100 MB if we ran two.
 - **Network-layer authz** (mTLS service identity) is owned by ADR-0033
   (Op-ex 5 Istio) — orthogonal.
 
+## Alternatives considered
+
+- **Two parallel OPA stacks (status quo of the two drafts)** — keep ADR-0018's REST-authz sidecar and ADR-0031's MCP `/tools/call` gate as independently drafted stacks. Rejected: two OPA sidecars per pod double memory and management surface, two bundles ship divergent Rego conventions and complicate audit, and two query shapes (`data.openbank.agents.allow` vs `data.openbank.allow`) break the single-decision-point mental model that makes OPA reviewable.
+- **Leave business endpoints on `@PermitAll` / plain role checks** — the pre-existing state that K7 of the 2026-05-28 audit flagged as 36 `@PermitAll` on business endpoints. Rejected: K7 is the forcing function for REST authz; the decision replaces those with fine-grained, attribute-aware `@Authorize` checks.
+- **Cedar as the REST policy language** — mentioned alongside OPA in the task #32 description. Rejected for now (D6): OPA is already deployed and AI agents use it, so adopting a second policy language for REST would re-fragment the audit surface this ADR exists to prevent. May be revisited for graph-shaped authorization such as document sharing.
+
 ## Consequences
 
 **Positive.**

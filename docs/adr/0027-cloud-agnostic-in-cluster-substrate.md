@@ -75,6 +75,15 @@ ADR is their origin:
 4. **Secrets never in IaC state**, KMS-unsealed, ESO-synced (see ADR-0017 / runbook 0005).
 5. **Default-deny network posture** between namespaces (NetworkPolicy baseline, ADR-0081).
 
+## Alternatives considered
+
+- **Cloud-managed proprietary primitives in the request or money path (Lambda/Fargate, DynamoDB, SQS in the money path, API Gateway, Cognito)** — the cheapest managed building blocks, tempting on a tight FinOps budget. Rejected because they create the deepest lock-in and would break the EU data-residency, DORA operational-resilience and regulator-facing exit/portability story; anything proposing an AWS-only primitive in the path is rejected by default unless it cites a go-live condition.
+- **Hand-rolled deployment outside Git (`kubectl apply`)** — rejected in favour of a single ArgoCD app-of-apps where merged-to-`main` is deployed, so there is no drift outside Git.
+- **In-memory storage for regulated stores (e.g. Apicurio in-memory)** — rejected; SQL storage is required, and "no in-memory state for regulated stores" is one of the go-live conditions.
+- **Kong as the gateway** — originally considered, superseded in implementation by nginx ingress (recorded as an as-built delta).
+- **Adding Tier-2 production capabilities speculatively** — rejected: they are added only when the go-live conditions are met, and never by reaching for a proprietary managed service that breaks the cloud-agnostic rule.
+- **A cloud SMS/voice/email dependency for paging and notifications** — rejected because it would punch a hole in the VPC-internal, egress-only posture; paging and notifications stay in-cluster or egress-only.
+
 ## Consequences
 
 - **Portability preserved.** No FaaS lock-in; the banking services are plain Quarkus containers on
@@ -96,3 +105,11 @@ ADR-0008 (OpenTelemetry), ADR-0010 (Kubernetes + ArgoCD GitOps), ADR-0017 (Vault
 ADR-0029 (governance-as-code gates), ADR-0030 (supply-chain / admission signature verification),
 ADR-0041 / ADR-0057 / ADR-0083 (scale-to-zero tiers as in-cluster operators), ADR-0054 (FinOps
 lifecycle), ADR-0081 (cluster segmentation / default-deny baseline), ADR-0088 (egress-only paging).
+
+## Compliance impact
+
+- PCI DSS: not applicable — platform substrate decision, no cardholder data in scope.
+- DORA:    engaged — DORA Art. 12 is cited for the durable, immutable account audit go-live condition (CloudTrail + AWS Config); the portability/exit posture is the wider resilience concern.
+- GDPR:    engaged — EU data residency is a stated obligation shaping the substrate; no article cited in this ADR.
+- PSD2:    not applicable — infrastructure substrate, no payment or authentication surface.
+- CNB:     not applicable — ADR cites DORA and EU residency, no CNB-specific requirement.

@@ -272,6 +272,18 @@ drift generator. This is a producer-side change (4 services + the sink's `inferA
 out of scope for this ADR's reconciliation-reader work and tracked as its own follow-up; account-service
 remains the single verified 🟢 reference until it lands.
 
+## Alternatives considered
+
+- **The sink reads each domain service's Postgres database directly** — the shortest route to per-aggregate `max(version)` and counts. Rejected because the analytics-sink owns no OLTP database (ADR-0022), it would break service-DB ownership boundaries and put read load on operational stores — precisely the second extraction path the Kappa/outbox design exists to avoid.
+- **Keep the status quo: leave `ReconciliationSource` bound to `NoOpReconciliationSource`** — reconciliation stays one-sided, comparing the warehouse against nothing authoritative. Rejected because it cannot answer the examiner question of whether the 10-year warehouse has silently lost or diverged from the operational record; it is retained only as the offline `@Default` binding so the service stays buildable.
+- **A new `openbank-contracts/` module for the shared DTO and JAX-RS interface** — rejected because `openbank-libs` already houses the reconciliation primitives and is already depended on by both the sink and every domain service, so a new module would only add build/version overhead.
+- **Per-service duplication of the endpoint contract (path, media type, `@RolesAllowed`)** — rejected in favour of a shared JAX-RS interface carrying the role gate, so the security gate cannot be forgotten or weakened per service; `@PermitAll` is explicitly never allowed.
+- **A bespoke service-to-service token mechanism for the sink's calls** — rejected in favour of the existing `@RegisterRestClient` + `@OidcClientFilter` / `ServiceTokenProvider` client-credentials path, so no new token handling lives in the adapter.
+- **Exposing the source-side version *sequence* to support completeness (F5)** — rejected because the OLTP store keeps only current state (one row per aggregate with its JPA `@Version`), not the historical event sequence; completeness stays inherently warehouse-only and the port declares no `versionsByAggregate()`.
+- **A single buffered JSON document for the high-volume `transaction` table** — kept as the baseline for small services but rejected at volume in favour of streamed NDJSON with cursor paging, so neither side buffers the full result set.
+- **Failing the whole reconciliation pass when a source service is unreachable** — rejected: the unreachable service is logged loudly and excluded from that pass, surfacing as warehouse-only for its keys.
+- **Building Phase 2 (balance, party, kyc, consent) as originally designed, before the producers are fixed** — rejected by the 2026-05-30 finding: those producers emit a constant or absent `version`, and balance/kyc emit no `aggregateType`, so a faithful source endpoint would manufacture drift on every aggregate. The chosen path is to fix the producers first.
+
 ## Consequences
 
 **Positive.** F4/F5 become genuinely two-sided: the sink finally has an authoritative source to
@@ -292,6 +304,14 @@ ADR-0023 adapters the integration is build-time gated, so a deployment that forg
 `openbank.analytics.reconcile.source.backend=http` (or omits an endpoint from the config map) silently
 keeps the no-op for the missing services — the gate and the endpoint map must be part of the production
 profile and verified, not assumed.
+
+## Compliance impact
+
+- PCI DSS: not applicable — reconciliation metadata only, no cardholder data in scope.
+- DORA:    engaged — ICT monitoring (the drift check and its sealed evidence); specific articles not mapped in this ADR.
+- GDPR:    not applicable — endpoint returns aggregate ids, versions and counts only.
+- PSD2:    not applicable — internal reconciliation surface, no payment or authentication flow.
+- CNB:     engaged — this closes the source side of the examiner-facing F4/F5 tie-out (BCBS 239 §3 accuracy/completeness/integrity and EBA/GL segregation of duties are cited); no specific CNB requirement number given.
 
 ## References
 - ADR-0023 — analytics regulatory hardening (F4 count tie-out, F5 completeness; this ADR closes the
