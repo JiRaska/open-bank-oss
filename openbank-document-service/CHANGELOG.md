@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.7](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.6...document-service-v0.8.7) (2026-07-20)
+
+
+### Bug Fixes
+
+* **document-service:** visible signature block, and stop duplicate agreements ([#1817](https://github.com/JiRaska/open-bank-oss/issues/1817)) ([b6b4faf](https://github.com/JiRaska/open-bank-oss/commit/b6b4faf3781c364efa5a11302e623be56463719f))
+
 ## [0.8.6](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.5...document-service-v0.8.6) (2026-07-17)
 
 
