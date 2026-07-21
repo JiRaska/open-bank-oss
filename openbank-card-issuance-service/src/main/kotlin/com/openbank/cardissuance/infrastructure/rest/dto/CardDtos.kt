@@ -60,3 +60,6 @@ fun Card.toResponse() = CardResponse(
     dailyLimitMinorUnits, monthlyLimitMinorUnits, currency, deliveryAddress,
     activatedAt, blockedAt, blockedReason, createdAt, updatedAt,
 )
+
+/** Customer/operator request to set a card's spending limits (minor units). */
+data class UpdateLimitsRequest(val dailyLimitMinorUnits: Long, val monthlyLimitMinorUnits: Long)

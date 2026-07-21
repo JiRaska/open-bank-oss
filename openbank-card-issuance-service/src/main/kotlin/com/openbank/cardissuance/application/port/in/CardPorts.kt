@@ -24,12 +24,20 @@ data class IssueCardCommand(
 
 data class CardStatusCommand(val cardId: UUID, val reason: String?, val changedBy: String)
 
+data class UpdateLimitsCommand(
+    val cardId: UUID,
+    val dailyLimitMinorUnits: Long,
+    val monthlyLimitMinorUnits: Long,
+    val changedBy: String,
+)
+
 interface CardUseCase {
     suspend fun issueCard(cmd: IssueCardCommand): Card
     suspend fun activateCard(cmd: CardStatusCommand): Card
     suspend fun blockCard(cmd: CardStatusCommand): Card
     suspend fun suspendCard(cmd: CardStatusCommand): Card
     suspend fun resumeCard(cmd: CardStatusCommand): Card
+    suspend fun updateLimits(cmd: UpdateLimitsCommand): Card
     suspend fun getCard(id: UUID): Card?
     suspend fun listAll(): List<Card>
     suspend fun listByAccount(accountId: UUID): List<Card>
