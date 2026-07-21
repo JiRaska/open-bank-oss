@@ -333,6 +333,24 @@ class UpstreamClient {
             .type(MediaType.APPLICATION_JSON).build()
     }
 
+    /** DELETE carrying a JSON body (e.g. consent revoke, which requires a { reason }). */
+    fun delete(url: String, partyId: String, body: String): Response = try {
+        val request = HttpRequest.newBuilder()
+            .uri(validatedUri(url))
+            .header("Authorization", "Bearer ${serviceToken()}")
+            .header(PARTY_HEADER, partyId)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .timeout(Duration.ofMillis(requestTimeoutMs))
+            .method("DELETE", HttpRequest.BodyPublishers.ofString(body)).build()
+        val r = http.send(request, HttpResponse.BodyHandlers.ofString())
+        Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
+    } catch (e: Exception) {
+        Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
     // Idempotency-aware POST: forwards the caller's Idempotency-Key (required by some upstreams,
     // e.g. domestic-payment) so an app retry replays rather than duplicates. A blank/absent key
     // falls back to a generated one so the upstream contract is always satisfied.

@@ -143,6 +143,9 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.sdd-service-url")
     lateinit var sddServiceUrl: String
 
+    @ConfigProperty(name = "openbank.edge.consent-service-url")
+    lateinit var consentServiceUrl: String
+
     /** The bank's own SWIFT/BIC — the senderBic on outbound MT103s. */
     @ConfigProperty(name = "openbank.edge.bank-bic", defaultValue = "OPENCZPPXXX")
     lateinit var bankBic: String
@@ -540,6 +543,68 @@ class CustomerEdgeResource(
         o.put("status", m.get("status")?.asText() ?: "")
         m.get("signatureDate")?.asText()?.let { o.put("signatureDate", it) }
         m.get("lastCollectionDate")?.asText()?.takeIf { it.isNotBlank() }?.let { o.put("lastCollectionDate", it) }
+        return o
+    }
+
+    // ── PSD2 consents (ADR-0126) ─────────────────────────────────────────────
+    // The customer's view of who (TPPs, delegated agents) may access their account data, and the
+    // ability to revoke. Consents are party-scoped: consent-service keys them by partyId, so the
+    // edge injects the caller's partyId from the JWT and never trusts a client-supplied one.
+
+    /** The third-party / agent data-access consents granted by the caller. */
+    @GET
+    @Path("/consents")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun listConsents(): Response {
+        val customer = customer()
+        val party = customer.partyId.toString()
+        val resp = upstream.get("$consentServiceUrl/api/v1/consents/party/$party", party)
+        val arr = if (resp.status == 200) {
+            runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") as? ArrayNode }.getOrNull()
+        } else {
+            null
+        } ?: return Response.ok("[]").type(MediaType.APPLICATION_JSON).build()
+        val out = objectMapper.createArrayNode()
+        arr.forEach { c -> out.add(projectConsent(c)) }
+        return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * Revoke a consent the caller owns. consent-service takes partyId as a query param and enforces
+     * that the consent belongs to it, so passing the JWT partyId both authorises and scopes the call
+     * — a customer can never revoke another party's consent even by guessing an id.
+     */
+    @DELETE
+    @Path("/consents/{id}")
+    @Authorize(action = "customer.consent.revoke", resource = "#id")
+    @Blocking
+    fun revokeConsent(@PathParam("id") id: UUID): Response {
+        val customer = customer()
+        val body = objectMapper.createObjectNode().put("reason", "Revoked by customer").toString()
+        val resp = upstream.delete(
+            "$consentServiceUrl/api/v1/consents/$id?partyId=${customer.partyId}",
+            customer.partyId.toString(),
+            body,
+        )
+        return Response.status(resp.status).entity(resp.entity).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    private fun projectConsent(c: com.fasterxml.jackson.databind.JsonNode): ObjectNode {
+        val o = objectMapper.createObjectNode()
+        o.put("id", c.get("id")?.asText())
+        o.put("granteeName", c.get("granteeName")?.asText() ?: "")
+        o.put("granteeType", c.get("granteeType")?.asText() ?: "")
+        o.put("status", c.get("status")?.asText() ?: "")
+        val scopes = objectMapper.createArrayNode()
+        c.get("scopes")?.forEach { scopes.add(it.asText()) }
+        o.set<com.fasterxml.jackson.databind.JsonNode>("scopes", scopes)
+        val ibans = objectMapper.createArrayNode()
+        c.get("accountIbans")?.takeIf { !it.isNull }?.forEach { ibans.add(it.asText()) }
+        o.set<com.fasterxml.jackson.databind.JsonNode>("accountIbans", ibans)
+        c.get("validFrom")?.asText()?.let { o.put("validFrom", it) }
+        c.get("validTo")?.asText()?.let { o.put("validTo", it) }
+        c.get("createdAt")?.asText()?.let { o.put("createdAt", it) }
         return o
     }
 
