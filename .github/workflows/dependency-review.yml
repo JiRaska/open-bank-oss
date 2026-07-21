@@ -22,7 +22,7 @@ jobs:
     # Only dependency-touching PRs wait at all; the rest finish in ~7 s (retry disarmed).
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Whether to wait for a Gradle snapshot depends on whether one is coming: the retry
       # below must be armed ONLY when dependency-submission.yml is also running for this PR,
