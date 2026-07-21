@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.37.1...customer-edge-v0.38.0) (2026-07-21)
+
+
+### Features
+
+* **edge:** PSD2 consent list + revoke for the customer app ([#1880](https://github.com/JiRaska/open-bank-oss/issues/1880)) ([e6cc4bf](https://github.com/JiRaska/open-bank-oss/commit/e6cc4bf5800363258c704231a57651bb48d3dd69))
+
 ## [0.37.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.37.0...customer-edge-v0.37.1) (2026-07-21)
 
 
