@@ -492,6 +492,43 @@ class CustomerEdgeResource(
         return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
     }
 
+    /** Cancel a SEPA Direct Debit mandate the caller owns (terminal — no more collections). */
+    @POST
+    @Path("/sdd/mandates/{id}/cancel")
+    @Authorize(action = "customer.sdd.update", resource = "#id")
+    @Blocking
+    fun cancelSddMandate(@PathParam("id") id: UUID): Response = sddMandateAction(id, "cancel")
+
+    /** Temporarily suspend a mandate (collections paused; resumable). */
+    @POST
+    @Path("/sdd/mandates/{id}/suspend")
+    @Authorize(action = "customer.sdd.update", resource = "#id")
+    @Blocking
+    fun suspendSddMandate(@PathParam("id") id: UUID): Response = sddMandateAction(id, "suspend")
+
+    /** Resume a suspended mandate. */
+    @POST
+    @Path("/sdd/mandates/{id}/resume")
+    @Authorize(action = "customer.sdd.update", resource = "#id")
+    @Blocking
+    fun resumeSddMandate(@PathParam("id") id: UUID): Response = sddMandateAction(id, "resume")
+
+    // Ownership: sdd-service actions are by mandate id only, so the edge resolves the mandate's
+    // accountId and checks the caller owns it before proxying — a customer must never suspend or
+    // cancel a mandate on someone else's account.
+    private fun sddMandateAction(id: UUID, action: String): Response {
+        val customer = customer()
+        val mResp = upstream.get("$sddServiceUrl/api/v1/sdd/mandates/$id", customer.partyId.toString())
+        if (mResp.status != 200) return Response.status(mResp.status).entity(mResp.entity).build()
+        val acct = runCatching {
+            objectMapper.readTree(mResp.entity?.toString() ?: "").get("accountId")?.asText()
+        }.getOrNull() ?: return forbidden("Mandate not found")
+        if (!ownsAccount(UUID.fromString(acct), customer.partyId)) {
+            return forbidden("Mandate does not belong to caller")
+        }
+        return upstream.post("$sddServiceUrl/api/v1/sdd/mandates/$id/$action", customer.partyId.toString(), "")
+    }
+
     private fun projectMandate(m: com.fasterxml.jackson.databind.JsonNode): ObjectNode {
         val o = objectMapper.createObjectNode()
         o.put("id", m.get("id")?.asText())
