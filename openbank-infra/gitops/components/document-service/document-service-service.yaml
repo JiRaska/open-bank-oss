@@ -134,7 +134,7 @@ spec:
             # REMOVE THIS once the KV is seeded per docs/runbooks/0008-openbao-document-signing-pki.md.
             # It is the only thing standing between the sandbox and real (self-signed org) seals.
             - name: OPENBANK_SIGNATURE_ALLOW_EPHEMERAL_SEALS
-              value: "true"
+              value: "false"
             # Datasource: single document-service-db (document-service-db.yaml).
             # Reactive URL for the app (Panache); JDBC URL for Flyway. Both
             # username/password variants set, matching the billing-service pattern.
