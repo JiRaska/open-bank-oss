@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.34.1...customer-edge-v0.35.0) (2026-07-21)
+
+
+### Features
+
+* **edge:** expose Verification of Payee at POST /customer/v1/vop/verify ([#1857](https://github.com/JiRaska/open-bank-oss/issues/1857)) ([a729127](https://github.com/JiRaska/open-bank-oss/commit/a729127f94c3ad286b8178223df8d84e8023393b)), closes [#1856](https://github.com/JiRaska/open-bank-oss/issues/1856)
+
 ## [0.34.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.34.0...customer-edge-v0.34.1) (2026-07-20)
 
 
