@@ -70,6 +70,26 @@ class PadesSigningTest {
     }
 
     @Test
+    fun `signature block renders a name with diacritics outside WinAnsi (rcaron, ecaron, uring)`() {
+        // Regression: the block used Standard-14 Helvetica (WinAnsiEncoding), which cannot encode
+        // U+0159 (ř) etc. — showText threw IllegalArgumentException and the ENTIRE signing ceremony
+        // failed with 400 for any customer whose name carries those glyphs (most Czech names). The
+        // earlier test only used á/š/ó, which happen to live in WinAnsi, so it never caught this.
+        val pdf = blankPdf()
+        val name = "Oldřich Vaněk-Růžička"
+
+        val stamped = PadesSigning.stampSignatureBlock(
+            pdf = pdf,
+            title = "Podepsáno elektronicky",
+            lines = listOf("Podepsal: $name", "Datum: 21.07.2026 přes SCA"),
+        )
+
+        val text = PDFTextStripper().getText(Loader.loadPDF(stamped))
+        assertThat(text).contains(name)
+        assertThat(text).contains("Podepsáno elektronicky")
+    }
+
+    @Test
     fun `stamping is a no-op without lines so an unsigned-block document is left byte-identical`() {
         val pdf = blankPdf()
 
