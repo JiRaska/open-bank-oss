@@ -100,6 +100,7 @@ openbank:
     sepa-payment-service-url: ${SEPA_PAYMENT_SERVICE_URL:http://sepa-payment.payments.svc:8115}
     sepa-instant-service-url: ${SEPA_INSTANT_SERVICE_URL:http://sepa-instant.payments.svc:8127}
     swift-service-url: ${SWIFT_SERVICE_URL:http://swift-service.payments.svc:8122}
+    vop-service-url: ${VOP_SERVICE_URL:http://vop-service.payments.svc:8149}
     sdd-service-url: ${SDD_SERVICE_URL:http://sdd-service.sdd.svc:8129}
     bank-bic: ${OPENBANK_BANK_BIC:OPENCZPPXXX}
     sca-service-url:     ${SCA_SERVICE_URL:http://sca-service.sca.svc:8110}

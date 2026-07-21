@@ -160,6 +160,10 @@ spec:
               value: http://sepa-instant.payments.svc:8127
             - name: SWIFT_SERVICE_URL
               value: http://swift-service.payments.svc:8122
+            # Verification of Payee (EU SEPA CoP): POST /customer/v1/vop/verify before a transfer.
+            # Declared here so gen-network-policies.py opens the edge->vop-service ingress allow.
+            - name: VOP_SERVICE_URL
+              value: http://vop-service.payments.svc:8149
             # SEPA Direct Debit mandates (inkasa) read-only view for the customer app (#1730): GET
             # /customer/v1/sdd/mandates. Declared here so gen-network-policies.py opens the
             # edge->sdd ingress allow. sdd-service is KEDA scale-to-zero — first call cold-starts it.

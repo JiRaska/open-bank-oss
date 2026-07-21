@@ -137,6 +137,9 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.swift-service-url")
     lateinit var swiftServiceUrl: String
 
+    @ConfigProperty(name = "openbank.edge.vop-service-url")
+    lateinit var vopServiceUrl: String
+
     @ConfigProperty(name = "openbank.edge.sdd-service-url")
     lateinit var sddServiceUrl: String
 
@@ -588,6 +591,28 @@ class CustomerEdgeResource(
             customer.partyId.toString(),
             """{"currencyCode":"$ccy"}""",
         )
+    }
+
+    // --- Verification of Payee (VoP / Confirmation of Payee, EU SEPA rule) ---
+
+    /**
+     * Verify that a creditor account (IBAN) belongs to the named payee BEFORE the customer confirms
+     * a transfer — the anti-APP-fraud check EU makes mandatory for SEPA payments. Pure name lookup:
+     * no money moves, no account ownership needed, so it is safe for any authenticated customer.
+     * Proxies to vop-service `/api/v1/vop/verify`, which returns MATCH / CLOSE_MATCH / NO_MATCH.
+     */
+    @POST
+    @Path("/vop/verify")
+    @Authorize(action = "customer.vop.verify")
+    @Blocking
+    fun verifyPayee(body: String): Response {
+        val customer = customer()
+        val iban = extractTextField(objectMapper, body, "creditorIban")?.trim()
+            ?: return badRequest("Missing creditorIban")
+        val name = extractTextField(objectMapper, body, "creditorName")?.trim()
+            ?: return badRequest("Missing creditorName")
+        if (iban.isEmpty() || name.isEmpty()) return badRequest("creditorIban and creditorName must not be blank")
+        return upstream.post("$vopServiceUrl/api/v1/vop/verify", customer.partyId.toString(), body)
     }
 
     @DELETE
