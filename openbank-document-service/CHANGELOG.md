@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.8](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.7...document-service-v0.8.8) (2026-07-21)
+
+
+### Bug Fixes
+
+* **onboarding:** release the idempotency key when an agreement is archived ([#1851](https://github.com/JiRaska/open-bank-oss/issues/1851)) ([c724041](https://github.com/JiRaska/open-bank-oss/commit/c724041a60dd8ad282c26ad3b878a088ff65c305)), closes [#1850](https://github.com/JiRaska/open-bank-oss/issues/1850)
+
 ## [0.8.7](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.6...document-service-v0.8.7) (2026-07-20)
 
 
