@@ -609,6 +609,53 @@ test_deny_operator_signature_ceremony_record_decision if {
 	}
 }
 
+# edge-service-consent: the customer's own PSD2 consent screen (ADR-0126). Same edge
+# principal + guard as the notification/document grants — list is party-scoped by the
+# path partyId the edge injects, revoke is ownership-enforced downstream.
+test_allow_service_consent_list if {
+	decision := rest.allow with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "consent.list",
+		"resource": {"type": "party", "id": "p-1"},
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "edge-service-consent"
+}
+
+test_allow_service_consent_revoke if {
+	decision := rest.allow with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "consent.revoke",
+		"resource": {"type": "consent", "id": "c-1"},
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "edge-service-consent"
+}
+
+# Least privilege: the grant is the two exact actions the app uses, NOT the consent. family
+# — the edge must not be able to create/activate/validate consents on the customer's behalf.
+test_deny_service_consent_create if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "consent.create",
+		"resource": {"type": "consent", "id": "c-1"},
+	}
+}
+
+# Staff carrying ROLE_OPERATOR must not revoke a customer's consent off this rule — it is
+# pinned to the edge's client_credentials identity, and a human session is a different client.
+test_deny_operator_consent_revoke if {
+	not rest.allow with input as {
+		"principal": {"id": "alice.operator", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "consent.revoke",
+		"resource": {"type": "consent", "id": "c-1"},
+	}
+}
+
 # The rule must NOT open other action families to the edge M2M caller (deny-by-default
 # holds) — operator-read-any also does not cover a write like party.update.
 test_deny_service_outside_notification_family if {

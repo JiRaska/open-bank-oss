@@ -230,6 +230,21 @@ allowed_reasons contains "edge-service-notification" if {
 	startswith(input.action, family)
 }
 
+# The customer-edge proxying the customer's own PSD2 consent screen (ADR-0126): the app
+# lists who may access its account data and revokes a consent. Same edge principal, same
+# guard as edge-service-notification — the edge injects the caller's authoritative partyId
+# from the JWT (consent-service keys listByParty by that path partyId), and revoke is
+# ownership-enforced downstream (ConsentService throws ConsentNotOwnedByPartyException when
+# consent.partyId != command.partyId), so the edge can never read or revoke another party's
+# consent even with a guessed id. Scoped to the two exact actions the app uses — NOT the
+# `consent.` family — so this grant cannot create, activate, or validate consents on the
+# edge principal (least privilege; the edge exposes no route for those anyway).
+allowed_reasons contains "edge-service-consent" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
+	input.action in {"consent.list", "consent.revoke"}
+}
+
 # Any M2M service-account caller (e.g. account-service) may trigger a sanctions screen
 # (issue #746, found via issue #669's load benchmark). sanctions.create is called with
 # resource = "" — a resourceless system action — so operator-on-own-tenant (which requires
