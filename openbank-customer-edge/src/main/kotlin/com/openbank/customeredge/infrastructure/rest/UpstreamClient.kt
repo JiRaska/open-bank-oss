@@ -289,6 +289,33 @@ class UpstreamClient {
             .type(MediaType.APPLICATION_JSON).build()
     }
 
+    /** PUT with the M2M operator token + party header + extra headers (e.g. X-Operator-Id). */
+    fun put(
+        url: String,
+        partyId: String,
+        body: String,
+        idempotencyKey: String?,
+        extraHeaders: Map<String, String>,
+    ): Response = try {
+        val builder = HttpRequest.newBuilder()
+            .uri(validatedUri(url))
+            .header("Authorization", "Bearer ${serviceToken()}")
+            .header(PARTY_HEADER, partyId)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .timeout(Duration.ofMillis(requestTimeoutMs))
+        idempotencyKey?.let { builder.header("Idempotency-Key", it) }
+        extraHeaders.forEach { (k, v) -> builder.header(k, v) }
+        val r = http.send(
+            builder.PUT(HttpRequest.BodyPublishers.ofString(body)).build(),
+            HttpResponse.BodyHandlers.ofString(),
+        )
+        Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
+    } catch (e: Exception) {
+        Log.error("upstream PUT to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""").type(MediaType.APPLICATION_JSON).build()
+    }
+
     /** DELETE with the M2M operator token + party header (e.g. cancel a standing order). */
     fun delete(url: String, partyId: String): Response = try {
         val request = HttpRequest.newBuilder()

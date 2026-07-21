@@ -29,3 +29,10 @@ data class CardStatusChanged(
     val changedBy: String,
     override val occurredAt: Instant = Instant.EPOCH,
 ) : CardEvent()
+data class CardLimitsChanged(
+    override val cardId: UUID,
+    val dailyLimitMinorUnits: Long,
+    val monthlyLimitMinorUnits: Long,
+    val changedBy: String,
+    override val occurredAt: Instant = Instant.EPOCH,
+) : CardEvent()

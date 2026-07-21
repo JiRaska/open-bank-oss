@@ -67,6 +67,19 @@ class CardService(private val repo: CardRepository, private val mapper: ObjectMa
 
     override suspend fun resumeCard(cmd: CardStatusCommand): Card = changeStatus(cmd) { it.resume(Instant.now(clock)) }
 
+    override suspend fun updateLimits(cmd: UpdateLimitsCommand): Card {
+        val card = repo.findById(cmd.cardId) ?: error("Card not found: ${cmd.cardId}")
+        val updated = card.withLimits(cmd.dailyLimitMinorUnits, cmd.monthlyLimitMinorUnits, Instant.now(clock))
+        val event = CardLimitsChanged(
+            updated.id,
+            updated.dailyLimitMinorUnits,
+            updated.monthlyLimitMinorUnits,
+            cmd.changedBy,
+            updated.updatedAt,
+        )
+        return repo.save(updated, outboxMessage(updated.id, EVENT_CARD_LIMITS_CHANGED, event))
+    }
+
     /**
      * Shared status-transition path: load the card, apply [transition], then persist the updated
      * aggregate and its CardStatusChanged event in one transaction (ADR-0050).
@@ -100,5 +113,6 @@ class CardService(private val repo: CardRepository, private val mapper: ObjectMa
     companion object {
         const val EVENT_CARD_ISSUED = "card.issued.v1"
         const val EVENT_CARD_STATUS_CHANGED = "card.status_changed.v1"
+        const val EVENT_CARD_LIMITS_CHANGED = "card.limits_changed.v1"
     }
 }

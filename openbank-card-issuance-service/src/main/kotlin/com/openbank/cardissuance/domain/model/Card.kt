@@ -51,4 +51,16 @@ data class Card(
     fun resume(now: Instant = Instant.EPOCH) = also {
         require(status == CardStatus.SUSPENDED) { "Only SUSPENDED cards can be resumed" }
     }.copy(status = CardStatus.ACTIVE, updatedAt = now)
+
+    /**
+     * Customer-set spending limits. Only a live card may be re-limited (a BLOCKED/CANCELLED/EXPIRED
+     * card has no spend to cap). Limits are non-negative and daily must not exceed monthly.
+     */
+    fun withLimits(dailyMinor: Long, monthlyMinor: Long, now: Instant = Instant.EPOCH) = also {
+        require(status in setOf(CardStatus.ACTIVE, CardStatus.SUSPENDED, CardStatus.PENDING)) {
+            "Cannot change limits on a card in status $status"
+        }
+        require(dailyMinor >= 0 && monthlyMinor >= 0) { "Limits must be non-negative" }
+        require(dailyMinor <= monthlyMinor) { "Daily limit ($dailyMinor) cannot exceed monthly ($monthlyMinor)" }
+    }.copy(dailyLimitMinorUnits = dailyMinor, monthlyLimitMinorUnits = monthlyMinor, updatedAt = now)
 }

@@ -2328,6 +2328,24 @@ class CustomerEdgeResource(
         )
     }
 
+    /** Set daily/monthly spending limits on one of the caller's OWN cards. Body:
+     *  {"dailyLimitMinorUnits":N,"monthlyLimitMinorUnits":M}. */
+    @PUT
+    @Path("/cards/{id}/limits")
+    @Authorize(action = "customer.cards.update", resource = "#id")
+    @Blocking
+    fun updateCardLimits(@PathParam("id") id: UUID, body: String): Response {
+        val customer = customer()
+        if (!ownsCard(id, customer.partyId)) return forbidden("Card does not belong to caller")
+        return upstream.put(
+            "$cardIssuanceServiceUrl/api/v1/cards/$id/limits",
+            customer.partyId.toString(),
+            body,
+            null,
+            mapOf("X-Operator-Id" to "customer:${customer.partyId}"),
+        )
+    }
+
     private fun ownsCard(id: UUID, partyId: UUID): Boolean {
         val resp = upstream.get("$cardIssuanceServiceUrl/api/v1/cards/$id", partyId.toString())
         if (resp.status != 200) return false

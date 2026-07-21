@@ -6,8 +6,10 @@ package com.openbank.cardissuance.infrastructure.rest
 
 import com.openbank.cardissuance.application.port.`in`.CardStatusCommand
 import com.openbank.cardissuance.application.port.`in`.CardUseCase
+import com.openbank.cardissuance.application.port.`in`.UpdateLimitsCommand
 import com.openbank.cardissuance.infrastructure.rest.dto.CardStatusRequest
 import com.openbank.cardissuance.infrastructure.rest.dto.IssueCardRequest
+import com.openbank.cardissuance.infrastructure.rest.dto.UpdateLimitsRequest
 import com.openbank.cardissuance.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
 import jakarta.annotation.security.RolesAllowed
@@ -15,6 +17,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -106,4 +109,20 @@ class CardResource(private val cardUseCase: CardUseCase) {
     @Operation(summary = "Resume a suspended card")
     suspend fun resume(@PathParam("id") id: UUID, @HeaderParam("X-Operator-Id") operatorId: String): Response =
         Response.ok(cardUseCase.resumeCard(CardStatusCommand(id, null, operatorId)).toResponse()).build()
+
+    @PUT
+    @Path("/{id}/limits")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "card.limits.update", resource = "#id")
+    @Operation(summary = "Set a card's daily and monthly spending limits")
+    suspend fun updateLimits(
+        @PathParam("id") id: UUID,
+        req: UpdateLimitsRequest,
+        @HeaderParam("X-Operator-Id") operatorId: String,
+    ): Response = Response.ok(
+        cardUseCase.updateLimits(
+            UpdateLimitsCommand(id, req.dailyLimitMinorUnits, req.monthlyLimitMinorUnits, operatorId),
+        ).toResponse(),
+    ).build()
 }
