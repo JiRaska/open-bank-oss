@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.35.0...customer-edge-v0.36.0) (2026-07-21)
+
+
+### Features
+
+* **cards:** customer-settable daily/monthly spending limits ([#1863](https://github.com/JiRaska/open-bank-oss/issues/1863)) ([1a37f1d](https://github.com/JiRaska/open-bank-oss/commit/1a37f1d2c0009b127efd6c00f6274b9376937e30)), closes [#1862](https://github.com/JiRaska/open-bank-oss/issues/1862)
+
 ## [0.35.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.34.1...customer-edge-v0.35.0) (2026-07-21)
 
 
