@@ -108,6 +108,28 @@ class DocumentRepositoryImplIT {
     }
 
     @Test
+    fun `archiving a document releases its idempotency key so a fresh agreement can re-render`(): Unit =
+        onVertxContext {
+            val key = "onboarding:${UUID.randomUUID()}"
+            val original = onboardingDoc(key)
+            repo.saveWithOutbox(original, outbox(original.id))
+
+            // Onboarding language switch: archive() nulls the key. The UPDATE must persist that null,
+            // or the partial unique index stays taken and the re-render below can never happen — the
+            // exact bug that left the archived agreement resolvable and unsignable ("Only
+            // PENDING_SIGNATURE documents can be signed").
+            repo.save(original.archive())
+
+            assertThat(repo.findByIdempotencyKey(key)).isNull()
+            assertThat(repo.findById(original.id)!!.status).isEqualTo(DocumentStatus.ARCHIVED)
+
+            // The fresh agreement re-renders under the SAME key — previously a DuplicateDocumentException.
+            val fresh = onboardingDoc(key)
+            repo.saveWithOutbox(fresh, outbox(fresh.id))
+            assertThat(repo.findByIdempotencyKey(key)!!.id).isEqualTo(fresh.id)
+        }
+
+    @Test
     fun `save inserts a document that does not exist yet`(): Unit = onVertxContext {
         val doc = onboardingDoc("onboarding:${UUID.randomUUID()}")
 
