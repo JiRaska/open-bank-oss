@@ -78,13 +78,21 @@ class CustomerDocumentResource(private val upstream: UpstreamClient) {
             ?: return Response.ok("[]").build()
         // document-service returns rows unordered; a document list is read newest-first, so sort here
         // rather than making every client do it.
-        val safe = docs.sortedByDescending { it.get("createdAt")?.asText().orEmpty() }.mapNotNull { doc ->
-            // Defence in depth: drop anything the upstream returned that isn't actually the caller's.
-            if (doc.get("partyRef")?.asText() != partyId) return@mapNotNull null
-            // ARCHIVED is a superseded revision (e.g. an agreement re-issued in another language).
-            // Listing it beside the live one shows the customer several apparently-equal contracts
-            // with no way to tell which one binds them.
-            if (doc.get("status")?.asText().equals(STATUS_ARCHIVED, ignoreCase = true)) return@mapNotNull null
+        val mine = docs.filter { it.get("partyRef")?.asText() == partyId }
+        // Template families that still have a live document, e.g. RAMCOVA_SMLOUVA for a party whose
+        // RAMCOVA_SMLOUVA_CS was superseded by RAMCOVA_SMLOUVA_EN.
+        val supersededFamilies = mine
+            .filterNot { it.get("status")?.asText().equals(STATUS_ARCHIVED, ignoreCase = true) }
+            .mapNotNull { it.get("templateCode")?.asText()?.let(::templateFamily) }
+            .toSet()
+        val safe = mine.sortedByDescending { it.get("createdAt")?.asText().orEmpty() }.mapNotNull { doc ->
+            // Hide an ARCHIVED revision only when a live one of the same family replaced it —
+            // otherwise it IS the customer's only copy. Blanket-hiding ARCHIVED looked right until
+            // the sandbox showed every account agreement sitting in that state: the filter would
+            // have silently removed a contract the customer has no other way to reach.
+            val archived = doc.get("status")?.asText().equals(STATUS_ARCHIVED, ignoreCase = true)
+            val family = doc.get("templateCode")?.asText()?.let(::templateFamily)
+            if (archived && family in supersededFamilies) return@mapNotNull null
             buildMap<String, Any?> {
                 put("id", doc.get("id")?.asText())
                 put("templateCode", doc.get("templateCode")?.asText())
@@ -178,3 +186,6 @@ class CustomerDocumentResource(private val upstream: UpstreamClient) {
         const val STATUS_ARCHIVED = "ARCHIVED"
     }
 }
+
+/** `RAMCOVA_SMLOUVA_CS` and `RAMCOVA_SMLOUVA_EN` are two languages of one contract, not two. */
+private fun templateFamily(templateCode: String): String = templateCode.removeSuffix("_CS").removeSuffix("_EN")
