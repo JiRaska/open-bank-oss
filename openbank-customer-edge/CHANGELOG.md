@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.37.0...customer-edge-v0.37.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* **customer-edge:** hide only superseded documents, not every ARCHIVED one ([#1841](https://github.com/JiRaska/open-bank-oss/issues/1841)) ([79333d7](https://github.com/JiRaska/open-bank-oss/commit/79333d7b745a6c3661069e571d702681affd81f4))
+
 ## [0.37.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.36.0...customer-edge-v0.37.0) (2026-07-21)
 
 
