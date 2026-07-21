@@ -94,5 +94,12 @@ class DocumentRepositoryImpl :
         sha256 = document.sha256
         sizeBytes = document.sizeBytes
         contentType = document.contentType
+        // MUST propagate the idempotency key: Document.archive() nulls it so the partial unique
+        // index (uq_documents_idempotency_key, WHERE idempotency_key IS NOT NULL) is released and a
+        // fresh agreement can re-render under the same key. Omitting it left the archived row
+        // holding the key, so ensureOnboardingAgreement's re-render hit a DuplicateDocumentException
+        // and its fallback resolved back to the ARCHIVED document — whose ceremony then failed to
+        // sign with "Only PENDING_SIGNATURE documents can be signed" (every onboarding language switch).
+        idempotencyKey = document.idempotencyKey
     }
 }
