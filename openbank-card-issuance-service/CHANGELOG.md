@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.10.3...card-issuance-service-v0.11.0) (2026-07-21)
+
+
+### Features
+
+* **cards:** customer-settable daily/monthly spending limits ([#1863](https://github.com/JiRaska/open-bank-oss/issues/1863)) ([1a37f1d](https://github.com/JiRaska/open-bank-oss/commit/1a37f1d2c0009b127efd6c00f6274b9376937e30)), closes [#1862](https://github.com/JiRaska/open-bank-oss/issues/1862)
+
 ## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.10.2...card-issuance-service-v0.10.3) (2026-07-17)
 
 
