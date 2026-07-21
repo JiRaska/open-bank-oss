@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.36.0...customer-edge-v0.37.0) (2026-07-21)
+
+
+### Features
+
+* **edge:** expose SDD mandate cancel/suspend/resume ([#1871](https://github.com/JiRaska/open-bank-oss/issues/1871)) ([e3dc268](https://github.com/JiRaska/open-bank-oss/commit/e3dc268fa3e80838647267cec5927264b1b77a37)), closes [#1870](https://github.com/JiRaska/open-bank-oss/issues/1870)
+
 ## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.35.0...customer-edge-v0.36.0) (2026-07-21)
 
 
