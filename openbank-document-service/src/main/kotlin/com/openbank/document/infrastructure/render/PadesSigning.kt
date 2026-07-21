@@ -6,8 +6,7 @@ package com.openbank.document.infrastructure.render
 
 import org.apache.pdfbox.Loader
 import org.apache.pdfbox.pdmodel.PDPageContentStream
-import org.apache.pdfbox.pdmodel.font.PDType1Font
-import org.apache.pdfbox.pdmodel.font.Standard14Fonts
+import org.apache.pdfbox.pdmodel.font.PDType0Font
 import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature
 import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureInterface
 import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureOptions
@@ -77,6 +76,14 @@ object PadesSigning {
     private const val TITLE_SIZE = 10f
     private const val LINE_SIZE = 8.5f
     private const val LINE_HEIGHT = 12f
+
+    // Signature-block text is drawn with an EMBEDDED Unicode TrueType font, not a Standard-14 base
+    // font. Standard-14 Helvetica is WinAnsiEncoding (CP1252) and cannot encode Czech diacritics —
+    // showText("Oldřich…") threw IllegalArgumentException("U+0159 ('rcaron') is not available…"),
+    // failing the whole signing ceremony for any customer with ř/ě/ů/… in their name. DejaVu Sans
+    // (bundled) covers full Latin; the font is subset-embedded so only used glyphs ship in the PDF.
+    private const val FONT_REGULAR = "/fonts/DejaVuSans.ttf"
+    private const val FONT_BOLD = "/fonts/DejaVuSans-Bold.ttf"
     private const val BORDER_WIDTH = 0.7f
     private const val BORDER_GREY_RGB = 0x999999
     private const val TEXT_BLACK_RGB = 0x111111
@@ -152,6 +159,9 @@ object PadesSigning {
      * No-op if [lines] is empty. Callers must not stamp an already-signed PDF (it would invalidate
      * the existing signature); [hasSignatureNamed] is the guard.
      */
+    private fun resourceFont(path: String) =
+        requireNotNull(PadesSigning::class.java.getResourceAsStream(path)) { "Bundled font not found: $path" }
+
     fun stampSignatureBlock(pdf: ByteArray, title: String, lines: List<String>): ByteArray {
         if (lines.isEmpty()) return pdf
         return Loader.loadPDF(pdf).use { document ->
@@ -162,6 +172,10 @@ object PadesSigning {
             val left = box.lowerLeftX + BLOCK_MARGIN
             val width = box.width - BLOCK_MARGIN * 2
 
+            // Embed Unicode fonts per-document (PDType0Font is bound to the PDDocument it loads into).
+            val titleFont = PDType0Font.load(document, resourceFont(FONT_BOLD), true)
+            val lineFont = PDType0Font.load(document, resourceFont(FONT_REGULAR), true)
+
             PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true, true).use { content ->
                 content.setLineWidth(BORDER_WIDTH)
                 content.setStrokingColor(BORDER_GREY)
@@ -169,14 +183,14 @@ object PadesSigning {
                 content.stroke()
 
                 content.beginText()
-                content.setFont(PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD), TITLE_SIZE)
+                content.setFont(titleFont, TITLE_SIZE)
                 content.setNonStrokingColor(TEXT_BLACK)
                 content.newLineAtOffset(left + BLOCK_PADDING, top - BLOCK_PADDING - TITLE_SIZE)
                 content.showText(title)
                 content.endText()
 
                 content.beginText()
-                content.setFont(PDType1Font(Standard14Fonts.FontName.HELVETICA), LINE_SIZE)
+                content.setFont(lineFont, LINE_SIZE)
                 content.setNonStrokingColor(TEXT_GREY)
                 content.newLineAtOffset(left + BLOCK_PADDING, top - BLOCK_PADDING - TITLE_SIZE - LINE_HEIGHT)
                 lines.forEach { line ->
