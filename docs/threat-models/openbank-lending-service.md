@@ -218,6 +218,18 @@ ADR-0155 `PendingApproval` wrapper, IS durably recorded in Postgres via `Collate
 
 ## 8. Change log
 
+- **2026-07-22** — Multi-currency GL posting correctness (issue #1275). The loan book posts in the
+  loan's own (client-supplied) currency, but the GL accounts were fixed to CZK (V19 +
+  `LendingLedgerConfig.Gl` `@WithDefault` UUIDs), so the first EUR/USD/GBP disbursement would 422 at
+  ledger-service (line/account currency-match check) — a money-path **availability** defect on the
+  ledger crossing (§2 boundary 2), invisible to unit tests (pure factory), the outbox IT
+  (dispatch-disabled) and the CZK-fixed pact. Fix: `LendingGlChart` selects the per-currency leaf set
+  by loan currency and **fails loud** on an unseeded currency (no silent mis-post); ledger migration
+  `V20` seeds the EUR/USD/GBP leaves; funding-clearing reuses the shared per-currency Customer Cash
+  Clearing accounts. The `@WithDefault` placeholders — which let the service boot green and 422 at
+  first posting rather than failing loud — are removed (accounts are now platform-fixed in code, like
+  transaction-service's `PaymentJournalFactory`). No trust-boundary change; no new external surface.
+  Rollback: revert the commit (safe only before a real non-CZK entry references the V20 accounts).
 - **2026-07-09** — Reschedule/restructuring (ADR-0028 follow-up, issue #667/#668). New
   `RescheduleLoanUseCase` + `POST /api/v1/lending/loans/{id}/reschedule`
   (`lending.reschedule`, `ROLE_CREDIT_RISK`/`ROLE_COMPLIANCE`/`ROLE_ADMIN`). Deletes an ACTIVE
