@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.10.0...party-service-v0.10.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **party:** authenticate the GDPR Art. 15 aggregation hops ([#1883](https://github.com/JiRaska/open-bank-oss/issues/1883)) ([c0a54fd](https://github.com/JiRaska/open-bank-oss/commit/c0a54fd6ed64bff200d99c1a9943f57bb3733bbd))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.9.2...party-service-v0.10.0) (2026-07-19)
 
 
