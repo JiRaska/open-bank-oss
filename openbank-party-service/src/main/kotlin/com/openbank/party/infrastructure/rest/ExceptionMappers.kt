@@ -104,7 +104,11 @@ class FeatureDisabledMapper : ExceptionMapper<FeatureDisabledException> {
 class GdprAggregationAuthMapper : ExceptionMapper<GdprAggregationAuthException> {
     override fun toResponse(e: GdprAggregationAuthException) = Response.status(BAD_GATEWAY).entity(
         ApiError(
-            UUID.randomUUID().toString(),
+            // Error-response correlation id, not a durable entity id — Ids.randomId() (ADR-0106).
+            // The pre-existing mappers above still mint via bare UUID.randomUUID(); left
+            // untouched (out of scope here, and the ADR-0106 guard is diff-scoped so it only
+            // flags new call sites, not the ~100 pre-existing ones fleet-wide).
+            Ids.randomId().toString(),
             BAD_GATEWAY,
             "GDPR_AGGREGATION_DENIED",
             e.message ?: "GDPR aggregation refused by a downstream service",
