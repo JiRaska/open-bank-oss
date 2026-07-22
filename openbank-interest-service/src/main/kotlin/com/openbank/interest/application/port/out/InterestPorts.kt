@@ -47,6 +47,16 @@ interface InterestAccrualRepository {
     fun findPendingCapitalization(accountId: UUID, productId: String, toDate: LocalDate): Uni<List<InterestAccrual>>
 
     /**
+     * The distinct `(accountId, productId)` pairs that have at least one pending (`ACCRUING`) accrual
+     * up to [toDate] — the work-list for a fleet-wide monthly capitalization run (issue #999). Unlike
+     * [findPendingCapitalization] (one already-known pair), this discovers *which* pairs have anything
+     * to capitalize, so the scheduler needs no separate account enumeration. Capitalizing is a pure
+     * function of already-persisted accruals, so this is a plain DB read — it never touches
+     * account-service.
+     */
+    fun findAccountsWithPendingCapitalization(toDate: LocalDate): Uni<List<Pair<UUID, String>>>
+
+    /**
      * The accruals of one `(account, product)` already **claimed** by an in-flight capitalization
      * (`CAPITALIZING`), regardless of date.
      *

@@ -268,6 +268,41 @@ class InterestServiceTest {
     }
 
     @Test
+    fun `capitalizeAll capitalizes every pending pair and recovers a per-pair failure`() {
+        val toDate = LocalDate.of(2026, 1, 20)
+        val prod = "SAVINGS"
+        val accountA = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        val accountB = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+        stubCapitalization()
+
+        every { accrualRepo.findAccountsWithPendingCapitalization(toDate) } returns
+            Uni.createFrom().item(listOf(accountA to prod, accountB to prod))
+        // A has a pending accrual → capitalizes; B's set is empty by the time it runs (a lost race) →
+        // capitalize() fails, and capitalizeAll must recover per-pair rather than abort the whole run.
+        every { accrualRepo.findPendingCapitalization(accountA, prod, toDate) } returns
+            Uni.createFrom().item(listOf(sampleAccrual(accountA, prod, LocalDate.of(2026, 1, 18), BigDecimal("1.50"))))
+        every { accrualRepo.findPendingCapitalization(accountB, prod, toDate) } returns
+            Uni.createFrom().item(emptyList())
+
+        val count = service.capitalizeAll(toDate).await().indefinitely()
+
+        assertThat(count).isEqualTo(1) // only A capitalized; B's failure was swallowed, not propagated
+        verify(exactly = 1) { accrualRepo.findAccountsWithPendingCapitalization(toDate) }
+        verify(exactly = 1) { accrualRepo.findPendingCapitalization(accountA, prod, toDate) }
+        verify(exactly = 1) { accrualRepo.findPendingCapitalization(accountB, prod, toDate) }
+    }
+
+    @Test
+    fun `capitalizeAll returns 0 and does nothing when no pair is pending`() {
+        val toDate = LocalDate.of(2026, 1, 20)
+        every { accrualRepo.findAccountsWithPendingCapitalization(toDate) } returns
+            Uni.createFrom().item(emptyList())
+
+        assertThat(service.capitalizeAll(toDate).await().indefinitely()).isEqualTo(0)
+        verify(exactly = 0) { accrualRepo.findPendingCapitalization(any(), any(), any()) }
+    }
+
+    @Test
     fun `capitalize withholds 15 percent and credits net on CZK interest`() {
         val accountId = UUID.fromString("88888888-8888-8888-8888-888888888888")
         val productId = "SAVINGS_CZK"

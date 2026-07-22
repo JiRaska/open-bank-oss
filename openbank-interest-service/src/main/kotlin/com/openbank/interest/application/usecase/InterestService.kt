@@ -17,6 +17,7 @@ import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.Clock
@@ -66,6 +67,8 @@ class InterestService(
         accruableAccountTypes,
         Clock.systemUTC(),
     )
+
+    private val log = Logger.getLogger(InterestService::class.java)
 
     override fun accrue(request: AccrualRequest): Uni<InterestAccrual> =
         configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate).flatMap { config ->
@@ -439,7 +442,45 @@ class InterestService(
         )
     }
 
-    override fun capitalizeAll(toDate: LocalDate): Uni<Int> = Uni.createFrom().item(0)
+    /**
+     * Capitalizes every `(account, product)` with a pending `ACCRUING` set up to [toDate] — the
+     * fleet-wide monthly run behind the capitalization scheduler (issue #999). Returns the number of
+     * pairs actually capitalized.
+     *
+     * The work-list is discovered from the accrual table itself ([findAccountsWithPendingCapitalization]),
+     * NOT by enumerating account-service: capitalization operates purely over already-persisted
+     * accruals, so it needs no live balance and does not touch account-service.
+     *
+     * Per-pair resilience mirrors [accrueAll]: a mixed-currency wedge (#1265), an in-flight claim held
+     * for a different period, a non-positive gross, or a lost race (another run already capitalized the
+     * pair) collapses that one pair to a no-op (0) and is logged, never aborting the batch — one wedged
+     * account must not stop every other account's monthly capitalization. Pairs are processed
+     * sequentially (`concatenate`) to keep a bounded, polite load on the ledger.
+     */
+    override fun capitalizeAll(toDate: LocalDate): Uni<Int> =
+        accrualRepo.findAccountsWithPendingCapitalization(toDate).flatMap { pairs ->
+            if (pairs.isEmpty()) {
+                Uni.createFrom().item(0)
+            } else {
+                Multi.createFrom().iterable(pairs)
+                    .onItem().transformToUniAndConcatenate { (accountId, productId) ->
+                        capitalize(accountId, productId, toDate)
+                            .map { 1 }
+                            .onFailure().invoke { e ->
+                                log.warnf(
+                                    e,
+                                    "capitalization skipped for account %s product %s up to %s: %s",
+                                    accountId,
+                                    productId,
+                                    toDate,
+                                    e.message,
+                                )
+                            }
+                            .onFailure().recoverWithItem(0)
+                    }
+                    .collect().with(java.util.stream.Collectors.summingInt { it })
+            }
+        }
 
     override fun listAllAccruals(): Uni<List<InterestAccrual>> = accrualRepo.findAll()
 

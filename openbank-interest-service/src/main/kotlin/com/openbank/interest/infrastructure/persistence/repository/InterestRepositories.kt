@@ -132,6 +132,15 @@ class InterestAccrualRepositoryImpl @Inject constructor(
         ).setParameter("a", accountId).setParameter("p", productId).setParameter("d", toDate).resultList
     }.map { it.map(mapper::toDomain) }
 
+    @WithSession override fun findAccountsWithPendingCapitalization(toDate: LocalDate): Uni<List<Pair<UUID, String>>> =
+        sf.withSession { s ->
+            s.createQuery(
+                "SELECT DISTINCT a.accountId, a.productId FROM InterestAccrualEntity a " +
+                    "WHERE a.status = 'ACCRUING' AND a.accrualDate <= :d",
+                Array<Any>::class.java,
+            ).setParameter("d", toDate).resultList
+        }.map { rows -> rows.map { (it[0] as UUID) to (it[1] as String) } }
+
     @WithSession
     override fun findClaimedForCapitalization(accountId: UUID, productId: String): Uni<List<InterestAccrual>> =
         sf.withSession { s ->
