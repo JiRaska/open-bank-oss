@@ -11,7 +11,10 @@
 # version.txt, so it is built/deployed independently of the fleet's Gradle
 # release axis.
 
-FROM python:3.14-slim AS builder
+# Digest-pinned per Scorecard Pinned-Dependencies (multi-arch manifest-list digest — the
+# platform-specific image is resolved from this at pull time). Refresh alongside a Python
+# patch bump: `crane digest python:3.14-slim` or the registry API.
+FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6 AS builder
 
 # Build-time-only packages. libpango/libharfbuzz runtime .so's are also
 # installed here so `pip install` can link/validate against them if a
@@ -31,10 +34,10 @@ WORKDIR /build
 COPY requirements.txt .
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
-RUN pip install --no-cache-dir --upgrade pip && \
+RUN pip install --no-cache-dir --upgrade pip==26.1.2 && \
     pip install --no-cache-dir -r requirements.txt
 
-FROM python:3.14-slim AS runtime
+FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6 AS runtime
 
 # Runtime-only shared libraries WeasyPrint needs (text shaping via Pango +
 # HarfBuzz, image decoding via libjpeg/openjp2). This mirrors the official
