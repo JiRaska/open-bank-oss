@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Party Service API
-  version: 1.7.0
+  version: 1.8.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
