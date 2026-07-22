@@ -1,7 +1,7 @@
 {
   "schema": "openbank.infra-lifecycle/v1",
   "source": "endoflife.date + GitOps image tags — ADR-0079",
-  "generatedAt": "2026-07-21T19:16:02.020Z",
+  "generatedAt": "2026-07-22T20:15:03.515Z",
   "components": [
     {
       "id": "postgres",
@@ -908,8 +908,8 @@
             "cycle": "9.1",
             "releaseDate": "2026-05-19",
             "eol": false,
-            "latest": "9.1.0",
-            "latestReleaseDate": "2026-05-19",
+            "latest": "9.1.1",
+            "latestReleaseDate": "2026-07-21",
             "lts": false,
             "support": true,
             "link": null
@@ -918,8 +918,8 @@
             "cycle": "9.0",
             "releaseDate": "2025-10-21",
             "eol": "2028-10-21",
-            "latest": "9.0.4",
-            "latestReleaseDate": "2026-05-05",
+            "latest": "9.0.5",
+            "latestReleaseDate": "2026-07-21",
             "lts": false,
             "support": "2028-10-21",
             "link": null
@@ -928,8 +928,8 @@
             "cycle": "8.1",
             "releaseDate": "2025-03-31",
             "eol": "2030-03-31",
-            "latest": "8.1.8",
-            "latestReleaseDate": "2026-06-02",
+            "latest": "8.1.9",
+            "latestReleaseDate": "2026-07-21",
             "lts": false,
             "support": "2028-03-31",
             "link": null
@@ -938,8 +938,8 @@
             "cycle": "8.0",
             "releaseDate": "2024-09-15",
             "eol": "2027-09-15",
-            "latest": "8.0.9",
-            "latestReleaseDate": "2026-05-06",
+            "latest": "8.0.10",
+            "latestReleaseDate": "2026-07-21",
             "lts": false,
             "support": "2027-09-15",
             "link": null
@@ -948,8 +948,8 @@
             "cycle": "7.2",
             "releaseDate": "2023-08-15",
             "eol": "2029-04-16",
-            "latest": "7.2.13",
-            "latestReleaseDate": "2026-05-05",
+            "latest": "7.2.14",
+            "latestReleaseDate": "2026-07-21",
             "lts": false,
             "support": "2027-04-16",
             "link": null
@@ -1048,8 +1048,8 @@
             "cycle": "13.1",
             "releaseDate": "2026-06-22",
             "eol": "2027-03-20",
-            "latest": "13.1.0",
-            "latestReleaseDate": "2026-06-23",
+            "latest": "13.1.1",
+            "latestReleaseDate": "2026-07-21",
             "lts": false,
             "support": true,
             "link": null
@@ -1058,8 +1058,8 @@
             "cycle": "13.0",
             "releaseDate": "2026-04-14",
             "eol": "2027-01-09",
-            "latest": "13.0.3",
-            "latestReleaseDate": "2026-06-23",
+            "latest": "13.0.4",
+            "latestReleaseDate": "2026-07-21",
             "lts": false,
             "support": "2026-06-22",
             "link": null
@@ -1068,8 +1068,8 @@
             "cycle": "12.4",
             "releaseDate": "2026-02-24",
             "eol": "2027-05-24",
-            "latest": "12.4.5",
-            "latestReleaseDate": "2026-06-23",
+            "latest": "12.4.6",
+            "latestReleaseDate": "2026-07-21",
             "lts": false,
             "support": "2026-04-17",
             "link": null
@@ -1078,8 +1078,8 @@
             "cycle": "12.3",
             "releaseDate": "2025-11-19",
             "eol": "2026-08-19",
-            "latest": "12.3.8",
-            "latestReleaseDate": "2026-06-23",
+            "latest": "12.3.9",
+            "latestReleaseDate": "2026-07-21",
             "lts": false,
             "support": "2026-02-24",
             "link": null
