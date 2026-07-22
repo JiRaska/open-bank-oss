@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.54.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.54.1...admin-ui-v0.54.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** bump brace-expansion and fast-uri off known CVEs/GHSAs ([#1887](https://github.com/JiRaska/open-bank-oss/issues/1887)) ([1aa4e7d](https://github.com/JiRaska/open-bank-oss/commit/1aa4e7d6d819d697e2b23831528d2a94fadb8866))
+
 ## [0.54.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.54.0...admin-ui-v0.54.1) (2026-07-20)
 
 
