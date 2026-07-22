@@ -4,100 +4,78 @@
 
 package com.openbank.party.infrastructure.gdpr
 
-import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.party.application.port.out.GdprAggregationAuthException
 import com.openbank.party.application.port.out.GdprAggregationPort
+import com.openbank.party.infrastructure.client.CardServiceRestClient
+import com.openbank.party.infrastructure.client.KycServiceRestClient
+import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.inject.Inject
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import org.eclipse.microprofile.config.inject.ConfigProperty
+import jakarta.ws.rs.WebApplicationException
+import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
-import java.util.Optional
 import java.util.UUID
 
 /**
- * GDPR Art. 15 aggregation adapter — fetches PII from kyc-service and card-issuance-service
- * on a best-effort basis. A downstream being unavailable must never block the export; null/empty
- * results are acceptable and annotated in the response so the DPO knows to follow up manually.
+ * GDPR Art. 15 aggregation adapter — fetches PII from kyc-service and card-issuance-service.
  *
- * HTTP is made synchronously via java.net.http.HttpClient inside [withContext(Dispatchers.IO)]
- * so the Vert.x event loop is never blocked. No MicroProfile REST client is used to avoid the
- * ClientHeadersFactory classpath issue (issue #247).
+ * Both hops go through a MicroProfile REST client carrying an M2M bearer
+ * ([io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter], oidc-client
+ * `openbank-services`). The previous implementation built raw `java.net.http` requests with **no
+ * Authorization header**, which both role-protected endpoints answered 401; the adapter treated
+ * any non-200 as "no data", so every deployed Art. 15 export silently shipped without KYC and card
+ * PII while still reading as successful. The old KDoc justified the raw client with "the
+ * ClientHeadersFactory classpath issue (issue #247)" — #247 is an unrelated (and merged) admin-ui
+ * dossier-status change, so that constraint never applied here.
+ *
+ * Failure handling is deliberately split:
+ *  - 401/403 → [GdprAggregationAuthException]. We were *refused* data that exists; degrading to
+ *    null would be indistinguishable from the subject genuinely having no case/cards.
+ *  - 404 → null / empty list. The subject genuinely has no KYC case or no cards.
+ *  - anything else (timeout, 5xx, DNS) → null / empty list, logged. A downstream outage must not
+ *    block the data subject's request; the DPO follows up from the log.
  */
 @ApplicationScoped
-class GdprAggregationAdapter : GdprAggregationPort {
-
-    @Inject
-    lateinit var objectMapper: ObjectMapper
-
-    @ConfigProperty(name = "openbank.gdpr.kyc-service-url")
-    var kycServiceUrl: Optional<String> = Optional.empty()
-
-    @ConfigProperty(name = "openbank.gdpr.card-service-url")
-    var cardServiceUrl: Optional<String> = Optional.empty()
+class GdprAggregationAdapter(
+    @RestClient private val kycClient: KycServiceRestClient,
+    @RestClient private val cardClient: CardServiceRestClient,
+) : GdprAggregationPort {
 
     private val log = Logger.getLogger(GdprAggregationAdapter::class.java)
 
-    private val http: HttpClient by lazy {
-        HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS.toLong()))
-            .build()
-    }
+    override suspend fun fetchKycData(partyId: UUID): Map<String, Any?>? = kycClient.getCaseByParty(partyId)
+        .onFailure().recoverWithUni(recover<Map<String, Any?>>(KYC, partyId, null))
+        .awaitSuspending()
 
-    override suspend fun fetchKycData(partyId: UUID): Map<String, Any?>? {
-        val base = kycServiceUrl.orElse("").takeIf { it.isNotBlank() } ?: return null
-        return withContext(Dispatchers.IO) {
-            runCatching {
-                val req = HttpRequest.newBuilder()
-                    .uri(URI.create("$base/api/v1/kyc/cases/party/$partyId"))
-                    .timeout(Duration.ofSeconds(READ_TIMEOUT_SECONDS.toLong()))
-                    .GET()
-                    .build()
-                val resp = http.send(req, HttpResponse.BodyHandlers.ofString())
-                if (resp.statusCode() == HTTP_OK) {
-                    @Suppress("UNCHECKED_CAST")
-                    objectMapper.readValue(resp.body(), Map::class.java) as Map<String, Any?>
-                } else {
-                    log.warnf("gdpr.aggregate.kyc status=%d partyId=%s", resp.statusCode(), partyId)
-                    null
-                }
-            }.onFailure { e ->
-                log.warnf(e, "gdpr.aggregate.kyc FAILED partyId=%s", partyId)
-            }.getOrNull()
-        }
-    }
+    override suspend fun fetchCardData(partyId: UUID): List<Map<String, Any?>> = cardClient.listByParty(partyId)
+        .onFailure().recoverWithUni(recover(CARDS, partyId, emptyList()))
+        .awaitSuspending()
 
-    override suspend fun fetchCardData(partyId: UUID): List<Map<String, Any?>> {
-        val base = cardServiceUrl.orElse("").takeIf { it.isNotBlank() } ?: return emptyList()
-        return withContext(Dispatchers.IO) {
-            runCatching {
-                val req = HttpRequest.newBuilder()
-                    .uri(URI.create("$base/api/v1/cards/party/$partyId"))
-                    .timeout(Duration.ofSeconds(READ_TIMEOUT_SECONDS.toLong()))
-                    .GET()
-                    .build()
-                val resp = http.send(req, HttpResponse.BodyHandlers.ofString())
-                if (resp.statusCode() == HTTP_OK) {
-                    @Suppress("UNCHECKED_CAST")
-                    objectMapper.readValue(resp.body(), List::class.java) as List<Map<String, Any?>>
-                } else {
-                    log.warnf("gdpr.aggregate.cards status=%d partyId=%s", resp.statusCode(), partyId)
-                    emptyList()
-                }
-            }.onFailure { e ->
-                log.warnf(e, "gdpr.aggregate.cards FAILED partyId=%s", partyId)
-            }.getOrElse { emptyList() }
+    /**
+     * Splits a downstream failure into "refused" and "absent or unavailable". Expressed as a
+     * Mutiny recovery rather than a `catch` so the authz case propagates as a real failure on the
+     * reactive chain instead of being reconstructed after the fact.
+     */
+    private fun <T> recover(service: String, partyId: UUID, fallback: T?): (Throwable) -> Uni<T> = { t ->
+        val status = (t as? WebApplicationException)?.response?.status
+        if (status == UNAUTHORIZED || status == FORBIDDEN) {
+            log.errorf(
+                "gdpr.aggregate.%s DENIED status=%d partyId=%s — export must not proceed",
+                service,
+                status,
+                partyId,
+            )
+            Uni.createFrom().failure(GdprAggregationAuthException(service, status))
+        } else {
+            log.warnf(t, "gdpr.aggregate.%s degraded status=%s partyId=%s", service, status ?: "unreachable", partyId)
+            Uni.createFrom().item { fallback }
         }
     }
 
     companion object {
-        private const val CONNECT_TIMEOUT_SECONDS = 1
-        private const val READ_TIMEOUT_SECONDS = 3
-        private const val HTTP_OK = 200
+        private const val UNAUTHORIZED = 401
+        private const val FORBIDDEN = 403
+        private const val KYC = "kyc-service"
+        private const val CARDS = "card-issuance-service"
     }
 }

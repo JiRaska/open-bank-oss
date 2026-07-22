@@ -8,6 +8,7 @@ import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.flags.FeatureDisabledException
+import com.openbank.party.application.port.out.GdprAggregationAuthException
 import com.openbank.party.application.usecase.PartyAlreadyExistsException
 import com.openbank.party.application.usecase.PartyMergeRejectedException
 import com.openbank.party.application.usecase.PartyNotFoundException
@@ -90,4 +91,31 @@ class FeatureDisabledMapper : ExceptionMapper<FeatureDisabledException> {
     override fun toResponse(e: FeatureDisabledException) = Response.status(404).entity(
         ApiError(UUID.randomUUID().toString(), 404, ErrorCode.NOT_FOUND.code, "feature '${e.flag}' is not enabled"),
     ).build()
+}
+
+/**
+ * Maps a [GdprAggregationAuthException] to 502. An Art. 15 export whose KYC/card hop was refused
+ * on authz grounds is NOT a valid export — returning 200 with those sections absent would be
+ * indistinguishable from a subject who genuinely holds no KYC case and no cards, and the data
+ * subject would receive a silently incomplete Right-of-Access response. Fail loudly so the DPO
+ * re-runs it rather than files it.
+ */
+@Provider
+class GdprAggregationAuthMapper : ExceptionMapper<GdprAggregationAuthException> {
+    override fun toResponse(e: GdprAggregationAuthException) = Response.status(BAD_GATEWAY).entity(
+        ApiError(
+            // Error-response correlation id, not a durable entity id — Ids.randomId() (ADR-0106).
+            // The pre-existing mappers above still mint via bare UUID.randomUUID(); left
+            // untouched (out of scope here, and the ADR-0106 guard is diff-scoped so it only
+            // flags new call sites, not the ~100 pre-existing ones fleet-wide).
+            Ids.randomId().toString(),
+            BAD_GATEWAY,
+            "GDPR_AGGREGATION_DENIED",
+            e.message ?: "GDPR aggregation refused by a downstream service",
+        ),
+    ).build()
+
+    companion object {
+        private const val BAD_GATEWAY = 502
+    }
 }
