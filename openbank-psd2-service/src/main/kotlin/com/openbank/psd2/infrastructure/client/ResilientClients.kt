@@ -99,7 +99,7 @@ class ResilientAccountServiceClient(private val delegate: StubAccountServiceClie
 @ApplicationScoped
 @Alternative
 @Priority(10)
-class ResilientConsentServiceClient(private val delegate: StubConsentServiceClient) : ConsentServiceClient {
+class ResilientConsentServiceClient(private val delegate: RestConsentServiceClient) : ConsentServiceClient {
 
     private val log = Logger.getLogger(ResilientConsentServiceClient::class.java)
 

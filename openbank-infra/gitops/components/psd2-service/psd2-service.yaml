@@ -84,6 +84,10 @@ spec:
             # the rest-client is lazy so this does not block boot or the consent/AIS/PIS endpoints.
             - name: TPP_REGISTRY_SERVICE_URL
               value: http://tpp-registry-service.tpp.svc:8108
+            # Real consent-service client backing the AIS consent/validate gate (issue #1500).
+            # M2M bearer via oidc-client openbank-services (OIDC_CLIENT_SECRET already set above).
+            - name: CONSENT_SERVICE_URL
+              value: http://consent-service.consent.svc:8106
             - name: QUARKUS_FLYWAY_MIGRATE_AT_START
               value: "true"
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
