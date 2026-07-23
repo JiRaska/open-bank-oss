@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { ClipboardList, RefreshCw, ChevronRight, X } from 'lucide-react'
+import { ClipboardList, RefreshCw, ChevronRight, X, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
 
 const SVC = 'onboarding-service'
@@ -174,10 +174,16 @@ export default function OnboardingPage() {
             {t('Přehled průběhu onboardingu zákazníků — fáze po fázi', 'Customer onboarding funnel — stage by stage')}
           </p>
         </div>
-        <button className="btn btn-secondary" onClick={refresh} disabled={loading}>
-          <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
-          {t('Obnovit', 'Refresh')}
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <Link href="/onboarding/analytics" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
+            <TrendingUp size={13} style={{ color: 'var(--accent)' }} />
+            {t('Konverze', 'Conversion')}
+          </Link>
+          <button className="btn btn-secondary" onClick={refresh} disabled={loading}>
+            <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+            {t('Obnovit', 'Refresh')}
+          </button>
+        </div>
       </div>
 
       {/* KPI funnel tiles */}

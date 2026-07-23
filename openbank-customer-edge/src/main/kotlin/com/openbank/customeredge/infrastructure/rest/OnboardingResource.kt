@@ -5,6 +5,7 @@
 package com.openbank.customeredge.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.customeredge.infrastructure.onboarding.OnboardingFunnelPublisher
 import com.openbank.customeredge.infrastructure.webauthn.EnrollmentTicketService
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.PermitAll
@@ -50,6 +51,7 @@ import java.time.Instant
 class OnboardingResource(
     private val upstream: UpstreamClient,
     private val enrollmentTicketService: EnrollmentTicketService,
+    private val funnelPublisher: com.openbank.customeredge.infrastructure.onboarding.OnboardingFunnelPublisher,
 ) {
 
     companion object {
@@ -72,6 +74,15 @@ class OnboardingResource(
         // Only the general terms are servable here — the framework agreement is per-party and
         // signed one step later (ADR-0169/0170), never fetched anonymously.
         private val SERVABLE_TERMS_CODES = setOf("VOP_CS", "VOP_EN")
+
+        // Funnel telemetry (/events): a small, closed body. Kept far under /start's limit because a
+        // funnel event is a handful of short enum-ish fields, never a document.
+        private const val MAX_FUNNEL_BODY_BYTES = 1_024
+        private const val MAX_FUNNEL_ATTR_LENGTH = 64
+        private val SESSION_ID_PATTERN =
+            Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+        // The ONLY caller-supplied attributes forwarded into the store (each length-capped). No free map.
+        private val FUNNEL_ATTRIBUTE_KEYS = listOf("kycMethod", "reason", "platform", "appVersion")
     }
 
     // Instance fields (the resource is a Quarkus singleton): per-lang cache of the serialized
@@ -163,6 +174,62 @@ class OnboardingResource(
     @RolesAllowed("ROLE_CUSTOMER")
     @Blocking
     fun registerParty(body: String): Response = customerEdge.registerParty(body)
+
+    /**
+     * Business onboarding-funnel telemetry sink (ADR-0069 Phase 2).
+     *
+     * The retail app posts one event per meaningful onboarding transition so the admin cockpit can
+     * measure where prospects drop off — most of which happen BEFORE a Keycloak session exists (the
+     * welcome/identity/email/consent steps), which is exactly why this is a dedicated anonymous stream
+     * and not RUM (OIDC-gated, consent-gated, non-queryable). See [OnboardingFunnelPublisher].
+     *
+     * Anonymous like [startOnboarding], behind the same ingress per-IP rate limit. Because it is an
+     * un-authenticated write that ultimately lands in a 10-year store, the body is size-capped and both
+     * `step` and `action` are validated against closed allow-lists — an unknown value is a 400 with no
+     * emission, so an abuser cannot inflate the warehouse with junk cardinality. `sessionId` is a
+     * pseudonymous, client-generated onboarding id (never PII). Always answers 202 on a well-formed
+     * body: telemetry is best-effort and must never gate onboarding, so a downstream Kafka issue is a
+     * server-side ERROR log, not a client-visible failure.
+     *
+     * Body: {"sessionId":"...","step":"AGREEMENT","action":"HOLD_ABANDONED",
+     *        "kycMethod":"BANKID"?,"reason":"..."?,"platform":"ios"?,"appVersion":"..."?}
+     */
+    @POST
+    @Path("/events")
+    @PermitAll
+    @Blocking
+    fun recordFunnelEvent(body: String): Response {
+        if (body.length > MAX_FUNNEL_BODY_BYTES) {
+            return Response.status(STATUS_PAYLOAD_TOO_LARGE)
+                .entity("""{"error":"Request body too large"}""")
+                .type(MediaType.APPLICATION_JSON).build()
+        }
+        val node = runCatching { jsonMapper.readTree(body) }.getOrElse {
+            return Response.status(400)
+                .entity("""{"error":"Invalid JSON"}""")
+                .type(MediaType.APPLICATION_JSON).build()
+        }
+        val sessionId = node.get("sessionId")?.asText()?.trim().orEmpty()
+        val step = node.get("step")?.asText()?.trim()?.uppercase().orEmpty()
+        val action = node.get("action")?.asText()?.trim()?.uppercase().orEmpty()
+        if (!SESSION_ID_PATTERN.matches(sessionId)) {
+            return Response.status(400)
+                .entity("""{"error":"sessionId must be a UUID"}""")
+                .type(MediaType.APPLICATION_JSON).build()
+        }
+        if (step !in OnboardingFunnelPublisher.VALID_STEPS || action !in OnboardingFunnelPublisher.VALID_ACTIONS) {
+            return Response.status(400)
+                .entity("""{"error":"unknown step or action"}""")
+                .type(MediaType.APPLICATION_JSON).build()
+        }
+        // Only a fixed, low-cardinality set of attributes is forwarded, each length-capped — the body is
+        // anonymous and long-lived, so we never echo an arbitrary caller-supplied map into the store.
+        val attributes = FUNNEL_ATTRIBUTE_KEYS.associateWith { key ->
+            node.get(key)?.asText()?.trim()?.take(MAX_FUNNEL_ATTR_LENGTH)?.takeIf { it.isNotEmpty() }
+        }
+        funnelPublisher.emit(sessionId, step, action, attributes)
+        return Response.status(202).build()
+    }
 
     /**
      * The PUBLISHED general terms (VOP) the onboarding consent step asks the user to agree to.

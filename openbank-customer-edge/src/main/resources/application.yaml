@@ -53,6 +53,13 @@ mp:
         topic: openbank.customer.audit
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Onboarding-funnel telemetry -> analytics-sink -> ClickHouse (best-effort; see
+      # OnboardingFunnelPublisher). Feeds the admin cockpit's conversion board.
+      onboarding-funnel-out:
+        connector: smallrye-kafka
+        topic: openbank.onboarding.funnel.events
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
       # pid party events — the onboarding auto-resume consumer (OnboardingResumeService) filters
       # for IdentityVerificationCaseDecided to replay a paused onboarding (ADR-0072). Latest offset

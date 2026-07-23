@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.15.0
+  version: 1.16.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -730,6 +730,32 @@ paths:
         '502':
           description: party-service or pid-service unavailable
 
+  /onboarding/events:
+    post:
+      tags: [Onboarding]
+      summary: Record an onboarding-funnel telemetry event (ADR-0069 Phase 2)
+      description: >-
+        Unauthenticated, best-effort business telemetry. The app posts one event per meaningful
+        onboarding transition (step viewed/completed, hold started/abandoned, KYC method chosen,
+        signature attempt/success/failure) so the admin cockpit can measure conversion and drop-off —
+        including the pre-session steps no domain event can see. Pseudonymous: `sessionId` is a
+        client-generated onboarding id, never PII. `step` and `action` are validated against closed
+        allow-lists; an unknown value is a 400 with no emission. Always 202 on a well-formed body.
+      operationId: recordOnboardingFunnelEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OnboardingFunnelEvent'
+      responses:
+        '202':
+          description: Event accepted (best-effort; never blocks onboarding)
+        '400':
+          description: Malformed body, bad sessionId, or unknown step/action
+        '413':
+          description: Request body too large
+
   /onboarding/start:
     post:
       tags: [Onboarding]
@@ -950,6 +976,32 @@ components:
         email:
           type: string
           format: email
+
+    OnboardingFunnelEvent:
+      type: object
+      required: [sessionId, step, action]
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+          description: Client-generated pseudonymous onboarding-attempt id (never PII).
+        step:
+          type: string
+          enum: [WELCOME, IDENTITY, EMAIL, AGREEMENT, PASSKEY, SIGN]
+        action:
+          type: string
+          enum: [STEP_VIEWED, STEP_COMPLETED, HOLD_STARTED, HOLD_ABANDONED, KYC_METHOD_CHOSEN, SIGN_ATTEMPT, SIGN_SUCCESS, SIGN_FAIL]
+        kycMethod:
+          type: string
+          description: Optional — which identity method the user chose (e.g. BANKID, SCAN, BOT, SKIP).
+        reason:
+          type: string
+          description: Optional — short machine reason for a failure/abandon (e.g. sign-fail code).
+        platform:
+          type: string
+          enum: [ios, android]
+        appVersion:
+          type: string
 
     StartOnboardingResponse:
       type: object

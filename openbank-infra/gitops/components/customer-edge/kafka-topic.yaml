@@ -18,3 +18,27 @@ spec:
   config:
     retention.ms: 604800000
     cleanup.policy: delete
+---
+# Onboarding-funnel telemetry topic (ADR-0069 Phase 2), produced by customer-edge's
+# OnboardingFunnelPublisher and consumed by analytics-sink (analytics-events-in) into the
+# ClickHouse bronze layer for the admin cockpit's conversion board. Declared explicitly like the
+# audit topic above so the Strimzi topic operator creates it (the broker does not auto-create).
+#
+# NOTE: analytics-sink is not yet a deployed component (no gitops manifest / version.txt), so until
+# it ships nothing consumes this topic — events simply accumulate under the retention below. The
+# producer side (edge Write ACL) is granted now so the funnel is live end-to-end the moment the
+# sink is deployed. 7-day retention: this is high-volume operational telemetry, not a system of
+# record (the durable copy is ClickHouse bronze, ≥10y). Single partition + RF 1 for the sandbox.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.onboarding.funnel.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

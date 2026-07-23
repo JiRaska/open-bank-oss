@@ -27,6 +27,7 @@ class OnboardingStartValidationTest {
         mockk<EnrollmentTicketService>(relaxed = true).apply {
             every { issue(any()) } returns "fake-enrollment-ticket"
         },
+        mockk(relaxed = true),
     ).apply {
         jsonMapper = ObjectMapper()
         partyServiceUrl = "http://party"
