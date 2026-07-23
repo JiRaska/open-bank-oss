@@ -111,6 +111,16 @@ spec:
         # `glitchtip-pg-app` secret and wires DATABASE_URL from it automatically —
         # so no external DB and no DATABASE_URL in Vault. Storage on gp3 like
         # tempo/loki; EU residency (ADR-0027). Scale instances/size for prod.
+        #
+        # UNBACKED-UP BY DESIGN (#1444): glitchtip-pg is the only CNPG cluster
+        # (1 of 51) with no ScheduledBackup/barmanObjectStore, deliberately.
+        # Its contents are disposable: error events expire after 30 days
+        # (GLITCHTIP_MAX_EVENT_LIFE_DAYS below), sign-up is closed and the few
+        # operator accounts are re-provisionable; no banking or customer data.
+        # Wiring backups would mean threading barmanObjectStore + an EKS
+        # pod-identity association through third-party chart values for data
+        # we can afford to lose. Revisit only if GlitchTip ever holds state
+        # that outlives its 30-day event window.
         postgresql:
           enabled: true
           cluster:

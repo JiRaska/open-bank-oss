@@ -111,13 +111,14 @@ jobs:
     permissions:
       contents: read
       security-events: write # upload-sarif
-    timeout-minutes: 30
-    # The java-kotlin leg's autobuild shells out to its own `./gradlew testClasses`
+    timeout-minutes: 40
+    # The java-kotlin leg's build step shells out to its own `./gradlew testClasses`
     # (whole-fleet dependency resolution, ~30 modules + quarkus-bom) without picking up
     # any GRADLE_OPTS we'd set in a step — it needs the env var at the job level. Without
     # this, Gradle's auto-detected 3 GiB default heap OOMs on that resolution (first seen
     # moving this job off the 16 GB Hetzner host to ubuntu-latest). Same fix pattern as
-    # fleet-lint.yml's GRADLE_OPTS.
+    # fleet-lint.yml's GRADLE_OPTS. Timeout raised 30->40min: --no-build-cache (below)
+    # means every run now genuinely compiles instead of sometimes restoring from cache.
     env:
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
     strategy:
@@ -125,7 +126,7 @@ jobs:
       matrix:
         include:
           - language: java-kotlin
-            build-mode: autobuild
+            build-mode: manual
           - language: javascript-typescript
             build-mode: none
     steps:
@@ -136,7 +137,7 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      # autobuild below shells out to `./gradlew testClasses` for the java-kotlin
+      # The build step below shells out to `./gradlew testClasses` for the java-kotlin
       # leg — validate the wrapper jar before it runs, same as every other job
       # that invokes gradlew.
       - name: Validate Gradle wrapper
@@ -160,13 +161,18 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
           queries: security-extended,security-and-quality
 
-      # JS/TS needs no build step (build-mode: none — source-only extraction);
-      # autobuild is only meaningful for the compiled java-kotlin matrix leg.
-      # Running it unconditionally for JS/TS caused intermittent
-      # "unsuccessful execution, exit code: 0" SARIF upload failures when
-      # autobuild's heuristic misdetected/mis-ran the admin-ui build.
-      - uses: github/codeql-action/autobuild@7188fc363630916deb702c7fdcf4e481b751f97a # v4
-        if: matrix.build-mode == 'autobuild'
+      # java-kotlin uses an explicit build step (build-mode: manual), not autobuild.
+      # This repo has `org.gradle.caching=true` + a remote HTTP build cache
+      # (settings.gradle.kts) fleet-wide; autobuild's `./gradlew testClasses` was
+      # intermittently satisfied entirely from the build cache, so javac/kotlinc
+      # never ran, the extractor traced zero compilations, and GitHub recorded the
+      # analysis as "unsuccessful execution, exit code: 0" (0 rules, 0 results) —
+      # the empty result then sits as the default branch's "current" CodeQL state
+      # until the next code-touching main push, showing as a code-scanning
+      # configuration error. --no-build-cache forces a real compile every run.
+      - name: Build (java-kotlin) for CodeQL tracing
+        if: matrix.language == 'java-kotlin'
+        run: ./gradlew testClasses --no-build-cache --no-daemon
 
       - uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a # v4
         with:
