@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/finops-agent-v0.2.3...finops-agent-v0.3.0) (2026-07-23)
+
+
+### Features
+
+* **finops-agent:** durable Postgres cost-anomaly memory (ADR-0112/0148) ([#2013](https://github.com/JiRaska/open-bank-oss/issues/2013)) ([6549f97](https://github.com/JiRaska/open-bank-oss/commit/6549f97d75bda9d6f555da3ee7521e4fb5ec7edf))
+
 ## [0.2.3](https://github.com/JiRaska/open-bank-oss/compare/finops-agent-v0.2.2...finops-agent-v0.2.3) (2026-07-07)
 
 

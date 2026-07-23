@@ -20,7 +20,7 @@
   "openbank-docs-truth-agent": "0.3.1",
   "openbank-document-service": "0.8.8",
   "openbank-domestic-payment": "0.10.1",
-  "openbank-finops-agent": "0.2.3",
+  "openbank-finops-agent": "0.3.0",
   "openbank-finrep-service": "0.5.0",
   "openbank-flaky-test-hunter": "0.3.0",
   "openbank-fraud-service": "0.8.1",
