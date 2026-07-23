@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.9](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.8.8...psd2-service-v0.8.9) (2026-07-23)
+
+
+### Bug Fixes
+
+* **psd2:** back the consent gate with a real consent-service client ([#1500](https://github.com/JiRaska/open-bank-oss/issues/1500)) ([#1897](https://github.com/JiRaska/open-bank-oss/issues/1897)) ([34fbfc5](https://github.com/JiRaska/open-bank-oss/commit/34fbfc5db89e1eccd0b01d63be6936ba902e089f))
+
 ## [0.8.8](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.8.7...psd2-service-v0.8.8) (2026-07-17)
 
 
