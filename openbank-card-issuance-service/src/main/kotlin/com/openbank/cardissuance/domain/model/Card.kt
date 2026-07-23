@@ -34,6 +34,11 @@ data class Card(
     val blockedReason: String?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    // Customer channel controls (#1): which rails the card may transact on. Default all-on.
+    val contactlessEnabled: Boolean = true,
+    val onlineEnabled: Boolean = true,
+    val atmEnabled: Boolean = true,
+    val abroadEnabled: Boolean = true,
 ) {
     fun activate(now: Instant = Instant.EPOCH) = also {
         require(status == CardStatus.PENDING) { "Only PENDING cards can be activated, current: $status" }
@@ -63,4 +68,26 @@ data class Card(
         require(dailyMinor >= 0 && monthlyMinor >= 0) { "Limits must be non-negative" }
         require(dailyMinor <= monthlyMinor) { "Daily limit ($dailyMinor) cannot exceed monthly ($monthlyMinor)" }
     }.copy(dailyLimitMinorUnits = dailyMinor, monthlyLimitMinorUnits = monthlyMinor, updatedAt = now)
+
+    /**
+     * Customer channel controls (#1): turn contactless / online (e-commerce) / ATM / abroad usage
+     * on or off. Only a live card may be re-controlled — a terminal card has no usage to gate.
+     */
+    fun withControls(
+        contactless: Boolean,
+        online: Boolean,
+        atm: Boolean,
+        abroad: Boolean,
+        now: Instant = Instant.EPOCH,
+    ) = also {
+        require(status in setOf(CardStatus.ACTIVE, CardStatus.SUSPENDED, CardStatus.PENDING)) {
+            "Cannot change controls on a card in status $status"
+        }
+    }.copy(
+        contactlessEnabled = contactless,
+        onlineEnabled = online,
+        atmEnabled = atm,
+        abroadEnabled = abroad,
+        updatedAt = now,
+    )
 }
