@@ -13,6 +13,7 @@ import com.openbank.notification.application.port.out.OversightWebhookPublisher
 import com.openbank.notification.application.port.out.PushMessage
 import com.openbank.notification.application.port.out.PushSender
 import com.openbank.notification.domain.HtmlEscape
+import com.openbank.notification.domain.model.NotificationCategory
 import com.openbank.notification.domain.model.NotificationChannel
 import com.openbank.notification.domain.model.NotificationRequest
 import com.openbank.notification.domain.model.NotificationStatus
@@ -21,6 +22,7 @@ import com.openbank.notification.domain.model.PushPlatform
 import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
+import com.openbank.notification.infrastructure.persistence.repository.NotificationPreferenceRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.mailer.Mail
@@ -38,6 +40,7 @@ import java.time.Instant
 import java.util.concurrent.Executor
 
 @ApplicationScoped
+@Suppress("TooManyFunctions") // one delivery path per channel + shared helpers; grows with channels
 class NotificationConsumer {
 
     @Inject lateinit var mailer: ReactiveMailer
@@ -47,6 +50,8 @@ class NotificationConsumer {
     @Inject lateinit var notificationRepo: NotificationRepository
 
     @Inject lateinit var deviceTokenRepo: DeviceTokenRepository
+
+    @Inject lateinit var preferenceRepo: NotificationPreferenceRepository
 
     @Inject lateinit var pushSender: PushSender
 
@@ -151,7 +156,7 @@ class NotificationConsumer {
                         log.infof("SMS stub: to=%s template=%s", req.recipient, req.template)
                         Uni.createFrom().voidItem()
                     }
-                    NotificationChannel.PUSH -> sendPush(req, subject, body, entity)
+                    NotificationChannel.PUSH -> maybeSendPush(req, subject, body, entity)
                     NotificationChannel.IN_APP -> {
                         log.infof("IN_APP stub: to=%s template=%s", req.recipient, req.template)
                         Uni.createFrom().voidItem()
@@ -285,6 +290,35 @@ class NotificationConsumer {
             )
         }
         .onFailure().recoverWithUni { _ -> Uni.createFrom().voidItem() }
+
+    /**
+     * Gate a PUSH by the party's preferences (#2). SECURITY-category notifications (OTP, SCA, KYC,
+     * account freeze) always send. For a togglable category, a missing preference row means "on";
+     * a muted category records the notification as SUPPRESSED and skips egress.
+     */
+    private fun maybeSendPush(
+        req: NotificationRequest,
+        subject: String,
+        body: String,
+        entity: NotificationEntity,
+    ): Uni<Void> {
+        val category = req.template.category
+        if (category == NotificationCategory.SECURITY) return sendPush(req, subject, body, entity)
+        return Panache.withTransaction { preferenceRepo.findByParty(req.partyId) }.chain { pref ->
+            val enabled = when (category) {
+                NotificationCategory.PAYMENTS -> pref?.paymentsPush ?: true
+                NotificationCategory.PRODUCT -> pref?.productPush ?: true
+                NotificationCategory.MARKETING -> pref?.marketingPush ?: true
+                NotificationCategory.SECURITY -> true
+            }
+            if (enabled) {
+                sendPush(req, subject, body, entity)
+            } else {
+                log.infof("PUSH suppressed by preference: party=%s category=%s", req.partyId, category)
+                markStatus(entity, "SUPPRESSED")
+            }
+        }
+    }
 
     /**
      * Deliver a PUSH notification by fanning out to every ACTIVE device token registered for

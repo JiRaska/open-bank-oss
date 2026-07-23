@@ -45,7 +45,25 @@ enum class NotificationTemplate(val variables: Set<String>) {
 
     /** Keys in [vars] that this template does not accept. Empty = the request is well-formed. */
     fun unknownVariables(vars: Map<String, String>): Set<String> = vars.keys - variables
+
+    /**
+     * The customer-facing category a template belongs to (#2). SECURITY is deliberately un-mutable:
+     * a customer can never silence OTP / SCA / KYC / account-freeze pushes, so those are always sent
+     * regardless of preferences. Everything else maps to a togglable category.
+     */
+    val category: NotificationCategory
+        get() = when (this) {
+            OTP_CODE, PASSWORD_RESET, ACCOUNT_FROZEN,
+            KYC_APPROVED, KYC_REJECTED, KYC_DOCUMENT_REQUIRED,
+            CONSENT_GRANTED, CONSENT_REVOKED,
+            -> NotificationCategory.SECURITY
+            TRANSACTION_COMPLETED, TRANSACTION_FAILED -> NotificationCategory.PAYMENTS
+            ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT
+        }
 }
+
+/** Customer-facing notification categories for push preferences (#2). */
+enum class NotificationCategory { SECURITY, PAYMENTS, PRODUCT, MARKETING }
 
 data class Notification(
     val id: UUID,
