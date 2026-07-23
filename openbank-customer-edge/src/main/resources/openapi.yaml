@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.15.0
+  version: 1.16.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -63,6 +63,10 @@ paths:
       responses:
         '200':
           description: Account list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountList'
 
   /accounts/{accountId}:
     get:
@@ -76,6 +80,10 @@ paths:
       responses:
         '200':
           description: Account detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
         '403':
           description: Not the owner
 
@@ -132,6 +140,12 @@ paths:
       responses:
         '200':
           description: Balance detail
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Balance'
 
   /transactions:
     get:
@@ -147,6 +161,10 @@ paths:
       responses:
         '200':
           description: Transaction page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionList'
         '403':
           description: Account does not belong to caller
 
@@ -162,6 +180,12 @@ paths:
       responses:
         '200':
           description: Statement-period list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Statement'
         '403':
           description: Account does not belong to caller
 
@@ -247,6 +271,10 @@ paths:
       responses:
         '200':
           description: Customer profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
 
   /fx/rates:
     get:
@@ -882,6 +910,292 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   schemas:
+    # --- Read-endpoint response schemas (issue #1773) ---
+    # customer-edge is a raw BFF proxy: each read endpoint returns the upstream service's
+    # response body verbatim, so these schemas mirror the upstream DTOs inline (no cross-file
+    # $ref). Kept field-for-field in step with the upstream openapi.yaml they mirror.
+
+    Pagination:
+      type: object
+      description: Cursor pagination envelope shared by the account and transaction list pages.
+      properties:
+        nextCursor:
+          type: string
+          nullable: true
+        hasMore:
+          type: boolean
+
+    # Mirrors openbank-account-service AccountResponse.
+    Account:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountNumber:
+          type: string
+        accountType:
+          type: string
+        partyId:
+          type: string
+          format: uuid
+        productId:
+          type: string
+        currencyCode:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, FROZEN, CLOSED, PENDING]
+        openedAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+        goalName:
+          type: string
+          nullable: true
+        goalTargetMinorUnits:
+          type: integer
+          format: int64
+          nullable: true
+        goalTargetDate:
+          type: string
+          format: date
+          nullable: true
+
+    # Mirrors openbank-account-service AccountPage (GET /api/v1/accounts is cursor-paginated,
+    # not a bare array).
+    AccountList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Account'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    # Mirrors openbank-balance-service BalanceResponse. GET /api/v1/balances/{accountId} returns
+    # one entry per currency held on the account (an array), not a single balance.
+    Balance:
+      type: object
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        availableBalance:
+          type: number
+        currentBalance:
+          type: number
+        reservedBalance:
+          type: number
+        pendingBalance:
+          type: number
+        lastUpdatedAt:
+          type: string
+          format: date-time
+
+    # Mirrors openbank-transaction-service TransactionResponse.
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        referenceNumber:
+          type: string
+        type:
+          type: string
+        sourceAccountId:
+          type: string
+          format: uuid
+          nullable: true
+        targetAccountId:
+          type: string
+          format: uuid
+          nullable: true
+        amount:
+          type: number
+        currencyCode:
+          type: string
+        status:
+          type: string
+        description:
+          type: string
+          nullable: true
+        valueDate:
+          type: string
+          format: date
+        bookingDate:
+          type: string
+          format: date
+        initiatedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        rail:
+          type: string
+          nullable: true
+          description: >-
+            Which scheme carried the money (ADR-0103). One of the PaymentRail enum values
+            (SEPA_CT, SEPA_INST, SWIFT, DOMESTIC, CARD, INTERNAL, CASH, FEE, INTEREST, UNKNOWN).
+            Null on legacy rows not yet stamped.
+        instructionType:
+          type: string
+          nullable: true
+          description: >-
+            How the movement was instructed (ADR-0103) — orthogonal to rail. One of the
+            InstructionType enum values (ONE_OFF, STANDING_ORDER, DIRECT_DEBIT, FUTURE_DATED,
+            SYSTEM, UNKNOWN). Null on legacy rows not yet stamped.
+        merchantCategory:
+          type: string
+          nullable: true
+          description: MCC-derived merchant category for card spend (ADR-0103).
+
+    # Mirrors openbank-transaction-service TransactionPage (GET /api/v1/transactions is
+    # cursor-paginated, not a bare array).
+    TransactionList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    # Mirrors openbank-statement-service StatementPeriod. GET /api/v1/statements/{accountId}
+    # returns the retained period-close records as an array.
+    Statement:
+      type: object
+      description: >-
+        The retained period-close record (ADR-0035 §F). The only persisted statement artefact —
+        no rendered bytes are stored.
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        pocketCurrency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        periodFrom:
+          type: string
+          format: date
+        periodTo:
+          type: string
+          format: date
+        legalSequenceNumber:
+          type: integer
+          format: int64
+        electronicSequenceNumber:
+          type: integer
+          format: int64
+        openingBalance:
+          type: number
+        closingBalance:
+          type: number
+        entryCount:
+          type: integer
+        status:
+          type: string
+          enum: [CLOSED, SUPERSEDED]
+        supersedesSequence:
+          type: integer
+          format: int64
+          nullable: true
+        closedAt:
+          type: string
+          format: date-time
+
+    # Mirrors the projection returned by openbank-party-service GET /api/v1/parties/{id}
+    # (PartyResource.Party.toResponse()). party-service does not declare a response schema for
+    # this endpoint, so the fields below are copied from that mapper and the Party domain model.
+    Profile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        partyType:
+          type: string
+          enum: [INDIVIDUAL, SOLE_TRADER, COMPANY, TRUST]
+        status:
+          type: string
+          enum: [PENDING_KYC, ACTIVE, SUSPENDED, CLOSED, MERGED]
+        legalName:
+          type: string
+        tradingName:
+          type: string
+          nullable: true
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+          nullable: true
+        kycStatus:
+          type: string
+          enum: [NOT_STARTED, IN_PROGRESS, APPROVED, REJECTED, EXPIRED]
+        address:
+          $ref: '#/components/schemas/ProfileAddress'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        consentGdpr:
+          type: boolean
+          nullable: true
+          description: Onboarding-time GDPR consent snapshot (informational, non-revocable).
+        consentCapturedAt:
+          type: string
+          format: date-time
+          nullable: true
+        consentMarketing:
+          type: boolean
+          nullable: true
+          description: Live, revocable marketing-communications preference.
+        consentMarketingUpdatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        mergedIntoPartyId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            ADR-0179: the surviving party this one was merged into. Non-null only on a MERGED
+            party — tells a consumer holding a stale id which party to follow instead.
+
+    # Mirrors openbank-party-service Address (nested under Profile.address).
+    ProfileAddress:
+      type: object
+      nullable: true
+      properties:
+        line1:
+          type: string
+        line2:
+          type: string
+          nullable: true
+        city:
+          type: string
+        postalCode:
+          type: string
+        countryCode:
+          type: string
+
     BankDto:
       type: object
       required: [code, name]
