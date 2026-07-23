@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.9.1...sca-service-v0.10.0) (2026-07-23)
+
+
+### Features
+
+* **sca:** pending-approvals list for decoupled/push SCA ([#1969](https://github.com/JiRaska/open-bank-oss/issues/1969)) ([5684d76](https://github.com/JiRaska/open-bank-oss/commit/5684d7613bfb1ba6e8991f9b0a8b9b17ca24aa7d)), closes [#1968](https://github.com/JiRaska/open-bank-oss/issues/1968)
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.9.0...sca-service-v0.9.1) (2026-07-17)
 
 
