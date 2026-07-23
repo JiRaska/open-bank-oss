@@ -417,7 +417,23 @@ jobs:
           # provider build.gradle.kts copies these into the forked test JVM. Empty
           # pactbroker.url (var unset) → @PactBroker provider test skips (it is
           # @EnabledIfSystemProperty(named=pactbroker.url, matches=.+)-gated).
-          ./gradlew :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
+          #
+          # --rerun-tasks ONLY on the main-push publish path (#1965/#1964). Publishing the
+          # provider-verification result is a network SIDE-EFFECT (a POST to the Pact Broker)
+          # that Gradle's up-to-date / build-cache machinery cannot observe: when the `test`
+          # task is restored from cache — which happens in a fleet fan-out where THIS provider's
+          # source + SHA are unchanged (e.g. a consumer republishes a new pact and the provider
+          # must re-verify + re-publish against it) — the cached result is reused and the publish
+          # POST never fires. That is why #1964 needed a manual build.gradle.kts cache-key bust to
+          # force a re-publish. Forcing re-execution here makes the publish happen on every main
+          # push, deterministically. Gated on PUBLISH_RESULTS (main only) so PR builds and the
+          # PR-lane fleet keep their cache: they verify but never publish, so re-running them would
+          # only cost time with no side-effect to trigger. The later "Generate Kover XML report"
+          # step is NOT re-run (no --rerun-tasks): `test` is up-to-date from this step, so it stays
+          # cached and does not re-execute uncredentialed (the #1009 hazard documented below).
+          RERUN=""
+          if [ "${PUBLISH_RESULTS}" = "true" ]; then RERUN="--rerun-tasks"; fi
+          ./gradlew :${{ inputs.service }}:build ${RERUN} --build-cache --console=plain --stacktrace \
             -Dpactbroker.url="${PACT_BROKER_URL:-}" \
             -Dpactbroker.auth.username="${PACT_BROKER_USERNAME:-}" \
             -Dpactbroker.auth.password="${PACT_BROKER_PASSWORD:-}" \
