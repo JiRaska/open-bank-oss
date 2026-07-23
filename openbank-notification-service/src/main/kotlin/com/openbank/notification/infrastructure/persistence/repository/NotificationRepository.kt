@@ -14,6 +14,7 @@ import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
+@Suppress("TooManyFunctions") // query methods per read/write path; grows with notification features
 class NotificationRepository : PanacheRepository<NotificationEntity> {
 
     suspend fun listAll(page: Int, size: Int): List<NotificationEntity> =
@@ -40,6 +41,16 @@ class NotificationRepository : PanacheRepository<NotificationEntity> {
 
     suspend fun findById(id: UUID): NotificationEntity? =
         Panache.withSession { find("notificationId", id).firstResult() }.awaitSuspending()
+
+    /**
+     * Party-scoped single read (customer fetch-on-tap, ADR-0135 §3 / issue #1182). The SELECT is
+     * scoped by partyId so a customer can only ever read their OWN notification — the same
+     * IDOR guard [markRead] applies to the UPDATE. Returns null when the id does not exist OR
+     * belongs to a different party (the caller cannot distinguish the two → no existence oracle).
+     */
+    suspend fun findByIdAndParty(id: UUID, partyId: UUID): NotificationEntity? = Panache.withSession {
+        find("notificationId = ?1 and partyId = ?2", id, partyId).firstResult()
+    }.awaitSuspending()
 
     suspend fun deleteByPartyId(partyId: UUID): Long =
         Panache.withTransaction { delete("partyId", partyId) }.awaitSuspending()

@@ -9,6 +9,7 @@ import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.OperatorMessageTemplate
 import com.openbank.notification.domain.model.OperatorMessageTemplateSensitivity
 import com.openbank.notification.domain.model.TemplateSensitivity
+import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -78,22 +79,44 @@ class NotificationResource {
     @Operation(summary = "Get notification by ID")
     suspend fun getNotification(@PathParam("id") id: UUID): Response {
         val n = repo.findById(id) ?: return Response.status(404).build()
-        return Response.ok(
-            mapOf(
-                "id" to n.notificationId,
-                "partyId" to n.partyId,
-                "channel" to n.channel,
-                "template" to n.template,
-                "recipient" to n.recipient,
-                "subject" to n.subject,
-                "body" to bodyForRead(n.template, n.body),
-                "status" to n.status,
-                "sentAt" to n.sentAt,
-                "readAt" to n.readAt,
-                "createdAt" to n.createdAt,
-            ),
-        ).build()
+        return Response.ok(notificationView(n)).build()
     }
+
+    /**
+     * Party-scoped single read for the customer app's fetch-on-tap (ADR-0135 §3, issue #1182).
+     * The push payload now carries no amount/PII (see NotificationConsumer.sendPush); on tap the
+     * app calls this to load the full detail. partyId is the edge-injected authoritative identity
+     * (customer-edge translates the mobile JWT to ROLE_SERVICE and injects it) — the repository
+     * SELECT is scoped by it, so a caller can never read another party's notification (IDOR guard,
+     * same shape as [markRead]). A missing/other-party id is a 404 with no existence oracle.
+     */
+    @GET
+    @Path("/{id}/self")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_SERVICE", "ROLE_ADMIN")
+    @Authorize(action = "notification.read.self", resource = "#id")
+    @Operation(summary = "Get one of the caller's own notifications (party-scoped)")
+    suspend fun getOwnNotification(@PathParam("id") id: UUID, @QueryParam("partyId") partyId: UUID?): Response {
+        partyId ?: return Response.status(Response.Status.BAD_REQUEST)
+            .entity(mapOf("code" to "BAD_REQUEST", "message" to "partyId query parameter is required")).build()
+        val n = repo.findByIdAndParty(id, partyId)
+            ?: return Response.status(Response.Status.NOT_FOUND)
+                .entity(mapOf("code" to "NOT_FOUND", "message" to "Notification not found")).build()
+        return Response.ok(notificationView(n)).build()
+    }
+
+    private fun notificationView(n: NotificationEntity) = mapOf(
+        "id" to n.notificationId,
+        "partyId" to n.partyId,
+        "channel" to n.channel,
+        "template" to n.template,
+        "recipient" to n.recipient,
+        "subject" to n.subject,
+        "body" to bodyForRead(n.template, n.body),
+        "status" to n.status,
+        "sentAt" to n.sentAt,
+        "readAt" to n.readAt,
+        "createdAt" to n.createdAt,
+    )
 
     /**
      * Mark one notification read (customer notification center). partyId is the edge-injected
