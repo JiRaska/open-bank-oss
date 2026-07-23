@@ -2002,6 +2002,33 @@ class CustomerEdgeResource(
         return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
     }
 
+    /** The caller's push-notification preferences (#2). Party is taken from the JWT, never the client. */
+    @GET
+    @Path("/notification-preferences")
+    @Authorize(action = "customer.notifications.read", resource = "")
+    @Blocking
+    fun getNotificationPreferences(): Response {
+        val customer = customer()
+        return upstream.get(
+            "$notificationServiceUrl/api/v1/preferences/party/${customer.partyId}",
+            customer.partyId.toString(),
+        )
+    }
+
+    /** Set the caller's push-notification preferences (#2). Body: {paymentsPush,productPush,marketingPush}. */
+    @PUT
+    @Path("/notification-preferences")
+    @Authorize(action = "customer.notifications.update", resource = "")
+    @Blocking
+    fun setNotificationPreferences(body: String): Response {
+        val customer = customer()
+        return upstream.put(
+            "$notificationServiceUrl/api/v1/preferences/party/${customer.partyId}",
+            customer.partyId.toString(),
+            body,
+        )
+    }
+
     // --- SCA device enrollment (ADR-0021) ---
 
     @POST
