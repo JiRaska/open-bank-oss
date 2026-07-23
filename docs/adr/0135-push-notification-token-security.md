@@ -7,14 +7,25 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [notifications, mobile-app, security-ops]
-summary: "Push tokens bind to an SCA-passed session and device fingerprint, one active token per platform, invalidated on logout, after a 90-day refresh TTL or by APNs/FCM feedback; payloads carry no account, amount or PII data."
+summary: "Push tokens bind to an SCA-passed session and device fingerprint, one active token per platform, invalidated on logout, after a 90-day TTL or by APNs/FCM feedback; §3 mandates PII-free payloads but that minimisation is unbuilt (#1182)."
 ---
 
 # ADR-0135: Push notification token security and lifecycle
 
 **Delivery note (updated 2026-06-30):**
-- **Security model** — ✅ Complete: token binding to SCA session, 90-day TTL refresh, explicit logout `DELETE` endpoint (PR #2527), payload minimisation (title/template only, no PII), and per-platform registration limit designed.
+- **Security model** — ✅ Complete: token binding to SCA session, 90-day TTL refresh, explicit logout `DELETE` endpoint (PR #2527), and per-platform registration limit designed.
 - **Token migration** — ⬜ Pending: APNs/FCM feedback loop integration (token revocation callbacks) and migration of existing plain-text tokens to encrypted columns + `registeredAt`/`refreshedAt`/`status` schema not yet done.
+
+**Payload-minimisation correction (2026-07-23):** the 2026-06-30 note above wrongly listed
+"payload minimisation (title/template only, no PII)" under ✅ Complete. It is **not**
+implemented (issue #1182): `NotificationConsumer` passes the fully-rendered template body
+(`htmlToPlain(body)`, incl. the transaction amount) into `PushMessage.body`, which
+`ApnsPushSender`/the FCM adapter place in the lock-screen-visible `aps.alert.body` — a direct
+violation of §3 below. The §3 design (wake-signal push + authenticated fetch-on-tap) is
+correct but unbuilt, and it is cross-repo: it needs the KMP `openbank-app` to implement
+fetch-on-tap AND a party-scoped `GET /api/v1/notifications/{id}` read endpoint
+(`NotificationResource.getNotification` is currently staff-only), so it cannot land as a
+single-repo change. Tracked in #1182; header stays `Delivery-Status: Partial`.
 
 **Delivery-Status update (2026-07-17):** the "Token migration" bullet above conflates a
 shipped item with genuinely-pending ones — split for accuracy (issue #1521):
