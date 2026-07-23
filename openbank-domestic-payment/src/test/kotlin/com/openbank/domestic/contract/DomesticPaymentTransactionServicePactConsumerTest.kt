@@ -28,10 +28,14 @@ import org.junit.jupiter.api.extension.ExtendWith
 @PactTestFor(providerName = "openbank-transaction-service", pactVersion = PactSpecVersion.V3)
 class DomesticPaymentTransactionServicePactConsumerTest {
 
+    // `type` must be a real TransactionType enum constant AND what SettlementAdapter actually
+    // sends ("DEBIT", SettlementAdapter.kt). The original "DOMESTIC_CREDIT_TRANSFER" is not in
+    // the provider's enum, so provider verification failed 400-vs-201 forever (result 9194) —
+    // the same consumer-invents-an-enum bug sepa-payment fixed in #937.
     private val requestBody = """
         {
           "idempotencyKey": "pact-domestic-txn-001",
-          "type": "DOMESTIC_CREDIT_TRANSFER",
+          "type": "DEBIT",
           "sourceAccountId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
           "amount": 1000.00,
           "currencyCode": "CZK",

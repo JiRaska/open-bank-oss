@@ -36,3 +36,12 @@ data class CardLimitsChanged(
     val changedBy: String,
     override val occurredAt: Instant = Instant.EPOCH,
 ) : CardEvent()
+data class CardControlsChanged(
+    override val cardId: UUID,
+    val contactlessEnabled: Boolean,
+    val onlineEnabled: Boolean,
+    val atmEnabled: Boolean,
+    val abroadEnabled: Boolean,
+    val changedBy: String,
+    override val occurredAt: Instant = Instant.EPOCH,
+) : CardEvent()

@@ -95,6 +95,33 @@ class CardTest {
             .hasMessageContaining("Only SUSPENDED cards can be resumed")
     }
 
+    @Test fun `withControls flips all four channel flags and stamps updatedAt`() {
+        val now = Instant.parse("2026-02-02T09:00:00Z")
+        val card = card(status = CardStatus.ACTIVE)
+
+        val updated = card.withControls(contactless = false, online = true, atm = false, abroad = true, now = now)
+
+        assertThat(updated.contactlessEnabled).isFalse()
+        assertThat(updated.onlineEnabled).isTrue()
+        assertThat(updated.atmEnabled).isFalse()
+        assertThat(updated.abroadEnabled).isTrue()
+        assertThat(updated.updatedAt).isEqualTo(now)
+    }
+
+    @Test fun `withControls is allowed on a suspended card`() {
+        val updated = card(status = CardStatus.SUSPENDED)
+            .withControls(contactless = true, online = false, atm = true, abroad = false)
+        assertThat(updated.onlineEnabled).isFalse()
+    }
+
+    @Test fun `withControls rejects a terminal card`() {
+        assertThatThrownBy {
+            card(status = CardStatus.BLOCKED).withControls(true, true, true, true)
+        }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("Cannot change controls")
+    }
+
     private fun card(status: CardStatus) = Card(
         id = UUID.fromString("11111111-1111-1111-1111-111111111111"),
         idempotencyKey = "idem-key",

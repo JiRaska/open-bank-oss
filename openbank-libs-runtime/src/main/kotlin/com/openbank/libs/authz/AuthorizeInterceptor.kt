@@ -16,7 +16,6 @@ import jakarta.interceptor.AroundInvoke
 import jakarta.interceptor.Interceptor
 import jakarta.interceptor.InvocationContext
 import jakarta.ws.rs.ForbiddenException
-import jakarta.ws.rs.ServiceUnavailableException
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.MediaType
@@ -66,7 +65,8 @@ import kotlin.reflect.jvm.kotlinFunction
  * Failure modes (enforce=true):
  *   - PDP returns `deny`  → `ForbiddenException` (HTTP 403) — the user is
  *     authenticated, the role check passed, but the policy denied.
- *   - PDP unreachable     → `ServiceUnavailableException` (HTTP 503) — do
+ *   - PDP unreachable     → `PolicyDecisionException` → HTTP 503 (via its
+ *     ExceptionMapper in openbank-libs-runtime; issue #1797) — do
  *     NOT fail open, do NOT pretend the user was forbidden. Distinct
  *     audit signal so an outage doesn't look like a flurry of access
  *     violations.
@@ -178,11 +178,11 @@ class AuthorizeInterceptor {
                         )
                         return@runBlocking null
                     }
-                    // JAX-RS ServiceUnavailableException has no (String, Throwable)
-                    // ctor — chain the cause manually so logs still show the root.
-                    throw ServiceUnavailableException("policy decision point unavailable: ${ex.message}").apply {
-                        initCause(ex)
-                    }
+                    // Propagate the domain PolicyDecisionException (503 via its ExceptionMapper in
+                    // openbank-libs-runtime). A thrown JAX-RS ServiceUnavailableException was being
+                    // laundered to 422 across the Kotlin suspend/coroutine bridge (issue #1797); a
+                    // mapper keyed on the concrete domain type is immune to that.
+                    throw PolicyDecisionException("policy decision point unavailable: ${ex.message}", ex)
                 }
         } ?: return ctx.proceed() // advisory + PDP unavailable: observe, do not block
 
@@ -235,7 +235,7 @@ class AuthorizeInterceptor {
             ctx.method.declaringClass.simpleName,
             ctx.method.name,
         )
-        throw ServiceUnavailableException("policy decision point not configured")
+        throw PolicyDecisionException("policy decision point not configured")
     }
 
     /**

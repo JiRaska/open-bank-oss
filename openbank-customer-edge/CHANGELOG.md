@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.42.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.41.0...customer-edge-v0.42.0) (2026-07-23)
+
+
+### Features
+
+* **cards:** channel controls (contactless / online / ATM / abroad) ([#1981](https://github.com/JiRaska/open-bank-oss/issues/1981)) ([fef2bda](https://github.com/JiRaska/open-bank-oss/commit/fef2bdadf18b2fcafab6b7d19ab82de0f0b33b8d)), closes [#1980](https://github.com/JiRaska/open-bank-oss/issues/1980)
+
+## [0.41.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.40.0...customer-edge-v0.41.0) (2026-07-23)
+
+
+### Features
+
+* **customer-edge:** publish response schemas for the core read endpoints ([#1773](https://github.com/JiRaska/open-bank-oss/issues/1773)) ([#1975](https://github.com/JiRaska/open-bank-oss/issues/1975)) ([b756a0f](https://github.com/JiRaska/open-bank-oss/commit/b756a0fdcf415a48c4b652e0cb5df30f97b13b64))
+
+## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.39.0...customer-edge-v0.40.0) (2026-07-23)
+
+
+### Features
+
+* **sca:** pending-approvals list for decoupled/push SCA ([#1969](https://github.com/JiRaska/open-bank-oss/issues/1969)) ([5684d76](https://github.com/JiRaska/open-bank-oss/commit/5684d7613bfb1ba6e8991f9b0a8b9b17ca24aa7d)), closes [#1968](https://github.com/JiRaska/open-bank-oss/issues/1968)
+
+## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.38.0...customer-edge-v0.39.0) (2026-07-23)
+
+
+### Features
+
+* **edge:** self-service virtual card issuance (POST /customer/v1/cards) ([#1963](https://github.com/JiRaska/open-bank-oss/issues/1963)) ([25424b9](https://github.com/JiRaska/open-bank-oss/commit/25424b979cb5c56aeb6b7c61dd82729e038d3941)), closes [#1962](https://github.com/JiRaska/open-bank-oss/issues/1962)
+
 ## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.37.1...customer-edge-v0.38.0) (2026-07-21)
 
 

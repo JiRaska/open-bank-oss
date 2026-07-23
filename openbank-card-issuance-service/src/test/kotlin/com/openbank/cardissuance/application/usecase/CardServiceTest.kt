@@ -6,6 +6,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.kotlinModule
 import com.openbank.cardissuance.application.port.`in`.CardStatusCommand
 import com.openbank.cardissuance.application.port.`in`.IssueCardCommand
+import com.openbank.cardissuance.application.port.`in`.UpdateControlsCommand
 import com.openbank.cardissuance.application.port.out.CardRepository
 import com.openbank.cardissuance.domain.model.Card
 import com.openbank.cardissuance.domain.model.CardNetwork
@@ -94,6 +95,30 @@ class CardServiceTest {
                         it.payload.contains("ops-user")
                 },
             )
+        }
+    }
+
+    @Test fun `updateControls applies the flags and emits a controls-changed event`(): Unit = runBlocking {
+        val active = card(status = CardStatus.ACTIVE)
+        coEvery { repo.findById(active.id) } returns active
+        coEvery { repo.save(any(), any()) } answers { firstArg() }
+
+        val result = service.updateControls(
+            UpdateControlsCommand(
+                cardId = active.id,
+                contactlessEnabled = false,
+                onlineEnabled = true,
+                atmEnabled = false,
+                abroadEnabled = true,
+                changedBy = "customer:${active.partyId}",
+            ),
+        )
+
+        assertThat(result.contactlessEnabled).isFalse()
+        assertThat(result.atmEnabled).isFalse()
+        assertThat(result.abroadEnabled).isTrue()
+        coVerify(exactly = 1) {
+            repo.save(any(), match { it.eventType == CardService.EVENT_CARD_CONTROLS_CHANGED })
         }
     }
 

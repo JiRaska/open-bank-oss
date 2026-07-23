@@ -12,10 +12,14 @@ import au.com.dius.pact.consumer.junit5.PactTestFor
 import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.settlement.infrastructure.adapter.SettlementJournalFactory
 import io.restassured.RestAssured.given
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import java.math.BigDecimal
+import java.util.UUID
 
 /**
  * Consumer-driven contract for the journal posting settlement-service makes when booking a
@@ -42,42 +46,34 @@ import org.junit.jupiter.api.extension.ExtendWith
 @PactTestFor(providerName = "openbank-ledger-service", pactVersion = PactSpecVersion.V3)
 class SettlementLedgerPostJournalPactConsumerTest {
 
-    private val transactionId = "55555555-5555-5555-5555-555555555555"
-    private val payerAccountId = "66666666-6666-6666-6666-666666666666"
-    private val payeeAccountId = "77777777-7777-7777-7777-777777777777"
+    private val transactionId = UUID.fromString("55555555-5555-5555-5555-555555555555")
+    private val payerAccountId = UUID.fromString("66666666-6666-6666-6666-666666666666")
+    private val payeeAccountId = UUID.fromString("77777777-7777-7777-7777-777777777777")
 
-    private val requestBody = """
-        {
-          "idempotencyKey": "settlement-book-$transactionId",
-          "transactionId": "$transactionId",
-          "entryDate": "2026-01-15",
-          "valueDate": "2026-01-15",
-          "description": "Settlement booking $transactionId",
-          "createdBy": "00000000-0000-0000-0000-000000005e77",
-          "lines": [
-            {
-              "glAccountId": "a0000000-0000-0000-0000-000000000002",
-              "side": "DEBIT",
-              "amount": 750.00,
-              "currencyCode": "CZK",
-              "fxRate": null,
-              "baseAmount": 750.00,
-              "baseCurrencyCode": "CZK",
-              "subAccountId": "$payerAccountId"
-            },
-            {
-              "glAccountId": "a0000000-0000-0000-0000-000000000002",
-              "side": "CREDIT",
-              "amount": 750.00,
-              "currencyCode": "CZK",
-              "fxRate": null,
-              "baseAmount": 750.00,
-              "baseCurrencyCode": "CZK",
-              "subAccountId": "$payeeAccountId"
-            }
-          ]
-        }
-    """.trimIndent()
+    // Both lines target the SAME GL account (...-002, 2100 Customer Deposit Control): a settlement
+    // moves money between two of the bank's own customer sub-accounts, so neither leg touches
+    // cash-clearing (see the class KDoc). The request body is SERIALIZED from the production
+    // [SettlementJournalFactory] — the same factory LedgerBookAdapter.book uses — so this contract
+    // verifies the request the adapter actually sends, not a hand-typed literal that can drift from
+    // the DTO (issue #1347: the old literal even carried an `fxRate` field JournalLineRequest lacks).
+    private val depositControlGlAccount = UUID.fromString("a0000000-0000-0000-0000-000000000002")
+    private val systemUser = UUID.fromString("00000000-0000-0000-0000-000000005e77")
+
+    private val requestBody = jacksonObjectMapper().writeValueAsString(
+        SettlementJournalFactory.build(
+            posting = SettlementJournalFactory.Posting(
+                settlementId = transactionId,
+                amount = BigDecimal("750.00"),
+                currency = "CZK",
+                payerAccountId = payerAccountId,
+                payeeAccountId = payeeAccountId,
+            ),
+            glDebitAccountId = depositControlGlAccount,
+            glCreditAccountId = depositControlGlAccount,
+            date = "2026-01-15",
+            createdBy = systemUser,
+        ),
+    )
 
     @Pact(consumer = "openbank-settlement-service", provider = "openbank-ledger-service")
     fun postSettlementJournalPact(builder: PactDslWithProvider): RequestResponsePact = builder

@@ -58,6 +58,18 @@ class CardEntity {
     @Column(name = "monthly_limit_minor_units", nullable = false)
     var monthlyLimitMinorUnits: Long = 0
 
+    @Column(name = "contactless_enabled", nullable = false)
+    var contactlessEnabled: Boolean = true
+
+    @Column(name = "online_enabled", nullable = false)
+    var onlineEnabled: Boolean = true
+
+    @Column(name = "atm_enabled", nullable = false)
+    var atmEnabled: Boolean = true
+
+    @Column(name = "abroad_enabled", nullable = false)
+    var abroadEnabled: Boolean = true
+
     @Column(name = "currency", nullable = false)
     lateinit var currency: String
 

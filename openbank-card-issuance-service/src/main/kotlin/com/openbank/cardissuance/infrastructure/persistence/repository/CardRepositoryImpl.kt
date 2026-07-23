@@ -83,6 +83,10 @@ class CardRepositoryImpl(private val outboxRepository: CardOutboxRepositoryImpl)
         expiryDate = card.expiryDate
         dailyLimitMinorUnits = card.dailyLimitMinorUnits
         monthlyLimitMinorUnits = card.monthlyLimitMinorUnits
+        contactlessEnabled = card.contactlessEnabled
+        onlineEnabled = card.onlineEnabled
+        atmEnabled = card.atmEnabled
+        abroadEnabled = card.abroadEnabled
         currency = card.currency
         deliveryAddress = card.deliveryAddress
         activatedAt = card.activatedAt

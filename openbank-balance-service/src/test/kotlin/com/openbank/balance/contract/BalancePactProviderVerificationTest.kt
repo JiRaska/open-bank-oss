@@ -135,9 +135,39 @@ class BalancePactProviderVerificationTest {
         context?.verifyInteraction()
     }
 
+    /**
+     * Idempotent seed. The same `@State` can run more than once in one JVM (Pact-JVM runs one
+     * verification per pact *version*, and enablePending/WIP pulls several), while the port's
+     * `save` is Panache `persist` — INSERT-only. The second run used to die on the
+     * `balances_account_id_currency_key` unique constraint (23505) inside the state-change
+     * callback, failing every interaction before it was even compared (issue #1771, verification
+     * results 2485/2486 and 9121/9122). Find-then-update keeps the seed re-runnable; `update`
+     * rewrites the amounts by (accountId, currency), which is exactly the reset the next
+     * verification pass needs.
+     */
+    private suspend fun seedBalance(balance: Balance) {
+        if (balanceRepo.findByAccountIdAndCurrency(balance.accountId, balance.currency) == null) {
+            balanceRepo.save(balance)
+        } else {
+            balanceRepo.update(balance)
+        }
+    }
+
+    /**
+     * Same idempotency for holds: the hold id is fixed, and a verified releaseHold sets
+     * `releasedAt` on the previous run's row — update resets it to active for the next pass.
+     */
+    private suspend fun seedHold(hold: BalanceHold) {
+        if (holdRepo.findById(hold.id) == null) {
+            holdRepo.save(hold)
+        } else {
+            holdRepo.update(hold)
+        }
+    }
+
     @State("a CZK balance exists for the holds account with sufficient funds")
     fun stateBalanceExists() = runOnVertxContext {
-        balanceRepo.save(
+        seedBalance(
             Balance(
                 id = UUID.randomUUID(),
                 accountId = HOLDS_ACCOUNT_ID,
@@ -158,7 +188,7 @@ class BalancePactProviderVerificationTest {
         // Balance must exist before releaseHold — it looks up (accountId, currency) to update.
         // Uses a distinct RELEASE_ACCOUNT_ID to avoid (accountId, currency) collision with the
         // stateBalanceExists handler when both run in the same Testcontainer DB.
-        balanceRepo.save(
+        seedBalance(
             Balance(
                 id = UUID.randomUUID(),
                 accountId = RELEASE_ACCOUNT_ID,
@@ -171,7 +201,7 @@ class BalancePactProviderVerificationTest {
                 version = 0L,
             ),
         )
-        holdRepo.save(
+        seedHold(
             BalanceHold(
                 id = RELEASE_HOLD_ID,
                 accountId = RELEASE_ACCOUNT_ID,
@@ -191,7 +221,7 @@ class BalancePactProviderVerificationTest {
 
     @State("balances exist for the balance account")
     fun stateBalancesExist() = runOnVertxContext {
-        balanceRepo.save(
+        seedBalance(
             Balance(
                 id = UUID.randomUUID(),
                 accountId = LIST_ACCOUNT_ID,
@@ -209,7 +239,7 @@ class BalancePactProviderVerificationTest {
 
     @State("a CZK balance exists for the balance account")
     fun stateSingleCzkBalanceExists() = runOnVertxContext {
-        balanceRepo.save(
+        seedBalance(
             Balance(
                 id = UUID.randomUUID(),
                 accountId = SINGLE_ACCOUNT_ID,

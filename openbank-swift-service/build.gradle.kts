@@ -81,15 +81,16 @@ tasks.withType<Test> {
     // Gradle-level exclusion prevents JUnit5 from ever discovering the class, so Quarkus never boots.
     // The class still runs locally (CI env var is not set outside GHA). Re-enable per #2404.
     //
-    // SwiftMessagePactProviderVerificationTest: @PactBroker triggers broker network calls during
-    // JUnit5 test-template expansion; the broker returns HTTP 404 (no consumer pact yet) and the
-    // Pact client hangs waiting for a response — causing the same 43-min job timeout pattern.
-    // @Disabled alone is insufficient because Pact's extension invokes the broker before JUnit5
-    // condition evaluation. Gradle-level exclusion prevents class discovery entirely.
-    // Remove both exclusions once a consumer pact exists (re-enable per #2404).
+    // SwiftMessagePactProviderVerificationTest re-enabled 2026-07-23: the 404-hang reason is
+    // gone — transaction-service publishes a consumer pact for openbank-swift-service on every
+    // main push, so /for-verification returns content. The class stays
+    // @EnabledIfSystemProperty(pactbroker.url)-gated, so it runs only in the main-push lane.
+    // Scan-scope fixed 2026-07-23 (#1948): the verification was crashing on a whole-classpath
+    // ClassGraph scan; the test now scopes MessageTestTarget to com.openbank.swift.contract. That
+    // fix touched only src/test, which does not rebuild this service on main-push, so this
+    // build-file note exists to re-trigger the provider verification (#1348 drain).
     if (System.getenv("CI") == "true") {
         exclude("**/SwiftBootSmokeIT*")
-        exclude("**/SwiftMessagePactProviderVerificationTest*")
         // SwiftEventPactConsumerTest: PactConsumerTestExt auto-publishes the generated pact
         // to pactbroker.url (forwarded from CI) in AfterTestTemplate — broker returns 401/hangs,
         // stalling the JVM for 30+ min. Exclude in CI; pact publishing runs as a dedicated step.

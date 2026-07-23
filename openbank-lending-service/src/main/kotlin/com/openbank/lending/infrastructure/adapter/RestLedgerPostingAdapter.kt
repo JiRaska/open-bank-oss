@@ -7,6 +7,7 @@ package com.openbank.lending.infrastructure.adapter
 import com.openbank.lending.application.port.out.LedgerPosting
 import com.openbank.lending.application.port.out.LedgerPostingPort
 import com.openbank.lending.infrastructure.client.LedgerCallGuard
+import com.openbank.lending.infrastructure.client.LendingGlChart
 import com.openbank.lending.infrastructure.client.LendingJournalFactory
 import com.openbank.lending.infrastructure.client.LendingLedgerConfig
 import io.quarkus.arc.properties.IfBuildProperty
@@ -42,7 +43,10 @@ class RestLedgerPostingAdapter(
     override fun post(posting: LedgerPosting): Uni<Unit> {
         val request = LendingJournalFactory.buildRequest(
             posting = posting,
-            accounts = config.accounts(),
+            // Select the GL account set matching the loan's own currency — ledger-service 422s a line
+            // whose currency doesn't match its GL account's currency (issue #1275). Fails loud on an
+            // unseeded currency rather than mis-posting.
+            accounts = LendingGlChart.accountsFor(posting.amount.currency.code),
             systemActorId = config.systemActorId(),
             date = LocalDate.now(clock),
         )

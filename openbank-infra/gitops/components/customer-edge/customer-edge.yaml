@@ -62,7 +62,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: customer-edge
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-e6cc4bf5
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-b756a0fd
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -169,6 +169,11 @@ spec:
             # edge->sdd ingress allow. sdd-service is KEDA scale-to-zero — first call cold-starts it.
             - name: SDD_SERVICE_URL
               value: http://sdd-service.sdd.svc:8129
+            # PSD2 third-party consents (ADR-0126) for the customer app (#1880): GET/DELETE
+            # /customer/v1/consents. Declared here so gen-network-policies.py opens the
+            # edge->consent ingress allow (consent-service enforces OPA, so the call must land).
+            - name: CONSENT_SERVICE_URL
+              value: http://consent-service.consent.svc:8106
             - name: SCA_SERVICE_URL
               value: http://sca-service.sca.svc:8110
             # Bind management interface to all interfaces so kubelet probes (from node IP)
