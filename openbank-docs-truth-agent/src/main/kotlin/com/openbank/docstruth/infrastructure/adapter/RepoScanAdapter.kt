@@ -182,14 +182,34 @@ internal object AdrTextScanner {
     }
 
     private fun parseDeliveryStatus(text: String): AdrDeliveryStatus {
-        val line = text.lineSequence().firstOrNull { it.startsWith("Delivery-Status:") }
+        val value = frontMatterValue(text, "delivery-status")
+            ?: legacyInlineDeliveryStatus(text)
             ?: return AdrDeliveryStatus.NOT_TRACKED
-        val value = line.removePrefix("Delivery-Status:")
-            .substringBefore("<!--")
-            .substringBefore("—")
-            .trim()
-            .uppercase()
-        return runCatching { AdrDeliveryStatus.valueOf(value) }.getOrDefault(AdrDeliveryStatus.NOT_TRACKED)
+        return runCatching { AdrDeliveryStatus.valueOf(value.uppercase()) }
+            .getOrDefault(AdrDeliveryStatus.NOT_TRACKED)
+    }
+
+    // Every ADR now opens with a `---`-delimited YAML front-matter block (the machine-readable
+    // schema added in #1808) carrying `delivery-status: shipped`/etc — the ONLY place delivery
+    // status lives today; the fleet-wide grep this scanner used to key off
+    // (`Delivery-Status:` as an inline prose line) matches zero of the 174 ADRs on disk. Without
+    // this, every single ADR silently parsed as NOT_TRACKED regardless of its real status.
+    private fun frontMatterValue(text: String, key: String): String? {
+        val lines = text.lineSequence().iterator()
+        if (!lines.hasNext() || lines.next().trim() != "---") return null
+        val prefix = "$key:"
+        while (lines.hasNext()) {
+            val line = lines.next()
+            if (line.trim() == "---") return null
+            if (line.startsWith(prefix)) return line.removePrefix(prefix).trim().ifBlank { null }
+        }
+        return null
+    }
+
+    // Kept for any ADR that predates the front-matter schema and never got backfilled.
+    private fun legacyInlineDeliveryStatus(text: String): String? {
+        val line = text.lineSequence().firstOrNull { it.startsWith("Delivery-Status:") } ?: return null
+        return line.removePrefix("Delivery-Status:").substringBefore("<!--").substringBefore("—").trim()
     }
 
     private fun scanReferences(text: String): Pair<Map<String, Boolean>, Map<String, Boolean>> {

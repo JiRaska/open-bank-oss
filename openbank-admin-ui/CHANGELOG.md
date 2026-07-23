@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.54.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.54.2...admin-ui-v0.54.3) (2026-07-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** bump next to 16.2.11, closing 9 Dependabot alerts ([#1903](https://github.com/JiRaska/open-bank-oss/issues/1903)) ([97097db](https://github.com/JiRaska/open-bank-oss/commit/97097db306df6709bc0d8b08289e31e5f3c6ba11))
+
 ## [0.54.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.54.1...admin-ui-v0.54.2) (2026-07-22)
 
 
