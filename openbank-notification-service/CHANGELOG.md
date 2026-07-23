@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.8...notification-service-v0.14.0) (2026-07-23)
+
+
+### Features
+
+* **notifications:** per-party push preferences with category opt-out ([#1990](https://github.com/JiRaska/open-bank-oss/issues/1990)) ([6de0d5e](https://github.com/JiRaska/open-bank-oss/commit/6de0d5e95b849ad5d84cd663503e307cec435dc6)), closes [#1989](https://github.com/JiRaska/open-bank-oss/issues/1989)
+
 ## [0.13.8](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.7...notification-service-v0.13.8) (2026-07-23)
 
 
