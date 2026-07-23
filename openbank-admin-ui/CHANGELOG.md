@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.55.0...admin-ui-v0.55.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** add react-is for recharts on the onboarding analytics board ([#2008](https://github.com/JiRaska/open-bank-oss/issues/2008)) ([d505c77](https://github.com/JiRaska/open-bank-oss/commit/d505c77fb64077084c4f231782a1a4172670f62b))
+
 ## [0.55.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.54.4...admin-ui-v0.55.0) (2026-07-23)
 
 
