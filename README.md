@@ -219,6 +219,10 @@ The platform is designed with the following regulatory frameworks in mind. None 
 - **PCI DSS** — v4.0 (payment card industry)
 - **GDPR** — Regulation (EU) 2016/679 (data protection)
 
+Auditor-facing evidence and control mappings live under [`docs/compliance/`](docs/compliance/):
+the [DORA + supply-chain evidence pack](docs/compliance/evidence-pack.md) and the
+[FINOS CCC + AIGF control mapping](docs/compliance/finos-ccc-mapping.md).
+
 ---
 
 ## License
