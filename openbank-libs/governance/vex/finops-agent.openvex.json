@@ -2,7 +2,7 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://open-bank.tech/vex/finops-agent",
   "author": "OpenBank Security",
-  "version": 1,
+  "version": 3,
   "statements": [
     {
       "vulnerability": {
@@ -75,6 +75,93 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_present",
       "impact_statement": "Netty is a transitive dependency resolved via the Quarkus platform BOM (io.quarkus.platform:quarkus-bom:3.37.2, gradle/libs.versions.toml `quarkus = \"3.37.2\"`), not a directly declared version. `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath` resolves every io.netty:* artifact (netty-common, netty-handler, netty-codec, netty-codec-http2, netty-codec-haproxy, netty-resolver-dns, netty-transport, ...) to 4.1.135.Final, which is exactly the version this CVE was fixed in (upstream advisory: \"Prior to versions 4.1.135.Final and 4.2.15.Final\"). The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-44249"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Netty is a transitive dependency resolved via the Quarkus platform BOM (io.quarkus.platform:quarkus-bom:3.37.2, gradle/libs.versions.toml `quarkus = \"3.37.2\"`), and additionally floored by openbank.dependency-vulnerability-pins. `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath` resolves every io.netty:* artifact (netty-common, netty-handler, netty-codec, netty-codec-http, netty-codec-http2, netty-codec-haproxy, netty-resolver-dns, netty-transport, ...) to 4.1.135.Final, which is exactly the version this CVE was fixed in (upstream advisory: \"Prior to versions 4.1.135.Final and 4.2.15.Final\"). The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-50020"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Netty is a transitive dependency resolved via the Quarkus platform BOM (io.quarkus.platform:quarkus-bom:3.37.2, gradle/libs.versions.toml `quarkus = \"3.37.2\"`), and additionally floored by openbank.dependency-vulnerability-pins. `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath` resolves every io.netty:* artifact (netty-common, netty-handler, netty-codec, netty-codec-http, netty-codec-http2, netty-codec-haproxy, netty-resolver-dns, netty-transport, ...) to 4.1.135.Final, which is exactly the version this CVE was fixed in (upstream advisory: \"Prior to versions 4.1.135.Final and 4.2.15.Final\"). The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-50560"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Netty is a transitive dependency resolved via the Quarkus platform BOM (io.quarkus.platform:quarkus-bom:3.37.2, gradle/libs.versions.toml `quarkus = \"3.37.2\"`), and additionally floored by openbank.dependency-vulnerability-pins. `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath` resolves every io.netty:* artifact (netty-common, netty-handler, netty-codec, netty-codec-http, netty-codec-http2, netty-codec-haproxy, netty-resolver-dns, netty-transport, ...) to 4.1.135.Final, which is exactly the version this CVE was fixed in (upstream advisory: \"Prior to versions 4.1.135.Final and 4.2.15.Final\"). The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-54512"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "jackson-databind is resolved to 2.22.1 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.1 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-54513"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "jackson-databind is resolved to 2.22.1 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.1 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-54514"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "jackson-databind is resolved to 2.22.1 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.1 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-54516"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "jackson-databind is resolved to 2.22.1 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.1 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-54517"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "jackson-databind is resolved to 2.22.1 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.1 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-54518"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "jackson-databind is resolved to 2.22.1 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). This CVE was fixed on the 2.21 branch in 2.21.4 (and 3.1.4); 2.22.0 was released after 2.21.4 and carries that fix forward, so the resolved 2.22.1 is not vulnerable. The vulnerable code as it existed before the fix is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-54515"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "jackson-databind is resolved to 2.22.1 (forced fleet-wide by openbank.dependency-vulnerability-pins; verified via `./gradlew :openbank-finops-agent:dependencies --configuration runtimeClasspath`). Unlike the other jackson CVEs in this batch, this one was patched on the 2.22 branch itself: the upstream advisory lists `from 2.22.0 before 2.22.1` as affected with 2.22.1 as a named fixed version. The resolved 2.22.1 is exactly that fixed version, so the vulnerable code is not present in the shipped artifact."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-45292"
+      },
+      "status": "affected",
+      "action_statement": "Resolved io.opentelemetry:opentelemetry-api is 1.60.1 (bundled by the Quarkus platform BOM io.quarkus.platform:quarkus-bom:3.37.2). The unbounded W3C-baggage memory allocation is fixed in 1.62.0, which is binary-incompatible with the OpenTelemetry extension Quarkus 3.37.2 ships (a force to 1.62.0 fails every service at boot with NoClassDefFoundError: io/opentelemetry/common/impl/ApiUsageLogger, verified and reverted in PR #1367), so remediation requires the Quarkus platform bump tracked in issue #1446. Compensating control: the `baggage` propagator only parses the W3C `baggage` header on the in-mesh trace-context path (Istio STRICT mTLS between services); the customer-facing edge does not accept or forward an attacker-supplied baggage header, so the oversized-baggage parse path is not reachable from untrusted input. Residual risk: medium-severity DoS only, no data exposure."
     }
   ]
 }
