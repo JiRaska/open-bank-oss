@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.13.0...interest-service-v0.14.0) (2026-07-23)
+
+
+### Features
+
+* **interest:** run monthly capitalization so withholding is assembled ([#999](https://github.com/JiRaska/open-bank-oss/issues/999)) ([#1900](https://github.com/JiRaska/open-bank-oss/issues/1900)) ([a438d8d](https://github.com/JiRaska/open-bank-oss/commit/a438d8dd45b9daae1e718910acf754df03014828))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.12.0...interest-service-v0.13.0) (2026-07-18)
 
 
