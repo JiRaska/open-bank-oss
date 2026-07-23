@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.54.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.54.3...admin-ui-v0.54.4) (2026-07-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** force sharp 0.35.0 via npm override (GHSA-f88m-g3jw-g9cj) ([#1906](https://github.com/JiRaska/open-bank-oss/issues/1906)) ([0f85d3c](https://github.com/JiRaska/open-bank-oss/commit/0f85d3c53fa1d78810b4319ab2a157c050a45f70))
+
 ## [0.54.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.54.2...admin-ui-v0.54.3) (2026-07-23)
 
 
