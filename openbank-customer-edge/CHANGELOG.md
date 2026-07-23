@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.40.0...customer-edge-v0.41.0) (2026-07-23)
+
+
+### Features
+
+* **customer-edge:** publish response schemas for the core read endpoints ([#1773](https://github.com/JiRaska/open-bank-oss/issues/1773)) ([#1975](https://github.com/JiRaska/open-bank-oss/issues/1975)) ([b756a0f](https://github.com/JiRaska/open-bank-oss/commit/b756a0fdcf415a48c4b652e0cb5df30f97b13b64))
+
 ## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.39.0...customer-edge-v0.40.0) (2026-07-23)
 
 
