@@ -1,7 +1,7 @@
 ---
 date: 2026-07-02
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +11,16 @@ summary: "Add an AI assurance layer: an in-repo versioned prompt registry that e
 ---
 
 # ADR-0148 — AI assurance — prompt registry, evals gate, and EU AI Act mapping
+
+> **Delivery note (2026-07-23) — partial.** Two of the three artifacts have a first
+> increment: (1) the **EU AI Act mapping** — `docs/compliance/eu-ai-act.md` is generated
+> from `agents.yaml` by `.github/scripts/gen-eu-ai-act.py` and drift-guarded by
+> `check-eu-ai-act.sh`; it records the platform position (no production high-risk system;
+> credit decisioning ADR-0142 would be the first) and the Art. 9–15 coverage. (2) The
+> **prompt registry** exists at `openbank-libs/governance/prompts/` with the scheme and the
+> first real ops-agent prompts extracted. Still open: wiring each service to *load* its
+> system prompt from the registry (so `prompt_hash` resolves), the `check-prompt-registry`
+> guard, and the per-charter **evals gate** — tracked as the ADR-0148 code follow-up.
 
 ## Context
 
