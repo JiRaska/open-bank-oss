@@ -157,7 +157,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0145](0145-api-deprecation-and-sunset-policy.md) | API deprecation and sunset policy | Accepted | Planned | api-contract,psd2-api,governance | — |
 | [0146](0146-incident-response-and-security-operations-framework.md) | Incident response and security-operations framework | Accepted | Partial | security-ops,resilience,compliance | — |
 | [0147](0147-cross-repo-governance-delivery-status-beyond-the-monorepo.md) | Cross-repo governance — delivery status beyond the monorepo | Accepted | Shipped | governance,docs | — |
-| [0148](0148-ai-assurance-prompt-registry-evals-gate-and-eu-ai-act-mapping.md) | AI assurance — prompt registry, evals gate, and EU AI Act mapping | Accepted | Planned | ai-agents,governance,compliance | — |
+| [0148](0148-ai-assurance-prompt-registry-evals-gate-and-eu-ai-act-mapping.md) | AI assurance — prompt registry, evals gate, and EU AI Act mapping | Accepted | Partial | ai-agents,governance,compliance | — |
 | [0149](0149-digital-accessibility-standard-wcag-2-2-aa-en-301-549.md) | Digital accessibility standard (WCAG 2.2 AA / EN 301 549) | Accepted | Planned | i18n-a11y,compliance,admin-ui | — |
 | [0150](0150-internationalization-and-language-support-strategy.md) | Internationalization and language-support strategy | Accepted | Planned | i18n-a11y,admin-ui | — |
 | [0151](0151-chaos-engineering-and-infrastructure-failure-injection-policy.md) | Chaos engineering and infrastructure failure-injection policy | Accepted | Planned | resilience,testing,kubernetes | — |
