@@ -58,4 +58,13 @@ money-path service, not adjacent.
 
 ## 6. Change log
 
+- **2026-07-22** — Activate monthly capitalization (issue #999). `capitalizeAll` was a stub returning 0,
+  so the already-assessed `capitalize()` money-path (claims accruals, posts a GL journal via
+  `LedgerPostingPort`, records withholding) had never run at scale. A new `InterestCapitalizationScheduler`
+  now drives it monthly (cron `0 0 2 1 * ?`), over a work-list read from the accrual table
+  (`findAccountsWithPendingCapitalization`). No new trust boundary or external caller — this activates
+  existing money-path logic on a schedule; per-pair failures are recovered (a wedged account can't stop
+  the batch) and each capitalization keeps its existing ledger idempotency key, so a retry is safe. The
+  downstream effect is that withholding tax is now actually assembled and remitted (the §38d statutory
+  filing owner is decided separately in ADR-0180). Rollback: revert the commit (the scheduler stops).
 - **2026-07-18** — Initial lightweight threat model (ADR-0030 D2), added alongside `openbank-interest-service`'s addition to `money_path_services` (#1478).
