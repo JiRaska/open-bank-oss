@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.38.0...customer-edge-v0.39.0) (2026-07-23)
+
+
+### Features
+
+* **edge:** self-service virtual card issuance (POST /customer/v1/cards) ([#1963](https://github.com/JiRaska/open-bank-oss/issues/1963)) ([25424b9](https://github.com/JiRaska/open-bank-oss/commit/25424b979cb5c56aeb6b7c61dd82729e038d3941)), closes [#1962](https://github.com/JiRaska/open-bank-oss/issues/1962)
+
 ## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.37.1...customer-edge-v0.38.0) (2026-07-21)
 
 
