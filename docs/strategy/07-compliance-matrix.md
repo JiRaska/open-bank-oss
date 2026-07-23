@@ -125,6 +125,13 @@ This document maps regulatory requirements to concrete technical capabilities an
 | CNB Act 21/1992 | 1 Jan 1993 | Ongoing | Czech national law; latest amendment 11 Jan 2026 |
 | eIDAS 2.0 (910/2014) | 27 Nov 2014 | 31 Dec 2026 | EUDI Wallet mandatory; implementing regs 2024/2977, 2024/2979, 2024/2982, 2024/2980 |
 
+## Related detailed positions
+
+Deep-dive compliance notes derived from the code on `origin/main`:
+
+- [Instant Payments Regulation (EU 2024/886) compliance position](../compliance/ipr-vop.md) — Verification of Payee, SCT Inst 10-second timing, charge parity, sanctions cadence, and an honest gap list.
+- [ISO 20022 message catalog](../compliance/iso-20022-catalog.md) — every pacs/camt/pain and SWIFT MT/MX message type mapped to the service it lives in.
+
 ## Sources
 
 - **PSD2**: Directive (EU) 2015/2366; RTS Regulation (EU) 2018/389 (amended by (EU) 2022/2360)
