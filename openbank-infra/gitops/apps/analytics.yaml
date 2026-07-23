@@ -1,0 +1,27 @@
+# Analytics warehouse + sink (ADR-0022): openbank-analytics-sink consumes the domain-event stream
+# into a single-node ClickHouse. Resources span the `analytics` namespace (ClickHouse, sink, ESO
+# projections) and `messaging` (the KafkaUser), like the customer-edge app — each manifest declares
+# its own metadata.namespace and ServerSideApply reconciles them.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: analytics
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/analytics
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: analytics
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

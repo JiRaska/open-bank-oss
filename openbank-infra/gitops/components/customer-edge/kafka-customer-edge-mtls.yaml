@@ -55,6 +55,14 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # Producer: OnboardingFunnelPublisher -> openbank.onboarding.funnel.events (ADR-0069
+      # Phase 2 funnel telemetry). Write only; the consumer is analytics-sink, not the edge.
+      - resource:
+          type: topic
+          name: openbank.onboarding.funnel.events
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
       # Consumer: OnboardingResumeService <- party.events (pid-service's party-events-out).
       # Unprefixed topic name is deliberate and matches the producer — pid-service publishes
       # `party.events`, distinct from party-service's `openbank.party.events`.

@@ -1,0 +1,98 @@
+# Kafka mTLS identity + ACLs for analytics-sink (ADR-0022 / ADR-0137 fleet gate).
+#
+# analytics-sink consumes the domain-event stream into the ClickHouse bronze layer. It has ONE
+# incoming channel (analytics-events-in) subscribed to nine topics; it never produces. The broker
+# runs allow.everyone.if.no.acl.found=false, so it needs a KafkaUser with Read on each topic + the
+# consumer group. Identity model (ADR-0137): one KafkaUser = one mTLS cert = one principal; the
+# Strimzi User Operator mints a per-user Secret in `messaging`, projected into `analytics` by the
+# ExternalSecrets below (same pattern as kafka-onboarding-mtls.yaml / kafka-customer-edge-mtls.yaml).
+# The eso-kafka-cert-reader Role in `messaging` is resourceNames-scoped — analytics-sink is added to
+# its allow-list in components/payments/kafka-scheme-accepted-acl.yaml.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  name: analytics-sink
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      # Read-only consumer across the analytics ingest topics (analytics-sink application.yaml
+      # `topics:` list). Describe is required alongside Read for metadata/offset fetch.
+      - resource: { type: topic, name: openbank.account.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.transaction.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.balance.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.party.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.kyc.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.consent.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.sca.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.documents.document.event, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.onboarding.funnel.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: group, name: analytics-sink, patternType: literal }
+        operations: [Read]
+        host: "*"
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: analytics-sink-kafka-keystore
+  namespace: analytics
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: analytics-sink-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: analytics-sink
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: analytics
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert

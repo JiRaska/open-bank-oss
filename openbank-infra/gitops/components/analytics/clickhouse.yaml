@@ -1,0 +1,129 @@
+# Single-node ClickHouse for the sandbox analytics warehouse (ADR-0022).
+#
+# This is the bronze/silver/gold store openbank-analytics-sink writes into and the admin cockpit's
+# onboarding-funnel board reads. Single node + one replica is deliberate for sandbox; production
+# would run a replicated ClickHouse (Keeper + shards). The schema (V1 bronze/silver + V2 onboarding
+# funnel gold views) is applied on first boot via the clickhouse-init ConfigMap mounted into
+# /docker-entrypoint-initdb.d — ClickHouse runs those .sql files once, when the data dir is empty.
+#
+# Image is docker.io/... so the ecr-pull-through-rewrite Kyverno policy rewrites it to the ECR
+# pull-through cache (docker-hub/) at admission — no NAT, and NOT an openbank-* image so the cosign
+# signature policy does not apply.
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse
+  namespace: analytics
+  labels:
+    app.kubernetes.io/name: clickhouse
+    app.kubernetes.io/part-of: openbank
+spec:
+  selector:
+    app.kubernetes.io/name: clickhouse
+  ports:
+    - name: http
+      port: 8123
+      targetPort: http
+    - name: native
+      port: 9000
+      targetPort: native
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: clickhouse
+  namespace: analytics
+  labels:
+    app.kubernetes.io/name: clickhouse
+    app.kubernetes.io/part-of: openbank
+spec:
+  serviceName: clickhouse
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: clickhouse
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: clickhouse
+        app.kubernetes.io/part-of: openbank
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: clickhouse
+          image: docker.io/clickhouse/clickhouse-server:24.8-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8123
+            - name: native
+              containerPort: 9000
+          env:
+            - name: CLICKHOUSE_DB
+              value: openbank_analytics
+            - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+              value: "1"
+            # Create the `analytics` application user at first boot from the out-of-band
+            # clickhouse-auth Secret (same Secret analytics-sink authenticates with). ClickHouse's
+            # image creates this user on an empty data dir; on an already-initialised volume the user
+            # must be created once via clickhouse-client (CREATE USER ... IDENTIFIED BY ...).
+            - name: CLICKHOUSE_USER
+              value: analytics
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-auth
+                  key: password
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          startupProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: init
+          configMap:
+            name: clickhouse-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 10Gi

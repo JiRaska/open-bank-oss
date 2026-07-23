@@ -114,6 +114,19 @@ spec:
             # degrades calmly to "Tempo unreachable" (graceful-state rule).
             - name: TEMPO_URL
               value: http://tempo.observability.svc:3100
+            # Onboarding funnel analytics (/onboarding/analytics): the BFF queries the ClickHouse
+            # gold views over the HTTP interface. Absent → defaults to localhost:8123 and the board
+            # degrades calmly to the "unavailable" state (graceful-state rule). Auth is the
+            # `analytics` user; password from the Vault-backed clickhouse-auth Secret below.
+            - name: CLICKHOUSE_URL
+              value: http://clickhouse.analytics.svc:8123
+            - name: CLICKHOUSE_USER
+              value: analytics
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-auth
+                  key: password
             # Business Observability + DORA/FinOps pages query Prometheus via the
             # /api/prometheus proxy, which resolves PROMETHEUS_URL (else falls back
             # to localhost:9090 → "Prometheus Unreachable", every metric reads N/A).

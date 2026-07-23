@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+# Onboarding-funnel alerts (ADR-0069 Phase 2). The customer-edge OnboardingFunnelPublisher
+# increments onboarding_funnel_events_total{step,action} on every app-reported funnel transition
+# (step & action are closed allow-lists — bounded cardinality). customer-edge's /q/metrics is
+# already scraped by the fleet PodMonitor (components/observability/podmonitor-openbank-services.yaml
+# lists the customer-edge namespace), so these series reach Prometheus with no extra wiring.
+#
+# WHY here and not from ClickHouse: the warehouse funnel is for exploration; paging needs a live,
+# cheap signal. The final framework-agreement signature is where the feedback said people fall off,
+# so the primary alert watches its success ratio.
+#
+# NOTE: this PrometheusRule lives in the customer-edge namespace (next to the service that emits the
+# metric). If this cluster's Prometheus restricts ruleNamespaceSelector, move it to the namespace
+# that holds the other PrometheusRules (see components/payments/prometheus-rules.yaml, namespace
+# payments) — the rules themselves are namespace-agnostic (metrics carry their own namespace label).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-onboarding-funnel-alerts
+  namespace: customer-edge
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: customer-edge
+spec:
+  groups:
+    - name: openbank.onboarding.funnel
+      rules:
+        - alert: OnboardingSignConversionLow
+          # Of the people who tried to sign the framework agreement in the last hour, fewer than 70%
+          # succeeded — with enough attempts (>=10) that the ratio is meaningful, not sandbox noise.
+          # This is the single metric the "people fall off at the signature" feedback maps to.
+          expr: |
+            (
+              sum(increase(onboarding_funnel_events_total{step="SIGN", action="SIGN_SUCCESS"}[1h]))
+              /
+              clamp_min(sum(increase(onboarding_funnel_events_total{step="SIGN", action="SIGN_ATTEMPT"}[1h])), 1)
+            ) < 0.70
+            and
+            sum(increase(onboarding_funnel_events_total{step="SIGN", action="SIGN_ATTEMPT"}[1h])) >= 10
+          for: 15m
+          labels:
+            severity: warning
+            service: customer-edge
+          annotations:
+            summary: "Onboarding signature conversion below 70%"
+            description: "Fewer than 70% of framework-agreement signature attempts succeeded in the last hour ({{ $value | humanizePercentage }}). Check sca-service / document-service and the sign-fail reasons on the admin onboarding board."
+        - alert: OnboardingConsentToSignDropoffHigh
+          # Big leak between agreeing to the terms (AGREEMENT completed) and actually reaching the
+          # signature (SIGN viewed): >40% of people who consented never even open the sign screen.
+          expr: |
+            (
+              1 -
+              (
+                sum(increase(onboarding_funnel_events_total{step="SIGN", action="STEP_VIEWED"}[6h]))
+                /
+                clamp_min(sum(increase(onboarding_funnel_events_total{step="AGREEMENT", action="STEP_COMPLETED"}[6h])), 1)
+              )
+            ) > 0.40
+            and
+            sum(increase(onboarding_funnel_events_total{step="AGREEMENT", action="STEP_COMPLETED"}[6h])) >= 20
+          for: 30m
+          labels:
+            severity: warning
+            service: customer-edge
+          annotations:
+            summary: "High drop-off between consent and signature"
+            description: "More than 40% of prospects who accepted the terms in the last 6h never reached the signature screen — a funnel leak between account creation and signing. Inspect the admin onboarding conversion board."

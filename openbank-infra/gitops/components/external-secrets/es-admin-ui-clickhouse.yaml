@@ -1,0 +1,23 @@
+# admin-ui → ClickHouse `analytics` user password, projected from OpenBao (KV mount openbank/,
+# path analytics-sink, field CLICKHOUSE_PASSWORD — the SAME secret analytics-sink and ClickHouse
+# use) into the admin-ui namespace. Lets the onboarding-funnel-analytics BFF authenticate to the
+# warehouse over the ClickHouse HTTP interface. Never committed in plaintext.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: clickhouse-auth
+  namespace: admin-ui
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: clickhouse-auth
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: password
+      remoteRef:
+        key: analytics-sink
+        property: CLICKHOUSE_PASSWORD

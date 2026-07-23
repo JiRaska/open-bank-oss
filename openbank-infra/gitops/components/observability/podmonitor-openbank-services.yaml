@@ -27,6 +27,7 @@ spec:
     matchNames:
       - accounts
       - aml
+      - analytics
       - audit
       - balances
       - consent

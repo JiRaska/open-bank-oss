@@ -29,6 +29,7 @@ class OnboardingTermsTest {
     private fun resource(upstream: UpstreamClient): OnboardingResource = OnboardingResource(
         upstream,
         mockk<EnrollmentTicketService>(relaxed = true),
+        mockk(relaxed = true),
     ).apply {
         jsonMapper = mapper
         partyServiceUrl = "http://party"

@@ -1,0 +1,376 @@
+apiVersion: v1
+data:
+  01-bronze-silver.sql: |
+    -- SPDX-License-Identifier: Apache-2.0
+    -- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+    -- See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+    --
+    -- OpenBank analytics warehouse schema (ADR-0022).
+    --
+    -- This is the ClickHouse target the openbank-analytics-sink writes into. It is applied by an
+    -- operator (or the future ClickHouseAnalyticsSink bootstrap) — NOT by Flyway, because this service
+    -- owns no OLTP database. The file is the source-controlled DDL of record for the warehouse.
+    --
+    -- Layering (medallion):
+    --   bronze  = append-only, replayable log of EVERY domain event (the log of record, kept >=10y)
+    --   silver  = current-state-per-aggregate, derived from bronze (last-writer-wins)
+    --
+    -- Consistency model: Kafka is at-least-once, so bronze MAY contain duplicates (same event_id) and
+    -- multiple versions per aggregate. ReplacingMergeTree(aggregate_version) collapses them at merge /
+    -- with FINAL, exactly mirroring AnalyticsProjections.latestPerAggregate in openbank-libs so the
+    -- in-app reconciliation job and the warehouse compute the SAME current-state view.
+
+    CREATE DATABASE IF NOT EXISTS openbank_analytics;
+
+    -- ---------------------------------------------------------------------------------------------
+    -- BRONZE: the log of record. Append-only, one row per ingested envelope (duplicates tolerated).
+    -- ---------------------------------------------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS openbank_analytics.bronze_events
+    (
+        event_id          UUID,
+        aggregate_type    LowCardinality(String),
+        aggregate_id      String,
+        aggregate_version Int64,
+        event_type        LowCardinality(String),
+        occurred_at       DateTime64(3, 'UTC'),
+        source_service    LowCardinality(String),
+        schema_version    UInt16,
+        actor_id          Nullable(String),
+        actor_type        Nullable(String),
+        trace_id          Nullable(String),
+        -- Lineage: how this row entered bronze (STREAM | INITIAL_LOAD | BACKFILL | CORRECTION) and, for
+        -- non-STREAM ingests, which reload batch produced it. Lets an auditor distinguish a live event
+        -- from a row reloaded by a corrected batch, and lets a specific batch be traced/superseded.
+        ingest_source     LowCardinality(String) DEFAULT 'STREAM',
+        batch_id          Nullable(String),
+        ingested_at       DateTime64(3, 'UTC') DEFAULT now64(3),
+        -- Tamper-evidence (ADR-0023 F1+F2): deterministic SHA-256 over the row's identity + business
+        -- content (AnalyticsIntegrity.recordHash). Bronze is operator-mutable, so this hash — committed
+        -- into a Merkle root sealed in the WORM integrity_anchors table — is what proves a row was not
+        -- altered or dropped after write. Recompute and compare to detect tampering.
+        record_hash       String DEFAULT '',
+        -- PII-masked event body (masked at the sink — NEVER raw PII). JSON for schema evolution over
+        -- the 10y horizon; individual silver projections extract typed columns as needed.
+        payload           String
+    )
+    ENGINE = ReplacingMergeTree(aggregate_version)
+    -- Last-writer-wins key matches (aggregateType, aggregateId) in AnalyticsProjections; event_id keeps
+    -- distinct events within an aggregate version distinguishable for exact dedupe.
+    ORDER BY (aggregate_type, aggregate_id, event_id)
+    PARTITION BY toYYYYMM(occurred_at)
+    -- Retention floor: the bronze layer is the log of record and MUST be retained at least the
+    -- regulatory minimum (AnalyticsRetention.BRONZE_MINIMUM = 10 years). This is the FLOOR, not the
+    -- ceiling — raise it, never lower it. Deleting bronze is irreversible and forfeits recompute/reconcile.
+    TTL toDateTime(occurred_at) + INTERVAL 10 YEAR
+    SETTINGS index_granularity = 8192;
+
+    -- Idempotency / dedupe helper: lets the sink and reconciliation cheaply ask "have I seen event_id?"
+    ALTER TABLE openbank_analytics.bronze_events
+        ADD INDEX IF NOT EXISTS idx_event_id (event_id) TYPE bloom_filter GRANULARITY 4;
+
+    -- ---------------------------------------------------------------------------------------------
+    -- SILVER: current state per aggregate. A VIEW over bronze using argMax = last-writer-wins by
+    -- (aggregate_version, occurred_at, ingested_at), the SAME tie-break order as the LATEST comparator
+    -- in AnalyticsProjections. A view (not a second table) keeps storage single-copy and always
+    -- consistent with bronze; promote to a materialized/AggregatingMergeTree table only if read latency
+    -- demands it.
+    -- ---------------------------------------------------------------------------------------------
+    -- NOTE: the source columns inside the aggregates are table-qualified (b.*). The output column
+    -- `max(aggregate_version) AS aggregate_version` (and `... AS occurred_at`) would otherwise collide
+    -- with the bare `aggregate_version` / `occurred_at` used in the argMax ordering tuples — ClickHouse
+    -- resolves a bare identifier to the same-named SELECT alias, nesting max() inside argMax() and failing
+    -- with ILLEGAL_AGGREGATION (code 184). Qualifying forces resolution to the physical bronze column.
+    CREATE VIEW IF NOT EXISTS openbank_analytics.silver_current_state AS
+    SELECT
+        b.aggregate_type,
+        b.aggregate_id,
+        argMax(b.event_id, (b.aggregate_version, b.occurred_at, b.ingested_at))       AS event_id,
+        max(b.aggregate_version)                                                      AS aggregate_version,
+        argMax(b.event_type, (b.aggregate_version, b.occurred_at, b.ingested_at))     AS event_type,
+        argMax(b.occurred_at, (b.aggregate_version, b.occurred_at, b.ingested_at))    AS occurred_at,
+        argMax(b.source_service, (b.aggregate_version, b.occurred_at, b.ingested_at)) AS source_service,
+        argMax(b.schema_version, (b.aggregate_version, b.occurred_at, b.ingested_at)) AS schema_version,
+        argMax(b.payload, (b.aggregate_version, b.occurred_at, b.ingested_at))        AS payload
+    FROM openbank_analytics.bronze_events AS b
+    GROUP BY b.aggregate_type, b.aggregate_id;
+
+    -- ---------------------------------------------------------------------------------------------
+    -- GOLD (example): a daily event-volume rollup per service/type. Gold marts are cheap to add as
+    -- views/materialized views over silver|bronze and are where Metabase/Superset dashboards point,
+    -- so BI never touches the operational databases.
+    -- ---------------------------------------------------------------------------------------------
+    CREATE VIEW IF NOT EXISTS openbank_analytics.gold_daily_event_volume AS
+    SELECT
+        toDate(occurred_at)  AS day,
+        source_service,
+        aggregate_type,
+        event_type,
+        count()              AS events
+    FROM openbank_analytics.bronze_events
+    GROUP BY day, source_service, aggregate_type, event_type;
+
+    -- ---------------------------------------------------------------------------------------------
+    -- SILVER HISTORY (SCD2): the full ordered version history per aggregate. Each row is one state in
+    -- the aggregate's life; consecutive rows form the valid-from/valid-to intervals of a slowly-changing
+    -- dimension. Mirrors AnalyticsProjections.history. lead() gives the next-version timestamp as the
+    -- close of each interval (NULL = still current).
+    -- ---------------------------------------------------------------------------------------------
+    CREATE VIEW IF NOT EXISTS openbank_analytics.silver_history AS
+    SELECT
+        aggregate_type,
+        aggregate_id,
+        aggregate_version,
+        event_type,
+        occurred_at                                                           AS valid_from,
+        leadInFrame(occurred_at) OVER (
+            PARTITION BY aggregate_type, aggregate_id
+            ORDER BY aggregate_version, occurred_at, ingested_at
+            ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+        )                                                                     AS valid_to,
+        payload
+    FROM openbank_analytics.bronze_events;
+
+    -- AS-OF / point-in-time current state. ClickHouse parameterised view: query with
+    --   SELECT * FROM openbank_analytics.silver_as_of(t = '2025-12-31 23:59:59');
+    -- to get the current-state-per-aggregate as it stood at time {t} — the regulatory "report as of"
+    -- cut-off. Same last-writer-wins resolution as silver, restricted to occurred_at <= {t}. Mirrors
+    -- AnalyticsProjections.asOf. Because bronze is a full event log, any historical cut-off is exact.
+    CREATE VIEW IF NOT EXISTS openbank_analytics.silver_as_of AS
+    SELECT
+        b.aggregate_type,
+        b.aggregate_id,
+        argMax(b.event_id, (b.aggregate_version, b.occurred_at, b.ingested_at))    AS event_id,
+        max(b.aggregate_version)                                                   AS aggregate_version,
+        argMax(b.event_type, (b.aggregate_version, b.occurred_at, b.ingested_at))  AS event_type,
+        argMax(b.occurred_at, (b.aggregate_version, b.occurred_at, b.ingested_at)) AS occurred_at,
+        argMax(b.payload, (b.aggregate_version, b.occurred_at, b.ingested_at))     AS payload
+    FROM openbank_analytics.bronze_events AS b
+    WHERE b.occurred_at <= {t:DateTime64(3, 'UTC')}
+    GROUP BY b.aggregate_type, b.aggregate_id;
+
+    -- ---------------------------------------------------------------------------------------------
+    -- DEAD-LETTER QUARANTINE: messages that could not be projected into an envelope (malformed JSON,
+    -- missing field). They are NOT silently dropped — a dropped event is an invisible gap in the log of
+    -- record. Idempotent on content_hash so re-delivery / replay does not duplicate rows. Once the
+    -- producer is fixed, an operator replays raw_payload through the normal mapping path. Kept 1 year
+    -- (operational, not the regulatory log of record).
+    -- ---------------------------------------------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS openbank_analytics.dead_letter_events
+    (
+        content_hash  String,
+        raw_payload   String,
+        error         String,
+        failed_at     DateTime64(3, 'UTC') DEFAULT now64(3)
+    )
+    ENGINE = ReplacingMergeTree(failed_at)
+    ORDER BY (content_hash)
+    PARTITION BY toYYYYMM(failed_at)
+    TTL toDateTime(failed_at) + INTERVAL 1 YEAR;
+
+    -- ---------------------------------------------------------------------------------------------
+    -- BACKFILL AUDIT: one row per recovery load (BACKFILL | INITIAL_LOAD | CORRECTION) — who reloaded
+    -- what window and why, plus counts. Audit evidence that a gap was deliberately and traceably filled.
+    -- Retained for the regulatory horizon alongside bronze.
+    -- ---------------------------------------------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS openbank_analytics.backfill_audit
+    (
+        batch_id       String,
+        ingest_source  LowCardinality(String),
+        range_from     DateTime64(3, 'UTC'),
+        range_to       DateTime64(3, 'UTC'),
+        aggregate_type Nullable(String),
+        aggregate_id   Nullable(String),
+        windows        UInt32,
+        ingested       UInt64,
+        deduped        UInt64,
+        requested_by   String,
+        reason         String,
+        started_at     DateTime64(3, 'UTC'),
+        finished_at    DateTime64(3, 'UTC'),
+        status         LowCardinality(String)
+    )
+    ENGINE = MergeTree
+    ORDER BY (started_at, batch_id)
+    PARTITION BY toYYYYMM(started_at)
+    TTL toDateTime(started_at) + INTERVAL 10 YEAR;
+
+    -- ---------------------------------------------------------------------------------------------
+    -- INTEGRITY ANCHORS (ADR-0023 F1+F2): one row per sealed batch — a Merkle root over that batch's
+    -- record_hash leaves, chained to the previous anchor's hash. This table is the *minimal* structure
+    -- that must live in genuinely immutable WORM storage (S3 Object Lock / append-only ledger); the
+    -- bronze rows themselves stay in mutable ClickHouse. A challenge re-derives the leaf hashes from
+    -- bronze and checks they still produce merkle_root. Reconciliation evidence is anchored here too
+    -- (source = 'RECONCILIATION:*', merkle_root = the evidence fingerprint). Never deleted.
+    --
+    -- NOTE: when bound to a real WORM target this table is a *cache/queryable mirror*; the authoritative
+    -- copy is the object-locked store the WormArchive adapter writes. ClickHouse cannot itself be WORM.
+    -- ---------------------------------------------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS openbank_analytics.integrity_anchors
+    (
+        anchor_id            String,
+        merkle_root          String,
+        previous_anchor_hash Nullable(String),
+        record_count         UInt32,
+        source               LowCardinality(String),
+        sealed_at            DateTime64(3, 'UTC')
+    )
+    ENGINE = MergeTree
+    ORDER BY (sealed_at, anchor_id)
+    PARTITION BY toYYYYMM(sealed_at);
+    -- No TTL: the tamper-evidence chain must outlive every record it anchors.
+
+    -- ---------------------------------------------------------------------------------------------
+    -- RELOAD PROPOSALS (ADR-0023 F3): the maker-checker decision trail for sensitive reloads. The full
+    -- lifecycle (PROPOSED→APPROVED/REJECTED/WITHDRAWN→EXECUTED) is auditable: who proposed, who approved
+    -- (must differ), who executed, and when. Retained alongside bronze.
+    --
+    -- The proposal is mutated in place as it transitions, so the engine version MUST be a per-write
+    -- timestamp (updated_at), NOT proposed_at (which is constant across transitions and would make the
+    -- ReplacingMergeTree collapse non-deterministic). Reads use FINAL / argMax(updated_at) to get the
+    -- current state. range_*/aggregate_*/requested_by carry the wrapped BackfillRequest so it can be
+    -- reconstructed faithfully.
+    -- ---------------------------------------------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS openbank_analytics.reload_proposals
+    (
+        proposal_id     String,
+        state           LowCardinality(String),
+        ingest_source   LowCardinality(String),
+        range_from      DateTime64(3, 'UTC'),
+        range_to        DateTime64(3, 'UTC'),
+        aggregate_type  Nullable(String),
+        aggregate_id    Nullable(String),
+        requested_by    String,
+        proposed_by     String,
+        proposed_at     DateTime64(3, 'UTC'),
+        decided_by      Nullable(String),
+        decided_at      Nullable(DateTime64(3, 'UTC')),
+        decision_reason Nullable(String),
+        executed_at     Nullable(DateTime64(3, 'UTC')),
+        reason          String,
+        -- Per-write timestamp; the ReplacingMergeTree version, so the latest transition always wins.
+        updated_at      DateTime64(3, 'UTC') DEFAULT now64(3)
+    )
+    ENGINE = ReplacingMergeTree(updated_at)
+    ORDER BY (proposal_id)
+    PARTITION BY toYYYYMM(proposed_at)
+    TTL toDateTime(proposed_at) + INTERVAL 10 YEAR;
+  02-onboarding-funnel.sql: |
+    -- SPDX-License-Identifier: Apache-2.0
+    -- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+    -- See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+    --
+    -- Onboarding-funnel gold marts (ADR-0069 Phase 2).
+    --
+    -- These views sit over the generic bronze_events log and are what the admin cockpit's onboarding
+    -- conversion board queries. No new table: the funnel events land in bronze like every other event
+    -- (aggregate_type = 'ONBOARDING_FUNNEL', one row per app-emitted transition, keyed on the
+    -- pseudonymous onboarding session id). Applied by the same operator step as V1, all IF NOT EXISTS.
+    --
+    -- Event grammar (payload JSON, produced by customer-edge OnboardingFunnelPublisher):
+    --   step   ∈ WELCOME, IDENTITY, EMAIL, AGREEMENT, PASSKEY, SIGN   (ordered)
+    --   action ∈ STEP_VIEWED, STEP_COMPLETED, HOLD_STARTED, HOLD_ABANDONED,
+    --            KYC_METHOD_CHOSEN, SIGN_ATTEMPT, SIGN_SUCCESS, SIGN_FAIL
+
+    -- Normalised, typed projection of the raw funnel events. Everything else builds on this.
+    CREATE VIEW IF NOT EXISTS openbank_analytics.gold_onboarding_funnel_events AS
+    SELECT
+        aggregate_id                                  AS session_id,
+        occurred_at,
+        toDate(occurred_at)                           AS day,
+        JSONExtractString(payload, 'step')            AS step,
+        JSONExtractString(payload, 'action')          AS action,
+        JSONExtractString(payload, 'kycMethod')       AS kyc_method,
+        JSONExtractString(payload, 'reason')          AS reason,
+        JSONExtractString(payload, 'platform')        AS platform,
+        JSONExtractString(payload, 'appVersion')      AS app_version
+    FROM openbank_analytics.bronze_events
+    WHERE aggregate_type = 'ONBOARDING_FUNNEL';
+
+    -- Stable step ordinal so the funnel can be walked in order (and drop-off computed between adjacent
+    -- steps) regardless of the string values. A session is "cohorted" to the day it was first seen.
+    CREATE VIEW IF NOT EXISTS openbank_analytics.gold_onboarding_step_index AS
+    SELECT
+        step,
+        multiIf(
+            step = 'WELCOME',   1,
+            step = 'IDENTITY',  2,
+            step = 'EMAIL',     3,
+            step = 'AGREEMENT', 4,
+            step = 'PASSKEY',   5,
+            step = 'SIGN',      6,
+            99) AS step_ordinal
+    FROM (SELECT DISTINCT step FROM openbank_analytics.gold_onboarding_funnel_events);
+
+    -- FUNNEL WIDTH per day: distinct sessions that VIEWED and that COMPLETED each step. The admin board
+    -- reads this directly and computes step->step conversion and drop-off % from the viewed counts.
+    CREATE VIEW IF NOT EXISTS openbank_analytics.gold_onboarding_funnel_daily AS
+    SELECT
+        day,
+        step,
+        multiIf(
+            step = 'WELCOME',   1,
+            step = 'IDENTITY',  2,
+            step = 'EMAIL',     3,
+            step = 'AGREEMENT', 4,
+            step = 'PASSKEY',   5,
+            step = 'SIGN',      6,
+            99)                                                     AS step_ordinal,
+        uniqExactIf(session_id, action = 'STEP_VIEWED')             AS sessions_viewed,
+        uniqExactIf(session_id, action = 'STEP_COMPLETED')          AS sessions_completed,
+        uniqExactIf(session_id, action = 'HOLD_ABANDONED')          AS hold_abandons
+    FROM openbank_analytics.gold_onboarding_funnel_events
+    GROUP BY day, step;
+
+    -- TIME ON STEP: per session+step, seconds between first view and first completion. The admin board
+    -- runs quantile(0.5)(seconds_on_step) over this for the median dwell time, split by step. Only
+    -- sessions that both viewed and completed the step contribute (a still-open step has no duration).
+    CREATE VIEW IF NOT EXISTS openbank_analytics.gold_onboarding_step_durations AS
+    SELECT
+        session_id,
+        step,
+        toDate(minIf(occurred_at, action = 'STEP_VIEWED'))         AS day,
+        dateDiff(
+            'second',
+            minIf(occurred_at, action = 'STEP_VIEWED'),
+            minIf(occurred_at, action = 'STEP_COMPLETED'))         AS seconds_on_step
+    FROM openbank_analytics.gold_onboarding_funnel_events
+    WHERE action IN ('STEP_VIEWED', 'STEP_COMPLETED')
+    GROUP BY session_id, step
+    HAVING countIf(action = 'STEP_VIEWED') > 0
+       AND countIf(action = 'STEP_COMPLETED') > 0
+       AND seconds_on_step >= 0;
+
+    -- SIGN OUTCOMES: the tail everyone cares about — attempts vs successes vs failures at the final
+    -- framework-agreement signature, plus the machine reason for each failure so the board can rank why.
+    CREATE VIEW IF NOT EXISTS openbank_analytics.gold_onboarding_sign_outcomes AS
+    SELECT
+        day,
+        countIf(action = 'SIGN_ATTEMPT')                           AS attempts,
+        countIf(action = 'SIGN_SUCCESS')                           AS successes,
+        countIf(action = 'SIGN_FAIL')                              AS failures
+    FROM openbank_analytics.gold_onboarding_funnel_events
+    WHERE step = 'SIGN'
+    GROUP BY day;
+
+    CREATE VIEW IF NOT EXISTS openbank_analytics.gold_onboarding_sign_fail_reasons AS
+    SELECT
+        day,
+        if(reason = '', 'unknown', reason)                         AS reason,
+        count()                                                    AS failures
+    FROM openbank_analytics.gold_onboarding_funnel_events
+    WHERE step = 'SIGN' AND action = 'SIGN_FAIL'
+    GROUP BY day, reason;
+
+    -- KYC METHOD SPLIT: which identity path prospects pick, and how it correlates with finishing.
+    CREATE VIEW IF NOT EXISTS openbank_analytics.gold_onboarding_kyc_method_daily AS
+    SELECT
+        day,
+        if(kyc_method = '', 'unknown', kyc_method)                 AS kyc_method,
+        uniqExact(session_id)                                      AS sessions
+    FROM openbank_analytics.gold_onboarding_funnel_events
+    WHERE action = 'KYC_METHOD_CHOSEN'
+    GROUP BY day, kyc_method;
+kind: ConfigMap
+metadata:
+  name: clickhouse-init
+  namespace: analytics
