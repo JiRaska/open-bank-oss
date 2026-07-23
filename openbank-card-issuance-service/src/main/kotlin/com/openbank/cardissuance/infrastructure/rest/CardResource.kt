@@ -6,9 +6,11 @@ package com.openbank.cardissuance.infrastructure.rest
 
 import com.openbank.cardissuance.application.port.`in`.CardStatusCommand
 import com.openbank.cardissuance.application.port.`in`.CardUseCase
+import com.openbank.cardissuance.application.port.`in`.UpdateControlsCommand
 import com.openbank.cardissuance.application.port.`in`.UpdateLimitsCommand
 import com.openbank.cardissuance.infrastructure.rest.dto.CardStatusRequest
 import com.openbank.cardissuance.infrastructure.rest.dto.IssueCardRequest
+import com.openbank.cardissuance.infrastructure.rest.dto.UpdateControlsRequest
 import com.openbank.cardissuance.infrastructure.rest.dto.UpdateLimitsRequest
 import com.openbank.cardissuance.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
@@ -32,6 +34,7 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Cards", description = "Card issuance and lifecycle management — PCI DSS compliant")
+@Suppress("TooManyFunctions") // one REST handler per card operation (issue/lifecycle/limits/controls)
 class CardResource(private val cardUseCase: CardUseCase) {
 
     @POST
@@ -123,6 +126,29 @@ class CardResource(private val cardUseCase: CardUseCase) {
     ): Response = Response.ok(
         cardUseCase.updateLimits(
             UpdateLimitsCommand(id, req.dailyLimitMinorUnits, req.monthlyLimitMinorUnits, operatorId),
+        ).toResponse(),
+    ).build()
+
+    @PUT
+    @Path("/{id}/controls")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "card.controls.update", resource = "#id")
+    @Operation(summary = "Set a card's channel controls (contactless / online / ATM / abroad)")
+    suspend fun updateControls(
+        @PathParam("id") id: UUID,
+        req: UpdateControlsRequest,
+        @HeaderParam("X-Operator-Id") operatorId: String,
+    ): Response = Response.ok(
+        cardUseCase.updateControls(
+            UpdateControlsCommand(
+                id,
+                req.contactlessEnabled,
+                req.onlineEnabled,
+                req.atmEnabled,
+                req.abroadEnabled,
+                operatorId,
+            ),
         ).toResponse(),
     ).build()
 }

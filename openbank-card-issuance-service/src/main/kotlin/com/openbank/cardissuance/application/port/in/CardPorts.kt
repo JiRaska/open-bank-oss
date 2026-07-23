@@ -31,6 +31,16 @@ data class UpdateLimitsCommand(
     val changedBy: String,
 )
 
+data class UpdateControlsCommand(
+    val cardId: UUID,
+    val contactlessEnabled: Boolean,
+    val onlineEnabled: Boolean,
+    val atmEnabled: Boolean,
+    val abroadEnabled: Boolean,
+    val changedBy: String,
+)
+
+@Suppress("TooManyFunctions") // one use-case method per card operation (hexagonal)
 interface CardUseCase {
     suspend fun issueCard(cmd: IssueCardCommand): Card
     suspend fun activateCard(cmd: CardStatusCommand): Card
@@ -38,6 +48,7 @@ interface CardUseCase {
     suspend fun suspendCard(cmd: CardStatusCommand): Card
     suspend fun resumeCard(cmd: CardStatusCommand): Card
     suspend fun updateLimits(cmd: UpdateLimitsCommand): Card
+    suspend fun updateControls(cmd: UpdateControlsCommand): Card
     suspend fun getCard(id: UUID): Card?
     suspend fun listAll(): List<Card>
     suspend fun listByAccount(accountId: UUID): List<Card>

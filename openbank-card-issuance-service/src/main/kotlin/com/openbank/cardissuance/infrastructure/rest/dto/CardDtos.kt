@@ -52,6 +52,10 @@ data class CardResponse(
     val blockedReason: String?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val contactlessEnabled: Boolean = true,
+    val onlineEnabled: Boolean = true,
+    val atmEnabled: Boolean = true,
+    val abroadEnabled: Boolean = true,
 )
 
 fun Card.toResponse() = CardResponse(
@@ -59,7 +63,16 @@ fun Card.toResponse() = CardResponse(
     cardholderName, embossedName, expiryDate, status,
     dailyLimitMinorUnits, monthlyLimitMinorUnits, currency, deliveryAddress,
     activatedAt, blockedAt, blockedReason, createdAt, updatedAt,
+    contactlessEnabled, onlineEnabled, atmEnabled, abroadEnabled,
 )
 
 /** Customer/operator request to set a card's spending limits (minor units). */
 data class UpdateLimitsRequest(val dailyLimitMinorUnits: Long, val monthlyLimitMinorUnits: Long)
+
+/** Customer/operator request to set a card's channel controls (which rails may transact). */
+data class UpdateControlsRequest(
+    val contactlessEnabled: Boolean,
+    val onlineEnabled: Boolean,
+    val atmEnabled: Boolean,
+    val abroadEnabled: Boolean,
+)

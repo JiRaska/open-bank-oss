@@ -16,6 +16,8 @@ fun CardEntity.toDomain() = Card(
     currency = currency, deliveryAddress = deliveryAddress,
     activatedAt = activatedAt, blockedAt = blockedAt, blockedReason = blockedReason,
     createdAt = createdAt, updatedAt = updatedAt,
+    contactlessEnabled = contactlessEnabled, onlineEnabled = onlineEnabled,
+    atmEnabled = atmEnabled, abroadEnabled = abroadEnabled,
 )
 
 fun Card.toEntity() = CardEntity().also { e ->
@@ -33,6 +35,10 @@ fun Card.toEntity() = CardEntity().also { e ->
     e.status = status.name
     e.dailyLimitMinorUnits = dailyLimitMinorUnits
     e.monthlyLimitMinorUnits = monthlyLimitMinorUnits
+    e.contactlessEnabled = contactlessEnabled
+    e.onlineEnabled = onlineEnabled
+    e.atmEnabled = atmEnabled
+    e.abroadEnabled = abroadEnabled
     e.currency = currency
     e.deliveryAddress = deliveryAddress
     e.activatedAt = activatedAt
