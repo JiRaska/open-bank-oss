@@ -1,7 +1,7 @@
 {
   "schema": "openbank.infra-lifecycle/v1",
   "source": "endoflife.date + GitOps image tags — ADR-0079",
-  "generatedAt": "2026-07-23T06:33:30.146Z",
+  "generatedAt": "2026-07-23T17:42:20.369Z",
   "components": [
     {
       "id": "postgres",
@@ -966,9 +966,19 @@
       "lifecycle": {
         "cycles": [
           {
+            "cycle": "2.6",
+            "releaseDate": "2026-07-14",
+            "eol": false,
+            "latest": "2.6.1",
+            "latestReleaseDate": "2026-07-22",
+            "lts": false,
+            "support": null,
+            "link": null
+          },
+          {
             "cycle": "2.5",
             "releaseDate": "2026-02-05",
-            "eol": false,
+            "eol": "2026-07-14",
             "latest": "2.5.5",
             "latestReleaseDate": "2026-06-17",
             "lts": false,
