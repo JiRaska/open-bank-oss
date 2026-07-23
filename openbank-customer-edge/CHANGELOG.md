@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.42.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.41.0...customer-edge-v0.42.0) (2026-07-23)
+
+
+### Features
+
+* **cards:** channel controls (contactless / online / ATM / abroad) ([#1981](https://github.com/JiRaska/open-bank-oss/issues/1981)) ([fef2bda](https://github.com/JiRaska/open-bank-oss/commit/fef2bdadf18b2fcafab6b7d19ab82de0f0b33b8d)), closes [#1980](https://github.com/JiRaska/open-bank-oss/issues/1980)
+
 ## [0.41.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.40.0...customer-edge-v0.41.0) (2026-07-23)
 
 
