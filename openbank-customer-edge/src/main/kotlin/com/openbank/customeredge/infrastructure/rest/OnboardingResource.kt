@@ -79,6 +79,7 @@ class OnboardingResource(
         // funnel event is a handful of short enum-ish fields, never a document.
         private const val MAX_FUNNEL_BODY_BYTES = 1_024
         private const val MAX_FUNNEL_ATTR_LENGTH = 64
+        private const val STATUS_ACCEPTED = 202
         private val SESSION_ID_PATTERN =
             Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
         // The ONLY caller-supplied attributes forwarded into the store (each length-capped). No free map.
@@ -228,7 +229,7 @@ class OnboardingResource(
             node.get(key)?.asText()?.trim()?.take(MAX_FUNNEL_ATTR_LENGTH)?.takeIf { it.isNotEmpty() }
         }
         funnelPublisher.emit(sessionId, step, action, attributes)
-        return Response.status(202).build()
+        return Response.status(STATUS_ACCEPTED).build()
     }
 
     /**
