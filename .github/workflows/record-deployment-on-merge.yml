@@ -22,6 +22,8 @@ name: Record deployment (gitops-PR merge)
 on:
   pull_request:
     types: [closed]
+    paths:
+      - "openbank-infra/gitops/components/**"
 
 permissions:
   contents: read
@@ -34,12 +36,14 @@ concurrency:
 jobs:
   record:
     name: record-deployment
-    # Only bot-authored gitops auto-deploy PRs that actually merged. `pull_request` (not
-    # `_target`) keeps this in the merged-head context with same-repo secrets; these PRs are
-    # always same-repo (peter-evans/create-pull-request bot branch), never forks.
-    if: >-
-      github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.head.ref, 'chore/gitops-auto-deploy-')
+    # Any MERGED PR that touched gitops components (paths filter above). Not just the bot's
+    # `chore/gitops-auto-deploy-*` branches: manually cut deploy PRs (e.g. #1729 billing) change
+    # the same `:sandbox-<sha>` image pins but were never recorded, so the broker's deployed-
+    # version matrix lagged reality for every hand-deployed service (#1727). The step below
+    # derives (service, sha) pairs from the PR's own diff, so a PR that touches gitops without
+    # changing an image pin records nothing. `pull_request` (not `_target`) keeps same-repo
+    # secrets; a fork PR gets no secrets and would fail loudly rather than record garbage.
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -62,32 +66,52 @@ jobs:
         if: ${{ vars.PACT_BROKER_URL != '' }}
         run: |
           set -uo pipefail
-          # The deployed version is the source sha the deploy PR was cut for — it is in the
-          # branch name (chore/gitops-auto-deploy-<sha>), the commit message, and the image tag.
-          # Validate it to a 40-hex sha so a hand-crafted ref name can never inject a shell token
-          # or a bogus pacticipant version.
-          SHA="${HEAD_REF#chore/gitops-auto-deploy-}"
-          if ! printf '%s' "$SHA" | grep -qE '^[0-9a-f]{40}$'; then
-            echo "::error::head ref '${HEAD_REF}' does not carry a 40-hex sha — refusing to record"
-            exit 1
-          fi
-          SHORT="${SHA:0:8}"
-
-          # The services this PR actually deployed = the manifests it changed to :sandbox-<sha>.
+          # The services this PR actually deployed = the manifests it changed to :sandbox-<short>.
           # Read them from the PR's own diff (added lines only), so an abandoned/other PR can
           # never cause a record here. Pacticipant name == the image name (openbank-<svc>).
-          mapfile -t SERVICES < <(
+          #
+          # The deployed VERSION is per-service now: bot auto-deploy PRs pin every service to the
+          # one sha in the branch name, but a manually cut deploy PR can pin any service to any
+          # built image (#1727). So take the short sha from each image tag and resolve it to the
+          # full 40-hex sha via the commits API, validating the result — a hand-crafted tag can
+          # never inject a shell token or a bogus pacticipant version.
+          mapfile -t PAIRS < <(
             gh pr diff "$PR_NUMBER" --repo "$GH_REPO" \
-              | grep -E "^\+.*openbank-[a-z0-9-]+:sandbox-${SHORT}" \
-              | grep -oE "openbank-[a-z0-9-]+:sandbox-${SHORT}" \
-              | sed -E 's/:sandbox-.*//' \
+              | grep -E "^\+.*openbank-[a-z0-9-]+:sandbox-[0-9a-f]{7,40}" \
+              | grep -oE "openbank-[a-z0-9-]+:sandbox-[0-9a-f]{7,40}" \
               | sort -u
           )
-          if [ "${#SERVICES[@]}" -eq 0 ]; then
-            echo "No openbank-*:sandbox-${SHORT} image changes in PR #${PR_NUMBER} — nothing to record."
+          if [ "${#PAIRS[@]}" -eq 0 ]; then
+            echo "No openbank-*:sandbox-<sha> image changes in PR #${PR_NUMBER} — nothing to record."
             exit 0
           fi
-          echo "Recording ${#SERVICES[@]} service(s) at ${SHORT} → sandbox: ${SERVICES[*]}"
+
+          # Resolve each distinct short sha once. On the bot branch this is one API call; the
+          # branch-name sha (chore/gitops-auto-deploy-<sha>) is used as a consistency check when
+          # present, not as the source of truth.
+          declare -A FULL
+          resolve_failed=0
+          for pair in "${PAIRS[@]}"; do
+            short="${pair##*:sandbox-}"
+            [ -n "${FULL[$short]:-}" ] && continue
+            full="$(gh api "repos/${GH_REPO}/commits/${short}" --jq .sha 2>/dev/null || true)"
+            if ! printf '%s' "$full" | grep -qE '^[0-9a-f]{40}$'; then
+              echo "::error::image tag sandbox-${short} does not resolve to a commit in ${GH_REPO} — refusing to record it"
+              resolve_failed=1
+              continue
+            fi
+            FULL[$short]="$full"
+          done
+          if [ "${HEAD_REF#chore/gitops-auto-deploy-}" != "$HEAD_REF" ]; then
+            BRANCH_SHA="${HEAD_REF#chore/gitops-auto-deploy-}"
+            for short in "${!FULL[@]}"; do
+              case "$BRANCH_SHA" in
+                "${short}"*) ;;
+                *) echo "::warning::auto-deploy branch sha ${BRANCH_SHA:0:8} != image tag sha ${short} — recording the image tag (gitops truth)";;
+              esac
+            done
+          fi
+          echo "Recording ${#PAIRS[@]} service pin(s) → sandbox: ${PAIRS[*]}"
 
           # Download the pact standalone CLI (retry the flaky github.com release download, then
           # fail loud — a silent skip would leave the broker behind reality, the very drift this
@@ -104,9 +128,13 @@ jobs:
           mkdir -p /tmp/pact && tar -xzf /tmp/pact.tgz -C /tmp/pact
           CLI="/tmp/pact/pact/bin/pact-broker"
 
-          rec_failed=0
-          for svc in "${SERVICES[@]}"; do
-            echo "==> record-deployment ${svc} @ ${SHORT} → sandbox"
+          rec_failed="$resolve_failed"
+          for pair in "${PAIRS[@]}"; do
+            svc="${pair%%:sandbox-*}"
+            short="${pair##*:sandbox-}"
+            SHA="${FULL[$short]:-}"
+            [ -n "$SHA" ] || continue  # unresolvable tag already counted via resolve_failed
+            echo "==> record-deployment ${svc} @ ${short} → sandbox"
             # record-deployment needs the version to exist in the broker. A version that CI
             # never published (path-scoped build skipped this service on that sha) 404s; create
             # it idempotently first, matching the old in-gitops-pr behaviour.
