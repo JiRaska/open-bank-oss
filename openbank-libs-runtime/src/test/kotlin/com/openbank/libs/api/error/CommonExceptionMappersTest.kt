@@ -7,6 +7,7 @@ package com.openbank.libs.api.error
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
+import com.openbank.libs.authz.PolicyDecisionException
 import jakarta.ws.rs.WebApplicationException
 import org.assertj.core.api.Assertions.assertThat
 import org.jboss.logging.MDC
@@ -118,6 +119,19 @@ class CommonExceptionMappersTest {
         assertThat(body.status).isEqualTo(403)
         assertThat(body.code).isEqualTo(ErrorCode.FORBIDDEN.code)
         assertThat(body.message).contains("maker-1")
+    }
+
+    @Test
+    fun `PolicyDecisionException maps to 503 POLICY_DECISION_POINT_UNAVAILABLE, not a 4xx`() {
+        val response = PolicyDecisionExceptionMapper()
+            .toResponse(PolicyDecisionException("policy decision point unavailable: OPA call failed: null"))
+        val body = response.entity as ApiError
+
+        // A PDP outage is an availability failure — 503, never a 4xx business/validation error (#1797).
+        assertThat(response.status).isEqualTo(503)
+        assertThat(body.status).isEqualTo(503)
+        assertThat(body.code).isEqualTo(ErrorCode.POLICY_DECISION_POINT_UNAVAILABLE.code)
+        assertThat(body.message).contains("policy decision point unavailable")
     }
 
     @Test

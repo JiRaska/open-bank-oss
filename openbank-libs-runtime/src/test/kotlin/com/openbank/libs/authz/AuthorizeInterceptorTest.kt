@@ -16,7 +16,6 @@ import io.mockk.mockk
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.interceptor.InvocationContext
 import jakarta.ws.rs.ForbiddenException
-import jakarta.ws.rs.ServiceUnavailableException
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.SecurityContext
@@ -231,7 +230,7 @@ class AuthorizeInterceptorTest {
         interceptor.pdp = mockk { every { isResolvable } returns false }
 
         assertThatThrownBy { interceptor.authorize(makeCtx(annotatedMethod)) }
-            .isInstanceOf(ServiceUnavailableException::class.java)
+            .isInstanceOf(PolicyDecisionException::class.java)
 
         assertThat(counter("openbank.authz.decisions", "outcome", "pdp_unconfigured"))
             .isEqualTo(1.0)
@@ -273,7 +272,7 @@ class AuthorizeInterceptorTest {
         interceptor.pdp = mockk { every { isResolvable } returns false }
         val ctx = makeCtx(annotatedMethod)
         assertThatThrownBy { interceptor.authorize(ctx) }
-            .isInstanceOf(ServiceUnavailableException::class.java)
+            .isInstanceOf(PolicyDecisionException::class.java)
     }
 
     @Test

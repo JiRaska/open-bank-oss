@@ -6,6 +6,7 @@ package com.openbank.libs.api.error
 
 import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
+import com.openbank.libs.authz.PolicyDecisionException
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
@@ -78,6 +79,27 @@ class InvalidApprovalStateMapper : ExceptionMapper<InvalidApprovalStateException
     override fun toResponse(exception: InvalidApprovalStateException): Response =
         Response.status(ErrorCode.CONFLICT.httpStatus)
             .entity(apiError(ErrorCode.CONFLICT.httpStatus, ErrorCode.CONFLICT.code, exception.message ?: "Conflict"))
+            .build()
+}
+
+// A PDP outage (OPA sidecar unreachable, or no PolicyDecisionPoint wired while enforcing) is an
+// availability failure, not a client error. AuthorizeInterceptor throws PolicyDecisionException; map
+// it to 503 with its own code so an outage reads as "the platform is broken", not laundered into a
+// 422 BUSINESS_RULE_VIOLATION ("the caller sent something invalid"). Keyed on the concrete domain
+// type, this is immune to whatever the Kotlin suspend/coroutine bridge does to WebApplicationException
+// subtypes at the JAX-RS boundary — the reason a thrown ServiceUnavailableException (503) was
+// surfacing as 422 (issue #1797).
+@Provider
+class PolicyDecisionExceptionMapper : ExceptionMapper<PolicyDecisionException> {
+    override fun toResponse(exception: PolicyDecisionException): Response =
+        Response.status(ErrorCode.POLICY_DECISION_POINT_UNAVAILABLE.httpStatus)
+            .entity(
+                apiError(
+                    ErrorCode.POLICY_DECISION_POINT_UNAVAILABLE.httpStatus,
+                    ErrorCode.POLICY_DECISION_POINT_UNAVAILABLE.code,
+                    exception.message ?: "Policy decision point unavailable",
+                ),
+            )
             .build()
 }
 
