@@ -31,6 +31,12 @@
 4. **Service → credit bureau / risk-parameter / valuation feeds (ports).** `@Default` no-op today; real
    integrations land later as build-time-gated `@Alternative` adapters — each a future trust boundary.
 5. **Service → its own Postgres schema.** Intra-service tables only; no cross-schema reads.
+6. **Service → in-namespace Redis (four-eyes `ApprovalStore`).** The ADR-0155 `RedisApprovalStore`
+   (openbank-libs-runtime) is backed by a same-namespace `redis` Deployment/Service (`redis.yaml`,
+   issue #1354). Ephemeral by design (persistence disabled) — a restart clears in-flight pending
+   approvals, matching the TTL-bounded residual-risk posture in §7. Reachable only from
+   `lending-service` (generated NetworkPolicy `redis-ingress-allow-list`, ADR-0081). Holds
+   short-lived `PendingApproval` records only — no loan, balance or PII data.
 
 ## 3. Controls in place (this slice)
 
@@ -171,6 +177,13 @@ officer decide the resulting `PendingApproval` for disbursement; the maker retri
 are wired, but blocking the REST call itself (pause-and-resume) is a deliberate follow-up flip, not
 bundled here (see ADR-0155).
 
+As of issue #1354 the `RedisApprovalStore` is now backed by a real in-namespace Redis (§2 item 6);
+previously the bean resolved but pointed at `redis://localhost:6379` in-pod, so flipping
+`authz.four-eyes.enforce=true` would have failed every gated `lending.disburse`/
+`lending.collateralRegister` call on a connection refusal — a latent fail-closed money-path outage
+rather than the documented pause-and-resume. The Redis backing is a precondition for that flip; the
+flip itself remains a separate deliberate step, validated against this Redis in a lower env first.
+
 Collateral registration additionally has its **own, independent, always-on domain-level gate** that
 does not depend on `authz.four-eyes.enforce` at all: `LendingService.register()` always creates a
 `Collateral` in `PENDING` status, and `applyCollateral()` only ever sums `APPROVED` items. A
@@ -218,6 +231,16 @@ ADR-0155 `PendingApproval` wrapper, IS durably recorded in Postgres via `Collate
 
 ## 8. Change log
 
+- **2026-07-22** — Deploy an in-namespace Redis backing the four-eyes `ApprovalStore` (issue #1354).
+  The CDI bean already resolved (`ApprovalConfig` @Produces `RedisApprovalStore`), so
+  `AuthorizeInterceptor`'s "no store → log + proceed" branch was never taken for lending; the store
+  pointed at `redis://localhost:6379` in-pod. Flipping `AUTHZ_FOUR_EYES_ENFORCE=true` would have
+  failed every `lending.disburse`/`lending.collateralRegister` on a connection refusal — a latent
+  fail-closed money-path outage. Adds `redis.yaml` (Deployment+Service, mirroring balances) +
+  `QUARKUS_REDIS_HOSTS` env; regenerated `network-policies.yaml` (new `redis-ingress-allow-list`).
+  **New trust boundary added to §2 (item 6); §7 updated.** `authz.four-eyes.enforce` stays `false`
+  — enforcement flip is a separate deliberate step, validated against this Redis in a lower env
+  first. No app-code or DB schema change (gitops + threat-model only). Rollback: revert the commit.
 - **2026-07-09** — Reschedule/restructuring (ADR-0028 follow-up, issue #667/#668). New
   `RescheduleLoanUseCase` + `POST /api/v1/lending/loans/{id}/reschedule`
   (`lending.reschedule`, `ROLE_CREDIT_RISK`/`ROLE_COMPLIANCE`/`ROLE_ADMIN`). Deletes an ACTIVE
