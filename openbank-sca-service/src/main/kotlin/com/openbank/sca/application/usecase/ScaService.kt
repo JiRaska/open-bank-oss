@@ -327,6 +327,8 @@ class ScaService(
     override suspend fun getChallenge(challengeId: UUID): ScaChallenge =
         repository.findById(challengeId) ?: throw ScaChallengeNotFoundException(challengeId)
 
+    override suspend fun listPendingByParty(partyId: UUID): List<ScaChallenge> = repository.findPendingByParty(partyId)
+
     /**
      * Settlement gate (ADR-0021): spend an approved challenge on exactly the operation the
      * device signed. Order matters — every check happens BEFORE the atomic compare-and-consume,

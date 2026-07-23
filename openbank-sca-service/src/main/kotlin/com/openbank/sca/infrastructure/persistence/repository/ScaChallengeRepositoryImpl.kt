@@ -6,6 +6,7 @@ package com.openbank.sca.infrastructure.persistence.repository
 
 import com.openbank.sca.application.port.out.ScaChallengeRepository
 import com.openbank.sca.domain.model.ScaChallenge
+import com.openbank.sca.domain.model.ScaStatus
 import com.openbank.sca.infrastructure.persistence.entity.ScaChallengeEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheRepository
@@ -34,6 +35,15 @@ class ScaChallengeRepositoryImpl :
 
     override suspend fun findById(id: UUID): ScaChallenge? =
         Panache.withSession { find("id", id).firstResult<ScaChallengeEntity>() }.awaitSuspending()?.toDomain()
+
+    override suspend fun findPendingByParty(partyId: UUID): List<ScaChallenge> = Panache.withSession {
+        find(
+            "partyId = ?1 and status = ?2 and expiresAt > ?3 order by createdAt desc",
+            partyId,
+            ScaStatus.PENDING,
+            OffsetDateTime.now(clock),
+        ).list<ScaChallengeEntity>()
+    }.awaitSuspending().map { it.toDomain() }
 
     override suspend fun markConsumed(id: UUID): Boolean = Panache.withTransaction {
         update("consumedAt = ?1 where id = ?2 and consumedAt is null", OffsetDateTime.now(clock), id)

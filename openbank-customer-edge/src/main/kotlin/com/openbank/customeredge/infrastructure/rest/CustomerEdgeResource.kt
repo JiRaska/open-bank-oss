@@ -2061,6 +2061,23 @@ class CustomerEdgeResource(
         return upstream.get("$scaServiceUrl/api/v1/sca/challenges/$id", customer.partyId.toString())
     }
 
+    /**
+     * The caller's live SCA challenges awaiting a decision (#8 push/decoupled approval list). The
+     * edge scopes the sca-service query by the JWT partyId, so a customer only ever sees their own
+     * pending approvals — the path partyId is never taken from the client.
+     */
+    @GET
+    @Path("/sca/pending")
+    @Authorize(action = "customer.sca.challenge", resource = "")
+    @Blocking
+    fun listPendingSca(): Response {
+        val customer = customer()
+        return upstream.get(
+            "$scaServiceUrl/api/v1/sca/parties/${customer.partyId}/challenges/pending",
+            customer.partyId.toString(),
+        )
+    }
+
     @POST
     @Path("/sca/challenges/{id}/decision")
     @Authorize(action = "customer.sca.decision", resource = "#id")
