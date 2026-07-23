@@ -334,6 +334,7 @@ rules:
       - agent-service                   # issue #686: oversight-triggers consumer, ns platform (first ESO client there)
       - document-service                # ADR-0161/0162: document lifecycle events, ns documents (first ESO client there)
       - customer-edge                   # ADR-0086 audit trail + ADR-0072 resume, ns customer-edge (first ESO Kafka client there); missed by the #2665 sweep
+      - analytics-sink                  # ADR-0022/0069: analytics bronze consumer (party/kyc/consent/sca/documents/onboarding-funnel), ns analytics (first ESO client there)
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1

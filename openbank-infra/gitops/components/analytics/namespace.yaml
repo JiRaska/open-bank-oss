@@ -1,0 +1,9 @@
+# Analytics namespace (ADR-0022): openbank-analytics-sink (Kafka → ClickHouse bronze/silver/gold)
+# plus a single-node ClickHouse for the sandbox warehouse. First analytics workload in the cluster.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: analytics
+  labels:
+    app.kubernetes.io/part-of: openbank
+    pod-security.kubernetes.io/enforce: restricted
