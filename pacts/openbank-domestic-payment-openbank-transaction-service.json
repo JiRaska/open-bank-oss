@@ -18,7 +18,7 @@
           "idempotencyKey": "pact-domestic-txn-001",
           "rail": "DOMESTIC",
           "sourceAccountId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-          "type": "DOMESTIC_CREDIT_TRANSFER",
+          "type": "DEBIT",
           "valueDate": "2026-01-20"
         },
         "headers": {
