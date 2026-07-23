@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.5](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.11.4...lending-service-v0.11.5) (2026-07-23)
+
+
+### Bug Fixes
+
+* **lending:** select GL accounts by loan currency, seed EUR/USD/GBP ([#1275](https://github.com/JiRaska/open-bank-oss/issues/1275)) ([#1898](https://github.com/JiRaska/open-bank-oss/issues/1898)) ([768a6f7](https://github.com/JiRaska/open-bank-oss/commit/768a6f736ff578b90196628e300205fa4d8982ce))
+
 ## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.11.3...lending-service-v0.11.4) (2026-07-19)
 
 
