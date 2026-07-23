@@ -11,6 +11,8 @@ import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
@@ -33,7 +35,20 @@ import java.time.Instant
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresRedpandaRedisTestResource::class)
+@TestProfile(AccountOutboxClaimIT.NoDispatchProfile::class)
 class AccountOutboxClaimIT {
+
+    // This IT drives AccountOutboxRepositoryImpl.claimProcessable DIRECTLY to prove its
+    // concurrency/reclaim invariants (#1201). The real scheduled outbox dispatcher
+    // (openbank.outbox.dispatch-enabled defaults true in application.yaml) is pure
+    // interference here: running concurrently it claims + dispatches + removes the rows this
+    // test hand-seeds, so `a stale DISPATCHING row is reclaimed` intermittently found the row
+    // already gone (AssertionFailedError at the reclaim assertion) and the dispatch path's
+    // idempotency write collided (`pk_account_idempotency` duplicate key). Disabling dispatch
+    // for this class isolates it to exactly the repository method under test (issue #1855).
+    class NoDispatchProfile : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> = mapOf("openbank.outbox.dispatch-enabled" to "false")
+    }
 
     @Inject
     lateinit var repository: AccountOutboxRepositoryImpl
