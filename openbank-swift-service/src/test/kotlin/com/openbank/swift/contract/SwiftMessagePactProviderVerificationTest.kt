@@ -18,7 +18,6 @@ import com.openbank.swift.domain.model.SwiftMessageType
 import com.openbank.swift.domain.model.SwiftPriority
 import com.openbank.swift.domain.model.SwiftStatus
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
@@ -33,12 +32,13 @@ import java.util.UUID
  * Does NOT boot Quarkus — message providers return raw JSON from [PactVerifyProvider]
  * methods, so this is a pure unit-level verification (no DB, no Kafka).
  */
-// CI-hang #2: this is the SECOND swift test that stalls the build to the 45-min timeout. With no
-// consumer pact for provider `openbank-swift-service` in the broker, `/for-verification` 404s and —
-// despite `@IgnoreNoPactsToVerify` — the broker HTTP client leaves the forked test JVM unable to
-// exit. It only runs in CI (`@EnabledIfSystemProperty(pactbroker.url)`). Disabled until a consumer
-// pact exists (transaction-service publishes one). See #2404.
-@Disabled("#2404 — no consumer pact for openbank-swift-service yet; broker 404 hangs :test to the CI timeout")
+// Re-enabled 2026-07-23: the original disable reason ("no consumer pact for
+// openbank-swift-service in the broker; /for-verification 404s and the broker HTTP client hangs
+// the forked JVM to the CI timeout" — pre-split #2404) no longer holds. transaction-service
+// commits and publishes pacts/openbank-transaction-service-openbank-swift-service.json on every
+// main push, and this class's @PactVerifyProvider matches its message description exactly. The
+// missing verification is what makes can-i-deploy block both transaction-service and
+// swift-service on this edge (#1348). Only runs where pactbroker.url is set (main-push lane).
 @Provider("openbank-swift-service")
 @PactBroker
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")

@@ -38,6 +38,19 @@ quarkus:
     tls:
       verification: none
 
+  # Outbound M2M token for the consent-service REST client (issue #1500). client_credentials
+  # on openbank-services (carries ROLE_OPERATOR, required by consent-service's endpoints);
+  # attached per-call by OidcClientRequestReactiveFilter on ConsentServiceRestClient.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+    tls:
+      verification: none
+
   smallrye-reactive-messaging:
     kafka:
       bootstrap-servers: localhost:29092
@@ -75,6 +88,10 @@ quarkus:
       url: ${TPP_REGISTRY_SERVICE_URL:http://localhost:8108}
       connect-timeout: 2000
       read-timeout: 2000
+    consent-service:
+      url: ${CONSENT_SERVICE_URL:http://localhost:8106}
+      connect-timeout: 2000
+      read-timeout: 3000
 
   management:
     enabled: true

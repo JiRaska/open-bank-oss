@@ -577,6 +577,17 @@ jobs:
       - name: "no service-local ExceptionMapper collision with libs-runtime (enforced)"
         run: bash .github/scripts/check-exception-mapper-collision.sh .
 
+      # authz-enforce ⇒ OPA PDP sidecar parity (issue #1797). A service that enforces
+      # @Authorize with no PDP sidecar bricks every @Authorize endpoint: AuthorizeInterceptor
+      # fails closed on an unreachable PDP (localhost:8181), so the endpoint can only ever
+      # 503/422 — the opposite of the interceptor's "advisory must never brick an endpoint"
+      # invariant. Eight live services were in this state (party fixed per-service in #1798).
+      # Checks each gitops workload per-pod-spec (handles shared payments-services.yaml +
+      # pluralized dirs), not the live pod. ADVISORY (ADR-0144): 10 known violations at
+      # introduction — graduate to --enforce once cleared. Exits 0, so placement is safe.
+      - name: "authz-enforce ⇒ PDP sidecar parity (advisory, #1797)"
+        run: python3 .github/scripts/check-authz-pdp-parity.py .
+
       # openbank.outbox.dispatch-enabled guard (the CLAUDE.md "outbox footgun":
       # a service whose OutboxDispatcher actually gates on this flag silently
       # never dispatches if it's left at its false default — no error,

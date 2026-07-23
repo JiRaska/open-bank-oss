@@ -21,6 +21,9 @@ lineage:
     - serviceName: audit-service
       relationType: topic
       description: events
+    - serviceName: account-service
+      relationType: topic
+      description: opens account on PARTY_CREATED
 schemaLineage:
   ownedSchemas:
     - parties_schema

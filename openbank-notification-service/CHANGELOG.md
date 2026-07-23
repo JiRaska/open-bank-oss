@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.8](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.7...notification-service-v0.13.8) (2026-07-23)
+
+
+### Bug Fixes
+
+* **notification:** use uuidv7 for consumer notification ids ([#1909](https://github.com/JiRaska/open-bank-oss/issues/1909)) ([bd2fed2](https://github.com/JiRaska/open-bank-oss/commit/bd2fed23b01711bd510ec80ebcbf2917553b357d))
+
 ## [0.13.7](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.6...notification-service-v0.13.7) (2026-07-18)
 
 
