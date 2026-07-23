@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.39.0...customer-edge-v0.40.0) (2026-07-23)
+
+
+### Features
+
+* **sca:** pending-approvals list for decoupled/push SCA ([#1969](https://github.com/JiRaska/open-bank-oss/issues/1969)) ([5684d76](https://github.com/JiRaska/open-bank-oss/commit/5684d7613bfb1ba6e8991f9b0a8b9b17ca24aa7d)), closes [#1968](https://github.com/JiRaska/open-bank-oss/issues/1968)
+
 ## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.38.0...customer-edge-v0.39.0) (2026-07-23)
 
 
