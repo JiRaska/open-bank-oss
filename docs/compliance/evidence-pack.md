@@ -70,11 +70,13 @@ Enforced authoritatively by [`openbank-libs/governance/rules.yaml`](../../openba
 
 ### Provenance gate rollout state (be precise with auditors)
 
-The deploy-time provenance gate is staged, not universally Enforce. The authoritative rollout state is
-`rules.yaml: provenance.gate` and the live Kyverno policy mode. As of this pack the
-`verify-openbank-image-sbom-attestation` ClusterPolicy is **Audit-only** (documented in-line in
-[`verify-sbom-attestation-policy.yaml`](../../openbank-infra/gitops/components/kyverno/verify-sbom-attestation-policy.yaml));
-the image-signature policy is Enforce. Verify the live mode before asserting either way:
+The deploy-time provenance gate graduated Audit → Enforce independently per rule. The authoritative
+rollout state is `rules.yaml: provenance.gate` and the live Kyverno policy mode. As of this pack the
+`verify-openbank-image-sbom-attestation` ClusterPolicy is **Enforce** (graduated from Audit on
+2026-07-12, ADR-0144; documented in-line in
+[`verify-sbom-attestation-policy.yaml`](../../openbank-infra/gitops/components/kyverno/verify-sbom-attestation-policy.yaml)) —
+an image lacking a cosign-signed SBOM attestation is REJECTED at admission; the image-signature
+policy has been Enforce since 2026-06-11. Verify the live mode before asserting either way:
 
 ```
 grep -nE 'validationFailureAction|Audit|Enforce' \
@@ -115,12 +117,12 @@ These are real, current limitations. Stating them is part of the evidence, not a
    (`WIRING INCOMPLETE`) rather than reporting a hollow PASS; `dr-test-log.md` currently records
    **table-top** exercises only. See [`automated-dr-restore.md`](../bcp/automated-dr-restore.md) for
    the remaining wiring.
-4. **Provenance gate is partially Audit-only.** The SBOM-attestation Kyverno policy is Audit, not
-   Enforce (§2 above); an unattested image would be surfaced, not blocked, at admission today.
-5. **DORA Art. 28/30 third-party controls are partial.** A vendor risk register and DORA Art. 30
+4. **DORA Art. 28/30 third-party controls are partial.** A vendor risk register and DORA Art. 30
    contractual clauses are backlog items (`dora-ictrm.md` follow-up; ADR-0174 `partial`), relevant
-   once the platform is commercially operated.
-6. **Escalation is single-maintainer (bus factor 1).** `incident-response.md` §4 documents no
+   once the platform is commercially operated. (Note: the supply-chain *technical* gate is NOT a gap —
+   both the image-signature and SBOM-attestation Kyverno policies are Enforce and reject
+   non-compliant images at admission, §2 above.)
+5. **Escalation is single-maintainer (bus factor 1).** `incident-response.md` §4 documents no
    secondary on-call — a deploying institution must fill this in before go-live.
 
 ---
