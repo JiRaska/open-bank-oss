@@ -190,6 +190,7 @@ locals {
     devops           = { namespace = "devops-agent", sa = "devops-db" }
     docstruth        = { namespace = "docs-truth-agent", sa = "docstruth-db" }
     document-service = { namespace = "documents", sa = "document-service-db" }
+    finops           = { namespace = "finops-agent", sa = "finops-db" }
     flakytest        = { namespace = "flaky-test-hunter", sa = "flakytest-db" }
     govaudit         = { namespace = "governance-auditor", sa = "govaudit-db" }
     liveness         = { namespace = "control-liveness-sentinel", sa = "liveness-db" }

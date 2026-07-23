@@ -48,6 +48,21 @@ quarkus:
     root-path: /q
   dev-ui:
     enabled: false
+  datasource:
+    db-kind: postgresql
+    username: ${POSTGRES_USER:openbank}
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    # Reactive client for the app (Panache); JDBC URL is for Flyway migrations only.
+    reactive:
+      url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_finops}
+    jdbc:
+      url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_finops}
+  hibernate-orm:
+    # Flyway owns the schema; Hibernate validates against it, never generates.
+    database:
+      generation: none
+  flyway:
+    migrate-at-start: true
 
 "%dev":
   quarkus:
