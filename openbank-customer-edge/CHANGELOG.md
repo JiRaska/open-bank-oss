@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.43.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.42.0...customer-edge-v0.43.0) (2026-07-23)
+
+
+### Features
+
+* **notifications:** per-party push preferences with category opt-out ([#1990](https://github.com/JiRaska/open-bank-oss/issues/1990)) ([6de0d5e](https://github.com/JiRaska/open-bank-oss/commit/6de0d5e95b849ad5d84cd663503e307cec435dc6)), closes [#1989](https://github.com/JiRaska/open-bank-oss/issues/1989)
+* **onboarding:** business funnel analytics — edge events + ClickHouse + admin board + alerts ([#1974](https://github.com/JiRaska/open-bank-oss/issues/1974)) ([7a14a79](https://github.com/JiRaska/open-bank-oss/commit/7a14a799967566fae36ac9c8eeecbb885b6d0668))
+
 ## [0.42.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.41.0...customer-edge-v0.42.0) (2026-07-23)
 
 
