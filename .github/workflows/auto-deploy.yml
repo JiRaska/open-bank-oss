@@ -623,6 +623,19 @@ jobs:
       # The pact CLI runs natively on the ARC runner pod (which resolves the broker's
       # cluster DNS); the pact-cli docker image would run in dind and could not. The
       # standalone ships a linux arm64 build for the Graviton runner.
+      #
+      # Cache the extracted CLI keyed on its pinned version + runner arch. The flaky
+      # github.com release download is the single point of failure that fail-closes the whole
+      # contract gate (issue #1348/#1009) — after the first successful run it is restored from
+      # cache and never re-downloaded. If the cache backend is unavailable on the ARC runner the
+      # step no-ops (cache-hit=false) and the download+retry below runs as before — strictly no
+      # worse than today.
+      - name: Cache pact standalone CLI
+        id: pact-cli-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/pact
+          key: pact-standalone-${{ env.PACT_STANDALONE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
       - name: can-i-deploy (per changed service)
         id: check
         if: ${{ vars.PACT_BROKER_URL != '' }}
@@ -638,24 +651,29 @@ jobs:
           SERVICES='${{ needs.changes.outputs.services }}'
           arch="$(uname -m)"; case "$arch" in aarch64|arm64) a=arm64 ;; *) a=x86_64 ;; esac
           os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) o=osx ;; *) o=linux ;; esac
-          tgz="pact-${PACT_STANDALONE_VERSION}-${o}-${a}.tar.gz"
-          url="https://github.com/pact-foundation/pact-ruby-standalone/releases/download/v${PACT_STANDALONE_VERSION}/${tgz}"
-          # Retry the flaky github.com release download. The record-deployment step below
-          # already does; this one did NOT, and a single-shot failure here is precisely what
-          # produced the #1348 phantoms. A genuine persistent failure still exits non-zero,
-          # and gate_ran=true + empty deployable then makes gitops-pr fail closed.
-          dl_ok=0
-          for attempt in 1 2 3; do
-            if curl -fsSL --retry 2 --retry-delay 3 -o /tmp/pact.tgz "$url"; then dl_ok=1; break; fi
-            echo "::warning::pact standalone download attempt ${attempt}/3 failed; retrying in 5s"
-            sleep 5
-          done
-          if [ "$dl_ok" -ne 1 ]; then
-            echo "::error::could not download pact standalone ($url) after 3 attempts — cannot run contract gate; gitops-pr will fail closed (deploy nothing) this run"
-            exit 1
-          fi
-          mkdir -p /tmp/pact && tar -xzf /tmp/pact.tgz -C /tmp/pact
           CLI="/tmp/pact/pact/bin/pact-broker"
+          # Download only on a cache miss (the "Cache pact standalone CLI" step restores /tmp/pact
+          # on a hit). This removes the flaky github.com release download — the single point of
+          # failure that fail-closes the whole gate (issue #1348/#1009) — from every run after the
+          # first. On a genuine persistent download failure this still exits non-zero, and
+          # gate_ran=true + empty deployable then makes gitops-pr fail closed, exactly as before.
+          if [ ! -x "$CLI" ]; then
+            tgz="pact-${PACT_STANDALONE_VERSION}-${o}-${a}.tar.gz"
+            url="https://github.com/pact-foundation/pact-ruby-standalone/releases/download/v${PACT_STANDALONE_VERSION}/${tgz}"
+            dl_ok=0
+            for attempt in 1 2 3; do
+              if curl -fsSL --retry 2 --retry-delay 3 -o /tmp/pact.tgz "$url"; then dl_ok=1; break; fi
+              echo "::warning::pact standalone download attempt ${attempt}/3 failed; retrying in 5s"
+              sleep 5
+            done
+            if [ "$dl_ok" -ne 1 ]; then
+              echo "::error::could not download pact standalone ($url) after 3 attempts — cannot run contract gate; gitops-pr will fail closed (deploy nothing) this run"
+              exit 1
+            fi
+            mkdir -p /tmp/pact && tar -xzf /tmp/pact.tgz -C /tmp/pact
+          else
+            echo "  ✓ pact CLI restored from cache ($CLI)"
+          fi
           # Ensure sandbox environment is registered — idempotent, 409 = already exists.
           "$CLI" create-environment --name sandbox --display-name Sandbox --no-production \
             --broker-base-url "$PACT_BROKER_URL" \
