@@ -63,10 +63,63 @@ def build_model() -> onnx.ModelProto:
     return model
 
 
+CARD_PATH = "src/main/resources/ml/baseline-fraud-v1.card.json"
+
+
+def write_card() -> None:
+    """Regenerate the ADR-0141 model card so its pinned contentSha256 tracks the .onnx bytes.
+
+    The serving adapter (OnnxFraudModel) verifies the model against this card before loading, so a
+    regenerated model with a stale card would fail verification — keep them in lockstep here.
+    """
+    import hashlib
+    import json
+
+    with open(OUTPUT_PATH, "rb") as f:
+        digest = hashlib.sha256(f.read()).hexdigest()
+    card = {
+        "modelId": "baseline-fraud",
+        "version": "v1",
+        "scope": "fraud-shadow",
+        "artifact": "baseline-fraud-v1.onnx",
+        "contentSha256": digest,
+        "features": ["VELOCITY_TXN_COUNT_H1", "VELOCITY_TXN_COUNT_H24"],
+        "provenance": {
+            "kind": "deterministic-baseline",
+            "generator": "openbank-fraud-service/scripts/gen_onnx_baseline_model.py",
+            "trained": False,
+            "note": (
+                "Deterministic re-expression of BaselineFraudModel.kt (logistic: intercept -4.0, "
+                "w_h1 0.30, w_h24 0.05). Not a trained model — a plumbing/latency proof for the "
+                "ADR-0139/0140 shadow plane."
+            ),
+        },
+        "metrics": {
+            "note": (
+                "Baseline encodes the same logistic as the rules path; parity is asserted by this "
+                "script and the fraud-service parity test, not measured on held-out data."
+            )
+        },
+        "signing": {
+            "state": "digest-pinned",
+            "note": (
+                "This card pins the artifact content hash; the card itself is not yet cosign-signed "
+                "(ADR-0141 follow-up). A trained model under a *-enforce scope must add a real "
+                "detached signature before it can gate."
+            ),
+        },
+    }
+    with open(CARD_PATH, "w") as f:
+        json.dump(card, f, indent=2)
+        f.write("\n")
+    print(f"wrote {CARD_PATH} (contentSha256={digest[:12]}…)")
+
+
 def main() -> None:
     model = build_model()
     onnx.save(model, OUTPUT_PATH)
     print(f"wrote {OUTPUT_PATH}")
+    write_card()
 
     # Sanity-check against BaselineFraudModelTest's exact assertions before shipping.
     import onnxruntime as ort

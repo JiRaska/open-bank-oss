@@ -1,8 +1,8 @@
 ---
 date: 2026-06-29
 decision-status: proposed
-delivery-status: planned
-authors: [Jiri Raska]
+delivery-status: partial
+authors: [jiri.raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
@@ -11,6 +11,16 @@ summary: "Treat an ML model as a first-class governed artifact: an in-repo model
 ---
 
 # ADR-0141 — Model registry and provenance for ML decisioning
+
+> **Delivery note (2026-07-23) — partial.** The **serving-side hook** is shipped: fraud-service's
+> `OnnxFraudModel` now verifies the model against a **model card** sidecar
+> (`ml/baseline-fraud-v1.card.json`) before loading — content SHA-256 must match and the declared
+> `scope` must be allowed — with the ADR-0139 fail-closed floor extended to verification. It is
+> advisory by default and fail-closed under `openbank.ml.require-signature=true` (ADR-0144
+> graduation pattern), and the card is regenerated in lockstep by `gen_onnx_baseline_model.py`.
+> Still open: a real detached signature / in-toto attestation over the card (today it is
+> digest-pinned only), content-addressed storage off `src/main/resources`, and the GitOps
+> promotion/rollback pointer — the rest of this ADR.
 
 ## Context
 

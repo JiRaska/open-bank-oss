@@ -150,7 +150,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0138](0138-configuration-driven-product-fee-rule-engine.md) | Configuration-driven product fee rule engine | Accepted | Partial | fees-billing,product-catalog,architecture | — |
 | [0139](0139-ml-decisioning-platform.md) | Real-time ML decisioning platform: feature store, model serving, champion/challenger governance | Accepted | Partial | ml,fraud,architecture | — |
 | [0140](0140-feature-store-topology.md) | Feature store topology and point-in-time correctness | Accepted | Partial | ml,kafka,fraud | — |
-| [0141](0141-model-registry-provenance.md) | Model registry and provenance for ML decisioning | Proposed | Planned | ml,governance,supply-chain | — |
+| [0141](0141-model-registry-provenance.md) | Model registry and provenance for ML decisioning | Proposed | Partial | ml,governance,supply-chain | — |
 | [0142](0142-credit-decisioning-engine.md) | Credit decisioning engine on the ML decisioning platform | Proposed | Planned | lending,ml,compliance | — |
 | [0143](0143-runtime-product-fee-posting-via-a-dedicated-billing-service.md) | Runtime product fee posting via a dedicated billing service | Accepted | Partial | fees-billing,ledger,architecture | — |
 | [0144](0144-gate-graduation-advisory-rules-carry-an-enforcement-deadline.md) | Gate graduation — advisory rules carry an enforcement deadline | Accepted | Shipped | governance,ci | — |
