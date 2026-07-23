@@ -6,9 +6,7 @@ package com.openbank.settlement.infrastructure.adapter
 
 import com.openbank.settlement.application.port.out.LedgerPort
 import com.openbank.settlement.application.port.out.SettlementRepository
-import com.openbank.settlement.infrastructure.client.JournalLineRequest
 import com.openbank.settlement.infrastructure.client.LedgerRestClient
-import com.openbank.settlement.infrastructure.client.PostJournalRequest
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.future.await
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -46,33 +44,18 @@ class LedgerBookAdapter(
         val today = LocalDate.now(clock).toString()
         log.infof("Booking settlement %s to ledger", settlementId)
         ledgerClient.postJournal(
-            PostJournalRequest(
-                idempotencyKey = "settlement-book-$settlementId",
-                transactionId = settlementId,
-                entryDate = today,
-                valueDate = today,
-                description = "Settlement booking $settlementId",
-                createdBy = SYSTEM_USER,
-                lines = listOf(
-                    JournalLineRequest(
-                        glAccountId = glDebitAccountId,
-                        side = "DEBIT",
-                        amount = settlement.amount,
-                        currencyCode = settlement.currency,
-                        baseAmount = settlement.amount,
-                        baseCurrencyCode = settlement.currency,
-                        subAccountId = settlement.payerAccountId,
-                    ),
-                    JournalLineRequest(
-                        glAccountId = glCreditAccountId,
-                        side = "CREDIT",
-                        amount = settlement.amount,
-                        currencyCode = settlement.currency,
-                        baseAmount = settlement.amount,
-                        baseCurrencyCode = settlement.currency,
-                        subAccountId = settlement.payeeAccountId,
-                    ),
+            SettlementJournalFactory.build(
+                posting = SettlementJournalFactory.Posting(
+                    settlementId = settlementId,
+                    amount = settlement.amount,
+                    currency = settlement.currency,
+                    payerAccountId = settlement.payerAccountId,
+                    payeeAccountId = settlement.payeeAccountId,
                 ),
+                glDebitAccountId = glDebitAccountId,
+                glCreditAccountId = glCreditAccountId,
+                date = today,
+                createdBy = SYSTEM_USER,
             ),
         ).subscribeAsCompletionStage().await()
     }
