@@ -5,6 +5,16 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
     id("openbank.static-analysis")
+    // Same gap as openbank-simulation (see the pins file's own comment): force() is
+    // project-local, so a project(...) consumer's force never reaches this module's OWN
+    // standalone resolution. This module isn't a Quarkus service (no openbank.quarkus-service
+    // to carry the pins transitively) and pulls testcontainers -> docker-java directly, which
+    // resolves its own old netty-handler:4.1.133.Final/etc — invisible to every consuming
+    // service (their own force always wins in their own resolution) but still submitted to
+    // GitHub's dependency graph as this module's standalone testRuntimeClasspath, keeping
+    // Dependabot alerts open fleet-wide. (#1728 already fixed this same gap narrowly for
+    // postgresql alone; this closes it for every other pin in the shared file at once.)
+    id("openbank.dependency-vulnerability-pins")
     `java-library`
     `maven-publish`
 }
@@ -88,13 +98,10 @@ dependencies {
 
     // Real JDBC round-trip in the kit's own self-test (PostgresTestResourcesTest) — not
     // pulled transitively by testcontainers-postgresql, which only drives the container.
-    // Pinned to the same patched version openbank.dependency-vulnerability-pins.gradle.kts
-    // forces fleet-wide (issue #461) — this module applies openbank.static-analysis, not
-    // openbank.quarkus-service, so that force() block never reaches it; the vulnerable 42.7.4
-    // resolved here unnoticed until a newly-disclosed pgjdbc GHSA pair (insecure-auth fallback
-    // despite channelBinding=require, and unbounded PBKDF2 SCRAM iterations enabling a CPU-
-    // exhaustion DoS) failed dependency-review on the first PR to newly depend on this module.
-    testImplementation("org.postgresql:postgresql:42.7.11")
+    // Declared version matches the same patched line openbank.dependency-vulnerability-pins
+    // forces fleet-wide (issue #461, now applied to this module too — see the plugins block
+    // above) purely for readability; force() would win over any version requested here anyway.
+    testImplementation("org.postgresql:postgresql:42.7.12")
 
     testImplementation(libs.mockk)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

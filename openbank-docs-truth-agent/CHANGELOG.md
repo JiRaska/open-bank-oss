@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/JiRaska/open-bank-oss/compare/docs-truth-agent-v0.3.0...docs-truth-agent-v0.3.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **libs:** bump pgjdbc to 42.7.12, fix ADR delivery-status front-matter parsing ([#1886](https://github.com/JiRaska/open-bank-oss/issues/1886)) ([31c0fb6](https://github.com/JiRaska/open-bank-oss/commit/31c0fb620e59b4c156fa138a6a1b622ebe5f924e))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/docs-truth-agent-v0.2.1...docs-truth-agent-v0.3.0) (2026-07-16)
 
 
