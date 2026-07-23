@@ -2454,6 +2454,41 @@ class CustomerEdgeResource(
         return extractOwnerPartyId((resp.entity as? String).orEmpty()) == partyId.toString()
     }
 
+    /**
+     * Issue a VIRTUAL card on one of the caller's OWN accounts (self-service, #4b). The app sends
+     * only { "accountId": "..." }; the edge forces the partyId from the JWT, verifies the account
+     * belongs to the caller, and resolves the cardholder name from party-service — the customer can
+     * never mint a card on someone else's account or under someone else's name. Idempotent per
+     * (party, account): a re-tap replays the same card rather than issuing duplicates.
+     */
+    @POST
+    @Path("/cards")
+    @Authorize(action = "customer.cards.create", resource = "")
+    @Blocking
+    fun issueVirtualCard(body: String): Response {
+        val customer = customer()
+        val accountId = runCatching { objectMapper.readTree(body).get("accountId")?.asText() }.getOrNull()
+            ?: return badRequest("Missing accountId")
+        val acct = runCatching { UUID.fromString(accountId) }.getOrNull() ?: return badRequest("Invalid accountId")
+        if (!ownsAccount(acct, customer.partyId)) return forbidden("Account does not belong to caller")
+        val name = fetchPartyLegalName(customer.partyId) ?: "OpenBank Customer"
+        val req = objectMapper.createObjectNode()
+        req.put("partyId", customer.partyId.toString())
+        req.put("accountId", acct.toString())
+        req.put("productCode", "VIRTUAL_DEBIT")
+        req.put("cardType", "VIRTUAL")
+        req.put("network", "VISA")
+        req.put("cardholderName", name)
+        req.put("embossedName", name.uppercase())
+        req.put("currency", "CZK")
+        return upstream.post(
+            "$cardIssuanceServiceUrl/api/v1/cards",
+            customer.partyId.toString(),
+            req.toString(),
+            "vcard-${customer.partyId}-$acct",
+        )
+    }
+
     // --- Nearby payments (payment sessions, ADR-0087) ---
 
     /**
