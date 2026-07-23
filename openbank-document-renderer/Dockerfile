@@ -34,8 +34,10 @@ WORKDIR /build
 COPY requirements.txt .
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
-RUN pip install --no-cache-dir --upgrade pip==26.1.2 && \
-    pip install --no-cache-dir -r requirements.txt
+# requirements.txt is a hash-locked pip-compile output of requirements.in (Scorecard
+# Pinned-Dependencies) — includes pip itself, so this one --require-hashes install both
+# upgrades pip to a verified version and installs every (transitive) runtime dependency.
+RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 
 FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6 AS runtime
 
