@@ -82,6 +82,7 @@ class OnboardingResource(
         private const val STATUS_ACCEPTED = 202
         private val SESSION_ID_PATTERN =
             Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
         // The ONLY caller-supplied attributes forwarded into the store (each length-capped). No free map.
         private val FUNNEL_ATTRIBUTE_KEYS = listOf("kycMethod", "reason", "platform", "appVersion")
     }

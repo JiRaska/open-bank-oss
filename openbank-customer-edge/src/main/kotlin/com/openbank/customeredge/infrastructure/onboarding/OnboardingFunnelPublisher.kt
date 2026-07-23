@@ -54,12 +54,7 @@ class OnboardingFunnelPublisher(
 
     // catch-all IS the contract: funnel telemetry never breaks onboarding.
     @Suppress("TooGenericExceptionCaught")
-    fun emit(
-        sessionId: String,
-        step: String,
-        action: String,
-        attributes: Map<String, String?> = emptyMap(),
-    ) {
+    fun emit(sessionId: String, step: String, action: String, attributes: Map<String, String?> = emptyMap()) {
         try {
             // Low-cardinality counter (step & action are closed allow-lists, validated by the
             // resource before we get here) so an alert can watch the sign conversion rate live.
