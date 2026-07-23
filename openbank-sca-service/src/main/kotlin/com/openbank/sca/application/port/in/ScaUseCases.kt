@@ -41,6 +41,9 @@ interface VerifyScaUseCase {
 
 interface GetScaUseCase {
     suspend fun getChallenge(challengeId: UUID): ScaChallenge
+
+    /** Live challenges awaiting a decision for [partyId] (decoupled/push approval list, ADR-0021). */
+    suspend fun listPendingByParty(partyId: UUID): List<ScaChallenge>
 }
 
 /** Enrol a device credential to a party so it can later sign decoupled approvals (ADR-0021). */

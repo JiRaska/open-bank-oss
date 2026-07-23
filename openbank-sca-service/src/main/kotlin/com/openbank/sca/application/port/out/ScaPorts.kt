@@ -17,6 +17,9 @@ interface ScaChallengeRepository {
 
     suspend fun findById(id: UUID): ScaChallenge?
 
+    /** Live (PENDING, not yet expired) challenges awaiting a decision for [partyId] — newest first. */
+    suspend fun findPendingByParty(partyId: UUID): List<ScaChallenge>
+
     /**
      * Atomically mark the challenge consumed (single-use gate). Returns true when THIS call
      * spent it; false when it was already consumed — the `consumed_at IS NULL` guard in the

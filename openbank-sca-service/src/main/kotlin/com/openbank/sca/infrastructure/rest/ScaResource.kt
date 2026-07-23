@@ -126,6 +126,38 @@ data class ScaChallengeResponse(
 }
 
 /**
+ * A pending SCA challenge projected for the app's approval list (#8): the dynamic-linking data
+ * (amount, creditor) is surfaced so the customer sees WHAT they are approving before signing.
+ */
+data class PendingScaResponse(
+    val id: UUID,
+    val purpose: ScaPurpose,
+    val method: ScaMethod,
+    val amount: String?,
+    val currency: String?,
+    val creditorIban: String?,
+    val creditorName: String?,
+    val reference: String?,
+    val expiresAt: String,
+    val createdAt: String,
+) {
+    companion object {
+        fun from(c: ScaChallenge) = PendingScaResponse(
+            id = c.id,
+            purpose = c.purpose,
+            method = c.method,
+            amount = c.dynamicLinkingData?.amount,
+            currency = c.dynamicLinkingData?.currency,
+            creditorIban = c.dynamicLinkingData?.creditorIban,
+            creditorName = c.dynamicLinkingData?.creditorName,
+            reference = c.dynamicLinkingData?.reference,
+            expiresAt = c.expiresAt.toString(),
+            createdAt = c.createdAt.toString(),
+        )
+    }
+}
+
+/**
  * Compare-and-consume body (settlement gate): the caller states the operation it is about
  * to execute; the challenge is spent only when the device-signed dynamic-linking data
  * authorises exactly that operation. `creditor` is the creditor IBAN (SEPA) or the Czech
@@ -218,6 +250,19 @@ class ScaResource(
     @Authorize(action = "scaChallenge.read", resource = "#id")
     suspend fun get(@PathParam("id") id: UUID): ScaChallengeResponse =
         ScaChallengeResponse.from(getSca.getChallenge(id))
+
+    /**
+     * Live challenges awaiting a decision for a party — the "pending approvals" list behind the
+     * decoupled/push SCA flow (#8). Unlike [get] this projects the dynamic-linking data (amount,
+     * creditor) so the app can render WHAT is being approved. ROLE_CUSTOMER is allowed because the
+     * edge forwards the caller's own partyId (same stance as [listDevices]).
+     */
+    @GET
+    @Path("/parties/{partyId}/challenges/pending")
+    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
+    @Authorize(action = "scaChallenge.read", resource = "#partyId")
+    suspend fun listPending(@PathParam("partyId") partyId: UUID): List<PendingScaResponse> =
+        getSca.listPendingByParty(partyId).map { PendingScaResponse.from(it) }
 
     /**
      * List device credentials enrolled to a party (ADR-0021, ADR-0068 onboarding cockpit).
