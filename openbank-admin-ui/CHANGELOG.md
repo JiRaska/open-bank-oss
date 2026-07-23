@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.54.4...admin-ui-v0.55.0) (2026-07-23)
+
+
+### Features
+
+* **onboarding:** business funnel analytics — edge events + ClickHouse + admin board + alerts ([#1974](https://github.com/JiRaska/open-bank-oss/issues/1974)) ([7a14a79](https://github.com/JiRaska/open-bank-oss/commit/7a14a799967566fae36ac9c8eeecbb885b6d0668))
+
 ## [0.54.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.54.3...admin-ui-v0.54.4) (2026-07-23)
 
 
