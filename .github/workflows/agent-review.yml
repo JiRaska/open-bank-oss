@@ -64,10 +64,11 @@ jobs:
     # — image-tag bump plus a regenerated derived catalog, ADR-0029 Layer B).
     #
     # The admin-ui-deploy skip is branch-pattern-based, not actor-based like the
-    # release-please one: that pipeline opens its PR via GITOPS_PR_TOKEN (a PAT
-    # under the repo owner's own account, so further workflows actually trigger),
-    # so `github.actor` here is the owner, not a bot — the actor check alone can't
-    # tell "automated deploy" apart from "a human's PR". Real-world cost of that
+    # release-please one: that pipeline opens its PR via the GitHub App token (the
+    # GITOPS_PR_TOKEN user-PAT rung was retired in #1305), whose actor is the App bot
+    # (`openbank-gitops-bot[bot]`, not `github-actions[bot]`) — so the actor check
+    # here still can't tell "automated deploy" apart from "a human's PR", and the
+    # branch pattern remains the reliable discriminator. Real-world cost of that
     # gap (2026-07-08): three deploy PRs (#596, #608, #609) piled up unmerged
     # because the reviewer kept flagging the SAME false positive on every one —
     # reviewing cluster-topology.json/infra-lifecycle.json (CI-regenerated
