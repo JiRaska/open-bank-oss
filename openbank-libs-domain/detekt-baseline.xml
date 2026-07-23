@@ -30,6 +30,7 @@
     <ID>MagicNumber:ApiError.kt$ErrorCode.INVALID_CURRENCY$400</ID>
     <ID>MagicNumber:ApiError.kt$ErrorCode.INVALID_IBAN$400</ID>
     <ID>MagicNumber:ApiError.kt$ErrorCode.NOT_FOUND$404</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.POLICY_DECISION_POINT_UNAVAILABLE$503</ID>
     <ID>MagicNumber:ApiError.kt$ErrorCode.UNAUTHORIZED$401</ID>
     <ID>MagicNumber:ApiError.kt$ErrorCode.VALIDATION_ERROR$400</ID>
     <ID>MagicNumber:AuthorizeInterceptor.kt$AuthorizeInterceptor$100</ID>
