@@ -85,6 +85,10 @@ tasks.withType<Test> {
     // gone — transaction-service publishes a consumer pact for openbank-swift-service on every
     // main push, so /for-verification returns content. The class stays
     // @EnabledIfSystemProperty(pactbroker.url)-gated, so it runs only in the main-push lane.
+    // Scan-scope fixed 2026-07-23 (#1948): the verification was crashing on a whole-classpath
+    // ClassGraph scan; the test now scopes MessageTestTarget to com.openbank.swift.contract. That
+    // fix touched only src/test, which does not rebuild this service on main-push, so this
+    // build-file note exists to re-trigger the provider verification (#1348 drain).
     if (System.getenv("CI") == "true") {
         exclude("**/SwiftBootSmokeIT*")
         // SwiftEventPactConsumerTest: PactConsumerTestExt auto-publishes the generated pact
