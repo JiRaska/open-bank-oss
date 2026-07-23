@@ -49,7 +49,12 @@ class SwiftMessagePactProviderVerificationTest {
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
-        context?.target = MessageTestTarget()
+        // Scope the ClassGraph scan to this package. The no-arg MessageTestTarget() scans the
+        // whole test classpath, and on swift-service that throws ClassGraphException ("Uncaught
+        // exception during scan"), failing verification with mismatches:[] (a harness crash, not a
+        // contract mismatch) — which kept the transaction<->swift edge red after #1938 re-enabled
+        // this class (#1348). Every working sibling (account/party/kyc/transaction) scopes the scan.
+        context?.target = MessageTestTarget(listOf("com.openbank.swift.contract"))
     }
 
     @TestTemplate
