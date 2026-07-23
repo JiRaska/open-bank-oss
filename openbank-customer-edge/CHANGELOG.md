@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.43.0...customer-edge-v0.44.0) (2026-07-23)
+
+
+### Features
+
+* **edge:** revoke a registered device (DELETE /customer/v1/devices/{id}) ([#2004](https://github.com/JiRaska/open-bank-oss/issues/2004)) ([faf3388](https://github.com/JiRaska/open-bank-oss/commit/faf3388a144eee1b86181f3b1cdb1420d184e4b3)), closes [#2003](https://github.com/JiRaska/open-bank-oss/issues/2003)
+
 ## [0.43.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.42.0...customer-edge-v0.43.0) (2026-07-23)
 
 
