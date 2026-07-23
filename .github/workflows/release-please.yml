@@ -61,8 +61,8 @@ jobs:
       #
       # Deliberately ungated and unfallback'd. Every other identity available here is a dead
       # end: GITHUB_TOKEN opens PRs that trigger no workflows (anti-recursion), so the required
-      # checks never run and nothing can ever auto-merge; the GITOPS_PR_TOKEN user PAT works
-      # but is what this repo is retiring. So if the App credentials are missing or invalid,
+      # checks never run and nothing can ever auto-merge; the GITOPS_PR_TOKEN user PAT worked
+      # but has been retired (#1305). So if the App credentials are missing or invalid,
       # failing here loudly is the only honest outcome — a fallback would buy a green run that
       # quietly produces a release queue that can never drain.
       - name: Mint a GitHub App installation token
