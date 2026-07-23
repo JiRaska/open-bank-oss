@@ -2158,6 +2158,24 @@ class CustomerEdgeResource(
         )
     }
 
+    /**
+     * Revoke (deactivate) one of the caller's OWN registered devices (#3) — sign it out so it stops
+     * receiving push. The partyId is forced from the JWT onto the notification-service call, which
+     * scopes the deactivation to that party's tokens, so a customer can never sign out someone
+     * else's device even with a guessed device id.
+     */
+    @DELETE
+    @Path("/devices/{id}")
+    @Authorize(action = "customer.devices.delete", resource = "#id")
+    @Blocking
+    fun revokeDevice(@PathParam("id") id: UUID): Response {
+        val customer = customer()
+        return upstream.delete(
+            "$notificationServiceUrl/api/v1/devices/$id?partyId=${customer.partyId}",
+            customer.partyId.toString(),
+        )
+    }
+
     // --- Onboarding (ADR-0069) ---
 
     // NOTE: POST /onboarding/start lives in [OnboardingResource], a separate resource
