@@ -1,0 +1,60 @@
+# Single-owner Postgres for finops-agent (cluster-wide CNPG operator, ADR-0112 / ADR-0148).
+# Generates the finops-db-app secret (username/password) + finops-db-rw Service the Deployment uses.
+# Cost anomalies are operational telemetry, not regulated records, so the agent degrades to
+# no-history on data loss rather than breaching a retention obligation — same posture as devops-db.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: finops-db
+  namespace: finops-agent
+spec:
+  # DB-layer observability: CNPG's built-in Prometheus exporter on :9187 + a PodMonitor the operator
+  # owns (selected cluster-wide), lighting up cnpg_* metrics with zero app changes.
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  # ECR pull-through instead of ghcr.io (issue #1290). CNPG instance pods are (correctly) excluded
+  # from the Kyverno ecr-pull-through-rewrite policy — the operator reconciles the pod image against
+  # spec.imageName, so a mutating webhook would make the pod permanently drift. Setting the ref here
+  # avoids that. Same tag (18.1) as devops-db.
+  imageName: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+      # Bound WAL so a checkpoint spike or bulk load cannot fill the 2Gi volume (#1432).
+      max_wal_size: "512MB"
+  # WAL archiving + daily base backups to S3 (#863 pattern). Credentials via EKS Pod Identity on the
+  # finops-db ServiceAccount (aws/.../db-backups.tf) — barman reads the SDK chain, no secret.
+  # Pod Identity injects the creds only at pod ADMISSION, so if this cluster is created during a node
+  # roll the DB pod may need one restart before WAL archiving succeeds (#1444/#1759).
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/finops-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+  bootstrap:
+    initdb:
+      database: openbank_finops
+      owner: openbank
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: finops-db-daily
+  namespace: finops-agent
+spec:
+  schedule: "0 15 3 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: finops-db
