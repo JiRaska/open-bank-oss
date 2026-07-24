@@ -1,0 +1,112 @@
+# openbank-ap2-service: the bank-side AP2 (Agent Payments Protocol) mandate verifier
+# (ADR-0193). A stateless JSON-RPC surface: POST /ap2/verify takes a presented signed
+# mandate + the payment it authorizes and returns a verdict (valid + evidence + failures).
+# It MOVES NO FUNDS — authorization evidence only. No DB, no Kafka.
+#
+# PHASE 1 DEPLOY (ADR-0193): every /ap2/verify call is authorized by the shared ADR-0034
+# PDP as an AI_AGENT principal and FAILS CLOSED here (HTTP 503) because no OPA sidecar is
+# deployed yet — deliberate, to keep the OPA-bundle blast radius out of this change. OIDC
+# tenant-disabled; only in-cluster callers (fenced by the generated NetworkPolicy). The
+# image runs as numeric uid 100 (USER 100), so runAsNonRoot admits it; runAsUser is pinned
+# for explicitness (matches agent-service).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ap2-service
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: ap2-service
+    app.kubernetes.io/part-of: platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ap2-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ap2-service
+        app.kubernetes.io/part-of: platform
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ap2-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-ap2-service:sandbox-b0b827eb
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8151
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            # ADR-0034 PDP. No sidecar in phase 1 → this localhost target is unreachable and
+            # every /ap2/verify fails CLOSED (HTTP 503, the intended posture). Sidecar is a follow-up.
+            - name: OPA_URL
+              value: http://localhost:8181
+            # AP2 issuer trust list (phase 1). Empty = no trusted issuer, so a reachable verify
+            # would fail every mandate at the signature stage until issuers are configured.
+            - name: AP2_TRUST_LIST
+              value: ""
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://tempo.observability.svc:4317
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ap2-service
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: ap2-service
+spec:
+  selector:
+    app.kubernetes.io/name: ap2-service
+  ports:
+    - name: http
+      port: 8151
+      targetPort: http
