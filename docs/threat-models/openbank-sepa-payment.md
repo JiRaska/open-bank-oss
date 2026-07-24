@@ -106,6 +106,22 @@ from clearing-simulator (cluster-internal, `ROLE_SERVICE`). New trust boundary:
 
 ## 6. Change log
 
+- **2026-07-24** — Retire the legacy in-service orchestration; Temporal is the sole orchestrator
+  (ADR-0120 Phase 6, issue #1917). `createPayment` no longer branches on `openbank.temporal.enabled`
+  (removed) — it always dispatches `SepaPaymentWorkflow` (screening → shadow fraud scoring → scheme
+  submission → settle). The in-service `applyScreening`/`scoreFraudShadow`/`submitToScheme`/
+  `settleProcessingPayment` flow and its now-unused ports (screening/aml/fraud/scheme/settlement) are
+  deleted; `persistTransition`, the pacs.004 return path (`reversalPort`), and the query/transition
+  endpoints are unchanged. Worker registration is gated separately by `openbank.sepa.worker.enabled`
+  (default true; `%test` false) so @QuarkusTest boot does not connect to an absent Temporal frontend;
+  a test `WorkflowClientTestProducer` backs the CDI `WorkflowClient` with an in-process
+  `TestWorkflowEnvironment`. **No new trust boundary or external caller** — the same screening/fraud/
+  scheme/settlement steps now run inside Temporal activities (each already OIDC/mTLS-bounded), with the
+  workflow adding durable retries + reverse compensation. The prerequisite that the Temporal path was
+  missing shadow fraud scoring was fixed first (#2068). Rollback: revert the commit (the flag +
+  in-service flow return). Risk class = **availability/correctness** (durable orchestration replaces a
+  best-effort in-process sequence); verified by a sandbox canary (worker registers + polls, real
+  payments complete via Temporal end-to-end).
 - **2026-05-30** — Added `sepa_payments_seq`, `sepa_payment_outbox_seq` (Hibernate fix). Additive
   DDL only — no new flow/surface/boundary. Risk class = **availability**, mitigated by
   `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.
