@@ -55,6 +55,7 @@ class CopilotChatService(
         val messages = mutableListOf(
             ChatMessage(ChatRole.SYSTEM, systemPrompt() + " " + PromptInjectionGuard.UNTRUSTED_PREAMBLE),
         )
+        appendThemeContext(messages, turn)
         messages += conversations.load(customerId, turn.conversationId)
         messages += ChatMessage(ChatRole.USER, turn.message)
 
@@ -91,10 +92,12 @@ class CopilotChatService(
         val messages = mutableListOf(
             ChatMessage(ChatRole.SYSTEM, systemPrompt() + " " + PromptInjectionGuard.UNTRUSTED_PREAMBLE),
         )
+        appendThemeContext(messages, turn)
         messages += conversations.load(customerId, turn.conversationId)
         messages += ChatMessage(ChatRole.USER, turn.message)
         val toolSpecs = tools.specs() + actionTools.specs()
         val proposals = mutableListOf<ActionProposal>()
+        val themeSpecs = mutableListOf<String>()
         var offerTools = true
 
         // Tool rounds emit no text (they generate only function specs), so every chunk the model
@@ -127,6 +130,7 @@ class CopilotChatService(
             }
 
             if (response.stopReason != StopReason.TOOL_USE || response.toolInvocations.isEmpty()) {
+                emitThemeSentinel(themeSpecs, onChunk)
                 emitProposalSentinel(proposals, onChunk)
                 persistTurn(customerId, turn.conversationId, turn.message, finalText.toString())
                 return
@@ -139,7 +143,7 @@ class CopilotChatService(
                 onChunk("[PROGRESS:${inv.name}]")
             }
             val before = proposals.size
-            if (runToolRound(messages, response.toolInvocations, customerId, proposals)) offerTools = false
+            if (runToolRound(messages, response.toolInvocations, customerId, proposals, themeSpecs)) offerTools = false
             if (proposals.size > before) offerTools = false
         }
 
@@ -174,6 +178,7 @@ class CopilotChatService(
     ): ChatOutcome {
         val toolSpecs = tools.specs() + actionTools.specs()
         val proposals = mutableListOf<ActionProposal>()
+        val themeSpecs = mutableListOf<String>()
         var offerTools = true
         repeat(MAX_ITERATIONS) {
             val response = try {
@@ -195,11 +200,13 @@ class CopilotChatService(
             }
 
             if (response.stopReason != StopReason.TOOL_USE || response.toolInvocations.isEmpty()) {
-                return ChatOutcome.Replied(ChatReply(conversationId, response.content, proposals.lastOrNull()))
+                return ChatOutcome.Replied(
+                    ChatReply(conversationId, response.content, proposals.lastOrNull(), themeSpecs.lastOrNull()),
+                )
             }
             messages += ChatMessage(ChatRole.ASSISTANT, response.content, toolCalls = response.toolInvocations)
             val before = proposals.size
-            if (runToolRound(messages, response.toolInvocations, customerId, proposals)) offerTools = false
+            if (runToolRound(messages, response.toolInvocations, customerId, proposals, themeSpecs)) offerTools = false
             // Once a proposal exists, stop offering tools so the model asks the customer to confirm it
             // rather than stacking a second proposal that would overwrite the first (#998 nit 2).
             if (proposals.size > before) offerTools = false
@@ -215,6 +222,7 @@ class CopilotChatService(
         invocations: List<ToolInvocation>,
         customerId: String,
         proposals: MutableList<ActionProposal>,
+        themeSpecs: MutableList<String>,
     ): Boolean {
         var errors = 0
         for (inv in invocations) {
@@ -225,6 +233,7 @@ class CopilotChatService(
                 actionTools.handles(inv.name) -> proposeAction(inv, proposals)
                 else -> tools.call(inv.name, inv.arguments)
             }
+            result.themeSpecJson?.let { themeSpecs += it }
             if (result.isError) errors++
             val capped = if (result.text.length > MAX_TOOL_RESULT_CHARS) {
                 result.text.take(MAX_TOOL_RESULT_CHARS) + "\n…(truncated)"
@@ -249,6 +258,29 @@ class CopilotChatService(
         val msg = "Návrh připraven: ${proposal.summary}. " +
             "Požádej klienta, ať ho potvrdí — odešle se až po potvrzení přes SCA."
         return ToolResult(msg)
+    }
+
+    /**
+     * The client's active ThemeSpec rides the turn as DATA context (ADR-0190) so "udělej to tmavší"
+     * edits relative to the current look. Same trust level as the user message — never instructions.
+     */
+    private fun appendThemeContext(messages: MutableList<ChatMessage>, turn: ChatTurn) {
+        val spec = turn.currentThemeSpec?.takeIf { it.isNotBlank() } ?: return
+        messages += ChatMessage(
+            ChatRole.SYSTEM,
+            "Aktuální vzhled aplikace klienta (ThemeSpec JSON, výchozí bod pro design_theme): " +
+                spec.take(MAX_THEME_CONTEXT_CHARS),
+        )
+    }
+
+    /**
+     * Emit the normalized ThemeSpec so the client applies the new look without a second round-trip.
+     * Format: `[THEME_SPEC:{...ThemeSpec JSON...}]` — the app re-validates before applying (ADR-0190 §3).
+     */
+    private suspend fun emitThemeSentinel(themeSpecs: List<String>, onChunk: suspend (String) -> Unit) {
+        val spec = themeSpecs.lastOrNull() ?: return
+        runCatching { onChunk("[THEME_SPEC:$spec]") }
+            .onFailure { log.warnf("Failed to emit theme sentinel: %s", it.message) }
     }
 
     /**
@@ -304,6 +336,13 @@ class CopilotChatService(
         // FX conversion proposal: use propose_fx_conversion.
         append("Pokud klient chce provést konverzi měn, použij propose_fx_conversion — ")
         append("vytvoří návrh, který klient potvrdí přes SCA. ")
+        // Theme designer (ADR-0190): design within the token system, whole spec every time.
+        append("Pokud klient chce změnit vzhled aplikace (barvy, tmavý režim, písmo, zaoblení, ")
+        append("hustotu, dekor, celkový vibe), použij design_theme a pošli VŽDY kompletní ThemeSpec — ")
+        append("vyjdi z aktuálního vzhledu v kontextu a změň jen to, co klient chce jinak. ")
+        append("Vzhled se aplikuje okamžitě; bezpečnostní obrazovky mají vzhled zamčený a částky ")
+        append("zůstávají vždy čitelné — to řeší aplikace, ne ty. Po zavolání design_theme stručně ")
+        append("popiš, co jsi navrhl. ")
         // Grounding (ADR-0089 D4): never invent figures.
         append("NIKDY si nevymýšlej částky, zůstatky, transakce ani kurzy — finanční čísla pocházejí výhradně ")
         append("z výsledků nástrojů, ne z tvé paměti. Pokud nemáš nástroj nebo data, řekni to na rovinu. ")
@@ -318,6 +357,8 @@ class CopilotChatService(
         const val MAX_ITERATIONS = 5
         const val MAX_TOOL_RESULT_CHARS = 3000
         const val MAX_OUTPUT_TOKENS = 512
+        // A ThemeSpec is ~400 chars; the cap only guards a malicious oversized client payload.
+        const val MAX_THEME_CONTEXT_CHARS = 2000
         const val DISABLED_MESSAGE = "Asistent je momentálně vypnutý."
         const val INJECTION_REFUSAL =
             "Tuto zprávu nemůžu zpracovat — odpovídá známému vzoru prompt-injection. " +

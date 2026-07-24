@@ -60,7 +60,11 @@ class CopilotChatResource {
                 .entity(mapOf("error" to "authenticated token is missing a usable subject"))
                 .build()
 
-        val turn = ChatTurn(conversationId = request.conversationId ?: "new", message = request.message)
+        val turn = ChatTurn(
+            conversationId = request.conversationId ?: "new",
+            message = request.message,
+            currentThemeSpec = request.themeSpec,
+        )
         when (val outcome = chat.handle(turn, customerId)) {
             is ChatOutcome.Disabled -> {
                 metrics.recordChatRequest(CopilotMetricsAdapter.OUTCOME_DISABLED)
@@ -103,7 +107,11 @@ class CopilotChatResource {
     @Authorize(action = "copilot.chat")
     fun chatStream(request: ChatRequest): Multi<String> {
         val customerId = customerSubject() ?: return Multi.createFrom().empty()
-        val turn = ChatTurn(conversationId = request.conversationId ?: "new", message = request.message)
+        val turn = ChatTurn(
+            conversationId = request.conversationId ?: "new",
+            message = request.message,
+            currentThemeSpec = request.themeSpec,
+        )
         return Multi.createFrom().emitter<String> { emitter ->
             try {
                 runBlocking {
@@ -117,5 +125,10 @@ class CopilotChatResource {
         }.runSubscriptionOn(Infrastructure.getDefaultWorkerPool())
     }
 
-    data class ChatRequest(val conversationId: String? = null, val message: String = "")
+    /** [themeSpec] = client's active ThemeSpec JSON (ADR-0190), data context for design_theme. */
+    data class ChatRequest(
+        val conversationId: String? = null,
+        val message: String = "",
+        val themeSpec: String? = null,
+    )
 }
