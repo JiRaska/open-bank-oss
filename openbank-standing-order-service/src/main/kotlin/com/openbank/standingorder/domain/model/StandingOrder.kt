@@ -9,6 +9,7 @@ import java.time.LocalDate
 import java.util.UUID
 
 enum class StandingOrderStatus { ACTIVE, PAUSED, CANCELLED, COMPLETED, FAILED }
+
 // ONCE = a one-off future-dated payment: it fires exactly once on its startDate and then
 // COMPLETES (never recurs). Modelled as a frequency so it reuses the whole scheduler engine
 // (due-query + execute + record) rather than a separate scheduled-payment service.
