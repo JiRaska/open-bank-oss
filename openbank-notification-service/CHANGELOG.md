@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.14.0...notification-service-v0.14.1) (2026-07-24)
+
+
+### Bug Fixes
+
+* **notification:** stop push payloads leaking amount/PII, add party-scoped read ([#1182](https://github.com/JiRaska/open-bank-oss/issues/1182)) ([#2011](https://github.com/JiRaska/open-bank-oss/issues/2011)) ([3fb2044](https://github.com/JiRaska/open-bank-oss/commit/3fb2044f8476628ab0d30ed21227263f7a63e6c7))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.13.8...notification-service-v0.14.0) (2026-07-23)
 
 
