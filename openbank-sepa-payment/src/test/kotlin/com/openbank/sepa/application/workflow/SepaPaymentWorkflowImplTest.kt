@@ -9,6 +9,7 @@ import com.openbank.sepa.domain.screening.ScreeningDecision
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.mockk.verifyOrder
 import io.temporal.client.WorkflowOptions
 import io.temporal.testing.TestWorkflowEnvironment
 import io.temporal.worker.Worker
@@ -49,7 +50,7 @@ class SepaPaymentWorkflowImplTest {
     )
 
     @Test
-    fun `CLEAR decision validates then submits to scheme and returns the scheme outcome`() {
+    fun `CLEAR decision validates, shadow-scores fraud, then submits to scheme (issue #1917)`() {
         val paymentId = UUID.randomUUID()
         every { activities.screenPayment(paymentId) } returns ScreeningDecision.CLEAR
         every { activities.validatePayment(paymentId) } returns Unit
@@ -58,8 +59,14 @@ class SepaPaymentWorkflowImplTest {
         val result = workflowStub().process(paymentId)
 
         assertThat(result).isEqualTo(SepaPaymentStatus.PROCESSING)
-        verify { activities.validatePayment(paymentId) }
-        verify { activities.submitToScheme(paymentId) }
+        // #1917: the workflow defined shadowFraudScore but never called it, so making Temporal the
+        // sole orchestrator would have silently dropped ADR-0084 shadow fraud scoring. It now runs
+        // between validation and scheme submission, matching the retired legacy SepaPaymentService flow.
+        verifyOrder {
+            activities.validatePayment(paymentId)
+            activities.shadowFraudScore(paymentId)
+            activities.submitToScheme(paymentId)
+        }
     }
 
     @Test
@@ -84,5 +91,7 @@ class SepaPaymentWorkflowImplTest {
         assertThat(result).isEqualTo(SepaPaymentStatus.RECEIVED)
         verify(exactly = 0) { activities.validatePayment(any()) }
         verify(exactly = 0) { activities.rejectPayment(any()) }
+        // Shadow fraud scoring rides the proceeding (CLEAR) path only — a held payment is not scored.
+        verify(exactly = 0) { activities.shadowFraudScore(any()) }
     }
 }
