@@ -1,0 +1,21 @@
+{
+  "modelId": "baseline-fraud",
+  "version": "v1",
+  "scope": "fraud-shadow",
+  "artifact": "baseline-fraud-v1.onnx",
+  "contentSha256": "9bf7160e00d7ff3f429d46a76502d25cdf97e5a04998b34d9a7128fe0ca64768",
+  "features": ["VELOCITY_TXN_COUNT_H1", "VELOCITY_TXN_COUNT_H24"],
+  "provenance": {
+    "kind": "deterministic-baseline",
+    "generator": "openbank-fraud-service/scripts/gen_onnx_baseline_model.py",
+    "trained": false,
+    "note": "Deterministic re-expression of BaselineFraudModel.kt (logistic: intercept -4.0, w_h1 0.30, w_h24 0.05). Not a trained model — a plumbing/latency proof for the ADR-0139/0140 shadow plane."
+  },
+  "metrics": {
+    "note": "Baseline encodes the same logistic as the rules path; parity is asserted by gen_onnx_baseline_model.py and the fraud-service parity test, not measured on held-out data."
+  },
+  "signing": {
+    "state": "digest-pinned",
+    "note": "This card pins the artifact content hash; the card itself is not yet cosign-signed (ADR-0141 follow-up). A trained model under a *-enforce scope must add a real detached signature before it can gate."
+  }
+}
