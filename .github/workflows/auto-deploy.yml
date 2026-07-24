@@ -653,6 +653,15 @@ jobs:
       PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
       PACT_STANDALONE_VERSION: "2.6.2"
     steps:
+      # This job had no checkout, so the #1420 money-path escalation below
+      # (`awk ... openbank-libs/governance/rules.yaml`) crashed with "cannot open" —
+      # latent until the scheduled reconcile started re-driving stranded (=often
+      # blocked) services every tick, which is the only path that reliably enters that
+      # block. Check out so rules.yaml is present and the money-path naming works.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
       # The pact CLI runs natively on the ARC runner pod (which resolves the broker's
       # cluster DNS); the pact-cli docker image would run in dind and could not. The
       # standalone ships a linux arm64 build for the Graviton runner.
@@ -816,6 +825,19 @@ jobs:
               fi
             done
             [ "$mp_blocked" = "1" ] && echo "::error::can-i-deploy left one or more MONEY-PATH services behind this run — see the job summary (issue #1420)"
+          fi
+          # On a scheduled reconcile tick an ordinary (non money-path) service still blocked by
+          # the contract gate is EXPECTED — reconcile deliberately re-offers known strands and
+          # leaves the still-blocked ones for a later tick; the deployable subset already
+          # advanced via gitops-pr. Failing the job for that would make the every-3h schedule
+          # perpetually red — a red workflow addressed to nobody (see auto-deploy.yml scheduling
+          # note). So on `schedule` only fail the status when a MONEY-PATH service is the one
+          # left behind (mp_blocked=1), which must stay loud. push / workflow_dispatch keep the
+          # unconditional ADR-0092 behaviour below. Deploy behaviour is unchanged either way:
+          # gitops-pr deploys the `deployable` subset and never the blocked complement.
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$rc" -ne 0 ] && [ "${mp_blocked:-0}" != "1" ]; then
+            echo "::notice::reconcile tick: ${BLOCKED_N:-0} service(s) still gate-blocked (non money-path) — left for a later tick; the deployable subset deployed. Not failing the scheduled run."
+            exit 0
           fi
           # Enforce: non-zero rc still fails this job's own status for visibility (ADR-0092) —
           # it no longer blocks gitops-pr/record-deployment for the deployable subset above.
