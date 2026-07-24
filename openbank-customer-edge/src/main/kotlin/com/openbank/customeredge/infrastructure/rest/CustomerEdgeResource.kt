@@ -495,6 +495,48 @@ class CustomerEdgeResource(
         return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
     }
 
+    /**
+     * Authorise a NEW SEPA Direct Debit mandate on one of the caller's OWN accounts (#6). The app
+     * supplies the creditor (name + SEPA creditor id) + scheme; the edge forces the debtor side
+     * from the JWT party (debtor IBAN from the owned account, debtor name from party-service) and
+     * mints the UMR + signature date, so a customer can never authorise a debit against someone
+     * else's account or under a forged debtor identity.
+     */
+    @POST
+    @Path("/sdd/mandates")
+    @Authorize(action = "customer.sdd.update", resource = "")
+    @Blocking
+    @Suppress("MagicNumber") // 20-char UMR suffix from a UUID; a named const adds no clarity here
+    fun createSddMandate(body: String): Response {
+        val customer = customer()
+        val node = runCatching { objectMapper.readTree(body) }.getOrNull() ?: return badRequest("Malformed body")
+        val accountId = node.get("accountId")?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return badRequest("Missing accountId")
+        val accountJson = fetchAccount(accountId, customer.partyId)
+            ?: return forbidden("Account does not belong to caller")
+        if (extractOwnerPartyId(accountJson) != customer.partyId.toString()) {
+            return forbidden("Account does not belong to caller")
+        }
+        val creditorName = node.get("creditorName")?.asText()?.takeIf { it.isNotBlank() }
+            ?: return badRequest("Missing creditorName")
+        val creditorId = node.get("creditorIdentifier")?.asText()?.takeIf { it.isNotBlank() }
+            ?: return badRequest("Missing creditorIdentifier")
+        val debtorIban = extractTextField(objectMapper, accountJson, "accountNumber")
+            ?: return badRequest("Account IBAN unavailable")
+        val debtorName = fetchPartyLegalName(customer.partyId) ?: "OpenBank Customer"
+        val req = objectMapper.createObjectNode()
+        req.put("accountId", accountId.toString())
+        req.put("debtorIban", debtorIban)
+        req.put("creditorIdentifier", creditorId)
+        req.put("umr", "UMR-" + UUID.randomUUID().toString().replace("-", "").take(20).uppercase())
+        req.put("scheme", node.get("scheme")?.asText() ?: "CORE")
+        req.put("sequenceType", node.get("sequenceType")?.asText() ?: "RCUR")
+        req.put("creditorName", creditorName)
+        req.put("debtorName", debtorName)
+        req.put("signatureDate", java.time.LocalDate.now(clock).toString())
+        return upstream.post("$sddServiceUrl/api/v1/sdd/mandates", customer.partyId.toString(), req.toString())
+    }
+
     /** Cancel a SEPA Direct Debit mandate the caller owns (terminal — no more collections). */
     @POST
     @Path("/sdd/mandates/{id}/cancel")
