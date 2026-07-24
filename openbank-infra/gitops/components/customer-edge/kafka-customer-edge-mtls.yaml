@@ -63,6 +63,15 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # Producer: FeedbackPublisher -> openbank.feedback.events (ADR-0192 screen feedback).
+      # Write only; the consumer is analytics-sink. Without this grant the produce is denied and
+      # the submission silently never reaches the warehouse — the sepa-instant/swift failure mode.
+      - resource:
+          type: topic
+          name: openbank.feedback.events
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
       # Consumer: OnboardingResumeService <- party.events (pid-service's party-events-out).
       # Unprefixed topic name is deliberate and matches the producer — pid-service publishes
       # `party.events`, distinct from party-service's `openbank.party.events`.

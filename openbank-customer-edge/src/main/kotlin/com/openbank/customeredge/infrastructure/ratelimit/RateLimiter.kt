@@ -29,15 +29,28 @@ class RateLimiter(redis: RedisDataSource, private val clock: Clock) {
      * Returns true if [partyId] is under the rate limit for the current minute window.
      * Side effect: increments the counter (each call consumes one slot).
      */
-    fun isAllowed(partyId: String, limitPerMinute: Int): Boolean {
-        val bucket = Instant.now(clock).epochSecond / WINDOW_SECONDS
-        val key = "edge:rate-limit:$partyId:$bucket"
+    fun isAllowed(partyId: String, limitPerMinute: Int): Boolean =
+        isWithinWindow(DEFAULT_SCOPE, partyId, limitPerMinute, WINDOW_SECONDS, WINDOW_TTL)
+
+    /**
+     * Same fixed-window algorithm under a caller-chosen [scope] and [windowSeconds], for quotas
+     * that are not the global per-minute request budget — e.g. the per-party-per-hour screen
+     * feedback quota (ADR-0192), which must not consume the general request allowance.
+     *
+     * [scope] namespaces the Redis key (`edge:{scope}:{id}:{bucket}`), so a per-feature quota can
+     * never collide with, or be spent by, another feature's traffic.
+     */
+    fun isWithinWindow(scope: String, id: String, limit: Int, windowSeconds: Long, ttl: Duration): Boolean {
+        val bucket = Instant.now(clock).epochSecond / windowSeconds
+        val key = "edge:$scope:$id:$bucket"
         val count = values.incr(key)
-        if (count == 1L) keys.expire(key, WINDOW_TTL)
-        return count <= limitPerMinute
+        if (count == 1L) keys.expire(key, ttl)
+        return count <= limit
     }
 
     companion object {
+        // Preserves the pre-existing key shape `edge:rate-limit:{partyId}:{minuteBucket}`.
+        private const val DEFAULT_SCOPE = "rate-limit"
         private const val WINDOW_SECONDS = 60L
         private val WINDOW_TTL: Duration = Duration.ofSeconds(70)
     }

@@ -1,6 +1,6 @@
 # openbank-analytics-sink: Kafka → ClickHouse bronze/silver/gold projection (ADR-0022).
 #
-# Consumes the domain-event stream (analytics-events-in → 9 topics) and writes the PII-masked
+# Consumes the domain-event stream (analytics-events-in → 10 topics) and writes the PII-masked
 # bronze layer into ClickHouse. The ClickHouse sink binding is baked at BUILD time
 # (@IfBuildProperty openbank.analytics.sink.type=clickhouse — the image is built with
 # ANALYTICS_SINK_TYPE=clickhouse); CLICKHOUSE_URL below points it at the in-namespace ClickHouse.

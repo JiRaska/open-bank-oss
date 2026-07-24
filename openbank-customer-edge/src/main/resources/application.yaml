@@ -60,6 +60,13 @@ mp:
         topic: openbank.onboarding.funnel.events
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # In-app screen feedback (ADR-0192) -> analytics-sink -> ClickHouse. Metadata + the
+      # screenshot's object-store key only; the PNG itself never enters Kafka (FeedbackPublisher).
+      feedback-out:
+        connector: smallrye-kafka
+        topic: openbank.feedback.events
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
       # pid party events — the onboarding auto-resume consumer (OnboardingResumeService) filters
       # for IdentityVerificationCaseDecided to replay a paused onboarding (ADR-0072). Latest offset
@@ -145,6 +152,29 @@ openbank:
     # QUARKUS_DATASOURCE_PASSWORD). Do NOT declare client-secret here with a
     # ${UPSTREAM_OIDC_CLIENT_SECRET:} expansion: a property name in ENV_VAR form is not
     # resolved reliably and silently yields "", which makes every token fetch 401.
+
+  # ADR-0192 in-app screen feedback. The screenshot goes to object storage through the shared
+  # ObjectStorePort (ADR-0161); `backend` is a BUILD-TIME selector (@IfBuildProperty), so it is
+  # pinned to s3 here rather than made env-overridable — the edge is stateless and has no
+  # database, so the Postgres blob adapter is not an alternative for it.
+  #
+  # Bucket lifecycle (90-day expiry) and SSE-KMS/Object-Lock settings are properties of the
+  # BUCKET, provisioned by Terraform (ADR-0161 D3) — never hardcoded here. Until that bucket and
+  # the Pod Identity association exist, a put simply fails and the submission is still recorded
+  # with screenshotStatus=STORE_FAILED (FeedbackScreenshotStore).
+  objectstore:
+    backend: s3
+    s3:
+      bucket: ${OBJECTSTORE_S3_BUCKET:openbank-feedback-dev}
+      region: ${OBJECTSTORE_S3_REGION:eu-central-1}
+      # endpoint-override deliberately NOT declared: it is an Optional<String> on S3ObjectStore
+      # and a "${VAR:}" default would resolve to Optional.of("") -> URI.create("") -> boot failure.
+      # Set OBJECTSTORE_S3_ENDPOINT_OVERRIDE only when an override (e.g. localstack) is wanted.
+  feedback:
+    # Per-party feedback submissions per hour, on top of the global per-minute request budget
+    # below. Rate limiting is part of this endpoint's contract from day one (ADR-0192) because
+    # each accepted submission can park up to 2 MB in object storage.
+    submissions-per-hour: ${FEEDBACK_SUBMISSIONS_PER_HOUR:10}
 
   rate-limit:
     per-party:

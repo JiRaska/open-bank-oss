@@ -42,3 +42,26 @@ spec:
   config:
     retention.ms: 604800000
     cleanup.policy: delete
+---
+# In-app screen-feedback topic (ADR-0192), produced by customer-edge's FeedbackPublisher and
+# consumed by analytics-sink into the ClickHouse bronze layer. Declared explicitly like the two
+# topics above — the broker does not auto-create, and a missing topic is exactly how the
+# sepa-instant/swift submits hung: the produce never lands and the caller waits on a broker that
+# will not accept it.
+#
+# Carries feedback METADATA only (screen id, category, comment, and the screenshot's object-store
+# key) — the PNG itself lives in S3 under a 90-day lifecycle rule and never enters Kafka. Retention
+# 7 days like the funnel stream: the durable copy is ClickHouse bronze, this is only the transport.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.feedback.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

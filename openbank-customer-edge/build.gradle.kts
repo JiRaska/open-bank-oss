@@ -29,6 +29,13 @@ dependencies {
     // WebAuthn RP verification (ADR-0066 F2 native passkey) — registration/authentication
     // ceremony crypto (attestation + assertion). Pinned old on purpose; see libs.versions.toml.
     implementation(libs.webauthn4j.core)
+    // ADR-0192 screen feedback: screenshots go to object storage via the shared ObjectStorePort
+    // (ADR-0161). openbank-libs-runtime compiles S3ObjectStore against the AWS SDK as compileOnly,
+    // so a service selecting openbank.objectstore.backend=s3 must bring the SDK itself — and the
+    // port's suspend API needs coroutines on the runtime classpath (the edge is otherwise
+    // coroutine-free; it is used from a @Blocking worker thread via runBlocking).
+    implementation(libs.aws.sdk.s3)
+    implementation(libs.kotlinx.coroutines.core)
 
     implementation(project(":openbank-libs"))
 

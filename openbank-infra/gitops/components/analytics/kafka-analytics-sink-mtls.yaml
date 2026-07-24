@@ -3,6 +3,7 @@
 # analytics-sink consumes the domain-event stream into the ClickHouse bronze layer. It has ONE
 # incoming channel (analytics-events-in) subscribed to nine topics; it never produces. The broker
 # runs allow.everyone.if.no.acl.found=false, so it needs a KafkaUser with Read on each topic + the
+# consumer group (the channel's topic list is the source of truth; keep the ACLs below in step).
 # consumer group. Identity model (ADR-0137): one KafkaUser = one mTLS cert = one principal; the
 # Strimzi User Operator mints a per-user Secret in `messaging`, projected into `analytics` by the
 # ExternalSecrets below (same pattern as kafka-onboarding-mtls.yaml / kafka-customer-edge-mtls.yaml).
@@ -51,6 +52,10 @@ spec:
         operations: [Read, Describe]
         host: "*"
       - resource: { type: topic, name: openbank.onboarding.funnel.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      # ADR-0192 in-app screen feedback (metadata + screenshot object key; never image bytes).
+      - resource: { type: topic, name: openbank.feedback.events, patternType: literal }
         operations: [Read, Describe]
         host: "*"
       - resource: { type: group, name: analytics-sink, patternType: literal }
