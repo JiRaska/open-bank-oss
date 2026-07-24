@@ -41,6 +41,9 @@ enum class NotificationTemplate(val variables: Set<String>) {
     OTP_CODE(setOf("code")),
     PASSWORD_RESET(setOf("resetLink")),
     WELCOME(setOf("name")),
+
+    /** Decoupled/push SCA — "you have a payment to approve" (#4). [detail] = the human summary. */
+    SCA_APPROVAL(setOf("detail")),
     ;
 
     /** Keys in [vars] that this template does not accept. Empty = the request is well-formed. */
@@ -53,7 +56,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
      */
     val category: NotificationCategory
         get() = when (this) {
-            OTP_CODE, PASSWORD_RESET, ACCOUNT_FROZEN,
+            OTP_CODE, PASSWORD_RESET, ACCOUNT_FROZEN, SCA_APPROVAL,
             KYC_APPROVED, KYC_REJECTED, KYC_DOCUMENT_REQUIRED,
             CONSENT_GRANTED, CONSENT_REVOKED,
             -> NotificationCategory.SECURITY

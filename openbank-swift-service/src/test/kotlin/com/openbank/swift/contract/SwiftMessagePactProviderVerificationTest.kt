@@ -68,7 +68,7 @@ class SwiftMessagePactProviderVerificationTest {
         // No state setup needed: message producer methods return deterministic payloads.
     }
 
-    @PactVerifyProvider("a swift.message.status-changed event with status SETTLED")
+    @PactVerifyProvider("a swift.message.status-changed event with status COMPLETED")
     fun produceSwiftStatusChanged(): String {
         val message = SwiftMessage(
             id = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),

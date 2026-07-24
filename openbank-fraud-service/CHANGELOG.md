@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.8.1...fraud-service-v0.9.0) (2026-07-24)
+
+
+### Features
+
+* **fraud:** verify the ONNX model against a signed model card before serving (ADR-0141) ([#2016](https://github.com/JiRaska/open-bank-oss/issues/2016)) ([d6fa173](https://github.com/JiRaska/open-bank-oss/commit/d6fa1733e4c3b692e5e85e9cbf020bd9752e2752))
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.8.0...fraud-service-v0.8.1) (2026-07-16)
 
 

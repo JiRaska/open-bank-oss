@@ -58,11 +58,12 @@ spec:
               value: http://alertmanager-operated.observability.svc:9093
             - name: TEMPORAL_NAMESPACE
               value: openbank-liveness
-            # DeepInfra OpenAI-compatible backend — same provider as devops-agent (ADR-0119) /
-            # copilot (ADR-0089). Not litellm.ai-platform: that gateway is not deployed anywhere
-            # in this repo's gitops (ADR-0163 E2E-wiring note).
+            # LLM backend — routed through the in-cluster LiteLLM gateway (ADR-0174/0175), which now
+            # IS deployed (openbank-infra/gitops/components/ai-platform). The gateway holds the
+            # provider key and is the only pod allowed to egress to the US provider; this agent
+            # presents the LiteLLM virtual key. Model id unchanged (mapped to deepinfra/deepseek there).
             - name: LIVENESS_MODEL_ENDPOINT
-              value: https://api.deepinfra.com/v1/openai
+              value: http://litellm.ai-platform.svc:4000/v1
             - name: LIVENESS_MODEL_ID
               value: deepseek-ai/DeepSeek-V3.2
             - name: LIVENESS_GITHUB_API_URL

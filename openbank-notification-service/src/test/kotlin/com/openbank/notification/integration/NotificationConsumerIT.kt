@@ -4,6 +4,7 @@
 package com.openbank.notification.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.notification.application.NotificationConsumer.Companion.GENERIC_PUSH_BODY
 import com.openbank.notification.application.port.out.PushMessage
 import com.openbank.notification.application.port.out.PushSender
 import com.openbank.notification.domain.model.NotificationChannel
@@ -320,6 +321,47 @@ class NotificationConsumerIT {
         assertThat(deviceStatusFor(OffContextPushSender.BAD_TOKEN)).isEqualTo("INVALID")
         assertThat(deviceStatusFor(OffContextPushSender.GOOD_TOKEN)).isEqualTo("ACTIVE")
     }
+
+    /**
+     * ADR-0135 §3 + issue #1182: the push payload that leaves the service must carry NO transaction
+     * amount, account number, or other PII. Pre-fix `sendPush` shipped `htmlToPlain(body)` — the
+     * fully-rendered "Transaction of 12345.67 EUR completed" — as the PushMessage body, landing on
+     * the lock screen. This asserts the delivered payload's title is the PII-free subject and the
+     * body is the fixed generic wake string, with the amount present in NEITHER. Fails against the
+     * old behavior (which put the amount in the body).
+     */
+    @Test
+    fun `PUSH payload carries no amount or PII (ADR-0135 section 3, issue 1182)`() {
+        val partyId = UUID.randomUUID()
+        val amount = "12345.67"
+        val account = "CZ6508000000192000145399"
+        // A token unique to this test — the (platform, token) unique constraint is shared across the
+        // IT DB, so reusing GOOD_TOKEN would collide with the fan-out test's seed. Delivery success
+        // is irrelevant here: send() captures the outbound PushMessage regardless of accept/reject.
+        val piiToken = "apns-pii-payload-token-it"
+        OffContextPushSender.SENT.clear()
+        seedActiveDevice(partyId, piiToken)
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.TRANSACTION_COMPLETED,
+                recipient = "push-tx@example.com",
+                variables = mapOf("amount" to amount, "currency" to "EUR"),
+            ),
+        )
+
+        val delivered = OffContextPushSender.SENT.filter { it.token == piiToken }
+        assertThat(delivered).hasSize(1)
+        val msg = delivered.first()
+        // Title is the already-PII-free subject; body is the fixed generic wake string.
+        assertThat(msg.title).isEqualTo("Transaction completed")
+        assertThat(msg.body).isEqualTo(GENERIC_PUSH_BODY)
+        // The amount and account never appear anywhere in the transported payload.
+        assertThat(msg.title).doesNotContain(amount).doesNotContain(account)
+        assertThat(msg.body).doesNotContain(amount).doesNotContain(account)
+    }
 }
 
 /**
@@ -333,6 +375,9 @@ class NotificationConsumerIT {
 @ApplicationScoped
 class OffContextPushSender : PushSender {
     override fun send(message: PushMessage): Uni<PushResult> {
+        // Record what actually crosses the transport boundary so a test can assert the payload
+        // is PII-free (ADR-0135 §3, issue #1182).
+        SENT.add(message)
         val result = if (message.token == GOOD_TOKEN) {
             PushResult.ok("apns-id-it")
         } else {
@@ -345,5 +390,8 @@ class OffContextPushSender : PushSender {
         const val GOOD_TOKEN = "apns-good-token-it"
         const val BAD_TOKEN = "apns-bad-token-it"
         private val EXECUTOR = Executors.newSingleThreadExecutor()
+
+        /** Messages the adapter was asked to deliver, in order — inspected by the PII assertion. */
+        val SENT: MutableList<PushMessage> = java.util.concurrent.CopyOnWriteArrayList()
     }
 }
