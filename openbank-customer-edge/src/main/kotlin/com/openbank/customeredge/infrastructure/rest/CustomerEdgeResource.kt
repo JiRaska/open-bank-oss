@@ -14,6 +14,7 @@ import com.openbank.customeredge.infrastructure.cnb.CnbBanksClient
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboarding
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboardingStore
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.logging.Log
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.PermitAll
@@ -528,7 +529,7 @@ class CustomerEdgeResource(
         req.put("accountId", accountId.toString())
         req.put("debtorIban", debtorIban)
         req.put("creditorIdentifier", creditorId)
-        req.put("umr", "UMR-" + UUID.randomUUID().toString().replace("-", "").take(20).uppercase())
+        req.put("umr", "UMR-" + Ids.randomId().toString().replace("-", "").take(20).uppercase())
         req.put("scheme", node.get("scheme")?.asText() ?: "CORE")
         req.put("sequenceType", node.get("sequenceType")?.asText() ?: "RCUR")
         req.put("creditorName", creditorName)
