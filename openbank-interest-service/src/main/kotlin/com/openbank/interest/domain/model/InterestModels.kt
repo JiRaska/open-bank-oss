@@ -31,6 +31,10 @@ data class InterestRateConfig(
      *  product-level default (accountId == null). Lets a specific customer be granted interest on an
      *  otherwise non-interest-bearing account (e.g. a CURRENT account, which defaults to 0). */
     val accountId: UUID? = null,
+    /** The currency this rate applies to. Rates are currency-specific — a CZK savings rate is not an
+     *  EUR one — so resolution is (account/product, currency)-specific and an account can only accrue
+     *  in a currency it has a rate config for (issue #1265). */
+    val currency: String,
     val rateType: InterestRateType = InterestRateType.FIXED,
     val annualRate: BigDecimal,
     val minBalance: BigDecimal = BigDecimal.ZERO,

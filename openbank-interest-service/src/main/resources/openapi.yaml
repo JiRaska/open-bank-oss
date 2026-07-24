@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Interest Service API
-  version: 1.2.0
+  version: 1.3.0
   description: >-
     Interest accrual, capitalization, and rate configuration. Capitalization withholds Czech
     final tax on credit interest (§36/§38d ZDP, ADR-0033): CZK interest credited to a resident
@@ -36,6 +36,10 @@ paths:
       responses:
         '200':
           description: Accrual result
+        '422':
+          description: >-
+            No active rate config for the (account/product, currency) — the account has no rate in
+            the requested currency, so nothing is accrued (issue #1265).
 
   /api/v1/interest/accrue/all:
     post:
@@ -378,6 +382,14 @@ components:
       properties:
         productId:
           type: string
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          description: >-
+            ISO-4217 currency this rate applies to. Rates are currency-specific; accrual resolves a
+            rate only in the accrual's own currency, so an account cannot accrue in a currency it has
+            no rate for (issue #1265). Accrual against a currency with no config yields HTTP 422.
         ratePercent:
           type: number
         calculationMethod:

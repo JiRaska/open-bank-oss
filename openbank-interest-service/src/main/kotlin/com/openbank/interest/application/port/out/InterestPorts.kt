@@ -29,7 +29,12 @@ interface InterestRateConfigRepository {
      * when neither exists — the account earns no interest (e.g. a plain CURRENT account, whose
      * product default is deactivated). This is what the accrual run and the app's rate view use.
      */
-    fun findEffectiveRate(accountId: UUID, productId: String, date: LocalDate): Uni<InterestRateConfig?>
+    fun findEffectiveRate(
+        accountId: UUID,
+        productId: String,
+        date: LocalDate,
+        currency: String? = null,
+    ): Uni<InterestRateConfig?>
     fun update(config: InterestRateConfig): Uni<InterestRateConfig>
 }
 

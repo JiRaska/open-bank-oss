@@ -14,6 +14,7 @@ import com.openbank.interest.domain.model.DayCount
 import com.openbank.interest.domain.model.InterestAccrual
 import com.openbank.interest.domain.model.InterestCapitalization
 import com.openbank.interest.domain.model.InterestRateConfig
+import com.openbank.interest.domain.model.RateConfigNotFoundException
 import com.openbank.interest.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
 import io.smallrye.mutiny.Uni
@@ -67,6 +68,10 @@ class InterestResource(
     @Authorize(action = "interest.create", resource = "")
     fun accrue(request: AccrualRequest): Uni<Response> = accrueUseCase.accrue(request)
         .map { Response.status(201).entity(it).build() }
+        .onFailure(RateConfigNotFoundException::class.java).recoverWithItem { e ->
+            // No rate for this (account/product, currency): a client/config condition, not a 500.
+            Response.status(422).entity(mapOf("error" to e.message)).build()
+        }
         .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
 
     @POST
