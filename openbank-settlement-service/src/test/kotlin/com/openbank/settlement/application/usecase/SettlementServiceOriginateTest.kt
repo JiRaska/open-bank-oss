@@ -4,12 +4,10 @@
 
 package com.openbank.settlement.application.usecase
 
-import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.settlement.application.port.`in`.OriginateSettlementCommand
-import com.openbank.settlement.application.port.out.CreditPort
-import com.openbank.settlement.application.port.out.DebitPort
-import com.openbank.settlement.application.port.out.LedgerPort
 import com.openbank.settlement.application.port.out.SettlementRepository
+import com.openbank.settlement.application.workflow.SettlementActivities
+import com.openbank.settlement.application.workflow.SettlementWorkflowImpl
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.settlement.infrastructure.temporal.TemporalConfig
@@ -18,44 +16,58 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
-import io.temporal.client.WorkflowClient
+import io.temporal.testing.TestWorkflowEnvironment
+import io.temporal.worker.Worker
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
 
+/**
+ * Coverage for [SettlementService.originate]: PENDING persistence + idempotent replay. Since ADR-0120
+ * Phase 6 (issue #1917) retired the legacy saga, originate()'s follow-on settle() dispatches to the
+ * Temporal workflow, so a fresh PENDING is driven against a real in-memory [TestWorkflowEnvironment];
+ * a repeated key resolves to the existing terminal row without a second dispatch.
+ */
 class SettlementServiceOriginateTest {
 
     private val repo: SettlementRepository = mockk(relaxed = true)
-    private val debitPort: DebitPort = mockk(relaxed = true)
-    private val creditPort: CreditPort = mockk(relaxed = true)
-    private val ledgerPort: LedgerPort = mockk(relaxed = true)
     private val temporalConfig: TemporalConfig = mockk(relaxed = true)
-    private val workflowClient: WorkflowClient = mockk(relaxed = true)
-    private val auditPublisher: AuditEventPublisher = mockk(relaxed = true)
 
-    private val service = SettlementService(
-        repo,
-        debitPort,
-        creditPort,
-        ledgerPort,
-        temporalConfig,
-        workflowClient,
-        auditPublisher,
-    )
+    private lateinit var env: TestWorkflowEnvironment
+    private lateinit var worker: Worker
+    private lateinit var service: SettlementService
+
+    private companion object {
+        const val TASK_QUEUE = "openbank-settlement"
+    }
+
+    @BeforeEach
+    fun setUp() {
+        env = TestWorkflowEnvironment.newInstance()
+        worker = env.newWorker(TASK_QUEUE)
+        worker.registerWorkflowImplementationTypes(SettlementWorkflowImpl::class.java)
+        worker.registerActivitiesImplementations(RelaxedActivities())
+        env.start()
+        every { temporalConfig.taskQueue() } returns TASK_QUEUE
+        service = SettlementService(repo, temporalConfig, env.workflowClient)
+    }
+
+    @AfterEach
+    fun tearDown() {
+        env.close()
+    }
 
     @Test
     fun `originate persists a PENDING settlement from the command and starts settlement`() {
-        // Temporal off → settle() runs the legacy in-process saga (ports are relaxed mocks).
-        every { temporalConfig.enabled() } returns false
         val created = slot<Settlement>()
         // No existing settlement for the key (dedup miss) until create captures it.
         coEvery { repo.findById(any()) } answers { if (created.isCaptured) created.captured else null }
         coEvery { repo.create(capture(created)) } answers { created.captured }
-        // This caller wins the atomic PENDING → DEBITED claim, so the legacy saga proceeds.
-        coEvery { repo.claimForProcessing(any()) } returns true
 
         val payer = UUID.randomUUID()
         val payee = UUID.randomUUID()
@@ -63,22 +75,20 @@ class SettlementServiceOriginateTest {
             service.originate(OriginateSettlementCommand("e2e-key-1", payer, payee, BigDecimal("250.00"), "CZK"))
         }
 
-        // The persisted settlement reflects the command and starts PENDING.
+        // The persisted settlement reflects the command and starts PENDING; settle() dispatched the
+        // Temporal workflow (the workflow's debit/credit/book + compensation are covered by
+        // SettlementWorkflowImplTest).
         assertThat(created.captured.payerAccountId).isEqualTo(payer)
         assertThat(created.captured.payeeAccountId).isEqualTo(payee)
         assertThat(created.captured.amount).isEqualByComparingTo(BigDecimal("250.00"))
         assertThat(created.captured.currency).isEqualTo("CZK")
         assertThat(created.captured.status).isEqualTo(SettlementStatus.PENDING)
         assertThat(result.id).isEqualTo(created.captured.id)
-
-        // settle() was invoked (legacy path debits the payer).
         coVerify { repo.create(any()) }
-        coVerify { debitPort.debit(created.captured.id) }
     }
 
     @Test
     fun `originate is idempotent — a repeated key returns the original without re-settling`() {
-        every { temporalConfig.enabled() } returns false
         val now = Instant.now()
         val existing = Settlement(
             id = UUID.nameUUIDFromBytes("settlement:dup-key".toByteArray()),
@@ -100,6 +110,16 @@ class SettlementServiceOriginateTest {
 
         assertThat(result.id).isEqualTo(existing.id)
         coVerify(exactly = 0) { repo.create(any()) }
-        coVerify(exactly = 0) { debitPort.debit(any()) }
+    }
+
+    /** Activities stub that never throws — originate coverage only exercises settle() dispatch. */
+    private class RelaxedActivities : SettlementActivities {
+        override fun debitPayer(settlementId: UUID) = Unit
+        override fun creditPayee(settlementId: UUID) = Unit
+        override fun bookToLedger(settlementId: UUID) = Unit
+        override fun reverseDebit(settlementId: UUID) = Unit
+        override fun reverseCredit(settlementId: UUID) = Unit
+        override fun reverseBookToLedger(settlementId: UUID) = Unit
+        override fun rejectSettlement(settlementId: UUID) = Unit
     }
 }
