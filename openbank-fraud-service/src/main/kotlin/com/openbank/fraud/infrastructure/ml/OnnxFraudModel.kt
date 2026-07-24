@@ -78,6 +78,10 @@ class OnnxFraudModel(
         private val INPUT_SHAPE = longArrayOf(1, 2)
         private val mapper = ObjectMapper()
 
+        // Truncation length for the sha256 printed in the model-card-verified log line —
+        // enough to eyeball-correlate against the full hash without spamming the log.
+        private const val LOG_SHA256_PREFIX_LEN = 12
+
         // Scopes this serving path is allowed to load. A model card declaring anything else (e.g. a
         // credit-decisioning model, ADR-0142) must not be served here even if its bytes verify.
         private val ALLOWED_SCOPES = setOf("fraud-shadow")
@@ -147,7 +151,7 @@ class OnnxFraudModel(
                 card.path("modelId").asText("?"),
                 card.path("version").asText("?"),
                 scope,
-                actual.take(12),
+                actual.take(LOG_SHA256_PREFIX_LEN),
             )
             return true
         }
