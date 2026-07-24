@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.45.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.44.0...customer-edge-v0.45.0) (2026-07-24)
+
+
+### Features
+
+* **edge:** authorise a new SEPA Direct Debit mandate ([#2042](https://github.com/JiRaska/open-bank-oss/issues/2042)) ([5dfa9ea](https://github.com/JiRaska/open-bank-oss/commit/5dfa9ea78e274418e72accdbf0f727eb2f8341da))
+
 ## [0.44.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.43.0...customer-edge-v0.44.0) (2026-07-23)
 
 
