@@ -52,7 +52,9 @@ jobs:
     # KEEP THIS EXPRESSION IN LOCKSTEP with the PACT_BROKER_URL env below — a hosted
     # runner with a set (unreachable) broker URL fails the provider tests instead
     # of skipping them.
-    runs-on: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'openbank-build' || 'ubuntu-latest' }}
+    # workflow_dispatch (verify-provider.yml, #2039) also runs on the ARC pool so a single
+    # provider can re-verify + re-publish without a full-fleet run. KEEP IN LOCKSTEP with PACT_BROKER_URL.
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && 'openbank-build' || 'ubuntu-latest' }}
     timeout-minutes: 45
     env:
       # Pact Broker (ADR-0092). The broker has no public ingress (ADR-0056); the
@@ -67,7 +69,7 @@ jobs:
       # cluster-DNS broker; a set-but-unreachable URL would fail the provider tests
       # instead of skipping them). Main-push behaviour is unchanged: verify + publish.
       # KEEP IN LOCKSTEP with the runs-on expression above.
-      PACT_BROKER_URL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PACT_BROKER_URL || '' }}
+      PACT_BROKER_URL: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && vars.PACT_BROKER_URL || '' }}
       PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
       PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
       # Testcontainers pulls postgres:16.3-alpine and redpandadata/redpanda through
