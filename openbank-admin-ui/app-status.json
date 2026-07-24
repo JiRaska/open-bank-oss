@@ -188,13 +188,13 @@
       "lens": [
         "security"
       ],
-      "status": "partial",
+      "status": "live",
       "adr": [
         "ADR-0066"
       ],
       "gap": {
-        "cs": "SPKI pinning je implementován, ale produkční hashe nejsou nastaveny (PINNED_SPKI_HASHES je prázdné), takže pinning je v sandboxu vypnutý (ADR-0066-S3).",
-        "en": "SPKI pinning is implemented but production hashes are not set (PINNED_SPKI_HASHES is empty), so pinning is disabled in sandbox (ADR-0066-S3)."
+        "cs": "SPKI pinning je aktivní: PINNED_SPKI_HASHES obsahuje produkční piny pro všechny hosty (customer.open-bank.tech, kc.open-bank.tech, rum.open-bank.tech) a useFakeData=false, takže CERT_PINNING_ENABLED=true. Zbytkový provozní úkol: piny jsou hardcoded, takže je nutné je aktualizovat při rotaci certifikátů (zmírněno cert-manager private-key-rotation-policy: Never na ingressu; cross-host backup pin dle RFC 7469 §2.1.3).",
+        "en": "SPKI pinning is active: PINNED_SPKI_HASHES holds production pins for all hosts (customer.open-bank.tech, kc.open-bank.tech, rum.open-bank.tech) and useFakeData=false, so CERT_PINNING_ENABLED=true. Residual operational task: pins are hardcoded and must be updated on cert rotation (mitigated by cert-manager private-key-rotation-policy: Never on the ingress; cross-host backup pin per RFC 7469 §2.1.3)."
       },
       "derivedStatus": "live"
     },
@@ -278,8 +278,8 @@
   "summary": {
     "total": 13,
     "byStatus": {
-      "live": 9,
-      "partial": 3,
+      "live": 10,
+      "partial": 2,
       "planned": 1
     },
     "decisionMissing": []
