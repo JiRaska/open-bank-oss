@@ -124,7 +124,7 @@ export async function GET(req: NextRequest) {
         WHERE ${range}
         GROUP BY step`),
       chQuery(`
-        SELECT toString(day)   AS day,
+        SELECT day,
                sum(attempts)   AS attempts,
                sum(successes)  AS successes,
                sum(failures)   AS failures
