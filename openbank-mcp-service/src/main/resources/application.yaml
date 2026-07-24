@@ -1,0 +1,29 @@
+quarkus:
+  application:
+    name: openbank-mcp-service
+  http:
+    port: 8150
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+  oidc:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://keycloak.iam.svc:8080/realms/openbank}
+    # Phase 1: OIDC present for health; the OAuth 2.1 -> PSD2-consent binding is phase 2.
+    tenant-enabled: false
+  smallrye-openapi:
+    info-title: OpenBank MCP Server
+    info-version: "1.0.0"
+
+# OPA PDP (ADR-0034). Phase 1: no sidecar deployed yet, so the default localhost:8181 fails closed
+# (every tools/call denied) until the gitops component ships the sidecar (deploy follow-up).
+opa:
+  url: ${OPA_URL:http://localhost:8181}
+  path: ${OPA_PATH:/v1/data/openbank/rest/allow}
+  timeout-ms: 500
+
+mcp:
+  server:
+    name: openbank-mcp
+    version: "0.1.0"
+    protocol-version: "2025-06-18"
