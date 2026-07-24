@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.14.1...notification-service-v0.15.0) (2026-07-24)
+
+
+### Features
+
+* **sca:** send a real approval push on challenge initiate ([#2026](https://github.com/JiRaska/open-bank-oss/issues/2026)) ([f53c527](https://github.com/JiRaska/open-bank-oss/commit/f53c52733722b684e838d317fc29981185dc0f20)), closes [#2025](https://github.com/JiRaska/open-bank-oss/issues/2025)
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.14.0...notification-service-v0.14.1) (2026-07-24)
 
 
