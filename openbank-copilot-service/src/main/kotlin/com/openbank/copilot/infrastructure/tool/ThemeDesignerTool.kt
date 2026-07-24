@@ -36,7 +36,7 @@ class ThemeDesignerTool(private val objectMapper: ObjectMapper) : CopilotTool {
             "accentS" to mapOf("type" to "number", "description" to "Accent saturation 0-1"),
             "accentL" to mapOf("type" to "number", "description" to "Accent lightness 0-1"),
             "mode" to mapOf("type" to "string", "enum" to listOf("light", "dark", "auto")),
-            "radiusScale" to mapOf("type" to "number", "description" to "Zaobleni rohu 0.4 (ostre) az 2.0 (velmi kulate)"),
+            "radiusScale" to mapOf("type" to "number", "description" to "Zaobleni rohu 0.4-2.0"),
             "compact" to mapOf("type" to "boolean", "description" to "Kompaktni hustota"),
             "fontPair" to mapOf("type" to "string", "enum" to listOf("grotesk", "serif", "mono")),
             "fontScale" to mapOf("type" to "number", "description" to "Meritko pisma 0.9-1.1"),
@@ -46,6 +46,10 @@ class ThemeDesignerTool(private val objectMapper: ObjectMapper) : CopilotTool {
         "required" to listOf("accentH", "accentS", "accentL", "mode"),
     )
 
+    // The clamp bounds and HSL defaults mirror the app-side ThemeSpecValidator (ADR-0190),
+    // which is the authoritative guardrail; this server-side normalization is a courtesy, so
+    // the literals live here rather than as a second source-of-truth set of constants.
+    @Suppress("MagicNumber")
     override suspend fun call(arguments: JsonNode): ToolResult {
         val h = arguments.path("accentH").asDouble(152.0)
         val s = arguments.path("accentS").asDouble(0.93)
@@ -75,7 +79,8 @@ class ThemeDesignerTool(private val objectMapper: ObjectMapper) : CopilotTool {
 
         val label = name.ifBlank { "novy vzhled" }
         return ToolResult(
-            text = "Motiv \"$label\" je pripraveny a aplikace ho prave prevzala. Strucne popis klientovi, co jsi navrhl.",
+            text = "Motiv \"$label\" je pripraveny a aplikace ho prave prevzala. " +
+                "Strucne popis klientovi, co jsi navrhl.",
             themeSpecJson = objectMapper.writeValueAsString(spec),
         )
     }

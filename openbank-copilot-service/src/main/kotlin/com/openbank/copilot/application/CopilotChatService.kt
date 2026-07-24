@@ -32,6 +32,10 @@ import org.jboss.logging.Logger
  * Grounding (D4): figures come from tool results, never model generation. Nothing here changes state.
  */
 @ApplicationScoped
+// Governed orchestrator: one method per governance concern (guard, converse, stream, tool
+// round, theme/proposal sentinels, prompt). Splitting it would scatter the loop it exists to
+// keep in one place.
+@Suppress("TooManyFunctions")
 class CopilotChatService(
     private val gateway: ModelGateway,
     private val guard: PromptInjectionGuard,
@@ -75,7 +79,7 @@ class CopilotChatService(
      * Called via runBlocking on a JAX-RS @Blocking worker thread (same pattern as [handle]) so CDI
      * context and the customer bearer for downstream tool calls are propagated correctly.
      */
-    @Suppress("TooGenericExceptionCaught")
+    @Suppress("TooGenericExceptionCaught", "LongMethod")
     suspend fun handleStream(turn: ChatTurn, customerId: String, onChunk: suspend (String) -> Unit) {
         if (!enabled) {
             onChunk(DISABLED_MESSAGE)
@@ -357,6 +361,7 @@ class CopilotChatService(
         const val MAX_ITERATIONS = 5
         const val MAX_TOOL_RESULT_CHARS = 3000
         const val MAX_OUTPUT_TOKENS = 512
+
         // A ThemeSpec is ~400 chars; the cap only guards a malicious oversized client payload.
         const val MAX_THEME_CONTEXT_CHARS = 2000
         const val DISABLED_MESSAGE = "Asistent je momentálně vypnutý."

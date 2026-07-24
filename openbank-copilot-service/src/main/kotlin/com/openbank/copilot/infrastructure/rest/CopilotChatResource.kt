@@ -126,9 +126,5 @@ class CopilotChatResource {
     }
 
     /** [themeSpec] = client's active ThemeSpec JSON (ADR-0190), data context for design_theme. */
-    data class ChatRequest(
-        val conversationId: String? = null,
-        val message: String = "",
-        val themeSpec: String? = null,
-    )
+    data class ChatRequest(val conversationId: String? = null, val message: String = "", val themeSpec: String? = null)
 }
