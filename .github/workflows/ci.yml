@@ -520,6 +520,13 @@ jobs:
       - name: "deploy-coverage guard (released + gitops => in ALL_SERVICES, enforced)"
         run: bash .github/scripts/check-deploy-coverage.sh
 
+      # Reconcile probe unit test (rules.yaml: deploy_reconcile, issue #2020). Guards the
+      # self-heal detection that re-drives a service stranded when the one-shot per-push
+      # auto-deploy run is blocked by a transient can-i-deploy verification lag. Pure git +
+      # jq against a throwaway fixture repo — no Gradle, no network.
+      - name: "auto-deploy reconcile probe unit test"
+        run: bash .github/scripts/test-auto-deploy-reconcile-lag.sh
+
       # gitops ref-integrity guard (rules.yaml: gitops_ref_integrity). The layer below
       # deploy-coverage: that one proves a service gets BUILT, this one proves the manifest
       # it deploys can actually START. A secretKeyRef to a Secret nobody declares passes

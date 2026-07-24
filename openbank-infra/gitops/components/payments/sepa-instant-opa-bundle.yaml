@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sepa-instant
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "e3a6187ec678c9ab"
+    openbank.tech/policy-checksum: "2366726c21f3e979"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2744,6 +2744,38 @@ data:
       # through the 2026-07-12 Enforce graduation -- one reschedule from an outage);
       # finrep-service; vop-service (merged 2026-07-16, one hour before this guard existed).
       incident: 2026-07-16
+
+    deploy_reconcile:
+      probe: .github/scripts/auto-deploy-reconcile-lag.sh
+      test: .github/scripts/test-auto-deploy-reconcile-lag.sh
+      wired_into: .github/workflows/ci.yml            # test -> governance job (a REQUIRED check)
+      schedule: .github/workflows/auto-deploy.yml     # cron "23 */3 * * *" -> the reconcile trigger
+      # THE RULE (issue #2020): the per-push auto-deploy run is ONE-SHOT. A service can be
+      # correctly detected, built and pushed, then blocked at the can-i-deploy contract gate by a
+      # TRANSIENT verification lag -- its build wave republished its consumer pact, and the
+      # counterpart provider version then in sandbox verified it only minutes later, on its own
+      # deploy. The gate's verdict ("no verified pact between the latest main consumer and the
+      # version currently in sandbox") is CORRECT at that instant, but nothing re-drives the
+      # deploy once the provider catches up, so the service rots on its stale image until a human
+      # hand-bumps gitops. Observed live: #1990 (notification-service per-party push prefs, +V11
+      # migration + /api/v1/preferences) built image sandbox-6de0d5e9, was blocked against the
+      # account-service then in sandbox, and ran the pre-#1990 image until PR #2017 hand-bumped
+      # it -- the broker later reported the pair verified/deployable, proving a timing race, not a
+      # contract break.
+      rule: >-
+        A scheduled reconcile re-offers every deployable service whose gitops image tag is behind
+        main to the SAME build-push -> can-i-deploy -> gitops-pr path, so a strand left by a
+        transient gate block self-heals the moment the gate clears.
+      # WHY THIS IS NOT "weaken the gate": the gate is untouched. A service still genuinely blocked
+      # stays blocked (and keeps its #1420 left-behind escalation) on every tick; reconcile only
+      # re-presents it, so it deploys the moment -- and only the moment -- the contract clears.
+      basis: a_transiently_blocked_deploy_must_self_heal_not_wait_for_a_human
+      # The candidate set is enumerated from the gitops manifest pins intersected with
+      # ALL_SERVICES (never a second copy of that list -- deploy_coverage above already guards
+      # its drift), and capped oldest-first per tick so the first run does not fan out the whole
+      # standing backlog (23 stranded services at 2026-07-24) in one shot. The deferred remainder
+      # is logged, never silently dropped, and drains on later ticks.
+      incident: 2026-07-24
 
     identifier_intent_guard:
       script: .github/scripts/check-new-random-uuid.sh
