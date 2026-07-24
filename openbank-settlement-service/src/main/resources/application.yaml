@@ -32,7 +32,6 @@ quarkus:
 
 openbank:
   temporal:
-    enabled: false
     task-queue: openbank-settlement
   api:
     version: "1"
@@ -63,6 +62,10 @@ authz:
         url: http://localhost:${quarkus.http.port}
   openbank:
     settlement:
+      # No real Temporal frontend in @QuarkusTest: don't register the worker (it would fail boot on
+      # UNAVAILABLE). Tests that need the workflow drive their own in-process TestWorkflowEnvironment.
+      worker:
+        enabled: false
       gl:
         debit-account-id: "a0000000-0000-0000-0000-000000000002"
         credit-account-id: "a0000000-0000-0000-0000-000000000002"

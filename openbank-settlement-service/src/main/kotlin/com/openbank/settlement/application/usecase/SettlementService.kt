@@ -4,14 +4,8 @@
 
 package com.openbank.settlement.application.usecase
 
-import com.openbank.libs.audit.AuditEvent
-import com.openbank.libs.audit.AuditEventPublisher
-import com.openbank.libs.audit.AuditResult
 import com.openbank.settlement.application.port.`in`.OriginateSettlementCommand
 import com.openbank.settlement.application.port.`in`.SettlementUseCase
-import com.openbank.settlement.application.port.out.CreditPort
-import com.openbank.settlement.application.port.out.DebitPort
-import com.openbank.settlement.application.port.out.LedgerPort
 import com.openbank.settlement.application.port.out.SettlementRepository
 import com.openbank.settlement.application.workflow.SettlementWorkflow
 import com.openbank.settlement.domain.model.Settlement
@@ -31,32 +25,20 @@ import java.util.UUID
 @ApplicationScoped
 class SettlementService(
     private val settlementRepository: SettlementRepository,
-    private val debitPort: DebitPort,
-    private val creditPort: CreditPort,
-    private val ledgerPort: LedgerPort,
     private val temporalConfig: TemporalConfig,
     private val workflowClient: WorkflowClient,
-    private val auditPublisher: AuditEventPublisher,
     private val clock: Clock,
 ) : SettlementUseCase {
 
     @Inject
     constructor(
         settlementRepository: SettlementRepository,
-        debitPort: DebitPort,
-        creditPort: CreditPort,
-        ledgerPort: LedgerPort,
         temporalConfig: TemporalConfig,
         workflowClient: WorkflowClient,
-        auditPublisher: AuditEventPublisher,
     ) : this(
         settlementRepository,
-        debitPort,
-        creditPort,
-        ledgerPort,
         temporalConfig,
         workflowClient,
-        auditPublisher,
         Clock.systemUTC(),
     )
 
@@ -119,101 +101,36 @@ class SettlementService(
         val settlement = settlementRepository.findById(settlementId)
             ?: error("Settlement $settlementId not found")
 
-        if (temporalConfig.enabled()) {
-            val stub = workflowClient.newWorkflowStub(
-                SettlementWorkflow::class.java,
-                WorkflowOptions.newBuilder()
-                    .setTaskQueue(temporalConfig.taskQueue())
-                    .setWorkflowId("settlement-$settlementId")
-                    // Money-path double-settle guard: a COMPLETED settlement workflow must NOT be
-                    // restarted (the default ALLOW_DUPLICATE would, on a status-read/start race,
-                    // run a second debit+credit+ledger cycle). FAILED_ONLY rejects a re-start of a
-                    // closed-completed run (→ WorkflowExecutionAlreadyStarted, caught below) while
-                    // still allowing a genuinely failed run to be retried.
-                    .setWorkflowIdReusePolicy(
-                        WorkflowIdReusePolicy.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE_FAILED_ONLY,
-                    )
-                    .build(),
-            )
-            try {
-                WorkflowClient.start(stub::settle, settlementId)
-            } catch (alreadyRunning: WorkflowExecutionAlreadyStarted) {
-                // Idempotent: the settlement workflow for this id is already in flight (a retry of
-                // an orphaned PENDING). Nothing to do — Temporal owns its lifecycle from here.
-                log.infof(
-                    "Settlement workflow %s already started (%s); idempotent no-op",
-                    settlementId,
-                    alreadyRunning.message,
+        // ADR-0120 Phase 6 (issue #1917): Temporal is the sole settlement orchestrator — the legacy
+        // hand-rolled saga (which never reversed an already-moved debit/credit on a mid-flight
+        // failure) is retired. The Temporal SettlementWorkflow compensates in reverse before
+        // rejecting, so a partial failure can no longer leave funds moved against a REJECTED row.
+        val stub = workflowClient.newWorkflowStub(
+            SettlementWorkflow::class.java,
+            WorkflowOptions.newBuilder()
+                .setTaskQueue(temporalConfig.taskQueue())
+                .setWorkflowId("settlement-$settlementId")
+                // Money-path double-settle guard: a COMPLETED settlement workflow must NOT be
+                // restarted (the default ALLOW_DUPLICATE would, on a status-read/start race,
+                // run a second debit+credit+ledger cycle). FAILED_ONLY rejects a re-start of a
+                // closed-completed run (→ WorkflowExecutionAlreadyStarted, caught below) while
+                // still allowing a genuinely failed run to be retried.
+                .setWorkflowIdReusePolicy(
+                    WorkflowIdReusePolicy.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE_FAILED_ONLY,
                 )
-            }
-            return settlement.status
-        }
-
-        return legacySettle(settlementId)
-    }
-
-    @Suppress("TooGenericExceptionCaught")
-    private suspend fun legacySettle(settlementId: UUID): SettlementStatus {
-        // Atomically claim the settlement (PENDING → DEBITED) before moving any money, so two
-        // concurrent same-key calls cannot both run the debit. The loser returns the current status.
-        if (!settlementRepository.claimForProcessing(settlementId)) {
-            val current = settlementRepository.findById(settlementId)?.status
-            log.infof("Settlement %s already claimed/settled (%s); skipping legacy settle", settlementId, current)
-            return current ?: SettlementStatus.REJECTED
-        }
-        return runLegacySettle(settlementId)
-    }
-
-    @Suppress("TooGenericExceptionCaught")
-    private suspend fun runLegacySettle(settlementId: UUID): SettlementStatus = try {
-        log.infof("Legacy settle: debiting payer for settlement %s (claimed → DEBITED)", settlementId)
-        debitPort.debit(settlementId)
-        // claimForProcessing already flipped the row to DEBITED (atomic PENDING -> DEBITED CAS)
-        // before this method was ever called, so the audited row already carries that status.
-        settlementRepository.findById(settlementId)?.let { audit("settlement.debit", it) }
-
-        log.infof("Legacy settle: crediting payee for settlement %s", settlementId)
-        creditPort.credit(settlementId)
-        val credited = settlementRepository.updateStatus(settlementId, SettlementStatus.CREDITED)
-        audit("settlement.credit", credited)
-
-        log.infof("Legacy settle: booking settlement %s to ledger", settlementId)
-        ledgerPort.book(settlementId)
-        val booked = settlementRepository.updateStatus(settlementId, SettlementStatus.BOOKED)
-        audit("settlement.ledger-book", booked)
-
-        SettlementStatus.BOOKED
-    } catch (ex: Exception) {
-        log.errorf(ex, "Legacy settle failed for settlement %s; rejecting", settlementId)
-        val rejected = settlementRepository.updateStatus(settlementId, SettlementStatus.REJECTED)
-        audit("settlement.reject", rejected, result = AuditResult.FAILURE)
-        SettlementStatus.REJECTED
-    }
-
-    /**
-     * Publishes an [AuditEvent] for a legacy-path settlement state transition (issue #1502).
-     * `actorId`/`actorType` are `settlement-service`/`SERVICE`: the legacy settle path is itself
-     * server-driven (originated by an authenticated REST call, but the debit/credit/book sequence
-     * that follows carries no per-step caller identity), same convention as the Temporal-activities
-     * audit trail in [com.openbank.settlement.application.workflow.SettlementActivitiesImpl].
-     */
-    private suspend fun audit(operation: String, settlement: Settlement, result: AuditResult = AuditResult.SUCCESS) {
-        auditPublisher.publish(
-            AuditEvent(
-                actorId = "settlement-service",
-                actorType = "SERVICE",
-                operation = operation,
-                resourceType = "settlement",
-                resourceId = settlement.id.toString(),
-                result = result,
-                payload = mapOf(
-                    "status" to settlement.status.name,
-                    "payerAccountId" to settlement.payerAccountId.toString(),
-                    "payeeAccountId" to settlement.payeeAccountId.toString(),
-                    "amount" to settlement.amount.toString(),
-                    "currency" to settlement.currency,
-                ),
-            ),
+                .build(),
         )
+        try {
+            WorkflowClient.start(stub::settle, settlementId)
+        } catch (alreadyRunning: WorkflowExecutionAlreadyStarted) {
+            // Idempotent: the settlement workflow for this id is already in flight (a retry of
+            // an orphaned PENDING). Nothing to do — Temporal owns its lifecycle from here.
+            log.infof(
+                "Settlement workflow %s already started (%s); idempotent no-op",
+                settlementId,
+                alreadyRunning.message,
+            )
+        }
+        return settlement.status
     }
 }
