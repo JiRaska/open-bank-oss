@@ -154,6 +154,14 @@ mp:
         topic: openbank.sca.events
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Decoupled/push SCA (#4): a "you have a payment to approve" push request drained by
+      # notification-service off openbank.notification.requests (same envelope as account-service).
+      notification-requests-out:
+        connector: smallrye-kafka
+        client.id: sca-service-notif-${quarkus.uuid}
+        topic: openbank.notification.requests
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
 
 # OPA sidecar (ADR-0034). Advisory mode by default.
 opa:
