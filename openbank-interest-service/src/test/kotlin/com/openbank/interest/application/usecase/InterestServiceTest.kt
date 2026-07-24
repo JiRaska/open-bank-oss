@@ -22,6 +22,7 @@ import com.openbank.interest.domain.model.InterestAccrual
 import com.openbank.interest.domain.model.InterestCapitalization
 import com.openbank.interest.domain.model.InterestRateConfig
 import com.openbank.interest.domain.model.InterestRateType
+import com.openbank.interest.domain.model.RateConfigNotFoundException
 import com.openbank.interest.domain.tax.TaxProfile
 import com.openbank.interest.domain.tax.WithholdingTax
 import com.openbank.interest.domain.tax.WithholdingTreatment
@@ -123,7 +124,7 @@ class InterestServiceTest {
         val accrualSlot: CapturingSlot<InterestAccrual> = slot()
 
         every {
-            configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate)
+            configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate, request.currency)
         } returns Uni.createFrom().item(config)
         every { accrualRepo.save(capture(accrualSlot)) } returns
             Uni.createFrom().item(expectedAccrual(request, config))
@@ -133,7 +134,9 @@ class InterestServiceTest {
         assertThat(accrualSlot.captured.dailyRate).isEqualByComparingTo(BigDecimal("0.0010000000"))
         assertThat(accrualSlot.captured.accruedAmount).isEqualByComparingTo(BigDecimal("1.000000"))
         assertThat(result).isEqualTo(expectedAccrual(request, config))
-        verify(exactly = 1) { configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate) }
+        verify(exactly = 1) {
+            configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate, request.currency)
+        }
         verify(exactly = 1) { accrualRepo.save(any()) }
     }
 
@@ -148,12 +151,12 @@ class InterestServiceTest {
         )
 
         every {
-            configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate)
+            configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate, request.currency)
         } returns Uni.createFrom().nullItem()
 
         assertThatThrownBy { service.accrue(request).await().indefinitely() }
-            .isInstanceOf(IllegalStateException::class.java)
-            .hasMessage("No active rate config for product SAVINGS")
+            .isInstanceOf(RateConfigNotFoundException::class.java)
+            .hasMessage("No active rate config for product SAVINGS in currency EUR")
         verify(exactly = 0) { accrualRepo.save(any()) }
     }
 
@@ -186,7 +189,7 @@ class InterestServiceTest {
             Uni.createFrom().item(BalanceSnapshot(BigDecimal("1000.00"), "CZK"))
         every { accountDirectoryPort.bookedBalance(savingsC) } returns
             Uni.createFrom().item(BalanceSnapshot(BigDecimal("2000.00"), "CZK"))
-        every { configRepo.findEffectiveRate(any(), any(), date) } returns Uni.createFrom().item(config)
+        every { configRepo.findEffectiveRate(any(), any(), date, any()) } returns Uni.createFrom().item(config)
         every { accrualRepo.save(any()) } answers { Uni.createFrom().item(firstArg<InterestAccrual>()) }
 
         val count = service.accrueAll(date).await().indefinitely()
@@ -222,7 +225,7 @@ class InterestServiceTest {
             Uni.createFrom().item(BalanceSnapshot(BigDecimal("500.00"), "CZK"))
         every { accountDirectoryPort.bookedBalance(ok) } returns
             Uni.createFrom().item(BalanceSnapshot(BigDecimal("1000.00"), "CZK"))
-        every { configRepo.findEffectiveRate(any(), any(), date) } returns Uni.createFrom().item(config)
+        every { configRepo.findEffectiveRate(any(), any(), date, any()) } returns Uni.createFrom().item(config)
         // The duplicate account simulates the UNIQUE(account, date, product) violation on re-run.
         every { accrualRepo.save(match { it.accountId == dup }) } returns
             Uni.createFrom().failure(IllegalStateException("duplicate key value violates unique constraint"))
@@ -733,6 +736,7 @@ class InterestServiceTest {
     private fun sampleConfig(annualRate: BigDecimal, dayCount: DayCount = DayCount.ACT_365) = InterestRateConfig(
         id = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
         productId = "SAVINGS",
+        currency = "EUR",
         rateType = InterestRateType.FIXED,
         annualRate = annualRate,
         minBalance = BigDecimal.ZERO,

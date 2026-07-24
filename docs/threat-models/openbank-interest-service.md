@@ -58,6 +58,20 @@ money-path service, not adjacent.
 
 ## 6. Change log
 
+- **2026-07-24** — Bind currency to the rate config (issue #1265). Previously nothing tied a currency
+  to `InterestRateConfig`, and `interest_accruals.currency` defaulted to `'EUR'` while the seeded
+  product is CZK, so an account could accumulate a mixed-currency ACCRUING set (the scheduler reads
+  each account's booked-balance currency). `capitalize()` correctly refuses to sum incommensurable
+  currencies, but there was **no operator or API path to unwedge the set** — a permanent
+  availability/correctness hole on the money path (interest silently never capitalized for that
+  account). Fix: `InterestRateConfig` gains a `currency`; `accrue` resolves a rate only in the
+  accrual's own currency and fails closed with `RateConfigNotFoundException` (HTTP 422) when the
+  account has no rate in that currency; the `interest_accruals` UNIQUE key now includes `currency`
+  (V12), so two same-date rows in different currencies can never collapse into one capitalize set.
+  The `mixedCurrencyFailure` guard is retained as an unreachable defence-in-depth assertion — the
+  last check before a GL journal is posted. No new trust boundary or external caller; the 422 is a
+  fail-closed on a config gap, never a fund movement. Rollback: revert the commit + V12 (safe only
+  before two currencies coexist for one account/product/date).
 - **2026-07-22** — Activate monthly capitalization (issue #999). `capitalizeAll` was a stub returning 0,
   so the already-assessed `capitalize()` money-path (claims accruals, posts a GL journal via
   `LedgerPostingPort`, records withholding) had never run at scale. A new `InterestCapitalizationScheduler`

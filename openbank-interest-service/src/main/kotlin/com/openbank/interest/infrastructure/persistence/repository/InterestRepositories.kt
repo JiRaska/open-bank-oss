@@ -59,19 +59,27 @@ class InterestRateConfigRepositoryImpl @Inject constructor(
         }.map { it?.let(mapper::toDomain) }
 
     @WithSession
-    override fun findEffectiveRate(accountId: UUID, productId: String, date: LocalDate): Uni<InterestRateConfig?> =
-        sf.withSession { s ->
-            // account-specific override (accountId set) OR the product-wide default (accountId null);
-            // the CASE orders overrides (0) before defaults (1) so setMaxResults(1) picks the override.
-            s.createQuery(
-                "FROM InterestRateConfigEntity WHERE active = true AND effectiveFrom <= :d " +
-                    "AND (effectiveTo IS NULL OR effectiveTo >= :d) " +
-                    "AND (accountId = :a OR (accountId IS NULL AND productId = :p)) " +
-                    "ORDER BY CASE WHEN accountId IS NULL THEN 1 ELSE 0 END, effectiveFrom DESC",
-                InterestRateConfigEntity::class.java,
-            ).setParameter("a", accountId).setParameter("p", productId).setParameter("d", date)
-                .setMaxResults(1).singleResultOrNull
-        }.map { it?.let(mapper::toDomain) }
+    override fun findEffectiveRate(
+        accountId: UUID,
+        productId: String,
+        date: LocalDate,
+        currency: String?,
+    ): Uni<InterestRateConfig?> = sf.withSession { s ->
+        // account-specific override (accountId set) OR the product-wide default (accountId null);
+        // the CASE orders overrides (0) before defaults (1) so setMaxResults(1) picks the override.
+        // currency == null keeps the currency-agnostic view (the read-only effective-rate lookup);
+        // accrue passes a non-null currency so a rate resolves only in its own currency (issue #1265).
+        s.createQuery(
+            "FROM InterestRateConfigEntity WHERE active = true AND effectiveFrom <= :d " +
+                "AND (effectiveTo IS NULL OR effectiveTo >= :d) " +
+                "AND (:ccy IS NULL OR currency = :ccy) " +
+                "AND (accountId = :a OR (accountId IS NULL AND productId = :p)) " +
+                "ORDER BY CASE WHEN accountId IS NULL THEN 1 ELSE 0 END, effectiveFrom DESC",
+            InterestRateConfigEntity::class.java,
+        ).setParameter("a", accountId).setParameter("p", productId).setParameter("d", date)
+            .setParameter("ccy", currency)
+            .setMaxResults(1).singleResultOrNull
+    }.map { it?.let(mapper::toDomain) }
 
     @WithTransaction
     override fun update(config: InterestRateConfig): Uni<InterestRateConfig> = sf.withTransaction { s ->
