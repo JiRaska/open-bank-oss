@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.14.1...interest-service-v0.14.2) (2026-07-24)
+
+
+### Bug Fixes
+
+* **interest:** freeze the tax profile at claim time so a capitalize() retry can't diverge row-vs-GL ([#2043](https://github.com/JiRaska/open-bank-oss/issues/2043)) ([ae03f3a](https://github.com/JiRaska/open-bank-oss/commit/ae03f3a728ae01fd9b5e4a1ba5c6eace25251a90)), closes [#1355](https://github.com/JiRaska/open-bank-oss/issues/1355) [#1316](https://github.com/JiRaska/open-bank-oss/issues/1316)
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.14.0...interest-service-v0.14.1) (2026-07-24)
 
 
