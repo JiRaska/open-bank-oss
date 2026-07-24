@@ -42,6 +42,17 @@ on:
       - "openbank-libs-domain/build.gradle.kts"
       - "openbank-libs-runtime/build.gradle.kts"
       - "build-logic/**"
+  # Self-heal reconcile (issue #2020). The per-push run is ONE-SHOT: a service that built
+  # and pushed its image but was then blocked at the can-i-deploy contract gate by a
+  # TRANSIENT verification lag (its build wave republished its consumer pact; the provider
+  # version in sandbox verified it minutes later, on its own deploy) is never re-driven —
+  # it stays pinned to the stale image until a human hand-bumps gitops (as PR #2017 did for
+  # notification-service after #1990). This tick re-offers every stranded service to the
+  # SAME build -> can-i-deploy -> gitops-pr path, so it deploys the moment the gate clears
+  # and stays blocked (with the #1420 left-behind escalation) while it does not. The gate is
+  # not weakened. Detection is .github/scripts/auto-deploy-reconcile-lag.sh (unit-tested).
+  schedule:
+    - cron: "23 */3 * * *" # every 3h, offset off the hour to dodge cron congestion
   # Manual re-trigger: rebuild + push + gitops-PR on demand. Useful to recover
   # after a failed auto-deploy run left the gitops image tags stale, without
   # waiting for the next service-source merge.
@@ -169,6 +180,28 @@ jobs:
             fi
             SERVICES_JSON="$(printf '%s\n' "${DEPLOYABLE[@]}" | jq -R . | jq -sc .)"
             echo "workflow_dispatch → building: $SERVICES_JSON"
+            echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Scheduled reconcile (issue #2020): re-drive every service whose deployed gitops
+          # image tag is behind main — the strand a one-shot per-push run leaves when the
+          # contract gate blocks it on a transient verification lag and nothing retries. The
+          # probe intersects the manifest pins with ALL_SERVICES (so it never tries to build
+          # a service this pipeline can't) and caps the batch oldest-first. The selected set
+          # then flows through the identical build-push -> can-i-deploy -> gitops-pr path, so
+          # a still-blocked service simply stays blocked this tick — the gate is unchanged.
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            SERVICES_JSON="$(RECONCILE_SERVICES="$ALL_SERVICES" \
+              bash .github/scripts/auto-deploy-reconcile-lag.sh)"
+            if [ "$SERVICES_JSON" = "[]" ] || [ -z "$SERVICES_JSON" ]; then
+              echo "Reconcile: every deployable service is up to date."
+              echo "services=[]" >> "$GITHUB_OUTPUT"
+              echo "any=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Reconcile → re-driving stranded services: $SERVICES_JSON"
             echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
             echo "any=true" >> "$GITHUB_OUTPUT"
             exit 0
