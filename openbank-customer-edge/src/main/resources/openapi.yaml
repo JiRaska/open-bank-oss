@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.19.0
+  version: 1.20.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -32,6 +32,7 @@ tags:
   - name: Documents
   - name: Preferences
   - name: Feedback
+  - name: Cards
 
 paths:
   /feedback:
@@ -1010,6 +1011,300 @@ paths:
         '401':
           description: Unknown credential or assertion verification failed
 
+  # --- Cards (lifecycle) ---------------------------------------------------
+  # PCI: every card read is masked-PAN only, with exactly one exception — POST /cards/{id}/details,
+  # the SCA-gated reveal for a virtual/single-use card, which is returned no-store and never logged.
+  # SCA (ADR-0021, challenge purpose CARD_MANAGEMENT) gates the actions that create risk: ISSUE,
+  # CANCEL, REVEAL_DETAILS and a LIMIT INCREASE. Freeze/unfreeze/block/controls and a limit DECREASE
+  # are reversible or strictly de-risking, so they carry no SCA friction.
+
+  /cards:
+    get:
+      tags: [Cards]
+      summary: List the caller's cards (masked PAN only)
+      description: Party-scoped by the JWT — a caller can only ever see their own cards.
+      operationId: listCards
+      security:
+        - customerOidc: [cards:read]
+      responses:
+        '200':
+          description: The caller's cards
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Card'
+    post:
+      tags: [Cards]
+      summary: Issue a VIRTUAL or SINGLE_USE card on one of the caller's own accounts (SCA-gated)
+      description: >-
+        The edge forces partyId from the JWT, verifies the account belongs to the caller, resolves the
+        cardholder name from party-service and the product code from the account's product — the
+        customer can never mint a card on someone else's account, under someone else's name, or
+        against a product they do not hold. Plastic cards stay an operator flow.
+
+
+        Idempotency is per card TYPE: a VIRTUAL issue uses a stable per-(party, account) key so a
+        re-tap replays the same card, while a SINGLE_USE issue uses the caller's Idempotency-Key (or a
+        generated one) — a stable key would make a second single-use card impossible.
+      operationId: issueCard
+      security:
+        - customerOidc: [cards:create]
+      parameters:
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid},
+           description: 'An approved CARD_MANAGEMENT challenge with cardAction=ISSUE bound to the accountId'}
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: {type: string}
+          description: Honoured for SINGLE_USE; ignored for VIRTUAL (which uses a stable key).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accountId]
+              properties:
+                accountId: {type: string, format: uuid}
+                cardType: {type: string, enum: [VIRTUAL, SINGLE_USE], default: VIRTUAL}
+      responses:
+        '201':
+          description: Card issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Card'
+        '400':
+          description: Malformed body, accountId or cardType
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardError'
+              examples:
+                cardType: {value: {error: 'cardType must be one of VIRTUAL, SINGLE_USE', code: CARD_TYPE_INVALID}}
+                accountId: {value: {error: Missing or malformed accountId, code: CARD_ACCOUNT_INVALID}}
+                body: {value: {error: Malformed request body, code: CARD_REQUEST_MALFORMED}}
+        '403':
+          description: Account not owned by the caller, or SCA missing/rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardError'
+        '409':
+          description: >-
+            Refused upstream by product-catalog entitlements — CARD_QUOTA_EXCEEDED,
+            CARD_PRODUCT_DISABLED or CARD_NETWORK_NOT_ALLOWED.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardError'
+
+  /cards/entitlements:
+    get:
+      tags: [Cards]
+      summary: What the caller may still issue — quota, remaining cards, allowed types and networks
+      description: >-
+        Drives the app's issue screen so an exhausted quota is greyed out rather than discovered as a
+        409 on submit. The party comes from the JWT; the optional accountId is ownership-checked and
+        resolved to the product code entitlements are keyed by. Read-only, no SCA.
+      operationId: cardEntitlements
+      security:
+        - customerOidc: [cards:read]
+      parameters:
+        - {name: accountId, in: query, required: false, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: The caller's card entitlements
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardEntitlements'
+        '400':
+          description: Malformed accountId (CARD_ACCOUNT_INVALID)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardError'
+        '403':
+          description: Account does not belong to caller
+
+  /cards/{id}/freeze:
+    post:
+      tags: [Cards]
+      summary: Freeze (reversibly suspend) one of the caller's own cards
+      operationId: freezeCard
+      security:
+        - customerOidc: [cards:update]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Card suspended}
+        '403': {description: Card does not belong to caller}
+
+  /cards/{id}/unfreeze:
+    post:
+      tags: [Cards]
+      summary: Unfreeze (resume) one of the caller's own cards
+      operationId: unfreezeCard
+      security:
+        - customerOidc: [cards:update]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Card resumed}
+        '403': {description: Card does not belong to caller}
+
+  /cards/{id}/block:
+    post:
+      tags: [Cards]
+      summary: Permanently block one of the caller's own cards (report lost/stolen)
+      description: >-
+        TERMINAL — card-issuance moves the card to BLOCKED and it can never be resumed. The reason is
+        fixed to LOST_OR_STOLEN, the only customer-initiated block reason. No SCA: blocking only ever
+        removes capability, and demanding a device approval would be exactly the wrong friction for
+        someone who has just lost their phone or card.
+      operationId: blockCard
+      security:
+        - customerOidc: [cards:update]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Card blocked}
+        '403': {description: Card does not belong to caller}
+
+  /cards/{id}/cancel:
+    post:
+      tags: [Cards]
+      summary: Permanently cancel one of the caller's own cards (SCA-gated)
+      description: >-
+        Terminal in card-issuance, and unlike a block it is a deliberate destroy rather than a panic
+        action — so it requires a device-signed, card-bound CARD_MANAGEMENT approval
+        (cardAction=CANCEL). Proxies upstream with X-Operator-Id customer:{partyId}.
+      operationId: cancelCard
+      security:
+        - customerOidc: [cards:update]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Card cancelled}
+        '403':
+          description: Card does not belong to caller, or SCA missing/rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardError'
+
+  /cards/{id}/details:
+    post:
+      tags: [Cards]
+      summary: Reveal PAN / CVV / expiry of a virtual or single-use card (SCA-gated)
+      description: >-
+        The only route on which a full PAN crosses the edge. POST, not GET, because it spends a
+        single-use SCA challenge and must never appear in a URL, browser history or access log. The
+        response is returned `Cache-Control: no-store` + `Pragma: no-cache`, is never logged, and is
+        audited by reference only (who / which card / when — never the value). A physical, blocked,
+        cancelled or expired card is refused upstream and surfaces as CARD_DETAILS_UNAVAILABLE.
+      operationId: revealCardDetails
+      security:
+        - customerOidc: [cards:read]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid},
+           description: 'An approved CARD_MANAGEMENT challenge with cardAction=REVEAL_DETAILS bound to this card'}
+      responses:
+        '200':
+          description: The card's secure details (uncacheable)
+          headers:
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+            Pragma: {schema: {type: string, enum: [no-cache]}}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardSecureDetails'
+        '403':
+          description: >-
+            Card does not belong to caller, SCA missing/rejected (SCA_REQUIRED / SCA_REJECTED), or the
+            card is not eligible for a reveal (CARD_DETAILS_UNAVAILABLE).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardError'
+
+  /cards/{id}/limits:
+    put:
+      tags: [Cards]
+      summary: Set daily/monthly spending limits (SCA-gated only when a limit is RAISED)
+      description: >-
+        The body is parsed and validated at the edge — both fields required, integral, non-negative
+        and daily <= monthly. The edge reads the card's current limits first: raising either one
+        widens the blast radius of a stolen session and requires a device-signed CARD_MANAGEMENT
+        approval (cardAction=LIMIT_INCREASE); leaving them or lowering them strictly reduces risk and
+        is allowed with no SCA at all. The X-SCA-Challenge-Id header is therefore optional — a missing
+        header on an increase is answered 403 SCA_REQUIRED (so the app can raise a challenge and
+        retry), never 400. Unresolvable current limits are treated as an increase (fail closed).
+      operationId: updateCardLimits
+      security:
+        - customerOidc: [cards:update]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - name: X-SCA-Challenge-Id
+          in: header
+          required: false
+          schema: {type: string, format: uuid}
+          description: Required only when either limit is higher than the card's current value.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardLimits'
+      responses:
+        '200': {description: Limits updated}
+        '400':
+          description: Missing, negative, non-integral, or daily > monthly (CARD_LIMITS_INVALID)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardError'
+        '403':
+          description: Card does not belong to caller, or an increase without a valid SCA challenge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardError'
+
+  /cards/{id}/controls:
+    put:
+      tags: [Cards]
+      summary: Set the four channel controls on one of the caller's own cards
+      description: >-
+        All four booleans are required and validated at the edge. Deliberately NOT SCA-gated: each
+        toggle is reversible at any time and can only narrow or restore what the card may do — no
+        money moves and no limit widens beyond what /limits already governs.
+      operationId: updateCardControls
+      security:
+        - customerOidc: [cards:update]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardControls'
+      responses:
+        '200': {description: Controls updated}
+        '400':
+          description: A toggle is missing or not a boolean (CARD_CONTROLS_INVALID)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardError'
+        '403': {description: Card does not belong to caller}
+
 components:
   securitySchemes:
     customerOidc:
@@ -1645,3 +1940,103 @@ components:
         currencyCode:
           type: string
           example: EUR
+
+    # --- Cards ---
+    # Mirrors openbank-card-issuance-service CardResponse (masked PAN only).
+    Card:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        partyId: {type: string, format: uuid}
+        accountId: {type: string, format: uuid}
+        productCode: {type: string, example: CURRENT_CZK}
+        cardType: {type: string, enum: [VIRTUAL, SINGLE_USE, PHYSICAL]}
+        network: {type: string, enum: [VISA, MASTERCARD]}
+        maskedPan: {type: string, example: '**** **** **** 4242'}
+        cardholderName: {type: string}
+        embossedName: {type: string}
+        expiryDate: {type: string, format: date}
+        status: {type: string, enum: [REQUESTED, ISSUED, ACTIVE, SUSPENDED, BLOCKED, CANCELLED, EXPIRED]}
+        dailyLimitMinorUnits: {type: integer, format: int64}
+        monthlyLimitMinorUnits: {type: integer, format: int64}
+        currency: {type: string, example: CZK}
+        activatedAt: {type: string, format: date-time, nullable: true}
+        blockedAt: {type: string, format: date-time, nullable: true}
+        blockedReason: {type: string, nullable: true}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        contactlessEnabled: {type: boolean}
+        onlineEnabled: {type: boolean}
+        atmEnabled: {type: boolean}
+        abroadEnabled: {type: boolean}
+
+    # The ONLY payload on which a full PAN/CVV crosses the edge (POST /cards/{id}/details).
+    # Returned no-store; never logged, never cached, never audited by value.
+    CardSecureDetails:
+      type: object
+      properties:
+        pan: {type: string, description: Full primary account number — treat as PCI cardholder data}
+        cvv: {type: string}
+        expiryDate: {type: string, example: 12/29}
+        cardholderName: {type: string}
+        network: {type: string, enum: [VISA, MASTERCARD]}
+
+    CardLimits:
+      type: object
+      required: [dailyLimitMinorUnits, monthlyLimitMinorUnits]
+      properties:
+        dailyLimitMinorUnits: {type: integer, format: int64, minimum: 0}
+        monthlyLimitMinorUnits: {type: integer, format: int64, minimum: 0}
+      description: Both required and non-negative; dailyLimitMinorUnits must not exceed monthlyLimitMinorUnits.
+
+    CardControls:
+      type: object
+      required: [contactlessEnabled, onlineEnabled, atmEnabled, abroadEnabled]
+      properties:
+        contactlessEnabled: {type: boolean}
+        onlineEnabled: {type: boolean}
+        atmEnabled: {type: boolean}
+        abroadEnabled: {type: boolean}
+
+    # Mirrors card-issuance GET /api/v1/cards/party/{partyId}/entitlements.
+    CardEntitlements:
+      type: object
+      properties:
+        productCode: {type: string}
+        maxCards: {type: integer}
+        issued: {type: integer}
+        remaining: {type: integer}
+        virtualCardAllowed: {type: boolean}
+        singleUseAllowed: {type: boolean}
+        networks:
+          type: array
+          items: {type: string}
+        tiers:
+          type: array
+          items: {type: string}
+        monthlyFeePerCard: {type: string, nullable: true}
+        enabled: {type: boolean}
+        source:
+          type: string
+          enum: [CATALOG, FALLBACK]
+          description: CATALOG when product-catalog answered; FALLBACK when the service used its defaults.
+
+    CardError:
+      type: object
+      description: Machine-readable edge error. Clients branch on `code`, never on `error` prose.
+      properties:
+        error: {type: string}
+        code:
+          type: string
+          enum:
+            - CARD_REQUEST_MALFORMED
+            - CARD_ACCOUNT_INVALID
+            - CARD_TYPE_INVALID
+            - CARD_LIMITS_INVALID
+            - CARD_CONTROLS_INVALID
+            - CARD_DETAILS_UNAVAILABLE
+            - CARD_QUOTA_EXCEEDED
+            - CARD_PRODUCT_DISABLED
+            - CARD_NETWORK_NOT_ALLOWED
+            - SCA_REQUIRED
+            - SCA_REJECTED

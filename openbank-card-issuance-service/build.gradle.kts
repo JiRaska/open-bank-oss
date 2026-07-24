@@ -21,6 +21,11 @@ dependencies {
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.oidc)
+    // product-catalog entitlement lookup (#4): RestClient + the openbank-services M2M bearer,
+    // same shape as account-service's / document-service's ProductCatalogClient.
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
+    implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.redis.client)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)

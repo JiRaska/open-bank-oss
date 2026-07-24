@@ -2503,7 +2503,10 @@ class CustomerEdgeResource(
         return Response.ok(mapped).type(MediaType.APPLICATION_JSON).build()
     }
 
-    // --- Cards (list + freeze/unfreeze; PCI — no PAN/CVV ever crosses the edge) ---
+    // --- Cards (lifecycle: list, freeze/unfreeze, block, cancel, limits, controls, issue, reveal) ---
+    // PCI: every card READ is masked-PAN only, with exactly one exception — POST /cards/{id}/details,
+    // the SCA-gated reveal for a virtual/single-use card. That one response carries PAN/CVV, is never
+    // logged, never cached (no-store) and never audited by value.
 
     /** List the caller's cards (masked PAN only). Party-scoped by the JWT party. */
     @GET
@@ -2570,82 +2573,376 @@ class CustomerEdgeResource(
         )
     }
 
-    /** Set daily/monthly spending limits on one of the caller's OWN cards. Body:
-     *  {"dailyLimitMinorUnits":N,"monthlyLimitMinorUnits":M}. */
+    /**
+     * Permanently CANCEL one of the caller's OWN cards. Terminal in card-issuance (a cancelled card
+     * can never be resumed), so unlike freeze this is SCA-gated: an attacker with a stolen session
+     * must still produce a device-signed, card-bound approval before they can destroy a card.
+     */
+    @POST
+    @Path("/cards/{id}/cancel")
+    @Authorize(action = "customer.cards.update", resource = "#id")
+    @Blocking
+    fun cancelCard(@PathParam("id") id: UUID, @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?): Response {
+        val customer = customer()
+        if (!ownsCard(id, customer.partyId)) return forbidden("Card does not belong to caller")
+        scaCardGate(scaChallengeId, customer, id.toString(), "CANCEL", "cards.cancel")?.let { return it }
+        val resp = upstream.post(
+            "$cardIssuanceServiceUrl/api/v1/cards/$id/cancel",
+            customer.partyId.toString(),
+            """{"reason":"CUSTOMER_REQUEST"}""",
+            null,
+            mapOf("X-Operator-Id" to "customer:${customer.partyId}"),
+        )
+        auditCard(resp, customer, "cards.cancel", "CUSTOMER_CARD_CANCELLED", id.toString())
+        return resp
+    }
+
+    /**
+     * Reveal the full card details (PAN / CVV / expiry) of one of the caller's OWN cards — the
+     * SCA-gated "show my card number" action for a VIRTUAL or SINGLE_USE card, which has no plastic
+     * to read the number off. POST (not GET) because it is a state-changing, single-use SCA spend and
+     * must never land in a URL, a browser history or an access log.
+     *
+     * PCI: the response is passed straight through and NEVER logged, cached or audited by value —
+     * the audit record carries who/which card/when only. `Cache-Control: no-store` + `Pragma:
+     * no-cache` stop any intermediary or the client HTTP stack retaining it. A physical, blocked,
+     * cancelled or expired card is refused upstream with 403 and surfaces here as a machine-readable
+     * CARD_DETAILS_UNAVAILABLE, not a generic 500.
+     */
+    @POST
+    @Path("/cards/{id}/details")
+    @Authorize(action = "customer.cards.details.read", resource = "#id")
+    @Blocking
+    fun revealCardDetails(
+        @PathParam("id") id: UUID,
+        @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?,
+    ): Response {
+        val customer = customer()
+        if (!ownsCard(id, customer.partyId)) return forbidden("Card does not belong to caller")
+        scaCardGate(scaChallengeId, customer, id.toString(), "REVEAL_DETAILS", "cards.details")?.let { return it }
+        val resp = upstream.get(
+            "$cardIssuanceServiceUrl/api/v1/cards/$id/secure-details",
+            customer.partyId.toString(),
+        )
+        // Audit BEFORE returning, and by reference only (party + card + outcome) — the body holds
+        // PAN/CVV and must not reach the audit topic any more than it may reach a log line.
+        auditCard(resp, customer, "cards.details", "CUSTOMER_CARD_DETAILS_REVEALED", id.toString())
+        if (resp.status == FORBIDDEN_STATUS) {
+            return cardError(
+                FORBIDDEN_STATUS,
+                "Card details are not available for this card",
+                "CARD_DETAILS_UNAVAILABLE",
+            )
+        }
+        if (resp.statusInfo.family != Response.Status.Family.SUCCESSFUL) return resp
+        return Response.status(resp.status)
+            .entity(resp.entity)
+            .type(MediaType.APPLICATION_JSON)
+            .header("Cache-Control", "no-store")
+            .header("Pragma", "no-cache")
+            .build()
+    }
+
+    /**
+     * What the caller is still entitled to issue — quota, remaining cards, allowed types/networks and
+     * the per-card monthly fee, as product-catalog defines it for the account's product. Drives the
+     * app's "issue a card" screen so it can grey out an exhausted quota rather than discovering it as
+     * a 409 on submit. Read-only, no SCA. `accountId` is optional (and ownership-checked when given);
+     * without it the upstream answers with its own product-less default.
+     */
+    @GET
+    @Path("/cards/entitlements")
+    @Authorize(action = "customer.cards.read")
+    @Blocking
+    fun cardEntitlements(@QueryParam("accountId") accountId: String?): Response {
+        val customer = customer()
+        val query = if (accountId.isNullOrBlank()) {
+            ""
+        } else {
+            val acct = runCatching { UUID.fromString(accountId) }.getOrNull()
+                ?: return cardError(BAD_REQUEST_STATUS, "Malformed accountId", "CARD_ACCOUNT_INVALID")
+            if (!ownsAccount(acct, customer.partyId)) return forbidden("Account does not belong to caller")
+            resolveCardProductCode(acct, customer.partyId)
+                ?.let { "?productCode=" + java.net.URLEncoder.encode(it, Charsets.UTF_8) }
+                ?: ""
+        }
+        return upstream.get(
+            "$cardIssuanceServiceUrl/api/v1/cards/party/${customer.partyId}/entitlements$query",
+            customer.partyId.toString(),
+        )
+    }
+
+    /**
+     * Set daily/monthly spending limits on one of the caller's OWN cards. Body:
+     * {"dailyLimitMinorUnits":N,"monthlyLimitMinorUnits":M} — parsed and validated HERE (both
+     * required, non-negative, daily <= monthly) rather than forwarded raw, so a malformed body is a
+     * clear 400 at the edge instead of an upstream 500.
+     *
+     * SCA is CONDITIONAL and risk-proportionate (PSD2 RTS Art. 4 — friction where risk is): raising
+     * either limit widens the blast radius of a stolen session and needs a device-signed approval;
+     * leaving them or LOWERING them strictly reduces risk, so it must never be gated behind SCA. The
+     * X-SCA-Challenge-Id header is therefore optional on this route — a missing header on an increase
+     * is the standard 403 SCA_REQUIRED (the app then raises a challenge and retries), never a 400.
+     */
     @PUT
     @Path("/cards/{id}/limits")
     @Authorize(action = "customer.cards.update", resource = "#id")
     @Blocking
-    fun updateCardLimits(@PathParam("id") id: UUID, body: String): Response {
+    fun updateCardLimits(
+        @PathParam("id") id: UUID,
+        body: String,
+        @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?,
+    ): Response {
         val customer = customer()
-        if (!ownsCard(id, customer.partyId)) return forbidden("Card does not belong to caller")
-        return upstream.put(
+        val requested = parseLimits(objectMapper, body)
+            ?: return cardError(
+                BAD_REQUEST_STATUS,
+                "dailyLimitMinorUnits and monthlyLimitMinorUnits are required, non-negative, and daily <= monthly",
+                "CARD_LIMITS_INVALID",
+            )
+        val cardJson = fetchCard(id, customer.partyId) ?: return forbidden("Card does not belong to caller")
+        if (extractOwnerPartyId(cardJson) != customer.partyId.toString()) {
+            return forbidden("Card does not belong to caller")
+        }
+        val current = parseLimits(objectMapper, cardJson)
+        if (current == null || requested.first > current.first || requested.second > current.second) {
+            // Unknown current limits count as an increase — fail closed, never silently un-gate.
+            scaCardGate(scaChallengeId, customer, id.toString(), "LIMIT_INCREASE", "cards.limits")?.let { return it }
+        }
+        val payload = objectMapper.createObjectNode().apply {
+            put("dailyLimitMinorUnits", requested.first)
+            put("monthlyLimitMinorUnits", requested.second)
+        }
+        val resp = upstream.put(
             "$cardIssuanceServiceUrl/api/v1/cards/$id/limits",
             customer.partyId.toString(),
-            body,
+            payload.toString(),
             null,
             mapOf("X-Operator-Id" to "customer:${customer.partyId}"),
         )
+        auditCard(resp, customer, "cards.limits", "CUSTOMER_CARD_LIMITS_UPDATED", id.toString())
+        return resp
     }
 
-    /** Set channel controls on one of the caller's OWN cards. Body:
-     *  {"contactlessEnabled":bool,"onlineEnabled":bool,"atmEnabled":bool,"abroadEnabled":bool}. */
+    /**
+     * Set channel controls on one of the caller's OWN cards. Body:
+     * {"contactlessEnabled":bool,"onlineEnabled":bool,"atmEnabled":bool,"abroadEnabled":bool} —
+     * all four required, parsed and validated here.
+     *
+     * Deliberately NOT SCA-gated: every toggle is reversible by the customer at any time and can only
+     * ever narrow or restore what the card may do — no money moves and no limit widens beyond what
+     * /limits already governs, so the friction would buy nothing.
+     */
     @PUT
     @Path("/cards/{id}/controls")
     @Authorize(action = "customer.cards.update", resource = "#id")
     @Blocking
     fun updateCardControls(@PathParam("id") id: UUID, body: String): Response {
         val customer = customer()
+        val controls = parseControls(objectMapper, body)
+            ?: return cardError(
+                BAD_REQUEST_STATUS,
+                "contactlessEnabled, onlineEnabled, atmEnabled and abroadEnabled (booleans) are all required",
+                "CARD_CONTROLS_INVALID",
+            )
         if (!ownsCard(id, customer.partyId)) return forbidden("Card does not belong to caller")
-        return upstream.put(
+        val resp = upstream.put(
             "$cardIssuanceServiceUrl/api/v1/cards/$id/controls",
             customer.partyId.toString(),
-            body,
+            controls.toString(),
             null,
             mapOf("X-Operator-Id" to "customer:${customer.partyId}"),
         )
+        auditCard(resp, customer, "cards.controls", "CUSTOMER_CARD_CONTROLS_UPDATED", id.toString())
+        return resp
+    }
+
+    // The card as card-issuance sees it (JSON on 200, null otherwise). One read serves both the
+    // ownership oracle and the current-limits comparison, so a limits update costs one upstream GET.
+    private fun fetchCard(id: UUID, partyId: UUID): String? {
+        val resp = upstream.get("$cardIssuanceServiceUrl/api/v1/cards/$id", partyId.toString())
+        if (resp.status != 200) return null
+        return (resp.entity as? String)?.takeIf { it.isNotBlank() }
     }
 
     private fun ownsCard(id: UUID, partyId: UUID): Boolean {
-        val resp = upstream.get("$cardIssuanceServiceUrl/api/v1/cards/$id", partyId.toString())
-        if (resp.status != 200) return false
-        return extractOwnerPartyId((resp.entity as? String).orEmpty()) == partyId.toString()
+        val cardJson = fetchCard(id, partyId) ?: return false
+        return extractOwnerPartyId(cardJson) == partyId.toString()
     }
 
     /**
-     * Issue a VIRTUAL card on one of the caller's OWN accounts (self-service, #4b). The app sends
-     * only { "accountId": "..." }; the edge forces the partyId from the JWT, verifies the account
-     * belongs to the caller, and resolves the cardholder name from party-service — the customer can
-     * never mint a card on someone else's account or under someone else's name. Idempotent per
-     * (party, account): a re-tap replays the same card rather than issuing duplicates.
+     * Issue a VIRTUAL or SINGLE_USE card on one of the caller's OWN accounts (self-service, #4b). The
+     * app sends { "accountId": "...", "cardType": "VIRTUAL"|"SINGLE_USE" }; the edge forces the
+     * partyId from the JWT, verifies the account belongs to the caller, and resolves the cardholder
+     * name from party-service — the customer can never mint a card on someone else's account or under
+     * someone else's name. SCA-gated: minting a card is a new payment instrument, so it needs the same
+     * device-signed approval a payment does (bound to the ACCOUNT, since no card id exists yet).
      */
     @POST
     @Path("/cards")
     @Authorize(action = "customer.cards.create", resource = "")
     @Blocking
-    fun issueVirtualCard(body: String): Response {
+    fun issueCard(
+        body: String,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?,
+    ): Response {
         val customer = customer()
-        val accountId = runCatching { objectMapper.readTree(body).get("accountId")?.asText() }.getOrNull()
-            ?: return badRequest("Missing accountId")
-        val acct = runCatching { UUID.fromString(accountId) }.getOrNull() ?: return badRequest("Invalid accountId")
+        val parsed = runCatching { objectMapper.readTree(body) }.getOrNull()
+            ?: return cardError(BAD_REQUEST_STATUS, "Malformed request body", "CARD_REQUEST_MALFORMED")
+        val acct = parsed.get("accountId")?.takeIf { it.isTextual }?.asText()
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return cardError(BAD_REQUEST_STATUS, "Missing or malformed accountId", "CARD_ACCOUNT_INVALID")
+        val cardType = parsed.get("cardType")?.takeIf { it.isTextual }?.asText()?.trim()?.uppercase()
+            ?: CARD_TYPE_VIRTUAL
+        if (cardType !in SELF_SERVICE_CARD_TYPES) {
+            return cardError(
+                BAD_REQUEST_STATUS,
+                "cardType must be one of ${SELF_SERVICE_CARD_TYPES.joinToString(", ")}",
+                "CARD_TYPE_INVALID",
+            )
+        }
         if (!ownsAccount(acct, customer.partyId)) return forbidden("Account does not belong to caller")
+        scaCardGate(scaChallengeId, customer, acct.toString(), "ISSUE", "cards.issue")?.let { return it }
+        // The product the ACCOUNT actually runs on is what product-catalog keys card entitlements by;
+        // the historical hardcoded "VIRTUAL_DEBIT" matches no catalogue product, so every upstream
+        // entitlement lookup fell through to its fallback. Resolve for real, hardcode only as a
+        // last resort (and say so in the log, so the fallback is never silent).
+        val productCode = resolveCardProductCode(acct, customer.partyId) ?: run {
+            Log.warn(
+                "card issue: cannot resolve product code for account $acct " +
+                    "— falling back to $FALLBACK_CARD_PRODUCT_CODE (entitlements will use the upstream default)",
+            )
+            FALLBACK_CARD_PRODUCT_CODE
+        }
         val name = fetchPartyLegalName(customer.partyId) ?: "OpenBank Customer"
         val req = objectMapper.createObjectNode()
         req.put("partyId", customer.partyId.toString())
         req.put("accountId", acct.toString())
-        req.put("productCode", "VIRTUAL_DEBIT")
-        req.put("cardType", "VIRTUAL")
+        req.put("productCode", productCode)
+        req.put("cardType", cardType)
         req.put("network", "VISA")
         req.put("cardholderName", name)
         req.put("embossedName", name.uppercase())
         req.put("currency", "CZK")
-        return upstream.post(
+        // Idempotency is per card TYPE, not per request, on purpose:
+        //  - VIRTUAL: one durable virtual card per (party, account), so a stable key makes a re-tap
+        //    (or a retry after a dropped response) replay the same card instead of minting duplicates.
+        //  - SINGLE_USE: the whole point is a fresh, burn-after-use card per request — a stable key
+        //    would make the SECOND one impossible (it would replay the first forever). Honour a
+        //    client-supplied Idempotency-Key so a genuine network retry still de-duplicates, and
+        //    generate one otherwise.
+        val key = if (cardType == CARD_TYPE_SINGLE_USE) {
+            idempotencyKey?.takeIf { it.isNotBlank() } ?: Ids.randomId().toString()
+        } else {
+            "vcard-${customer.partyId}-$acct"
+        }
+        val resp = upstream.post(
             "$cardIssuanceServiceUrl/api/v1/cards",
             customer.partyId.toString(),
             req.toString(),
-            "vcard-${customer.partyId}-$acct",
+            key,
         )
+        auditCard(resp, customer, "cards.issue", "CUSTOMER_CARD_ISSUED", acct.toString(), cardType)
+        return resp
     }
+
+    /**
+     * The product code the account actually runs on: account-service carries a productId (UUID),
+     * product-catalog turns that into the `code` card entitlements are keyed by. Null on any miss
+     * (catalog down, product gone) so the caller can decide its own fallback.
+     */
+    private fun resolveCardProductCode(accountId: UUID, partyId: UUID): String? {
+        val accountJson = fetchAccount(accountId, partyId) ?: return null
+        val productId = extractTextField(objectMapper, accountJson, "productId") ?: return null
+        val resp = upstream.get("$productCatalogUrl/api/v1/products/$productId", partyId.toString())
+        if (resp.status != 200) return null
+        return extractTextField(objectMapper, (resp.entity as? String).orEmpty(), "code")?.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * The card-management SCA gate (ADR-0021, purpose CARD_MANAGEMENT): the same atomic
+     * compare-and-consume the payment gate uses, but the dynamic-linking data binds the challenge to
+     * THIS card and THIS action instead of an amount/creditor — so an approval signed to reveal one
+     * card's PAN can never be spent to cancel another, or to raise a limit. Returns null when the
+     * gate is open; an audited 403 otherwise.
+     */
+    private fun scaCardGate(
+        scaChallengeId: String?,
+        customer: CustomerIdentity,
+        cardId: String,
+        cardAction: String,
+        operation: String,
+    ): Response? {
+        val challengeId = scaChallengeId?.let { runCatching { UUID.fromString(it.trim()) }.getOrNull() }
+        if (challengeId == null) {
+            audit.emit(
+                eventType = "CUSTOMER_CARD_ACTION_REFUSED",
+                partyId = customer.partyId.toString(),
+                operation = operation,
+                result = "DENIED",
+                resourceId = cardId,
+                details = mapOf("reason" to "SCA_REQUIRED", "cardAction" to cardAction),
+            )
+            return Response.status(Response.Status.FORBIDDEN)
+                .entity("""{"error":"Strong customer authentication required","code":"SCA_REQUIRED"}""")
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+        }
+        val consumeBody = objectMapper.createObjectNode().apply {
+            put("partyId", customer.partyId.toString())
+            put("cardId", cardId)
+            put("cardAction", cardAction)
+        }
+        val consume = upstream.post(
+            "$scaServiceUrl/api/v1/sca/challenges/$challengeId/consume",
+            customer.partyId.toString(),
+            objectMapper.writeValueAsString(consumeBody),
+        )
+        if (consume.statusInfo.family != Response.Status.Family.SUCCESSFUL) {
+            audit.emit(
+                eventType = "CUSTOMER_CARD_ACTION_REFUSED",
+                partyId = customer.partyId.toString(),
+                operation = operation,
+                result = "DENIED",
+                resourceId = cardId,
+                details = mapOf(
+                    "reason" to "SCA_REJECTED",
+                    "cardAction" to cardAction,
+                    "scaChallengeId" to challengeId.toString(),
+                    "scaError" to (consume.entity as? String)?.take(AUDIT_DETAIL_MAX_CHARS),
+                ),
+            )
+            return Response.status(Response.Status.FORBIDDEN)
+                .entity("""{"error":"Strong customer authentication failed","code":"SCA_REJECTED"}""")
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+        }
+        return null
+    }
+
+    // Card lifecycle audit: who / which card / what outcome. Never carries a response body — a card
+    // response holds a masked PAN at best and the full PAN at worst (secure-details).
+    private fun auditCard(
+        resp: Response,
+        customer: CustomerIdentity,
+        operation: String,
+        eventType: String,
+        resourceId: String,
+        cardType: String? = null,
+    ) = audit.emit(
+        eventType = eventType,
+        partyId = customer.partyId.toString(),
+        operation = operation,
+        result = if (resp.statusInfo.family == Response.Status.Family.SUCCESSFUL) "SUCCESS" else "FAILURE",
+        resourceId = resourceId,
+        details = mapOf("status" to resp.status.toString(), "cardType" to cardType),
+    )
+
+    private fun cardError(status: Int, message: String, code: String): Response = Response.status(status)
+        .entity("""{"error":"$message","code":"$code"}""")
+        .type(MediaType.APPLICATION_JSON)
+        .build()
 
     // --- Nearby payments (payment sessions, ADR-0087) ---
 
@@ -2965,6 +3262,58 @@ class CustomerEdgeResource(
         // Extracts the owning party id from an account-service account JSON payload, used for the
         // edge-side ownership check on transaction reads.
         private val OWNER_PARTY_REGEX = Regex("\"partyId\"\\s*:\\s*\"([0-9a-fA-F-]+)\"")
+
+        // --- Cards ---
+
+        private const val BAD_REQUEST_STATUS = 400
+        private const val FORBIDDEN_STATUS = 403
+
+        internal const val CARD_TYPE_VIRTUAL = "VIRTUAL"
+        internal const val CARD_TYPE_SINGLE_USE = "SINGLE_USE"
+
+        /** The only card types a customer may mint themselves — plastic stays an operator flow. */
+        internal val SELF_SERVICE_CARD_TYPES = setOf(CARD_TYPE_VIRTUAL, CARD_TYPE_SINGLE_USE)
+
+        /**
+         * Last-resort product code when the account's real one cannot be resolved. Historically this
+         * was hardcoded for EVERY issue; it matches no product-catalog product, so upstream
+         * entitlement lookups silently fall back. Kept only so an unavailable catalogue degrades to
+         * the previous behaviour instead of failing the issue outright.
+         */
+        internal const val FALLBACK_CARD_PRODUCT_CODE = "VIRTUAL_DEBIT"
+
+        /**
+         * Parse + validate a card-limits document: both fields required, integral, non-negative, and
+         * daily <= monthly. Returns (daily, monthly) or null when any of that fails. Also used to read
+         * the card's CURRENT limits out of a card-issuance card JSON (same field names).
+         * Package-visible for unit tests.
+         */
+        internal fun parseLimits(mapper: ObjectMapper, json: String): Pair<Long, Long>? {
+            val node = runCatching { mapper.readTree(json) }.getOrNull() ?: return null
+            val daily = node.get("dailyLimitMinorUnits")?.takeIf { it.isIntegralNumber }?.asLong() ?: return null
+            val monthly = node.get("monthlyLimitMinorUnits")?.takeIf { it.isIntegralNumber }?.asLong() ?: return null
+            if (daily < 0 || monthly < 0) return null
+            if (daily > monthly) return null
+            return daily to monthly
+        }
+
+        /**
+         * Parse + validate a card-controls document: all four channel toggles required and boolean.
+         * Returns the normalised body to forward, or null when the body is malformed.
+         * Package-visible for unit tests.
+         */
+        internal fun parseControls(mapper: ObjectMapper, json: String): ObjectNode? {
+            val node = runCatching { mapper.readTree(json) }.getOrNull() ?: return null
+            val out = mapper.createObjectNode()
+            for (field in CARD_CONTROL_FIELDS) {
+                val value = node.get(field)?.takeIf { it.isBoolean } ?: return null
+                out.put(field, value.asBoolean())
+            }
+            return out
+        }
+
+        private val CARD_CONTROL_FIELDS =
+            listOf("contactlessEnabled", "onlineEnabled", "atmEnabled", "abroadEnabled")
 
         /**
          * Pull the `partyId` from an account-service account JSON (a trusted upstream response with a

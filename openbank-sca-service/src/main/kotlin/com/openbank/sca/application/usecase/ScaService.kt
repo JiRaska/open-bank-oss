@@ -353,16 +353,19 @@ class ScaService(
         }
         if (challenge.status != ScaStatus.COMPLETED) throw ScaChallengeNotApprovedException(command.challengeId)
         val linking = challenge.dynamicLinkingData
-        // A challenge that signed nothing cannot authorise a money movement OR a document
-        // signature; one that signed amount+payee (or a document hash+ceremony) must match the
-        // operation exactly (RTS Art. 5 dynamic linking, extended to documents by ADR-0169 D2).
+        // A challenge that signed nothing cannot authorise a money movement, a document
+        // signature OR a card operation; one that signed amount+payee (or a document
+        // hash+ceremony, or a card+action) must match the operation exactly (RTS Art. 5 dynamic
+        // linking, extended to documents by ADR-0169 D2 and to card management here).
         val authorised = linking?.authorises(
             command.amount,
             command.currency,
             command.creditor,
             command.documentSha256,
             command.ceremonyId,
-        ) ?: (command.amount == null && command.documentSha256 == null)
+            command.cardId,
+            command.cardAction,
+        ) ?: (command.amount == null && command.documentSha256 == null && command.cardId == null)
         if (!authorised) throw ScaDynamicLinkingMismatchException(command.challengeId)
         if (!repository.markConsumed(command.challengeId)) {
             throw ScaChallengeAlreadyConsumedException(command.challengeId)
@@ -384,11 +387,13 @@ class ScaService(
             "Potvrďte přístup k citlivým údajům"
         ScaPurpose.DOCUMENT_SIGNING ->
             "Potvrďte podpis dokumentu"
+        ScaPurpose.CARD_MANAGEMENT ->
+            "Potvrďte operaci s platební kartou"
     }
 
     private fun buildIdempotencyKey(command: InitiateScaCommand, method: ScaMethod): String {
         val dl = command.dynamicLinkingData
-        return listOf(
+        val base = listOf(
             command.partyId,
             command.purpose,
             method,
@@ -398,7 +403,18 @@ class ScaService(
             dl?.creditorName,
             dl?.reference,
             command.redirectUrl,
-        ).joinToString(":") { it?.toString() ?: "-" }
+        )
+        // A CARD_MANAGEMENT challenge carries none of the payment fields above, so without the
+        // card binding every card challenge for a party would collapse to the SAME key: raising
+        // card A's limit would replay the still-PENDING challenge signed for card B's PAN reveal.
+        // Appended only when present, so payment/document/login keys keep the exact string they
+        // already hash to (a key change would silently drop dedupe across a rolling deploy).
+        val cardSegments = if (dl?.cardId != null || dl?.cardAction != null) {
+            listOf(dl.cardId, dl.cardAction)
+        } else {
+            emptyList()
+        }
+        return (base + cardSegments).joinToString(":") { it?.toString() ?: "-" }
     }
 }
 

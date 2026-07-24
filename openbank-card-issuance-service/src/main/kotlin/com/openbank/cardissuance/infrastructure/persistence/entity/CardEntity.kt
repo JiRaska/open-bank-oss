@@ -90,4 +90,12 @@ class CardEntity {
 
     @Column(name = "updated_at", nullable = false)
     lateinit var updatedAt: Instant
+
+    // Synthetic PAN vault: base64(IV ‖ AES-256-GCM ciphertext ‖ tag). Nullable — cards issued
+    // before V6 have no stored credential at all.
+    @Column(name = "pan_encrypted")
+    var panEncrypted: String? = null
+
+    @Column(name = "cvv_encrypted")
+    var cvvEncrypted: String? = null
 }

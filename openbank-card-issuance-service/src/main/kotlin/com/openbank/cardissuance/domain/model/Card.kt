@@ -9,7 +9,23 @@ import java.time.LocalDate
 import java.util.UUID
 
 enum class CardStatus { PENDING, ACTIVE, SUSPENDED, BLOCKED, EXPIRED, CANCELLED }
-enum class CardType { DEBIT, CREDIT, PREPAID, VIRTUAL }
+
+/**
+ * Form factor of a card.
+ *
+ * [VIRTUAL] and [SINGLE_USE] have no plastic: their PAN only ever exists in this service, so they
+ * are the only two types whose synthetic PAN/CVV may be read back through the secure-details
+ * endpoint (a physical card's PAN is printed on the plastic — re-serving it here would turn this
+ * service into a PAN oracle for a card the caller may not be holding).
+ *
+ * [SINGLE_USE] is, for now, a *labelling* distinction only: it marks a virtual card intended for
+ * one merchant / one purchase. **This service does NOT auto-cancel it after an authorisation** —
+ * there is no authorisation flow here at all (card-issuance owns the lifecycle, not the rails), so
+ * nothing in this codebase observes a SINGLE_USE card being spent. Enforcing "one use" needs an
+ * authorisation feed (scheme/processor) that does not exist yet; until then a SINGLE_USE card must
+ * be cancelled explicitly like any other. The gap is stated here rather than implied by the name.
+ */
+enum class CardType { DEBIT, CREDIT, PREPAID, VIRTUAL, SINGLE_USE }
 enum class CardNetwork { VISA, MASTERCARD, AMEX, UNIONPAY }
 
 data class Card(
@@ -39,7 +55,14 @@ data class Card(
     val onlineEnabled: Boolean = true,
     val atmEnabled: Boolean = true,
     val abroadEnabled: Boolean = true,
+    // Synthetic PAN vault (#4): AES-256-GCM ciphertext, never the clear value. Nullable because
+    // cards issued before the pan_encrypted/cvv_encrypted migration have no stored PAN at all.
+    val panEncrypted: String? = null,
+    val cvvEncrypted: String? = null,
 ) {
+    /** True when this card's PAN only ever existed digitally — see [CardType]. */
+    val isVirtualForm: Boolean get() = cardType in VIRTUAL_FORM_TYPES
+
     fun activate(now: Instant = Instant.EPOCH) = also {
         require(status == CardStatus.PENDING) { "Only PENDING cards can be activated, current: $status" }
     }.copy(status = CardStatus.ACTIVE, activatedAt = now, updatedAt = now)
@@ -56,6 +79,22 @@ data class Card(
     fun resume(now: Instant = Instant.EPOCH) = also {
         require(status == CardStatus.SUSPENDED) { "Only SUSPENDED cards can be resumed" }
     }.copy(status = CardStatus.ACTIVE, updatedAt = now)
+
+    /**
+     * Close the card for good. Allowed from every non-terminal status **including BLOCKED** — a
+     * customer who reported a card lost (→ BLOCKED) routinely then closes it — and CANCELLED is
+     * itself terminal: no transition, limit change or control change may follow it (the other
+     * `require` guards already exclude CANCELLED, since none of them lists it as a legal source).
+     * EXPIRED is likewise terminal: an expired card is already dead, cancelling it is a no-op the
+     * caller should not be silently granted.
+     *
+     * [reason] is carried on the emitted `CardStatusChanged` event; it also overwrites
+     * [blockedReason], the aggregate's single "why is this card not usable" note. Cancelling a
+     * BLOCKED card with no reason therefore preserves the original block reason.
+     */
+    fun cancel(reason: String?, now: Instant = Instant.EPOCH) = also {
+        require(status in CANCELLABLE_STATUSES) { "Cannot cancel card in status $status" }
+    }.copy(status = CardStatus.CANCELLED, blockedReason = reason ?: blockedReason, updatedAt = now)
 
     /**
      * Customer-set spending limits. Only a live card may be re-limited (a BLOCKED/CANCELLED/EXPIRED
@@ -90,4 +129,20 @@ data class Card(
         abroadEnabled = abroad,
         updatedAt = now,
     )
+
+    companion object {
+        /** Statuses a card may be cancelled from. CANCELLED and EXPIRED are terminal. */
+        val CANCELLABLE_STATUSES = setOf(
+            CardStatus.PENDING,
+            CardStatus.ACTIVE,
+            CardStatus.SUSPENDED,
+            CardStatus.BLOCKED,
+        )
+
+        /** Statuses that consume a product's card quota — a dead card must not hold a slot. */
+        val LIVE_STATUSES = setOf(CardStatus.PENDING, CardStatus.ACTIVE, CardStatus.SUSPENDED)
+
+        /** Card types with no plastic, i.e. the only ones whose PAN may be re-served digitally. */
+        val VIRTUAL_FORM_TYPES = setOf(CardType.VIRTUAL, CardType.SINGLE_USE)
+    }
 }

@@ -172,6 +172,10 @@ data class ConsumeScaRequest(
     val documentSha256: String? = null,
     /** The signature ceremony this consume is scoped to, for a DOCUMENT_SIGNING challenge. */
     val ceremonyId: String? = null,
+    /** The card this consume is scoped to, for a CARD_MANAGEMENT challenge. */
+    val cardId: String? = null,
+    /** The card operation being executed (`LIMIT_INCREASE`, `REVEAL_DETAILS`, ...), for a CARD_MANAGEMENT challenge. */
+    val cardAction: String? = null,
 )
 
 @Path("/api/v1/sca")
@@ -345,6 +349,12 @@ class ScaResource(
      * single-use per RTS Art. 5). Called by the customer edge — an M2M, operator-realm
      * principal — immediately BEFORE forwarding a payment to the money path, so a payment can
      * only ever execute behind a device-signed, amount+payee-bound, unconsumed approval.
+     *
+     * The same endpoint gates document signing (`documentSha256`+`ceremonyId`) and card
+     * management (`cardId`+`cardAction`): the caller states the operation it is about to execute
+     * in whichever shape applies, and EVERY linking field is compared, so a challenge raised for
+     * one shape can never be spent on another (a payment challenge consumed with a `cardId`, or a
+     * card challenge consumed with an `amount`, both 409).
      */
     @POST
     @Path("/challenges/{id}/consume")
@@ -360,6 +370,8 @@ class ScaResource(
                 creditor = request.creditor,
                 documentSha256 = request.documentSha256,
                 ceremonyId = request.ceremonyId,
+                cardId = request.cardId,
+                cardAction = request.cardAction,
             ),
         )
         return ScaChallengeResponse.from(challenge)

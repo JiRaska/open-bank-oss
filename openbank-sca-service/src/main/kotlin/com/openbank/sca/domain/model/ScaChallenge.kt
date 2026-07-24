@@ -25,6 +25,13 @@ enum class ScaPurpose {
      * document, not a payment: [DynamicLinkingData.documentSha256]/[DynamicLinkingData.ceremonyId]
      * are populated instead of amount/currency/creditor. */
     DOCUMENT_SIGNING,
+
+    /** Step-up approval of a card lifecycle/management act — dynamic-linked to a specific card
+     * and action ([DynamicLinkingData.cardId]/[DynamicLinkingData.cardAction]) rather than to a
+     * payment or a document. Raising a limit or revealing a virtual card's PAN/CVV is a
+     * sensitive, card-scoped operation: the device-signed evidence must say "I authorised THIS
+     * action on THIS card", never a bare "I completed some challenge". */
+    CARD_MANAGEMENT,
 }
 
 enum class ScaStatus {
@@ -75,6 +82,11 @@ data class ScaChallenge(
     )
 }
 
+// Three dynamic-linking shapes (payment / document / card) share one flat value object rather
+// than a sealed hierarchy, so the signed-payload builder and `authorises` stay a single
+// byte-exact code path. Splitting it would mean three payload builders — the one thing that must
+// never diverge.
+@Suppress("LongParameterList")
 data class DynamicLinkingData(
     val amount: String?,
     val currency: String?,
@@ -85,6 +97,16 @@ data class DynamicLinkingData(
     val documentSha256: String? = null,
     /** The signature ceremony (document-service) this challenge is scoped to, for [ScaPurpose.DOCUMENT_SIGNING]. */
     val ceremonyId: String? = null,
+    /** The card this challenge is bound to, for [ScaPurpose.CARD_MANAGEMENT]. */
+    val cardId: String? = null,
+    /**
+     * The card operation being authorised, for [ScaPurpose.CARD_MANAGEMENT] — the caller's
+     * vocabulary (`LIMIT_INCREASE`, `REVEAL_DETAILS`, `ISSUE`, `CANCEL`, ...). Deliberately a
+     * free-form String, exactly like [ceremonyId]: sca-service does not own the card domain's
+     * action vocabulary, and pinning it to a server-side enum would make every new card action a
+     * lock-step deployment of two services. It is opaque here and compared byte-for-byte.
+     */
+    val cardAction: String? = null,
 ) {
     /**
      * Does this signed linking data authorise exactly the operation the caller is about to
@@ -97,6 +119,12 @@ data class DynamicLinkingData(
      * challenge's evidence must be spent on the SAME document/ceremony it was raised for, never a
      * different one — this is what makes the biometric approval evidence "I authorised THIS
      * contract" rather than a bare "I completed some challenge" (ADR-0169 D2).
+     *
+     * [cardId]/[cardAction] follow the same rule for card management: the evidence must be spent
+     * on the SAME card and the SAME action it was raised for. Because every field is compared —
+     * not just the ones the caller happens to supply — this is also what keeps the three shapes
+     * from bleeding into one another: a payment challenge (card fields null) consumed with a
+     * cardId is refused, and a card challenge (amount null) can never authorise a money movement.
      */
     fun authorises(
         amount: String?,
@@ -104,18 +132,28 @@ data class DynamicLinkingData(
         creditor: String?,
         documentSha256: String? = null,
         ceremonyId: String? = null,
+        cardId: String? = null,
+        cardAction: String? = null,
     ): Boolean {
-        fun amountEq(a: String?, b: String?): Boolean = when {
-            a == null && b == null -> true
-            a == null || b == null -> false
-            else -> runCatching { java.math.BigDecimal(a).compareTo(java.math.BigDecimal(b)) == 0 }.getOrDefault(false)
-        }
-        fun norm(s: String?) = s?.replace(" ", "")?.uppercase()
         if (!amountEq(this.amount, amount)) return false
-        if (norm(this.currency) != norm(currency)) return false
-        if (this.creditorIban != null && norm(this.creditorIban) != norm(creditor)) return false
-        if (norm(this.documentSha256) != norm(documentSha256)) return false
+        if (!normEq(this.currency, currency)) return false
+        if (this.creditorIban != null && !normEq(this.creditorIban, creditor)) return false
+        if (!normEq(this.documentSha256, documentSha256)) return false
         if (this.ceremonyId != ceremonyId) return false
+        if (!normEq(this.cardId, cardId)) return false
+        if (this.cardAction != cardAction) return false
         return true
     }
 }
+
+/** Numeric amount equality: "250.0" == "250.00", and a malformed amount never authorises. */
+private fun amountEq(a: String?, b: String?): Boolean = when {
+    a == null && b == null -> true
+    a == null || b == null -> false
+    else -> runCatching { java.math.BigDecimal(a).compareTo(java.math.BigDecimal(b)) == 0 }.getOrDefault(false)
+}
+
+/** Equality ignoring spacing and case — how IBANs, currencies and hex ids are compared. */
+private fun normEq(a: String?, b: String?): Boolean = norm(a) == norm(b)
+
+private fun norm(s: String?) = s?.replace(" ", "")?.uppercase()

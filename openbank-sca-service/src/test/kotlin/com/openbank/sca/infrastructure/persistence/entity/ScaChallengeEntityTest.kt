@@ -45,6 +45,33 @@ class ScaChallengeEntityTest {
         assertThat(restored.dynamicLinkingData).isEqualTo(challenge.dynamicLinkingData)
     }
 
+    // Same reasoning for the card binding: a CARD_MANAGEMENT challenge reloaded from the DB
+    // without cardId/cardAction would have nothing left for consume() to match, and the mapper is
+    // the only place they can be dropped.
+    @Test
+    fun `card-management dynamic linking data survives a fromDomain-toDomain round trip`() {
+        val challenge = ScaChallenge(
+            partyId = UUID.randomUUID(),
+            purpose = ScaPurpose.CARD_MANAGEMENT,
+            method = ScaMethod.BIOMETRIC,
+            expiresAt = now.plusMinutes(5),
+            dynamicLinkingData = DynamicLinkingData(
+                amount = null,
+                currency = null,
+                creditorIban = null,
+                creditorName = null,
+                reference = null,
+                cardId = "card-1",
+                cardAction = "LIMIT_INCREASE",
+            ),
+            createdAt = now,
+        )
+
+        val restored = ScaChallengeEntity.fromDomain(challenge).toDomain()
+
+        assertThat(restored.dynamicLinkingData).isEqualTo(challenge.dynamicLinkingData)
+    }
+
     @Test
     fun `challenge with no dynamic linking data round-trips to null`() {
         val challenge = ScaChallenge(

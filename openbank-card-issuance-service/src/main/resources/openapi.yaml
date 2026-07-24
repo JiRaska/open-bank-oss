@@ -3,8 +3,9 @@
 openapi: 3.1.0
 info:
   title: Card Issuance Service API
-  version: 1.0.0
-  description: Debit/credit card lifecycle — issue, activate, block, suspend, resume.
+  version: 1.1.0
+  description: Debit/credit card lifecycle — issue, activate, block, suspend, resume, cancel;
+    synthetic PAN vault and product-catalog entitlements.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -39,6 +40,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CardResponse'
+        '409':
+          description: >
+            A product-catalog entitlement rule rejected the issue — CARD_QUOTA_EXCEEDED,
+            CARD_PRODUCT_DISABLED, CARD_VIRTUAL_NOT_ALLOWED or CARD_NETWORK_NOT_ALLOWED.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /api/v1/cards/{id}:
     get:
@@ -127,6 +136,108 @@ paths:
         '200':
           description: Card blocked
 
+  /api/v1/cards/{id}/cancel:
+    post:
+      tags: [Cards]
+      summary: Cancel a card permanently (terminal)
+      operationId: cancelCard
+      parameters:
+        - $ref: '#/components/parameters/cardId'
+        - name: X-Operator-Id
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardStatusRequest'
+      responses:
+        '200':
+          description: Card cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardResponse'
+        '422':
+          description: Card is already terminal (CANCELLED / EXPIRED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/cards/{id}/secure-details:
+    get:
+      tags: [Cards]
+      summary: Read a virtual card's synthetic PAN/CVV (VIRTUAL and SINGLE_USE only)
+      description: >
+        Returns the synthetic, Luhn-valid test PAN generated at issue time. Never a real
+        cardholder PAN. Served with Cache-Control:no-store; the access is audited.
+      operationId: getCardSecureDetails
+      parameters:
+        - $ref: '#/components/parameters/cardId'
+        - name: X-Operator-Id
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Synthetic card credential
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: ["no-store"]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardSecureDetailsResponse'
+        '403':
+          description: >
+            CARD_SECURE_DETAILS_NOT_SUPPORTED (card has plastic) or
+            CARD_SECURE_DETAILS_CARD_NOT_LIVE (BLOCKED / CANCELLED / EXPIRED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Card not found, or CARD_SECURE_DETAILS_NOT_STORED (issued before the vault)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/cards/party/{partyId}/entitlements:
+    get:
+      tags: [Cards]
+      summary: Card entitlements of a party on a product
+      description: >
+        Resolved from product-catalog's cardConfig. When source is FALLBACK the catalog did not
+        answer and maxCards/remaining are -1 ("no known cap"), not 0.
+      operationId: getCardEntitlements
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: productCode
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Entitlements
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardEntitlementsResponse'
+
   /api/v1/cards/{id}/suspend:
     post:
       tags: [Cards]
@@ -196,7 +307,7 @@ components:
           format: uuid
         cardType:
           type: string
-          enum: [DEBIT, CREDIT, PREPAID]
+          enum: [DEBIT, CREDIT, PREPAID, VIRTUAL, SINGLE_USE]
         cardNetwork:
           type: string
           enum: [VISA, MASTERCARD]
@@ -233,7 +344,7 @@ components:
           type: string
         status:
           type: string
-          enum: [ISSUED, ACTIVE, SUSPENDED, BLOCKED, EXPIRED]
+          enum: [PENDING, ACTIVE, SUSPENDED, BLOCKED, EXPIRED, CANCELLED]
         expiryDate:
           type: string
           example: "12/27"
@@ -241,10 +352,79 @@ components:
           type: string
           format: date-time
 
+    CardSecureDetailsResponse:
+      type: object
+      required: [pan, cvv, expiryDate, cardholderName, network]
+      properties:
+        pan:
+          type: string
+          # No `example:` on purpose. Any 16-digit Luhn-valid string here trips the repo's
+          # pan-card-number secret-scan rule, and that rule is right to fire on a public repo:
+          # a reader cannot tell a documentation sample from a leak, and neither can a scanner.
+          description: >-
+            Synthetic, Luhn-valid test PAN, 16 digits (15 for AMEX), no separators.
+            Never a real cardholder PAN — generated from a test BIN at issue time.
+          minLength: 15
+          maxLength: 19
+        cvv:
+          type: string
+          description: 3 digits (4 for AMEX).
+          minLength: 3
+          maxLength: 4
+        expiryDate:
+          type: string
+          format: date
+        cardholderName:
+          type: string
+        network:
+          type: string
+          enum: [VISA, MASTERCARD, AMEX, UNIONPAY]
+
+    CardEntitlementsResponse:
+      type: object
+      required: [productCode, maxCards, issued, remaining, enabled, source]
+      properties:
+        productCode:
+          type: string
+        maxCards:
+          type: integer
+          description: -1 when source is FALLBACK (no known cap)
+        issued:
+          type: integer
+          description: Cards in a live status (PENDING / ACTIVE / SUSPENDED)
+        remaining:
+          type: integer
+          description: -1 when source is FALLBACK
+        virtualCardAllowed:
+          type: boolean
+        singleUseAllowed:
+          type: boolean
+        networks:
+          type: array
+          items:
+            type: string
+            enum: [VISA, MASTERCARD, AMEX, UNIONPAY]
+        tiers:
+          type: array
+          items:
+            type: string
+        monthlyFeePerCard:
+          type: number
+        enabled:
+          type: boolean
+        source:
+          type: string
+          enum: [CATALOG, FALLBACK]
+
     ApiError:
       type: object
       properties:
         code:
           type: string
+          description: >
+            Machine-readable failure code. Card-specific values: CARD_QUOTA_EXCEEDED,
+            CARD_PRODUCT_DISABLED, CARD_NETWORK_NOT_ALLOWED, CARD_VIRTUAL_NOT_ALLOWED,
+            CARD_SECURE_DETAILS_NOT_SUPPORTED, CARD_SECURE_DETAILS_CARD_NOT_LIVE,
+            CARD_SECURE_DETAILS_NOT_STORED.
         message:
           type: string

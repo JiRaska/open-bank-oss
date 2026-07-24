@@ -47,6 +47,26 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     tls:
       verification: none
+  # M2M client for the outbound product-catalog lookup — product-catalog authenticates its
+  # readers (#743), so an unauthenticated call would 401 and silently degrade every card
+  # entitlement rule to the permissive fallback.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+    tls:
+      verification: none
+  rest-client:
+    # Short timeouts on purpose: product-catalog is KEDA scale-to-zero, and this lookup is
+    # fail-open (see CardProductCatalogPort) — waiting on a cold start would delay every issue
+    # for a rule that is allowed to be skipped.
+    "product-catalog-api":
+      url: ${PRODUCT_CATALOG_SERVICE_URL:http://openbank-product-catalog:8080}
+      connect-timeout: 3000
+      read-timeout: 5000
   redis:
     hosts: redis://localhost:6379
   smallrye-reactive-messaging:
@@ -133,6 +153,12 @@ mp:
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
 "%dev":
+  openbank:
+    card:
+      # No key here on purpose: this repo is public and a committed base64 blob is exactly what
+      # the Gitleaks gate exists to stop. With no key configured the cipher mints an ephemeral one
+      # per boot; export OPENBANK_CARD_PAN_ENCRYPTION_KEY to pin a stable key locally.
+      allow-ephemeral-pan-key: true
   quarkus:
     log:
       level: DEBUG
@@ -141,6 +167,10 @@ mp:
     oidc:
       enabled: false
 "%test":
+  openbank:
+    card:
+      # Same as dev: an ephemeral per-boot key, nothing committed (see the dev profile above).
+      allow-ephemeral-pan-key: true
   quarkus:
     # Dedicated IT Postgres on the warm CI stack (ADR-0043); CI auto-creates any openbank_*_it
     # database referenced here. Dev Services stay OFF — tests hit localhost:5432 exactly as on a
@@ -163,6 +193,13 @@ mp:
     scheduler:
       enabled: false
 openbank:
+  card:
+    # Base64 of 32 random bytes (AES-256). Deliberately absent from this file: card-issuance
+    # refuses to boot rather than store synthetic PANs unencrypted (AesGcmCardSecretCipher).
+    # In-cluster the value is an OpenBao/ESO-projected secret supplied as the environment variable
+    # OPENBANK_CARD_PAN_ENCRYPTION_KEY, which Quarkus maps onto this property natively — an
+    # explicit `${...}` indirection here would expand to an empty string when unset, and SmallRye
+    # rejects that as "failed to load config value" instead of falling back to the default.
   outbox:
     dispatch-enabled: true
   rate-limit:

@@ -6,6 +6,7 @@ package com.openbank.cardissuance.infrastructure.rest
 
 import com.openbank.cardissuance.application.port.`in`.CardStatusCommand
 import com.openbank.cardissuance.application.port.`in`.CardUseCase
+import com.openbank.cardissuance.application.port.`in`.ReadSecureDetailsQuery
 import com.openbank.cardissuance.application.port.`in`.UpdateControlsCommand
 import com.openbank.cardissuance.application.port.`in`.UpdateLimitsCommand
 import com.openbank.cardissuance.infrastructure.rest.dto.CardStatusRequest
@@ -23,6 +24,8 @@ import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
@@ -78,6 +81,36 @@ class CardResource(private val cardUseCase: CardUseCase) {
     suspend fun listByParty(@PathParam("partyId") partyId: UUID): Response =
         Response.ok(cardUseCase.listByParty(partyId).map { it.toResponse() }).build()
 
+    /**
+     * A virtual card's synthetic PAN/CVV. `no-store` is mandatory: this body must not sit in a
+     * proxy, a browser cache or a service-worker after the one render it was fetched for.
+     */
+    @GET
+    @Path("/{id}/secure-details")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "card.details.read", resource = "#id")
+    @Operation(summary = "Read a virtual card's synthetic PAN/CVV (VIRTUAL and SINGLE_USE only)")
+    suspend fun secureDetails(@PathParam("id") id: UUID, @HeaderParam("X-Operator-Id") operatorId: String?): Response {
+        val details = cardUseCase.readSecureDetails(ReadSecureDetailsQuery(id, operatorId ?: "unknown"))
+        return Response.ok(details.toResponse())
+            .header(HttpHeaders.CACHE_CONTROL, "no-store")
+            .header("Pragma", "no-cache")
+            .build()
+    }
+
+    @GET
+    @Path("/party/{partyId}/entitlements")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "card.list", resource = "#partyId")
+    @Operation(summary = "Card entitlements of a party on a product (product-catalog cardConfig)")
+    suspend fun entitlements(
+        @PathParam("partyId") partyId: UUID,
+        @QueryParam("productCode") productCode: String?,
+    ): Response {
+        require(!productCode.isNullOrBlank()) { "productCode query parameter required" }
+        return Response.ok(cardUseCase.getEntitlements(partyId, productCode).toResponse()).build()
+    }
+
     @POST
     @Path("/{id}/activate")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
@@ -96,6 +129,18 @@ class CardResource(private val cardUseCase: CardUseCase) {
         req: CardStatusRequest,
         @HeaderParam("X-Operator-Id") operatorId: String,
     ): Response = Response.ok(cardUseCase.blockCard(CardStatusCommand(id, req.reason, operatorId)).toResponse()).build()
+
+    @POST
+    @Path("/{id}/cancel")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
+    @Authorize(action = "card.cancel", resource = "#id")
+    @Operation(summary = "Cancel a card permanently (terminal)")
+    suspend fun cancel(
+        @PathParam("id") id: UUID,
+        req: CardStatusRequest,
+        @HeaderParam("X-Operator-Id") operatorId: String,
+    ): Response =
+        Response.ok(cardUseCase.cancelCard(CardStatusCommand(id, req.reason, operatorId)).toResponse()).build()
 
     @POST
     @Path("/{id}/suspend")
