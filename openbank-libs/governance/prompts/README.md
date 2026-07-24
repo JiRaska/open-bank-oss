@@ -46,3 +46,10 @@ inline constant today; wiring them to load from here is the ADR-0148 code follow
 
 The remaining agents (agent-service, copilot-service, and the LiteLLM-stub ops-agents) register
 their prompts as their real LLM wiring lands (ADR-0164–0168, ADR-0174 gateway).
+
+## Validation
+
+`.github/scripts/check-prompt-registry.py` guards this tree in CI (ADR-0148, **advisory** first per
+ADR-0144). It fails on structural corruption — a prompt for a non-existent charter, a name that is
+not `<name>.v<N>.md`, an empty file, or a re-used version — and emits an advisory `::warning` listing
+charters not yet migrated. Run it locally: `python3 .github/scripts/check-prompt-registry.py`.
