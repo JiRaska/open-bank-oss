@@ -104,6 +104,7 @@ object InterestAccrualScenario {
         val config = InterestRateConfig(
             id = random.nextUuid(),
             productId = "sim-deposit",
+            currency = world.currency,
             annualRate = random.pick(ANNUAL_RATES),
             effectiveFrom = today.minusYears(1),
             createdAt = now,
