@@ -11,6 +11,7 @@ import com.openbank.customeredge.infrastructure.feedback.FeedbackScreenshotStore
 import com.openbank.customeredge.infrastructure.feedback.FeedbackSubmission
 import com.openbank.customeredge.infrastructure.ratelimit.RateLimiter
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.identifiers.Ids
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -91,7 +92,9 @@ class FeedbackResource(
             return quotaExceeded()
         }
 
-        val feedbackId = UUID.randomUUID()
+        // Ids.newId() (UUIDv7, ADR-0106) — this id is durable: it names the S3 object and, through
+        // the reference, the warehouse row an erasure request has to find.
+        val feedbackId = Ids.newId()
         val reference = reference(feedbackId)
         val stored = request.screenshot
             ?.let { screenshotStore.store(feedbackId, reference, it) }
@@ -264,8 +267,11 @@ class FeedbackResource(
         // Short, unambiguous (no vowels -> no accidental words), and quotable over the phone.
         private const val REFERENCE_HEX_LEN = 12
 
+        // Taken from the TAIL of the id, not the head: Ids.newId() is UUIDv7, whose leading 48 bits
+        // are a millisecond timestamp — a head-derived reference would collide for two submissions
+        // in the same millisecond and leak nothing but the clock. The tail is the random part.
         private fun reference(feedbackId: UUID): String =
-            "FB-" + feedbackId.toString().replace("-", "").take(REFERENCE_HEX_LEN).uppercase()
+            "FB-" + feedbackId.toString().replace("-", "").takeLast(REFERENCE_HEX_LEN).uppercase()
 
         /** Trimmed, non-blank text node value, or null. */
         private fun JsonNode.text(field: String): String? =
