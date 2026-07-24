@@ -1683,7 +1683,34 @@ spec:
                   name: standing-order-db-app
                   key: password
             - name: KAFKA_BOOTSTRAP_SERVERS
-              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            # mTLS to Strimzi (ADR-0137, #889). See application.yaml's
+            # mp.messaging.connector.smallrye-kafka.* for how these map to the
+            # SmallRye Kafka connector's SSL config. Without these the pod
+            # authenticated as User:ANONYMOUS and deny-by-default blocked its
+            # execution-trigger consumer group (GroupAuthorizationException).
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka/keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: standing-order-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka/truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET
@@ -1726,6 +1753,12 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka/keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka/truststore
+              readOnly: true
           resources:
             requests:
               cpu: 150m
@@ -1736,6 +1769,12 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: kafka-keystore
+          secret:
+            secretName: standing-order-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
 ---
 apiVersion: v1
 kind: Service
