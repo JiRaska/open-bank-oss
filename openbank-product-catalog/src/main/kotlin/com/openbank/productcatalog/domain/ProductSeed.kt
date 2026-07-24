@@ -264,12 +264,15 @@ object ProductSeed {
                     effectiveFrom = LocalDate.of(2024, 11, 1),
                     language = "cs",
                     summary = "Osobní účet — obchodní podmínky v3.0",
-                    // ADR-0162 D1: reference by document-service template CODE only, not a
-                    // pinned version -- onboarding always renders whatever is currently
-                    // PUBLISHED for this code (UCET_SMLOUVA_CS, seeded in
-                    // DocumentTemplateSeed.kt), so a document-service republish never needs a
-                    // matching product-catalog edit.
-                    documentTemplateCode = "UCET_SMLOUVA_CS",
+                    // No documentTemplateCode by design (ADR-0170 D5, issue #1840): at onboarding the
+                    // customer signs ONLY the framework agreement (RAMCOVA_SMLOUVA), which incorporates
+                    // the account-contract terms by reference; a separate account-contract signing
+                    // ceremony is an explicitly-deferred phase-2 refinement. Binding UCET_SMLOUVA_CS
+                    // here makes the eager OnboardingDocumentService.issueOnboardingDocument path open a
+                    // UCET_SMLOUVA ceremony that nothing ever signs — a dangling artifact (the same
+                    // class #1524/#1561 fixed for the CURRENT_CZK/SAVINGS_CZK onboarding products, and
+                    // missed here until #1840 because the OnboardingProductTemplateBindingTest guard
+                    // only covered those two — now generalised to the whole seed).
                 ),
             ),
             versionHistory = listOf(
