@@ -16,7 +16,10 @@ FROM eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15
 WORKDIR /app
 
 RUN addgroup -S openbank && adduser -S openbank -G openbank
-USER openbank
+# Numeric UID (alpine `adduser -S` assigns uid 100) so Kubernetes `runAsNonRoot: true`
+# can verify the user is non-root. A named USER makes admission fail with
+# "image has non-numeric user (openbank), cannot verify user is non-root".
+USER 100
 
 COPY --from=build /build/openbank-mcp-service/build/quarkus-app/lib/ /app/lib/
 COPY --from=build /build/openbank-mcp-service/build/quarkus-app/*.jar /app/
