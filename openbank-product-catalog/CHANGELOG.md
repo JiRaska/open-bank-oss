@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.11.1...product-catalog-v0.11.2) (2026-07-24)
+
+
+### Bug Fixes
+
+* **product-catalog:** unbind UCET_SMLOUVA_CS from CURRENT_PERSONAL so onboarding stops opening a ceremony nothing signs ([#2056](https://github.com/JiRaska/open-bank-oss/issues/2056)) ([d04fd1c](https://github.com/JiRaska/open-bank-oss/commit/d04fd1cda71a35af826d9f7d474690e0cc83c2fd)), closes [#1840](https://github.com/JiRaska/open-bank-oss/issues/1840)
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.11.0...product-catalog-v0.11.1) (2026-07-18)
 
 

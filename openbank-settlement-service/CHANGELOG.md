@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.8](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.4.7...settlement-service-v0.4.8) (2026-07-24)
+
+
+### Bug Fixes
+
+* **settlement:** Temporal-only orchestration, retire the legacy saga (ADR-0120 Phase 6, [#1917](https://github.com/JiRaska/open-bank-oss/issues/1917) — 1/3) ([#2066](https://github.com/JiRaska/open-bank-oss/issues/2066)) ([0a9cff7](https://github.com/JiRaska/open-bank-oss/commit/0a9cff79c02a116554e7381daed36382107f523a))
+
 ## [0.4.7](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.4.6...settlement-service-v0.4.7) (2026-07-18)
 
 
