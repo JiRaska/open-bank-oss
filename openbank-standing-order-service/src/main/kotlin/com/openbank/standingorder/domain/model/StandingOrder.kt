@@ -9,7 +9,10 @@ import java.time.LocalDate
 import java.util.UUID
 
 enum class StandingOrderStatus { ACTIVE, PAUSED, CANCELLED, COMPLETED, FAILED }
-enum class Frequency { DAILY, WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, ANNUALLY }
+// ONCE = a one-off future-dated payment: it fires exactly once on its startDate and then
+// COMPLETES (never recurs). Modelled as a frequency so it reuses the whole scheduler engine
+// (due-query + execute + record) rather than a separate scheduled-payment service.
+enum class Frequency { ONCE, DAILY, WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, ANNUALLY }
 enum class PaymentType { SEPA_CREDIT, DOMESTIC, INTERNAL }
 
 data class StandingOrder(
@@ -60,10 +63,19 @@ data class StandingOrder(
         nextExecutionDate = nextDate,
         executionCount = executionCount + 1,
         updatedAt = now,
-        status = if (endDate != null && nextDate.isAfter(endDate)) StandingOrderStatus.COMPLETED else status,
+        // A ONCE order is spent after its single execution; a recurring order completes only once
+        // it runs past its (optional) endDate.
+        status = if (frequency == Frequency.ONCE || (endDate != null && nextDate.isAfter(endDate))) {
+            StandingOrderStatus.COMPLETED
+        } else {
+            status
+        },
     )
 
     fun calculateNextDate(from: LocalDate): LocalDate = when (frequency) {
+        // ONCE never recurs (recordExecution completes it); the returned date is unused, so keep it
+        // unchanged rather than inventing a future occurrence.
+        Frequency.ONCE -> from
         Frequency.DAILY -> from.plusDays(1)
         Frequency.WEEKLY -> from.plusWeeks(1)
         Frequency.BIWEEKLY -> from.plusWeeks(2)

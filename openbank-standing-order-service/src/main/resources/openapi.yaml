@@ -163,7 +163,7 @@ components:
           type: string
         frequency:
           type: string
-          enum: [DAILY, WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, ANNUALLY]
+          enum: [ONCE, DAILY, WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, ANNUALLY]
         startDate:
           type: string
           format: date
