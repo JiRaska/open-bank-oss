@@ -122,6 +122,70 @@ class CardTest {
             .hasMessageContaining("Cannot change controls")
     }
 
+    // ── cancel (#2): the transition matrix, including CANCELLED-is-terminal ────────────
+
+    @Test fun `cancel closes a card from every non-terminal status`() {
+        val now = Instant.parse("2026-03-03T08:00:00Z")
+
+        Card.CANCELLABLE_STATUSES.forEach { status ->
+            val updated = card(status = status).cancel("Customer closed the card", now)
+
+            assertThat(updated.status)
+                .describedAs("cancel from $status")
+                .isEqualTo(CardStatus.CANCELLED)
+            assertThat(updated.blockedReason).isEqualTo("Customer closed the card")
+            assertThat(updated.updatedAt).isEqualTo(now)
+        }
+    }
+
+    @Test fun `cancel is allowed from BLOCKED - a lost card the customer then closes`() {
+        val blocked = card(status = CardStatus.BLOCKED)
+
+        assertThat(blocked.cancel(null).status).isEqualTo(CardStatus.CANCELLED)
+    }
+
+    @Test fun `cancel without a reason keeps the original block reason`() {
+        val lost = card(status = CardStatus.ACTIVE).block("Reported lost").cancel(null)
+
+        assertThat(lost.status).isEqualTo(CardStatus.CANCELLED)
+        assertThat(lost.blockedReason).isEqualTo("Reported lost")
+    }
+
+    @Test fun `cancel is terminal - a cancelled card can never transition again`() {
+        val cancelled = card(status = CardStatus.CANCELLED)
+
+        assertThatThrownBy { cancelled.cancel("again") }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("Cannot cancel card in status CANCELLED")
+        assertThatThrownBy { cancelled.activate() }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { cancelled.block("fraud") }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { cancelled.suspend() }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { cancelled.resume() }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { cancelled.withLimits(1, 2) }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { cancelled.withControls(true, true, true, true) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test fun `cancel rejects an expired card`() {
+        assertThatThrownBy { card(status = CardStatus.EXPIRED).cancel("closing") }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("Cannot cancel card in status EXPIRED")
+    }
+
+    @Test fun `a cancelled card never consumes product quota`() {
+        assertThat(Card.LIVE_STATUSES).doesNotContain(CardStatus.CANCELLED, CardStatus.BLOCKED, CardStatus.EXPIRED)
+        assertThat(Card.LIVE_STATUSES)
+            .containsExactlyInAnyOrder(CardStatus.PENDING, CardStatus.ACTIVE, CardStatus.SUSPENDED)
+    }
+
+    @Test fun `only virtual form factors expose their PAN digitally`() {
+        assertThat(card(status = CardStatus.ACTIVE).copy(cardType = CardType.VIRTUAL).isVirtualForm).isTrue()
+        assertThat(card(status = CardStatus.ACTIVE).copy(cardType = CardType.SINGLE_USE).isVirtualForm).isTrue()
+        assertThat(card(status = CardStatus.ACTIVE).copy(cardType = CardType.DEBIT).isVirtualForm).isFalse()
+        assertThat(card(status = CardStatus.ACTIVE).copy(cardType = CardType.CREDIT).isVirtualForm).isFalse()
+        assertThat(card(status = CardStatus.ACTIVE).copy(cardType = CardType.PREPAID).isVirtualForm).isFalse()
+    }
+
     private fun card(status: CardStatus) = Card(
         id = UUID.fromString("11111111-1111-1111-1111-111111111111"),
         idempotencyKey = "idem-key",

@@ -66,6 +66,43 @@ fun Card.toResponse() = CardResponse(
     contactlessEnabled, onlineEnabled, atmEnabled, abroadEnabled,
 )
 
+/**
+ * A virtual card's decrypted synthetic credential. Serialised once, straight to the caller, under
+ * `Cache-Control: no-store` — it is never logged, cached or persisted in this shape.
+ */
+data class CardSecureDetailsResponse(
+    val pan: String,
+    val cvv: String,
+    val expiryDate: LocalDate,
+    val cardholderName: String,
+    val network: CardNetwork,
+)
+
+fun CardSecureDetails.toResponse() = CardSecureDetailsResponse(pan, cvv, expiryDate, cardholderName, network)
+
+/**
+ * What a party may still do on a product. `source` = `FALLBACK` means product-catalog did not
+ * answer: `maxCards`/`remaining` are then `-1` ("no known cap"), not `0`.
+ */
+data class CardEntitlementsResponse(
+    val productCode: String,
+    val maxCards: Int,
+    val issued: Int,
+    val remaining: Int,
+    val virtualCardAllowed: Boolean,
+    val singleUseAllowed: Boolean,
+    val networks: List<CardNetwork>,
+    val tiers: List<String>,
+    val monthlyFeePerCard: Double,
+    val enabled: Boolean,
+    val source: EntitlementSource,
+)
+
+fun CardEntitlements.toResponse() = CardEntitlementsResponse(
+    productCode, maxCards, issued, remaining, virtualCardAllowed, singleUseAllowed,
+    networks, tiers, monthlyFeePerCard, enabled, source,
+)
+
 /** Customer/operator request to set a card's spending limits (minor units). */
 data class UpdateLimitsRequest(val dailyLimitMinorUnits: Long, val monthlyLimitMinorUnits: Long)
 

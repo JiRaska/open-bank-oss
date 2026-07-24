@@ -871,6 +871,177 @@ class ScaServiceTest {
         }.isInstanceOf(ScaDynamicLinkingMismatchException::class.java)
     }
 
+    // --- consume: card-management binding ---
+
+    @Test
+    fun `consume marks a card-management challenge as spent when the card and action match`(): Unit = runBlocking {
+        val ch = cardChallenge()
+        coEvery { repository.findById(ch.id) } returns ch
+        coEvery { repository.markConsumed(ch.id) } returns true
+
+        val result = service.consume(
+            ConsumeScaCommand(
+                ch.id,
+                ch.partyId,
+                null,
+                null,
+                null,
+                cardId = "card-1",
+                cardAction = "LIMIT_INCREASE",
+            ),
+        )
+
+        assertThat(result.consumedAt).isNotNull()
+        coVerify(exactly = 1) { repository.markConsumed(ch.id) }
+    }
+
+    @Test
+    fun `consume throws ScaDynamicLinkingMismatchException when the card does not match`(): Unit = runBlocking {
+        val ch = cardChallenge()
+        coEvery { repository.findById(ch.id) } returns ch
+        assertThatThrownBy {
+            runBlocking {
+                service.consume(
+                    ConsumeScaCommand(
+                        ch.id,
+                        ch.partyId,
+                        null,
+                        null,
+                        null,
+                        cardId = "card-2",
+                        cardAction = "LIMIT_INCREASE",
+                    ),
+                )
+            }
+        }.isInstanceOf(ScaDynamicLinkingMismatchException::class.java)
+    }
+
+    @Test
+    fun `consume throws ScaDynamicLinkingMismatchException when the card action does not match`(): Unit = runBlocking {
+        val ch = cardChallenge()
+        coEvery { repository.findById(ch.id) } returns ch
+        assertThatThrownBy {
+            runBlocking {
+                service.consume(
+                    ConsumeScaCommand(
+                        ch.id,
+                        ch.partyId,
+                        null,
+                        null,
+                        null,
+                        cardId = "card-1",
+                        cardAction = "REVEAL_DETAILS",
+                    ),
+                )
+            }
+        }.isInstanceOf(ScaDynamicLinkingMismatchException::class.java)
+    }
+
+    @Test
+    fun `consume of a card-bound challenge without the card fields is rejected — cannot spend as a no-op`(): Unit =
+        runBlocking {
+            val ch = cardChallenge()
+            coEvery { repository.findById(ch.id) } returns ch
+            assertThatThrownBy {
+                runBlocking { service.consume(ConsumeScaCommand(ch.id, ch.partyId, null, null, null)) }
+            }.isInstanceOf(ScaDynamicLinkingMismatchException::class.java)
+        }
+
+    @Test
+    fun `consume rejects a payment challenge presented with card-management fields`(): Unit = runBlocking {
+        val ch = challenge(status = ScaStatus.COMPLETED).copy(
+            purpose = ScaPurpose.PAYMENT_INITIATION,
+            dynamicLinkingData = DynamicLinkingData("100.00", "CZK", null, null, null),
+        )
+        coEvery { repository.findById(ch.id) } returns ch
+        assertThatThrownBy {
+            runBlocking {
+                service.consume(
+                    ConsumeScaCommand(
+                        ch.id,
+                        ch.partyId,
+                        "100.00",
+                        "CZK",
+                        null,
+                        cardId = "card-1",
+                        cardAction = "LIMIT_INCREASE",
+                    ),
+                )
+            }
+        }.isInstanceOf(ScaDynamicLinkingMismatchException::class.java)
+    }
+
+    @Test
+    fun `consume rejects a card-management challenge presented as a payment`(): Unit = runBlocking {
+        // The inverse cross-purpose direction: card approval evidence must never move money.
+        val ch = cardChallenge()
+        coEvery { repository.findById(ch.id) } returns ch
+        assertThatThrownBy {
+            runBlocking {
+                service.consume(
+                    ConsumeScaCommand(ch.id, ch.partyId, "100.00", "CZK", "CZ6508000000192000145399"),
+                )
+            }
+        }.isInstanceOf(ScaDynamicLinkingMismatchException::class.java)
+    }
+
+    @Test
+    fun `a card-management challenge is single-use — the second consume is refused`(): Unit = runBlocking {
+        val ch = cardChallenge()
+        coEvery { repository.findById(ch.id) } returns ch
+        // markConsumed is the atomic compare-and-consume: it answers true once, false thereafter.
+        coEvery { repository.markConsumed(ch.id) } returnsMany listOf(true, false)
+        val command = ConsumeScaCommand(
+            ch.id,
+            ch.partyId,
+            null,
+            null,
+            null,
+            cardId = "card-1",
+            cardAction = "LIMIT_INCREASE",
+        )
+
+        service.consume(command)
+
+        assertThatThrownBy { runBlocking { service.consume(command) } }
+            .isInstanceOf(ScaChallengeAlreadyConsumedException::class.java)
+    }
+
+    @Test
+    fun `a card-management challenge that is not approved cannot be consumed`(): Unit = runBlocking {
+        val ch = cardChallenge().copy(status = ScaStatus.PENDING, method = ScaMethod.SMS_OTP)
+        coEvery { repository.findById(ch.id) } returns ch
+        assertThatThrownBy {
+            runBlocking {
+                service.consume(
+                    ConsumeScaCommand(
+                        ch.id,
+                        ch.partyId,
+                        null,
+                        null,
+                        null,
+                        cardId = "card-1",
+                        cardAction = "LIMIT_INCREASE",
+                    ),
+                )
+            }
+        }.isInstanceOf(ScaChallengeNotApprovedException::class.java)
+    }
+
+    private fun cardChallenge(cardId: String = "card-1", cardAction: String = "LIMIT_INCREASE") =
+        challenge(status = ScaStatus.COMPLETED).copy(
+            purpose = ScaPurpose.CARD_MANAGEMENT,
+            dynamicLinkingData = DynamicLinkingData(
+                null,
+                null,
+                null,
+                null,
+                null,
+                cardId = cardId,
+                cardAction = cardAction,
+            ),
+        )
+
     private fun device(partyId: UUID = UUID.randomUUID(), credentialId: String = "cred-1") = EnrolledDevice(
         partyId = partyId,
         credentialId = credentialId,

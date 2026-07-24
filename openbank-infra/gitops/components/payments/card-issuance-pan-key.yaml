@@ -1,0 +1,44 @@
+# AES-256 key for card-issuance's synthetic PAN/CVV vault (ADR-0194), projected from OpenBao by
+# the External Secrets Operator (ClusterSecretStore `vault-kv`, KV mount `openbank`).
+#
+# This is a HARD dependency of the card-issuance Deployment, not a tuning knob:
+# AesGcmCardSecretCipher refuses to boot without it rather than store PANs unencrypted, so a
+# missing or malformed value is a CrashLoopBackOff, not a degraded mode. Deploy this before (or
+# with) the Deployment change that references it.
+#
+# The key protects SYNTHETIC test-BIN card numbers in a sandbox — there is no real cardholder data
+# in this platform — but it is handled like any other production secret so the control is actually
+# exercised rather than rehearsed for the first time when it matters.
+#
+# Rotation is NOT transparent: existing rows are sealed under the current key and become
+# undecryptable the moment it changes. `secure-details` answers such a card with its
+# "no stored PAN" refusal rather than an error, so a rotation degrades gracefully — but plan it
+# as a re-issue of affected virtual cards, not as a silent swap.
+#
+# creationPolicy Owner + deletionPolicy Retain mirrors the sibling oidc-externalsecrets.yaml.
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: card-issuance-pan-key
+  namespace: payments
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: vault-kv
+  target:
+    name: card-issuance-pan-key
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      engineVersion: v2
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: CARD_PAN_ENCRYPTION_KEY
+      remoteRef:
+        key: card-issuance
+        property: CARD_PAN_ENCRYPTION_KEY

@@ -125,6 +125,9 @@ spec:
               kubernetes.io/metadata.name: documents
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: payments
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: platform
         - namespaceSelector:
             matchLabels:

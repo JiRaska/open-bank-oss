@@ -1981,6 +1981,16 @@ spec:
                 secretKeyRef:
                   name: card-issuance-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # AES-256 key for the synthetic PAN/CVV vault (ADR-0194). card-issuance refuses to
+            # boot without it rather than store PANs unencrypted, so this is a hard dependency of
+            # the deployment, not an optional tuning knob — see card-issuance-pan-key.yaml.
+            - name: OPENBANK_CARD_PAN_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: card-issuance-pan-key
+                  key: CARD_PAN_ENCRYPTION_KEY
+            - name: PRODUCT_CATALOG_SERVICE_URL
+              value: http://product-catalog.accounts.svc:8104
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG

@@ -10,6 +10,8 @@ stateDiagram-v2
     PENDING --> CANCELLED : cancel()
     ACTIVE --> CANCELLED : cancel()
     SUSPENDED --> CANCELLED : cancel()
+    %% a lost card (BLOCKED) that the customer then closes
+    BLOCKED --> CANCELLED : cancel()
     BLOCKED --> [*]
     EXPIRED --> [*]
     CANCELLED --> [*]
