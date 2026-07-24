@@ -257,6 +257,53 @@ spec:
         operations: [Read]
         host: "*"
 ---
+# ── standing-order-service (#889 / ONCE feature) ────────────────────────────
+# Late mTLS wiring — same gap as card-issuance-service above. standing-order was
+# listed as "non-deployed, RBAC pre-registered" in the ADR-0137 fleet sweep
+# (kafka.yaml), then deployed anyway (recurring-order engine, #889; ONCE one-off
+# payments) WITHOUT its mTLS manifests. On the plaintext listener it authenticates
+# as User:ANONYMOUS, which allow.everyone.if.no.acl.found=false denies on every
+# resource — so its execution-trigger consumer got GroupAuthorizationException on
+# group `openbank-standing-order-service` and never joined, killing the whole
+# standing-order execution pipeline in sandbox.
+#
+# Self-consume model (#889): the outbox dispatches due events to
+# openbank.standing-orders.order.event (channel standing-order-events-out) and
+# StandingOrderDueConsumer reads the SAME topic (channel standing-order-due-in) to
+# initiate the real SEPA payment — so this one KafkaUser needs BOTH Write and Read
+# on that topic, plus Read on its service-scoped consumer group (group.id falls
+# back to quarkus.application.name = openbank-standing-order-service).
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs (KafkaUsers→Strimzi secrets→ESO projection) must land
+    # before the payments Deployment rolls the pod onto mTLS; lower waves sync
+    # first and ArgoCD blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: standing-order-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.standing-orders.order.event
+          patternType: literal
+        operations: [Read, Write, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-standing-order-service
+          patternType: literal
+        operations: [Read]
+        host: "*"
+---
 # ── External Secrets reader (ADR-0137) ──────────────────────────────────────
 # The Strimzi User Operator writes the KafkaUser keystores (and the cluster CA
 # truststore) as Secrets in THIS namespace (messaging), but the services run in
