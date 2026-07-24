@@ -43,6 +43,17 @@ import java.util.concurrent.Executor
 @Suppress("TooManyFunctions") // one delivery path per channel + shared helpers; grows with channels
 class NotificationConsumer {
 
+    companion object {
+        /**
+         * Generic, PII-free push body (ADR-0135 §3, issue #1182). Lock-screen-visible push
+         * payloads must never carry the transaction amount, account number, or any PII — the
+         * subject alone (already PII-free, e.g. "Transaction completed") is the title and this
+         * fixed string is the body. Full detail is fetched on tap via the authenticated,
+         * party-scoped GET /api/v1/notifications/{id}/self.
+         */
+        const val GENERIC_PUSH_BODY = "Open the OpenBank app to view details."
+    }
+
     @Inject lateinit var mailer: ReactiveMailer
 
     @Inject lateinit var objectMapper: ObjectMapper
@@ -156,7 +167,7 @@ class NotificationConsumer {
                         log.infof("SMS stub: to=%s template=%s", req.recipient, req.template)
                         Uni.createFrom().voidItem()
                     }
-                    NotificationChannel.PUSH -> maybeSendPush(req, subject, body, entity)
+                    NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
                     NotificationChannel.IN_APP -> {
                         log.infof("IN_APP stub: to=%s template=%s", req.recipient, req.template)
                         Uni.createFrom().voidItem()
@@ -296,14 +307,9 @@ class NotificationConsumer {
      * account freeze) always send. For a togglable category, a missing preference row means "on";
      * a muted category records the notification as SUPPRESSED and skips egress.
      */
-    private fun maybeSendPush(
-        req: NotificationRequest,
-        subject: String,
-        body: String,
-        entity: NotificationEntity,
-    ): Uni<Void> {
+    private fun maybeSendPush(req: NotificationRequest, subject: String, entity: NotificationEntity): Uni<Void> {
         val category = req.template.category
-        if (category == NotificationCategory.SECURITY) return sendPush(req, subject, body, entity)
+        if (category == NotificationCategory.SECURITY) return sendPush(req, subject, entity)
         return Panache.withTransaction { preferenceRepo.findByParty(req.partyId) }.chain { pref ->
             val enabled = when (category) {
                 NotificationCategory.PAYMENTS -> pref?.paymentsPush ?: true
@@ -312,7 +318,7 @@ class NotificationConsumer {
                 NotificationCategory.SECURITY -> true
             }
             if (enabled) {
-                sendPush(req, subject, body, entity)
+                sendPush(req, subject, entity)
             } else {
                 log.infof("PUSH suppressed by preference: party=%s category=%s", req.partyId, category)
                 markStatus(entity, "SUPPRESSED")
@@ -330,13 +336,15 @@ class NotificationConsumer {
      * Adapters are off by default; a disabled adapter returns a *skipped* (successful) result,
      * so in the sandbox a push is recorded SENT without any egress (mirrors the EMAIL stub).
      */
-    private fun sendPush(
-        req: NotificationRequest,
-        subject: String,
-        body: String,
-        entity: NotificationEntity,
-    ): Uni<Void> {
-        val pushText = htmlToPlain(body)
+    private fun sendPush(req: NotificationRequest, subject: String, entity: NotificationEntity): Uni<Void> {
+        // ADR-0135 §3 + issue #1182: push payloads must carry NO amount / account number / PII.
+        // The rendered body (e.g. "Transaction of 1 234,00 EUR completed") used to be flattened
+        // with htmlToPlain(body) and shipped as the PushMessage body, landing verbatim in the
+        // lock-screen-visible aps.alert.body (ApnsPushSender) / FCM notification — a direct §3
+        // violation. We now send only the already-PII-free subject as the title plus a fixed
+        // generic wake body. The customer's device fetches the full detail on tap via the
+        // authenticated, party-scoped GET /api/v1/notifications/{id}/self.
+        val pushText = GENERIC_PUSH_BODY
         // Capture the Vert.x (duplicated) context now, while we are demonstrably on it — the
         // opening findActiveByParty transaction below only works because we are. The push adapter's
         // send completes on the JDK HttpClient's own thread pool, off the event loop
@@ -396,10 +404,6 @@ class NotificationConsumer {
         notificationRepo.find("notificationId", entity.notificationId).firstResult()
             .map { e -> e?.also { it.status = status } }
     }.replaceWithVoid()
-
-    /** Strip HTML so the rich email body renders as a plain push alert. */
-    private fun htmlToPlain(html: String): String =
-        html.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
 
     /**
      * Renders [template] into a (subject, body) pair.

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Notification Service API
-  version: 1.6.0
+  version: 1.7.0
   description: Notification delivery management — query sent/pending notifications, manage push device tokens.
   license:
     name: Apache-2.0
@@ -149,6 +149,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/NotificationResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/notifications/{id}/self:
+    get:
+      tags: [Notifications]
+      summary: Get one of the caller's own notifications (party-scoped, fetch-on-tap)
+      description: >-
+        Party-scoped single read for the customer app's fetch-on-tap (ADR-0135 §3, issue #1182).
+        Push payloads carry no amount/PII; on tap the app loads the full notification detail here.
+        The SELECT is scoped by the edge-injected partyId, so a caller can only read their own
+        notification (IDOR guard). A missing or other-party id returns 404 with no existence oracle.
+      operationId: getOwnNotification
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Notification detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationResponse'
+        '400':
+          description: Missing partyId
         '404':
           $ref: '#/components/responses/NotFound'
 
