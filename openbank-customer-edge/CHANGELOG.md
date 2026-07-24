@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.46.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.45.0...customer-edge-v0.46.0) (2026-07-24)
+
+
+### Features
+
+* **feedback:** screen-feedback endpoint, Kafka stream and ClickHouse marts (ADR-0192) ([#2108](https://github.com/JiRaska/open-bank-oss/issues/2108)) ([828c24f](https://github.com/JiRaska/open-bank-oss/commit/828c24f6fe9812147fe09d83edb059c08aaf773c))
+* **theme:** edge theme prefs + copilot theme designer (ADR-0191) ([#2076](https://github.com/JiRaska/open-bank-oss/issues/2076)) ([91b9ac7](https://github.com/JiRaska/open-bank-oss/commit/91b9ac77238214e1363bec87b5f932dfd9becb42))
+
 ## [0.45.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.44.0...customer-edge-v0.45.0) (2026-07-24)
 
 
