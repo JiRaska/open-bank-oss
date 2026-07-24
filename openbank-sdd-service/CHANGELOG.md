@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.8.1...sdd-service-v0.8.2) (2026-07-24)
+
+
+### Bug Fixes
+
+* **sdd:** @WithTransaction on write endpoints (outbox append had no session) ([#2061](https://github.com/JiRaska/open-bank-oss/issues/2061)) ([0436516](https://github.com/JiRaska/open-bank-oss/commit/04365161f5a6676d2959205b98e29c29c09ed155))
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.8.0...sdd-service-v0.8.1) (2026-07-17)
 
 

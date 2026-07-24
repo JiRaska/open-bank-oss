@@ -42,6 +42,17 @@ on:
       - "openbank-libs-domain/build.gradle.kts"
       - "openbank-libs-runtime/build.gradle.kts"
       - "build-logic/**"
+  # Self-heal reconcile (issue #2020). The per-push run is ONE-SHOT: a service that built
+  # and pushed its image but was then blocked at the can-i-deploy contract gate by a
+  # TRANSIENT verification lag (its build wave republished its consumer pact; the provider
+  # version in sandbox verified it minutes later, on its own deploy) is never re-driven —
+  # it stays pinned to the stale image until a human hand-bumps gitops (as PR #2017 did for
+  # notification-service after #1990). This tick re-offers every stranded service to the
+  # SAME build -> can-i-deploy -> gitops-pr path, so it deploys the moment the gate clears
+  # and stays blocked (with the #1420 left-behind escalation) while it does not. The gate is
+  # not weakened. Detection is .github/scripts/auto-deploy-reconcile-lag.sh (unit-tested).
+  schedule:
+    - cron: "23 */3 * * *" # every 3h, offset off the hour to dodge cron congestion
   # Manual re-trigger: rebuild + push + gitops-PR on demand. Useful to recover
   # after a failed auto-deploy run left the gitops image tags stale, without
   # waiting for the next service-source merge.
@@ -169,6 +180,28 @@ jobs:
             fi
             SERVICES_JSON="$(printf '%s\n' "${DEPLOYABLE[@]}" | jq -R . | jq -sc .)"
             echo "workflow_dispatch → building: $SERVICES_JSON"
+            echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Scheduled reconcile (issue #2020): re-drive every service whose deployed gitops
+          # image tag is behind main — the strand a one-shot per-push run leaves when the
+          # contract gate blocks it on a transient verification lag and nothing retries. The
+          # probe intersects the manifest pins with ALL_SERVICES (so it never tries to build
+          # a service this pipeline can't) and caps the batch oldest-first. The selected set
+          # then flows through the identical build-push -> can-i-deploy -> gitops-pr path, so
+          # a still-blocked service simply stays blocked this tick — the gate is unchanged.
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            SERVICES_JSON="$(RECONCILE_SERVICES="$ALL_SERVICES" \
+              bash .github/scripts/auto-deploy-reconcile-lag.sh)"
+            if [ "$SERVICES_JSON" = "[]" ] || [ -z "$SERVICES_JSON" ]; then
+              echo "Reconcile: every deployable service is up to date."
+              echo "services=[]" >> "$GITHUB_OUTPUT"
+              echo "any=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Reconcile → re-driving stranded services: $SERVICES_JSON"
             echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
             echo "any=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -620,6 +653,15 @@ jobs:
       PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
       PACT_STANDALONE_VERSION: "2.6.2"
     steps:
+      # This job had no checkout, so the #1420 money-path escalation below
+      # (`awk ... openbank-libs/governance/rules.yaml`) crashed with "cannot open" —
+      # latent until the scheduled reconcile started re-driving stranded (=often
+      # blocked) services every tick, which is the only path that reliably enters that
+      # block. Check out so rules.yaml is present and the money-path naming works.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
       # The pact CLI runs natively on the ARC runner pod (which resolves the broker's
       # cluster DNS); the pact-cli docker image would run in dind and could not. The
       # standalone ships a linux arm64 build for the Graviton runner.
@@ -783,6 +825,19 @@ jobs:
               fi
             done
             [ "$mp_blocked" = "1" ] && echo "::error::can-i-deploy left one or more MONEY-PATH services behind this run — see the job summary (issue #1420)"
+          fi
+          # On a scheduled reconcile tick an ordinary (non money-path) service still blocked by
+          # the contract gate is EXPECTED — reconcile deliberately re-offers known strands and
+          # leaves the still-blocked ones for a later tick; the deployable subset already
+          # advanced via gitops-pr. Failing the job for that would make the every-3h schedule
+          # perpetually red — a red workflow addressed to nobody (see auto-deploy.yml scheduling
+          # note). So on `schedule` only fail the status when a MONEY-PATH service is the one
+          # left behind (mp_blocked=1), which must stay loud. push / workflow_dispatch keep the
+          # unconditional ADR-0092 behaviour below. Deploy behaviour is unchanged either way:
+          # gitops-pr deploys the `deployable` subset and never the blocked complement.
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$rc" -ne 0 ] && [ "${mp_blocked:-0}" != "1" ]; then
+            echo "::notice::reconcile tick: ${BLOCKED_N:-0} service(s) still gate-blocked (non money-path) — left for a later tick; the deployable subset deployed. Not failing the scheduled run."
+            exit 0
           fi
           # Enforce: non-zero rc still fails this job's own status for visibility (ADR-0092) —
           # it no longer blocks gitops-pr/record-deployment for the deployable subset above.

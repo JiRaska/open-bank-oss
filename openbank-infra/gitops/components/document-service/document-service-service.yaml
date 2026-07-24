@@ -43,7 +43,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-document-service-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "3b905b7241de3df6"
+        openbank.tech/policy-checksum: "3f4eee07f47dc3ba"
     spec:
       # ADR-0162 D4 (continued): a dedicated SA (not `default`) is what OpenBao's Kubernetes-auth
       # role `document-service-signing` is bound to — least-privilege, one identity per consumer.
@@ -118,23 +118,14 @@ spec:
                   name: document-service-signing-keystore
                   key: keystore.password
                   optional: true
-            # ADR-0172 D2 — SANDBOX ONLY, and it is here because the seal is currently worthless.
-            #
-            # Verified live 2026-07-16: the `document-service-signing-keystore` ExternalSecret is
-            # SecretSyncedError / READY=False ("could not get secret data from provider") because the
-            # OpenBao KV path `openbank/document-service-signing-seal` has never been seeded, so
-            # /mnt/signing-keystore/ mounts empty and the adapter falls back to a throwaway
-            # self-signed cert. Every seal applied here is legally worthless.
-            #
-            # The code now fails closed at seal time rather than producing that silently. Without
-            # this opt-in, signature ceremonies in the sandbox would start erroring — which is
-            # CORRECT, but would take out the demo without warning. So the fail-open is kept, and
-            # moved from an invisible code default to this reviewable line.
-            #
-            # REMOVE THIS once the KV is seeded per docs/runbooks/0008-openbao-document-signing-pki.md.
-            # It is the only thing standing between the sandbox and real (self-signed org) seals.
-            - name: OPENBANK_SIGNATURE_ALLOW_EPHEMERAL_SEALS
-              value: "false"
+            # Seal keystore is seeded (OpenBao KV openbank/document-service-signing-seal), the
+            # ExternalSecret syncs, and PdfBoxPadesSealAdapter loads the real org keystore at boot —
+            # no ephemeral-seal fallback (issue #1296). OPENBANK_SIGNATURE_ALLOW_EPHEMERAL_SEALS is
+            # therefore removed: its default (false, fail-closed at seal time) is now the correct
+            # steady state, and the earlier explicit opt-in only existed to keep the demo alive while
+            # the KV was unseeded. Do NOT set OPENBANK_SIGNATURE_REQUIRE_TRUSTED_ISSUER (a boot gate)
+            # unless a real trusted-CA leaf replaces the self-signed org seal — assurance is ADR-0172
+            # §5 "advanced" (AdES), not qualified.
             # Datasource: single document-service-db (document-service-db.yaml).
             # Reactive URL for the app (Panache); JDBC URL for Flyway. Both
             # username/password variants set, matching the billing-service pattern.

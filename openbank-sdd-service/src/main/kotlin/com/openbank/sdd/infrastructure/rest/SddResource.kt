@@ -21,6 +21,7 @@ import com.openbank.sdd.infrastructure.rest.dto.AuthoriseCollectionRequest
 import com.openbank.sdd.infrastructure.rest.dto.MandateResponse
 import com.openbank.sdd.infrastructure.rest.dto.RefundAssessmentResponse
 import com.openbank.sdd.infrastructure.rest.dto.RegisterMandateRequest
+import io.quarkus.hibernate.reactive.panache.common.WithTransaction
 import io.smallrye.mutiny.Uni
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
@@ -64,6 +65,7 @@ class SddResource(
     @Operation(
         summary = "Register a debtor mandate (Core ⇒ ACTIVE, B2B ⇒ PENDING_CONFIRMATION). Idempotent on (CID, UMR).",
     )
+    @WithTransaction
     fun registerMandate(req: RegisterMandateRequest): Uni<Response> = register.register(
         RegisterMandateCommand(
             accountId = req.accountId,
@@ -98,6 +100,7 @@ class SddResource(
     @Path("/mandates/{id}/confirm")
     @Authorize(action = "sdd.approve", resource = "#id")
     @Operation(summary = "Confirm (verify) a B2B mandate — PENDING_CONFIRMATION ⇒ ACTIVE")
+    @WithTransaction
     fun confirmMandate(@PathParam("id") id: UUID): Uni<Response> =
         confirm.confirm(id).map { Response.ok(MandateResponse.of(it)).build() }
 
@@ -105,6 +108,7 @@ class SddResource(
     @Path("/mandates/{id}/suspend")
     @Authorize(action = "sdd.update", resource = "#id")
     @Operation(summary = "Suspend an ACTIVE mandate")
+    @WithTransaction
     fun suspendMandate(@PathParam("id") id: UUID): Uni<Response> =
         manage.suspend(id).map { Response.ok(MandateResponse.of(it)).build() }
 
@@ -112,6 +116,7 @@ class SddResource(
     @Path("/mandates/{id}/resume")
     @Authorize(action = "sdd.update", resource = "#id")
     @Operation(summary = "Resume a SUSPENDED mandate")
+    @WithTransaction
     fun resumeMandate(@PathParam("id") id: UUID): Uni<Response> =
         manage.resume(id).map { Response.ok(MandateResponse.of(it)).build() }
 
@@ -119,6 +124,7 @@ class SddResource(
     @Path("/mandates/{id}/cancel")
     @Authorize(action = "sdd.delete", resource = "#id")
     @Operation(summary = "Cancel a mandate (terminal)")
+    @WithTransaction
     fun cancelMandate(@PathParam("id") id: UUID): Uni<Response> =
         manage.cancel(id).map { Response.ok(MandateResponse.of(it)).build() }
 
@@ -126,6 +132,7 @@ class SddResource(
     @Path("/mandates/{id}")
     @Authorize(action = "sdd.update", resource = "#id")
     @Operation(summary = "Amend a mandate field (records an AMDT marker)")
+    @WithTransaction
     fun amendMandate(@PathParam("id") id: UUID, req: AmendMandateRequest): Uni<Response> =
         amend.amend(id, AmendMandateCommand(req.field, req.newValue))
             .map { Response.ok(MandateResponse.of(it)).build() }
@@ -134,6 +141,7 @@ class SddResource(
     @Path("/collections/authorise")
     @Authorize(action = "sdd.authorise")
     @Operation(summary = "Fail-closed authorisation of an inbound collection (ACCEPT / REJECT / REFUSE)")
+    @WithTransaction
     fun authoriseCollection(req: AuthoriseCollectionRequest): Uni<Response> = authorise.authorise(
         CollectionInstruction(
             creditorIdentifier = req.creditorIdentifier,

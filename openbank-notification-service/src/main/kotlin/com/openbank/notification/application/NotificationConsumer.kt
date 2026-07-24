@@ -419,6 +419,7 @@ class NotificationConsumer {
      * Every `vars[...]` key read here must be declared in that constant's [NotificationTemplate.variables];
      * anything else is rejected upstream and can never arrive.
      */
+    @Suppress("CyclomaticComplexMethod") // one branch per template — grows with the template catalogue
     private fun renderTemplate(template: NotificationTemplate, vars: Map<String, String>): Pair<String, String> =
         when (template) {
             NotificationTemplate.ACCOUNT_OPENED ->
@@ -473,6 +474,9 @@ class NotificationConsumer {
             NotificationTemplate.WELCOME ->
                 "Welcome to OpenBank" to
                     "<h2>Welcome!</h2><p>Thank you for joining OpenBank, ${vars.v("name")}.</p>"
+            NotificationTemplate.SCA_APPROVAL ->
+                "Approve your payment" to
+                    "<p>${vars.v("detail").ifBlank { "You have a payment waiting for your approval." }}</p>"
         }
 }
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.55.1...admin-ui-v0.55.2) (2026-07-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** resync package-lock with react-is@17.0.2 ([#2040](https://github.com/JiRaska/open-bank-oss/issues/2040)) ([e93d30f](https://github.com/JiRaska/open-bank-oss/commit/e93d30f73dda0babe3608fd86f25165df50ae385)), closes [#2037](https://github.com/JiRaska/open-bank-oss/issues/2037)
+
 ## [0.55.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.55.0...admin-ui-v0.55.1) (2026-07-23)
 
 

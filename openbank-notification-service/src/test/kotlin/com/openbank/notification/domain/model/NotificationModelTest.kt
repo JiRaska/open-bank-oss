@@ -33,12 +33,15 @@ class NotificationModelTest {
 
     @Test
     fun `NotificationTemplate has all expected templates`() {
-        assertThat(NotificationTemplate.values()).hasSize(13)
+        assertThat(NotificationTemplate.values()).hasSize(14)
         assertThat(NotificationTemplate.values()).contains(
             NotificationTemplate.ACCOUNT_OPENED,
             NotificationTemplate.OTP_CODE,
             NotificationTemplate.WELCOME,
+            NotificationTemplate.SCA_APPROVAL,
         )
+        // SCA_APPROVAL is SECURITY so the #2 push-preference gate never suppresses it.
+        assertThat(NotificationTemplate.SCA_APPROVAL.category).isEqualTo(NotificationCategory.SECURITY)
     }
 
     @Test
