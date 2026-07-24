@@ -56,15 +56,16 @@ spec:
               value: http://alertmanager-operated.observability.svc:9093
             - name: TEMPORAL_NAMESPACE
               value: openbank-devops
-            # LLM diagnosis backend — DeepInfra (OpenAI-compatible), DeepSeek-V3.2: the same
-            # provider+model as the customer copilot (ADR-0089). Swap backend by changing these
-            # env vars only; no image rebuild.
+            # LLM diagnosis backend — routed through the in-cluster LiteLLM gateway (ADR-0174/0175),
+            # NOT api.deepinfra.com directly. The gateway holds the provider key and is the only pod
+            # allowed to egress to the US provider; this agent presents the LiteLLM virtual key. Model
+            # id is unchanged (the gateway maps it to deepinfra/deepseek). Swap backend at the gateway,
+            # not here.
             - name: DEVOPS_MODEL_ENDPOINT
-              value: https://api.deepinfra.com/v1/openai
+              value: http://litellm.ai-platform.svc:4000/v1
             - name: DEVOPS_MODEL_ID
               value: deepseek-ai/DeepSeek-V3.2
-            # DeepInfra API key, projected from OpenBao by ESO (devops-agent-secrets).
-            # Seed: bao kv patch openbank/devops-agent MODEL_API_KEY=<deepinfra-key>
+            # LiteLLM virtual key, projected from OpenBao by ESO (devops-agent-secrets → openbank/litellm).
             # Optional so an un-seeded key doesn't CrashLoop the pod — until set, diagnosis degrades.
             - name: DEVOPS_MODEL_API_KEY
               valueFrom:

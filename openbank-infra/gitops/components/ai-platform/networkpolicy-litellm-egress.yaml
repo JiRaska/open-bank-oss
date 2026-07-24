@@ -1,0 +1,40 @@
+# Egress lockdown for the LiteLLM gateway (ADR-0175 §4). This is the ONE workload permitted to leave
+# the cluster to a US LLM provider; every agent routes through it and (in a follow-up) is default-deny
+# egress except to this Service, so the DeepInfra key and prompt egress have a single choke point.
+#
+# Hand-written and DELIBERATELY named networkpolicy-*.yaml (not network-policies.yaml) so
+# gen-network-policies.py — which owns/overwrites network-policies.yaml and emits INGRESS only —
+# never clobbers it (ADR-0081). LiteLLM's INGRESS allow-list (from the repointed agents' .svc URLs)
+# is generator-owned; this file is egress-only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: litellm-egress
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/part-of: ai-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: litellm
+  policyTypes:
+    - Egress
+  egress:
+    # DNS resolution.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # The deliberate internet hole: HTTPS to the LLM provider (DeepInfra). This is the only pod in
+    # the fleet with 0.0.0.0/0:443 egress — the whole point of centralising the choke point here.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443

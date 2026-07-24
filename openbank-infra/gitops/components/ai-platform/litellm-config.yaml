@@ -1,0 +1,26 @@
+# LiteLLM proxy config (ADR-0174). The single egress choke point: every agent/copilot LLM call
+# routes through here, and only this pod is allowed to leave the cluster to the provider (ADR-0175,
+# networkpolicy-litellm-egress.yaml). Model name is kept identical to what the agents already send
+# (deepseek-ai/DeepSeek-V3.2) so repointing them is an endpoint change only.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: ai-platform
+data:
+  config.yaml: |
+    model_list:
+      - model_name: deepseek-ai/DeepSeek-V3.2
+        litellm_params:
+          model: deepinfra/deepseek-ai/DeepSeek-V3.2
+          api_key: os.environ/DEEPINFRA_API_KEY
+    general_settings:
+      # Callers authenticate to LiteLLM with this virtual key (projected from OpenBao), NOT with the
+      # upstream provider key — so the DeepInfra key lives only here, never in an agent pod (ADR-0175).
+      master_key: os.environ/LITELLM_MASTER_KEY
+    litellm_settings:
+      # Fail fast to the caller's deterministic fallback rather than hanging an agent's Temporal
+      # activity; the agents already treat a null/again response as "no model".
+      request_timeout: 60
+      drop_params: true
+      telemetry: false
