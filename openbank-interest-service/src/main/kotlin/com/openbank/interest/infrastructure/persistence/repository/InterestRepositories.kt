@@ -6,8 +6,12 @@ package com.openbank.interest.infrastructure.persistence.repository
 
 import com.openbank.interest.application.port.out.*
 import com.openbank.interest.domain.model.*
+import com.openbank.interest.domain.tax.TaxProfile
 import com.openbank.interest.domain.tax.WithholdingTax
-import com.openbank.interest.infrastructure.persistence.entity.*
+import com.openbank.interest.infrastructure.persistence.entity.InterestAccrualEntity
+import com.openbank.interest.infrastructure.persistence.entity.InterestCapitalizationEntity
+import com.openbank.interest.infrastructure.persistence.entity.InterestOutboxEntity
+import com.openbank.interest.infrastructure.persistence.entity.InterestRateConfigEntity
 import com.openbank.interest.infrastructure.persistence.mapper.InterestMapper
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
@@ -159,13 +163,23 @@ class InterestAccrualRepositoryImpl @Inject constructor(
         }.map { it.map(mapper::toDomain) }
 
     // Own transaction, committed BEFORE the ledger post: the claim must survive a crash, or the
-    // retry would re-derive a different accrual set and diverge from the journal already booked.
-    @WithTransaction override fun claimForCapitalization(accrualIds: List<UUID>, periodTo: LocalDate): Uni<Unit> =
+    // retry would re-derive a different accrual set — or a different tax profile (#1355) — and diverge
+    // from the journal already booked. The resolved [profile] is frozen here alongside the period.
+    @WithTransaction
+    override fun claimForCapitalization(accrualIds: List<UUID>, periodTo: LocalDate, profile: TaxProfile): Uni<Unit> =
         sf.withTransaction { s ->
             s.createMutationQuery(
-                "UPDATE InterestAccrualEntity SET status = 'CAPITALIZING', claimedPeriodTo = :t " +
+                "UPDATE InterestAccrualEntity SET status = 'CAPITALIZING', claimedPeriodTo = :t, " +
+                    "claimedTaxpayerType = :tt, claimedResidency = :res, claimedTreatyRate = :tr, " +
+                    "claimedNonCooperatingState = :ncs, claimedExemptCode = :ec " +
                     "WHERE id IN :ids AND status = 'ACCRUING'",
-            ).setParameter("t", periodTo).setParameter("ids", accrualIds).executeUpdate()
+            ).setParameter("t", periodTo)
+                .setParameter("tt", profile.taxpayerType)
+                .setParameter("res", profile.residency)
+                .setParameter("tr", profile.treatyRate)
+                .setParameter("ncs", profile.nonCooperatingState)
+                .setParameter("ec", profile.exemptCode)
+                .setParameter("ids", accrualIds).executeUpdate()
                 .flatMap { claimed ->
                     if (claimed != accrualIds.size) {
                         Uni.createFrom().failure(

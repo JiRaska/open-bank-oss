@@ -58,6 +58,19 @@ money-path service, not adjacent.
 
 ## 6. Change log
 
+- **2026-07-24** — Freeze the tax profile at claim time (issue #1355). `capitalize()`'s claim froze the
+  accrual SET (gross) before the ledger post but re-called `taxProfilePort.resolve(accountId)` fresh on
+  every attempt, including retries. The ledger idempotency key is amount-blind, so a retry after a
+  crashed post replays the ORIGINAL journal (P1's amounts) while the withholding row was recomputed from
+  a freshly-resolved profile (P2 if the account's tax attributes changed in between) — a row-vs-GL
+  divergence on the **tax** axis (the same class #1316 fixed for gross). Dormant today only because
+  `DefaultTaxProfileProvider` returns a constant; the account→party tax-attribute fast-follow would make
+  it reachable. Fix: the resolved profile is now snapshotted with the claim (V13, five nullable columns
+  on `interest_accruals`) and a retry replays it instead of re-resolving; a claim already in flight at
+  deploy carries no snapshot and safely falls back to a fresh resolve while resolution is constant. No
+  new trust boundary or external caller — an internal correctness hardening of an existing money path;
+  a fabricated profile change cannot move money, only make a retry recompute from the frozen inputs.
+  Rollback: revert the commit + V13 (reverts to re-resolving on retry, the pre-#1355 behaviour).
 - **2026-07-24** — Bind currency to the rate config (issue #1265). Previously nothing tied a currency
   to `InterestRateConfig`, and `interest_accruals.currency` defaulted to `'EUR'` while the seeded
   product is CZK, so an account could accumulate a mixed-currency ACCRUING set (the scheduler reads

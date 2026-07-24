@@ -5,6 +5,8 @@
 package com.openbank.interest.infrastructure.persistence.entity
 
 import com.openbank.interest.domain.model.*
+import com.openbank.interest.domain.tax.TaxResidency
+import com.openbank.interest.domain.tax.TaxpayerType
 import com.openbank.interest.domain.tax.WithholdingRemittanceStatus
 import com.openbank.interest.domain.tax.WithholdingTaxStatus
 import com.openbank.interest.domain.tax.WithholdingTreatment
@@ -108,6 +110,25 @@ class InterestAccrualEntity : PanacheEntityBase() {
 
     @Column(name = "claimed_period_to")
     var claimedPeriodTo: LocalDate? = null
+
+    // Tax profile frozen at claim time (issue #1355) — replayed on a capitalize() retry so the
+    // withholding row matches the ledger journal the interrupted attempt idempotently replays.
+    @Column(name = "claimed_taxpayer_type")
+    @Enumerated(EnumType.STRING)
+    var claimedTaxpayerType: TaxpayerType? = null
+
+    @Column(name = "claimed_residency")
+    @Enumerated(EnumType.STRING)
+    var claimedResidency: TaxResidency? = null
+
+    @Column(name = "claimed_treaty_rate", precision = 6, scale = 4)
+    var claimedTreatyRate: BigDecimal? = null
+
+    @Column(name = "claimed_non_cooperating_state")
+    var claimedNonCooperatingState: Boolean? = null
+
+    @Column(name = "claimed_exempt_code")
+    var claimedExemptCode: String? = null
 
     @Column(name = "capitalized_at")
     var capitalizedAt: OffsetDateTime? = null

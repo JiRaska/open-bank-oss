@@ -24,6 +24,8 @@ import com.openbank.interest.domain.model.InterestRateConfig
 import com.openbank.interest.domain.model.InterestRateType
 import com.openbank.interest.domain.model.RateConfigNotFoundException
 import com.openbank.interest.domain.tax.TaxProfile
+import com.openbank.interest.domain.tax.TaxResidency
+import com.openbank.interest.domain.tax.TaxpayerType
 import com.openbank.interest.domain.tax.WithholdingTax
 import com.openbank.interest.domain.tax.WithholdingTreatment
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -78,6 +80,7 @@ class InterestServiceTest {
     /** Captures the ACCRUING -> CAPITALIZING claim the use case takes before it posts. */
     private val claimIdsSlot: CapturingSlot<List<UUID>> = slot()
     private val claimPeriodSlot: CapturingSlot<LocalDate> = slot()
+    private val claimProfileSlot: CapturingSlot<TaxProfile> = slot()
 
     /**
      * The default world: nothing is CAPITALIZING, so capitalize() takes a fresh ACCRUING set and
@@ -87,7 +90,11 @@ class InterestServiceTest {
     private fun stubNoClaimOutstanding() {
         every { accrualRepo.findClaimedForCapitalization(any(), any()) } returns Uni.createFrom().item(emptyList())
         every {
-            accrualRepo.claimForCapitalization(capture(claimIdsSlot), capture(claimPeriodSlot))
+            accrualRepo.claimForCapitalization(
+                capture(claimIdsSlot),
+                capture(claimPeriodSlot),
+                capture(claimProfileSlot),
+            )
         } returns Uni.createFrom().item(Unit)
     }
 
@@ -442,7 +449,7 @@ class InterestServiceTest {
         // them). Failing here leaves the accruals CAPITALIZING — claimed, so the retry re-derives
         // the identical amount and key, and simply completes.
         verify(exactly = 0) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
-        verify(exactly = 1) { accrualRepo.claimForCapitalization(accruals.map { it.id }, toDate) }
+        verify(exactly = 1) { accrualRepo.claimForCapitalization(accruals.map { it.id }, toDate, any()) }
     }
 
     @Test
@@ -489,7 +496,7 @@ class InterestServiceTest {
         // Nothing is credited, nothing is withheld, and the accruals stay ACCRUING for an operator:
         // the currency check runs BEFORE the claim, so there is nothing to unwind.
         verify(exactly = 0) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
-        verify(exactly = 0) { accrualRepo.claimForCapitalization(any(), any()) }
+        verify(exactly = 0) { accrualRepo.claimForCapitalization(any(), any(), any()) }
         verify(exactly = 0) { taxProfilePort.resolve(any()) }
     }
 
@@ -552,12 +559,14 @@ class InterestServiceTest {
         // ledger is told about must be frozen before it is told. Claiming after the post would
         // leave the same window open.
         verifyOrder {
-            accrualRepo.claimForCapitalization(any(), any())
+            accrualRepo.claimForCapitalization(any(), any(), any())
             ledgerPostingPort.post(any())
             capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any())
         }
         assertThat(claimIdsSlot.captured).containsExactlyElementsOf(accruals.map { it.id })
         assertThat(claimPeriodSlot.captured).isEqualTo(toDate)
+        // #1355: the claim also freezes the resolved tax profile, so a later retry replays it.
+        assertThat(claimProfileSlot.captured).isEqualTo(TaxProfile.FAIL_SAFE_DEFAULT)
     }
 
     @Test
@@ -589,9 +598,42 @@ class InterestServiceTest {
         // stays ACCRUING and falls into the next period — which is the correct answer.
         verify(exactly = 0) { accrualRepo.findPendingCapitalization(any(), any(), any()) }
         // Already claimed: re-claiming would trip the ACCRUING guard and wedge the recovery.
-        verify(exactly = 0) { accrualRepo.claimForCapitalization(any(), any()) }
+        verify(exactly = 0) { accrualRepo.claimForCapitalization(any(), any(), any()) }
         // ...and the credit still completes. A claimed set is never a wedge.
         verify(exactly = 1) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a retry replays the tax profile frozen at claim, not a freshly resolved one (issue #1355)`() {
+        // #1355: capitalize() froze the accrual set (gross) at claim but re-resolved the tax profile on
+        // every attempt. If the account's tax attributes changed between a crashed post and the retry,
+        // the ledger idempotently replayed the ORIGINAL journal while the withholding row was recomputed
+        // from the NEW profile — GL and row disagreeing on the tax split. The claim now snapshots the
+        // profile; the retry must recompute from THAT, never a fresh resolve.
+        val accountId = UUID.fromString("15151515-1515-1515-1515-151515151515")
+        val productId = "SAVINGS_CZK"
+        val toDate = LocalDate.of(2026, 1, 20)
+        // Profile frozen at claim (attempt 1): a legal entity — interest is NOT withheld (§36).
+        val frozen = TaxProfile(TaxpayerType.LEGAL_ENTITY, TaxResidency.RESIDENT)
+        val claimed = listOf(
+            sampleAccrual(accountId, productId, LocalDate.of(2026, 1, 18), BigDecimal("100.00"), currency = "CZK")
+                .copy(status = AccrualStatus.CAPITALIZING, claimedPeriodTo = toDate, claimedTaxProfile = frozen),
+        )
+        // resolve(any()) returns FAIL_SAFE_DEFAULT — an INDIVIDUAL, 15 % WITHHELD: the "changed" profile.
+        stubCapitalization()
+        every { accrualRepo.findClaimedForCapitalization(accountId, productId) } returns
+            Uni.createFrom().item(claimed)
+
+        service.capitalize(accountId, productId, toDate).await().indefinitely()
+
+        // Uses the FROZEN legal-entity profile: NOT_WITHHELD, zero tax, net == gross. Had it re-resolved,
+        // it would have withheld 15 (the individual default) — the exact row-vs-GL divergence #1355 closes.
+        assertThat(whtSlot.captured.treatment).isEqualTo(WithholdingTreatment.NOT_WITHHELD)
+        assertThat(whtSlot.captured.taxAmount).isEqualByComparingTo(BigDecimal.ZERO)
+        assertThat(capSlot.captured.taxAmount).isEqualByComparingTo(BigDecimal.ZERO)
+        assertThat(capSlot.captured.netAmount).isEqualByComparingTo(BigDecimal("100"))
+        // The freeze, proven directly: a retry never re-resolves the profile.
+        verify(exactly = 0) { taxProfilePort.resolve(any()) }
     }
 
     @Test
@@ -644,7 +686,7 @@ class InterestServiceTest {
         // accruals must stay claimable so an operator can fix the rate and re-run.
         verify(exactly = 0) { ledgerPostingPort.post(any()) }
         verify(exactly = 0) { capitalizationRepo.saveWithOutbox(any(), any(), any(), any(), any()) }
-        verify(exactly = 0) { accrualRepo.claimForCapitalization(any(), any()) }
+        verify(exactly = 0) { accrualRepo.claimForCapitalization(any(), any(), any()) }
         verify(exactly = 0) { taxProfilePort.resolve(any()) }
     }
 
