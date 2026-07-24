@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: OpenBank MCP Server
+  version: 1.0.0
+  description: >
+    Model Context Protocol (JSON-RPC 2.0 over HTTP POST) exposing curated consent-scoped read tools
+    and a HITL payment proposal to governed AI agents (ADR-0181). Every tools/call is authorized by
+    the ADR-0034 OPA PDP as an AI_AGENT principal.
+paths:
+  /mcp:
+    post:
+      summary: MCP JSON-RPC endpoint (initialize, tools/list, tools/call, ping)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jsonrpc: { type: string, example: "2.0" }
+                id: {}
+                method: { type: string, example: tools/list }
+                params: { type: object }
+      responses:
+        "200":
+          description: JSON-RPC response
+          content:
+            application/json:
+              schema:
+                type: object

@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only.
+dataDomain: payments
+primaryDatastore: none
+dataLineageRole: consumer
+dataClassification: confidential
+# Phase 1 holds no state (tools delegate to other services; proposals are a stub). When phase 2
+# adds a maker-checker proposal store, set primaryDatastore/schemaName + a 13-month retention.
+retentionPolicy: not applicable
+evidenceExported: false

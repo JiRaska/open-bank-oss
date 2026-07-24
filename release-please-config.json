@@ -247,6 +247,12 @@
         "openbank-lending-service/src/test"
       ]
     },
+    "openbank-mcp-service": {
+      "component": "mcp-service",
+      "exclude-paths": [
+        "openbank-mcp-service/src/test"
+      ]
+    },
     "openbank-notification-service": {
       "component": "notification-service",
       "exclude-paths": [
