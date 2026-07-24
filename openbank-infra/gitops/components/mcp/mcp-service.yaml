@@ -1,0 +1,105 @@
+# openbank-mcp-service: the first-party Model Context Protocol server (ADR-0181). A
+# stateless JSON-RPC surface (initialize / tools/list / tools/call / ping) exposing a
+# curated, consent-scoped tool set to governed AI agents. No DB, no Kafka.
+#
+# PHASE 1 DEPLOY (ADR-0181): the protocol surface (initialize / tools/list) runs live;
+# `tools/call` is authorized by the shared ADR-0034 PDP and FAILS CLOSED here because no
+# OPA sidecar is deployed yet — every tool call is denied until the sidecar + agents.yaml
+# charter land (deliberate: deploying the protocol surface first keeps the OPA-bundle
+# blast radius out of this change). OIDC is tenant-disabled in the image config, so the
+# endpoint carries no auth in phase 1 and the only caller is the in-cluster network
+# (fenced by the generated NetworkPolicy).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-service
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: mcp-service
+    app.kubernetes.io/part-of: platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mcp-service
+        app.kubernetes.io/part-of: platform
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mcp-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-mcp-service:sandbox-c04790d2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8150
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            # ADR-0034 PDP. No sidecar in phase 1 → this localhost target is unreachable and
+            # every tools/call fails CLOSED (the intended posture). The sidecar is a follow-up.
+            - name: OPA_URL
+              value: http://localhost:8181
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://tempo.observability.svc:4317
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-service
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: mcp-service
+spec:
+  selector:
+    app.kubernetes.io/name: mcp-service
+  ports:
+    - name: http
+      port: 8150
+      targetPort: http
