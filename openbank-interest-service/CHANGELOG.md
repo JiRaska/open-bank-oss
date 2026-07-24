@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.14.0...interest-service-v0.14.1) (2026-07-24)
+
+
+### Bug Fixes
+
+* **interest:** bind currency to the rate config so a mixed-currency accrual set can't wedge capitalize ([#2037](https://github.com/JiRaska/open-bank-oss/issues/2037)) ([72ebcf2](https://github.com/JiRaska/open-bank-oss/commit/72ebcf22a1c533e746aa5d325c1127ccad089892)), closes [#1265](https://github.com/JiRaska/open-bank-oss/issues/1265)
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.13.0...interest-service-v0.14.0) (2026-07-23)
 
 
