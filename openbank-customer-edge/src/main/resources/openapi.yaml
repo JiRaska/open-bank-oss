@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.18.0
+  version: 1.19.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -31,8 +31,48 @@ tags:
   - name: WebAuthn
   - name: Documents
   - name: Preferences
+  - name: Feedback
 
 paths:
+  /feedback:
+    post:
+      tags: [Feedback]
+      summary: Submit in-app screen feedback, optionally with a screenshot (ADR-0192)
+      description: >-
+        Screen-scoped product feedback from the app's global feedback rail. The screenshot is
+        user-initiated and explicitly confirmed on-device before sending; the edge validates it by
+        PNG signature, stores it in object storage under a 90-day lifecycle rule, and publishes only
+        METADATA plus the object key to `openbank.feedback.events` — the image never enters the
+        event stream or the warehouse. The party is taken from the bearer token, never the body.
+
+        Best-effort by design: a well-formed submission always answers 202, even if the screenshot
+        write failed (the event then records the failure and the comment is still delivered).
+        Quota: 10 submissions per party per hour, on top of the global per-party request limit.
+      operationId: submitFeedback
+      security:
+        - customerOidc: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedbackSubmission'
+      responses:
+        '202':
+          description: Feedback accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackAccepted'
+        '400':
+          description: Malformed body, unknown category, bad screenId, non-base64 or non-PNG screenshot
+        '403':
+          description: Token carries no usable party identity
+        '413':
+          description: Request body too large, or screenshot larger than 2 MB decoded
+        '429':
+          description: Per-party hourly feedback quota exceeded
+
   /preferences/theme:
     get:
       tags: [Preferences]
@@ -1377,6 +1417,48 @@ components:
         email:
           type: string
           format: email
+
+    FeedbackSubmission:
+      type: object
+      required: [screenId, category]
+      description: >-
+        `comment` and `screenshotPngBase64` are individually optional but at least one must be
+        present — an empty submission carries no signal.
+      properties:
+        screenId:
+          type: string
+          maxLength: 64
+          pattern: '^[A-Za-z0-9._/-]{1,64}$'
+          description: Nav route the feedback is about (e.g. `home`, `payments/new`), not free text.
+          example: payments/new
+        category:
+          type: string
+          enum: [BUG, IDEA, CONFUSING]
+        comment:
+          type: string
+          maxLength: 2000
+          description: Free-text user comment. Personal data — retained per the ADR-0192 GDPR terms.
+        platform:
+          type: string
+          enum: [ios, android]
+        appVersion:
+          type: string
+          maxLength: 32
+        screenshotPngBase64:
+          type: string
+          format: byte
+          description: >-
+            Optional base64 PNG, max 2 MB decoded. Validated by PNG signature, not by field name.
+            Stored in object storage (SSE, 90-day lifecycle); only its key travels onward.
+
+    FeedbackAccepted:
+      type: object
+      required: [reference]
+      properties:
+        reference:
+          type: string
+          description: Support-quotable handle for this submission.
+          example: FB-3F9A21C0B7D4
 
     OnboardingFunnelEvent:
       type: object

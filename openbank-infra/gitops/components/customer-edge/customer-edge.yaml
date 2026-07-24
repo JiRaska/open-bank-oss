@@ -212,6 +212,16 @@ spec:
             # ADR-0034: OPA sidecar is live, flip advisory→enforce (D4→D5 complete).
             - name: AUTHZ_ENFORCE
               value: "true"
+            # ADR-0192 screen feedback: bucket the confirmed screenshots are written to via the
+            # shared ObjectStorePort. The 90-day expiry lifecycle rule, SSE settings and the EKS
+            # Pod Identity association that gives this pod s3:PutObject are TERRAFORM concerns
+            # (sandbox-platform), not manifest ones. Until they exist the put fails and the
+            # submission is still recorded with screenshotStatus=STORE_FAILED — visible on
+            # gold_screen_feedback_screenshot_health and the FeedbackScreenshotStoreFailing alert.
+            - name: OBJECTSTORE_S3_BUCKET
+              value: openbank-feedback-sandbox
+            - name: OBJECTSTORE_S3_REGION
+              value: eu-north-1
             # Redis: nearby-pay payment sessions (ADR-0087) + WebAuthn RP challenge/
             # credential store (ADR-0066 F2). In-namespace ephemeral Redis (redis.yaml).
             - name: QUARKUS_REDIS_HOSTS

@@ -65,3 +65,33 @@ spec:
           annotations:
             summary: "High drop-off between consent and signature"
             description: "More than 40% of prospects who accepted the terms in the last 6h never reached the signature screen — a funnel leak between account creation and signing. Inspect the admin onboarding conversion board."
+    # ADR-0192 screen feedback. Both alerts watch the DELIVERY of a user's report, not its content:
+    # feedback is user-initiated, so a dropped submission is a lost user report, not a lost sample.
+    - name: openbank.screen.feedback
+      rules:
+        - alert: FeedbackScreenshotStoreFailing
+          # Screenshots are being promised by the app and not landing in object storage. In sandbox
+          # the usual cause is that the bucket / EKS Pod Identity association was never provisioned
+          # (Terraform, sandbox-platform) — the comment survives, the image does not.
+          expr: |
+            sum(increase(feedback_submissions_total{screenshot_status="STORE_FAILED"}[1h])) >= 3
+          for: 15m
+          labels:
+            severity: warning
+            service: customer-edge
+          annotations:
+            summary: "Feedback screenshots are not reaching object storage"
+            description: "{{ $value }} feedback submissions in the last hour recorded screenshotStatus=STORE_FAILED. Check the feedback bucket, its lifecycle rule and the pod's s3:PutObject permission."
+        - alert: FeedbackEmitFailing
+          # The Kafka produce itself is failing — the whole submission (comment included) never
+          # reaches analytics-sink. Missing/expired Write ACL on openbank.feedback.events is the
+          # first thing to check: that exact gap silently hung the sepa-instant and swift submits.
+          expr: |
+            sum(increase(feedback_emit_failures_total[15m])) > 0
+          for: 10m
+          labels:
+            severity: warning
+            service: customer-edge
+          annotations:
+            summary: "Screen-feedback events are not reaching Kafka"
+            description: "customer-edge failed to publish {{ $value }} feedback events in the last 15 minutes. Check the openbank.feedback.events topic and the customer-edge KafkaUser Write ACL."
