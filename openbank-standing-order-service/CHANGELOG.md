@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.14.0...standing-order-service-v0.14.1) (2026-07-24)
+
+
+### Bug Fixes
+
+* **standing-order:** merge instead of persist so cancel/pause don't 500 ([#2079](https://github.com/JiRaska/open-bank-oss/issues/2079)) ([5f8c233](https://github.com/JiRaska/open-bank-oss/commit/5f8c23327d5054f8ec4227ea66fe4c42cea7cd3f)), closes [#2077](https://github.com/JiRaska/open-bank-oss/issues/2077)
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.13.1...standing-order-service-v0.14.0) (2026-07-24)
 
 
