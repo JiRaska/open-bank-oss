@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.10.0...sca-service-v0.11.0) (2026-07-24)
+
+
+### Features
+
+* **sca:** send a real approval push on challenge initiate ([#2026](https://github.com/JiRaska/open-bank-oss/issues/2026)) ([f53c527](https://github.com/JiRaska/open-bank-oss/commit/f53c52733722b684e838d317fc29981185dc0f20)), closes [#2025](https://github.com/JiRaska/open-bank-oss/issues/2025)
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.9.1...sca-service-v0.10.0) (2026-07-23)
 
 
