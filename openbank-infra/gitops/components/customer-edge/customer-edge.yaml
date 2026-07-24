@@ -3,6 +3,20 @@
 # ownership, proxies an allow-listed route set. Deny-by-default.
 # Progressive delivery via Argo Rollout (ADR-0098 Phase 4): canary 10 %→30 % with
 # Prometheus error-rate / p95-latency analysis before full promotion.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: customer-edge
+  namespace: customer-edge
+  labels:
+    app.kubernetes.io/name: customer-edge
+    app.kubernetes.io/part-of: customer-edge
+  annotations:
+    # Sync-wave -1: the SA must exist before the Rollout that references it, otherwise
+    # the first sync creates pods that fall back to `default` and never pick up the
+    # EKS Pod Identity credentials.
+    argocd.argoproj.io/sync-wave: "-1"
+---
 apiVersion: argoproj.io/v1alpha1
 kind: Rollout
 metadata:
@@ -53,6 +67,11 @@ spec:
         # Kept in sync by gen-customer-edge-opa-bundle.sh (do not hand-edit).
         openbank.tech/policy-checksum: "3f4eee07f47dc3ba"
     spec:
+      # Dedicated SA so EKS Pod Identity can hand the edge (and ONLY the edge) the
+      # feedback-screenshots S3 role — ADR-0192, openbank-infra/aws/envs/sandbox-platform/
+      # feedback-screenshots.tf. Running as `default` would either lose the credentials
+      # entirely or, if associated, hand them to Redis and the OPA sidecar too.
+      serviceAccountName: customer-edge
       securityContext:
         runAsNonRoot: true
         runAsUser: 100
@@ -213,13 +232,14 @@ spec:
             - name: AUTHZ_ENFORCE
               value: "true"
             # ADR-0192 screen feedback: bucket the confirmed screenshots are written to via the
-            # shared ObjectStorePort. The 90-day expiry lifecycle rule, SSE settings and the EKS
-            # Pod Identity association that gives this pod s3:PutObject are TERRAFORM concerns
-            # (sandbox-platform), not manifest ones. Until they exist the put fails and the
-            # submission is still recorded with screenshotStatus=STORE_FAILED — visible on
-            # gold_screen_feedback_screenshot_health and the FeedbackScreenshotStoreFailing alert.
+            # shared ObjectStorePort. The bucket itself, its 90-day expiry lifecycle rule, the SSE
+            # settings and the EKS Pod Identity association granting s3:PutObject are Terraform,
+            # not manifest: openbank-infra/aws/envs/sandbox-platform/feedback-screenshots.tf.
+            # The name below MUST match "${local.cluster_name}-feedback" there. If it drifts, the
+            # put fails and the submission is still recorded with screenshotStatus=STORE_FAILED —
+            # visible on gold_screen_feedback_screenshot_health and FeedbackScreenshotStoreFailing.
             - name: OBJECTSTORE_S3_BUCKET
-              value: openbank-feedback-sandbox
+              value: openbank-sandbox-feedback
             - name: OBJECTSTORE_S3_REGION
               value: eu-north-1
             # Redis: nearby-pay payment sessions (ADR-0087) + WebAuthn RP challenge/
