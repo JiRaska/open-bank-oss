@@ -64,16 +64,20 @@ spec:
             # Sandbox model: DeepInfra (OpenAI-compatible API), DeepSeek-V3.2 — fast, cheap (~$0.27/M),
             # no rate-limit issues on paid tier. Switch backends by updating COPILOT_MODEL_ENDPOINT +
             # model IDs only; no image rebuild.
-            # HOSTED (off-cluster) — sandbox/synthetic data only; production must pin to in-cluster/EU (D6).
+            # Routed through the in-cluster LiteLLM gateway (ADR-0174/0175), which now IS deployed
+            # (openbank-infra/gitops/components/ai-platform) and is the ONLY pod allowed to egress to
+            # the US provider (networkpolicy-litellm-egress.yaml). copilot presents the LiteLLM virtual
+            # key, not the DeepInfra key. Model id unchanged — litellm-config maps it to
+            # deepinfra/deepseek-ai/DeepSeek-V3.2, so this is an endpoint + key change only (#1919).
             - name: COPILOT_MODEL_ENDPOINT
-              value: https://api.deepinfra.com/v1/openai
+              value: http://litellm.ai-platform.svc:4000/v1
             - name: COPILOT_DEFAULT_MODEL
               value: deepseek-ai/DeepSeek-V3.2
             - name: COPILOT_MODEL_ID
               value: deepseek-ai/DeepSeek-V3.2
-            # DeepInfra API key, projected from OpenBao by ESO (copilot-service-secrets).
-            # Seed: bao kv patch openbank/copilot-service MODEL_API_KEY=<deepinfra-key>
-            # Optional so an un-seeded key doesn't CrashLoop the pod — until it's set model call degrades.
+            # LiteLLM virtual key, projected from OpenBao (litellm/LITELLM_MASTER_KEY) by ESO — the
+            # provider key now lives only in ai-platform (ADR-0175). Optional so an un-seeded key does
+            # not CrashLoop the pod — until it is set the model call degrades.
             - name: COPILOT_MODEL_API_KEY
               valueFrom:
                 secretKeyRef:

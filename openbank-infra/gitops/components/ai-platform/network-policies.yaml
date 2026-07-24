@@ -59,6 +59,9 @@ spec:
               kubernetes.io/metadata.name: governance-auditor
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: platform
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: release-steward
         - namespaceSelector:
             matchLabels:
