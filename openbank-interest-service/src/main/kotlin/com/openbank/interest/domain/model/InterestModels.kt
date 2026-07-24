@@ -4,6 +4,7 @@
 
 package com.openbank.interest.domain.model
 
+import com.openbank.interest.domain.tax.TaxProfile
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -31,6 +32,10 @@ data class InterestRateConfig(
      *  product-level default (accountId == null). Lets a specific customer be granted interest on an
      *  otherwise non-interest-bearing account (e.g. a CURRENT account, which defaults to 0). */
     val accountId: UUID? = null,
+    /** The currency this rate applies to. Rates are currency-specific — a CZK savings rate is not an
+     *  EUR one — so resolution is (account/product, currency)-specific and an account can only accrue
+     *  in a currency it has a rate config for (issue #1265). */
+    val currency: String,
     val rateType: InterestRateType = InterestRateType.FIXED,
     val annualRate: BigDecimal,
     val minBalance: BigDecimal = BigDecimal.ZERO,
@@ -64,6 +69,17 @@ data class InterestAccrual(
      * already have booked.
      */
     val claimedPeriodTo: LocalDate? = null,
+    /**
+     * The tax profile resolved and frozen when this accrual went `CAPITALIZING`, and null otherwise
+     * (also null for any claim already in flight when #1355's snapshot columns were added).
+     *
+     * It freezes the withholding computation the same way [claimedPeriodTo] freezes the accrual set:
+     * a `capitalize()` retry after a crashed ledger post replays the ORIGINAL journal (the idempotency
+     * key is amount-blind), so the withholding row it commits must recompute from the SAME profile —
+     * not a freshly-resolved one that may have changed. `capitalizeSet` reads this on retry instead of
+     * calling `TaxProfilePort.resolve` again (issue #1355). Falls back to a fresh resolve when null.
+     */
+    val claimedTaxProfile: TaxProfile? = null,
     val capitalizedAt: OffsetDateTime? = null,
     val createdAt: OffsetDateTime,
 )

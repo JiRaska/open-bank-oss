@@ -14,6 +14,7 @@ import com.openbank.customeredge.infrastructure.cnb.CnbBanksClient
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboarding
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboardingStore
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.logging.Log
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.PermitAll
@@ -84,6 +85,7 @@ class CustomerEdgeResource(
     private val audit: EdgeAuditPublisher,
     private val sessions: PaymentSessionStore,
     private val banksClient: CnbBanksClient,
+    private val themePrefs: ThemePreferenceStore,
     private val clock: Clock,
 ) {
 
@@ -493,6 +495,48 @@ class CustomerEdgeResource(
         val out = objectMapper.createArrayNode()
         arr.forEach { m -> out.add(projectMandate(m)) }
         return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * Authorise a NEW SEPA Direct Debit mandate on one of the caller's OWN accounts (#6). The app
+     * supplies the creditor (name + SEPA creditor id) + scheme; the edge forces the debtor side
+     * from the JWT party (debtor IBAN from the owned account, debtor name from party-service) and
+     * mints the UMR + signature date, so a customer can never authorise a debit against someone
+     * else's account or under a forged debtor identity.
+     */
+    @POST
+    @Path("/sdd/mandates")
+    @Authorize(action = "customer.sdd.update", resource = "")
+    @Blocking
+    @Suppress("MagicNumber") // 20-char UMR suffix from a UUID; a named const adds no clarity here
+    fun createSddMandate(body: String): Response {
+        val customer = customer()
+        val node = runCatching { objectMapper.readTree(body) }.getOrNull() ?: return badRequest("Malformed body")
+        val accountId = node.get("accountId")?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return badRequest("Missing accountId")
+        val accountJson = fetchAccount(accountId, customer.partyId)
+            ?: return forbidden("Account does not belong to caller")
+        if (extractOwnerPartyId(accountJson) != customer.partyId.toString()) {
+            return forbidden("Account does not belong to caller")
+        }
+        val creditorName = node.get("creditorName")?.asText()?.takeIf { it.isNotBlank() }
+            ?: return badRequest("Missing creditorName")
+        val creditorId = node.get("creditorIdentifier")?.asText()?.takeIf { it.isNotBlank() }
+            ?: return badRequest("Missing creditorIdentifier")
+        val debtorIban = extractTextField(objectMapper, accountJson, "accountNumber")
+            ?: return badRequest("Account IBAN unavailable")
+        val debtorName = fetchPartyLegalName(customer.partyId) ?: "OpenBank Customer"
+        val req = objectMapper.createObjectNode()
+        req.put("accountId", accountId.toString())
+        req.put("debtorIban", debtorIban)
+        req.put("creditorIdentifier", creditorId)
+        req.put("umr", "UMR-" + Ids.randomId().toString().replace("-", "").take(20).uppercase())
+        req.put("scheme", node.get("scheme")?.asText() ?: "CORE")
+        req.put("sequenceType", node.get("sequenceType")?.asText() ?: "RCUR")
+        req.put("creditorName", creditorName)
+        req.put("debtorName", debtorName)
+        req.put("signatureDate", java.time.LocalDate.now(clock).toString())
+        return upstream.post("$sddServiceUrl/api/v1/sdd/mandates", customer.partyId.toString(), req.toString())
     }
 
     /** Cancel a SEPA Direct Debit mandate the caller owns (terminal — no more collections). */
@@ -2029,6 +2073,40 @@ class CustomerEdgeResource(
         )
     }
 
+    // --- Theme preferences (ADR-0190) — edge-local, party-keyed, roams the app look ---
+
+    /** The caller's stored ThemeSpec, 404 when none. Party is taken from the JWT, never the client. */
+    @GET
+    @Path("/preferences/theme")
+    @Authorize(action = "customer.preferences.theme.read", resource = "")
+    @Blocking
+    fun getThemePreference(): Response {
+        val spec = themePrefs.get(customer().partyId)
+            ?: return Response.status(Response.Status.NOT_FOUND).build()
+        return Response.ok(spec).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * Store the caller's ThemeSpec. The edge only gates shape (valid JSON object, size cap) —
+     * the deterministic guardrail validation runs on-device on every read (ADR-0190 §3), so a
+     * hand-crafted spec can never render an illegible or spoofed UI.
+     */
+    @PUT
+    @Path("/preferences/theme")
+    @Authorize(action = "customer.preferences.theme.update", resource = "")
+    @Blocking
+    fun setThemePreference(body: String): Response {
+        if (body.length > THEME_SPEC_MAX_BYTES) {
+            return Response.status(Response.Status.REQUEST_ENTITY_TOO_LARGE).build()
+        }
+        val node = runCatching { objectMapper.readTree(body) }.getOrNull()
+        if (node == null || !node.isObject) {
+            return Response.status(Response.Status.BAD_REQUEST).build()
+        }
+        themePrefs.put(customer().partyId, node.toString())
+        return Response.noContent().build()
+    }
+
     // --- SCA device enrollment (ADR-0021) ---
 
     @POST
@@ -2873,6 +2951,10 @@ class CustomerEdgeResource(
         parseCreditorAccount(raw) ?: czechIbanToBban(raw)
 
     companion object {
+        // A ThemeSpec is a small token document; 8 KiB leaves headroom for future fields
+        // while keeping Redis abuse-proof (ADR-0190).
+        private const val THEME_SPEC_MAX_BYTES = 8 * 1024
+
         // Decimal scale for the FX mid-price projected to the app (rate = (bid+ask)/2).
         private const val FX_RATE_SCALE = 6
 

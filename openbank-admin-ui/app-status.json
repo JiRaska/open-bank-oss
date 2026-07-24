@@ -12,14 +12,15 @@
   "asOf": "2026-06-08",
   "appRepo": "JiRaska/openbank-app",
   "derived": {
-    "version": "0.2.0",
+    "version": "0.4.0",
     "useFakeData": false,
     "edgeBaseUrl": "https://customer.open-bank.tech",
     "keycloakIssuer": "https://kc.open-bank.tech/realms/openbank-customers",
     "oauthClientId": "openbank-app",
     "oauthScopes": [
       "openid",
-      "profile"
+      "profile",
+      "offline_access"
     ],
     "certPinningConfigured": true,
     "certPinningActive": true,
@@ -99,7 +100,8 @@
       "gap": {
         "cs": "Celý řetězec je zapojen: SendScreen → createDomesticPayment (edge /domestic-payments) → initiateChallenge (edge /sca/challenges) → biometrické schválení podepsané device klíčem (dynamic linking, RTS Art. 5). Biometrické potvrzení se ověřuje na fyzickém zařízení.",
         "en": "The full chain is wired: SendScreen → createDomesticPayment (edge /domestic-payments) → initiateChallenge (edge /sca/challenges) → biometric approval signed by the device key (dynamic linking, RTS Art. 5). The biometric confirmation is verified on a physical device."
-      }
+      },
+      "derivedStatus": "live"
     },
     {
       "id": "keycloak-realm",
@@ -136,7 +138,8 @@
       "gap": {
         "cs": "Kompletní Authorization Code + PKCE flow ve sdíleném AuthService (commonMain, unit-testováno): S256 challenge, state proti CSRF, OIDC nonce, výměna kódu, persistnce tokenů s expirací, proaktivní refresh (refresh_token) a RP-initiated logout. Platformy dodávají jen systémový prohlížeč (ASWebAuthenticationSession / Custom Tabs + redirect Activity). Zbývá: ověření na fyzickém zařízení (deeplink round-trip).",
         "en": "Complete Authorization Code + PKCE flow in the shared AuthService (commonMain, unit-tested): S256 challenge, CSRF state, OIDC nonce, code exchange, token persistence with expiry, proactive refresh (refresh_token) and RP-initiated logout. Platforms contribute only the system browser (ASWebAuthenticationSession / Custom Tabs + redirect Activity). Remaining: on-device verification of the deeplink round-trip."
-      }
+      },
+      "derivedStatus": "live"
     },
     {
       "id": "credential-storage",
@@ -154,7 +157,8 @@
       "gap": {
         "cs": "Android: tokeny šifrované AES-256-GCM klíčem v AndroidKeyStore (StrongBox fallback) — už ne in-memory. iOS: tokeny v Keychain (WhenUnlockedThisDeviceOnly). Zbývající mezera: iOS PIN může degradovat na nešifrovaný NSUserDefaults, když selže Keychain bridge (zpevnění ADR-0073).",
         "en": "Android: tokens encrypted with an AES-256-GCM key in AndroidKeyStore (StrongBox fallback) — no longer in-memory. iOS: tokens in the Keychain (WhenUnlockedThisDeviceOnly). Residual gap: the iOS PIN can degrade to unencrypted NSUserDefaults if the Keychain bridge fails (hardening tracked by ADR-0073)."
-      }
+      },
+      "derivedStatus": "live"
     },
     {
       "id": "sca-device-key",
@@ -172,7 +176,8 @@
       "gap": {
         "cs": "iOS: Secure Enclave (P-256, gated biometrikou). Android: P-256 v AndroidKeyStore (StrongBox/TEE), ECDSA podpis, export X.509 SPKI — už ne stub. Zbývá: per-signature biometrika (zatím per-key-creation, F2).",
         "en": "iOS: Secure Enclave (P-256, biometric-gated). Android: P-256 in AndroidKeyStore (StrongBox/TEE), ECDSA signing, X.509 SPKI export — no longer a stub. Remaining: per-signature biometrics (currently per-key-creation, F2)."
-      }
+      },
+      "derivedStatus": "live"
     },
     {
       "id": "tls-pinning",
@@ -183,14 +188,15 @@
       "lens": [
         "security"
       ],
-      "status": "partial",
+      "status": "live",
       "adr": [
         "ADR-0066"
       ],
       "gap": {
-        "cs": "SPKI pinning je implementován, ale produkční hashe nejsou nastaveny (PINNED_SPKI_HASHES je prázdné), takže pinning je v sandboxu vypnutý (ADR-0066-S3).",
-        "en": "SPKI pinning is implemented but production hashes are not set (PINNED_SPKI_HASHES is empty), so pinning is disabled in sandbox (ADR-0066-S3)."
-      }
+        "cs": "SPKI pinning je aktivní: PINNED_SPKI_HASHES obsahuje produkční piny pro všechny hosty (customer.open-bank.tech, kc.open-bank.tech, rum.open-bank.tech) a useFakeData=false, takže CERT_PINNING_ENABLED=true. Zbytkový provozní úkol: piny jsou hardcoded, takže je nutné je aktualizovat při rotaci certifikátů (zmírněno cert-manager private-key-rotation-policy: Never na ingressu; cross-host backup pin dle RFC 7469 §2.1.3).",
+        "en": "SPKI pinning is active: PINNED_SPKI_HASHES holds production pins for all hosts (customer.open-bank.tech, kc.open-bank.tech, rum.open-bank.tech) and useFakeData=false, so CERT_PINNING_ENABLED=true. Residual operational task: pins are hardcoded and must be updated on cert rotation (mitigated by cert-manager private-key-rotation-policy: Never on the ingress; cross-host backup pin per RFC 7469 §2.1.3)."
+      },
+      "derivedStatus": "live"
     },
     {
       "id": "diagnostics",
@@ -207,9 +213,10 @@
         "ADR-0070"
       ],
       "gap": {
-        "cs": "Vrstva je postavená pro debug buildy (7-tap logo → DebugMenu, čte živé /api/v1/info bez PII). Zbývá: build-time split místo runtime gate (cíl ADR-0070) a F2 integrace — feature flags, network tracing, session claims, SCA historie.",
-        "en": "The surface is built for debug builds (7-tap logo → DebugMenu, reads the live /api/v1/info with no PII). Remaining: a build-time split instead of a runtime gate (the ADR-0070 target) and the F2 integrations — feature flags, network tracing, session claims, SCA history."
-      }
+        "cs": "Phase 1 dokončena (ADR-0070 Accepted): DebugGate (Android BuildConfig.DEBUG / iOS Platform.isDebugBinary), 7-tap debugTrigger, DebugMenu s panelem build-info (živé /api/v1/info bez PII). Zbývá F2: feature flags (EvaluationReason), network tracing (X-Correlation-ID), session claims, SCA metadata; a build-time source-set split místo runtime gate.",
+        "en": "Phase 1 complete (ADR-0070 Accepted): DebugGate (Android BuildConfig.DEBUG / iOS Platform.isDebugBinary), 7-tap debugTrigger, DebugMenu with build-info panel (live /api/v1/info, no PII). Remaining F2: feature flags (EvaluationReason), network tracing (X-Correlation-ID), session claims, SCA metadata; and a build-time source-set split instead of a runtime gate."
+      },
+      "derivedStatus": "partial"
     },
     {
       "id": "crash-monitoring",
@@ -271,8 +278,8 @@
   "summary": {
     "total": 13,
     "byStatus": {
-      "live": 9,
-      "partial": 3,
+      "live": 10,
+      "partial": 2,
       "planned": 1
     },
     "decisionMissing": []

@@ -5,9 +5,14 @@
 package com.openbank.interest.infrastructure.persistence.mapper
 
 import com.openbank.interest.domain.model.*
+import com.openbank.interest.domain.tax.TaxProfile
 import com.openbank.interest.domain.tax.WithholdingRemittance
 import com.openbank.interest.domain.tax.WithholdingTax
-import com.openbank.interest.infrastructure.persistence.entity.*
+import com.openbank.interest.infrastructure.persistence.entity.InterestAccrualEntity
+import com.openbank.interest.infrastructure.persistence.entity.InterestCapitalizationEntity
+import com.openbank.interest.infrastructure.persistence.entity.InterestRateConfigEntity
+import com.openbank.interest.infrastructure.persistence.entity.WithholdingRemittanceEntity
+import com.openbank.interest.infrastructure.persistence.entity.WithholdingTaxEntity
 import jakarta.enterprise.context.ApplicationScoped
 
 @ApplicationScoped
@@ -16,6 +21,7 @@ class InterestMapper {
         it.id = c.id
         it.productId = c.productId
         it.accountId = c.accountId
+        it.currency = c.currency
         it.rateType = c.rateType
         it.annualRate = c.annualRate
         it.minBalance = c.minBalance
@@ -28,7 +34,7 @@ class InterestMapper {
         it.updatedAt = c.updatedAt
     }
     fun toDomain(e: InterestRateConfigEntity) = InterestRateConfig(
-        id = e.id, productId = e.productId, accountId = e.accountId, rateType = e.rateType,
+        id = e.id, productId = e.productId, accountId = e.accountId, currency = e.currency, rateType = e.rateType,
         annualRate = e.annualRate, minBalance = e.minBalance, maxBalance = e.maxBalance,
         dayCount = e.dayCount, effectiveFrom = e.effectiveFrom, effectiveTo = e.effectiveTo,
         active = e.active, createdAt = e.createdAt, updatedAt = e.updatedAt,
@@ -45,6 +51,13 @@ class InterestMapper {
         it.currency = a.currency
         it.status = a.status
         it.claimedPeriodTo = a.claimedPeriodTo
+        a.claimedTaxProfile?.let { p ->
+            it.claimedTaxpayerType = p.taxpayerType
+            it.claimedResidency = p.residency
+            it.claimedTreatyRate = p.treatyRate
+            it.claimedNonCooperatingState = p.nonCooperatingState
+            it.claimedExemptCode = p.exemptCode
+        }
         it.capitalizedAt = a.capitalizedAt
         it.createdAt = a.createdAt
     }
@@ -53,6 +66,17 @@ class InterestMapper {
         configId = e.configId, accrualDate = e.accrualDate, balance = e.balance,
         dailyRate = e.dailyRate, accruedAmount = e.accruedAmount, currency = e.currency,
         status = e.status, claimedPeriodTo = e.claimedPeriodTo,
+        // Reassemble the profile snapshot; taxpayer_type is the discriminator (all five written
+        // together at claim, so residency is non-null whenever taxpayer_type is) — #1355.
+        claimedTaxProfile = e.claimedTaxpayerType?.let { tt ->
+            TaxProfile(
+                taxpayerType = tt,
+                residency = e.claimedResidency!!,
+                treatyRate = e.claimedTreatyRate,
+                nonCooperatingState = e.claimedNonCooperatingState ?: false,
+                exemptCode = e.claimedExemptCode,
+            )
+        },
         capitalizedAt = e.capitalizedAt, createdAt = e.createdAt,
     )
     fun toEntity(c: InterestCapitalization) = InterestCapitalizationEntity().also {

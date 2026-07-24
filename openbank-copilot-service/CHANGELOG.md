@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.6.0...copilot-service-v0.7.0) (2026-07-24)
+
+
+### Features
+
+* **theme:** edge theme prefs + copilot theme designer (ADR-0191) ([#2076](https://github.com/JiRaska/open-bank-oss/issues/2076)) ([91b9ac7](https://github.com/JiRaska/open-bank-oss/commit/91b9ac77238214e1363bec87b5f932dfd9becb42))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.5.3...copilot-service-v0.6.0) (2026-07-19)
 
 
