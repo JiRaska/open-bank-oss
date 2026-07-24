@@ -316,7 +316,10 @@ data:
             step = 'SIGN',      6,
             99)                                                     AS step_ordinal,
         uniqExactIf(session_id, action = 'STEP_VIEWED')             AS sessions_viewed,
-        uniqExactIf(session_id, action = 'STEP_COMPLETED')          AS sessions_completed,
+        -- The SIGN step never emits STEP_COMPLETED — its terminal success signal is SIGN_SUCCESS
+        -- (a signature can fail, unlike the earlier steps' unconditional completion). Count that as the
+        -- SIGN step's completion so a signed agreement shows as "completed" in the funnel / conversion.
+        uniqExactIf(session_id, action = 'STEP_COMPLETED' OR (step = 'SIGN' AND action = 'SIGN_SUCCESS')) AS sessions_completed,
         uniqExactIf(session_id, action = 'HOLD_ABANDONED')          AS hold_abandons
     FROM openbank_analytics.gold_onboarding_funnel_events
     GROUP BY day, step;
