@@ -37,6 +37,17 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # Decoupled/push SCA (#4): sca-service emits a "payment to approve" push request onto
+      # openbank.notification.requests (notification-requests-out channel). That topic IS
+      # ACL-locked (account-service writes it, notification-service reads it), so the
+      # allow.everyone.if.no.acl.found fallback does NOT apply here — an explicit Write grant is
+      # required or every emit fails with TOPIC_AUTHORIZATION_FAILED.
+      - resource:
+          type: topic
+          name: openbank.notification.requests
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
 ---
 # Keystore projection: Strimzi User Operator writes the per-user keystore Secret
 # in `messaging`; ESO projects it into `sca` for pod volume mount.

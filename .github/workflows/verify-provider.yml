@@ -1,0 +1,30 @@
+# Re-verify + re-publish ONE provider's pact verification on demand (ADR-0092, #2039).
+#
+# WHY: a main-push provider verification only republishes as part of the full-fleet run, which
+# saturates the 6-runner ARC pool and can wedge for hours (#1208/#2039) — so a merged pact/contract
+# fix (e.g. #2030's swift status vocab) may sit unverified behind the queue. This dispatches a SINGLE
+# provider's build+verify on the ARC pool (broker access), turning a ~30-job wedge into one ~5-min
+# job. Same reusable workflow, same publish path (github.ref==main ⇒ PUBLISH_RESULTS=true).
+#
+# Maintainer-triggered only (workflow_dispatch). Runs on main. No new runners, no full-fleet.
+name: Verify one provider
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Provider service dir, e.g. openbank-swift-service"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify:
+    uses: ./.github/workflows/_service-ci.yml
+    with:
+      service: ${{ inputs.service }}
+    secrets:
+      PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
