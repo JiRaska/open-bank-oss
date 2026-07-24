@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-platform
+  labels:
+    app.kubernetes.io/part-of: openbank
+    openbank.io/component: ai-platform
+    # PSS-restricted: this namespace runs the ONE workload allowed to egress to a US LLM provider
+    # (ADR-0175), so it is held to the strictest pod-security baseline.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
