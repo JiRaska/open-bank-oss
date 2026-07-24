@@ -1,0 +1,28 @@
+quarkus:
+  application:
+    name: openbank-ap2-service
+  http:
+    port: 8151
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+  oidc:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://keycloak.iam.svc:8080/realms/openbank}
+    # Phase 1: OIDC present for health; the OAuth 2.1 agent-token binding is phase 2.
+    tenant-enabled: false
+  smallrye-openapi:
+    info-title: OpenBank AP2 Mandate Verifier
+    info-version: "1.0.0"
+
+# OPA PDP (ADR-0034). Phase 1: no sidecar deployed yet, so the default localhost:8181 fails closed
+# (every verify denied) until the gitops component ships the sidecar (deploy follow-up).
+opa:
+  url: ${OPA_URL:http://localhost:8181}
+  path: ${OPA_PATH:/v1/data/openbank/rest/allow}
+  timeout-ms: 500
+
+# AP2 issuer trust list (phase 1). Semicolon-separated `issuer=<x509-spki-base64>` pairs. Empty =
+# no trusted issuer, so every mandate fails signature-stage closed until issuers are configured.
+ap2:
+  trust-list: ${AP2_TRUST_LIST:}

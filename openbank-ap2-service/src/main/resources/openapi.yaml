@@ -1,0 +1,59 @@
+openapi: 3.0.3
+info:
+  title: OpenBank AP2 Mandate Verifier
+  version: 1.0.0
+  description: >
+    Bank-side verification of AP2 (Agent Payments Protocol) signed mandates as an
+    authorization-evidence type (ADR-0193). Verifies the mandate's signature chain and its
+    constraints (payee, amount cap, currency, expiry) against a presented payment. Moves no funds.
+    Every call is authorized by the ADR-0034 OPA PDP as an AI_AGENT principal.
+paths:
+  /ap2/verify:
+    post:
+      summary: Verify a presented AP2 mandate against a payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mandate, payment]
+              properties:
+                mandate:
+                  type: object
+                  required: [kind, issuer, subject, constraints, signingInput, signatureB64, algorithm]
+                  properties:
+                    kind: { type: string, enum: [INTENT, CART, PAYMENT] }
+                    issuer: { type: string }
+                    subject: { type: string }
+                    algorithm: { type: string, enum: [ES256, ED25519] }
+                    signingInput: { type: string }
+                    signatureB64: { type: string }
+                    constraints:
+                      type: object
+                      properties:
+                        payee: { type: string }
+                        amountCapMinor: { type: integer, format: int64 }
+                        currency: { type: string }
+                        expiresAt: { type: string, format: date-time }
+                        singleUse: { type: boolean }
+                payment:
+                  type: object
+                  properties:
+                    payee: { type: string }
+                    amountMinor: { type: integer, format: int64 }
+                    currency: { type: string }
+                    at: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Verdict (valid + evidence + failures)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean }
+                  failures: { type: array, items: { type: string } }
+                  evidence: { type: object }
+        "403": { description: Denied by policy }
+        "503": { description: Authorization unavailable (PDP outage — fail closed) }

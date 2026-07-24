@@ -91,6 +91,12 @@
         "openbank-anacredit-service/src/test"
       ]
     },
+    "openbank-ap2-service": {
+      "component": "ap2-service",
+      "exclude-paths": [
+        "openbank-ap2-service/src/test"
+      ]
+    },
     "openbank-audit-service": {
       "component": "audit-service",
       "exclude-paths": [
