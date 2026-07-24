@@ -1655,6 +1655,10 @@ spec:
       labels:
         app.kubernetes.io/name: standing-order-service
         app.kubernetes.io/part-of: payments
+      annotations:
+        # Rolls the pod when the OPA bundle changes (ADR-0034). Value is stamped by
+        # gen-standing-order-opa-bundle.sh — do not hand-edit.
+        openbank.tech/policy-checksum: "baac3cc1ae4a929f" # standing-order-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1727,6 +1731,13 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # OPA sidecar bootstrap (ADR-0034 Phase 5, issue #1797). Advisory mode first
+            # (AUTHZ_ENFORCE=false, @Authorize logs "would DENY" without blocking) — matches every
+            # other service's rollout convention. Before this the pod inherited the libs default
+            # enforce=true with NO sidecar, so standingOrder.pause failed closed on an unreachable
+            # PDP. Flip to true only after an observation window with a clean advisory report.
+            - name: AUTHZ_ENFORCE
+              value: "false"
           startupProbe:
             tcpSocket:
               port: management
@@ -1766,6 +1777,77 @@ spec:
             limits:
               cpu: "1"
               memory: 640Mi
+        # OPA policy-decision sidecar (ADR-0034, issue #1797 bootstrap). Serves
+        # data.openbank.rest.allow for standingOrder.pause (the service's only @Authorize
+        # endpoint). Bundle mounted from standing-order-opa-bundle ConfigMap
+        # (gen-standing-order-opa-bundle.sh).
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: standing-order-opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: standing-order-opa-bundle
+              mountPath: /bundle/standing_order_rest_ext.rego
+              subPath: standing_order_rest_ext.rego
+              readOnly: true
+            - name: standing-order-opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: standing-order-opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: standing-order-opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: standing-order-opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: tmp
           emptyDir: {}
@@ -1775,6 +1857,11 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
+        - name: opa-tmp
+          emptyDir: {}
+        - name: standing-order-opa-bundle
+          configMap:
+            name: standing-order-opa-bundle
 ---
 apiVersion: v1
 kind: Service
