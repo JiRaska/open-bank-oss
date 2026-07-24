@@ -62,6 +62,9 @@ read_only_tools := {
 	"get_fx_rates",
 	"get_scheduled_payments",
 	"search_help",
+	# design_theme (ADR-0191): no money, no server state — returns a ThemeSpec the app
+	# persists via the edge and re-validates on-device; safe for any authenticated customer.
+	"design_theme",
 }
 
 # Proposal tools (create ProposalToken, require SCA confirm).
