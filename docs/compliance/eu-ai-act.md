@@ -57,6 +57,29 @@ a high-risk system (credit decisioning) ships. What is open is the article-by-ar
 > substance and tracked here in advance. The first `HIGH-RISK` row that appears in the
 > inventory above (via a new/changed charter) flips every status to APPLIES NOW.
 
+## LLM provider egress (Art. 10 / GDPR data governance)
+
+The agents above call a large language model. This maps the **as-built** egress path
+(`agents.yaml: model_gateway_as_built`), which governs where prompt content actually
+goes today — distinct from `model_gateway_target`, the ADR-0031 D6 decision that is
+not deployed.
+
+| Property | As-built value | AI Act / GDPR bearing |
+|---|---|---|
+| Gateway / egress choke point | `none` | No single point to enforce residency, redaction, or an egress NetworkPolicy. |
+| Hosted (external) provider(s) | `deepinfra` | Prompt content leaves the platform trust boundary — Art. 10 data governance applies. |
+| Sensitive-data routing | `none` | No routing separates sensitive from non-sensitive prompt data. |
+| Budgets enforced at | `charter` | Cost control only — not a data-governance control. |
+| Fallback | `none` | Single provider; on failure the agent degrades to a deterministic path. |
+
+> ⚠ **Open gap (Art. 10 / GDPR).** A hosted external provider is in use with no
+> gateway and no sensitive-data routing, so prompt content egresses with no enforced
+> residency or redaction control. This is the platform's most material AI-egress
+> exposure and would block any high-risk (Annex III) deployment. Residency, DPA, and
+> the synthetic-data licence position are recorded in **ADR-0175**; the shared egress
+> seam that gives this path a single choke point landed in #2018, with the fleet
+> repoint tracked as its follow-up. Until that lands, treat LLM egress as un-enforced.
+
 ## Provenance
 
 - Source: `openbank-libs/governance/agents.yaml` (sha256 `ed696e5fef5274f0…`, 13 charters)
