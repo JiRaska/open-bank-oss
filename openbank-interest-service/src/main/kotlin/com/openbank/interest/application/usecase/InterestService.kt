@@ -7,6 +7,7 @@ package com.openbank.interest.application.usecase
 import com.openbank.interest.application.port.`in`.*
 import com.openbank.interest.application.port.out.*
 import com.openbank.interest.domain.model.*
+import com.openbank.interest.domain.tax.TaxProfile
 import com.openbank.interest.domain.tax.WithholdingTax
 import com.openbank.interest.domain.tax.WithholdingTaxPolicy
 import com.openbank.libs.domain.money.CurrencyCode
@@ -71,32 +72,34 @@ class InterestService(
     private val log = Logger.getLogger(InterestService::class.java)
 
     override fun accrue(request: AccrualRequest): Uni<InterestAccrual> =
-        configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate).flatMap { config ->
-            if (config == null) {
-                Uni.createFrom().failure(
-                    IllegalStateException("No active rate config for product ${request.productId}"),
-                )
-            } else {
-                val divisor = when (config.dayCount) {
-                    DayCount.ACT_360 -> BigDecimal(360)
-                    else -> BigDecimal(365)
+        configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate, request.currency)
+            .flatMap { config ->
+                if (config == null) {
+                    // Fails closed: no rate for this (account/product, currency) — see #1265. 422, not 500.
+                    Uni.createFrom().failure(
+                        RateConfigNotFoundException(request.productId, request.currency),
+                    )
+                } else {
+                    val divisor = when (config.dayCount) {
+                        DayCount.ACT_360 -> BigDecimal(360)
+                        else -> BigDecimal(365)
+                    }
+                    val dailyRate = config.annualRate.divide(divisor, 10, RoundingMode.HALF_UP)
+                    val accruedAmount = request.balance.multiply(dailyRate).setScale(6, RoundingMode.HALF_UP)
+                    val accrual = InterestAccrual(
+                        accountId = request.accountId,
+                        productId = request.productId,
+                        configId = config.id,
+                        accrualDate = request.accrualDate,
+                        balance = request.balance,
+                        dailyRate = dailyRate,
+                        accruedAmount = accruedAmount,
+                        currency = request.currency,
+                        createdAt = OffsetDateTime.now(clock),
+                    )
+                    accrualRepo.save(accrual)
                 }
-                val dailyRate = config.annualRate.divide(divisor, 10, RoundingMode.HALF_UP)
-                val accruedAmount = request.balance.multiply(dailyRate).setScale(6, RoundingMode.HALF_UP)
-                val accrual = InterestAccrual(
-                    accountId = request.accountId,
-                    productId = request.productId,
-                    configId = config.id,
-                    accrualDate = request.accrualDate,
-                    balance = request.balance,
-                    dailyRate = dailyRate,
-                    accruedAmount = accruedAmount,
-                    currency = request.currency,
-                    createdAt = OffsetDateTime.now(clock),
-                )
-                accrualRepo.save(accrual)
             }
-        }
 
     /**
      * The daily accrual run: discover every ACTIVE interest-bearing account fleet-wide (paged via
@@ -245,13 +248,18 @@ class InterestService(
      * them would also withhold against the wrong base. There is no safe guess, so refuse loudly and
      * leave every accrual `ACCRUING`.
      *
-     * NOTE (issue #1265): this refusal is permanent as shipped. Nothing binds a currency to a
-     * product ([InterestRateConfig] has no currency field, and [AccrualStatus.REVERSED] /
-     * [AccrualStatus.SUSPENDED] have zero writers anywhere), so there is currently no operator
-     * or API path that can split, reverse, or otherwise unwedge the pending set once this fires.
-     * Do not tell a caller to "split the accruals" or "investigate" as if that were actionable —
-     * see #1265 for the options (currency on the product config, currency in the accrual unique
-     * key, or a guarded reversal endpoint) and get a decision before promising a way out here.
+     * NOTE (issue #1265): this is now a **defence-in-depth assertion, expected to be unreachable**.
+     * Two structural changes closed the path that used to feed it a mixed set: [InterestRateConfig]
+     * now carries a `currency` and `accrue` resolves a rate only in the accrual's own currency
+     * (an account can no longer accrue in a currency it has no rate for — it fails closed with
+     * [RateConfigNotFoundException]), and the `interest_accruals` UNIQUE key includes `currency`
+     * (V12), so two same-date rows in different currencies can never collapse into one capitalize
+     * set. It is kept — not deleted — because it is the last guard before money is posted, and a
+     * future writer for [AccrualStatus.REVERSED] / [AccrualStatus.SUSPENDED], a manual DB edit, or a
+     * data migration could still fabricate a mixed set; better to refuse loudly than to sum
+     * incommensurable currencies. If it ever fires in practice, that is a real bug upstream, not an
+     * operator-actionable state — do not tell a caller to "split the accruals" as if that were a
+     * supported path.
      */
     private fun mixedCurrencyFailure(accountId: UUID, productId: String, currencies: List<String>) =
         IllegalStateException(
@@ -325,7 +333,9 @@ class InterestService(
         val periodFrom = accruals.minOf { it.accrualDate }
         val now = OffsetDateTime.now(clock)
         // ADR-0033: withhold at the credit (capitalization), crediting net; record the liability.
-        return taxProfilePort.resolve(accountId).flatMap { profile ->
+        // #1355: freeze the tax profile at claim time and replay it on retry (see [claimProfile]),
+        // so the withholding row a retry commits matches the journal the ledger idempotently replays.
+        return claimProfile(accountId, accruals, alreadyClaimed).flatMap { profile ->
             val tax = WithholdingTaxPolicy.compute(gross, ccy.code, profile, toDate)
             val net = tax.netAmount.setScale(ccy.defaultFractionDigits, RoundingMode.HALF_UP)
             val cap = InterestCapitalization(
@@ -354,7 +364,7 @@ class InterestService(
                 exemptCode = tax.exemptCode,
                 createdAt = now,
             )
-            claim(accruals, toDate, alreadyClaimed)
+            claim(accruals, toDate, alreadyClaimed, profile)
                 // Ledger SECOND, own rows THIRD (ADR-0033 §D) — see [postCreditLeg].
                 .flatMap { postCreditLeg(cap, ccy) }
                 .flatMap {
@@ -374,13 +384,42 @@ class InterestService(
         }
     }
 
-    /** Freezes the accrual set for [toDate]; a set recovered from a previous attempt is already frozen. */
-    private fun claim(accruals: List<InterestAccrual>, toDate: LocalDate, alreadyClaimed: Boolean): Uni<Unit> =
-        if (alreadyClaimed) {
-            Uni.createFrom().item(Unit)
-        } else {
-            accrualRepo.claimForCapitalization(accruals.map { it.id }, toDate)
-        }
+    /**
+     * The tax profile to withhold against for this capitalization.
+     *
+     * On a fresh set it is resolved now and (via [claim]) frozen with the claim. On a retry
+     * ([alreadyClaimed]) it is replayed from the snapshot frozen at claim time — NOT re-resolved —
+     * so a profile change between the crashed attempt and the retry cannot make the withholding row
+     * disagree with the journal the ledger idempotently replays (issue #1355). A claim already in
+     * flight before the snapshot columns existed carries none; those fall back to a fresh resolve,
+     * which is safe while resolution is constant.
+     */
+    private fun claimProfile(
+        accountId: UUID,
+        accruals: List<InterestAccrual>,
+        alreadyClaimed: Boolean,
+    ): Uni<TaxProfile> = if (alreadyClaimed) {
+        accruals.firstNotNullOfOrNull { it.claimedTaxProfile }
+            ?.let { Uni.createFrom().item(it) }
+            ?: taxProfilePort.resolve(accountId)
+    } else {
+        taxProfilePort.resolve(accountId)
+    }
+
+    /**
+     * Freezes the accrual set AND the resolved tax [profile] for [toDate]; a set recovered from a
+     * previous attempt is already frozen (both were committed by the interrupted attempt's claim).
+     */
+    private fun claim(
+        accruals: List<InterestAccrual>,
+        toDate: LocalDate,
+        alreadyClaimed: Boolean,
+        profile: TaxProfile,
+    ): Uni<Unit> = if (alreadyClaimed) {
+        Uni.createFrom().item(Unit)
+    } else {
+        accrualRepo.claimForCapitalization(accruals.map { it.id }, toDate, profile)
+    }
 
     /**
      * Posts the ADR-0033 §D split to the ledger — DEBIT interest expense (gross), CREDIT the

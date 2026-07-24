@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: copilot-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "e873cef5348f5401"
+    openbank.tech/policy-checksum: "570754ed994f56fc"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -446,6 +446,9 @@ data:
     	"get_fx_rates",
     	"get_scheduled_payments",
     	"search_help",
+    	# design_theme (ADR-0191): no money, no server state — returns a ThemeSpec the app
+    	# persists via the edge and re-validates on-device; safe for any authenticated customer.
+    	"design_theme",
     }
 
     # Proposal tools (create ProposalToken, require SCA confirm).

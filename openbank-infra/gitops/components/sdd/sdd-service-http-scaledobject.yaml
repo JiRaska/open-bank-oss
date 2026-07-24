@@ -60,7 +60,16 @@ spec:
     apiVersion: apps/v1
     port: 8129
   replicas:
-    min: 0
+    # min:1, NOT 0. The customer-edge calls sdd-service.sdd.svc:8129 DIRECTLY (see
+    # CustomerEdgeResource sddServiceUrl + this ns netpol), NOT through the KEDA HTTP
+    # interceptor — so at min:0 the interceptor never parks the request: the direct
+    # service simply has no endpoints and edge gets a ConnectException. The read path
+    # (GET /sdd/mandates) masked this with an empty-list fallback, but the new write
+    # path (POST /sdd/mandates, #6 mandate create) surfaced it as a 502 "upstream
+    # unavailable". Same class as card-issuance / interest-service; pin min:1 to keep a
+    # warm pod for the edge-facing SDD screen. The line-34 "interceptor parks the first
+    # request" premise is wrong for a direct (non-interceptor) caller.
+    min: 1
     max: 2
   scaledownPeriod: 300
   targetPendingRequests: 50

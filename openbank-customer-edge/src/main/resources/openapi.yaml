@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.17.0
+  version: 1.18.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -30,8 +30,49 @@ tags:
   - name: Onboarding
   - name: WebAuthn
   - name: Documents
+  - name: Preferences
 
 paths:
+  /preferences/theme:
+    get:
+      tags: [Preferences]
+      summary: The customer's stored app-appearance document (ThemeSpec, ADR-0190)
+      description: >-
+        Per-party ThemeSpec so the customer's look roams across devices. Stored
+        edge-locally (Redis, no upstream). The client re-validates every spec with
+        its deterministic guardrail before applying it.
+      operationId: getThemePreference
+      security:
+        - customerOidc: []
+      responses:
+        '200':
+          description: Stored ThemeSpec
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThemeSpec'
+        '404':
+          description: No theme stored for this party
+    put:
+      tags: [Preferences]
+      summary: Store the customer's ThemeSpec
+      operationId: setThemePreference
+      security:
+        - customerOidc: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ThemeSpec'
+      responses:
+        '204':
+          description: Stored
+        '400':
+          description: Body is not a JSON object
+        '413':
+          description: Body exceeds the 8 KiB spec cap
+
   /banks:
     get:
       tags: [Reference]
@@ -940,6 +981,52 @@ components:
     # customer-edge is a raw BFF proxy: each read endpoint returns the upstream service's
     # response body verbatim, so these schemas mirror the upstream DTOs inline (no cross-file
     # $ref). Kept field-for-field in step with the upstream openapi.yaml they mirror.
+
+    # Mirrors openbank-app shared ThemeSpec (ADR-0190). Forward-tolerant on both
+    # sides: unknown fields are ignored by the app decoder, and the edge stores the
+    # document verbatim after a shape check.
+    ThemeSpec:
+      type: object
+      properties:
+        version:
+          type: integer
+        name:
+          type: string
+        emoji:
+          type: string
+        accentH:
+          type: number
+          format: float
+        accentS:
+          type: number
+          format: float
+        accentL:
+          type: number
+          format: float
+        accentName:
+          type: string
+        mode:
+          type: string
+          enum: [light, dark, auto]
+        radiusScale:
+          type: number
+          format: float
+        compact:
+          type: boolean
+        reducedMotion:
+          type: boolean
+        fontPair:
+          type: string
+        fontScale:
+          type: number
+          format: float
+        surfaceTint:
+          type: number
+          format: float
+        decor:
+          type: string
+        promptHash:
+          type: string
 
     Pagination:
       type: object

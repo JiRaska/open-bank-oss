@@ -7,6 +7,7 @@ package com.openbank.interest.application.port.out
 import com.openbank.interest.domain.model.InterestAccrual
 import com.openbank.interest.domain.model.InterestCapitalization
 import com.openbank.interest.domain.model.InterestRateConfig
+import com.openbank.interest.domain.tax.TaxProfile
 import com.openbank.interest.domain.tax.WithholdingTax
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.smallrye.mutiny.Uni
@@ -29,7 +30,12 @@ interface InterestRateConfigRepository {
      * when neither exists — the account earns no interest (e.g. a plain CURRENT account, whose
      * product default is deactivated). This is what the accrual run and the app's rate view use.
      */
-    fun findEffectiveRate(accountId: UUID, productId: String, date: LocalDate): Uni<InterestRateConfig?>
+    fun findEffectiveRate(
+        accountId: UUID,
+        productId: String,
+        date: LocalDate,
+        currency: String? = null,
+    ): Uni<InterestRateConfig?>
     fun update(config: InterestRateConfig): Uni<InterestRateConfig>
 }
 
@@ -79,8 +85,12 @@ interface InterestAccrualRepository {
      *
      * Fails (and rolls back) unless every id flipped: a partial match means a concurrent run claimed
      * or capitalized some of them.
+     *
+     * [profile] is the tax profile resolved for this claim; it is frozen here alongside the period so a
+     * retry recomputes withholding from the same inputs the interrupted attempt used, not a fresh
+     * resolve that may have changed (issue #1355).
      */
-    fun claimForCapitalization(accrualIds: List<UUID>, periodTo: LocalDate): Uni<Unit>
+    fun claimForCapitalization(accrualIds: List<UUID>, periodTo: LocalDate, profile: TaxProfile): Uni<Unit>
 
     fun sumAccrued(accountId: UUID, from: LocalDate, to: LocalDate): Uni<BigDecimal>
 }
