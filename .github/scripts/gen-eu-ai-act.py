@@ -146,6 +146,48 @@ def main():
         w("> substance and tracked here in advance. The first `HIGH-RISK` row that appears in the")
         w("> inventory above (via a new/changed charter) flips every status to APPLIES NOW.")
     w("")
+
+    # --- LLM provider egress (Art. 10 / GDPR data governance) --------------------------------
+    # Derived from `model_gateway_as_built` — the block that describes the RUNNING system (not
+    # `model_gateway_target`, the undeployed decision). Prompt content that reaches a hosted
+    # provider with no gateway and no sensitive-data routing leaves the platform trust boundary;
+    # that is the most material open Art. 10 / GDPR exposure and must surface in this inventory,
+    # not stay buried in a comment. The residency / DPA / data-licence specifics live in ADR-0175
+    # (referenced, not restated here, so this section can never drift from that decision).
+    mg = data.get("model_gateway_as_built") or {}
+    if mg:
+        providers = mg.get("providers") or {}
+        hosted = [name for name, p in providers.items() if (p or {}).get("hosted")]
+        w("## LLM provider egress (Art. 10 / GDPR data governance)")
+        w("")
+        w("The agents above call a large language model. This maps the **as-built** egress path")
+        w("(`agents.yaml: model_gateway_as_built`), which governs where prompt content actually")
+        w("goes today — distinct from `model_gateway_target`, the ADR-0031 D6 decision that is")
+        w("not deployed.")
+        w("")
+        w("| Property | As-built value | AI Act / GDPR bearing |")
+        w("|---|---|---|")
+        w(f"| Gateway / egress choke point | `{mg.get('gateway', 'none')}` | "
+          "No single point to enforce residency, redaction, or an egress NetworkPolicy. |")
+        w(f"| Hosted (external) provider(s) | {', '.join('`'+h+'`' for h in hosted) or 'none'} | "
+          "Prompt content leaves the platform trust boundary — Art. 10 data governance applies. |")
+        w(f"| Sensitive-data routing | `{mg.get('routing', 'none')}` | "
+          "No routing separates sensitive from non-sensitive prompt data. |")
+        w(f"| Budgets enforced at | `{mg.get('budgets_enforced_at', 'n/a')}` | "
+          "Cost control only — not a data-governance control. |")
+        w(f"| Fallback | `{mg.get('fallback', 'none')}` | "
+          "Single provider; on failure the agent degrades to a deterministic path. |")
+        w("")
+        if hosted and mg.get("gateway", "none") == "none":
+            w("> ⚠ **Open gap (Art. 10 / GDPR).** A hosted external provider is in use with no")
+            w("> gateway and no sensitive-data routing, so prompt content egresses with no enforced")
+            w("> residency or redaction control. This is the platform's most material AI-egress")
+            w("> exposure and would block any high-risk (Annex III) deployment. Residency, DPA, and")
+            w("> the synthetic-data licence position are recorded in **ADR-0175**; the shared egress")
+            w("> seam that gives this path a single choke point landed in #2018, with the fleet")
+            w("> repoint tracked as its follow-up. Until that lands, treat LLM egress as un-enforced.")
+            w("")
+
     w("## Provenance")
     w("")
     src = AGENTS.read_bytes()
