@@ -46,6 +46,12 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
             }
             ScreeningDecision.CLEAR -> {
                 activities.validatePayment(paymentId)
+                // ADR-0084 §4.2 (SHADOW): score fraud on the payment that cleared screening and is
+                // proceeding — observed, never enforced, fail-open via the adapter. Issue #1917: the
+                // legacy DomesticPaymentService flow ran this after screening cleared; the workflow
+                // defined the activity but never invoked it, so making Temporal the sole orchestrator
+                // would have silently dropped shadow fraud scoring. Restored here.
+                activities.shadowFraudScore(paymentId)
                 val schemeStatus = activities.submitScheme(paymentId)
                 // ADR-0108: if scheme accepted (SENT_TO_CLEARING), book the funds.
                 if (schemeStatus == DomesticPaymentStatus.SENT_TO_CLEARING) {

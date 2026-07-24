@@ -145,6 +145,12 @@ mp:
       enabled: false
     devservices:
       enabled: false
+  openbank:
+    domestic:
+      # No real Temporal frontend in @QuarkusTest: don't register the worker (it would fail boot on
+      # UNAVAILABLE). Tests that need the workflow drive their own in-process TestWorkflowEnvironment.
+      worker:
+        enabled: false
 openbank:
   bank:
     bic: ${OPENBANK_BIC:OPBKCZ22}

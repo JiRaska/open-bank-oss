@@ -25,7 +25,8 @@ class TemporalClientProducer(
     private val meterRegistry: MeterRegistry,
 ) {
 
-    // Lazy so no TCP connection attempt happens when temporal.enabled=false.
+    // Lazy so no TCP connection attempt happens until the client is first used (e.g. tests that set
+    // openbank.domestic.worker.enabled=false and never dispatch a workflow never open a connection).
     private val client: WorkflowClient by lazy {
         val scope = RootScopeBuilder()
             .reporter(MicrometerClientStatsReporter(meterRegistry))
