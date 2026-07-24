@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.5](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.8.4...sepa-payment-v0.8.5) (2026-07-24)
+
+
+### Bug Fixes
+
+* **sepa:** invoke shadowFraudScore in the payment workflow (ADR-0120 Phase 6 prerequisite, [#1917](https://github.com/JiRaska/open-bank-oss/issues/1917)) ([#2068](https://github.com/JiRaska/open-bank-oss/issues/2068)) ([95f5ffc](https://github.com/JiRaska/open-bank-oss/commit/95f5ffcd9bd4e931d7d5725fe2e468a201b93c2d))
+* **sepa:** make Temporal the sole orchestrator, retire the legacy in-service flow (ADR-0120 Phase 6, [#1917](https://github.com/JiRaska/open-bank-oss/issues/1917) — 2/2) ([#2110](https://github.com/JiRaska/open-bank-oss/issues/2110)) ([81f981a](https://github.com/JiRaska/open-bank-oss/commit/81f981adafc8a979dc149a437289baa404ccd84a)), closes [#2068](https://github.com/JiRaska/open-bank-oss/issues/2068)
+
 ## [0.8.4](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.8.3...sepa-payment-v0.8.4) (2026-07-17)
 
 
