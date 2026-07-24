@@ -1,0 +1,34 @@
+# ArgoCD app for openbank-ap2-service (bank-side AP2 mandate verifier, ADR-0193).
+# Deploys the platform-ns Deployment+Service from components/ap2. Tracks main.
+# Phase 1: no OPA sidecar (/ap2/verify fails closed 503), no DB, no Kafka.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ap2
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/ap2
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
