@@ -85,16 +85,20 @@ grep -nE 'validationFailureAction|Audit|Enforce' \
 
 ---
 
-## 3. AI-Act evidence (forward reference)
+## 3. AI-Act evidence
 
 DORA and the EU AI Act overlap on AI-system governance for the four AI agent services
 (ADR-0031 / ADR-0136). The AI-Act-specific control mapping is **owned by a separate document**,
-`docs/compliance/eu-ai-act.md` (issue #1918), and is **not duplicated here**. When that document
-lands, this pack's AI-Act row is: *see [`docs/compliance/eu-ai-act.md`](./eu-ai-act.md)*.
+`docs/compliance/eu-ai-act.md` (ADR-0148, issue #1918), and is **not duplicated here**. This pack's
+AI-Act row is: *see [`docs/compliance/eu-ai-act.md`](./eu-ai-act.md)* — the AI-system inventory,
+Annex III classification, the Art. 9–15 obligation mapping, and the LLM prompt-egress gap. That
+document is **generated** from `openbank-libs/governance/agents.yaml` (`gen-eu-ai-act.py`) and
+drift-guarded by `check-eu-ai-act.sh`.
 
-Until then, the AI-governance substrate an auditor can already verify: agents-as-code + AI-attributed
-audit (ADR-0031), policy-gated MCP tool-calls via the shared OPA sidecar (ADR-0034), and agent
-charters as Markdown (ADR-0156).
+In addition, the AI-governance substrate an auditor can verify directly: agents-as-code +
+AI-attributed audit (ADR-0031), policy-gated MCP tool-calls via the shared OPA sidecar (ADR-0034),
+agent charters as Markdown (ADR-0156), and the versioned prompt registry with its integrity guard
+(`openbank-libs/governance/prompts/` + `check-prompt-registry.py`, ADR-0148).
 
 ---
 
