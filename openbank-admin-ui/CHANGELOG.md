@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.55.2...admin-ui-v0.55.3) (2026-07-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** onboarding funnel board — ClickHouse alias collision on sign_outcomes ([#2115](https://github.com/JiRaska/open-bank-oss/issues/2115)) ([37ab156](https://github.com/JiRaska/open-bank-oss/commit/37ab156672eddf7f0ad8d34b0c903b30fd2d62c7))
+
 ## [0.55.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.55.1...admin-ui-v0.55.2) (2026-07-24)
 
 
