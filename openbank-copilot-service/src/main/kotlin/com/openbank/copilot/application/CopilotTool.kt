@@ -5,8 +5,13 @@ package com.openbank.copilot.application
 
 import com.fasterxml.jackson.databind.JsonNode
 
-/** Result of running a tool. [isError] tells the loop the round failed (auth/connectivity/not-found). */
-data class ToolResult(val text: String, val isError: Boolean = false)
+/**
+ * Result of running a tool. [isError] tells the loop the round failed (auth/connectivity/not-found).
+ * [themeSpecJson] is set only by the theme-designer tool (ADR-0190): the normalized ThemeSpec the
+ * chat loop lifts onto the reply / stream sentinel so the app can apply it — it never rides the
+ * model-facing text.
+ */
+data class ToolResult(val text: String, val isError: Boolean = false, val themeSpecJson: String? = null)
 
 /**
  * A capability the assistant may invoke on the customer's behalf (ADR-0089). Phase-1 tools are

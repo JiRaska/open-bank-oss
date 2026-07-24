@@ -181,3 +181,14 @@ npm run test            # vitest run (includes the graceful-state guard)
 npx next build          # full production build
 npx eslint .            # lint
 ```
+
+- **Keep `package-lock.json` in sync — a drift breaks CI *fleet-wide*, not just admin-ui.** The
+  "Customer-app dossier" job runs `npm ci` here (it installs admin-ui for the YAML parser) on **every
+  repo PR**, and `npm ci` hard-fails on any lockfile drift: a missing transitive dep
+  (`Missing: react-is@17.0.2 from lock file`) or a stale top-level `version` that lags a
+  release-please `package.json` bump. It went red on every open PR on 2026-07-24 (#2040) and, being
+  advisory (not in the required set), silently masked real dossier failures. Fix: run `npm install`
+  in `openbank-admin-ui`, commit **only** `package-lock.json`. Any change to `package.json`
+  dependencies must commit the regenerated lockfile in the same PR. Existing PRs cut before the fix
+  stay red on their own stale lockfile until rebased/`gh pr update-branch`d — a re-run alone won't
+  clear it.

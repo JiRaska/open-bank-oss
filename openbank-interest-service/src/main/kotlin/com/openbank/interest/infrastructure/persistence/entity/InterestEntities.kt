@@ -37,6 +37,9 @@ class InterestRateConfigEntity : PanacheEntityBase() {
     @Column(name = "account_id", columnDefinition = "uuid")
     var accountId: UUID? = null
 
+    @Column(name = "currency", length = 3)
+    var currency: String = ""
+
     @Column(name = "rate_type")
     @Enumerated(EnumType.STRING)
     var rateType: InterestRateType = InterestRateType.FIXED

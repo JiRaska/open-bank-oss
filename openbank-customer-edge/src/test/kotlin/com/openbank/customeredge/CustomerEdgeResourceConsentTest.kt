@@ -29,6 +29,7 @@ class CustomerEdgeResourceConsentTest {
         mockk(relaxed = true),
         PaymentSessionStore(),
         mockk(relaxed = true),
+        mockk(relaxed = true),
         Clock.systemUTC(),
     ).apply {
         jwt = mockk {

@@ -326,6 +326,7 @@ class CapitalizationLedgerBoundaryIT {
         configRepo.save(
             InterestRateConfig(
                 productId = productId,
+                currency = "CZK",
                 annualRate = annualRate,
                 effectiveFrom = LocalDate.of(2026, 1, 1),
                 createdAt = OffsetDateTime.parse("2026-01-01T00:00:00Z"),

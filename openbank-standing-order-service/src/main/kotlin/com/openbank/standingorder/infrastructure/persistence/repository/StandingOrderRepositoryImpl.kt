@@ -28,7 +28,9 @@ class StandingOrderRepositoryImpl :
 
     override suspend fun save(order: StandingOrder): StandingOrder {
         val e = order.toEntity()
-        Panache.withTransaction { persist(e) }.awaitSuspending()
+        // Application-assigned @Id: persist() is INSERT-only and duplicate-keys on any update
+        // (pause/resume/cancel load an existing row). merge() upserts. See ADR-0126 D3 / #1521.
+        Panache.withTransaction { Panache.getSession().flatMap { it.merge(e) } }.awaitSuspending()
         return e.toDomain()
     }
     override suspend fun findById(id: UUID) =

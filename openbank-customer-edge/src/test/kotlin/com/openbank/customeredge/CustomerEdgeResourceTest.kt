@@ -36,6 +36,7 @@ class CustomerEdgeResourceTest {
         mockk(relaxed = true),
         PaymentSessionStore(),
         mockk(relaxed = true),
+        mockk(relaxed = true),
         Clock.systemUTC(),
     ).apply {
         jwt = mockk {
@@ -682,6 +683,7 @@ class CustomerEdgeResourceTest {
         mockk(relaxed = true),
         store,
         mockk(relaxed = true),
+        mockk(relaxed = true),
         Clock.systemUTC(),
     ).apply {
         jwt = mockk {
@@ -940,6 +942,7 @@ class CustomerEdgeResourceTest {
             mockk(relaxed = true),
             PaymentSessionStore(),
             mockk(relaxed = true),
+            mockk(relaxed = true),
             Clock.systemUTC(),
         ).apply {
             jwt = mockk {
@@ -976,6 +979,7 @@ class CustomerEdgeResourceTest {
             mockk(relaxed = true),
             PaymentSessionStore(),
             mockk(relaxed = true),
+            mockk(relaxed = true),
             Clock.systemUTC(),
         ).apply {
             jwt = mockk {
@@ -1011,6 +1015,7 @@ class CustomerEdgeResourceTest {
             mockk(relaxed = true),
             PaymentSessionStore(),
             mockk(relaxed = true),
+            mockk(relaxed = true),
             Clock.systemUTC(),
         ).apply {
             jwt = mockk {
@@ -1041,6 +1046,7 @@ class CustomerEdgeResourceTest {
             upstream,
             mockk(relaxed = true),
             PaymentSessionStore(),
+            mockk(relaxed = true),
             mockk(relaxed = true),
             Clock.systemUTC(),
         ).apply {
@@ -1171,6 +1177,7 @@ class CustomerEdgeResourceTest {
         upstream,
         mockk(relaxed = true),
         PaymentSessionStore(),
+        mockk(relaxed = true),
         mockk(relaxed = true),
         Clock.systemUTC(),
     ).apply {
