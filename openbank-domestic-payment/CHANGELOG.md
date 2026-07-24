@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.10.1...domestic-payment-v0.10.2) (2026-07-24)
+
+
+### Bug Fixes
+
+* **domestic:** make Temporal the sole orchestrator, retire the legacy in-service flow (ADR-0120 Phase 6, [#1917](https://github.com/JiRaska/open-bank-oss/issues/1917) — 3/3) ([#2122](https://github.com/JiRaska/open-bank-oss/issues/2122)) ([189fe7b](https://github.com/JiRaska/open-bank-oss/commit/189fe7b034a277ceb20d686de725c68992b60b7f))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.10.0...domestic-payment-v0.10.1) (2026-07-17)
 
 
