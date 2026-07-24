@@ -10,10 +10,10 @@
         "messageType": "MT103",
         "occurredAt": "2000-01-31T14:00:00Z",
         "paymentSagaRef": "string",
-        "status": "SETTLED",
+        "status": "COMPLETED",
         "swiftMessageId": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
       },
-      "description": "a swift.message.status-changed event with status SETTLED",
+      "description": "a swift.message.status-changed event with status COMPLETED",
       "generators": {
         "body": {
           "$.occurredAt": {
@@ -79,7 +79,7 @@
             "matchers": [
               {
                 "match": "regex",
-                "regex": "VALIDATED|SENT|SETTLED|REJECTED"
+                "regex": "VALIDATED|SENT|COMPLETED|REJECTED"
               }
             ]
           },
