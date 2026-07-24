@@ -1,0 +1,54 @@
+# -----------------------------------------------------------------------------
+# EU AI Act inventory drift gate (ADR-0148 rule #7; issue #1918).
+#
+# Runs `.github/scripts/check-eu-ai-act.sh` on every PR that touches the source
+# (openbank-libs/governance/agents.yaml), the DERIVED compliance doc
+# (docs/compliance/eu-ai-act.md), or the generator/guard themselves. The doc is
+# generated from agents.yaml and must never be hand-edited or drift from a fresh
+# generator run — a stale AI Act inventory is worse than none, because auditors
+# read it as a live claim (EU AI Act Annex III applies from 2026-08-02).
+#
+# The guard existed but nothing ran it, so the compliance doc could silently
+# drift from agents.yaml. Mirrors adr-registry.yml / agent-charter-registry.yml:
+# small, named, its own workflow rather than a step buried in the services-ci matrix.
+# -----------------------------------------------------------------------------
+name: EU AI Act registry
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'openbank-libs/governance/agents.yaml'
+      - 'docs/compliance/eu-ai-act.md'
+      - '.github/scripts/gen-eu-ai-act.py'
+      - '.github/scripts/check-eu-ai-act.sh'
+      - '.github/workflows/eu-ai-act-registry.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'openbank-libs/governance/agents.yaml'
+      - 'docs/compliance/eu-ai-act.md'
+      - '.github/scripts/gen-eu-ai-act.py'
+      - '.github/scripts/check-eu-ai-act.sh'
+      - '.github/workflows/eu-ai-act-registry.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eu-ai-act-registry-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eu-ai-act-registry:
+    name: eu-ai-act-registry
+    # Pure python/bash over agents.yaml, no Gradle/Docker.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - name: Check EU AI Act inventory is in sync with agents.yaml
+        run: bash .github/scripts/check-eu-ai-act.sh
