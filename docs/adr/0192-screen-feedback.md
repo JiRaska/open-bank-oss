@@ -1,7 +1,7 @@
 ---
 date: 2026-07-24
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []

@@ -200,7 +200,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0189](0189-field-level-encryption-and-tokenization-for-pii-and-pan.md) | Field-level encryption and tokenization for PII and PAN | Accepted | Partial | crypto-keys,privacy-gdpr | — |
 | [0190](0190-card-authorisation-3ds-and-pin-processing-out-of-scope.md) | Card authorisation, 3DS and PIN processing out of scope | Accepted | N/A | architecture,payments | — |
 | [0191](0191-ai-driven-personal-theming-of-the-mobile-app.md) | AI-driven personal theming of the mobile app | Accepted | Partial | mobile-app,ai-agents,customer-edge,architecture | openbank-app |
-| [0192](0192-screen-feedback.md) | In-app screen feedback with screenshot capture | Accepted | Planned | mobile-app,customer-edge,analytics,privacy-gdpr | openbank-app |
+| [0192](0192-screen-feedback.md) | In-app screen feedback with screenshot capture | Accepted | Partial | mobile-app,customer-edge,analytics,privacy-gdpr | openbank-app |
 
 ## By tag
 
