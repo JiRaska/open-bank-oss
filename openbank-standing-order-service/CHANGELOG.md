@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.13.1...standing-order-service-v0.14.0) (2026-07-24)
+
+
+### Features
+
+* **standing-order:** ONCE frequency (one-off future-dated payment) — [#7](https://github.com/JiRaska/open-bank-oss/issues/7) ([#2072](https://github.com/JiRaska/open-bank-oss/issues/2072)) ([eb0bcf3](https://github.com/JiRaska/open-bank-oss/commit/eb0bcf3008caa0fa81cdfab98f53f6739c9e1a81))
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.13.0...standing-order-service-v0.13.1) (2026-07-17)
 
 
