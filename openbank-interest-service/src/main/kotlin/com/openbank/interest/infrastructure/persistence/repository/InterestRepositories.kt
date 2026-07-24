@@ -6,8 +6,12 @@ package com.openbank.interest.infrastructure.persistence.repository
 
 import com.openbank.interest.application.port.out.*
 import com.openbank.interest.domain.model.*
+import com.openbank.interest.domain.tax.TaxProfile
 import com.openbank.interest.domain.tax.WithholdingTax
-import com.openbank.interest.infrastructure.persistence.entity.*
+import com.openbank.interest.infrastructure.persistence.entity.InterestAccrualEntity
+import com.openbank.interest.infrastructure.persistence.entity.InterestCapitalizationEntity
+import com.openbank.interest.infrastructure.persistence.entity.InterestOutboxEntity
+import com.openbank.interest.infrastructure.persistence.entity.InterestRateConfigEntity
 import com.openbank.interest.infrastructure.persistence.mapper.InterestMapper
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
@@ -59,19 +63,27 @@ class InterestRateConfigRepositoryImpl @Inject constructor(
         }.map { it?.let(mapper::toDomain) }
 
     @WithSession
-    override fun findEffectiveRate(accountId: UUID, productId: String, date: LocalDate): Uni<InterestRateConfig?> =
-        sf.withSession { s ->
-            // account-specific override (accountId set) OR the product-wide default (accountId null);
-            // the CASE orders overrides (0) before defaults (1) so setMaxResults(1) picks the override.
-            s.createQuery(
-                "FROM InterestRateConfigEntity WHERE active = true AND effectiveFrom <= :d " +
-                    "AND (effectiveTo IS NULL OR effectiveTo >= :d) " +
-                    "AND (accountId = :a OR (accountId IS NULL AND productId = :p)) " +
-                    "ORDER BY CASE WHEN accountId IS NULL THEN 1 ELSE 0 END, effectiveFrom DESC",
-                InterestRateConfigEntity::class.java,
-            ).setParameter("a", accountId).setParameter("p", productId).setParameter("d", date)
-                .setMaxResults(1).singleResultOrNull
-        }.map { it?.let(mapper::toDomain) }
+    override fun findEffectiveRate(
+        accountId: UUID,
+        productId: String,
+        date: LocalDate,
+        currency: String?,
+    ): Uni<InterestRateConfig?> = sf.withSession { s ->
+        // account-specific override (accountId set) OR the product-wide default (accountId null);
+        // the CASE orders overrides (0) before defaults (1) so setMaxResults(1) picks the override.
+        // currency == null keeps the currency-agnostic view (the read-only effective-rate lookup);
+        // accrue passes a non-null currency so a rate resolves only in its own currency (issue #1265).
+        s.createQuery(
+            "FROM InterestRateConfigEntity WHERE active = true AND effectiveFrom <= :d " +
+                "AND (effectiveTo IS NULL OR effectiveTo >= :d) " +
+                "AND (:ccy IS NULL OR currency = :ccy) " +
+                "AND (accountId = :a OR (accountId IS NULL AND productId = :p)) " +
+                "ORDER BY CASE WHEN accountId IS NULL THEN 1 ELSE 0 END, effectiveFrom DESC",
+            InterestRateConfigEntity::class.java,
+        ).setParameter("a", accountId).setParameter("p", productId).setParameter("d", date)
+            .setParameter("ccy", currency)
+            .setMaxResults(1).singleResultOrNull
+    }.map { it?.let(mapper::toDomain) }
 
     @WithTransaction
     override fun update(config: InterestRateConfig): Uni<InterestRateConfig> = sf.withTransaction { s ->
@@ -151,13 +163,23 @@ class InterestAccrualRepositoryImpl @Inject constructor(
         }.map { it.map(mapper::toDomain) }
 
     // Own transaction, committed BEFORE the ledger post: the claim must survive a crash, or the
-    // retry would re-derive a different accrual set and diverge from the journal already booked.
-    @WithTransaction override fun claimForCapitalization(accrualIds: List<UUID>, periodTo: LocalDate): Uni<Unit> =
+    // retry would re-derive a different accrual set — or a different tax profile (#1355) — and diverge
+    // from the journal already booked. The resolved [profile] is frozen here alongside the period.
+    @WithTransaction
+    override fun claimForCapitalization(accrualIds: List<UUID>, periodTo: LocalDate, profile: TaxProfile): Uni<Unit> =
         sf.withTransaction { s ->
             s.createMutationQuery(
-                "UPDATE InterestAccrualEntity SET status = 'CAPITALIZING', claimedPeriodTo = :t " +
+                "UPDATE InterestAccrualEntity SET status = 'CAPITALIZING', claimedPeriodTo = :t, " +
+                    "claimedTaxpayerType = :tt, claimedResidency = :res, claimedTreatyRate = :tr, " +
+                    "claimedNonCooperatingState = :ncs, claimedExemptCode = :ec " +
                     "WHERE id IN :ids AND status = 'ACCRUING'",
-            ).setParameter("t", periodTo).setParameter("ids", accrualIds).executeUpdate()
+            ).setParameter("t", periodTo)
+                .setParameter("tt", profile.taxpayerType)
+                .setParameter("res", profile.residency)
+                .setParameter("tr", profile.treatyRate)
+                .setParameter("ncs", profile.nonCooperatingState)
+                .setParameter("ec", profile.exemptCode)
+                .setParameter("ids", accrualIds).executeUpdate()
                 .flatMap { claimed ->
                     if (claimed != accrualIds.size) {
                         Uni.createFrom().failure(

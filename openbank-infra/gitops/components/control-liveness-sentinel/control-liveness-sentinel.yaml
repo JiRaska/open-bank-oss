@@ -26,9 +26,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: control-liveness-sentinel
-          # Pending first CI build (ADR-0163 initial PR) — build-push-service.sh publishes the
-          # real sandbox-<sha> tag on merge; ArgoCD will not sync a healthy pod until then.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-control-liveness-sentinel:sandbox-f4bd8b81
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-control-liveness-sentinel:sandbox-c941c558
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

@@ -11,9 +11,6 @@ import jakarta.enterprise.context.ApplicationScoped
 @ConfigMapping(prefix = "openbank.temporal")
 @ApplicationScoped
 interface TemporalConfig {
-    @WithDefault("false")
-    fun enabled(): Boolean
-
     @WithDefault("localhost:7233")
     fun serverUrl(): String
 

@@ -128,12 +128,24 @@ replacing the former in-memory stub), so settlement state is durable across rest
    narrow `service-settlement-m2m` rule the way `service-domestic-payment-m2m` / `service-sca-m2m`
    do it, not a blanket SERVICE allow.
 
-2. **OPA policy for settlement activities not yet written** — `openbank-infra/opa/policies/` does not yet
-   contain a `settlement_activity.rego`. Until it does, the `OpaActivityInterceptor` in libs
-   operates on a missing-policy → fail-closed basis (safe default).
-   **Action: write `settlement_activity.rego` before flag flip.**
+2. ~~**OPA policy for settlement activities not yet written.**~~ **Closed** —
+   `openbank-settlement-service/src/main/resources/opa/settlement_activity.rego` exists and is bundled
+   (`settlement-opa-bundle.yaml`), so `OpaActivityInterceptor` has a real policy to evaluate rather
+   than fail-closing on a missing one. This was the pre-condition for the flag flip below.
 
-3. **2-approval gate** — money-path rule requires 2 approvals. This PR has 1 (automated review).
+3. **Temporal is now the SOLE orchestrator (issue #1917, ADR-0120 Phase 6).** The
+   `openbank.temporal.enabled` dispatch gate is removed and the in-process legacy saga
+   (`legacySettle`) is deleted. This closes a compensation gap: the legacy path flipped a mid-flight
+   failure straight to `REJECTED` **without reversing an already-moved debit/credit**, whereas
+   `SettlementWorkflow` runs `reverseBookToLedger → reverseCredit → reverseDebit` before rejecting.
+   Flip pre-conditions are verified: Temporal server healthy, `openbank-settlement` namespace
+   registered, `settlement_activity.rego` present (risk 2). Worker registration is gated on
+   `openbank.settlement.worker.enabled` (default true; false in `%test`). **Cutover risk:** with no
+   fallback path, a settlement cannot be processed if the Temporal worker is not registered or the
+   frontend is unreachable — a sandbox canary must confirm the worker registers and a real settlement
+   drives `PENDING → BOOKED` before merge, and the deterministic simulation (ADR-0100/0115) stays green.
+
+4. **2-approval gate** — money-path rule requires 2 approvals. This PR has 1 (automated review).
    Second approval from a human committer required before merge per rules.yaml.
 
 ---

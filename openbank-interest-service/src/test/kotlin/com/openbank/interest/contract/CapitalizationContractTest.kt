@@ -21,7 +21,7 @@ class CapitalizationContractTest {
     @Test
     fun `contract version is bumped for the remittance change`() {
         val version = Regex("""(?m)^\s+version:\s*"?([^"\s]+)"?\s*$""").find(openapi)?.groupValues?.get(1)
-        assertThat(version).isEqualTo("1.2.0")
+        assertThat(version).isEqualTo("1.3.0")
     }
 
     @Test

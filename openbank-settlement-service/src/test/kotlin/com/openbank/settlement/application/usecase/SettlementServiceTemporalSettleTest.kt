@@ -4,10 +4,6 @@
 
 package com.openbank.settlement.application.usecase
 
-import com.openbank.libs.audit.AuditEventPublisher
-import com.openbank.settlement.application.port.out.CreditPort
-import com.openbank.settlement.application.port.out.DebitPort
-import com.openbank.settlement.application.port.out.LedgerPort
 import com.openbank.settlement.application.port.out.SettlementRepository
 import com.openbank.settlement.application.workflow.SettlementActivities
 import com.openbank.settlement.application.workflow.SettlementWorkflowImpl
@@ -32,16 +28,13 @@ import java.util.UUID
  * Coverage for [SettlementService.settle]'s Temporal-enabled dispatch, including the idempotent
  * double-start no-op (WorkflowExecutionAlreadyStarted), driven against a real in-memory
  * [TestWorkflowEnvironment] rather than mocking Temporal's static `WorkflowClient.start` entry
- * point. SettlementServiceSettleTest covers the legacy (Temporal-disabled) path.
+ * point. SettlementServiceSettleTest covers the not-found guard; SettlementWorkflowImplTest covers
+ * the workflow's compensation-on-failure behaviour.
  */
 class SettlementServiceTemporalSettleTest {
 
     private val repo: SettlementRepository = mockk(relaxed = true)
-    private val debitPort: DebitPort = mockk(relaxed = true)
-    private val creditPort: CreditPort = mockk(relaxed = true)
-    private val ledgerPort: LedgerPort = mockk(relaxed = true)
     private val temporalConfig: TemporalConfig = mockk(relaxed = true)
-    private val auditPublisher: AuditEventPublisher = mockk(relaxed = true)
 
     private lateinit var env: TestWorkflowEnvironment
     private lateinit var worker: Worker
@@ -58,17 +51,8 @@ class SettlementServiceTemporalSettleTest {
         worker.registerWorkflowImplementationTypes(SettlementWorkflowImpl::class.java)
         worker.registerActivitiesImplementations(RelaxedActivities())
         env.start()
-        every { temporalConfig.enabled() } returns true
         every { temporalConfig.taskQueue() } returns TASK_QUEUE
-        service = SettlementService(
-            repo,
-            debitPort,
-            creditPort,
-            ledgerPort,
-            temporalConfig,
-            env.workflowClient,
-            auditPublisher,
-        )
+        service = SettlementService(repo, temporalConfig, env.workflowClient)
     }
 
     @AfterEach

@@ -120,6 +120,22 @@ class StandingOrderTest {
         assertThat(updated.status).isEqualTo(StandingOrderStatus.ACTIVE)
     }
 
+    @Test
+    fun `recordExecution completes a ONCE order after its single execution`() {
+        val order = standingOrder(
+            frequency = Frequency.ONCE,
+            startDate = LocalDate.of(2026, 6, 1),
+            endDate = null,
+            nextExecutionDate = LocalDate.of(2026, 6, 1),
+            status = StandingOrderStatus.ACTIVE,
+        )
+
+        val executed = order.recordExecution(order.calculateNextDate(order.nextExecutionDate), FIXED_NOW)
+
+        assertThat(executed.status).isEqualTo(StandingOrderStatus.COMPLETED)
+        assertThat(executed.executionCount).isEqualTo(order.executionCount + 1)
+    }
+
     private fun standingOrder(
         id: UUID = UUID.fromString("00000000-0000-0000-0000-000000000001"),
         idempotencyKey: String = "idempotency-key",
@@ -187,6 +203,8 @@ class StandingOrderTest {
 
         @JvmStatic
         fun frequencyNextDateCases(): Stream<Arguments> = Stream.of(
+            // ONCE never advances — the returned date is unused (recordExecution completes it).
+            Arguments.of(Frequency.ONCE, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 1)),
             Arguments.of(Frequency.DAILY, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 2)),
             Arguments.of(Frequency.WEEKLY, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 8)),
             Arguments.of(Frequency.BIWEEKLY, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 15)),

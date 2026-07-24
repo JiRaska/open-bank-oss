@@ -85,6 +85,7 @@ class CustomerEdgeResource(
     private val audit: EdgeAuditPublisher,
     private val sessions: PaymentSessionStore,
     private val banksClient: CnbBanksClient,
+    private val themePrefs: ThemePreferenceStore,
     private val clock: Clock,
 ) {
 
@@ -2072,6 +2073,40 @@ class CustomerEdgeResource(
         )
     }
 
+    // --- Theme preferences (ADR-0190) — edge-local, party-keyed, roams the app look ---
+
+    /** The caller's stored ThemeSpec, 404 when none. Party is taken from the JWT, never the client. */
+    @GET
+    @Path("/preferences/theme")
+    @Authorize(action = "customer.preferences.theme.read", resource = "")
+    @Blocking
+    fun getThemePreference(): Response {
+        val spec = themePrefs.get(customer().partyId)
+            ?: return Response.status(Response.Status.NOT_FOUND).build()
+        return Response.ok(spec).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * Store the caller's ThemeSpec. The edge only gates shape (valid JSON object, size cap) —
+     * the deterministic guardrail validation runs on-device on every read (ADR-0190 §3), so a
+     * hand-crafted spec can never render an illegible or spoofed UI.
+     */
+    @PUT
+    @Path("/preferences/theme")
+    @Authorize(action = "customer.preferences.theme.update", resource = "")
+    @Blocking
+    fun setThemePreference(body: String): Response {
+        if (body.length > THEME_SPEC_MAX_BYTES) {
+            return Response.status(Response.Status.REQUEST_ENTITY_TOO_LARGE).build()
+        }
+        val node = runCatching { objectMapper.readTree(body) }.getOrNull()
+        if (node == null || !node.isObject) {
+            return Response.status(Response.Status.BAD_REQUEST).build()
+        }
+        themePrefs.put(customer().partyId, node.toString())
+        return Response.noContent().build()
+    }
+
     // --- SCA device enrollment (ADR-0021) ---
 
     @POST
@@ -2916,6 +2951,10 @@ class CustomerEdgeResource(
         parseCreditorAccount(raw) ?: czechIbanToBban(raw)
 
     companion object {
+        // A ThemeSpec is a small token document; 8 KiB leaves headroom for future fields
+        // while keeping Redis abuse-proof (ADR-0190).
+        private const val THEME_SPEC_MAX_BYTES = 8 * 1024
+
         // Decimal scale for the FX mid-price projected to the app (rate = (bid+ask)/2).
         private const val FX_RATE_SCALE = 6
 

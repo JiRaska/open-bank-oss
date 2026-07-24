@@ -11,15 +11,25 @@ package com.openbank.copilot.domain
  * human-in-the-loop + SCA (ADR-0089 D2) — never an action emitted from here.
  */
 
-/** One customer turn. [message] is untrusted input — never treated as instructions (ADR-0089 D3). */
-data class ChatTurn(val conversationId: String, val message: String)
+/**
+ * One customer turn. [message] is untrusted input — never treated as instructions (ADR-0089 D3).
+ * [currentThemeSpec] is the client's active ThemeSpec JSON (ADR-0190) so the theme designer edits
+ * relative to what the customer sees; data context only, same trust level as the message.
+ */
+data class ChatTurn(val conversationId: String, val message: String, val currentThemeSpec: String? = null)
 
 /**
  * A narrated reply. Figures, if any, are rendered from tool results — not model generation. When the
  * turn produced a money-path action, [proposal] carries the structured, validated proposal the app
  * renders as a non-AI-controlled card and routes into the existing edge payment + SCA flow (D2).
  */
-data class ChatReply(val conversationId: String, val reply: String, val proposal: ActionProposal? = null)
+data class ChatReply(
+    val conversationId: String,
+    val reply: String,
+    val proposal: ActionProposal? = null,
+    /** Normalized ThemeSpec JSON produced by the theme-designer tool this turn (ADR-0190), else null. */
+    val themeSpec: String? = null,
+)
 
 /** Outcome of handling a turn. */
 sealed interface ChatOutcome {

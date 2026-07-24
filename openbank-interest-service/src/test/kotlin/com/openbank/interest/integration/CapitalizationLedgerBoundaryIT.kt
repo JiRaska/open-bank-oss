@@ -5,11 +5,15 @@ package com.openbank.interest.integration
 
 import com.openbank.interest.application.port.`in`.AccrueInterestUseCase
 import com.openbank.interest.application.port.`in`.CapitalizeInterestUseCase
+import com.openbank.interest.application.port.out.InterestAccrualRepository
 import com.openbank.interest.application.port.out.InterestRateConfigRepository
 import com.openbank.interest.domain.model.AccrualRequest
 import com.openbank.interest.domain.model.AccrualStatus
 import com.openbank.interest.domain.model.InterestCapitalization
 import com.openbank.interest.domain.model.InterestRateConfig
+import com.openbank.interest.domain.tax.TaxProfile
+import com.openbank.interest.domain.tax.TaxResidency
+import com.openbank.interest.domain.tax.TaxpayerType
 import com.openbank.interest.infrastructure.persistence.entity.InterestAccrualEntity
 import com.openbank.interest.infrastructure.persistence.entity.InterestCapitalizationEntity
 import io.quarkus.test.common.QuarkusTestResource
@@ -53,6 +57,9 @@ class CapitalizationLedgerBoundaryIT {
 
     @Inject
     lateinit var configRepo: InterestRateConfigRepository
+
+    @Inject
+    lateinit var accrualRepo: InterestAccrualRepository
 
     @Inject
     lateinit var ledger: LedgerBoundary
@@ -264,6 +271,35 @@ class CapitalizationLedgerBoundaryIT {
         assertThat(statusesOf(accountId)).containsOnly(AccrualStatus.CAPITALIZED)
     }
 
+    @Test
+    fun `claim freezes the tax profile and it survives a round-trip through the DB (issue #1355)`() {
+        // The persistence half of #1355: capitalize()'s claim now snapshots the resolved tax profile
+        // onto the claimed accrual rows (V13), so a retry replays it instead of re-resolving. Prove the
+        // snapshot actually round-trips through the new columns + mapper + claim SQL against a real DB —
+        // a non-default profile persisted at claim comes back byte-for-byte on findClaimedForCapitalization.
+        val accountId = UUID.randomUUID()
+        persistAccrual(accountId, "100.000000", LocalDate.of(2026, 1, 18))
+        val ids = accrualsOf(accountId).map { it.id }
+        // A non-default profile so every field is exercised (not the FAIL_SAFE_DEFAULT the mapper could
+        // reproduce by accident): a non-resident with a treaty rate and a non-cooperating-state flag.
+        val frozen = TaxProfile(
+            taxpayerType = TaxpayerType.INDIVIDUAL,
+            residency = TaxResidency.NON_RESIDENT,
+            treatyRate = BigDecimal("0.1000"),
+            nonCooperatingState = true,
+            exemptCode = "TREATY-CZ-DE",
+        )
+
+        VertxContextSupport.subscribeAndAwait { accrualRepo.claimForCapitalization(ids, periodTo, frozen) }
+
+        val claimed = VertxContextSupport.subscribeAndAwait {
+            accrualRepo.findClaimedForCapitalization(accountId, PRODUCT)
+        }!!
+        assertThat(claimed).hasSize(1)
+        assertThat(claimed.single().claimedTaxProfile).isEqualTo(frozen)
+        assertThat(claimed.single().claimedPeriodTo).isEqualTo(periodTo)
+    }
+
     // --- Helpers ---------------------------------------------------------------------------------
 
     // Every reactive call below runs through VertxContextSupport, never `await().indefinitely()`:
@@ -290,6 +326,7 @@ class CapitalizationLedgerBoundaryIT {
         configRepo.save(
             InterestRateConfig(
                 productId = productId,
+                currency = "CZK",
                 annualRate = annualRate,
                 effectiveFrom = LocalDate.of(2026, 1, 1),
                 createdAt = OffsetDateTime.parse("2026-01-01T00:00:00Z"),
