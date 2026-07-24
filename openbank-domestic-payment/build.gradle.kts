@@ -39,6 +39,9 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
     testImplementation(libs.quarkus.junit5)
+    // In-process Temporal test server for the sole-orchestrator dispatch/workflow tests (ADR-0120 Phase 6, #1917).
+    testImplementation("io.temporal:temporal-testing:1.25.1")
+    testImplementation("io.grpc:grpc-inprocess:1.68.1")
     // @TestSecurity for the ADR-0034 Phase 5 advisory-mode authz regression test.
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
