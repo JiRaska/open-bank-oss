@@ -1,6 +1,8 @@
 # copilot-service secret from OpenBao → copilot-service-secrets Secret.
-# COPILOT_MODEL_API_KEY = the NVIDIA NIM API key for the openai-compat model provider (ADR-0089).
-# Seed it once in OpenBao at KV path `openbank/copilot-service`, property `MODEL_API_KEY`.
+# COPILOT_MODEL_API_KEY = the LiteLLM virtual key (ADR-0174/0175): copilot authenticates to the
+# in-cluster gateway, NOT to the provider — the DeepInfra key now lives only in ai-platform (#1919).
+# Sourced from OpenBao KV path `openbank/litellm`, property `LITELLM_MASTER_KEY` (the same key the
+# gateway checks and the ops agents already present).
 # (No OIDC secret: copilot validates the customer JWT bearer-only via JWKS — no client secret.)
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
@@ -23,5 +25,5 @@ spec:
   data:
     - secretKey: COPILOT_MODEL_API_KEY
       remoteRef:
-        key: copilot-service
-        property: MODEL_API_KEY
+        key: litellm
+        property: LITELLM_MASTER_KEY
