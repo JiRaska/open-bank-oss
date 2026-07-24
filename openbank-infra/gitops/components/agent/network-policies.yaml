@@ -166,6 +166,8 @@ spec:
       ports:
         - protocol: TCP
           port: 8150
+        - protocol: TCP
+          port: 8181
     - from:
         - namespaceSelector:
             matchLabels:
