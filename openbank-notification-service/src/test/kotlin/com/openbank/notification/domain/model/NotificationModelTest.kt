@@ -15,9 +15,7 @@ class NotificationModelTest {
     fun `NotificationChannel has all expected values`() {
         assertThat(NotificationChannel.values()).containsExactlyInAnyOrder(
             NotificationChannel.EMAIL,
-            NotificationChannel.SMS,
             NotificationChannel.PUSH,
-            NotificationChannel.IN_APP,
         )
     }
 
@@ -71,12 +69,12 @@ class NotificationModelTest {
     fun `NotificationRequest data class construction`() {
         val req = NotificationRequest(
             partyId = UUID.randomUUID(),
-            channel = NotificationChannel.SMS,
+            channel = NotificationChannel.PUSH,
             template = NotificationTemplate.OTP_CODE,
             recipient = "+420123456789",
             variables = mapOf("code" to "123456"),
         )
-        assertThat(req.channel).isEqualTo(NotificationChannel.SMS)
+        assertThat(req.channel).isEqualTo(NotificationChannel.PUSH)
         assertThat(req.variables).containsEntry("code", "123456")
     }
 }

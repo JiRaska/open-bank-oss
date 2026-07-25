@@ -163,15 +163,7 @@ class NotificationConsumer {
             .chain { _ ->
                 when (req.channel) {
                     NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
-                    NotificationChannel.SMS -> {
-                        log.infof("SMS stub: to=%s template=%s", req.recipient, req.template)
-                        Uni.createFrom().voidItem()
-                    }
                     NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
-                    NotificationChannel.IN_APP -> {
-                        log.infof("IN_APP stub: to=%s template=%s", req.recipient, req.template)
-                        Uni.createFrom().voidItem()
-                    }
                 }
             }
             // Oversight side-channel (ADR-0059): for allow-listed risk templates, also

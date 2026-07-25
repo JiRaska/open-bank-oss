@@ -7,7 +7,12 @@ package com.openbank.notification.domain.model
 import java.time.Instant
 import java.util.UUID
 
-enum class NotificationChannel { EMAIL, SMS, PUSH, IN_APP }
+// SMS and IN_APP were declared but never implemented — the dispatch `when` in NotificationConsumer
+// only logged and returned success for either, so a caller requesting them got silent non-delivery
+// with no error (issue #2372). Removed rather than fixed: IN_APP needs a terminal status transition
+// and a wake-signal design, SMS needs a real provider port — both are real builds, not something
+// this narrowing should speculatively half-do.
+enum class NotificationChannel { EMAIL, PUSH }
 enum class NotificationStatus { PENDING, SENT, FAILED, BOUNCED }
 
 /**
