@@ -45,7 +45,7 @@ class AccountsWithBalancesTool(@RestClient private val client: CustomerEdgeRestC
             val id = a.id
             val balancePart = if (id != null) {
                 try {
-                    val balances = client.getBalances(id).awaitSuspending().balances
+                    val balances = client.getBalances(id).awaitSuspending()
                     if (balances.isEmpty()) {
                         "zůstatek nedostupný"
                     } else {
