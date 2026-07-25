@@ -1,0 +1,67 @@
+{
+  "consumer": {
+    "name": "openbank-psd2-service"
+  },
+  "interactions": [
+    {
+      "description": "GET check an unregistered TPP \u2014 the fail-closed refusal",
+      "providerStates": [
+        {
+          "name": "no registry entry exists for the pact unknown-TPP id"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/tpp-registry/check",
+        "query": {
+          "role": [
+            "AISP"
+          ],
+          "tppId": [
+            "CZ-CNB-PACT-UNREGISTERED"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "authorized": false,
+          "reason": "TPP not found in registry",
+          "roles": [
+
+          ],
+          "tppId": "CZ-CNB-PACT-UNREGISTERED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.reason": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 403
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-tpp-registry-service"
+  }
+}
