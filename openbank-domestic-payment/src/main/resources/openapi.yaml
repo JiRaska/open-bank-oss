@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Domestic Payment Service API
-  version: 1.1.1
+  version: 1.2.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -119,6 +119,57 @@ paths:
           description: Updated payment
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/v1/domestic-payments/approvals/{id}:
+    patch:
+      tags: [Domestic Payments]
+      summary: Approve or reject a pending four-eyes approval for a domestic payment (ADR-0155)
+      description: >-
+        Decides an approval the platform's maker-checker gate paused. The checker is taken from the
+        authenticated principal, never from the body, and the store rejects a checker equal to the
+        maker. Requires ROLE_OPERATOR or ROLE_ADMIN.
+      operationId: decideApproval
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve:
+                  type: boolean
+                  description: true approves the pending action, false rejects it.
+      responses:
+        '200':
+          description: The decided approval
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, action, status]
+                properties:
+                  id:
+                    type: string
+                  action:
+                    type: string
+                    description: The gated action this approval was raised for.
+                  resourceId:
+                    type: string
+                    nullable: true
+                  status:
+                    type: string
+                  decidedBy:
+                    type: string
+                    nullable: true
+        '404':
+          $ref: '#/components/responses/NotFound'
 
 components:
   securitySchemes:

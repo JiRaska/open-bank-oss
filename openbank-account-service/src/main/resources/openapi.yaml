@@ -5,7 +5,7 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  version: 1.4.0
+  version: 1.5.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -339,6 +339,57 @@ paths:
                 $ref: '#/components/schemas/AccountResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/approvals/{id}:
+    patch:
+      tags: [Accounts]
+      summary: Approve or reject a pending four-eyes approval for a account lifecycle (ADR-0155)
+      description: >-
+        Decides an approval the platform's maker-checker gate paused. The checker is taken from the
+        authenticated principal, never from the body, and the store rejects a checker equal to the
+        maker. Requires ROLE_OPERATOR or ROLE_ADMIN.
+      operationId: decideApproval
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve:
+                  type: boolean
+                  description: true approves the pending action, false rejects it.
+      responses:
+        '200':
+          description: The decided approval
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, action, status]
+                properties:
+                  id:
+                    type: string
+                  action:
+                    type: string
+                    description: The gated action this approval was raised for.
+                  resourceId:
+                    type: string
+                    nullable: true
+                  status:
+                    type: string
+                  decidedBy:
+                    type: string
+                    nullable: true
+        '404':
+          $ref: '#/components/responses/NotFound'
 
 components:
   securitySchemes:

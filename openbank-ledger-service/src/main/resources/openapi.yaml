@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Ledger Service API
-  version: 1.8.0
+  version: 1.9.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -454,6 +454,57 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/journals/approvals/{id}:
+    patch:
+      tags: [Ledger]
+      summary: Approve or reject a pending four-eyes approval for a ledger journal (ADR-0155)
+      description: >-
+        Decides an approval the platform's maker-checker gate paused. The checker is taken from the
+        authenticated principal, never from the body, and the store rejects a checker equal to the
+        maker. Requires ROLE_OPERATOR or ROLE_ADMIN.
+      operationId: decideApproval
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve:
+                  type: boolean
+                  description: true approves the pending action, false rejects it.
+      responses:
+        '200':
+          description: The decided approval
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, action, status]
+                properties:
+                  id:
+                    type: string
+                  action:
+                    type: string
+                    description: The gated action this approval was raised for.
+                  resourceId:
+                    type: string
+                    nullable: true
+                  status:
+                    type: string
+                  decidedBy:
+                    type: string
+                    nullable: true
         '404':
           $ref: '#/components/responses/NotFound'
 

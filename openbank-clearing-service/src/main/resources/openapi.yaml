@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Clearing Service API
-  version: 1.0.1
+  version: 1.1.0
   description: Payment clearing and settlement — batch submission, cycle triggering, position management.
   license:
     name: Apache-2.0
@@ -175,6 +175,57 @@ paths:
           description: Reconciliation found a discrepancy
         '403':
           description: Forbidden — OPA policy denied clearingBatch.reconcile (ADR-0034 Phase 5)
+
+  /api/v1/clearing/approvals/{id}:
+    patch:
+      tags: [Clearing]
+      summary: Approve or reject a pending four-eyes approval for a clearing (ADR-0155)
+      description: >-
+        Decides an approval the platform's maker-checker gate paused. The checker is taken from the
+        authenticated principal, never from the body, and the store rejects a checker equal to the
+        maker. Requires ROLE_OPERATOR or ROLE_ADMIN.
+      operationId: decideApproval
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve:
+                  type: boolean
+                  description: true approves the pending action, false rejects it.
+      responses:
+        '200':
+          description: The decided approval
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, action, status]
+                properties:
+                  id:
+                    type: string
+                  action:
+                    type: string
+                    description: The gated action this approval was raised for.
+                  resourceId:
+                    type: string
+                    nullable: true
+                  status:
+                    type: string
+                  decidedBy:
+                    type: string
+                    nullable: true
+        '404':
+          description: No pending approval with that id
 
 components:
   securitySchemes:
