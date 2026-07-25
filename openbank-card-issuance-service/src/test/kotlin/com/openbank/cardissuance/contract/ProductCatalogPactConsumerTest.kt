@@ -42,13 +42,24 @@ import jakarta.ws.rs.Path as JaxrsPath
  *    accidental: if product-catalog ever answered 200-with-empty-body for a missing code, the
  *    adapter would take a different branch.
  *
- * WHY THE REQUEST PATH IS READ OFF THE CLIENT INTERFACE, not typed as a literal: a contract test
- * that hard-codes the path it expects passes even when the production client calls a path that does
- * not exist — that is how finrep shipped a call to a non-existent ledger path (#2269). Here the path
- * is reflected off [ProductCatalogClient.getByCode]'s own `@Path`, and the response is deserialized
- * into the client's own [ProductCardConfigResponse]/`CardConfigResponse` DTOs with the Kotlin
- * Jackson module (so a renamed non-defaulted field throws rather than silently reading null). Rename
- * the path or a DTO field in the client and this test goes red.
+ * **The two sides of the path are deliberately sourced differently.** The interaction declares the
+ * contract as a literal ([PRODUCT_BY_CODE_PATH_TEMPLATE], mirroring product-catalog's own
+ * `openapi.yaml`); the REQUEST is issued against [PATH_TEMPLATE], reflected off
+ * [ProductCatalogClient.getByCode]'s own `@Path`. That asymmetry is the whole mechanism — the pact
+ * mock server answers 500 on an unexpected path, so annotating the production client with anything
+ * other than the contract path turns this test red.
+ *
+ * Deriving BOTH sides from the annotation — how this test was first written (#2283) — is worthless
+ * and looks identical: expectation and request move together, so the mock server always sees exactly
+ * what it was told to expect and the test stays green for any `@Path` value whatsoever. Established
+ * empirically on the finrep equivalent (#2290): built that way it passed against the known-broken
+ * #2269 path. A `assertThat(PATH_TEMPLATE).isEqualTo(PRODUCT_BY_CODE_PATH_TEMPLATE)` guard names the
+ * problem directly rather than leaving it as an opaque 500.
+ *
+ * Responses are deserialized into the client's own
+ * [ProductCardConfigResponse]/`CardConfigResponse` DTOs with the Kotlin Jackson module (so a renamed
+ * non-defaulted field throws rather than silently reading null). Rename the path or a DTO field in
+ * the client and this test goes red.
  *
  * IMPORTANT — regenerate on change: if the `@Pact` methods change (new interaction, different
  * matcher, renamed field), re-run
@@ -75,7 +86,8 @@ class ProductCatalogPactConsumerTest {
     fun cardEnabledProductPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("a product with card configuration exists for code $CARD_ENABLED_CODE")
         .uponReceiving("GET product by code for a card-enabled product")
-        .path(pathFor(CARD_ENABLED_CODE))
+        // LITERAL on purpose — see the class KDoc. The request side uses the reflected path.
+        .path(contractPathFor(CARD_ENABLED_CODE))
         .method("GET")
         .headers(mapOf("Accept" to "application/json"))
         .willRespondWith()
@@ -107,7 +119,8 @@ class ProductCatalogPactConsumerTest {
     fun unknownProductCodePact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("no product exists with code $MISSING_CODE")
         .uponReceiving("GET product by an unknown code")
-        .path(pathFor(MISSING_CODE))
+        // LITERAL on purpose — see the class KDoc. The request side uses the reflected path.
+        .path(contractPathFor(MISSING_CODE))
         .method("GET")
         .headers(mapOf("Accept" to "application/json"))
         .willRespondWith()
@@ -123,6 +136,8 @@ class ProductCatalogPactConsumerTest {
     @Test
     @PactTestFor(pactMethod = "cardEnabledProductPact")
     fun `the client DTOs parse a card-enabled product into a complete card config`(mockServer: MockServer) {
+        assertReflectedPathMatchesTheContract()
+
         val (status, body) = get(mockServer, pathFor(CARD_ENABLED_CODE))
 
         assertThat(status).isEqualTo(200)
@@ -146,12 +161,30 @@ class ProductCatalogPactConsumerTest {
     @Test
     @PactTestFor(pactMethod = "unknownProductCodePact")
     fun `an unknown product code answers 404 with a JSON error body`(mockServer: MockServer) {
+        assertReflectedPathMatchesTheContract()
+
         val (status, body) = get(mockServer, pathFor(MISSING_CODE))
 
         assertThat(status).isEqualTo(404)
         // The adapter turns this into CardConfigLookup.Unavailable via WebApplicationException; it
         // never reads the body, so only "JSON with an error message" is contractual.
         assertThat(mapper.readTree(body).path("error").asText()).isNotBlank()
+    }
+
+    /**
+     * Without this the drift still fails the test — the mock server 500s on a path it was not told
+     * to expect — but as an unexplained status mismatch. Asserting it directly names the cause.
+     */
+    private fun assertReflectedPathMatchesTheContract() {
+        assertThat(PATH_TEMPLATE)
+            .describedAs(
+                "ProductCatalogClient.getByCode is annotated @Path(\"%s\"), but openbank-product-catalog " +
+                    "serves \"%s\" (its openapi.yaml). The production client is calling a path the " +
+                    "provider does not have.",
+                PATH_TEMPLATE,
+                PRODUCT_BY_CODE_PATH_TEMPLATE,
+            )
+            .isEqualTo(PRODUCT_BY_CODE_PATH_TEMPLATE)
     }
 
     private fun get(mockServer: MockServer, path: String): Pair<Int, String> {
@@ -171,8 +204,24 @@ class ProductCatalogPactConsumerTest {
         const val MISSING_CODE = "NO_SUCH_CARD_PRODUCT"
 
         /**
-         * The `@Path` template the production client actually calls, read off the interface so a
-         * path change in [ProductCatalogClient] cannot pass this test silently.
+         * The contract, written out LITERALLY on purpose: openbank-product-catalog serves the
+         * by-code lookup here (`/api/v1/products/by-code/{code}` in its `openapi.yaml`).
+         *
+         * It must NOT be derived from [ProductCatalogClient] like [PATH_TEMPLATE] is — deriving both
+         * sides from the same annotation makes the interaction and the request move together, so the
+         * pact mock server always sees exactly what it expects and the test passes against a client
+         * pointing anywhere at all. The literal is the fixed point the annotation is measured
+         * against.
+         */
+        const val PRODUCT_BY_CODE_PATH_TEMPLATE = "/api/v1/products/by-code/{code}"
+
+        /** The contract path with the code substituted — what the `@Pact` interaction declares. */
+        private fun contractPathFor(code: String): String = PRODUCT_BY_CODE_PATH_TEMPLATE.replace("{code}", code)
+
+        /**
+         * The `@Path` template the production client actually calls, read off the interface. Used
+         * for the OUTGOING request only, so a path change in [ProductCatalogClient] fails against
+         * the literal contract above instead of silently moving both sides.
          */
         private val PATH_TEMPLATE: String = ProductCatalogClient::class.java
             .getMethod("getByCode", String::class.java)
