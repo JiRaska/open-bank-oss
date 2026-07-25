@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: document-service
     app.kubernetes.io/part-of: documents
   annotations:
-    openbank.tech/policy-checksum: "1e9aeebd53e8aa3d"
+    openbank.tech/policy-checksum: "fafb98c3d419eced"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -122,10 +122,16 @@ data:
     	# skill_ok, none of which charter_allowed alone consults. Calling charter_allowed
     	# directly would let a fleet-wide hard-denied tool tier, or an agent's own
     	# tools.deny glob, silently reach a REST action anyway.
+    	# object.get (not input.resource): the PDP omits `resource` from the query entirely when
+    	# it is null (OpaSidecarPolicyDecisionPoint.toInput only puts it when non-null), and a bare
+    	# `input.resource` reference is then UNDEFINED, which makes this whole object — and the
+    	# agents.allow call — undefined, silently denying every resource-less AI_AGENT REST call.
+    	# The MCP server (openbank-mcp-service) is the first caller to route AI_AGENT through
+    	# rest.allow with no resource; agent-service queries agents.allow directly and never hit this.
     	data.openbank.agents.allow with input as {
     		"agent": input.principal.id,
     		"tool": input.action,
-    		"resource": input.resource,
+    		"resource": object.get(input, "resource", null),
     	}
     }
 
