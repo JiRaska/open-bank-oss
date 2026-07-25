@@ -1,0 +1,142 @@
+{
+  "consumer": {
+    "name": "openbank-fx-service"
+  },
+  "interactions": [
+    {
+      "description": "POST a full-list screen for a name that is on no sanctions or PEP list",
+      "providerStates": [
+        {
+          "name": "the sanctions lists are seeded and carry no entry for the screened name"
+        }
+      ],
+      "request": {
+        "body": {
+          "aliases": [
+
+          ],
+          "entityType": "INDIVIDUAL",
+          "idempotencyKey": "11111111-1111-1111-1111-111111111111:party",
+          "name": "Zdenka Bezprijmeni"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/sanctions/screen"
+      },
+      "response": {
+        "body": {
+          "matches": [
+
+          ],
+          "overallScore": 0.0,
+          "status": "CLEAR"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.overallScore": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "POST a full-list screen for a name carried by the seeded sanctions lists",
+      "providerStates": [
+        {
+          "name": "the sanctions lists are seeded with the boot-time OFAC/EU/UN/PEP entries"
+        }
+      ],
+      "request": {
+        "body": {
+          "aliases": [
+
+          ],
+          "entityType": "INDIVIDUAL",
+          "idempotencyKey": "22222222-2222-2222-2222-222222222222:party",
+          "name": "Vladimir Putin"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/sanctions/screen"
+      },
+      "response": {
+        "body": {
+          "matches": [
+            {
+              "matchScore": 1.0,
+              "matchedName": "Vladimir Putin"
+            }
+          ],
+          "overallScore": 1.0,
+          "status": "HIT"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.matches": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.matches[*].matchScore": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.matches[*].matchedName": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.overallScore": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-sanctions-service"
+  }
+}
