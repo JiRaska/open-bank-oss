@@ -31,14 +31,14 @@ triaging an incident that starts on `agent`.
 ## Health & probes
 
 - Readiness: `GET :8109/q/health/ready` · Liveness: `GET :8109/q/health/live`
-- Metrics: scraped by the fleet PodMonitor (namespace `agent`); dashboards in Grafana.
-- Logs: `kubectl logs -n agent deploy/agent-service -f`, or Loki
-  `{namespace="agent"}`.
+- Metrics: scraped by the fleet PodMonitor (namespace `platform`); dashboards in Grafana.
+- Logs: `kubectl logs -n platform deploy/agent-service -f`, or Loki
+  `{namespace="platform"}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl rollout restart deploy/agent-service -n agent` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/agent-service -n agent --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Restart:** `kubectl rollout restart deploy/agent-service -n platform` (rolling, zero-downtime at >1 replica).
+- **Scale:** `kubectl scale deploy/agent-service -n platform --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes
@@ -53,7 +53,7 @@ triaging an incident that starts on `agent`.
 
 ## Disaster recovery
 
-- **RPO/RTO: undefined** — no backup is configured yet (see the prerequisite below), so no recovery-point/time guarantee can be made today.
+- **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up).
 - **Mechanism:** restore from the datastore's managed backup to a fresh instance (confirm a backup is actually configured for this datastore first).
 - **Restore:** provision a new datastore from the latest backup, replay any incremental logs, re-point the service.
 - **Verify:** health endpoint green + a domain spot check against last known-good.

@@ -31,14 +31,14 @@ triaging an incident that starts on `balance`.
 ## Health & probes
 
 - Readiness: `GET :8103/q/health/ready` · Liveness: `GET :8103/q/health/live`
-- Metrics: scraped by the fleet PodMonitor (namespace `balance`); dashboards in Grafana.
-- Logs: `kubectl logs -n balance deploy/balance-service -f`, or Loki
-  `{namespace="balance"}`.
+- Metrics: scraped by the fleet PodMonitor (namespace `balances`); dashboards in Grafana.
+- Logs: `kubectl logs -n balances deploy/balance-service -f`, or Loki
+  `{namespace="balances"}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl rollout restart deploy/balance-service -n balance` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/balance-service -n balance --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Restart:** `kubectl rollout restart deploy/balance-service -n balances` (rolling, zero-downtime at >1 replica).
+- **Scale:** `kubectl scale deploy/balance-service -n balances --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes
@@ -53,7 +53,7 @@ triaging an incident that starts on `balance`.
 
 ## Disaster recovery
 
-- **RPO/RTO: undefined** — no backup is configured yet (see the prerequisite below), so no recovery-point/time guarantee can be made today.
+- **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up).
 - **Mechanism:** restore from the datastore's managed backup to a fresh instance (confirm a backup is actually configured for this datastore first).
 - **Restore:** provision a new datastore from the latest backup, replay any incremental logs, re-point the service.
 - **Verify:** health endpoint green + a domain spot check against last known-good.

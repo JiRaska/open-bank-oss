@@ -23,7 +23,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 ## Dependencies
 
 - **Upstream (this service consumes):** `fx-service`, `sepa-payment`, `sepa-instant`, `domestic-payment`, `standing-order-service`, `swift-service`, `clearing-service`, `agent-service`
-- **Downstream (depends on this service):** `account-service`, `ledger-service`, `balance-service`, `audit-service`, `notification-service`
+- **Downstream (depends on this service):** `account-service`, `ledger-service`, `balance-service`, `audit-service`
 
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `transaction`.
@@ -31,14 +31,14 @@ triaging an incident that starts on `transaction`.
 ## Health & probes
 
 - Readiness: `GET :8102/q/health/ready` · Liveness: `GET :8102/q/health/live`
-- Metrics: scraped by the fleet PodMonitor (namespace `transaction`); dashboards in Grafana.
-- Logs: `kubectl logs -n transaction deploy/transaction-service -f`, or Loki
-  `{namespace="transaction"}`.
+- Metrics: scraped by the fleet PodMonitor (namespace `payments`); dashboards in Grafana.
+- Logs: `kubectl logs -n payments deploy/transaction-service -f`, or Loki
+  `{namespace="payments"}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl rollout restart deploy/transaction-service -n transaction` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/transaction-service -n transaction --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Restart:** `kubectl rollout restart deploy/transaction-service -n payments` (rolling, zero-downtime at >1 replica).
+- **Scale:** `kubectl scale deploy/transaction-service -n payments --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes
@@ -53,9 +53,8 @@ triaging an incident that starts on `transaction`.
 
 ## Disaster recovery
 
-- **RPO/RTO: undefined** — no backup is configured yet (see the prerequisite below), so no recovery-point/time guarantee can be made today.
-- **⚠ Prerequisite NOT met:** this PostgreSQL cluster has **no backup configured** (`barmanObjectStore` absent — prod-readiness C5=1). **DR is not achievable today** and the RPO/RTO targets above do NOT yet apply. Enabling the CNPG backup is the blocking prerequisite (see the backup sweep). Once enabled, the procedure is:
-- **Mechanism (after enablement):** CNPG continuous WAL + base backups → PITR.
+- **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up).
+- **Mechanism:** CloudNativePG continuous WAL archiving + base backups to S3 (`barmanObjectStore`). Point-in-time recovery (PITR).
 - **Restore:** create a `Cluster` with `bootstrap.recovery` pointing at the backup object store; CNPG replays WAL to the target time. See runbook 0003 (PG major upgrade) for the cluster-recreate mechanics.
 - **Verify:** `kubectl cnpg status <db>-rw -n <ns>` shows the recovered cluster Healthy and the `*-app` secret regenerated.
 
