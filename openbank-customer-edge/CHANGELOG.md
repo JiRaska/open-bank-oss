@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.46.0...customer-edge-v0.47.0) (2026-07-25)
+
+
+### Features
+
+* **cards:** card lifecycle, synthetic PAN vault and SCA-gated card operations (ADR-0194) ([#2135](https://github.com/JiRaska/open-bank-oss/issues/2135)) ([991cd92](https://github.com/JiRaska/open-bank-oss/commit/991cd928a9ea8a267aeb5aa82c33ae5a32aa3887))
+
 ## [0.46.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.45.0...customer-edge-v0.46.0) (2026-07-24)
 
 
