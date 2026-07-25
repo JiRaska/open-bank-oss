@@ -88,23 +88,26 @@ not deployed.
 
 | Property | As-built value | AI Act / GDPR bearing |
 |---|---|---|
-| Gateway / egress choke point | `none` | No single point to enforce residency, redaction, or an egress NetworkPolicy. |
-| Hosted (external) provider(s) | `deepinfra` | Prompt content leaves the platform trust boundary — Art. 10 data governance applies. |
+| Gateway / egress choke point | `litellm` | A single in-cluster choke point exists — the place where residency, redaction and an egress NetworkPolicy CAN be enforced. Whether every caller is actually forced through it is the `Egress enforced` row, not this one. |
+| Egress enforced | `partial` | The gateway is enforced for its own egress, but at least one caller's pod can still reach a provider directly — the choke point is bypassable. |
+| Callers routed through the gateway | `copilot-service`, `control-liveness-sentinel`, `devops-agent`, `docs-truth-agent`, `finops-agent`, `flaky-test-hunter`, `governance-auditor`, `release-steward`, `authz-policy-auditor` | Prompt content from these systems has a single auditable egress path. |
+| Callers NOT routed | `agent-service` | Prompt content from these systems reaches a provider directly. |
+| Hosted (external) provider(s) | `deepinfra`, `groq` | Prompt content leaves the platform trust boundary — Art. 10 data governance applies. |
 | Sensitive-data routing | `none` | No routing separates sensitive from non-sensitive prompt data. |
 | Budgets enforced at | `charter` | Cost control only — not a data-governance control. |
 | Fallback | `none` | Single provider; on failure the agent degrades to a deterministic path. |
 
-> ⚠ **Open gap (Art. 10 / GDPR).** A hosted external provider is in use with no
-> gateway and no sensitive-data routing, so prompt content egresses with no enforced
-> residency or redaction control. This is the platform's most material AI-egress
-> exposure and would block any high-risk (Annex III) deployment. Residency, DPA, and
-> the synthetic-data licence position are recorded in **ADR-0175**; the shared egress
-> seam that gives this path a single choke point landed in #2018, with the fleet
-> repoint tracked as its follow-up. Until that lands, treat LLM egress as un-enforced.
+> ⚠ **Partially closed gap (Art. 10 / GDPR).** A hosted external provider is in use
+> behind an in-cluster gateway, so the provider credential and the egress path are
+> centralised and auditable — but the gateway is not yet the *only* way out. Until
+> `egress_enforced` reads `full`, a caller pod can still reach the provider directly
+> and the choke point is a convention, not a control. Sensitive-data routing remains
+> absent either way. Residency, DPA and the synthetic-data licence position are
+> recorded in **ADR-0175**.
 
 ## Provenance
 
-- Source: `openbank-libs/governance/agents.yaml` (sha256 `ebac2c2fb74b933a…`, 15 charters)
+- Source: `openbank-libs/governance/agents.yaml` (sha256 `39267a3241371cc2…`, 15 charters)
 - Source: `openbank-libs/governance/ml-systems.yaml` (sha256 `9cd5cb5b20918520…`, 4 non-agent systems)
 - Related: ADR-0031 (agent governance), ADR-0084 (fraud scoring plane), ADR-0139/0140
   (ML decisioning platform), ADR-0141 (model registry), ADR-0142 (credit decisioning),
