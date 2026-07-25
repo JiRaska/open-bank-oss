@@ -55,17 +55,22 @@ control-liveness-sentinel), **6 pending** (the stub ops-agents, ADR-0164–0168 
 coding-agent session), **2 not-applicable** (mcp-anonymous, ap2-anonymous — identity-only
 principals).
 
-| File | Source (to be replaced by a registry load) |
-|---|---|
-| `compliance-officer/oversight.v1.md` | `OversightService.systemPrompt()` |
-| `ui-assistant/system.v1.md` | `AgentChatService.systemPrompt()` |
-| `customer-copilot/system.v1.md` | `CopilotChatService.systemPrompt()` |
-| `devops-agent/diagnosis.v1.md` | `LlmDiagnosisAdapter.DIAGNOSIS_SYSTEM` |
-| `devops-agent/remediation.v1.md` | `LlmDiagnosisAdapter.REMEDIATION_SYSTEM` |
-| `control-liveness-sentinel/system.v1.md` | `LlmDiagnosisAdapter.SYSTEM_PROMPT` |
+| File | Source | Loaded from here? |
+|---|---|---|
+| `compliance-officer/oversight.v1.md` | `OversightService.systemPrompt()` | no — inline constant |
+| `ui-assistant/system.v1.md` | `AgentChatService.systemPrompt()` | no — inline constant |
+| `customer-copilot/system.v1.md` | `CopilotChatService.systemPrompt()` | no — inline constant |
+| `devops-agent/diagnosis.v1.md` | `LlmDiagnosisAdapter.DIAGNOSIS_SYSTEM` | yes (#2240) |
+| `devops-agent/remediation.v1.md` | `LlmDiagnosisAdapter.REMEDIATION_SYSTEM` | yes (#2240) |
+| `control-liveness-sentinel/system.v1.md` | `LlmDiagnosisAdapter.SYSTEM_PROMPT` | superseded by v2 |
+| `control-liveness-sentinel/system.v2.md` | `LlmDiagnosisAdapter.SYSTEM_PROMPT` | yes (#2321) |
 
-The services still hold the inline constant; wiring them to load from here is the ADR-0148 code
-follow-up.
+The remaining three services still hold the inline constant; wiring them to load from here is the
+ADR-0148 code follow-up.
+
+A superseded file stays in the tree and in `registry.yaml`: a shipped prompt is immutable, and an
+AuditEvent written while it was live carries its `prompt_hash` — delisting the file makes that hash
+unresolvable, which defeats the record-keeping property the registry exists for.
 
 ### Templated prompts
 
