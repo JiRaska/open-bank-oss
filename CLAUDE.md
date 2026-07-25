@@ -188,6 +188,23 @@ fire from *outside* it, so they stay here:
   does not match reality" — there is no judgement left to exercise, so advisory just makes the drift
   mergeable. `eu-ai-act-registry` went red twice on #2156 and the PR merged anyway, leaving the EU AI
   Act inventory omitting an AI system until it was regenerated. Tracked as #2216.
+- **The gate that never existed beats the unfalsified one: check whether anything reads the artifact
+  at all before assuming a green covers it.** This repo is a MULTI-LICENSE tree — Apache-2.0 at the
+  root, an AGPL-3.0-only open-core subset (ADR-0136 + ADR-0181/0193) — and *nothing* compared the
+  per-file SPDX headers to that declaration: no `reuse-tool`/`licensee`/`license-eye`/`scancode`
+  anywhere, and the OpenSSF Scorecard `License` check only asks whether a recognized licence file
+  exists at the **root**, never what the files say. So four descriptions of the split drifted in
+  silence: 12 AGPL modules in the tree, 10 in `rules.yaml`, **4** in the published `NOTICE`/`README` —
+  which told every downstream adopter the other 8 were Apache-2.0 (#2280). Two transferable rules.
+  (a) **A licence claim about a *distributed* artifact needs a gate, not prose** — all 12 carry a
+  `version.txt`. (b) **Never let a published doc keep its own copy of a list that lives in
+  `rules.yaml`** — enumerate once, point at it everywhere else; the second hand-maintained copy IS the
+  drift. Root cause was `scripts/add-license-headers.sh` hardcoding Apache-2.0 for every path, the
+  ADR-0136 follow-up nobody did — a stamping script that is not path-aware in a multi-license tree
+  manufactures the violation. Now `rules.yaml: agpl_modules` is canonical and
+  `.github/scripts/check-license-headers.py` enforces every declaration against it. Frozen headers
+  (an applied Flyway migration — editing one breaks its checksum and the service dies at boot) go in
+  `REUSE.toml` with `precedence = "override"`, never edited in place.
 
 ### CI / bot commit signing
 - **What signs a bot commit is the *endpoint*, not the token — and `main-protection` enforces
