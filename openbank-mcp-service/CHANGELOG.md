@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.3.0...mcp-service-v0.4.0) (2026-07-25)
+
+
+### Features
+
+* **mcp:** resolve the acting agent + consent from the caller's OAuth token (ADR-0195 step 1) ([#2253](https://github.com/JiRaska/open-bank-oss/issues/2253)) ([3108b3a](https://github.com/JiRaska/open-bank-oss/commit/3108b3a81772599bd51378b4cb00479155804aac))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.2.1...mcp-service-v0.3.0) (2026-07-25)
 
 
