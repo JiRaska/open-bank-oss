@@ -1,0 +1,63 @@
+{
+  "consumer": {
+    "name": "openbank-vop-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the party whose name VoP compares the payer-supplied name against",
+      "providerStates": [
+        {
+          "name": "a party exists with both a legal name and a trading name"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/parties/b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9"
+      },
+      "response": {
+        "body": {
+          "legalName": "Pact Verify Trading Company a.s.",
+          "tradingName": "PactVerify"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.legalName": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.tradingName": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-party-service"
+  }
+}
