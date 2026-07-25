@@ -63,7 +63,6 @@ KNOWN_UNCOVERED = {
     "pacts/openbank-onboarding-service-openbank-party-service.json",
     "pacts/openbank-sepa-payment-openbank-fraud-service.json",
     "pacts/openbank-transaction-service-openbank-balance-service.json",
-    "pacts/openbank-transaction-service-openbank-fx-service.json",
     "pacts/openbank-transaction-service-openbank-swift-service.json",
 }
 
