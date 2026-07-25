@@ -103,11 +103,8 @@ const FORWARD_HEADERS = [
   // approved (AuthorizeInterceptor). Without forwarding it, every retry looks identical to the
   // original request and gets 202'd again forever.
   'x-approval-id',
-  // The audited human behind a mutation. Several backends take it as a required
-  // @HeaderParam (card-issuance's CardResource stamps it onto every
-  // CardStatusChanged event); not forwarding it turns an operator action into an
-  // anonymous one — or a 400, since the parameter is non-nullable there.
-  'x-operator-id',
+  // NOTE: x-operator-id is deliberately NOT forwarded from the client. It is
+  // derived server-side from the session below — see the comment there.
 ]
 
 export const dynamic = 'force-dynamic'
@@ -144,11 +141,24 @@ async function proxy(
   // Keycloak access token (which carries the operator's ROLE_* claims) as the
   // upstream bearer, so backend RBAC sees the real caller. We never overwrite an
   // explicit Authorization already on the request (service-to-service / tests).
+  const session = await auth()
   if (!headers.has('authorization')) {
-    const session = await auth()
     const accessToken = session?.user?.accessToken
     if (accessToken) headers.set('authorization', `Bearer ${accessToken}`)
   }
+
+  // The audited human behind a mutation. Several backends take it as a required
+  // @HeaderParam — card-issuance's CardResource stamps it onto every
+  // CardStatusChanged event — so without it an operator action is anonymous, or a
+  // 400, since the parameter is non-nullable there.
+  //
+  // DERIVED from the session, never forwarded from the request. A browser can set
+  // any header it likes, so trusting the client here would let an operator write
+  // someone else's name into the audit trail of a card block — an audit field the
+  // audited party controls is not an audit field. The header is stripped from
+  // FORWARD_HEADERS above precisely so a spoofed one cannot survive this hop.
+  const operator = session?.user?.email ?? session?.user?.name
+  if (operator) headers.set('x-operator-id', `admin-ui:${operator}`)
 
   // Edge guard (ADR-0056): the BFF must never be an unauthenticated relay into
   // the cluster. If the caller presented neither an explicit bearer (service-to-

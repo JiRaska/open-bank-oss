@@ -10,7 +10,6 @@ import {
   PauseCircle, PlayCircle, ShieldX, Ban, AlertTriangle, Info,
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
-import { useAuth } from '@/lib/auth/useAuth'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
@@ -242,18 +241,16 @@ function ConfirmDialog({
 
 export default function CardsPage() {
   const { t, language } = useLanguage()
-  const { user } = useAuth()
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [pending, setPending] = useState<{ card: Card; transition: CardTransition } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
 
-  // The audited actor behind every mutation. card-issuance stamps `X-Operator-Id`
-  // onto the CardStatusChanged event, so it must identify the signed-in admin —
-  // the same source the approvals screen uses for `decidedBy`. The fallback is a
-  // clearly-labelled placeholder, never an invented identity.
-  const operatorId = user?.email || user?.name || 'admin-ui:unknown-operator'
+  // NOTE: X-Operator-Id is NOT set here. The BFF proxy derives it from the server
+  // session and refuses to forward a client-supplied one — a browser can set any
+  // header, so an operator identity chosen in the browser is not evidence of
+  // anything. See src/app/api/svc/[service]/[...path]/route.ts.
 
   // Single graceful data path (admin-ui rule #1): the hook classifies a non-OK
   // BFF response and auto-wakes a scaled-to-zero pod (KEDA, ADR-0057) instead of
@@ -326,7 +323,7 @@ export default function CardsPage() {
     try {
       const res = await fetch(svcUrl('card-issuance-service', `/api/v1/cards/${card.id}/${transition.action}`), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Operator-Id': operatorId },
+        headers: { 'Content-Type': 'application/json' },
         // Only block/cancel take a body (CardStatusRequest); the reversible
         // endpoints declare no entity parameter.
         body: transition.reason ? JSON.stringify({ reason }) : undefined,
@@ -366,7 +363,7 @@ export default function CardsPage() {
     } finally {
       setBusy(null)
     }
-  }, [operatorId, reload, t, failureCopy])
+  }, [reload, t, failureCopy])
 
   const feedbackStyle = (tone: Feedback['tone']) => ({
     ok: { bg: 'var(--success-bg)', border: 'var(--success-border)', color: 'var(--success-text)' },
