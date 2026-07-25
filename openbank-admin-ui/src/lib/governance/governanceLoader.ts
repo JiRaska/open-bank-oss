@@ -33,7 +33,8 @@ export function getGovernanceManifest(): GovernanceManifestEntry[] {
       serviceName: s.serviceName!,
       dataDomain: s.dataDomain!,
       primaryDatastore: s.primaryDatastore!,
-      schemaName: s.schemaName!,
+      schemaName: s.schemaName ?? null,   // null = declared stateless (ADR-0071)
+      stateless: s.stateless,
       dataLineageRole: s.dataLineageRole!,
       flywayDeclaredVersion: s.flywayDeclaredVersion ?? '',
       flywayCurrentVersion: null,        // runtime, no live-DB integration yet
