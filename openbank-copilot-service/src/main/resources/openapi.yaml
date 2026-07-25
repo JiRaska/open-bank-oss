@@ -7,7 +7,7 @@ openapi: "3.1.0"
 
 info:
   title: OpenBank Copilot Service API
-  version: "1.1.0"
+  version: "1.2.0"
   description: |
     Customer-facing AI assistant (mobile copilot), per ADR-0089.
 
@@ -50,8 +50,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ChatReply"
+        "401":
+          description: Authenticated token carries no usable subject
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "501":
           description: Capability not yet enabled (feature flag off)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /copilot/chat/stream:
     post:
@@ -63,6 +73,13 @@ paths:
         they arrive from the model backend instead of being buffered until the full reply is
         ready. Tool-call rounds are handled server-side and transparent to the client; only
         the final text response is streamed. First token arrives within ~500 ms.
+
+        Unlike `/copilot/chat`, this endpoint reports nothing through the status code once the
+        stream has opened. A disabled capability is delivered as an ordinary text chunk on the
+        `200` stream (`CopilotChatService.handleStream` emits its disabled message and returns —
+        there is no `501` path here), a refused prompt-injection attempt arrives the same way, and
+        a token with no usable subject yields an empty `200` stream rather than a `401`. Clients
+        must therefore read the body, not the status, to tell these apart.
       security:
         - bearerAuth: []
       requestBody:
@@ -81,8 +98,8 @@ paths:
                 description: >
                   Newline-delimited SSE events. Each `data:` line contains a raw text chunk.
                   No JSON wrapper — clients concatenate chunks to build the full reply.
-        "501":
-          description: Capability not yet enabled (feature flag off)
+                  A disabled capability, a refused prompt injection and a missing subject all
+                  arrive on this same 200 stream — see the operation description.
 
   /copilot/actions/{tokenId}/confirm:
     post:
@@ -158,6 +175,13 @@ components:
         message:
           type: string
           description: The customer's message (treated as untrusted input — ADR-0089 D3).
+        themeSpec:
+          type: string
+          nullable: true
+          description: |
+            The client's active ThemeSpec JSON (ADR-0190), so the theme-designer tool edits relative
+            to what the customer currently sees. Data context only — carries the same trust level as
+            `message` and is never treated as instructions.
     ChatReply:
       type: object
       required: [conversationId, reply]
@@ -173,6 +197,12 @@ components:
             Present when the turn produced a money-path action. A structured, validated proposal the
             app renders as a non-AI-controlled card and routes into the existing edge payment + SCA
             (dynamic-linking) flow. The assistant NEVER executes it (ADR-0089 D2).
+        themeSpec:
+          type: string
+          nullable: true
+          description: |
+            Normalized ThemeSpec JSON produced by the theme-designer tool on this turn (ADR-0190),
+            absent otherwise.
     ActionProposal:
       type: object
       required: [kind, summary, fields]
