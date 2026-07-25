@@ -145,8 +145,36 @@ data class Consent(
             ConsentScope.STATEMENTS_READ,
         )
 
+        /**
+         * GDPR Art. 7 data-processing scopes with no PSD2 account-access dimension (ADR-0205 D1).
+         * A consent request made ENTIRELY of these scopes activates immediately — no SCA challenge —
+         * because an SCA ceremony designed for payment authorization is a disproportionate burden on
+         * a data-processing opt-in. Disjoint from [AISP_SCOPES] by construction: a scope must never
+         * appear in both, or a request could either skip SCA it should require, or force SCA on a
+         * request meant to be exempt. A request mixing a GDPR-only scope with any other scope is
+         * rejected outright by [com.openbank.consent.application.usecase.ConsentService.createConsent]
+         * rather than silently falling back to the SCA-gated path.
+         */
+        val GDPR_ONLY_SCOPES = setOf(
+            ConsentScope.TELEMETRY_RUM,
+            ConsentScope.MARKETING_COMMS_EMAIL,
+            ConsentScope.MARKETING_COMMS_PUSH,
+            ConsentScope.MARKETING_COMMS_INAPP,
+        )
+
         /** PSD2 RTS Art. 10(2)(b): max AISP accesses per day without fresh SCA. */
         const val AISP_MAX_ACCESSES_PER_DAY = 4
+
+        init {
+            // ADR-0205's own Negative consequences: nothing but code review currently guards
+            // AISP_SCOPES/GDPR_ONLY_SCOPES staying disjoint. Fail fast at class-load time instead
+            // of trusting review — the two sets encode opposite SCA requirements, so a scope in
+            // both would make createConsent's SCA-vs-exempt branch ambiguous by construction.
+            check(AISP_SCOPES.intersect(GDPR_ONLY_SCOPES).isEmpty()) {
+                "AISP_SCOPES and GDPR_ONLY_SCOPES must be disjoint: " +
+                    "${AISP_SCOPES.intersect(GDPR_ONLY_SCOPES)} appear in both"
+            }
+        }
     }
 }
 

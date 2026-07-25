@@ -215,6 +215,25 @@ class ConsentTest {
         }
     }
 
+    // ADR-0205 D1: the disjointness invariant is enforced by a `check()` in Consent's companion
+    // `init` block (fails fast at class-load time, not just at code review). Asserted explicitly
+    // here too so the invariant has a named, readable test rather than only an implicit one from
+    // every other test in this class merely loading the class successfully.
+    @Test
+    fun `AISP_SCOPES and GDPR_ONLY_SCOPES are disjoint`() {
+        assertThat(Consent.AISP_SCOPES.intersect(Consent.GDPR_ONLY_SCOPES)).isEmpty()
+    }
+
+    @Test
+    fun `GDPR_ONLY_SCOPES contains exactly the four GDPR Art7 scopes, not the PSD2 or agent ones`() {
+        assertThat(Consent.GDPR_ONLY_SCOPES).containsExactlyInAnyOrder(
+            ConsentScope.TELEMETRY_RUM,
+            ConsentScope.MARKETING_COMMS_EMAIL,
+            ConsentScope.MARKETING_COMMS_PUSH,
+            ConsentScope.MARKETING_COMMS_INAPP,
+        )
+    }
+
     private fun consent(
         scopes: Set<ConsentScope> = setOf(ConsentScope.PAYMENTS_INITIATE),
         accountIbans: List<String>? = listOf("CZ6508000000192000145399"),
