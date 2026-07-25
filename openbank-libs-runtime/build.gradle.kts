@@ -70,6 +70,11 @@ dependencies {
     testImplementation("org.jboss.logging:jboss-logging:3.6.2.Final")
     testImplementation("jakarta.enterprise:jakarta.enterprise.cdi-api:4.1.0")
     testImplementation("io.micrometer:micrometer-core:1.14.5")
+    // Test-only: WorkflowLivenessMetricNamingTest checks the dotted meter name against Micrometer's
+    // REAL PrometheusNamingConvention rather than trusting the hand-rolled dot -> underscore
+    // rendering that the sentinel's PromQL depends on. The registry itself is never used at runtime
+    // here — each service brings quarkus-micrometer-registry-prometheus itself.
+    testImplementation("io.micrometer:micrometer-registry-prometheus:1.14.5")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

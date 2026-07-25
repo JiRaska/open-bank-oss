@@ -54,10 +54,18 @@ devops-agent:
   (`rules.yaml`'s advisory-gate `blocked_on` list for mechanisms 1/2, so it can distinguish a
   known, tracked exception from a new regression).
 - **Detects four ways**, one per ADR-0160 mechanism:
-  - **D1 — stale watchdog heartbeat.** Any `openbank_workflow_liveness_last_success_age_seconds`
+  - **D1 — stale watchdog heartbeat.** Any `openbank_workflow_last_success_age_seconds`
     gauge past 2× its declared expected interval — the same threshold ADR-0160 mechanism 3
     already defines as the paging line, so this agent's finding and Alertmanager's page always
     agree.
+    (Correction, #2187 follow-up: this line originally named the gauge
+    `openbank_workflow_liveness_last_success_age_seconds`, and the implementation queried that,
+    but ADR-0160's `DomainMetrics.registerWorkflowLiveness` emits it without the `liveness`
+    infix — so D1 collected an empty vector and could only report "no stale heartbeats". The
+    query and this line were aligned to the emitted name, which is the one actually in
+    Prometheus; both sides now read it from `WorkflowLivenessMetrics`. The "Alertmanager's page"
+    it claims to agree with does not exist yet either — no PrometheusRule implements mechanism
+    3's generic expression.)
   - **D2 — event-consumer regression.** A newly producer-only topic in
     `check-event-consumer-liveness.sh`'s report that is not in the `rules.yaml` allowlist.
   - **D3 — lineage-vs-code drift.** A `governance.yaml` lineage edge the code audit

@@ -5,6 +5,7 @@
 
 package com.openbank.liveness.application.workflow
 
+import com.openbank.libs.observability.WorkflowLivenessMetrics
 import com.openbank.liveness.application.port.out.PrometheusQueryPort
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -27,8 +28,13 @@ open class CollectSignalsActivityImpl(private val prometheusQuery: PrometheusQue
     // matching interval gauge is dropped rather than guessed at.
     override fun collectWatchdogHeartbeats(): Map<String, Double> = runOnVertxContext {
         log.debug("Collecting WorkflowLivenessWatchdog heartbeat gauges")
-        val ages = prometheusQuery.queryVector("openbank_workflow_liveness_last_success_age_seconds")
-        val intervals = prometheusQuery.queryVector("openbank_workflow_liveness_expected_interval_seconds")
+        // Series names come from WorkflowLivenessMetrics — the same constants DomainMetrics
+        // registers the gauges under. They used to be literals here, and they were WRONG: this
+        // queried `openbank_workflow_liveness_*` while the producer emits `openbank_workflow_*`,
+        // so both queries returned an empty vector and mechanism 3 reported "no stale heartbeats"
+        // unconditionally — the exact vacuous-green shape the mechanism exists to catch.
+        val ages = prometheusQuery.queryVector(WorkflowLivenessMetrics.LAST_SUCCESS_AGE_SERIES)
+        val intervals = prometheusQuery.queryVector(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SERIES)
         ages.mapNotNull { (job, age) ->
             val interval = intervals[job] ?: return@mapNotNull null
             "$job|$interval" to age

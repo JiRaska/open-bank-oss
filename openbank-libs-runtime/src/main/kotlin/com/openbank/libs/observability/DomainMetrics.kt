@@ -367,12 +367,17 @@ class DomainMetrics {
     fun registerWorkflowLiveness(workflow: String, expectedInterval: Duration): WorkflowLivenessRecorder {
         val lastSuccessEpochMillis = java.util.concurrent.atomic.AtomicLong(java.time.Instant.EPOCH.toEpochMilli())
         reg()?.let { r ->
-            Gauge.builder("openbank.workflow.last_success.age_seconds") {
+            // Names come from WorkflowLivenessMetrics, never a literal: the consumer side
+            // (openbank-control-liveness-sentinel) queried a name nothing emitted for as long as
+            // both sides spelled it themselves, so mechanism 3 collected an empty vector and could
+            // only ever report "no stale heartbeats" (#2187 follow-up).
+            Gauge.builder(WorkflowLivenessMetrics.LAST_SUCCESS_AGE_SECONDS) {
                 Duration.between(java.time.Instant.ofEpochMilli(lastSuccessEpochMillis.get()), java.time.Instant.now())
                     .toSeconds().toDouble()
-            }.tag("workflow", workflow).strongReference(true).register(r)
-            Gauge.builder("openbank.workflow.expected_interval_seconds") { expectedInterval.toSeconds().toDouble() }
-                .tag("workflow", workflow).strongReference(true).register(r)
+            }.tag(WorkflowLivenessMetrics.WORKFLOW_TAG, workflow).strongReference(true).register(r)
+            Gauge.builder(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS) {
+                expectedInterval.toSeconds().toDouble()
+            }.tag(WorkflowLivenessMetrics.WORKFLOW_TAG, workflow).strongReference(true).register(r)
         }
         return WorkflowLivenessRecorder(lastSuccessEpochMillis)
     }
