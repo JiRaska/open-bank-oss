@@ -65,6 +65,45 @@ class FeedbackSubmissionTest {
     ) = """{"screenId":"$screenId","category":"$category","comment":"$comment"$extra}"""
 
     @Test
+    fun `rendering context is parsed, capped and passed through`() {
+        val extra = ""","osVersion":"iOS 17.5","locale":"cs","theme":"green-dark","sessionId":"sess-1""""
+        val resp = resource().submit(body(extra = extra))
+
+        assertThat(resp.status).isEqualTo(202)
+        val emitted = slot<FeedbackSubmission>()
+        verify(exactly = 1) { publisher.emit(capture(emitted)) }
+        assertThat(emitted.captured.osVersion).isEqualTo("iOS 17.5")
+        assertThat(emitted.captured.locale).isEqualTo("cs")
+        assertThat(emitted.captured.theme).isEqualTo("green-dark")
+        assertThat(emitted.captured.sessionId).isEqualTo("sess-1")
+    }
+
+    @Test
+    fun `oversized context values are truncated, not rejected`() {
+        // A client-side cap is a UX affordance; the server must bound the value itself before it
+        // reaches a 10-year warehouse. Truncating keeps the usable prefix instead of losing the
+        // whole report over a cosmetic field.
+        val extra = ""","theme":"${"t".repeat(200)}""""
+        val resp = resource().submit(body(extra = extra))
+
+        assertThat(resp.status).isEqualTo(202)
+        val emitted = slot<FeedbackSubmission>()
+        verify(exactly = 1) { publisher.emit(capture(emitted)) }
+        assertThat(emitted.captured.theme).hasSize(32)
+    }
+
+    @Test
+    fun `context fields are optional`() {
+        val resp = resource().submit(body())
+
+        assertThat(resp.status).isEqualTo(202)
+        val emitted = slot<FeedbackSubmission>()
+        verify(exactly = 1) { publisher.emit(capture(emitted)) }
+        assertThat(emitted.captured.osVersion).isNull()
+        assertThat(emitted.captured.theme).isNull()
+    }
+
+    @Test
     fun `well-formed text-only feedback is accepted with 202 and emitted once`() {
         val resp = resource().submit(body())
 

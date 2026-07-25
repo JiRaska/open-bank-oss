@@ -50,10 +50,46 @@ class FeedbackPublisherTest {
         comment = "Confirm button hides behind the keyboard",
         platform = "ios",
         appVersion = "0.4.0",
+        osVersion = "iOS 17.5",
+        locale = "cs",
+        theme = "green-dark",
+        sessionId = "7f3a1c20-9b44-4e51-8c2a-1d6e5f0a9b31",
         screenshotKey = screenshotKey,
         screenshotBytes = 40,
         screenshotStatus = status,
     )
+
+    @Test
+    fun `carries the rendering context and session id into the payload`() {
+        val record = slot<Record<String, String>>()
+        every { emitter.send(capture(record)) } returns CompletableFuture.completedFuture(null)
+
+        publisher().emit(submission())
+
+        val payload = mapper.readTree(record.captured.value())["payload"]
+        assertThat(payload["osVersion"].asText()).isEqualTo("iOS 17.5")
+        assertThat(payload["locale"].asText()).isEqualTo("cs")
+        assertThat(payload["theme"].asText()).isEqualTo("green-dark")
+        assertThat(payload["sessionId"].asText()).isEqualTo("7f3a1c20-9b44-4e51-8c2a-1d6e5f0a9b31")
+    }
+
+    @Test
+    fun `omits context keys entirely when the app did not report them`() {
+        // Absent must stay absent rather than becoming "": the warehouse has to be able to tell
+        // "this client never reported a theme" from "the theme was an empty string".
+        val record = slot<Record<String, String>>()
+        every { emitter.send(capture(record)) } returns CompletableFuture.completedFuture(null)
+
+        publisher().emit(
+            submission().copy(osVersion = null, locale = null, theme = null, sessionId = null),
+        )
+
+        val payload = mapper.readTree(record.captured.value())["payload"]
+        assertThat(payload.has("osVersion")).isFalse()
+        assertThat(payload.has("locale")).isFalse()
+        assertThat(payload.has("theme")).isFalse()
+        assertThat(payload.has("sessionId")).isFalse()
+    }
 
     @Test
     fun `emits the analytics envelope keyed on the reference, carrying the key and not the bytes`() {

@@ -36,6 +36,10 @@ data class FeedbackSubmission(
     val comment: String,
     val platform: String?,
     val appVersion: String?,
+    val osVersion: String?,
+    val locale: String?,
+    val theme: String?,
+    val sessionId: String?,
     val screenshotKey: String?,
     val screenshotBytes: Int,
     val screenshotStatus: String,
@@ -101,6 +105,12 @@ class FeedbackPublisher(
             payload.put("comment", submission.comment)
             submission.platform?.let { payload.put("platform", it) }
             submission.appVersion?.let { payload.put("appVersion", it) }
+            // Rendering context + session correlation (ADR-0192). Absent fields stay absent
+            // rather than becoming "", so the warehouse can tell "not reported" from "empty".
+            submission.osVersion?.let { payload.put("osVersion", it) }
+            submission.locale?.let { payload.put("locale", it) }
+            submission.theme?.let { payload.put("theme", it) }
+            submission.sessionId?.let { payload.put("sessionId", it) }
             submission.screenshotKey?.let { payload.put("screenshotKey", it) }
             payload.put("screenshotBytes", submission.screenshotBytes)
             payload.put("screenshotStatus", submission.screenshotStatus)
