@@ -632,6 +632,20 @@ jobs:
       - name: "no dead-code SERVICE-principal rego rule (enforced)"
         run: bash .github/scripts/check-no-service-principal-type.sh .
 
+      # openbank-mcp-service caller-auth ordering guard (BLOCKER #2206). The MCP
+      # threat model (#2200) established the service authenticates nobody today —
+      # resolveContext() hardcodes the "agent:mcp-anonymous" placeholder and the OPA
+      # PDP authorizes a constant; consent-scoped filtering is delegated to a port
+      # impl that is only StubReadPorts. The stub boundary IS the security control.
+      # Phase-2's "swap the stub for a real @RegisterRestClient adapter" needs no
+      # endpoint and no policy edit, so a real port silently turns get_balance into
+      # an unauthenticated read of any account with every other gate green. This
+      # guard fails if a non-Stub read/proposal port is wired while the placeholder
+      # identity remains — forcing real caller auth to land before/with the port.
+      # 0 violations on origin/main at introduction — a regression guard. ENFORCED.
+      - name: "MCP real-port requires caller auth first (BLOCKER #2206, enforced)"
+        run: bash .github/scripts/check-mcp-stub-ports-vs-caller-auth.sh .
+
       # No service may register its own ExceptionMapper for a JDK type
       # openbank-libs-runtime already maps (IllegalArgumentException,
       # IllegalStateException, NoSuchElementException, Exception,
