@@ -49,12 +49,10 @@ PACTS = ROOT / "pacts"
 # ~44 generated files and give the PR a short shelf life. The list belongs next to the code that
 # reads it.
 KNOWN_UNCOVERED = {
-    "pacts/openbank-balance-service-openbank-account-service.json",
     "pacts/openbank-consent-service-openbank-sca-service.json",
     # Landed 2026-07-25, after the #2327 audit counted 16 of 27: same three providers
     # (balance/transaction/party), so the same debt, not a new class of it. The estate went
     # 27 -> 33 pacts in a day, which is the argument for a gate rather than another audit.
-    "pacts/openbank-notification-service-openbank-account-service.json",
     "pacts/openbank-sepa-payment-openbank-fraud-service.json",
     "pacts/openbank-transaction-service-openbank-fx-service.json",
     "pacts/openbank-transaction-service-openbank-swift-service.json",
