@@ -59,6 +59,7 @@ All operational recovery procedures are in `openbank-infra/docs/runbooks/`:
 | Cluster re-init after node failure | `runbook-0001-cluster-ops.md` |
 | OpenBao break-glass re-init | `runbook-0005-openbao-breakglass.md` |
 | Full DR restore from backup | `runbook-0002-disaster-recovery.md` |
+| Money-path pod kill / CNPG live failover mid-posting | `money-path-chaos-drill-procedure.md` (procedure only — not yet executed, issue #669) |
 
 ---
 
