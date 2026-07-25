@@ -32,6 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gitops_facts import (  # noqa: E402  (path must be set before the import)
     declared_datastore,
     is_stateless,
+    module_dir,
+    money_path_services,
     podmonitor_namespaces,
     service_namespace,
 )
@@ -44,13 +46,19 @@ ATTESTATIONS = REPO / "openbank-libs" / "governance" / "attestations.yaml"
 RELEASE_EVIDENCE = REPO / ".github" / "workflows" / "release-please.yml"
 VEX_DIR = REPO / "openbank-libs" / "governance" / "vex"
 
-# Money-path services (mirror of rules.yaml: money_path_services). Kept short
-# here; the real collector would parse rules.yaml. These get a stricter gate.
-MONEY_PATH = {
-    "ledger", "transaction", "account", "balance", "sepa-payment",
-    "sepa-instant", "domestic-payment", "clearing", "swift", "fx",
-    "lending", "sca", "consent", "fraud",
-}
+# Money-path services come from rules.yaml, the authoritative list — never a copy. The literal
+# that used to live here named 14 services while rules.yaml declared 20, so sdd, interest,
+# billing, settlement, sanctions and vop were scored with the LENIENT gate and read GO (#2364).
+# money_path_services() raises rather than returning an empty set, because an empty set would
+# relax the gate for the whole fleet while looking like a clean run.
+def money_path() -> set[str]:
+    """The money-path set, read from rules.yaml at CALL time.
+
+    Deliberately a function, not a module-level constant: REPO is rebindable (the test suite
+    points it at a fixture tree), and a constant evaluated at import would both ignore that
+    rebinding and raise on any tree without a rules.yaml.
+    """
+    return money_path_services(REPO)
 
 DIMENSIONS = [
     ("C1", "Kód"),
@@ -69,7 +77,10 @@ DIMENSIONS = [
 # helpers
 # ---------------------------------------------------------------------------
 def svc_dir(short: str) -> Path:
-    return REPO / f"openbank-{short}-service"
+    # Not every module is `openbank-<short>-service`: the three payment modules
+    # (sepa-payment, sepa-instant, domestic-payment) drop the suffix. Resolving the shape here
+    # is what lets them be scored at all (#2364).
+    return module_dir(short, REPO)
 
 
 def exists_dir(short: str) -> bool:
@@ -259,7 +270,7 @@ def committed_pacts(short: str) -> list[str]:
     pacts = REPO / "pacts"
     if not pacts.is_dir():
         return []
-    token = f"openbank-{short}-service"
+    token = svc_dir(short).name  # module dir name — the payment modules drop the -service suffix
     return sorted(p.name for p in pacts.glob("*.json") if token in p.name)
 
 
@@ -353,7 +364,7 @@ def has_vex_triage(short: str) -> bool:
 
 
 def score_c7_security(short: str, att, today) -> tuple[int, str]:
-    tm = (THREAT_MODELS / f"openbank-{short}-service.md").exists()
+    tm = (THREAT_MODELS / f"{svc_dir(short).name}.md").exists()
     netpol = bool(gitops_files_for(short, "NetworkPolicy"))
     sectest = grep_any(svc_dir(short) / "src" / "test",
                        ["Security", "schemathesis", "Authz"])
@@ -454,7 +465,7 @@ class ServiceReadiness:
 
 
 def collect(short: str, att, today: str) -> ServiceReadiness:
-    r = ServiceReadiness(service=short, money_path=short in MONEY_PATH)
+    r = ServiceReadiness(service=short, money_path=short in money_path())
     for (code, _), scorer in zip(DIMENSIONS, SCORERS):
         s, ev = scorer(short, att, today)
         r.scores[code] = s
@@ -464,12 +475,28 @@ def collect(short: str, att, today: str) -> ServiceReadiness:
 
 
 def all_services() -> list[str]:
-    out = []
-    for d in sorted(REPO.glob("openbank-*-service")):
+    """Every module the matrix scores: the `-service` modules PLUS every declared money-path one.
+
+    The `openbank-*-service` glob alone missed openbank-sepa-payment, openbank-sepa-instant and
+    openbank-domestic-payment — three released components with a governance.yaml, an openapi.yaml
+    and a threat model, which rules.yaml declares money-path and which move SEPA and domestic
+    payments. They had no row at all, so every headline this collector produced ("N cells below
+    Verified", "GO x/37") silently excluded them (#2364). A module governance calls money-path
+    must never be absent from the readiness matrix.
+
+    Deliberately NOT widened to every module carrying a governance.yaml + src/main: that would
+    add 12 further agent/auxiliary modules and is a scoping decision about what the matrix
+    covers, not a correctness fix.
+    """
+    out = set()
+    for d in REPO.glob("openbank-*-service"):
         m = re.match(r"openbank-(.+)-service", d.name)
         if m:
-            out.append(m.group(1))
-    return out
+            out.add(m.group(1))
+    for short in money_path():
+        if module_dir(short, REPO).is_dir():
+            out.add(short)
+    return sorted(out)
 
 
 # ---------------------------------------------------------------------------
@@ -511,7 +538,7 @@ def main():
     results = []
     for short in targets:
         if not exists_dir(short):
-            print(f"skip: openbank-{short}-service not found", file=sys.stderr)
+            print(f"skip: no module directory for {short!r}", file=sys.stderr)
             continue
         results.append(collect(short, att, args.today))
 

@@ -50,7 +50,12 @@ PODMON_REL = Path(
 # (#2255) — so it lives in exactly one place now, tested by
 # openbank-infra/scripts/prod_readiness_collector_test.py and the fixtures in --self-test below.
 sys.path.insert(0, str(REPO / "openbank-infra" / "scripts"))
-from gitops_facts import podmonitor_namespaces, workload_namespaces  # noqa: E402
+from gitops_facts import (  # noqa: E402
+    module_dir,
+    money_path_services,
+    podmonitor_namespaces,
+    workload_namespaces,
+)
 
 
 def audit(repo: Path) -> tuple[dict[str, list[str]], list[str], int]:
@@ -60,11 +65,22 @@ def audit(repo: Path) -> tuple[dict[str, list[str]], list[str], int]:
     missing: dict[str, list[str]] = {}
     no_workload: list[str] = []
     ok = 0
-    for d in sorted(repo.glob("openbank-*-service")):
+    # The `-service` glob alone skipped openbank-sepa-payment, openbank-sepa-instant and
+    # openbank-domestic-payment, so the three modules that move SEPA and domestic payments were
+    # never checked for scrape coverage at all — this gate reported a complete fleet while three
+    # money-path workloads were outside its population (#2364).
+    shorts = set()
+    for d in repo.glob("openbank-*-service"):
         m = re.match(r"openbank-(.+)-service", d.name)
-        if not m:
-            continue
-        short = m.group(1)
+        if m:
+            shorts.add(m.group(1))
+    try:
+        for s in money_path_services(repo):
+            if module_dir(s, repo).is_dir():
+                shorts.add(s)
+    except RuntimeError:
+        pass  # self-test fixtures carry no rules.yaml; the real repo always does
+    for short in sorted(shorts):
         namespaces = workload_namespaces(short, gitops)
         if not namespaces:
             no_workload.append(short)
@@ -82,13 +98,13 @@ def run_gate(repo: Path, quiet: bool = False) -> int:
     say = (lambda *a: None) if quiet else print
     say(f"PodMonitor namespace coverage: {ok} scraped, {len(missing)} missing, {len(no_workload)} not deployed")
     for short in no_workload:
-        say(f"  note: openbank-{short}-service has no Deployment/Rollout in gitops (not deployed yet)")
+        say(f"  note: {short} has no Deployment/Rollout in gitops (not deployed yet)")
     if not missing:
         return 0
     for short, gaps in sorted(missing.items()):
         for ns in gaps:
             say(
-                f"::error file={PODMON_REL}::openbank-{short}-service runs in namespace "
+                f"::error file={PODMON_REL}::{short} runs in namespace "
                 f"'{ns}', which is absent from namespaceSelector.matchNames — its metrics "
                 f"never reach Prometheus and any PrometheusRule over them cannot fire. "
                 f"Add '{ns}' to {PODMON_REL}."

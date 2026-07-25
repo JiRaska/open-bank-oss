@@ -128,6 +128,76 @@ class CollectorScorerTest(unittest.TestCase):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(body)
 
+    # -- the scored population and the money-path set (#2364) --------------
+    def write_rules(self, entries=("openbank-ledger-service", "openbank-sepa-payment")):
+        p = self.root / "openbank-libs" / "governance" / "rules.yaml"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("money_path_services:\n" + "".join(f"    - {e}\n" for e in entries))
+
+    def test_all_services_includes_a_money_path_module_the_glob_would_miss(self):
+        """openbank-sepa-payment has no `-service` suffix, so the glob alone dropped it — and with
+        it every headline the matrix printed (#2364)."""
+        self.write_rules()
+        (self.root / "openbank-ledger-service").mkdir(exist_ok=True)
+        (self.root / "openbank-sepa-payment").mkdir(exist_ok=True)
+        services = self.mod.all_services()
+        self.assertIn("sepa-payment", services)
+        self.assertIn("ledger", services)
+
+    def test_all_services_skips_a_declared_module_with_no_directory(self):
+        self.write_rules(("openbank-ledger-service", "openbank-ghost-service"))
+        (self.root / "openbank-ledger-service").mkdir(exist_ok=True)
+        self.assertNotIn("ghost", self.mod.all_services())
+
+    def test_money_path_comes_from_rules_yaml_not_a_literal(self):
+        """The hardcoded set named 14 while rules.yaml declared 20, so six declared money-path
+        services were gated leniently and read GO."""
+        self.write_rules(("openbank-widget-service",))
+        self.assertEqual(self.mod.money_path(), {"widget"})
+
+    def test_money_path_is_read_at_call_time_not_import_time(self):
+        """A module-level constant would ignore a rebound REPO and raise on a rules-less tree."""
+        self.write_rules(("openbank-alpha-service",))
+        self.assertEqual(self.mod.money_path(), {"alpha"})
+        self.write_rules(("openbank-beta-service",))
+        self.assertEqual(self.mod.money_path(), {"beta"})
+
+    def test_a_money_path_service_needs_three_on_the_critical_cells(self):
+        """The stricter gate is what the six leniently-scored services were missing."""
+        self.write_rules(("openbank-widget-service",))
+        r = self.mod.ServiceReadiness(service="widget", money_path=True)
+        r.scores = {c: 2 for c, _ in self.mod.DIMENSIONS}
+        r.compute_gate()
+        self.assertEqual(r.gate, "NO-GO", "all-2 must not clear the money-path gate")
+        for critical in ("C1", "C5", "C7"):
+            r.scores[critical] = 3
+        r.compute_gate()
+        self.assertEqual(r.gate, "GO")
+
+    def test_a_non_money_path_service_clears_at_all_twos(self):
+        r = self.mod.ServiceReadiness(service="widget", money_path=False)
+        r.scores = {c: 2 for c, _ in self.mod.DIMENSIONS}
+        r.compute_gate()
+        self.assertEqual(r.gate, "GO")
+
+    def test_threat_model_is_looked_up_under_the_resolved_module_name(self):
+        """C7 read docs/threat-models/openbank-sepa-payment-service.md — a file that cannot exist."""
+        (self.root / "openbank-sepa-payment").mkdir(exist_ok=True)
+        tm = self.root / "docs" / "threat-models"
+        tm.mkdir(parents=True, exist_ok=True)
+        (tm / "openbank-sepa-payment.md").write_text("# threat model\n")
+        self.mod.THREAT_MODELS = tm
+        score, evidence = self.mod.score_c7_security("sepa-payment", {}, "2026-07-25")
+        # NOT `assertIn("threat-model", evidence)`: the zero-score evidence string is
+        # "no threat-model/netpol/sectest/provenance", which contains that substring, so the
+        # loose assertion passes against the unfixed code. Same substring trap this whole sweep
+        # has been pulling out of the scorers — assert the positive form.
+        self.assertNotIn("no threat-model", evidence, "C7 found no threat model at all")
+        self.assertTrue(
+            evidence.startswith("threat-model") or ", threat-model" in evidence,
+            f"threat-model not listed as present: {evidence!r}",
+        )
+
     # -- C1: ports live in the package, not the filename --------------------
     def test_c1_counts_an_application_port_package(self):
         """anacredit/onboarding shape: a port package whose files are not named *Port*."""

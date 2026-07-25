@@ -43,7 +43,7 @@ def read(p: Path) -> str:
 
 def gov_facts(short: str) -> dict:
     """Parse the flat scalars + lineage service names from governance.yaml."""
-    txt = read(REPO / f"openbank-{short}-service" / "governance.yaml")
+    txt = read(gitops_facts.module_dir(short, REPO) / "governance.yaml")
     facts = {}
     for key in ("dataDomain", "primaryDatastore", "schemaName",
                 "dataClassification", "retentionPolicy", "dataLineageRole"):
@@ -60,7 +60,7 @@ def gov_facts(short: str) -> dict:
 
 def http_port(short: str) -> str:
     """The Quarkus HTTP port (skip 8085, the shared management port)."""
-    txt = read(REPO / f"openbank-{short}-service" / "src" / "main" / "resources" / "application.yaml")
+    txt = read(gitops_facts.module_dir(short, REPO) / "src" / "main" / "resources" / "application.yaml")
     for p in re.findall(r"port:\s*(\d+)", txt):
         if p != "8085":
             return p
@@ -159,7 +159,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 | Field | Value |
 |---|---|
-| Service | `openbank-{short}-service` |
+| Service | `{module}` |
 | HTTP port | `{port}` |
 | Data domain | {domain} |
 | Datastore | {datastore} (schema `{schema}`) |
@@ -244,6 +244,7 @@ def render(short: str) -> str:
         )
     return TEMPLATE.format(
         short=short,
+        module=gitops_facts.module_dir(short, REPO).name,
         ns=service_namespace(short),
         failure_modes=failure_modes,
         domain=f.get("dataDomain", "—"),
@@ -262,11 +263,18 @@ def render(short: str) -> str:
 
 def all_services() -> list[str]:
     out = []
-    for d in sorted(REPO.glob("openbank-*-service")):
+    out = set()
+    for d in REPO.glob("openbank-*-service"):
         m = re.match(r"openbank-(.+)-service", d.name)
         if m:
-            out.append(m.group(1))
-    return out
+            out.add(m.group(1))
+    # Every module rules.yaml declares money-path needs a runbook too — the `-service` glob alone
+    # skipped openbank-sepa-payment, openbank-sepa-instant and openbank-domestic-payment, so the
+    # three modules that move SEPA and domestic payments had no operational runbook at all (#2364).
+    for short in gitops_facts.money_path_services(REPO):
+        if gitops_facts.module_dir(short, REPO).is_dir():
+            out.add(short)
+    return sorted(out)
 
 
 def main():
@@ -278,8 +286,8 @@ def main():
     targets = args.services or all_services()
     created, skipped = 0, 0
     for short in targets:
-        if not (REPO / f"openbank-{short}-service").is_dir():
-            print(f"skip: openbank-{short}-service not found", file=sys.stderr)
+        if not gitops_facts.module_dir(short, REPO).is_dir():
+            print(f"skip: no module directory for {short!r}", file=sys.stderr)
             continue
         out = RUNBOOKS / f"svc-{short}.md"
         if out.exists() and not args.force:
