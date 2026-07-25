@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fx-service
     app.kubernetes.io/part-of: fx
   annotations:
-    openbank.tech/policy-checksum: "99a6bf0cabab12e8"
+    openbank.tech/policy-checksum: "6f0be59e4e5ac0c7"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2379,6 +2379,57 @@ data:
       # edge-service-notification rule and rest_test.rego's
       # test_deny_operator_read_any_does_not_cover_write).
       ci_producer: ".github/scripts/check-no-service-principal-type.sh"
+
+    # ---------------------------------------------------------------------------------------
+    # Scheduled-method invariants (issue #2148, fleet sweep #2187).
+    # ---------------------------------------------------------------------------------------
+    scheduled_methods:
+      no_runblocking_in_scheduled_body: true
+      # Quarkus invokes a plain (non-`suspend`) @Scheduled method on a bare `executor-thread`,
+      # which carries NO Vert.x context. A body of `runBlocking { … }` therefore runs the
+      # coroutine on that thread, and the first reactive Hibernate-Reactive/Panache call inside
+      # throws `HR000068: This method should exclusively be invoked from a Vert.x EventLoop
+      # thread`. The job aborts having done nothing, and does so silently — the throw lands
+      # before whatever per-item try/catch the job has, or is swallowed by its own outer catch
+      # into one ERROR line.
+      #
+      # Found live five times. #2148: StandingOrderExecutionScheduler.sweep() — no due standing
+      # order had EVER executed (PR #2180). The #2187 sweep then found the same shape in the
+      # daily sub-ledger tie-out control and the daily FX revaluation (ledger, PR #2190), the
+      # statutory ČNB fixing ingestion (fx, PR #2191) and the monthly billing cycle (PR #2194).
+      # None had ever run.
+      #
+      # This is a GATE and not a documented lesson because the natural test does not fail: a test
+      # that calls the method directly supplies a Vert.x context the scheduler does not, so it
+      # passes against the broken code — which is exactly how all five hid behind green suites.
+      # Regression coverage must drive the REAL cron via a @TestProfile that shrinks the cron
+      # expression (pattern: StandingOrderExecutionSweepIT, LedgerSchedulerVertxContextIT).
+      #
+      # FIX: make the method a `suspend fun` — Quarkus dispatches a suspending @Scheduled method
+      # on a proper (duplicated) Vert.x context. Unanimous fleet convention: every other reactive
+      # @Scheduled method here is `suspend` or returns `Uni`. Preferred over
+      # `VertxContextSupport.subscribeAndAwait`, which swaps one blocking bridge for another,
+      # pins the scheduler worker for the whole run, and throws if ever called FROM an event-loop
+      # thread (so it breaks the day the method gains @NonBlocking or a virtual thread).
+      #
+      # An entry below is a genuine exception, not a deferral: a service with no reactive
+      # persistence on its classpath at all, where `runBlocking` bridges deliberately BLOCKING
+      # clients and `suspend` would be the wrong change. Same individually-justified-exception
+      # idiom as the ktlint/detekt baselines and event_consumer_liveness.allowlist. A stale entry
+      # is itself a violation.
+      runblocking_allowlist:
+        - method: "openbank-agent-service/src/main/kotlin/com/openbank/agent/application/OversightService.kt#scheduledSweep"
+          reason: >-
+            agent-service has NO Hibernate Reactive on its classpath (build.gradle.kts: the
+            proposals store is plain Agroal JDBC, deliberately not the reactive stack). The sweep
+            drives blocking OPA/MCP/LLM clients and needs to stay on a worker thread — the same
+            bridge ChatEndpoint uses. `suspend` here would move blocking I/O onto an event loop.
+        - method: "openbank-analytics-sink/src/main/kotlin/com/openbank/analytics/infrastructure/reconcile/ReconciliationJob.kt#scheduled"
+          reason: >-
+            analytics-sink deliberately DROPS hibernate-reactive-panache, reactive-pg-client and
+            jdbc-postgresql (build.gradle.kts) — it has no OLTP datasource to reach. The
+            reconciliation reads the warehouse and the WORM archive over blocking clients.
+      ci_producer: ".github/scripts/check-no-runblocking-in-scheduled.py"
 
     # ---------------------------------------------------------------------------------------
     # Vulnerability-management lifecycle SLAs (ADR-0030 D1). Detection -> closure, in days.
