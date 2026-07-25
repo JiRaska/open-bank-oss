@@ -153,9 +153,16 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   replays is therefore worthless against the likeliest defect — and that is exactly how
   finrep-service shipped a call to `/api/v1/ledger/trial-balance`, a ledger path that has never
   existed, breaking every FINREP/COREP render while its unit tests passed against a mocked port
-  (#2269). Corollary: derive the path in the consumer test from the client's own `@Path` rather than
-  retyping it, and never add a consumer pact without wiring (or confirming) the provider's
-  `@PactFolder` replay.
+  (#2269). Never add a consumer pact without wiring (or confirming) the provider's `@PactFolder`
+  replay.
+- **In a consumer test the expected path must be a LITERAL; only the outgoing request may be
+  reflected off the client's `@Path`.** Deriving *both* sides from the annotation feels DRY and is
+  vacuous — expectation and request move together, so the test stays green when the client points
+  at a route that does not exist. Measured on #2290: with the assertion removed, a pact whose path
+  came from the annotation passed against the broken `/api/v1/ledger/trial-balance`; with the path
+  written as a literal, both interactions went red. The asymmetry IS the test.
+  (`ProductCatalogPactConsumerTest` from #2283 still has the symmetric shape, and its KDoc promises
+  a redness it cannot deliver at the consumer layer — the provider replay is what backstops it.)
 - **Read the pact verdict from the JUnit XML, not the console.** pact-jvm prints
   `Not all of the N were verified` even on a fully green run — it is an artifact, not a failure.
   (`./gradlew … | tail` also masks the exit code; see the Kotlin block-comment note.)
