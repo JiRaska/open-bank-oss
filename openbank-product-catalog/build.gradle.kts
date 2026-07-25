@@ -48,6 +48,17 @@ dependencies {
     // Shared Testcontainers resource kit (issue #467) — pilot migration off the local
     // PostgresTestResource.kt copy.
     testImplementation(project(":openbank-libs-testing"))
+
+    // Provider-side Pact verification of the consumer pacts in the repo-root pacts/ dir
+    // (git-pact, ADR-0063 — no broker). Provider side only: product-catalog calls no other
+    // service's API, so there is no pact-consumer dependency here.
+    testImplementation(libs.pact.provider)
+}
+
+// Pact: provider verification reads pact files from the shared pacts/ dir (git-pact, ADR-0063).
+// Set on the test JVM fork, not the Gradle daemon — System.setProperty would not propagate.
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
 }
 
 // Coverage floor (ADR-0020, ratchet-only — sweep #466: this module previously had NO

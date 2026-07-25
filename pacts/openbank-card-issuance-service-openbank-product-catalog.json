@@ -1,0 +1,186 @@
+{
+  "consumer": {
+    "name": "openbank-card-issuance-service"
+  },
+  "interactions": [
+    {
+      "description": "GET product by code for a card-enabled product",
+      "providerStates": [
+        {
+          "name": "a product with card configuration exists for code CURRENT_PERSONAL"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/products/by-code/CURRENT_PERSONAL"
+      },
+      "response": {
+        "body": {
+          "cardConfig": {
+            "contactlessEnabled": true,
+            "enabled": true,
+            "maxCards": 3,
+            "monthlyFeePerCard": 0.0,
+            "networks": [
+              "VISA"
+            ],
+            "tiers": [
+              "STANDARD"
+            ],
+            "virtualCardAllowed": true
+          },
+          "code": "CURRENT_PERSONAL",
+          "id": "prod-003"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.cardConfig.contactlessEnabled": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.cardConfig.enabled": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.cardConfig.maxCards": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.cardConfig.monthlyFeePerCard": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.cardConfig.networks": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.cardConfig.networks[*]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.cardConfig.tiers": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.cardConfig.tiers[*]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.cardConfig.virtualCardAllowed": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.code": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET product by an unknown code",
+      "providerStates": [
+        {
+          "name": "no product exists with code NO_SUCH_CARD_PRODUCT"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/products/by-code/NO_SUCH_CARD_PRODUCT"
+      },
+      "response": {
+        "body": {
+          "error": "Product with code 'NO_SUCH_CARD_PRODUCT' not found"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.error": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-product-catalog"
+  }
+}

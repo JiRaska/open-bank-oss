@@ -57,6 +57,7 @@ jobs:
             :openbank-account-service:test --tests "com.openbank.account.contract.*PactConsumerTest" \
             :openbank-balance-service:test --tests "com.openbank.balance.contract.*PactConsumerTest" \
             :openbank-billing-service:test --tests "com.openbank.billing.contract.*PactConsumerTest" \
+            :openbank-card-issuance-service:test --tests "com.openbank.cardissuance.contract.*PactConsumerTest" \
             :openbank-consent-service:test --tests "com.openbank.consent.contract.*PactConsumerTest" \
             :openbank-domestic-payment:test --tests "com.openbank.domestic.contract.*PactConsumerTest" \
             :openbank-fraud-service:test --tests "com.openbank.fraud.contract.*PactConsumerTest" \
