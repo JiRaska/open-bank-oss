@@ -144,6 +144,77 @@ class ConsentTest {
         assertThat(consent.frequencyPerDay()).isNull()
     }
 
+    // ADR-0198 D1: the three MARKETING_COMMS_* scopes must behave exactly like TELEMETRY_RUM —
+    // GDPR Art. 7, not AISP, not SCA-gated, 365-day bucket. The Negative-consequences section of
+    // ADR-0198 explicitly requires this exclusion from AISP_SCOPES be a reviewed, testable line,
+    // not an assumption resting on exhaustiveness that does not exist in this codebase.
+    @Test
+    fun `MARKETING_COMMS scopes are allowed past 90 days (GDPR, not AISP-capped)`() {
+        val emailConsent = consent(
+            scopes = setOf(ConsentScope.MARKETING_COMMS_EMAIL),
+            accountIbans = null,
+            validFrom = baseValidFrom,
+            validTo = baseValidFrom.plusDays(180),
+        )
+        val pushConsent = consent(
+            scopes = setOf(ConsentScope.MARKETING_COMMS_PUSH),
+            accountIbans = null,
+            validFrom = baseValidFrom,
+            validTo = baseValidFrom.plusDays(180),
+        )
+        val inAppConsent = consent(
+            scopes = setOf(ConsentScope.MARKETING_COMMS_INAPP),
+            accountIbans = null,
+            validFrom = baseValidFrom,
+            validTo = baseValidFrom.plusDays(180),
+        )
+
+        assertThat(emailConsent.hasScope(ConsentScope.MARKETING_COMMS_EMAIL)).isTrue()
+        assertThat(pushConsent.hasScope(ConsentScope.MARKETING_COMMS_PUSH)).isTrue()
+        assertThat(inAppConsent.hasScope(ConsentScope.MARKETING_COMMS_INAPP)).isTrue()
+        assertThat(emailConsent.isActive(OffsetDateTime.now())).isTrue()
+    }
+
+    @Test
+    fun `MARKETING_COMMS scopes are still capped at the 365-day maximum`() {
+        assertThrows<IllegalArgumentException> {
+            consent(
+                scopes = setOf(ConsentScope.MARKETING_COMMS_EMAIL),
+                accountIbans = null,
+                validFrom = baseValidFrom,
+                validTo = baseValidFrom.plusDays(366),
+            )
+        }
+    }
+
+    @Test
+    fun `frequencyPerDay is null for MARKETING_COMMS scopes — they are not AISP_SCOPES`() {
+        val consent = consent(
+            scopes = setOf(ConsentScope.MARKETING_COMMS_PUSH),
+            accountIbans = null,
+            validFrom = baseValidFrom,
+            validTo = baseValidFrom.plusDays(180),
+        )
+
+        assertThat(consent.frequencyPerDay()).isNull()
+    }
+
+    @Test
+    fun `a MARKETING_COMMS scope never triggers the PSD2 90-day AISP cap even mixed with an AISP scope`() {
+        // If a consent ever carried both an AISP scope and a marketing scope, the stricter (AISP)
+        // cap must still apply — this is the mixed-set behavior maxDays already implements via
+        // scopes.any { it in AISP_SCOPES }, asserted here so a future refactor of that predicate
+        // cannot silently let a marketing scope exempt an AISP scope from its 90-day cap.
+        assertThrows<IllegalArgumentException> {
+            consent(
+                scopes = setOf(ConsentScope.ACCOUNTS_READ, ConsentScope.MARKETING_COMMS_EMAIL),
+                accountIbans = listOf("CZ6508000000192000145399"),
+                validFrom = baseValidFrom,
+                validTo = baseValidFrom.plusDays(91),
+            )
+        }
+    }
+
     private fun consent(
         scopes: Set<ConsentScope> = setOf(ConsentScope.PAYMENTS_INITIATE),
         accountIbans: List<String>? = listOf("CZ6508000000192000145399"),
