@@ -17,7 +17,6 @@ import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
-import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
@@ -77,12 +76,25 @@ class TieOutScheduler(
         .description("Number of sub-ledger tie-out breaks detected (ADR-0039 Phase B). Non-zero = incident.")
         .register(registry)
 
+    // `suspend`, never `runBlocking` (#2187, the fleet sweep of #2148). Quarkus invokes a plain
+    // @Scheduled method on a bare `executor-thread`, which carries no Vert.x context, so
+    // `runBlocking { clusterLock.tryRunExclusively(…) }` ran [PostgresClusterLock]'s
+    // `Panache.withTransaction` — the FIRST reactive call, and it sits *outside* every try/catch
+    // below — off the event loop and threw `HR000068: This method should exclusively be invoked
+    // from a Vert.x EventLoop thread`. Every daily tick aborted there, so the sub-ledger tie-out
+    // control (ADR-0039 Phase B) never checked a single account and never recorded a run. A
+    // suspending @Scheduled method is dispatched by Quarkus on a proper (duplicated) Vert.x
+    // context instead.
+    //
+    // The cron is a config expression (same default as before) purely so an IT can shrink it and
+    // drive the *real* scheduler dispatch — calling this method directly supplies a context the
+    // scheduler does not, and would pass against the broken code.
     @Scheduled(
-        cron = "0 0 6 * * ?",
+        cron = "{openbank.ledger.tieout.cron:0 0 6 * * ?}",
         timeZone = "Europe/Prague",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
-    fun runTieOut(): Unit = runBlocking {
+    suspend fun runTieOut() {
         val ran = clusterLock.tryRunExclusively(JOB_NAME) {
             // clock.withZone(zone), NOT LocalDate.now(zone): the latter is `Clock.system(zone)` —
             // it silently ignores the injected `clock` and reads the JVM's real wall clock.
