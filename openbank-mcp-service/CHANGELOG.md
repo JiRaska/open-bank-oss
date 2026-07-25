@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.4.0...mcp-service-v0.5.0) (2026-07-25)
+
+
+### Features
+
+* **mcp:** real consent-validated read ports, code-complete but not wired (ADR-0195 step 2) ([#2262](https://github.com/JiRaska/open-bank-oss/issues/2262)) ([ebe497f](https://github.com/JiRaska/open-bank-oss/commit/ebe497f60eb53540e43bcf846d1dde1904e9f82a))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.3.0...mcp-service-v0.4.0) (2026-07-25)
 
 
