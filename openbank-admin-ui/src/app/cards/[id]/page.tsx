@@ -191,7 +191,7 @@ export default function CardDetailPage() {
                   <CardStatusChip status={card.status} current />
                 </div>
                 <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)' }}>
-                  {[card.cardType, card.network, card.productCode, card.currency].filter(Boolean).join(' · ')}
+                  {[card.cardType, card.productCode, card.currency].filter(Boolean).join(' · ')}
                 </p>
               </div>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -222,7 +222,6 @@ export default function CardDetailPage() {
               <Panel icon={<CreditCard size={15} style={{ color: 'var(--accent)' }} />} title={t('Karta', 'Card')}>
                 <Row label={t('Maskovaný PAN', 'Masked PAN')} value={card.maskedPan} mono />
                 <Row label={t('Typ', 'Type')} value={card.cardType} />
-                <Row label={t('Síť', 'Network')} value={card.network} />
                 <Row label={t('Produkt', 'Product')} value={card.productCode} mono />
                 <Row label={t('Měna', 'Currency')} value={card.currency} />
                 <Row label={t('Platnost do', 'Expires')} value={card.expiryDate || '—'} mono />
@@ -340,7 +339,6 @@ export default function CardDetailPage() {
                     <Row label={t('Vydáno / maximum', 'Issued / cap')} value={quota.known ? `${quota.issued} / ${quota.max}` : t('neznámo', 'unknown')} />
                     <Row label={t('Virtuální karty', 'Virtual cards')} value={entitlements.virtualCardAllowed ? t('povoleny', 'allowed') : t('nepovoleny', 'not allowed')} />
                     <Row label={t('Jednorázové karty', 'Single-use cards')} value={entitlements.singleUseAllowed ? t('povoleny', 'allowed') : t('nepovoleny', 'not allowed')} />
-                    <Row label={t('Sítě', 'Networks')} value={entitlements.networks.join(', ') || '—'} />
                     <Row label={t('Měsíční poplatek za kartu', 'Monthly fee per card')} value={String(entitlements.monthlyFeePerCard)} />
                     <Row label={t('Zdroj', 'Source')} value={entitlements.source} muted />
                   </div>
