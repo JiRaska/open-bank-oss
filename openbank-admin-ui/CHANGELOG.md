@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.57.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.56.0...admin-ui-v0.57.0) (2026-07-25)
+
+
+### Features
+
+* **admin-ui:** drive the card lifecycle from the portal, and show what the states are ([#2244](https://github.com/JiRaska/open-bank-oss/issues/2244)) ([d86b987](https://github.com/JiRaska/open-bank-oss/commit/d86b9870baa339e7bc89c52fc1092504e0eefc5f))
+
 ## [0.56.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.55.4...admin-ui-v0.56.0) (2026-07-25)
 
 
