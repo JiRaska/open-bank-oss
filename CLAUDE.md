@@ -177,10 +177,14 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   main-push (the broker has no public ingress, ADR-0056), so its
   `@EnabledIfSystemProperty(pactbroker.url)` gate skips it and the contract is replayed only *after*
   the merge. Measured 2026-07-25: **16 of 27 committed pacts** were in that state, across eight
-  providers, several money-path (#2327). Nothing enforced the rule — it was prose here and nowhere
-  else, which is why the gap was invisible; a derived coverage check is #2338. Until that lands,
-  confirm the replay by hand: an always-running `@PactFolder` class for that provider, not merely a
-  class bearing its `@Provider` name.
+  providers, several money-path (#2327) — and the estate reached 33 pacts the same day, so an audit
+  was never going to hold it. `check-pact-provider-replay.py` now enforces it (`Validate manifests`,
+  #2338): it derives the covered set from `pacts/*.json` and the `@Provider`/`@PactFolder`
+  annotations, and a class that exists but cannot run — broker-sourced, gated, or excluded by its
+  `build.gradle.kts` — does not count. The pre-existing backlog is declared in that script's
+  `KNOWN_UNCOVERED`, which #2327 empties one provider at a time; an entry that becomes covered fails
+  as stale, so the list cannot outlive the debt. What this buys you: a NEW pact for a provider with
+  no `@PactFolder` replay is red at PR time, instead of being discovered by a later audit.
 - **In a consumer test the expected path must be a LITERAL; only the outgoing request may be
   reflected off the client's `@Path`.** Deriving *both* sides from the annotation feels DRY and is
   vacuous — expectation and request move together, so the test stays green when the client points

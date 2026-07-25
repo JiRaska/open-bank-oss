@@ -585,6 +585,22 @@ jobs:
         if: github.event_name == 'pull_request'
         run: python3 openbank-infra/scripts/check-threat-model-diff.py --base "${PR_DIFF_BASE}"
 
+      # issue #2338. A consumer pact CANNOT catch a wrong request path — the Pact mock server
+      # answers whatever path the client asks for, so only the provider replay goes red. That is
+      # how finrep-service shipped a call to a ledger route that has never existed (#2269), with
+      # its consumer test green the whole time. CLAUDE.md has stated the rule since then — never
+      # add a consumer pact without wiring the provider's @PactFolder replay — and nothing
+      # enforced it, so 16 of 27 pacts had no replay running before merge (#2327); the estate then
+      # went to 33 pacts in a day. This derives the coverage set from pacts/*.json and the
+      # @Provider/@PactFolder annotations rather than any list, and a class that exists but cannot
+      # run (broker-sourced, gated, or excluded by its build.gradle.kts) does not count as
+      # coverage. Its own --selftest below feeds every check an input it MUST flag, because a gate
+      # that has only ever passed is unfalsified.
+      - name: "Pact provider-replay coverage self-test (issue #2338)"
+        run: python3 .github/scripts/check-pact-provider-replay.py --selftest
+      - name: "Pact provider-replay coverage (issue #2338, enforced)"
+        run: python3 .github/scripts/check-pact-provider-replay.py
+
       # CLAUDE.md rule 3 / ADR-0029: a module is a released component iff it has
       # a version.txt, and must be registered in release-please-config.json AND
       # .release-please-manifest.json. stdlib-only gate; catches a new service
