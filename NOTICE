@@ -9,13 +9,31 @@ You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
 
-The OpenBank AI agent services (openbank-agent-service, openbank-copilot-service,
-openbank-devops-agent, openbank-finops-agent) are OpenBank's open-core component
-and are licensed under the GNU Affero General Public License v3.0 only
+NOT ALL OF THIS REPOSITORY IS APACHE-2.0. The Apache-2.0 grant above covers the
+banking platform. OpenBank's AI agent and agent-plane services are its open-core
+component and are licensed under the GNU Affero General Public License v3.0 only
 (AGPL-3.0-only), with a parallel commercial licence available from the
-maintainer. They are NOT covered by the Apache-2.0 LICENSE/NOTICE; see each
-service's LICENSE file, LICENSES/AGPL-3.0-only.txt, and
-docs/adr/0136-agent-services-agpl-in-repo-open-core.md.
+maintainer. They are NOT covered by the Apache-2.0 LICENSE/NOTICE.
+
+The authoritative list of AGPL-3.0-only modules is the "agpl_modules" key in
+openbank-libs/governance/rules.yaml (dependencies.license_boundary_exceptions).
+It is deliberately not duplicated here: a second hand-maintained copy is how this
+NOTICE came to name four modules while the tree contained twelve. Equivalently,
+a module is AGPL-3.0-only if and only if it contains its own LICENSE file, and
+every file in it carries "SPDX-License-Identifier: AGPL-3.0-only" (with the
+exception of already-applied Flyway migrations, whose frozen headers are
+corrected out-of-tree in REUSE.toml). The agreement of all of these is enforced
+by .github/scripts/check-license-headers.py.
+
+If you redistribute, modify or operate any of those modules -- including offering
+them to users over a network -- the AGPL-3.0 applies, or obtain the commercial
+licence. See each module's LICENSE file, LICENSES/AGPL-3.0-only.txt, and
+docs/adr/0136-agent-services-agpl-in-repo-open-core.md (extended by ADR-0181 and
+ADR-0193, which place two further agent-plane services inside the same boundary).
+
+No Apache-2.0 module takes a build or compile dependency on an AGPL-3.0-only
+module, so the copyleft does not extend to the Apache-2.0 platform; the AGPL
+modules depend on openbank-libs (Apache-2.0), which the AGPL permits.
 
 "OpenBank" is the name of this independent open-source project and is not
 affiliated with, endorsed by, or connected to Santander's "Openbank" or any

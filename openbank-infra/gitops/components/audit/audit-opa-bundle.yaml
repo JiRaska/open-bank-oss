@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: audit-service
     app.kubernetes.io/part-of: audit
   annotations:
-    openbank.tech/policy-checksum: "3cd18c2aac6d236b"
+    openbank.tech/policy-checksum: "f831fe5bb5f83319"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2230,6 +2230,9 @@ data:
       license_denylist_exceptions:
         - license: AGPL-3.0-only
           scope: agent-services                 # in-repo open-core; own LICENSE, commercial dual-license
+          # DERIVED from license_boundary_exceptions[0].agpl_modules below (one entry each, with a
+          # trailing slash). check-license-headers.py fails if the two lists disagree -- they drifted
+          # apart from the tree once already (#2280).
           paths:
             - openbank-agent-service/
             - openbank-copilot-service/
@@ -2241,22 +2244,33 @@ data:
             - openbank-docs-truth-agent/
             - openbank-authz-policy-auditor/
             - openbank-flaky-test-hunter/
+            - openbank-ap2-service/
+            - openbank-mcp-service/
           reason: "open-core: AGPL-3.0-only + commercial dual-licensing of the AI agent services"
           adr: ADR-0136
       license_boundary_exceptions:
         - description: "AGPL/Apache seam (in-repo). The AI agent services are AGPL-3.0-only; no Apache-2.0 module may take a build/compile dependency on them (only network/HTTP use is allowed). They depend on openbank-libs (Apache-2.0), which is permitted -- copyleft may consume permissive code."
+          # CANONICAL list of the in-repo AGPL-3.0-only modules -- the single source of truth for
+          # which components sit outside the root Apache-2.0 LICENSE. NOTICE and README deliberately
+          # do NOT enumerate them (they point here instead), because a hand-maintained second copy
+          # is what let the published NOTICE claim 4 modules while the tree carried 12 (#2280).
+          # Adding a module here means: give it its own LICENSE, stamp AGPL-3.0-only headers
+          # (scripts/add-license-headers.sh is path-aware from this list), and keep the paths list above
+          # in sync. Enforced by .github/scripts/check-license-headers.py.
           agpl_modules:
-            - openbank-agent-service
-            - openbank-copilot-service
-            - openbank-devops-agent
-            - openbank-finops-agent
+            - openbank-agent-service            # ADR-0136
+            - openbank-copilot-service          # ADR-0136
+            - openbank-devops-agent             # ADR-0136
+            - openbank-finops-agent             # ADR-0136
             - openbank-control-liveness-sentinel
             - openbank-governance-auditor
             - openbank-release-steward
             - openbank-docs-truth-agent
             - openbank-authz-policy-auditor
             - openbank-flaky-test-hunter
-          rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter') as a dependency"
+            - openbank-ap2-service              # ADR-0193 -- same agent plane as mcp-service
+            - openbank-mcp-service              # ADR-0181 -- explicitly inside the ADR-0136 boundary
+          rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-ap2-service'|':openbank-mcp-service') as a dependency"
           license: "AGPL-3.0-only"
           adr: ADR-0136
       block_on_cve_severity: [CRITICAL, HIGH]

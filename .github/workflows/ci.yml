@@ -366,6 +366,24 @@ jobs:
       - name: "PodMonitor namespace coverage (issue #2255, enforced)"
         run: python3 .github/scripts/check-podmonitor-namespace-coverage.py
 
+      # issue #2280. This repo is a MULTI-LICENSE tree: Apache-2.0 at the root (ADR-0123) with an
+      # AGPL-3.0-only open-core subset (ADR-0136, extended by ADR-0181 and ADR-0193). NOTHING
+      # compared the per-file SPDX headers against that declaration — no reuse-tool, no licensee,
+      # no license-eye anywhere in CI, and the OpenSSF Scorecard `License` check only asks whether a
+      # recognized licence file exists at the root, never what the files say. So four descriptions of
+      # the same split drifted apart unobserved: the tree carried 12 AGPL modules, rules.yaml listed
+      # 10, and the published NOTICE/README named 4 — telling every downstream adopter of a
+      # nominally Apache-2.0 monorepo that the other 8 were Apache-2.0. That is the failure mode a
+      # licence header exists to prevent, and an SPDX scanner reads it as AGPL contamination.
+      # Root cause was scripts/add-license-headers.sh hardcoding Apache-2.0 for every path — the
+      # ADR-0136 "make this script path-aware" follow-up that was never done.
+      # Its own --selftest below feeds every check an input it MUST flag, because a gate that has
+      # only ever passed is unfalsified.
+      - name: "License header consistency self-test (issue #2280)"
+        run: python3 .github/scripts/check-license-headers.py --selftest
+      - name: "License header consistency (issue #2280, enforced)"
+        run: python3 .github/scripts/check-license-headers.py
+
 
       # issue #2255. docs/runbooks/svc-*.md are GENERATED from governance.yaml + the gitops
       # manifests, and nothing checked them, so 25 of 30 had silently gone stale: they told

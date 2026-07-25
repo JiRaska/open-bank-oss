@@ -236,23 +236,37 @@ OpenBank uses a **dual-license model** (ADR-0123, superseding ADR-0012):
 - ✅ Permissive — no copyleft; forks and downstream may relicense their changes
 - ✅ You may combine OpenBank with proprietary code
 
-Every platform source file carries an SPDX `Apache-2.0` header; the AI agent services carry
-`AGPL-3.0-only` (see below). Contributions are certified via the
+Every platform source file carries an SPDX `Apache-2.0` header; the AI agent and agent-plane services
+carry `AGPL-3.0-only` (see below). Contributions are certified via the
 [Developer Certificate of Origin](https://developercertificate.org/) — no CLA.
 
-**The AI agent services — AGPL-3.0-only + a parallel commercial licence (open-core).**
+**The AI agent / agent-plane services — AGPL-3.0-only + a parallel commercial licence (open-core).**
 
-Per [ADR-0136](docs/adr/0136-agent-services-agpl-in-repo-open-core.md) (superseding the ADR-0031 D8
-separate-repo plan), the part of OpenBank intended for commercialization — the four AI agent services
-**`openbank-agent-service`, `openbank-copilot-service`, `openbank-devops-agent`, `openbank-finops-agent`** —
-is licensed **AGPL-3.0-only in this repo**, with a **commercial licence available from the maintainer** as an
-alternative (open-core dual-licensing). Every file in those services carries
-`// SPDX-License-Identifier: AGPL-3.0-only`; each has its own `LICENSE`, and the full text is in
-[`LICENSES/AGPL-3.0-only.txt`](LICENSES/AGPL-3.0-only.txt).
+⚠️ **This repository is not entirely Apache-2.0.** Per
+[ADR-0136](docs/adr/0136-agent-services-agpl-in-repo-open-core.md) (superseding the ADR-0031 D8
+separate-repo plan, and extended by [ADR-0181](docs/adr/0181-mcp-server-exposing-psd2-and-admin-read-apis-to-governed-ai-agents.md)
+and [ADR-0193](docs/adr/0193-ap2-mandate-verification-model-and-liability-position-promotes-adr-0182.md),
+which place two further agent-plane services inside the same boundary), the part of OpenBank intended
+for commercialization — the agent-plane
+services — is licensed **AGPL-3.0-only in this repo**, with a **commercial licence available from the
+maintainer** as an alternative (open-core dual-licensing). If you redistribute, modify or operate one
+of those modules — including offering it to users over a network — the AGPL-3.0 applies.
 
-The AGPL **does not contaminate the Apache-2.0 platform**: no Apache module takes a build/compile dependency
-on an agent service (they are reached only over HTTP), and the agent services depend only on the Apache-2.0
-`openbank-libs` (copyleft may consume permissive code). `rules.yaml` records this boundary.
+**Which modules?** The authoritative list is the `agpl_modules` key in
+[`openbank-libs/governance/rules.yaml`](openbank-libs/governance/rules.yaml)
+(`dependencies.license_boundary_exceptions`). It is intentionally not repeated here — a second
+hand-maintained copy is how this section came to name four modules while the tree contained twelve.
+Equivalently, and checkably: **a module is AGPL-3.0-only iff it contains its own `LICENSE` file**, and
+every file in it carries `SPDX-License-Identifier: AGPL-3.0-only`. The full licence text is in
+[`LICENSES/AGPL-3.0-only.txt`](LICENSES/AGPL-3.0-only.txt). The one documented exception is
+already-applied Flyway migrations, whose headers are frozen by Flyway's checksum and are therefore
+corrected out-of-tree in [`REUSE.toml`](REUSE.toml). That every one of these declarations agrees is
+enforced on each PR by [`check-license-headers.py`](.github/scripts/check-license-headers.py).
+
+The AGPL **does not contaminate the Apache-2.0 platform**: no Apache module takes a build/compile
+dependency on an AGPL module (they are reached only over HTTP, which the AGPL treats as use rather than
+linking), and the AGPL modules depend only on the Apache-2.0 `openbank-libs` (copyleft may consume
+permissive code). `rules.yaml` records this boundary and the gate above enforces it.
 
 See [`LICENSE`](LICENSE) for full Apache-2.0 text and [ADR-0123](docs/adr/0123-relicense-to-apache-2.0.md) for the
 relicensing rationale (and [ADR-0012](docs/adr/0012-mpl-license-and-dco.md) for the original MPL decision it supersedes).
