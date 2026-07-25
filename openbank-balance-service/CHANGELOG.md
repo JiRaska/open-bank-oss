@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.11.3...balance-service-v1.12.0) (2026-07-25)
+
+
+### Features
+
+* **balance:** surface the future-value-dated pipeline on the reconciliation report (ADR-0178 Phase 3) ([#2175](https://github.com/JiRaska/open-bank-oss/issues/2175)) ([0a6610e](https://github.com/JiRaska/open-bank-oss/commit/0a6610e99ff5753b1dc1a5e7629d28ba608a0154))
+
 ## [1.11.3](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.11.2...balance-service-v1.11.3) (2026-07-19)
 
 
