@@ -9,7 +9,6 @@ import com.openbank.billing.application.usecase.BillingCycleService
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
-import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
@@ -71,13 +70,27 @@ class BillingCycleScheduler {
 
     private val log = Logger.getLogger(BillingCycleScheduler::class.java)
 
+    // `suspend`, never `runBlocking` (#2187, the fleet sweep of #2148). Quarkus invokes a plain
+    // @Scheduled method on a bare `executor-thread`, which carries no Vert.x context, so
+    // `runBlocking { runSweep() }` ran the first reactive Panache call reached from it
+    // (`BillingAssessmentRepositoryImpl.findExisting`, via `sf.withSession`) off the event loop and
+    // threw `HR000068: This method should exclusively be invoked from a Vert.x EventLoop thread`,
+    // aborting the whole monthly cycle. It stayed latent only because the sweep is off by default
+    // and no-ops without a configured batch — the first environment to switch it on would have
+    // found a cycle that silently assessed nothing. A suspending @Scheduled method is dispatched by
+    // Quarkus on a proper (duplicated) Vert.x context instead.
     @Scheduled(
         cron = "{openbank.billing.scheduler.cron}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
-    fun sweep(): Unit = runBlocking { runSweep() }
+    suspend fun sweep() = runSweep()
 
-    /** The cycle-sweep logic, split out from the `@Scheduled` entrypoint so ITs can drive it directly. */
+    /**
+     * The cycle-sweep logic, split out from the `@Scheduled` entrypoint so unit tests can drive it
+     * directly. Note that a direct call is *not* sufficient coverage for the entrypoint itself: it
+     * supplies a Vert.x context the Quarkus scheduler does not, which is exactly how #2187 hid —
+     * see `BillingCycleSweepVertxContextIT`, which drives the real cron instead.
+     */
     suspend fun runSweep() {
         if (!enabled) {
             log.debug("[billing-cycle-scheduler] Disabled — skipping sweep")

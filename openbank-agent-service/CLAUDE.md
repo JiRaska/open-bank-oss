@@ -47,7 +47,10 @@ JAVA_HOME=$(/usr/libexec/java_home -v 25) ./gradlew :openbank-agent-service:test
 
 ## Config gotchas
 
-- `GROQ_API_KEY` must be set for the `llama-3.3-70b-versatile` model; omit for mock-echo.
+- `AGENT_MODEL_API_KEY` (or the legacy `GROQ_API_KEY` fallback) must be set for the
+  `llama-3.3-70b-versatile` model; omit for mock-echo. Deployed, that key is the LiteLLM
+  *virtual* key and `AGENT_MODEL_ENDPOINT` points at the in-cluster gateway — the provider
+  key never lands in this pod (ADR-0174/0175).
 - `AGENT_POLICY_ENFORCEMENT=block` requires a running OPA sidecar — without it the gate
   degrades to advisory and logs a WARN (fail-open by design).
 - `AGENT_OVERSIGHT_ENABLED=true` enables the scheduled compliance-officer sweep (every 30 min).

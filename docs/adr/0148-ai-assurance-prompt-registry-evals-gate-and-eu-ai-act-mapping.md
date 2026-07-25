@@ -31,6 +31,33 @@ summary: "Add an AI assurance layer: an in-repo versioned prompt registry that e
 > that the only high-risk one (credit decisioning, ADR-0142) is *planned and unbuilt*, and that
 > the nearest-to-money ML system (fraud) runs **shadow-only**. The evals-gate registry + guard
 > landed in #2070; the prompt-loading wiring remains the deferred code follow-up.
+>
+> **Update (2026-07-25, issue #1918) — the evals-gate runner ships.**
+> `.github/scripts/run-evals.py` is the runner the two increments above deferred. It is
+> **record/replay**: an operator records a charter's scenarios against the live model
+> (`--record`, writing `evals/recordings/<charter>.json` with the prompt's sha256, the suite
+> version and the model id), and every PR replays those outputs offline through the suite's
+> `assert` blocks against the `evals/baselines.json` ratchet floor. The gate bites on
+> **staleness** — a bumped suite version or an edited registry prompt invalidates every
+> recording for that charter — which is precisely decision (2): a prompt or model promotion
+> cannot ship without its behaviour being re-measured. CI runs `--self-test` **enforced**
+> (twelve fixtures that each declare the exit code they must produce, eleven of them
+> must-fail) ahead of the advisory replay, so a runner that loses the ability to go red fails
+> the build instead of reporting green.
+>
+> Prompt-registry coverage is now an explicit per-charter claim in `prompts/registry.yaml`
+> (`registered` / `pending` / `external` / `not-applicable`, guard-enforced for all 15
+> charters), which makes "absent" distinguishable from "cannot have one" — previously an
+> identity-only principal, a third-party-hosted prompt and an unbuilt stub were the same
+> undifferentiated warning. The three live customer- and operator-facing prompts
+> (`compliance-officer`, `ui-assistant`, `customer-copilot`) are extracted into the registry
+> with eval suites, taking coverage from 2 charters to 5.
+>
+> **Still open after this increment:** services load their prompt from the registry rather
+> than an inline `buildString` (so a deployed `prompt_hash` resolves and byte-for-byte parity
+> can be checked); the first *recorded* run for any charter — none exists yet, so replay is
+> advisory and warns rather than gates; the six `pending` stub ops-agents (ADR-0112 P4,
+> ADR-0164–0168).
 
 ## Context
 

@@ -1,6 +1,9 @@
 %% title: Card Lifecycle
 stateDiagram-v2
-    [*] --> PENDING : issueCard()
+    %% PENDING means "waiting for the plastic to be received"; a card with no plastic
+    %% (VIRTUAL / SINGLE_USE) has nothing to wait for and is issued ACTIVE directly.
+    [*] --> PENDING : issueCard() — card with plastic
+    [*] --> ACTIVE : issueCard() — VIRTUAL / SINGLE_USE
     PENDING --> ACTIVE : activate()
     ACTIVE --> SUSPENDED : suspend()
     SUSPENDED --> ACTIVE : resume()
