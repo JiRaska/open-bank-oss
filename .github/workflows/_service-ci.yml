@@ -435,7 +435,14 @@ jobs:
           # cached and does not re-execute uncredentialed (the #1009 hazard documented below).
           RERUN=""
           if [ "${PUBLISH_RESULTS}" = "true" ]; then RERUN="--rerun-tasks"; fi
+          # -Dquarkus.smallrye-openapi.store-schema-directory writes the document Quarkus actually
+          # serves, as a side effect of the SAME quarkusBuild task this :build already runs
+          # (confirmed via --dry-run: quarkusBuild is already in :build's task graph for every
+          # Quarkus module here, so this adds zero extra build time). Read by the
+          # openapi-request-schema-conformance step below — rules.yaml:
+          # openapi_request_schema_conformance.
           ./gradlew :${{ inputs.service }}:build ${RERUN} --build-cache --console=plain --stacktrace \
+            -Dquarkus.smallrye-openapi.store-schema-directory="${{ inputs.service }}/build/openapi-generated" \
             -Dpactbroker.url="${PACT_BROKER_URL:-}" \
             -Dpactbroker.auth.username="${PACT_BROKER_USERNAME:-}" \
             -Dpactbroker.auth.password="${PACT_BROKER_PASSWORD:-}" \
@@ -445,6 +452,23 @@ jobs:
             -Dpact.provider.version="${GITHUB_SHA}" \
             -Dpact.provider.branch="${BRANCH}" \
             -Dpact.provider.tag="${BRANCH}"
+
+      # rules.yaml: openapi_request_schema_conformance (advisory). Only the REQUEST-body half of
+      # schema-vs-code — see the script header for why the response half is not attempted. The
+      # existence guard is a bash `[ -f ]` rather than a YAML `if: hashFiles(...)` composition —
+      # no precedent for hashFiles(format(...)) elsewhere in this repo's workflows, and per the
+      # project's own note on workflow files, a mistaken expression here is invisible until an
+      # actual CI run reaches it. A bash guard is checkable with `bash -n` before that.
+      - name: "openapi request-schema conformance (advisory)"
+        run: |
+          SPEC="${{ inputs.service }}/src/main/resources/openapi.yaml"
+          if [ ! -f "$SPEC" ]; then
+            echo "openapi-request-schema-conformance: ${{ inputs.service }} has no openapi.yaml — skipping."
+            exit 0
+          fi
+          python3 .github/scripts/check-openapi-request-schema-conformance.py \
+            --service "${{ inputs.service }}" \
+            --generated "${{ inputs.service }}/build/openapi-generated/openapi.yaml"
 
       # Coverage upload (Codecov is free for public repos; tokenless via the OIDC
       # id-token this job already has). Advisory only — never gates the build.
