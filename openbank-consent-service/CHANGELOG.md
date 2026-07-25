@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.13.0...consent-service-v0.14.0) (2026-07-25)
+
+
+### Features
+
+* **consent:** add GDPR_ONLY_SCOPES auto-activation, no SCA challenge (ADR-0205 D1) ([#2423](https://github.com/JiRaska/open-bank-oss/issues/2423)) ([7dfdb77](https://github.com/JiRaska/open-bank-oss/commit/7dfdb77a9453a2a424d28c5fdc437a66655e14af))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.12.0...consent-service-v0.13.0) (2026-07-25)
 
 
