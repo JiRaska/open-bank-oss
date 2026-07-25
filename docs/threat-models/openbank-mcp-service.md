@@ -6,10 +6,11 @@ Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 
 
 STRIDE/DFD threat model for the first-party Model Context Protocol server, per ADR-0030 D2.
 **Not** currently listed in `rules.yaml: money_path_services` (see §7); money-path-adjacent by
-design intent, inert by implementation today.
+design intent, and — as of the phase-2 cutover recorded here — no longer inert: the read tools now
+call real downstream services behind a live-validated PSD2 consent.
 
-- **Status:** Draft (first pass, written against phase 1 as shipped — PR #2104 service, #2134/#2136
-  deploy, #2142 OPA sidecar)
+- **Status:** Draft (revised for the ADR-0195 phase-2 cutover — PR #2253 caller auth, #2262 real
+  read ports, #2278 M2M client, #2316 atomic cutover)
 - **Last reviewed:** 2026-07-25
 - **Owner:** mcp-service CODEOWNERS
 - **Related ADRs:** ADR-0181 (this service), ADR-0031 (AI-agent governance / charters), ADR-0034
@@ -19,37 +20,40 @@ design intent, inert by implementation today.
 
 ## 0. Phase posture — read this before anything below
 
-**Almost nothing behind the tools is wired.** Writing this model as if the intended system were the
-shipped one would be worse than having no model, so every row below is tagged:
+**The phase-2 cutover (ADR-0195) has landed.** Caller identity and the read tools are both real now;
+`propose_payment` is not. Every row below is tagged:
 
 - **[LIVE]** — implemented and reachable today, with the file that implements it.
 - **[INTENT]** — described in an ADR, a KDoc, `agents.yaml`, or a rego comment, but **no code path
   enforces it**. These are not mitigations. They are documentation.
 
-What is actually running (`openbank-infra/gitops/components/mcp/mcp-service.yaml`, image
-`sandbox-c04790d2`):
+What is actually running (`openbank-infra/gitops/components/mcp/mcp-service.yaml`):
 
 | Fact | State |
 |---|---|
 | JSON-RPC surface `initialize` / `ping` / `tools/list` / `tools/call` on `:8150/mcp` | **LIVE** (`infrastructure/mcp/McpEndpoint.kt`) |
 | Five curated tools, deny-by-default capability map | **LIVE** (`application/McpToolRegistry.kt`) |
 | Every `tools/call` gated on the shared ADR-0034 PDP as `AI_AGENT`, fail-closed | **LIVE** (`McpEndpoint.handleToolCall`, OPA sidecar in the pod) |
-| Tool bodies — accounts, balance, transactions, consents, proposal | **STUB** (`infrastructure/read/StubReadPorts.kt` returns a fixed `"phase":"1-stub"` note; **no downstream call is made, no customer data is read, no proposal row is written**) |
-| Caller authentication on `/mcp` | **NONE.** `quarkus.oidc.tenant-enabled: false` (`src/main/resources/application.yaml`); no `@RolesAllowed`, no `@Authorize`, no mTLS, no API key |
-| Caller identity | **NONE.** `McpEndpoint.resolveContext()` returns a hardcoded `ConsentContext("agent:mcp-anonymous", "none", emptyList())` — the `X-Agent-Id` / `X-Consent-Id` headers its own KDoc describes are **not read** |
-| Consent scoping | **[INTENT]** — `ReadPorts.kt` KDoc assigns the granted-account intersection to "the port implementation"; the only implementation is the stub, which enforces nothing |
+| Caller authentication on `/mcp` | **LIVE.** `quarkus.oidc.tenant-enabled: true`; a validated OAuth 2.1 bearer is required. No token ⇒ `resolveContext()` throws ⇒ the call is denied and metered `resolution_failed` (`McpEndpoint.kt`, ADR-0195 step 4, #2316) |
+| Caller identity | **LIVE.** `CallerContextResolver.resolveOrNull()` reads the token's `sub` (`agent:<id>`) and `consent_id` claim (#2253); the PDP principal id is `ctx.agentId`, no longer a constant. **Residual:** every real caller still authenticates through the one M2M OIDC client provisioned so far, so in practice one charter (`mcp-anonymous`) still covers every caller — see T-S1 |
+| Tool bodies — accounts, balance, transactions, consents | **LIVE.** `RealAccountReadPort` (#2262, wired as the CDI default in #2316) calls consent-service, account-service, balance-service and transaction-service over M2M OIDC client-credentials (#2278) |
+| Tool body — proposal (`propose_payment`) | **STUB.** `StubProposalPort` still returns the canned `{"phase":"1-stub","status":"PROPOSED"}` note — no maker-checker row is written. copilot-service's `ActionProposal` domain stayed internal (not exposed as a callable port) rather than being bound here |
+| Consent scoping | **LIVE.** `RealAccountReadPort.validate()` calls consent-service `POST /consents/{id}/validate` on every read, reads `grantedAccounts` from THAT response (never from the token), and fails closed on revoked/expired/out-of-scope — see T-I2 |
 | Audit trail of tool calls / policy decisions | **LIVE** (`application/McpCallAuditor.kt`) — one canonical `AuditEvent` per `tools/call`, `actorType = AI_AGENT`, carrying tool, capability, charter, `policy_decision` and outcome. Emitted on ALL four outcomes (allow, policy deny, unmapped tool, PDP outage). Delivery is the shared `LoggingAuditEventPublisher` (log pipeline), as everywhere else in the fleet — no Kafka producer in the module |
 | Rate limiting / budgets / idempotency | **NONE** in this service |
 | NetworkPolicy | **LIVE.** `mcp-service-ingress-allow-list` (ADR-0081, derived) admits same-namespace + admin-ui:8150/8181 + observability/security-scanner:8085 and drops every other cross-namespace source. Ingress only — egress is unrestricted |
 | Internet exposure | **NO** ingress, no `HTTPRoute`, `Service` is `ClusterIP` — in-cluster only |
 
-**The single most important consequence:** the service is unauthenticated *and* has no caller
-identity, so the PDP's `AI_AGENT` decision is made about a constant. It is safe today only because
-the tools are stubs and nothing routes to it from outside the cluster. Both of those are phase-2
-changes. **Neither the stub boundary nor the absent ingress is enforced by a gate** — a phase-2 PR
-that binds the real REST clients behind the same ports (explicitly the plan in `ReadPorts.kt`)
-turns every threat in §4 from theoretical to live *without touching the endpoint, the policy, or
-this document*, which is exactly the change class that slips through review.
+**The single most important consequence, restated for phase 2:** the confused-deputy precondition
+(T-E2) that §0 of the phase-1 model warned about is now live — the service holds and uses its own
+M2M credential on every real caller's behalf. What closes it is exactly the sequencing that model
+called for: identity (#2253) and consent-intersection enforcement (in the port, #2262) landed
+*before* the real clients went live as the CDI default (#2316) — never the other way round. What is
+**still** open, and was never gated on the cutover: `rest.rego`'s bridge into `agents.rego` still
+drops `attributes` (§3), so the PDP itself still cannot see the consent id or scope anything by it —
+consent enforcement lives entirely in the port, not the policy plane — and per-agent charter
+provisioning (T-S1) has not shipped, so the distinguishable identity the token now carries is not
+yet matched by a distinguishable authorization tier.
 
 ## 1. Scope & assets
 
@@ -75,60 +79,71 @@ Assets, in priority order:
 
 ```
 [AI agent / MCP client]
-        │  JSON-RPC POST /mcp        ← NO authentication, NO caller identity  (phase 1)
+        │  JSON-RPC POST /mcp        ← validated OAuth 2.1 bearer required (LIVE, ADR-0195)
         ▼
 ┌─────────────────────── pod: mcp-service (ns platform) ───────────────────────┐
 │  McpEndpoint                                                                 │
+│    ├─ CallerContextResolver: sub → agentId, consent_id claim → consentId    │
+│    │        no token / no consent_id claim ⇒ REFUSE (fail closed)           │
 │    ├─ tools/list ─────────────────────────────► full schema, NO gate         │
 │    └─ tools/call                                                             │
 │         ├─ registry.capabilities[tool]  ── absent ⇒ REFUSE (deny-by-default) │
-│         ├─ PDP.allow(Principal("agent:mcp-anonymous", AI_AGENT), capability) │
+│         ├─ PDP.allow(Principal(ctx.agentId, AI_AGENT), capability)           │
 │         │        └──localhost:8181──► [OPA sidecar]  rest.rego → agents.rego │
 │         │                              (mcp-opa-bundle ConfigMap)            │
 │         │            exception / timeout ⇒ DENY (fail closed)                │
-│         └─ registry.call(...) ──► StubReadPorts  ── returns a canned note     │
-│                                    ▲ phase 2: @RegisterRestClient to         │
-│                                      account / balance / transaction /       │
-│                                      consent, + a maker-checker PROPOSED row │
+│         │            rest.rego bridge drops `attributes` — PDP never sees    │
+│         │            consentId, only agentId + tool name                     │
+│         └─ registry.call(...) ──► RealAccountReadPort (accounts/balance/      │
+│              transactions/consents) — M2M OIDC client-credentials bearer      │
+│              ├─ consent.validate(consentId, scope, iban) ── LIVE, fails      │
+│              │    closed on revoked/expired/out-of-scope; grantedAccounts    │
+│              │    read from THIS response, never from the caller's token     │
+│              └─ propose_payment ──► StubProposalPort — still a canned note,   │
+│                   no maker-checker row written                               │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Trust boundaries.** (a) MCP client → `/mcp`: **no authentication boundary** — the only fences are
-the ADR-0081 ingress allow-list (which admits the whole `platform` namespace, since same-namespace
-traffic is unconditional) and the fact that the `Service` is cluster-internal with nothing routed to
-it.
-(b) service → OPA: localhost, same pod. (c) service → downstream banking services: **does not exist
-yet**; phase 2 creates it and it will carry a service bearer, at which point the confused-deputy
-threat (T-E2) becomes real.
+**Trust boundaries.** (a) MCP client → `/mcp`: **LIVE authentication boundary** — OIDC
+resource-server validation of the bearer, enforced before `resolveContext()` returns; the
+network-level fences (ADR-0081 ingress allow-list, cluster-internal `Service`) are now
+defense-in-depth rather than the only control.
+(b) service → OPA: localhost, same pod. (c) service → downstream banking services: **LIVE**, over an
+M2M OIDC client-credentials bearer (#2278) — the confused-deputy precondition (T-E2) is now real,
+and what bounds it is the live consent-intersection check inside the port, not the transport.
 
-**External entities.** MCP clients (LLM agents), the OPA sidecar, and — phase 2 —
-account/balance/transaction/consent services and the maker-checker queue.
+**External entities.** MCP clients (AI agents), the OPA sidecar, consent-service, account-service,
+balance-service, transaction-service. The maker-checker queue is not yet an entity here —
+`propose_payment` is still a stub.
 
 ## 3. Authn / Authz — what the PDP can and cannot see
 
 Every `tools/call` builds one `AuthzQuery` (`McpEndpoint.handleToolCall`):
 
 ```
-principal  = Principal(id = "agent:mcp-anonymous", type = "AI_AGENT")   ← CONSTANT
-action     = registry.capabilities[toolName]                            ← one of 5 strings
+principal  = Principal(id = ctx.agentId, type = "AI_AGENT")   ← from the validated token (LIVE)
+action     = registry.capabilities[toolName]                  ← one of 5 strings
 resource   = null
 attributes = {"tool": …, "consentId": …}
 ```
 
 `rest.rego`'s `agent-charter-allows` rule bridges this to `agents.rego` by rebuilding the input as
-`{agent, tool, resource}` — **it drops `attributes` entirely**
-(`openbank-libs/governance/policies/rest.rego`). Therefore:
+`{agent, tool, resource}` — **it still drops `attributes` entirely**
+(`openbank-libs/governance/policies/rest.rego`, re-verified unchanged against `main` at this
+revision). The cutover did not touch this bridge, and closing T-S1/T-E2 did not require it to: the
+consent check moved into the port (§0, T-I2), not the policy. Therefore:
 
-**The PDP CAN see:** the principal type (`AI_AGENT`), the constant agent id, and which of the five
-capabilities is being invoked. That is enough for the hard-denied tool tier, the charter's `deny`
-globs (`money.*`, `gh.pr.*`, `*.write`, `secrets.read.raw`) and its five-entry `allow` list — all
-**[LIVE]** and all genuinely enforced.
+**The PDP CAN see:** the principal type (`AI_AGENT`), the *real* agent id from the validated token
+(no longer a constant), and which of the five capabilities is being invoked. That is enough for the
+hard-denied tool tier, the charter's `deny` globs (`money.*`, `gh.pr.*`, `*.write`,
+`secrets.read.raw`) and its five-entry `allow` list — all **[LIVE]** and all genuinely enforced.
 
-**The PDP CANNOT see:** *who is calling*. There is one identity for every caller. It also cannot see
-the consent id (dropped by the bridge), the account id argument, the proposed amount, the payee, or
-any request count. So no policy written in this plane can express "this agent may read only these
-accounts", "this consent has expired", or "this is the 500th call this minute" — those are not
-policy gaps to be closed by better rego, they are **input** gaps.
+**The PDP CANNOT see:** the consent id (still dropped by the bridge), the account id argument, the
+proposed amount, the payee, or any request count. So no policy written in this plane can express
+"this consent has expired" or "this is the 500th call this minute" — the consent-validity and
+account-scope checks that *are* now enforced live entirely in `RealAccountReadPort`, not here; a
+future tool whose author forgets to call `validate()` gets no backstop from the PDP. Those remain
+**input** gaps, not policy gaps to be closed by better rego.
 
 **Relation to the `openbank-psd2-service` finding (PR #2166 / issue #2169).** The same limitation
 applies here, and it applies *worse*. On psd2 the PDP also cannot distinguish one external caller
@@ -138,30 +153,37 @@ authenticated the TPP, checked its eIDAS role against tpp-registry, and 401'd an
 unauthorized one before the interceptor runs. Issue #2169's complaint is only that no guard *ties*
 the granted actions to that filter's path prefixes.
 
-**openbank-mcp-service has no equivalent upstream authenticator at all.** There is no filter, no
-mTLS, no bearer, no header check — `resolveContext()` does not even read the header its own KDoc
-names. So the mitigating precondition that makes the psd2 anonymous grant acceptable is *absent*
-here, and the shape of the risk is the same one #2169 describes: a policy grant resting on an
-invariant that nothing enforces. Phase 2 must land the OAuth 2.1 → PSD2-consent binding
-(ADR-0126) **before** the read ports are bound to real services, not after.
+**openbank-mcp-service now has that upstream authenticator.** `CallerContextResolver` validates the
+OAuth 2.1 bearer and requires a `consent_id` claim before any tool call is even considered (#2253),
+and `RealAccountReadPort` live-validates that consent against consent-service on every read (#2262).
+That closes the specific gap this section originally raised — the psd2 comparison no longer applies
+the same way, because the precondition #2169 asks psd2 to rely on (an upstream authenticator having
+already run) is now genuinely present here, not merely assumed. What #2169's underlying shape still
+applies to: the coarse charter grant (§4 T-S1) — the PDP's `allow` decision is still made against
+one shared charter regardless of which real agent id presented the token, exactly the "grant resting
+on an invariant nothing distinguishes" pattern, just one layer up from where it was in phase 1.
 
 ## 4. STRIDE
 
 ### Spoofing
 
-- **T-S1 — every caller is the same principal. [LIVE gap]** `resolveContext()` hardcodes
-  `agent:mcp-anonymous`. Any process that can reach `:8150` is that agent, with that charter. There
-  is no agent identity to forge because there is no agent identity. *Mitigating today:* the tools are
-  stubs, so the granted capabilities reach no data; the pod has no ingress. *Not mitigated by:*
-  the OPA gate, which authorizes the constant faithfully.
-  **[INTENT]** ADR-0181 phase 2 / ADR-0126: per-agent OAuth 2.1 identity, one charter per real
-  caller, `mcp-anonymous` retired. Compare `openbank-ap2-service`, which at least reads `X-Agent-Id`
-  and falls back to an anonymous id; this service does not read it.
-- **T-S2 — unauthenticated surface. [LIVE gap]** `quarkus.oidc.tenant-enabled: false` and no
-  `@RolesAllowed`. Every in-cluster workload — including any compromised pod anywhere in the
-  cluster that the ADR-0081 allow-list admits — every pod in `platform`, plus `admin-ui` — can call
-  `tools/call` directly, with no credential. **See T-E1 for what the NetworkPolicy does and does not
-  fence.**
+- **T-S1 — every real caller still shares one charter. [PARTIALLY CLOSED, LIVE gap remains]**
+  `resolveContext()` no longer hardcodes an identity — the PDP principal id is `ctx.agentId`, read
+  from the validated token's `sub` claim (#2253, #2316). Forging *that* identity now requires a
+  valid OAuth 2.1 token, not merely network reachability — the original T-S1 forgery scenario is
+  closed. **What remains open:** per-agent charter provisioning has not shipped. The `mcp-anonymous`
+  charter's own comment in `agents.yaml` still says its `id` must stay `mcp-anonymous` "or every
+  tools/call defaults to deny" — nothing has changed that. In practice every real caller today
+  authenticates through the one M2M OIDC client provisioned so far, so distinguishable *identity*
+  (LIVE) is not yet matched by distinguishable *authorization* — every real caller is still granted
+  exactly the same five-tool, propose-only envelope regardless of who it actually is.
+  **[INTENT]** ADR-0181 phase 2 / ADR-0126, still open: per-agent OAuth 2.1 client provisioning, one
+  charter per real caller, `mcp-anonymous` retired as the universal fallback.
+- **T-S2 — unauthenticated surface. [CLOSED]** `quarkus.oidc.tenant-enabled: true` (#2316); every
+  `tools/call` requires a validated bearer, and `resolveContext()` throws — denying and metering
+  `resolution_failed` — when none is presented or the token carries no `consent_id` claim
+  (`McpEndpointTest`'s dedicated "no token → denied" case). The NetworkPolicy fence described in T-E1
+  is now defense-in-depth rather than the only control.
 
 ### Tampering
 
@@ -169,12 +191,16 @@ invariant that nothing enforces. Phase 2 must land the OAuth 2.1 → PSD2-consen
   `mcp-opa-bundle` ConfigMap by `gen-mcp-opa-bundle.sh`, mounted read-only, and a checksum
   annotation rolls the pod on change. **[LIVE]** Changes go through the OPA-bundle CI gate; the
   bundle is derived, never hand-edited.
-- **T-T2 — tool-argument tampering. [LIVE gap, latent]** Arguments are validated only for
-  presence and JSON type (`McpToolRegistry.reqText`). Nothing validates that `accountId` is within
-  the consent, that `amount` is a well-formed non-negative decimal, that `toIban` is a valid IBAN,
-  or that `currency` is ISO 4217 — the declared `inputSchema` is advertised to the client but is
-  **not** validated server-side. Harmless while the port is a stub that echoes the request; it is
-  the first thing to fix when `propose_payment` writes a real row.
+- **T-T2 — tool-argument tampering. [LIVE gap, narrowed for the read tools]** Arguments are still
+  validated only for presence and JSON type at the transport layer (`McpToolRegistry.reqText`); the
+  declared `inputSchema` is advertised to the client but is **not** schema-validated server-side.
+  For the read tools this is now bounded, not harmless: a malformed or out-of-scope `accountId`
+  reaches `RealAccountReadPort.validate()`, which live-checks it against the presented consent's
+  `grantedAccounts` and fails closed (T-I2) — so the residual is a wasted downstream round-trip and
+  an error, not a data leak. It is still fully open for `propose_payment`: nothing validates that
+  `amount` is a well-formed non-negative decimal, that `toIban` is a valid IBAN, or that `currency`
+  is ISO 4217, because that tool has no validating implementation behind it yet — the first thing to
+  fix when `propose_payment` writes a real row.
 - **T-T3 — runtime tampering.** `readOnlyRootFilesystem`, `runAsNonRoot: true`, `runAsUser: 100`,
   all capabilities dropped, `seccompProfile: RuntimeDefault`, image cosign-signed and
   Kyverno-verified at admission (ADR-0030 D4). **[LIVE]**
@@ -190,8 +216,10 @@ invariant that nothing enforces. Phase 2 must land the OAuth 2.1 → PSD2-consen
   the record — an unmapped tool and a PDP outage included, because a trail that shows only
   successes hides the interesting half. `tools/list`, `initialize` and `ping` are deliberately not
   audited (static catalogue, no customer data).
-  **Residual:** (a) attribution is only as good as the identity, and the actor is the constant
-  `agent:mcp-anonymous` until T-S1 lands — the trail answers "what was done" but not yet "by whom";
+  **Residual:** (a) attribution is only as good as the identity — now the real per-token `sub`
+  rather than a constant (T-S1 partially closed), so the trail answers "by which authenticated
+  caller" today; it still cannot distinguish *which agent product* that was, since every real caller
+  shares the one M2M client provisioned so far (T-S1's remaining gap);
   (b) delivery is the shared `LoggingAuditEventPublisher`, so entries reach the ADR-0086 hash chain
   via the log pipeline rather than a durable Kafka producer — the fleet-wide posture, not specific
   to this service; (c) the payload deliberately carries **no** tool arguments and **no** tool
@@ -205,22 +233,25 @@ invariant that nothing enforces. Phase 2 must land the OAuth 2.1 → PSD2-consen
   all five tool names, descriptions and schemas. Low severity (names, not data) and consistent with
   agent-service's accepted residual (its T-I1), but note that here it is *fully* unauthenticated
   rather than role-gated. **[LIVE gap, accepted]**
-- **T-I2 — cross-consent data harvesting. [INTENT only]** The claim "a tool never sees an account
-  the consent did not grant" lives in `ReadPorts.kt`'s KDoc and delegates enforcement to "the port
-  implementation". The shipped implementation is `StubReadPorts`, which reads nothing and enforces
-  nothing, and `grantedAccounts` is always an empty list. So there is currently **no consent
-  enforcement code anywhere in this service**, and the PDP cannot supply it (§3 — the consent id is
-  dropped before the policy sees it). This is the threat that phase 2 must answer first: binding a
-  real `AccountReadPort` without an implemented intersection check turns `get_balance(accountId)`
-  into an unauthenticated read of any account id an attacker can guess or enumerate.
-- **T-I3 — tool-result exfiltration (AI-specific).** A tool result is JSON serialized straight into
-  a `ToolContent.text` block and handed to the model. There is **no** data-marker wrapping, **no**
-  PII masking, and **no** instruction-stripping in this service. `agents.yaml` declares
-  `data_scope: {pii: masked}` for the `mcp-anonymous` charter — **[INTENT]**, nothing in
-  `openbank-mcp-service` reads `data_scope`. Contrast agent-service, which does wrap untrusted tool
-  results in data markers (its T-I2). Once the ports return real data, an agent that has been
-  induced to call a read tool can relay balances and transaction narratives verbatim to wherever its
-  own client sends them; the bank's boundary ends at the response.
+- **T-I2 — cross-consent data harvesting. [CLOSED]** `RealAccountReadPort.validate()` calls
+  consent-service `POST /consents/{id}/validate` on every read (`listAccounts`, `getBalance`,
+  `listTransactions`, `listConsents`), reads `grantedAccounts` from THAT live response — never from
+  the caller's token — and throws (fails closed) on revoked, expired, or out-of-scope consent, or
+  when the requested account IBAN is not within `grantedAccounts`. The exact scenario this row
+  originally warned about — a bound `AccountReadPort` with no intersection check turning
+  `get_balance(accountId)` into an unauthenticated read of any guessable account id — is what #2262
+  built the check specifically to prevent, and #2316 only wired it as the default once that check
+  existed. **Residual:** the check lives in this one port class; a future tool or port that forgets
+  to call `validate()` gets no PDP backstop (§3) and no CI guard beyond code review.
+- **T-I3 — tool-result exfiltration (AI-specific). [LIVE, now with real data]** A tool result is
+  JSON serialized straight into a `ToolContent.text` block and handed to the model. There is **no**
+  data-marker wrapping, **no** PII masking, and **no** instruction-stripping in this service.
+  `agents.yaml` declares `data_scope: {pii: masked}` for the `mcp-anonymous` charter —
+  **[INTENT]**, nothing in `openbank-mcp-service` reads `data_scope`. Contrast agent-service, which
+  does wrap untrusted tool results in data markers (its T-I2). This residual, previously latent
+  behind the stub, is now live: an agent induced to call a read tool relays real balances and
+  transaction narratives verbatim to wherever its own client sends them; the bank's boundary ends at
+  the response. Recommended follow-up (not opened by this document, see §7).
 - **T-I4 — prompt injection reaching a tool call (AI-specific).** The bank does not control the
   model, the system prompt, or the conversation on the other side of this protocol — that is
   inherent to being an MCP *server* rather than the agent runtime. Attacker-controlled text that
@@ -235,14 +266,17 @@ invariant that nothing enforces. Phase 2 must land the OAuth 2.1 → PSD2-consen
 
 ### Denial of service
 
-- **T-D1 — no rate limit, no budget, no idempotency. [LIVE gap]** The `mcp-anonymous` charter
-  declares `limits: {tokens_per_run: 80000, runs_per_day: 1000}` — **[INTENT]**; that is
-  agent-service's `CharterRateLimiter` vocabulary and **no code in `openbank-mcp-service` reads
-  `limits`**. Combined with the unauthenticated surface (T-S2), any caller the ADR-0081 allow-list
-  admits (T-E1) can loop `tools/call` freely. Bounded today by the stub (no
-  downstream fan-out, so the damage is one pod's CPU at `limits: 1 CPU / 512Mi`); phase 2 makes
-  every call a fan-out into account/balance/transaction/consent, making this service an in-cluster
-  amplifier against the money-path read services.
+- **T-D1 — no rate limit, no budget, no idempotency. [LIVE gap, now live-exploitable]** The
+  `mcp-anonymous` charter declares `limits: {tokens_per_run: 80000, runs_per_day: 1000}` —
+  **[INTENT]**; that is agent-service's `CharterRateLimiter` vocabulary and **no code in
+  `openbank-mcp-service` reads `limits`**. T-S2 (unauthenticated surface) is now closed, so this is
+  no longer "any pod that can reach `:8150`" — a caller needs a valid bearer. But nothing throttles
+  *what a validly authenticated caller* can do: every `tools/call` now fans out into
+  consent-service, account-service, balance-service and/or transaction-service (§0), so a caller
+  looping a read tool is an in-cluster amplifier against those money-path read services, not merely
+  CPU on this one pod as it was while the port was a stub. The mitigating precondition changed from
+  "no ingress" to "requires a token"; the amplification consequence this row warned about is the one
+  that actually landed.
 - **T-D2 — replay.** There is no idempotency key, no nonce and no request-id binding on `/mcp`.
   Replaying a captured `tools/call` re-executes it. Reads are idempotent, so this is inert while the
   tools are reads and stubs; it stops being inert the moment `propose_payment` writes a
@@ -266,22 +300,29 @@ invariant that nothing enforces. Phase 2 must land the OAuth 2.1 → PSD2-consen
   `platform` — agent-service, ap2-service, copilot-service and their sidecars — reaches `:8150`
   unauthenticated (T-S2). `policyTypes: [Ingress]` only, so egress is unrestricted. Closing the
   remaining exposure is an authentication problem, not a network one.
-- **T-E2 — confused deputy (AI-specific). [INTENT — the core phase-2 design risk]** Phase 2 binds
-  `@RegisterRestClient` adapters that will call account/balance/transaction/consent with a **service
-  bearer**. At that point the MCP server holds the bank's own credential and acts on it in response
-  to an unauthenticated, unidentified request — the textbook confused deputy, and the reason
-  `grantedAccounts` must be resolved from a *verified* token rather than passed in by the caller.
-  The correct sequencing is: OAuth 2.1 → consent binding **first**, consent-intersection enforcement
-  **in the port** second, real clients **third**. Building them in any other order ships an
-  authenticated read proxy with no authorization.
+- **T-E2 — confused deputy (AI-specific). [LIVE, mitigated by sequencing]** `RealAccountReadPort`'s
+  `@RegisterRestClient` adapters call account/balance/transaction/consent with an M2M OIDC
+  client-credentials bearer (#2278) — the MCP server now holds the bank's own credential and acts on
+  it on every real call. What prevents this from being the textbook confused-deputy exploit is
+  exactly the sequencing this row called for: caller identity (#2253) and consent-intersection
+  enforcement in the port (#2262) both landed *before* the real clients were wired as the CDI
+  default (#2316) — enforced structurally by `check-mcp-stub-ports-vs-caller-auth.sh` (#2230), which
+  fails the build if a non-stub port ships while the placeholder identity is still present.
+  `grantedAccounts` is resolved from the verified consent-service response, never passed in by the
+  caller, so a request cannot claim scope it was not granted. **Residual:** the guard only checked
+  the two landed together; it does not (and cannot) verify the *logic inside* the port stays
+  correct on future changes — that is T-I2's residual, restated from the deputy's-own-credential
+  angle.
 - **T-E3 — scope escalation across the five tools. [LIVE, partly mitigated]** The capability map is
   a genuine deny-by-default gate: a tool name with no entry has no OPA action and is refused before
   the PDP is consulted (`McpEndpoint.handleToolCall`), and the charter's `deny` globs (`money.*`,
   `gh.pr.*`, `*.write`, `secrets.read.raw`) plus the fleet-wide hard-denied tier apply on top via
-  `agents.allow`. Unit-tested in `McpEndpointTest`. **The residual is horizontal, not vertical:**
-  all five capabilities are granted to the one charter every caller assumes, so there is no
-  privilege *tier* to climb — reaching `propose_payment` requires exactly what reaching
-  `list_accounts` requires. Per-caller charters (phase 2) are what make this row meaningful.
+  `agents.allow`. Unit-tested in `McpEndpointTest`. **The residual is still horizontal, not
+  vertical, and is now the same fact as T-S1's remaining gap:** all five capabilities are granted to
+  the one charter every real caller authenticates as, so there is no privilege *tier* to climb —
+  reaching `propose_payment` (still a stub) requires exactly what reaching `list_accounts` (now
+  live) requires. Per-caller charters, not yet shipped, are what would make this row's mitigation
+  meaningful rather than coincidental.
 - **T-E4 — `requires_human` is not enforced by anything. [INTENT]** The `mcp-anonymous` charter
   declares `requires_human: [every: proposal, sca: dynamic_linking, scope: consent_granted]`.
   `agents.rego` states this outright: *"same as every charter's `requires_human` block, which no
@@ -299,31 +340,39 @@ reader skimming `agents.yaml` would reasonably assume all of them work:
 
 | Claimed control | Where it is claimed | Enforced by |
 |---|---|---|
-| Acting agent resolved from `X-Agent-Id` | `McpEndpoint` KDoc | **nothing** — headers are not read; the id is hardcoded |
-| Consent-scoped reads / `grantedAccounts` intersection | `ReadPorts.kt` KDoc, ADR-0181 | **nothing** — only the stub implements the port |
-| `pii: masked` on the agent's data scope | `agents.yaml: mcp-anonymous.data_scope` | **nothing** in this service |
-| `requires_human: {every: proposal, sca: dynamic_linking, scope: consent_granted}` | `agents.yaml` | **nothing** — stated explicitly in `agents.rego` |
-| `limits: {tokens_per_run, runs_per_day}` | `agents.yaml` | **nothing** in this service (agent-service has a `CharterRateLimiter`; this one does not) |
+| ~~Acting agent resolved from a validated token~~ | `CallerContextResolver` KDoc, ADR-0195 | **now enforced** — `sub` + `consent_id` claims, fail closed with no fallback (#2253, #2316) |
+| ~~Consent-scoped reads / `grantedAccounts` intersection~~ | `RealAccountReadPort` KDoc, ADR-0181/ADR-0126 | **now enforced** — live `consent.validate()` call per read, fails closed (#2262, wired live in #2316); see T-I2 |
+| Per-agent charter (one charter per real caller) | ADR-0181 phase 2 intent, `agents.yaml: mcp-anonymous` comment | **nothing** — every real caller still authenticates through the one provisioned M2M client; see T-S1 |
+| `pii: masked` on the agent's data scope | `agents.yaml: mcp-anonymous.data_scope` | **nothing** in this service — see T-I3, now live-exploitable |
+| `requires_human: {every: proposal, sca: dynamic_linking, scope: consent_granted}` | `agents.yaml` | **nothing** — stated explicitly in `agents.rego`; moot in practice while `propose_payment` is a stub (T-E4) |
+| `limits: {tokens_per_run, runs_per_day}` | `agents.yaml` | **nothing** in this service (agent-service has a `CharterRateLimiter`; this one does not) — see T-D1, now live-exploitable |
 | ~~Policy decision recorded to the audit chain~~ | `agents.rego` `decision` comment, ADR-0031 D5 | **now enforced** — `McpCallAuditor` (#2207); see T-R1 |
-| Declared tool `inputSchema` | `McpToolRegistry.tools` | **nothing** server-side beyond presence + JSON type |
+| Declared tool `inputSchema` | `McpToolRegistry.tools` | **nothing** server-side beyond presence + JSON type; narrowed by the live consent check for read tools (T-T2), fully open for `propose_payment` |
 | 2 approvals on money-path changes | `CLAUDE.md`, `rules.yaml` | **nothing** — `main-protection` has `required_approving_review_count: 0` (issue #2183). Relevant here because §7 argues for the money-path listing |
 
-Genuinely enforced today: the deny-by-default capability map, the charter allow/deny evaluation via
-the shared PDP, fail-closed on PDP error, the AI-attributed audit event on every tool call, the
-read-only signed OPA bundle with a pod-rolling checksum, and the container hardening.
+Genuinely enforced today: caller-token validation with no fallback, per-caller PDP principal id,
+live consent-intersection enforcement in the read port, the deny-by-default capability map, the
+charter allow/deny evaluation via the shared PDP, fail-closed on PDP error, the AI-attributed audit
+event on every tool call, the read-only signed OPA bundle with a pod-rolling checksum, and the
+container hardening.
 
 ## 6. Residual risks & assumptions
 
-1. **The stub boundary is the load-bearing control and no gate protects it.** Every read tool
-   returns a canned note. If `StubReadPorts` is replaced without T-I2, T-E2 and T-S1 being closed
-   first, this service becomes an unauthenticated read proxy over customer accounts. Suggested
-   guard: a CI check that binding a non-stub `AccountReadPort` requires `resolveContext()` to no
-   longer be a constant.
-2. **No ingress today.** Correct, and it should stay that way until authn exists. An
-   internet-exposed MCP endpoint with `tenant-enabled: false` would be a critical exposure.
-3. **Phase-1 sandbox only.** No real customer data has passed through this service.
-4. **`propose_payment` is money-adjacent by design.** The propose-only guarantee currently rests on
-   an unimplemented port, not on a state machine (T-E4).
+1. **The stub boundary was the load-bearing control, and it is now retired for the read side.**
+   The CI guard this section originally suggested shipped as `check-mcp-stub-ports-vs-caller-auth.sh`
+   (#2230) and did exactly its job: it kept the real `AccountReadPort` from going live before T-I2
+   and the caller-identity half of T-S1/T-E2 were closed, and now correctly reports "placeholder
+   identity removed; real ports permitted." The remaining load-bearing stub is `StubProposalPort` —
+   the same class of guard should gate its eventual replacement on T-E4 (below) actually being
+   closed, not merely on identity/consent being present.
+2. **No ingress today.** Still correct, and still should stay that way — authentication now exists,
+   but nothing here has been evaluated against a hostile internet-facing client, only in-cluster
+   ones.
+3. **Real customer data now passes through this service.** The sandbox posture (no production
+   customers) is what currently bounds the blast radius of T-I3, not any code-level control.
+4. **`propose_payment` is money-adjacent by design and remains a stub.** The propose-only guarantee
+   still rests on an unimplemented port, not on a state machine (T-E4) — this is unchanged by the
+   phase-2 cutover, which deliberately left `ProposalPort` untouched.
 5. **The MCP protocol version is pinned** (`2025-06-18`) and the server advertises no capabilities
    beyond tools — no resources, prompts, or sampling, which keeps the surface small. Worth keeping.
 6. **The AGPL carve-out (ADR-0136)** applies to this service's own code; the shared Apache-2.0 libs
@@ -331,13 +380,18 @@ read-only signed OPA bundle with a pod-rolling checksum, and the container harde
 
 ## 7. Should `openbank-mcp-service` be in `rules.yaml: money_path_services`? (not changed here)
 
-**Conclusion: not today; yes at phase 2, and the trigger should be the `ProposalPort` binding.**
+**Conclusion: not today; yes once `ProposalPort` binds, and that trigger has still not fired.**
 
-- **Against, today.** The list is "services that move funds" plus a few adjacent ones. This service
-  moves nothing, calls nothing, and holds no state: `propose_payment` returns a literal
-  `{"phase":"1-stub","status":"PROPOSED"}` object. Adding it now would assert a risk profile the
-  code does not have, and — because the list drives the `check-threat-models.py` gate, the pitest
-  matrix and the 2-approval rule — it would add ceremony without adding signal.
+- **Against, today — narrower than before, but still true.** The list is "services that move
+  funds" plus a few adjacent ones. As of the phase-2 cutover this service does call real services
+  and hold real customer data in transit (§0) — the "calls nothing" half of the original argument no
+  longer holds. But it still **moves nothing**: `propose_payment` returns a literal
+  `{"phase":"1-stub","status":"PROPOSED"}` object, unchanged by this cutover. The trigger this
+  section named at first writing was deliberately the write side, not the read side, precisely
+  because reads-only-adjacent-to-money is `openbank-psd2-service`'s own position and that service is
+  not on the list either (see the next bullet). Adding this service now, on the strength of the read
+  cutover alone, would still assert a risk profile broader than what the code does — it would add
+  ceremony without adding the signal the list is for.
 - **For, at phase 2.** Once `ProposalPort` writes a real maker-checker row, this service occupies
   exactly `openbank-psd2-service`'s position: it authorizes and shapes a payment instruction while
   the irreversible action lives downstream. `openbank-psd2-service` is *not* on the money-path list
@@ -348,9 +402,12 @@ read-only signed OPA bundle with a pod-rolling checksum, and the container harde
   it is not implemented — `main-protection` requires zero approvals (issue #2183). That is an
   argument for fixing #2183, not for skipping the listing.
 
-Recommended follow-up issues (not opened by this PR): OAuth 2.1 → consent binding before the
-read ports are bound (T-S1/T-E2); server-side `inputSchema` validation + idempotency on
-`propose_payment` (T-T2/T-D2).
+Recommended follow-up issues (not opened by this PR): per-agent OAuth 2.1 client provisioning /
+charter retirement of `mcp-anonymous` as the universal fallback (T-S1/T-E3); rate limiting or a
+`CharterRateLimiter`-equivalent now that reads fan out into money-path services (T-D1); tool-result
+data-marker wrapping / PII masking to match `agents.yaml`'s declared `data_scope` (T-I3);
+server-side `inputSchema` validation + idempotency on `propose_payment`, when that port stops being
+a stub (T-T2/T-D2).
 
 ## 8. Change log
 
@@ -370,3 +427,15 @@ read ports are bound (T-S1/T-E2); server-side `inputSchema` validation + idempot
   for every `tools/call` outcome, so the ADR-0031 D5 `policy_decision` the rego was written to
   expose is now on the record. Residuals restated (constant actor id until T-S1, log-pipeline
   delivery, deliberately no arguments/results in the payload).
+- **2026-07-25 (ADR-0195 phase 2, PRs #2253/#2262/#2278/#2316)** — Revised against the phase-2
+  cutover: caller identity now comes from a validated OAuth 2.1 token (#2253, T-S2 closed, T-S1
+  partially closed), the read tools call real downstream services behind a live PSD2
+  consent-intersection check in `RealAccountReadPort` (#2262, T-I2 closed, T-T2 narrowed), the M2M
+  client-credentials bearer landed (#2278), and the placeholder identity + stub read ports were
+  atomically removed/replaced as the CDI default (#2316, T-E2 now live and mitigated by the landing
+  sequence). `propose_payment` / `StubProposalPort` were deliberately left untouched — T-E4 and §7's
+  conclusion are unchanged. Confirmed unchanged: `rest.rego`'s `agent-charter-allows` bridge still
+  drops `attributes`, so the consent id still never reaches the policy plane (§3); every real caller
+  still authenticates through one M2M client, so T-S1/T-E3's charter-granularity gap remains open.
+  T-I3 and T-D1 move from latent-behind-the-stub to live-exploitable, since the tools now return real
+  data and real downstream fan-out.
