@@ -50,6 +50,10 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     // @TestSecurity for the boot smoke-test's DB-touch assertion (calls /resolve with a role).
     testImplementation(libs.quarkus.test.security)
+    // PidApiContractTest compares the served API against the committed openapi.yaml, which it PARSES
+    // rather than greps. No version: managed by the enforcedPlatform(quarkus.bom) above
+    // (testImplementation extends implementation), so it cannot drift from the runtime's Jackson.
+    testImplementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")
 }
 
 kover {
