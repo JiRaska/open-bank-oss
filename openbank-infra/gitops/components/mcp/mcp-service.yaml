@@ -2,13 +2,12 @@
 # stateless JSON-RPC surface (initialize / tools/list / tools/call / ping) exposing a
 # curated, consent-scoped tool set to governed AI agents. No DB, no Kafka.
 #
-# PHASE 1 DEPLOY (ADR-0181): the protocol surface (initialize / tools/list) runs live;
-# `tools/call` is authorized by the shared ADR-0034 PDP and FAILS CLOSED here because no
-# OPA sidecar is deployed yet — every tool call is denied until the sidecar + agents.yaml
-# charter land (deliberate: deploying the protocol surface first keeps the OPA-bundle
-# blast radius out of this change). OIDC is tenant-disabled in the image config, so the
-# endpoint carries no auth in phase 1 and the only caller is the in-cluster network
-# (fenced by the generated NetworkPolicy).
+# PHASE 2 (ADR-0181): the ADR-0034 OPA sidecar below serves data.openbank.rest.allow over
+# localhost:8181, so `tools/call` is now authorized (not fail-closed): the shared PDP evaluates
+# each capability as an AI_AGENT action against the `mcp-anonymous` charter (agents.yaml). A PDP
+# outage still fails CLOSED in McpEndpoint (never fail-open on a money-adjacent surface). OIDC is
+# tenant-disabled in the image config, so the endpoint carries no auth in phase 1 and the only
+# caller is the in-cluster network.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,6 +26,10 @@ spec:
       labels:
         app.kubernetes.io/name: mcp-service
         app.kubernetes.io/part-of: platform
+      annotations:
+        # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-mcp-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "8247b3f401bef1b1"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -47,8 +50,9 @@ spec:
           env:
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
-            # ADR-0034 PDP. No sidecar in phase 1 → this localhost target is unreachable and
-            # every tools/call fails CLOSED (the intended posture). The sidecar is a follow-up.
+            # ADR-0034 PDP: the OPA sidecar in this pod (localhost:8181), serving
+            # data.openbank.rest.allow (mcp-opa-bundle ConfigMap). A PDP connectivity error
+            # still fails CLOSED in McpEndpoint (money-adjacent surface — never fail-open).
             - name: OPA_URL
               value: http://localhost:8181
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
@@ -88,9 +92,74 @@ spec:
             limits:
               cpu: "1"
               memory: 512Mi
+        # OPA policy-decision sidecar (ADR-0034 / ADR-0181 phase 2). Serves
+        # data.openbank.rest.allow for the MCP tools/call gate — the shared PDP bridges the
+        # AI_AGENT capability to the mcp-anonymous charter (agents.rego). Bundle mounted from
+        # mcp-opa-bundle ConfigMap (gen-mcp-opa-bundle.sh). Bind 0.0.0.0 so kubelet httpGet
+        # probes reach /health (the image is scratch — no shell for an exec probe); reachability
+        # is fenced by the pod network, and OPA serves only policy decisions, no secrets.
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet: {path: "/health?bundles=true", port: 8181}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /health, port: 8181}
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem: true.
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: mcp-opa-bundle
 ---
 apiVersion: v1
 kind: Service

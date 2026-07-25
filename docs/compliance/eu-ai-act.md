@@ -28,6 +28,7 @@ article-by-article before it can move past *Proposed*.
 | `ui-assistant` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `rca-investigator` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `customer-copilot` | customer | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
+| `mcp-anonymous` | customer | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `finops-agent` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `devops-agent` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `control-liveness-sentinel` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
@@ -82,6 +83,6 @@ not deployed.
 
 ## Provenance
 
-- Source: `openbank-libs/governance/agents.yaml` (sha256 `ed696e5fef5274f0…`, 13 charters)
+- Source: `openbank-libs/governance/agents.yaml` (sha256 `db00ef54f93055dd…`, 14 charters)
 - Related: ADR-0031 (agent governance), ADR-0141 (model registry), ADR-0142 (credit
   decisioning), ADR-0148 (this assurance layer).

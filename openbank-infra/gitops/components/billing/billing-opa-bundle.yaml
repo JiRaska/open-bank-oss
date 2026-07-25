@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: billing-service
     app.kubernetes.io/part-of: billing
   annotations:
-    openbank.tech/policy-checksum: "615cb245d5ee823a"
+    openbank.tech/policy-checksum: "a25fe07bf25bd265"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -709,6 +709,8 @@ data:
         - query.observability.readonly # Prometheus metrics / Loki logs / Alertmanager alerts (read-only)
         - query.balance.readonly      # the signed-in customer's own balance (customer-copilot, edge-enforced ownership)
         - query.transaction.readonly  # the signed-in customer's own transactions (customer-copilot, edge-enforced ownership)
+        - query.account.readonly      # PSD2 consent-scoped account list (openbank-mcp-service, ADR-0181)
+        - query.consent.readonly      # the PSD2 consents the acting agent holds (openbank-mcp-service, ADR-0181)
       write_proposal: # produces a reviewable artifact, never a direct effect
         - draft.ticket
         - gh.pr.open
@@ -829,6 +831,33 @@ data:
           - every: proposal                          # ActionProposal on the reply, never a direct effect
           - sca: dynamic_linking                     # HITL + SCA bound to amount+payee before any state change
           - scope: customer_own                      # audience-scoped on-behalf-of token (one customer)
+        limits: { tokens_per_run: 80000, runs_per_day: 1000 }
+
+      - id: mcp-anonymous
+        plane: customer
+        charter: "The first-party MCP server's acting identity (ADR-0181). Exposes a curated, PSD2-consent-scoped tool set — read the granted accounts/balances/transactions/consents, and PROPOSE a payment — to governed AI agents over the Model Context Protocol. Reads only; propose.payment is a reviewable artifact a human + SCA disposes, never a debit."
+        # `mcp-anonymous` is the phase-1 FIXED principal id McpEndpoint.resolveContext() sets
+        # (ctx.agentId = "agent:mcp-anonymous"); the shared ADR-0034 PDP classifies it AI_AGENT and
+        # rest.rego's agent bridge trims the "agent:" prefix, so this charter's `id` must stay
+        # `mcp-anonymous` or every tools/call defaults to deny. Phase 2 (ADR-0126) replaces this single
+        # placeholder with a per-agent OAuth 2.1 → PSD2-consent identity; each real caller then gets its
+        # own charter and this one is retired.
+        data_scope:
+          # The accounts/consents the presented PSD2 consent grants; ownership is enforced at the
+          # consent edge, never widened by the model. PII masked (defaults).
+          read: [account, balance, transaction, consent]
+          pii: masked
+        tools:
+          # Exact MCP capability strings the ADR-0034 PDP evaluates as input.action (McpToolRegistry
+          # .capabilities). Deny-by-default: only these five are grantable; propose.payment emits a
+          # reviewable proposal only (customer-copilot's ADR-0089 regime), never a direct money move.
+          allow: [query.account.readonly, query.balance.readonly, query.transaction.readonly,
+                  query.consent.readonly, propose.payment]
+          deny:  ["money.*", "gh.pr.*", "*.write", secrets.read.raw]
+        requires_human:
+          - every: proposal                          # propose.payment surfaces a proposal, never a debit
+          - sca: dynamic_linking                     # HITL + SCA bound to amount+payee before any state change
+          - scope: consent_granted                   # reads never exceed the presented PSD2 consent
         limits: { tokens_per_run: 80000, runs_per_day: 1000 }
 
       - id: finops-agent
