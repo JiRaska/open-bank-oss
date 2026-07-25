@@ -1,7 +1,8 @@
 # LiteLLM proxy config (ADR-0174). The single egress choke point: every agent/copilot LLM call
 # routes through here, and only this pod is allowed to leave the cluster to the provider (ADR-0175,
-# networkpolicy-litellm-egress.yaml). Model name is kept identical to what the agents already send
-# (deepseek-ai/DeepSeek-V3.2) so repointing them is an endpoint change only.
+# networkpolicy-litellm-egress.yaml). Model names are kept identical to what the callers already
+# send (deepseek-ai/DeepSeek-V3.2 for copilot + the ops agents, llama-3.3-70b-versatile for
+# agent-service) so repointing a caller is an endpoint + key change only, never a prompt change.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -14,6 +15,15 @@ data:
         litellm_params:
           model: deepinfra/deepseek-ai/DeepSeek-V3.2
           api_key: os.environ/DEEPINFRA_API_KEY
+      # agent-service's admin-UI assistant model (#1919). It sends `model-gateway.models[].id`
+      # verbatim, so the model_name MUST stay `llama-3.3-70b-versatile` — that is what repointing
+      # agent-service at this gateway costs: an endpoint + key change, nothing else. The Groq key
+      # is projected here from the SAME OpenBao path agent-service used to read it from, so the
+      # provider credential moves into this pod rather than being duplicated (ADR-0175).
+      - model_name: llama-3.3-70b-versatile
+        litellm_params:
+          model: groq/llama-3.3-70b-versatile
+          api_key: os.environ/GROQ_API_KEY
     general_settings:
       # Callers authenticate to LiteLLM with this virtual key (projected from OpenBao), NOT with the
       # upstream provider key — so the DeepInfra key lives only here, never in an agent pod (ADR-0175).
