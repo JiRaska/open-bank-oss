@@ -52,12 +52,10 @@ interface ScaIdempotencyStore {
     suspend fun save(key: String, challengeId: UUID, ttlSeconds: Long)
 }
 
-/** Outbound port for delivering SCA challenges to the user out-of-band (push / SMS). */
+/** Outbound port for delivering SCA challenges to the user out-of-band (push). */
 interface NotificationSender {
 
     suspend fun sendPushNotification(partyId: UUID, challengeId: UUID, message: String)
-
-    suspend fun sendSmsOtp(partyId: UUID, otp: String)
 }
 
 /** Durable store of device credentials enrolled to a party (ADR-0021). */

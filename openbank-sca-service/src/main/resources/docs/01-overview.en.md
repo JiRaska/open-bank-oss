@@ -4,7 +4,7 @@
 
 `openbank-sca-service` is the **Strong Customer Authentication (SCA) engine** of the OpenBank platform. It performs step-up authentication when another service needs to be sure a real customer is present and has approved a sensitive action. It holds:
 
-- **ScaChallenge aggregate** — a single authentication challenge: party, purpose (PAYMENT_INITIATION / CONSENT_GRANT / LOGIN / AGENT_ACTION / SENSITIVE_DATA_ACCESS), method (SMS_OTP / TOTP / PUSH_NOTIFICATION / BIOMETRIC), status (PENDING / COMPLETED / FAILED / EXPIRED / CANCELLED), attempt counter, expiry, and optional **dynamic-linking data** (amount, currency, creditor IBAN/name, reference) per PSD2 RTS Art. 5.
+- **ScaChallenge aggregate** — a single authentication challenge: party, purpose (PAYMENT_INITIATION / CONSENT_GRANT / LOGIN / AGENT_ACTION / SENSITIVE_DATA_ACCESS), method (TOTP / PUSH_NOTIFICATION / BIOMETRIC), status (PENDING / COMPLETED / FAILED / EXPIRED / CANCELLED), attempt counter, expiry, and optional **dynamic-linking data** (amount, currency, creditor IBAN/name, reference) per PSD2 RTS Art. 5.
 - **EnrolledDevice** — a device credential (public key + algorithm ES256/ED25519) enrolled to a party, used to verify later out-of-band approval signatures (ADR-0021). The private key never leaves the device's hardware keystore (Secure Enclave / Android Keystore).
 - **DeviceApprovalDecision** — a signature-verified, dynamic-linking-bound APPROVED/DENIED decision recorded out-of-band by the enrolled device; stored transiently (it only needs to outlive its challenge).
 

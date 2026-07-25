@@ -159,12 +159,9 @@ class ScaService(
         idempotencyStore.save(idempotencyKey, saved.id, minOf(ttlSeconds, idempotencyTtlSeconds))
 
         when (method) {
-            ScaMethod.SMS_OTP, ScaMethod.TOTP -> {
+            ScaMethod.TOTP -> {
                 val otp = otpGenerator.generate()
                 otpStore.store(saved.id, otp, ttlSeconds)
-                if (method == ScaMethod.SMS_OTP) {
-                    notificationDispatchGuard.sendSmsOtp(command.partyId, otp)
-                }
             }
             ScaMethod.PUSH_NOTIFICATION, ScaMethod.BIOMETRIC -> {
                 notificationDispatchGuard.sendPushNotification(
@@ -187,7 +184,7 @@ class ScaService(
         if (!challenge.canAttempt(now)) throw ScaChallengeMaxAttemptsException(command.challengeId)
 
         return when (challenge.method) {
-            ScaMethod.SMS_OTP, ScaMethod.TOTP -> verifyOtp(challenge, command, now)
+            ScaMethod.TOTP -> verifyOtp(challenge, command, now)
             // Decoupled methods (ADR-0021): never auto-approve. The authentication happened
             // out-of-band on the enrolled device; we consult the signature-verified decision
             // recorded by recordDecision(). No decision yet => the challenge stays PENDING

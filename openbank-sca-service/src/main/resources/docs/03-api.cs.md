@@ -24,7 +24,7 @@ Request:
 {
   "partyId": "uuid",
   "purpose": "PAYMENT_INITIATION | CONSENT_GRANT | LOGIN | AGENT_ACTION | SENSITIVE_DATA_ACCESS",
-  "preferredMethod": "PUSH_NOTIFICATION | SMS_OTP | TOTP | BIOMETRIC",
+  "preferredMethod": "PUSH_NOTIFICATION | TOTP | BIOMETRIC",
   "dynamicLinkingData": {
     "amount": "100.00", "currency": "EUR",
     "creditorIban": "…", "creditorName": "…", "reference": "…"
@@ -39,7 +39,7 @@ Pošlete `Idempotency-Key` (preferováno) nebo `X-Request-ID`. Replay vrátí ca
 
 ## Ověření — `POST /api/v1/sca/challenges/{id}/verify`
 
-Request: `{ "partyId": "uuid", "otp": "123456" }` (`otp` povinné pro SMS_OTP/TOTP).
+Request: `{ "partyId": "uuid", "otp": "123456" }` (`otp` povinné pro TOTP).
 - **OTP metody**: správné OTP ⇒ `COMPLETED`; chybné OTP zvýší `attemptCount` a po dosažení `maxAttempts` (3) se výzva stane `FAILED` a volání vrátí `401`.
 - **Decoupled metody (PUSH/BIOMETRIC)**: vrací aktuální výzvu. `COMPLETED` jen pokud zapsané zařízení už poslalo APPROVED rozhodnutí; jinak zůstává `PENDING` (pokus se nespotřebuje) — nikdy ne automaticky (ADR-0021).
 

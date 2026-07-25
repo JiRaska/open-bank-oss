@@ -20,11 +20,4 @@ class NotificationDispatchGuard(private val notificationSender: NotificationSend
     suspend fun sendPushNotification(partyId: UUID, challengeId: UUID, message: String) {
         notificationSender.sendPushNotification(partyId, challengeId, message)
     }
-
-    @Timeout(2000)
-    @Retry(maxRetries = 2, delay = 200, jitter = 100, retryOn = [Exception::class])
-    @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000, successThreshold = 2)
-    suspend fun sendSmsOtp(partyId: UUID, otp: String) {
-        notificationSender.sendSmsOtp(partyId, otp)
-    }
 }

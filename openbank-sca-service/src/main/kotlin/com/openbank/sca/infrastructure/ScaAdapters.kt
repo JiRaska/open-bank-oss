@@ -83,8 +83,4 @@ class LoggingNotificationSender(
         )
         notificationEmitter.send(Record.of(partyId.toString(), objectMapper.writeValueAsString(request)))
     }
-
-    override suspend fun sendSmsOtp(partyId: UUID, otp: String) {
-        log.infof("SMS OTP → partyId=%s otp=%s", partyId, otp)
-    }
 }

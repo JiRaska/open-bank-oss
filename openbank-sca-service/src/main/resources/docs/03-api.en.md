@@ -24,7 +24,7 @@ Request:
 {
   "partyId": "uuid",
   "purpose": "PAYMENT_INITIATION | CONSENT_GRANT | LOGIN | AGENT_ACTION | SENSITIVE_DATA_ACCESS",
-  "preferredMethod": "PUSH_NOTIFICATION | SMS_OTP | TOTP | BIOMETRIC",
+  "preferredMethod": "PUSH_NOTIFICATION | TOTP | BIOMETRIC",
   "dynamicLinkingData": {
     "amount": "100.00", "currency": "EUR",
     "creditorIban": "…", "creditorName": "…", "reference": "…"
@@ -39,7 +39,7 @@ Send `Idempotency-Key` (preferred) or `X-Request-ID`. A replay returns the cache
 
 ## Verify — `POST /api/v1/sca/challenges/{id}/verify`
 
-Request: `{ "partyId": "uuid", "otp": "123456" }` (`otp` required for SMS_OTP/TOTP).
+Request: `{ "partyId": "uuid", "otp": "123456" }` (`otp` required for TOTP).
 - **OTP methods**: a correct OTP ⇒ `COMPLETED`; a wrong OTP increments `attemptCount` and, once `maxAttempts` (3) is reached, the challenge becomes `FAILED` and the call returns `401`.
 - **Decoupled methods (PUSH/BIOMETRIC)**: returns the current challenge. `COMPLETED` only if the enrolled device already posted an APPROVED decision; otherwise it stays `PENDING` (no attempt consumed) — never auto-approved (ADR-0021).
 
