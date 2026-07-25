@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.5.0...finrep-service-v0.6.0) (2026-07-25)
+
+
+### Features
+
+* **finrep:** instrument template renders, input size, balance and data gaps ([#2279](https://github.com/JiRaska/open-bank-oss/issues/2279)) ([f10a138](https://github.com/JiRaska/open-bank-oss/commit/f10a138f017bb075990f7eb93a414da5682bad7d)), closes [#2255](https://github.com/JiRaska/open-bank-oss/issues/2255)
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.4.0...finrep-service-v0.5.0) (2026-07-08)
 
 
