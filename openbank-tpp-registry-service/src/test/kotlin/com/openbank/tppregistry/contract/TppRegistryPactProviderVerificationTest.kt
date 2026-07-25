@@ -41,12 +41,12 @@ import org.junit.jupiter.api.extension.ExtendWith
  * registers the unknown TPP id the refusal interaction uses, so a fresh Testcontainer DB satisfies
  * it by construction.
  *
- * The allow branch is NOT in the committed pact yet, and the reason is worth knowing before adding
- * a `@State` for it: `TppRepositoryImpl.toDomain()` maps this entity's `BIGSERIAL` id through
- * `UUID.fromString(id.toString())`, so reading ANY registered row throws and the endpoint answers
- * 400 `"Invalid UUID string: 2"` — issue #2340, found by this very replay while psd2's consumer test
- * stayed green. `V1__init.sql` already seeds `CZ-CNB-TEST-AISP` as an ACTIVE AISP, so once #2340 is
- * fixed the allow interaction needs only a no-op `@State` here.
+ * The allow branch (issue #2340) is now in the committed pact: it was withheld until
+ * `TppRepositoryImpl.toDomain()` stopped mapping the entity's `BIGSERIAL` id through
+ * `UUID.fromString(id.toString())`, which threw on any registered row (400
+ * `"Invalid UUID string: 2"`, found by this very replay while psd2's consumer test stayed green).
+ * `V1__init.sql` already seeds `CZ-CNB-TEST-AISP` ACTIVE/AISP with no QWAC expiry, so the state
+ * handler below needs no setup either.
  *
  * `@TestSecurity` matches `checkAuthorization`'s `@RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR",
  * "ROLE_ADMIN")` — psd2 calls it with an M2M client-credentials token in production (ADR-0018).
@@ -95,5 +95,12 @@ class TppRegistryPactProviderVerificationTest {
         // No setup: nothing registers CZ-CNB-PACT-UNREGISTERED. Declared so the state is an
         // explicit part of the contract rather than a name pact-jvm passes over silently — an
         // unhandled state is not an error, which is how #468's missing states stayed invisible.
+    }
+
+    @State("the TPP registry has an ACTIVE AISP with an unexpired QWAC")
+    fun activeAispWithValidQwacIsSeeded() {
+        // No setup: V1__init.sql already seeds CZ-CNB-TEST-AISP as ACTIVE/AISP with a NULL
+        // qwac_expires_at, which TppRegistryService.checkAuthorization treats as never-expired.
+        // Declared for the same reason as the state above — an explicit, visible no-op.
     }
 }

@@ -43,14 +43,13 @@ import org.junit.jupiter.api.extension.ExtendWith
  * shipped a call to a ledger path that had never existed while its unit tests passed against a
  * mocked port. No seeded data is needed; nothing registers the id this interaction uses.
  *
- * WITHHELD, deliberately: the **allow** branch (HTTP 200, `authorized: true`, `roles: ["AISP"]`).
- * It is written and it FAILS against a real tpp-registry — `TppRepositoryImpl.toDomain()` maps the
+ * Also pinned: the **allow** branch (HTTP 200, `authorized: true`, `roles: ["AISP"]`), against the
+ * `CZ-CNB-TEST-AISP` fixture `V1__init.sql` already seeds ACTIVE/AISP with no QWAC expiry. This
+ * interaction was WITHHELD until #2340 landed: `TppRepositoryImpl.toDomain()` used to map the
  * entity's `BIGSERIAL` id through `UUID.fromString(id.toString())`, so reading any registered row
- * throws and the endpoint answers 400 `"Invalid UUID string: 2"` (issue #2340). The provider replay
- * is what found it; this consumer test was green throughout, which is the asymmetry CLAUDE.md
- * records. Committing that interaction would leave a permanently red provider gate, so it lands with
- * the fix. Note what this means for the contract as it stands: the refusal branch is verified, the
- * allow branch is currently unreachable in production.
+ * threw and the endpoint answered 400 `"Invalid UUID string: 2"`. The provider replay is what found
+ * it; this consumer test was green throughout, which is the asymmetry CLAUDE.md records — a
+ * committed pact nobody replays is worthless against the request-path/read-path class of defect.
  *
  * **The expected path is a LITERAL; only the outgoing requests are reflected off the client's
  * `@Path`** (CLAUDE.md "Contract tests", measured on #2290). Deriving both sides is vacuous —
@@ -103,6 +102,40 @@ class TppRegistryCheckPactConsumerTest {
         assertThat(response.reason).isNotBlank()
     }
 
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun registeredAispAllowedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("the TPP registry has an ACTIVE AISP with an unexpired QWAC")
+        .uponReceiving("GET check a registered, active AISP — the allow branch")
+        .path(EXPECTED_CHECK_PATH)
+        .query("tppId=$REGISTERED_AISP_ID&role=$AISP_ROLE")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.stringValue("tppId", REGISTERED_AISP_ID)
+                o.booleanValue("authorized", true)
+                o.array("roles") { a -> a.stringValue("AISP") }
+                o.nullValue("reason")
+            }.build(),
+        )
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "registeredAispAllowedPact")
+    fun `a registered active AISP with a valid QWAC is authorized`(mockServer: MockServer) {
+        assertClientPathMatchesContract()
+
+        val raw = check(mockServer, REGISTERED_AISP_ID, 200)
+
+        val response = mapper.readValue<TppAuthorizationResponse>(raw)
+        assertThat(response.authorized).isTrue()
+        assertThat(response.roles).containsExactly("AISP")
+        assertThat(response.reason).isNull()
+    }
+
     private fun check(mockServer: MockServer, tppId: String, expectedStatus: Int): String = given()
         .baseUri(mockServer.getUrl())
         .accept("application/json")
@@ -134,6 +167,9 @@ class TppRegistryCheckPactConsumerTest {
 
         /** Never registered — a fresh Testcontainer DB satisfies the refusal state by construction. */
         const val UNKNOWN_TPP_ID = "CZ-CNB-PACT-UNREGISTERED"
+
+        /** Seeded ACTIVE/AISP with no QWAC expiry by V1__init.sql — satisfied by boot-time data. */
+        const val REGISTERED_AISP_ID = "CZ-CNB-TEST-AISP"
 
         /** `TppRole.AISP`, sent as the exact enum name the provider's `valueOf` accepts. */
         const val AISP_ROLE = "AISP"

@@ -51,6 +51,43 @@
         },
         "status": 403
       }
+    },
+    {
+      "description": "GET check a registered, active AISP \u2014 the allow branch",
+      "providerStates": [
+        {
+          "name": "the TPP registry has an ACTIVE AISP with an unexpired QWAC"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/tpp-registry/check",
+        "query": {
+          "role": [
+            "AISP"
+          ],
+          "tppId": [
+            "CZ-CNB-TEST-AISP"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "authorized": true,
+          "reason": null,
+          "roles": [
+            "AISP"
+          ],
+          "tppId": "CZ-CNB-TEST-AISP"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
     }
   ],
   "metadata": {
