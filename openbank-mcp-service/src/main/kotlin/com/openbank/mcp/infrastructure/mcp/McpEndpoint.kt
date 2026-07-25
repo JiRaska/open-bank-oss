@@ -64,6 +64,11 @@ import java.time.Duration
  * no path from an unauthenticated caller to a real read. The consent's `grantedAccounts` are
  * validated LIVE at consent-service by [com.openbank.mcp.infrastructure.read.RealAccountReadPort];
  * account scope is never taken from the token.
+ *
+ * Known residual (unchanged by step 4): `rest.rego`'s `agent-charter-allows` bridge still drops the
+ * `attributes` map on the query to `pdp.allow` above, so the shared PDP never sees `consentId` — the
+ * capability-vs-charter decision is real now, but a future policy that wants to gate on consent state
+ * cannot yet, since the input never reaches it (threat model §3, docs/threat-models/openbank-mcp-service.md).
  */
 @Path("/mcp")
 @Consumes(MediaType.APPLICATION_JSON)

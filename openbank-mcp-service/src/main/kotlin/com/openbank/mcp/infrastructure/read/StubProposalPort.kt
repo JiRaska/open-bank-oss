@@ -6,40 +6,18 @@ package com.openbank.mcp.infrastructure.read
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
 import com.openbank.mcp.application.port.out.ProposalPort
 import jakarta.enterprise.context.ApplicationScoped
 
 /**
- * PHASE 1 deterministic stubs behind the read/proposal ports (ADR-0181). They prove the MCP
- * protocol + the OPA gate end to end without the downstream wiring. Phase 2 replaces these with
- * `@RegisterRestClient` adapters (account/balance/transaction/consent) and a real PROPOSED-row
- * maker-checker writer — the tool code and the endpoint do not change, only the bound implementation.
+ * PHASE 1 deterministic stub behind the proposal port (ADR-0181). `AccountReadPort`'s stub was
+ * retired in ADR-0195 step 4 — [com.openbank.mcp.infrastructure.read.RealAccountReadPort] is now
+ * the sole implementation. `ProposalPort` stays stubbed: the "PROPOSED row into a maker-checker
+ * queue" a real implementation would write turned out to require NEW cross-service API surface
+ * (copilot-service's `ActionProposal` domain is internal, not a callable endpoint) — a separate
+ * design decision, out of scope for the caller-auth cutover.
  */
-@ApplicationScoped
-class StubAccountReadPort(private val mapper: ObjectMapper) : AccountReadPort {
-
-    override fun listAccounts(consentContext: ConsentContext): JsonNode =
-        note("list_accounts", "would return the consent's grantedAccounts", consentContext)
-
-    override fun getBalance(consentContext: ConsentContext, accountId: String): JsonNode =
-        note("get_balance", "would return balance for account $accountId", consentContext)
-
-    override fun listTransactions(consentContext: ConsentContext, accountId: String, limit: Int): JsonNode =
-        note("list_transactions", "would return up to $limit transactions for account $accountId", consentContext)
-
-    override fun listConsents(consentContext: ConsentContext): JsonNode =
-        note("list_consents", "would return the agent's PSD2 consents", consentContext)
-
-    private fun note(tool: String, what: String, ctx: ConsentContext): JsonNode = mapper.createObjectNode()
-        .put("phase", "1-stub")
-        .put("tool", tool)
-        .put("note", "$what (real edge wiring is phase 2)")
-        .put("agentId", ctx.agentId)
-        .put("consentId", ctx.consentId)
-}
-
 @ApplicationScoped
 class StubProposalPort(private val mapper: ObjectMapper) : ProposalPort {
     override fun proposePayment(consentContext: ConsentContext, request: JsonNode): JsonNode = mapper.createObjectNode()
