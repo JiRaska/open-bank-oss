@@ -11,11 +11,6 @@
 #                     documented hardening follow-up (ADR-0053). Keeps 1 warm
 #                     runner (arc_min_runners) off the critical path; bursts to
 #                     arc_max_runners.
-#   openbank-batch  — same trust level as build (no creds), SEPARATE low-capped
-#                     pool: non-blocking PR checks + weekly cron (security/secret
-#                     scans, finops audit, label sync). Scales to zero. A batch
-#                     burst tops out at arc_batch_max_runners and cannot touch
-#                     the build pool.
 #   openbank-deploy — post-merge ECR push + ArgoCD sync. Its pod SA carries
 #                     IRSA scoped to ECR push only; a PR job can never schedule
 #                     here (workflow routing + the ci-runner-governance lint).
@@ -755,10 +750,15 @@ resource "helm_release" "arc_build" {
       metadata = { annotations = local.runner_pod_annotations }
       spec = {
         serviceAccountName = var.arc_runner_enabled ? kubernetes_service_account.arc_build_runner[0].metadata[0].name : "default"
-        nodeSelector       = local.runner_node_selector
-        tolerations        = local.runner_tolerations
-        affinity           = local.runner_affinity
-        initContainers     = [local.dind_init_container, local.aio_sysctl_init_container, local.gradle_home_init_container, local.jdk_toolcache_preload_init_container]
+        # Below every platform workload (which sit at the default priority 0), so a
+        # CI burst can never delay a deploy the way it did on 2026-07-25 — and, via
+        # preemptionPolicy: Never on the class, a runner never evicts anything to get
+        # scheduled. Object lives in gitops/components/platform/priorityclasses.yaml.
+        priorityClassName = "openbank-ci"
+        nodeSelector      = local.runner_node_selector
+        tolerations       = local.runner_tolerations
+        affinity          = local.runner_affinity
+        initContainers    = [local.dind_init_container, local.aio_sysctl_init_container, local.gradle_home_init_container, local.jdk_toolcache_preload_init_container]
         containers = [
           {
             name         = "runner"
@@ -798,52 +798,6 @@ resource "helm_release" "arc_build" {
 }
 
 # ---------------------------------------------------------------------------
-# batch scale set — runs-on: openbank-batch. Same trust level as build (default
-# SA, NO cloud-write creds, dind), but a SEPARATE, low-capped pool so the
-# non-blocking lane (weekly security/secret scans, finops audit, label sync, and
-# the same scans' lightweight PR runs) can never starve the merge-required
-# per-service build lane. This is the "priority" lever: ARC has no job preemption,
-# so the build lane gets dedicated capacity instead. Scales to zero (minRunners 0)
-# — idle cost $0; a batch burst tops out at arc_batch_max_runners and leaves the
-# build pool untouched. Lighter resource request than build (no heavy Gradle fan-out).
-# ---------------------------------------------------------------------------
-resource "helm_release" "arc_batch" {
-  count            = var.arc_runner_enabled ? 1 : 0
-  name             = "openbank-batch"
-  namespace        = kubernetes_namespace.arc_runners[0].metadata[0].name
-  create_namespace = false
-  repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
-  chart            = "gha-runner-scale-set"
-  version          = var.arc_controller_version
-  depends_on       = [helm_release.arc_controller, kubectl_manifest.nodepool_runners, kubernetes_config_map.dind_mirror_certs]
-
-  values = [yamlencode({
-    githubConfigUrl    = var.github_config_url
-    githubConfigSecret = "arc-github-app"
-    runnerScaleSetName = "openbank-batch"
-    minRunners         = 0 # true scale-to-zero; the batch lane is never on the critical path
-    maxRunners         = var.arc_batch_max_runners
-    containerMode      = { type = "dind" }
-    template = {
-      metadata = { annotations = local.runner_pod_annotations }
-      spec = {
-        nodeSelector = local.runner_node_selector
-        tolerations  = local.runner_tolerations
-        containers = [{
-          name    = "runner"
-          image   = local.runner_image
-          command = local.runner_command
-          resources = {
-            requests = { cpu = "2", memory = "4Gi" }
-            limits   = { memory = "8Gi" }
-          }
-        }]
-      }
-    }
-  })]
-}
-
-# ---------------------------------------------------------------------------
 # deploy scale set — runs-on: openbank-deploy (post-merge only). Pod runs as the
 # IRSA-scoped ServiceAccount; dind for build+push.
 # ---------------------------------------------------------------------------
@@ -868,9 +822,14 @@ resource "helm_release" "arc_deploy" {
       metadata = { annotations = local.runner_pod_annotations }
       spec = {
         serviceAccountName = kubernetes_service_account.arc_deploy[0].metadata[0].name
-        nodeSelector       = local.runner_node_selector
-        tolerations        = local.runner_tolerations
-        initContainers     = [local.dind_init_container, local.aio_sysctl_init_container, local.gradle_home_init_container, local.jdk_toolcache_preload_init_container]
+        # Below every platform workload (which sit at the default priority 0), so a
+        # CI burst can never delay a deploy the way it did on 2026-07-25 — and, via
+        # preemptionPolicy: Never on the class, a runner never evicts anything to get
+        # scheduled. Object lives in gitops/components/platform/priorityclasses.yaml.
+        priorityClassName = "openbank-ci"
+        nodeSelector      = local.runner_node_selector
+        tolerations       = local.runner_tolerations
+        initContainers    = [local.dind_init_container, local.aio_sysctl_init_container, local.gradle_home_init_container, local.jdk_toolcache_preload_init_container]
         containers = [
           {
             name         = "runner"
@@ -879,7 +838,14 @@ resource "helm_release" "arc_deploy" {
             env          = local.runner_docker_env
             volumeMounts = local.runner_docker_volume_mounts
             resources = {
-              requests = { cpu = "2", memory = "4Gi" }
+              # ephemeral-storage, same reasoning as the build pool: this pod mounts the
+              # SAME local.dind_container, whose docker-lib emptyDir is capped at 14Gi, and
+              # runner-image.yml builds the CI runner image here — the most layer-heavy build
+              # in the fleet. Without a request the scheduler sizes the node as if the pod
+              # needed no disk, and kubelet's DiskPressure ranking puts a pod that is always
+              # over its (zero) request at the front of the eviction queue. That is the same
+              # shape of bug as the dind memory request above, one resource over.
+              requests = { cpu = "2", memory = "4Gi", "ephemeral-storage" = "16Gi" }
               limits   = { memory = "8Gi" }
             }
           },
