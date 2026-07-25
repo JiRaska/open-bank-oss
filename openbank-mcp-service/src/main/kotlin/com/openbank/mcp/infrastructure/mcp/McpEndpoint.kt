@@ -45,9 +45,13 @@ import org.jboss.logging.Logger
  * against the bank is reconstructable. `tools/list`, `initialize` and `ping` do not: they touch no
  * customer data and expose only the static tool catalogue.
  *
- * Phase 1: the acting agent + consent are resolved from headers (X-Agent-Id / X-Consent-Id); the
- * real OAuth 2.1 → PSD2-consent binding (ADR-0126) is phase 2. The principal id is `agent:`-prefixed
- * so the shared AuthorizeInterceptor/rego classify it AI_AGENT and bridge to `agents.allow`.
+ * Caller identity (ADR-0195): the acting agent + presented consent come from the caller's validated
+ * OAuth 2.1 access token via [CallerContextResolver] — `sub` (`agent:<id>`, classified AI_AGENT by
+ * the shared AuthorizeInterceptor/rego and bridged to `agents.allow`) and the `consent_id` claim.
+ * While OIDC is still tenant-disabled no agent token is presented, so the resolver returns null and
+ * the endpoint falls back to the phase-1 placeholder identity (unchanged deployed behaviour). The
+ * consent's `grantedAccounts` are validated live at consent-service by the real read ports (the next
+ * ADR-0195 step); account scope is never taken from the token.
  */
 @Path("/mcp")
 @Consumes(MediaType.APPLICATION_JSON)
@@ -56,6 +60,7 @@ class McpEndpoint(
     private val registry: McpToolRegistry,
     private val pdp: PolicyDecisionPoint,
     private val auditor: McpCallAuditor,
+    private val callerResolver: CallerContextResolver,
     private val mapper: ObjectMapper,
     @ConfigProperty(name = "mcp.server.name", defaultValue = "openbank-mcp") private val serverName: String,
     @ConfigProperty(name = "mcp.server.version", defaultValue = "0.1.0") private val serverVersion: String,
@@ -91,10 +96,15 @@ class McpEndpoint(
     private fun handleToolCall(id: JsonNode, params: JsonNode): Response {
         val toolName = params.path("name").asText("")
         val arguments = params.path("arguments").let { if (it.isMissingNode) mapper.createObjectNode() else it }
-        val ctx = resolveContext()
         // Argument KEY names only — the values are customer data and must never enter the audit
         // trail (McpCallAuditor KDoc).
         val argumentKeys = arguments.fieldNames().asSequence().sorted().toList()
+
+        // Caller authentication (ADR-0195): the acting agent + presented consent come from the
+        // validated OAuth token. A malformed agent token (e.g. no consent_id) fails CLOSED — a
+        // money-adjacent surface never degrades to an unscoped identity.
+        val ctx = resolveCaller(toolName, argumentKeys)
+            ?: return toolError(id, "Authorization unavailable")
 
         fun audit(
             capability: String?,
@@ -163,11 +173,38 @@ class McpEndpoint(
         }
     }
 
-    // Phase 1 identity: headers. Phase 2: OAuth 2.1 token -> PSD2 consent (grantedAccounts).
-    private fun resolveContext(): ConsentContext {
-        // Placeholder resolution; the real binding lands with the OAuth resource-server config.
-        return ConsentContext(agentId = "agent:mcp-anonymous", consentId = "none", grantedAccounts = emptyList())
+    // Resolve the caller's identity + consent, or audit the failure and return null (the caller
+    // then denies with "Authorization unavailable"). Fails closed on any resolution error.
+    @Suppress("TooGenericExceptionCaught")
+    private fun resolveCaller(toolName: String, argumentKeys: List<String>): ConsentContext? = try {
+        resolveContext()
+    } catch (ex: Exception) {
+        log.warnf("caller context resolution failed for %s: %s — denying", toolName, ex.message)
+        runBlocking {
+            auditor.toolCallCompleted(
+                McpCallAuditor.ToolCall(
+                    agentId = "unknown",
+                    consentId = "none",
+                    tool = toolName,
+                    capability = null,
+                    decision = McpCallAuditor.Decision.UNAVAILABLE,
+                    result = AuditResult.DENIED,
+                    reason = "caller authentication failed",
+                    argumentKeys = argumentKeys,
+                ),
+            )
+        }
+        null
     }
+
+    // ADR-0195: the acting agent + consent come from the caller's validated OAuth token
+    // (CallerContextResolver). Until OIDC is enabled and a token is required, no agent token is
+    // presented and the resolver returns null, so we fall back to the phase-1 placeholder — the
+    // deployed stub surface keeps working unchanged. The `agent:mcp-anonymous` literal deliberately
+    // lives HERE: the #2206 CI guard keys on it, refusing to let a real read port land while this
+    // fallback is still reachable. It is removed when OIDC is enabled and a token becomes mandatory.
+    private fun resolveContext(): ConsentContext = callerResolver.resolveOrNull()
+        ?: ConsentContext(agentId = "agent:mcp-anonymous", consentId = "none", grantedAccounts = emptyList())
 
     private fun toolError(id: JsonNode, message: String): Response = Response.ok(
         McpResponse(id = id, result = ToolCallResult(listOf(ToolContent(text = message)), isError = true)),
