@@ -38,6 +38,19 @@ interface BalanceRepository {
     suspend fun sumBookedByCurrencyAsOf(asOf: java.time.LocalDate): Map<String, BigDecimal>
 
     /**
+     * The future-value-dated **pipeline** per currency: Σ of projected booked deltas whose value date
+     * is strictly after [asOf], read from the dated projection audit (`ledger_projection_event`).
+     *
+     * This is exactly the tail [sumBookedByCurrencyAsOf] subtracts, published in its own right for
+     * ADR-0178 Phase 3 control quality: it is the expected upcoming movement, so an operator reading
+     * the tie-out can see *why* the value-date sub-ledger sum differs from the raw materialized booked
+     * total rather than facing an unexplained control-account gap. Read-only reporting — it moves no
+     * money and does not feed the drift calculation (both tie-out sides already exclude this tail, so
+     * subtracting it again would double-count). Empty when nothing is value-dated after [asOf].
+     */
+    suspend fun sumFutureValueDatedByCurrency(asOf: java.time.LocalDate): Map<String, BigDecimal>
+
+    /**
      * Sum of booked deltas applied to ([accountId], [currency]) with a booking date *strictly after*
      * [asOf], read from the dated ledger-projection audit (`ledger_projection_event`). Used to rewind
      * the current booked balance to a point in time: `bookedAsOf = current − sumBookedDeltaAfter(asOf)`.

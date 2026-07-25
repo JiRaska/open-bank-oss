@@ -8,11 +8,13 @@ STRIDE/DFD threat model for the balance bounded context, per ADR-0030 D2.
 Money-path service. Reviewed in PR; referenced from ADR-0039.
 
 - **Status:** Draft (lightweight, ADR-0039-aware)
-- **Last reviewed:** 2026-06-08
+- **Last reviewed:** 2026-07-25 (ADR-0178 Phase 3 — reconciliation publishes the future-value-dated
+  pipeline; read-only reporting, no write path and no change to the drift arithmetic)
 - **Owner:** balance CODEOWNERS
 - **Related ADRs:** ADR-0002 (hexagonal), ADR-0017 (Vault), ADR-0018 (OPA authz),
   ADR-0024/0025 (single IBAN + currency pockets), ADR-0034 (OPA unified authz),
-  ADR-0039 (balance as projection of ledger)
+  ADR-0039 (balance as projection of ledger), ADR-0160 (sustained-drift alerting),
+  ADR-0178 (value-date-correct reconciliation)
 
 ## 1. Scope & assets
 
@@ -140,6 +142,18 @@ also be deleted (nothing else in balance-service depends on it).
   dampener does not contain it). Anchoring on the materialized `balances` (not on the audit sum) keeps
   the tie-out able to catch a `balances`⇄projection-audit desync — it is not blind to a broken write
   path (T2).
+- **The future-value-dated pipeline is published, never subtracted** (ADR-0178 Phase 3). The
+  reconciliation reports `futureValueDatedPipeline` per currency — the same `Σ delta with
+  entry_date > asOf` tail the value-date basis already excludes — so an operator sees the expected
+  upcoming movement instead of an unexplained gap between the tie-out figure and the raw materialized
+  total. It must stay **read-only and out of the drift arithmetic**: both sides of the tie-out already
+  exclude that tail, so folding it into `difference` would double-count and re-create the false drift
+  Phase 1 removed, while *subtracting* it from a genuine mismatch would let a real divergence hide
+  behind an outstanding pipeline. The remaining `difference` is therefore UNEXPLAINED drift by
+  construction — that, plus the ADR-0160 sustained-duration `for:` clause, is the alerting signal.
+  Locked by `BalanceReconciliationServiceTest` (a purely future-value-dated batch raises zero drift; a
+  genuine shortfall still drifts while a pipeline is outstanding) and by `BalanceReconciliationAsOfIT`
+  against a real database.
 
 ## 6. Open items / follow-ups
 
