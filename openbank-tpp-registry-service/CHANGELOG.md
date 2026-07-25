@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.8](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.6.7...tpp-registry-service-v0.6.8) (2026-07-25)
+
+
+### Bug Fixes
+
+* **tpp-registry:** map the domain id to a real UUID column, not the BIGSERIAL primary key ([#2405](https://github.com/JiRaska/open-bank-oss/issues/2405)) ([16e1412](https://github.com/JiRaska/open-bank-oss/commit/16e1412f10fd39e9e32199c23dd36bf9f866a54e)), closes [#2340](https://github.com/JiRaska/open-bank-oss/issues/2340)
+
 ## [0.6.7](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.6.6...tpp-registry-service-v0.6.7) (2026-07-17)
 
 
