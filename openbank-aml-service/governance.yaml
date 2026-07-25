@@ -20,15 +20,15 @@ lineage:
     - serviceName: domestic-payment
       relationType: api
       description: screens
-    - serviceName: swift-service
+    - serviceName: fx-service
       relationType: api
       description: screens
-    - serviceName: kyc-service
+    - serviceName: agent-service
+      relationType: api
+      description: reads
+    - serviceName: party-service
       relationType: topic
       description: triggers
-    - serviceName: sanctions-service
-      relationType: topic
-      description: updates
 schemaLineage:
   ownedSchemas:
     - aml_schema
