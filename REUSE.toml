@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# REUSE 3.2 out-of-tree licensing declarations (https://reuse.software/spec-3.2/).
+#
+# This repository is a MULTI-LICENSE tree: the platform is Apache-2.0 (root LICENSE,
+# ADR-0123) and the AI agent / agent-plane services are AGPL-3.0-only + a parallel
+# commercial licence (open-core, ADR-0136). The authoritative list of AGPL modules is
+# `openbank-libs/governance/rules.yaml` -> dependencies.license_boundary_exceptions[0].agpl_modules.
+#
+# Almost every file states its licence in its own SPDX header. This file exists only for
+# files that CANNOT carry a correct header, so that an SPDX/REUSE scanner still resolves
+# them to the right licence.
+
+version = 1
+SPDX-PackageName = "OpenBank"
+SPDX-PackageSupplier = "OpenBank contributors"
+SPDX-PackageDownloadLocation = "https://github.com/JiRaska/open-bank-oss"
+
+# ---------------------------------------------------------------------------------------
+# Applied Flyway migrations inside AGPL-3.0-only modules.
+#
+# These files carry a stale `SPDX-License-Identifier: Apache-2.0` header. It is WRONG --
+# they belong to AGPL-3.0-only modules -- but it CANNOT be corrected in place: Flyway
+# checksums the entire migration file, comments included, so editing the header makes the
+# checksum diverge from the `flyway_schema_history` row and every affected service fails
+# at boot with "Migration checksum mismatch". All eight are already applied in deployed
+# environments (see each module's version.txt), so the header is frozen.
+#
+# `precedence = "override"` makes this declaration win over the in-file header, which is
+# exactly the intent: the file says Apache-2.0, the truth is AGPL-3.0-only.
+#
+# When a module's schema is next rebuilt from scratch (a squashed baseline migration, i.e.
+# a new file with a new checksum), stamp the AGPL header on the new file and drop its entry
+# here. Do NOT edit these files to shorten this list.
+# ---------------------------------------------------------------------------------------
+[[annotations]]
+path = [
+  "openbank-authz-policy-auditor/src/main/resources/db/migration/V1__init_authzaudit.sql",
+  "openbank-control-liveness-sentinel/src/main/resources/db/migration/V1__init_liveness.sql",
+  "openbank-devops-agent/src/main/resources/db/migration/V1__init_devops.sql",
+  "openbank-docs-truth-agent/src/main/resources/db/migration/V1__init_docstruth.sql",
+  "openbank-finops-agent/src/main/resources/db/migration/V1__init_finops.sql",
+  "openbank-flaky-test-hunter/src/main/resources/db/migration/V1__init_flakytest.sql",
+  "openbank-governance-auditor/src/main/resources/db/migration/V1__init_govaudit.sql",
+  "openbank-release-steward/src/main/resources/db/migration/V1__init_releasesteward.sql",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) OpenBank contributors"
+SPDX-License-Identifier = "AGPL-3.0-only"
