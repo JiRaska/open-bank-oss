@@ -109,6 +109,10 @@ class FeedbackResource(
                 comment = request.comment,
                 platform = request.platform,
                 appVersion = request.appVersion,
+                osVersion = request.context.osVersion,
+                locale = request.context.locale,
+                theme = request.context.theme,
+                sessionId = request.context.sessionId,
                 screenshotKey = stored.key,
                 screenshotBytes = request.screenshot?.size ?: 0,
                 screenshotStatus = stored.status,
@@ -126,7 +130,24 @@ class FeedbackResource(
         val comment: String,
         val platform: String?,
         val appVersion: String?,
+        val context: RenderContext,
         val screenshot: ByteArray?,
+    )
+
+    /**
+     * How the screen looked when the report was filed. The same screen renders differently per OS
+     * version, language and theme, so without these a "this looks wrong" report is not
+     * reproducible. [sessionId] is the app's pseudonymous client session (ADR-0192) and correlates
+     * the report with that session's RUM/trace data — it is never an account or device identifier.
+     *
+     * Grouped rather than inlined: as flat constructor arguments these four push [ValidRequest]
+     * past the parameter-count limit, and they genuinely travel as one unit.
+     */
+    private class RenderContext(
+        val osVersion: String?,
+        val locale: String?,
+        val theme: String?,
+        val sessionId: String?,
     )
 
     private sealed interface Parsed {
@@ -171,6 +192,12 @@ class FeedbackResource(
                 comment = comment,
                 platform = node.text("platform")?.take(MAX_SHORT_FIELD_LEN),
                 appVersion = node.text("appVersion")?.take(MAX_SHORT_FIELD_LEN),
+                context = RenderContext(
+                    osVersion = node.text("osVersion")?.take(MAX_SHORT_FIELD_LEN),
+                    locale = node.text("locale")?.take(MAX_SHORT_FIELD_LEN),
+                    theme = node.text("theme")?.take(MAX_SHORT_FIELD_LEN),
+                    sessionId = node.text("sessionId")?.take(MAX_SHORT_FIELD_LEN),
+                ),
                 screenshot = screenshot,
             ),
         )

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.20.0
+  version: 1.21.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1739,6 +1739,29 @@ components:
         appVersion:
           type: string
           maxLength: 32
+        osVersion:
+          type: string
+          maxLength: 32
+          description: Coarse OS release the report was filed on, e.g. `iOS 17.5`, `Android 14`.
+          example: iOS 17.5
+        locale:
+          type: string
+          maxLength: 32
+          description: UI language the screen was rendered in, e.g. `cs`, `en`.
+          example: cs
+        theme:
+          type: string
+          maxLength: 32
+          description: >-
+            Active app theme (ADR-0191), e.g. `green-dark`. The same screen renders differently
+            per theme, so a rendering complaint is not reproducible without it.
+          example: green-dark
+        sessionId:
+          type: string
+          maxLength: 32
+          description: >-
+            Client-generated pseudonymous session id (never PII) — correlates this report with
+            the session's RUM/trace data.
         screenshotPngBase64:
           type: string
           format: byte
