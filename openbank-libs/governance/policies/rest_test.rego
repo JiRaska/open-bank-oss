@@ -718,6 +718,23 @@ test_allow_ai_agent_ledger_list_via_charter_bridge if {
 	decision.reason == "agent-charter-allows"
 }
 
+# REGRESSION (openbank-mcp-service, ADR-0181): the PDP OMITS `resource` from the query when it
+# is null (OpaSidecarPolicyDecisionPoint.toInput), so the bridge input has NO resource key at
+# all — the real production shape for the MCP server, which is the first AI_AGENT caller routed
+# through rest.allow. A bare `input.resource` in the bridge was undefined here, denying the call;
+# every other agent test sends an explicit `"resource": null` and so never covered this path.
+test_allow_ai_agent_via_charter_bridge_without_resource_key if {
+	decision := rest.allow with input as {
+		"principal": {"id": "agent:ui-assistant", "type": "AI_AGENT", "roles": []},
+		"action": "ledger.list",
+	}
+		with data.openbank.bundle as bundle
+		with data.agents as agent_charters_for_rest_bridge
+
+	decision.allow == true
+	decision.reason == "agent-charter-allows"
+}
+
 # The bridge is read-only -- an AI_AGENT can never reach a write action through it.
 test_deny_ai_agent_ledger_create_via_charter_bridge if {
 	not rest.allow with input as {
