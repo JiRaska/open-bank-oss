@@ -54,8 +54,19 @@ reconciliation did for 41 days (issue #855).
   Seeding those two secret values is the one remaining manual step before this agent can produce a
   real end-to-end proposal.
 - The Prometheus gauge names this agent queries
-  (`openbank_workflow_liveness_last_success_age_seconds`,
+  (`openbank_workflow_last_success_age_seconds` + `openbank_workflow_expected_interval_seconds`,
   `openbank_event_consumer_liveness_producer_only`, `openbank_lineage_audit_unverified_edge`,
   `openbank_reconciliation_consecutive_drift_runs`) are the contract this agent expects from
   ADR-0160's mechanisms 1–4; wiring each mechanism's CI script / watchdog primitive to actually
   emit them is tracked as part of ADR-0160's own rollout, not duplicated here.
+- **Mechanism 3 is the one with a live producer, and the name above is corrected.** This doc and
+  ADR-0163 D1 originally wrote `openbank_workflow_liveness_last_success_age_seconds`, but
+  `DomainMetrics.registerWorkflowLiveness` — shipped, with one adopter — emits
+  `openbank_workflow_last_success_age_seconds` (no `liveness` infix). The query was aligned to the
+  producer rather than the other way round: the emitted name is what is physically in Prometheus
+  today, and renaming a live series to match prose would break the existing adopter for nothing.
+  Both sides now take the name from `WorkflowLivenessMetrics` in `openbank-libs-domain`, so a
+  future disagreement is a compile error rather than an empty result vector. The other three names
+  have no producer yet **by design** (see the bullet above) — an empty vector there means "not
+  wired", which is different from mechanism 3's case, where a producer existed and was simply not
+  being asked for.
