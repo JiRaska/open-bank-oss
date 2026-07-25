@@ -1,0 +1,111 @@
+{
+  "consumer": {
+    "name": "openbank-mcp-service"
+  },
+  "interactions": [
+    {
+      "description": "POST validate an ACTIVE ACCOUNTS_READ consent covering the requested IBAN",
+      "providerStates": [
+        {
+          "name": "an ACTIVE AISP consent covers the pact account for the pact grantee"
+        }
+      ],
+      "request": {
+        "body": {
+          "accountIban": "CZ6508000000192000145399",
+          "granteeId": "agent:pact-verify-mcp",
+          "requiredScope": "ACCOUNTS_READ"
+        },
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/consents/c1c1c1c1-d2d2-4e4e-8f8f-a9a9a9a9a9a9/validate"
+      },
+      "response": {
+        "body": {
+          "frequencyPerDay": 4,
+          "grantedAccounts": [
+            "CZ6508000000192000145399"
+          ],
+          "scopes": [
+            "ACCOUNTS_READ"
+          ],
+          "valid": true
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.grantedAccounts[0]": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST validate an unknown consent id \u2014 the fail-closed deny",
+      "providerStates": [
+        {
+          "name": "no consent exists with the pact unknown-consent id"
+        }
+      ],
+      "request": {
+        "body": {
+          "accountIban": "CZ6508000000192000145399",
+          "granteeId": "agent:pact-verify-mcp",
+          "requiredScope": "ACCOUNTS_READ"
+        },
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/consents/00000000-0000-4000-8000-0000000c0de0/validate"
+      },
+      "response": {
+        "body": {
+          "code": "CONSENT_NOT_FOUND",
+          "reason": "Consent not found",
+          "valid": false
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.reason": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-consent-service"
+  }
+}

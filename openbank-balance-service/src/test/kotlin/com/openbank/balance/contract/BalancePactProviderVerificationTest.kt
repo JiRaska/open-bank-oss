@@ -259,4 +259,18 @@ class BalancePactProviderVerificationTest {
     fun stateInitializeAccountHasNoBalance() {
         // No-op: the Testcontainer DB is clean for e5e5 on every run.
     }
+
+    /**
+     * State for mcp-service's `BalanceReadPactConsumerTest` (issue #2255, ADR-0195). No setup:
+     * `getBalances` skips its owner check when no `X-Customer-Party-Id` header is present (mcp is a
+     * service-to-service reader and sends none) and answers 200 with an empty `balances` array for
+     * an account it holds nothing for. That 200 is the point of the interaction — it proves the
+     * route exists; a 404 would prove nothing, since Quarkus answers 404 for an absent route too.
+     */
+    @State("balance-service is reachable and holds no balances for the pact account")
+    fun stateNoBalancesForPactAccount() {
+        // Intentionally empty — a fresh Testcontainer DB satisfies it by construction. Declared so
+        // the state is an explicit part of the contract; pact-jvm passes silently over an unhandled
+        // state name, which is how the missing states in #468 stayed invisible.
+    }
 }

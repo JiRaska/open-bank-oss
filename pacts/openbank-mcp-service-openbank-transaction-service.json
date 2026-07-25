@@ -1,0 +1,104 @@
+{
+  "consumer": {
+    "name": "openbank-mcp-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the transaction page the MCP list_transactions tool returns verbatim",
+      "providerStates": [
+        {
+          "name": "transaction-service is reachable and holds no transactions for the pact account"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/transactions",
+        "query": {
+          "accountId": [
+            "e1e1e1e1-f2f2-4a4a-8b8b-c9c9c9c9c9c9"
+          ],
+          "limit": [
+            "20"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "data": [
+            {
+              "currency": "CZK",
+              "id": "9f8e7d6c-5b4a-4390-8123-456789abcdef"
+            }
+          ],
+          "pagination": {
+            "hasNextPage": false,
+            "limit": 20
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.data": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.data[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.data[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.pagination.hasNextPage": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.pagination.limit": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-transaction-service"
+  }
+}

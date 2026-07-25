@@ -49,6 +49,9 @@ dependencies {
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // Consumer-driven contract test against sca-service getChallenge (ADR-0063 P2 Batch B).
     testImplementation(libs.pact.consumer)
+    // Provider-side verification (ADR-0063 git-pact): ConsentPactProviderVerificationTest replays the
+    // consumer pacts in pacts/ that name openbank-consent-service as provider (issue #2255).
+    testImplementation(libs.pact.provider)
 }
 
 kover {
