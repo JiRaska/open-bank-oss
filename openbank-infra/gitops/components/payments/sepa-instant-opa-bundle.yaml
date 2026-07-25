@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sepa-instant
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "0e3ef7b260b92f2f"
+    openbank.tech/policy-checksum: "a724fbbae9a58610"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1824,6 +1824,23 @@ data:
         # (3-dot against the PR base). Findings are ::warning annotations. Flip to enforced =
         # pass --enforce to the script in ci.yml (one-line change).
         ci_producer: "openbank-infra/scripts/check-threat-model-diff.py"
+      mp_messaging_dotted_keys:
+        # SmallRye reactive-messaging config written as a DOTTED key
+        # (`mp.messaging.incoming.x.topic: …`) inside a nested YAML mapping is silently ignored by
+        # SnakeYAML — the channel keeps its default and the consumer subscribes to nothing, with no
+        # error at boot (issue #686). The guard rewrites the shape it can prove wrong.
+        detect: ["<service>/src/main/resources/application.yaml", "mp.messaging.* written as a dotted key under a nested mapping"]
+        require:
+          - "mp.messaging channel config expressed as nested YAML, not a dotted key inside a mapping"
+        gate: dotted-mp-messaging-keys
+        enforced: advisory
+        target_enforce_date: "2026-09-30"   # ADR-0144
+        blocked_on: "1 finding remains fleet-wide; the script already supports --enforce, so graduating
+          is a one-word change in ci.yml once it is cleared"
+        # Registered here as part of issue #2392: this gate ran advisory with no rules.yaml rule at
+        # all, so check-gate-graduation.sh could not see it and it had no deadline. That class is now
+        # itself gated by .github/scripts/check-advisory-gate-registration.py.
+        ci_producer: ".github/scripts/check-dotted-mp-messaging-keys.sh"
       new_service_with_outbox:
         # A service that extends AbstractOutboxEntity / uses OutboxDispatcher but does NOT
         # set openbank.outbox.dispatch-enabled=true silently never dispatches events —
@@ -2742,6 +2759,19 @@ data:
     # MEASURED behaviour by a classifier + CI gate (derive -> enforce -> show, ADR-0029/0054).
     # ---------------------------------------------------------------------------------------
     finops_tiers:
+      # Declared-side validation (check-finops-tiers.py, finops-lifecycle.yml) runs ADVISORY: the
+      # script always exits 0 today, so a tier declared here that contradicts the manifest is a
+      # ::warning. Graduating needs the MEASURED classifier (the derive->enforce->show half below);
+      # until that lands there is nothing to compare a declaration against except itself.
+      #
+      # Registered with a date as part of issue #2392: this gate ran advisory with no `enforced` /
+      # `target_enforce_date` on its rule, so check-gate-graduation.sh (ADR-0144) skipped it entirely
+      # and it had no deadline at all.
+      enforced: advisory
+      target_enforce_date: "2026-12-31"   # ADR-0144 — gated on the measured classifier, not on triage
+      blocked_on: "the measured-side classifier must land before the declared side can hard-fail;
+        without it, enforcing would only assert that the file agrees with itself"
+      ci_producer: "openbank-infra/scripts/check-finops-tiers.py"
       tiers:
         T0:                                   # Always-on
           definition: "Money-path HOT path where a cold-start / scaled-to-zero gap is unacceptable, or a regulator-mandated continuous service."
