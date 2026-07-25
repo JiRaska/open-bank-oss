@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.12.0...consent-service-v0.13.0) (2026-07-25)
+
+
+### Features
+
+* **consent:** add per-channel MARKETING_COMMS ConsentScope values (ADR-0198 D1) ([#2408](https://github.com/JiRaska/open-bank-oss/issues/2408)) ([dff4ff6](https://github.com/JiRaska/open-bank-oss/commit/dff4ff60582425eadc767219f91d875677d20f27))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.11.2...consent-service-v0.12.0) (2026-07-18)
 
 
