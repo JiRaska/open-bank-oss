@@ -138,6 +138,15 @@ mp:
         auto.offset.reset: earliest
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # Marketing-consent projection (ADR-0205 D4): the whole consent-service outbox topic,
+      # filtered in-consumer to the fixed internal grantee id — see MarketingConsentEventConsumer.
+      consent-events-in:
+        connector: smallrye-kafka
+        topic: openbank.consent.events
+        group.id: openbank-party-service
+        auto.offset.reset: earliest
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%dev":
   quarkus:
     log:

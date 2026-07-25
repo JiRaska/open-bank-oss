@@ -18,6 +18,7 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import java.time.Clock
+import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
@@ -130,6 +131,15 @@ class PartyRepositoryImpl :
 
     override suspend fun findByRcBlindIndex(index: String): Party? =
         Panache.withSession { find("rcBlindIndex", index).firstResult() }.awaitSuspending()?.toDomain()
+
+    // Scoped UPDATE (ADR-0205 D4), not find-then-mutate-then-save of the whole Party aggregate —
+    // matches NotificationRepository.markTerminalStatus's pattern (issue #1393). No-op (0 rows
+    // affected, no error) if the party row does not exist.
+    override suspend fun updateMarketingConsentProjection(partyId: UUID, granted: Boolean, at: Instant) {
+        Panache.withTransaction {
+            update("consentMarketing = ?1, consentMarketingUpdatedAt = ?2 where partyId = ?3", granted, at, partyId)
+        }.awaitSuspending()
+    }
 
     private fun Party.toEntity() = PartyEntity().also {
         it.partyId = id

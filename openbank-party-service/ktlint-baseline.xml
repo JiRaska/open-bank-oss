@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <baseline version="1.0">
+    <file name="src/main/kotlin/com/openbank/party/application/port/in/MarketingConsentProjectionUseCase.kt">
+        <error line="5" column="9" source="standard:package-name" />
+    </file>
     <file name="src/main/kotlin/com/openbank/party/application/port/in/PartyPort.kt">
         <error line="5" column="9" source="standard:package-name" />
         <error line="8" column="1" source="standard:no-wildcard-imports" />
