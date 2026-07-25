@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.4.0...devops-agent-v0.5.0) (2026-07-25)
+
+
+### Features
+
+* **devops-agent:** load prompts from the registry + route via the LlmGatewayPort seam ([#1918](https://github.com/JiRaska/open-bank-oss/issues/1918)) ([#2240](https://github.com/JiRaska/open-bank-oss/issues/2240)) ([fb44dd7](https://github.com/JiRaska/open-bank-oss/commit/fb44dd79d40b9f64a076e1fe03848aa84db7d89d))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.3.2...devops-agent-v0.4.0) (2026-07-17)
 
 
