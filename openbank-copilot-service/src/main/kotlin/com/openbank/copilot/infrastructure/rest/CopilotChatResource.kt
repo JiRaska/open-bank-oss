@@ -3,7 +3,7 @@
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 package com.openbank.copilot.infrastructure.rest
 
-import com.openbank.copilot.application.CopilotChatService
+import com.openbank.copilot.application.port.`in`.CopilotChatUseCase
 import com.openbank.copilot.domain.ChatOutcome
 import com.openbank.copilot.domain.ChatTurn
 import com.openbank.copilot.infrastructure.observability.CopilotMetricsAdapter
@@ -42,7 +42,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken
 class CopilotChatResource {
 
     @Inject
-    lateinit var chat: CopilotChatService
+    lateinit var chat: CopilotChatUseCase
 
     @Inject
     lateinit var identity: SecurityIdentity

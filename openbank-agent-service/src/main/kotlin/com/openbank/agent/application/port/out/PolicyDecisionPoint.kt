@@ -3,7 +3,7 @@
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 
-package com.openbank.agent.application
+package com.openbank.agent.application.port.out
 
 import com.openbank.agent.domain.policy.PolicyDecision
 import com.openbank.agent.domain.policy.PolicyQuery

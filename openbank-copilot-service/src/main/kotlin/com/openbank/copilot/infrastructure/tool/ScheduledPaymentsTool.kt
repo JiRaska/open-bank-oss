@@ -4,8 +4,8 @@
 package com.openbank.copilot.infrastructure.tool
 
 import com.fasterxml.jackson.databind.JsonNode
-import com.openbank.copilot.application.CopilotTool
-import com.openbank.copilot.application.ToolResult
+import com.openbank.copilot.application.port.out.CopilotTool
+import com.openbank.copilot.application.port.out.ToolResult
 import com.openbank.copilot.infrastructure.client.CustomerEdgeRestClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped

@@ -7,9 +7,7 @@ package com.openbank.copilot.infrastructure.authz
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
-import jakarta.ws.rs.WebApplicationException
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.net.InetSocketAddress
 import java.util.Optional
@@ -17,7 +15,11 @@ import java.util.Optional
 /**
  * [OpaToolGate] is the per-call authorization gate an AI copilot tool invocation must pass
  * (ADR-0089 D3 / ADR-0034) — it must fail CLOSED (deny) on any ambiguity: malformed OPA
- * response, non-2xx, or an unreachable sidecar. None of those fail-closed paths had a test.
+ * response, non-2xx, or an unreachable sidecar.
+ *
+ * The gate returns a `ToolPolicyDecision` rather than throwing, so a deny is asserted on the
+ * verdict. That is the whole point of the port contract: "denied" must be a value the caller has
+ * to look at, not an exception it might accidentally swallow.
  */
 class OpaToolGateTest {
 
@@ -30,76 +32,69 @@ class OpaToolGateTest {
     @Test
     fun `allows the tool call when OPA returns a bare boolean true result`() {
         withOpaServer(200, """{"result":true}""") { baseUrl, _ ->
-            gate(baseUrl).authorize("get_balance", "customer-1")
+            assertThat(gate(baseUrl).authorize("get_balance", "customer-1").allow).isTrue()
         }
     }
 
     @Test
     fun `allows the tool call when OPA returns a nested allow true result`() {
         withOpaServer(200, """{"result":{"allow":true}}""") { baseUrl, _ ->
-            gate(baseUrl).authorize("get_balance", "customer-1")
+            assertThat(gate(baseUrl).authorize("get_balance", "customer-1").allow).isTrue()
         }
     }
 
     @Test
-    fun `denies with 403 when OPA returns a bare boolean false result`() {
+    fun `denies when OPA returns a bare boolean false result`() {
         withOpaServer(200, """{"result":false}""") { baseUrl, _ ->
-            assertThatThrownBy { gate(baseUrl).authorize("transfer_money", "customer-1") }
-                .isInstanceOf(WebApplicationException::class.java)
-                .extracting { (it as WebApplicationException).response.status }
-                .isEqualTo(403)
+            val decision = gate(baseUrl).authorize("transfer_money", "customer-1")
+            assertThat(decision.allow).isFalse()
+            assertThat(decision.reason).isEqualTo("opa-denied: policy")
         }
     }
 
     @Test
-    fun `denies with 403 when the nested allow key is false`() {
+    fun `denies when the nested allow key is false`() {
         withOpaServer(200, """{"result":{"allow":false}}""") { baseUrl, _ ->
-            assertThatThrownBy { gate(baseUrl).authorize("transfer_money", "customer-1") }
-                .isInstanceOf(WebApplicationException::class.java)
+            assertThat(gate(baseUrl).authorize("transfer_money", "customer-1").allow).isFalse()
         }
     }
 
     @Test
     fun `fails closed when the result field is missing entirely`() {
         withOpaServer(200, """{}""") { baseUrl, _ ->
-            assertThatThrownBy { gate(baseUrl).authorize("transfer_money", "customer-1") }
-                .isInstanceOf(WebApplicationException::class.java)
+            assertThat(gate(baseUrl).authorize("transfer_money", "customer-1").allow).isFalse()
         }
     }
 
     @Test
     fun `fails closed when the result field is null`() {
         withOpaServer(200, """{"result":null}""") { baseUrl, _ ->
-            assertThatThrownBy { gate(baseUrl).authorize("transfer_money", "customer-1") }
-                .isInstanceOf(WebApplicationException::class.java)
+            assertThat(gate(baseUrl).authorize("transfer_money", "customer-1").allow).isFalse()
         }
     }
 
     @Test
     fun `fails closed on a malformed (non-JSON) OPA response body`() {
         withOpaServer(200, "not json at all") { baseUrl, _ ->
-            assertThatThrownBy { gate(baseUrl).authorize("transfer_money", "customer-1") }
-                .isInstanceOf(WebApplicationException::class.java)
+            assertThat(gate(baseUrl).authorize("transfer_money", "customer-1").allow).isFalse()
         }
     }
 
     @Test
     fun `fails closed when OPA returns a non-2xx status`() {
         withOpaServer(500, """{"result":true}""") { baseUrl, _ ->
-            assertThatThrownBy { gate(baseUrl).authorize("transfer_money", "customer-1") }
-                .isInstanceOf(WebApplicationException::class.java)
-                .extracting { (it as WebApplicationException).response.status }
-                .isEqualTo(403)
+            val decision = gate(baseUrl).authorize("transfer_money", "customer-1")
+            assertThat(decision.allow).isFalse()
+            assertThat(decision.reason).isEqualTo("opa-error: HTTP 500")
         }
     }
 
     @Test
     fun `fails closed when the OPA sidecar is unreachable`() {
         // Nothing listens on this loopback port.
-        assertThatThrownBy { gate("http://127.0.0.1:1").authorize("transfer_money", "customer-1") }
-            .isInstanceOf(WebApplicationException::class.java)
-            .extracting { (it as WebApplicationException).response.status }
-            .isEqualTo(403)
+        val decision = gate("http://127.0.0.1:1").authorize("transfer_money", "customer-1")
+        assertThat(decision.allow).isFalse()
+        assertThat(decision.reason).isEqualTo("opa-unreachable")
     }
 
     @Test

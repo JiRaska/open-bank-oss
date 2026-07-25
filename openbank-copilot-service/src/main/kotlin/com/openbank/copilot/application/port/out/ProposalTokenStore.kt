@@ -2,18 +2,18 @@
 // Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
-package com.openbank.copilot.infrastructure.persistence
+package com.openbank.copilot.application.port.out
 
 import com.openbank.copilot.domain.ProposalToken
 import java.util.UUID
 
 /**
- * Port for persisting and retrieving [ProposalToken] instances (ADR-0089 D2, Track A).
+ * Outbound port for persisting and retrieving [ProposalToken] instances (ADR-0089 D2, Track A).
  *
- * Two implementations:
- * - [InMemoryProposalTokenStore] — single-node dev/test (active when build property
- *   `copilot.token-store=memory` or in `%test` profile)
- * - [RedisProposalTokenStore] — production-grade Valkey/Redis store (default)
+ * Two adapters:
+ * - `infrastructure.persistence.InMemoryProposalTokenStore` — single-node dev/test (active when
+ *   build property `copilot.token-store=memory` or in the `%test` profile)
+ * - `infrastructure.persistence.RedisProposalTokenStore` — production-grade Valkey/Redis (default)
  */
 interface ProposalTokenStore {
     /** Persist [token] with TTL [TOKEN_TTL_SECONDS] seconds. */

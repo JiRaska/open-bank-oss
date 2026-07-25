@@ -6,6 +6,7 @@
 package com.openbank.agent.application
 
 import com.fasterxml.jackson.databind.JsonNode
+import com.openbank.agent.application.port.`in`.KillSwitchQueries
 import com.openbank.agent.domain.model.ChatMessage
 import com.openbank.agent.domain.model.ChatRole
 import com.openbank.agent.domain.model.ModelRequest
@@ -46,7 +47,7 @@ class AgentChatService {
 
     @Inject lateinit var rateLimiter: CharterRateLimiter
 
-    @Inject lateinit var killSwitch: KillSwitchService
+    @Inject lateinit var killSwitch: KillSwitchQueries
 
     @Inject lateinit var charterRegistry: CharterRegistry
 

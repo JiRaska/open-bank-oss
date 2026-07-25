@@ -3,6 +3,9 @@
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 package com.openbank.copilot.application
 
+import com.openbank.copilot.application.port.`in`.CopilotChatUseCase
+import com.openbank.copilot.application.port.out.ConversationStore
+import com.openbank.copilot.application.port.out.ToolResult
 import com.openbank.copilot.domain.ActionProposal
 import com.openbank.copilot.domain.ChatOutcome
 import com.openbank.copilot.domain.ChatReply
@@ -12,7 +15,6 @@ import com.openbank.copilot.domain.model.ChatRole
 import com.openbank.copilot.domain.model.ModelRequest
 import com.openbank.copilot.domain.model.StopReason
 import com.openbank.copilot.domain.model.ToolInvocation
-import com.openbank.copilot.infrastructure.persistence.ConversationStore
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
@@ -45,10 +47,10 @@ class CopilotChatService(
     private val conversations: ConversationStore,
     @ConfigProperty(name = "copilot.enabled", defaultValue = "false")
     private val enabled: Boolean,
-) {
+) : CopilotChatUseCase {
     private val log = Logger.getLogger(CopilotChatService::class.java)
 
-    suspend fun handle(turn: ChatTurn, customerId: String): ChatOutcome {
+    override suspend fun handle(turn: ChatTurn, customerId: String): ChatOutcome {
         if (!enabled) return ChatOutcome.Disabled
 
         guard.scanUserInput(customerId, turn.message)?.let {
@@ -80,7 +82,7 @@ class CopilotChatService(
      * context and the customer bearer for downstream tool calls are propagated correctly.
      */
     @Suppress("TooGenericExceptionCaught", "LongMethod")
-    suspend fun handleStream(turn: ChatTurn, customerId: String, onChunk: suspend (String) -> Unit) {
+    override suspend fun handleStream(turn: ChatTurn, customerId: String, onChunk: suspend (String) -> Unit) {
         if (!enabled) {
             onChunk(DISABLED_MESSAGE)
             return

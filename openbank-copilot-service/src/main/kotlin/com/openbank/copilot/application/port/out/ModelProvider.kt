@@ -3,15 +3,15 @@
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 
-package com.openbank.copilot.application
+package com.openbank.copilot.application.port.out
 
 import com.openbank.copilot.domain.model.ModelDescriptor
 import com.openbank.copilot.domain.model.ModelRequest
 import com.openbank.copilot.domain.model.ModelResponse
 
 /**
- * Port for a model backend (ADR-0089 D6). One implementation per *kind* of backend (mock, a
- * hosted public free API, a self-hosted vLLM endpoint, …). The [ModelGateway] selects the
+ * Outbound port for a model backend (ADR-0089 D6). One implementation per *kind* of backend (mock, a
+ * hosted public free API, a self-hosted vLLM endpoint, …). `ModelGateway` selects the
  * provider whose [key] matches a [ModelDescriptor.provider], so the rest of the system never
  * depends on a concrete vendor.
  *

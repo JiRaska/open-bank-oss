@@ -2,12 +2,12 @@
 // Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
-package com.openbank.copilot.infrastructure.persistence
+package com.openbank.copilot.application.port.out
 
 import com.openbank.copilot.domain.model.ChatMessage
 
 /**
- * Short-lived conversation memory for the copilot (ADR-0089): without it every turn is stateless,
+ * Outbound port: short-lived conversation memory for the copilot (ADR-0089): without it every turn is stateless,
  * so a follow-up like "ano, potvrzuji" or "a na spořicím?" has no context and the assistant is
  * unusable for anything multi-turn.
  *
@@ -21,9 +21,10 @@ import com.openbank.copilot.domain.model.ChatMessage
  * read another customer's history. History is capped ([MAX_MESSAGES]) and expires ([TTL_SECONDS],
  * sliding on each write) — it is transient UX state, not a record of account activity.
  *
- * Two implementations mirror [ProposalTokenStore]:
- * - [InMemoryConversationStore] — single-node dev/test (build property `copilot.token-store=memory`)
- * - [RedisConversationStore] — production Valkey/Redis (default)
+ * Two adapters mirror [ProposalTokenStore]:
+ * - `infrastructure.persistence.InMemoryConversationStore` — single-node dev/test
+ *   (build property `copilot.token-store=memory`)
+ * - `infrastructure.persistence.RedisConversationStore` — production Valkey/Redis (default)
  */
 interface ConversationStore {
     /** Prior conversational turns for (customer, conversation), oldest first; empty if none/expired. */

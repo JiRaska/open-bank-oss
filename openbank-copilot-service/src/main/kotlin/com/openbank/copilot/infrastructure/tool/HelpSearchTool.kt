@@ -4,9 +4,9 @@
 package com.openbank.copilot.infrastructure.tool
 
 import com.fasterxml.jackson.databind.JsonNode
-import com.openbank.copilot.application.CopilotTool
 import com.openbank.copilot.application.HelpKnowledgeBase
-import com.openbank.copilot.application.ToolResult
+import com.openbank.copilot.application.port.out.CopilotTool
+import com.openbank.copilot.application.port.out.ToolResult
 import jakarta.enterprise.context.ApplicationScoped
 
 /**

@@ -5,6 +5,7 @@
 
 package com.openbank.copilot.application
 
+import com.openbank.copilot.application.port.out.ModelProvider
 import com.openbank.copilot.domain.model.ModelDescriptor
 import com.openbank.copilot.domain.model.ModelRequest
 import com.openbank.copilot.domain.model.ModelResponse

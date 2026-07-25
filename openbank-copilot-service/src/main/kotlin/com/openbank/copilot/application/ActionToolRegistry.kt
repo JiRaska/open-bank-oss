@@ -4,6 +4,8 @@
 package com.openbank.copilot.application
 
 import com.fasterxml.jackson.databind.JsonNode
+import com.openbank.copilot.application.port.out.ActionProposalTool
+import com.openbank.copilot.application.port.out.ProposalResult
 import com.openbank.copilot.domain.model.ToolSpec
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance

@@ -4,6 +4,7 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.copilot.application
 
+import com.openbank.copilot.application.port.out.ModelProvider
 import com.openbank.copilot.domain.model.ChatMessage
 import com.openbank.copilot.domain.model.ChatRole
 import com.openbank.copilot.domain.model.ModelRequest

@@ -5,7 +5,7 @@ package com.openbank.copilot.infrastructure.model
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.copilot.application.ModelProvider
+import com.openbank.copilot.application.port.out.ModelProvider
 import com.openbank.copilot.domain.model.ChatRole
 import com.openbank.copilot.domain.model.ModelDescriptor
 import com.openbank.copilot.domain.model.ModelRequest

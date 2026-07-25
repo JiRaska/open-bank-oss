@@ -5,6 +5,7 @@
 package com.openbank.copilot.infrastructure.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.copilot.application.port.out.ProposalTokenStore
 import com.openbank.copilot.domain.ProposalToken
 import io.quarkus.arc.properties.UnlessBuildProperty
 import io.quarkus.redis.datasource.ReactiveRedisDataSource

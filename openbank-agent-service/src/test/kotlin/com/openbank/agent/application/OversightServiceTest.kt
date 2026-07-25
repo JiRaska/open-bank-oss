@@ -5,8 +5,8 @@
 
 package com.openbank.agent.application
 
-import com.openbank.agent.infrastructure.persistence.AgentProposal
-import com.openbank.agent.infrastructure.persistence.ProposalState
+import com.openbank.agent.domain.proposal.AgentProposal
+import com.openbank.agent.domain.proposal.ProposalState
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -48,7 +48,7 @@ class OversightServiceTest {
             coEvery { chat.run(any(), any(), any(), any(), any()) } returns outcome()
             val service = OversightService().apply {
                 chatService = chat
-                proposalService = mockk {
+                proposals = mockk {
                     every { listPending() } returns listOf(pendingProposal("Review screening SCR-1"))
                 }
                 injectionGuard = mockk { every { sanitizeInline(any(), any()) } answers { firstArg() } }
@@ -74,7 +74,7 @@ class OversightServiceTest {
         val chat = mockk<AgentChatService>()
         val service = OversightService().apply {
             chatService = chat
-            proposalService = mockk()
+            proposals = mockk()
             injectionGuard = mockk()
             enabled = false
         }
@@ -90,7 +90,7 @@ class OversightServiceTest {
         coEvery { chat.run(any(), any(), any(), any(), any()) } returns outcome()
         val service = OversightService().apply {
             chatService = chat
-            proposalService = mockk { every { listPending() } returns emptyList() }
+            proposals = mockk { every { listPending() } returns emptyList() }
             injectionGuard = mockk { every { sanitizeInline(any(), any()) } answers { firstArg() } }
             enabled = true
         }

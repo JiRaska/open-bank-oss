@@ -5,7 +5,10 @@
 
 package com.openbank.agent.application
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.agent.application.port.`in`.CreateProposalUseCase
+import com.openbank.agent.application.port.out.DownstreamReadPort
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
@@ -136,10 +139,10 @@ class McpToolRegistryTest {
     fun `flip_feature_flag rejects prohibited safety-control keys`() {
         val mapper = ObjectMapper()
         val audit = CapturingAuditPublisher()
-        val proposalSvc = mockk<ProposalService>()
+        val proposalSvc = mockk<CreateProposalUseCase>()
         registry.objectMapper = mapper
         registry.auditPublisher = audit
-        registry.proposalService = proposalSvc
+        registry.proposals = proposalSvc
 
         val prohibitedKeys = listOf(
             "sca-enforcement-disabled",
@@ -171,20 +174,20 @@ class McpToolRegistryTest {
     fun `flip_feature_flag creates a proposal and emits featureflag-flip audit event`() {
         val mapper = ObjectMapper()
         val audit = CapturingAuditPublisher()
-        val proposalSvc = mockk<ProposalService>()
+        val proposalSvc = mockk<CreateProposalUseCase>()
         registry.objectMapper = mapper
         registry.auditPublisher = audit
-        registry.proposalService = proposalSvc
+        registry.proposals = proposalSvc
 
         val proposalId = java.util.UUID.randomUUID()
-        val fakeProposal = com.openbank.agent.infrastructure.persistence.AgentProposal(
+        val fakeProposal = com.openbank.agent.domain.proposal.AgentProposal(
             id = proposalId,
             title = "Feature-flag flip: instant-payments-enabled → on",
             rationale = "Enable SEPA instant for pilot cohort",
             suggestedAction = "Update ConfigMap",
             proposedBy = "compliance-officer",
             proposedAt = java.time.Instant.now(),
-            state = com.openbank.agent.infrastructure.persistence.ProposalState.PROPOSED,
+            state = com.openbank.agent.domain.proposal.ProposalState.PROPOSED,
             decidedBy = null, decidedAt = null, decisionReason = null,
             modelId = null, correlationId = null,
         )
@@ -222,13 +225,28 @@ class McpToolRegistryTest {
         assertThat(flipEvent.payload["proposalId"]).isEqualTo(proposalId.toString())
     }
 
+    /**
+     * A [DownstreamReadPort] stub that serves exactly [tool]. The registry's own job is the
+     * governance envelope — capability lookup, audit, error classification — so the transport is a
+     * stub here; which downstream service a tool reaches is `RestDownstreamReadAdapterTest`'s job.
+     */
+    private fun downstream(tool: String, result: JsonNode? = null, failWith: Exception? = null): DownstreamReadPort =
+        mockk {
+            every { handles(any()) } answers { firstArg<String>() == tool }
+            if (failWith != null) {
+                every { read(tool, any()) } throws failWith
+            } else {
+                every { read(tool, any()) } returns result!!
+            }
+        }
+
+    @Test
     fun `successful tool execution emits an AI-attributed audit event carrying the actor`() {
         val mapper = ObjectMapper()
         val audit = CapturingAuditPublisher()
         registry.objectMapper = mapper
         registry.auditPublisher = audit
-        registry.accountClient = mockk()
-        every { registry.accountClient.getAccount(any()) } returns mapper.createObjectNode().put("id", "acc-1")
+        registry.downstream = downstream("get_account", mapper.createObjectNode().put("id", "acc-1"))
 
         val args = mapper.createObjectNode().put("accountId", "acc-1")
         val result = registry.call("get_account", args, actorId = "compliance-officer")
@@ -250,8 +268,7 @@ class McpToolRegistryTest {
         val audit = CapturingAuditPublisher()
         registry.objectMapper = mapper
         registry.auditPublisher = audit
-        registry.accountClient = mockk()
-        every { registry.accountClient.getAccount(any()) } throws RuntimeException("downstream 503")
+        registry.downstream = downstream("get_account", failWith = RuntimeException("downstream 503"))
 
         val args = mapper.createObjectNode().put("accountId", "acc-1")
         val result = registry.call("get_account", args, actorId = "compliance-officer")
@@ -264,67 +281,58 @@ class McpToolRegistryTest {
     }
 
     @Test
-    fun `query_metrics runs an instant query and emits an AI-attributed audit event`() {
+    fun `a missing required argument is audited as invalid_params, not an execution error`() {
         val mapper = ObjectMapper()
         val audit = CapturingAuditPublisher()
         registry.objectMapper = mapper
         registry.auditPublisher = audit
-        registry.prometheusClient = mockk()
-        // No start/end → instant query path.
-        every { registry.prometheusClient.query("up", null) } returns
-            mapper.createObjectNode().put("status", "success")
+        registry.downstream = downstream(
+            "get_account",
+            failWith = IllegalArgumentException("Required field 'accountId' is missing or blank"),
+        )
 
-        val args = mapper.createObjectNode().put("query", "up")
-        val result = registry.call("query_metrics", args, actorId = "compliance-officer")
+        val result = registry.call("get_account", mapper.createObjectNode(), actorId = "compliance-officer")
 
-        assertThat(result.isError).isFalse()
-        val event = audit.events.single()
-        assertThat(event.actorType).isEqualTo("AI_AGENT")
-        assertThat(event.operation).isEqualTo("agent.mcp.tool_exec")
-        assertThat(event.resourceId).isEqualTo("query_metrics")
-        assertThat(event.result).isEqualTo(AuditResult.SUCCESS)
+        assertThat(result.isError).isTrue()
+        assertThat(result.content.first().text).contains("Invalid parameters")
+        assertThat(audit.events.single().payload["error"]).isEqualTo("invalid_params")
     }
 
     @Test
-    fun `query_loki_logs caps the line limit at 1000`() {
+    fun `a read tool the port does not serve fails closed as an unknown tool`() {
         val mapper = ObjectMapper()
         val audit = CapturingAuditPublisher()
         registry.objectMapper = mapper
         registry.auditPublisher = audit
-        registry.lokiClient = mockk()
-        every {
-            registry.lokiClient.queryRange(any(), any(), any(), 1000, any())
-        } returns mapper.createObjectNode().put("status", "success")
+        // The port serves get_account only — a registered tool it cannot reach must not silently
+        // resolve to some other service, and must never be reported as a success.
+        registry.downstream = downstream("get_account", mapper.createObjectNode())
 
-        val args = mapper.createObjectNode()
-            .put("query", "{namespace=\"payments\"}")
-            .put("limit", 99999)
-        val result = registry.call("query_loki_logs", args, actorId = "compliance-officer")
+        val result = registry.call("list_alerts", mapper.createObjectNode(), actorId = "compliance-officer")
 
-        assertThat(result.isError).isFalse()
-        // Verifies the coerceIn(1, 1000) cap reached the client as 1000.
-        io.mockk.verify { registry.lokiClient.queryRange(any(), any(), any(), 1000, any()) }
+        assertThat(result.isError).isTrue()
+        assertThat(result.content.first().text).contains("Unknown tool: list_alerts")
+        assertThat(audit.events).isEmpty()
     }
 
     @Test
-    fun `list_alerts calls alertmanager and emits an AI-attributed audit event`() {
+    fun `every read tool is handed to the downstream port with the raw arguments`() {
         val mapper = ObjectMapper()
-        val audit = CapturingAuditPublisher()
-        registry.objectMapper = mapper
-        registry.auditPublisher = audit
-        registry.alertmanagerClient = mockk()
-        // active=true, silenced=false hardcoded; filter is null when the arg is absent.
-        every { registry.alertmanagerClient.listAlerts(true, false, null) } returns
-            mapper.createArrayNode().add(mapper.createObjectNode().put("status", "firing"))
+        // The registry must not reinterpret arguments on the way out — capping, defaulting and
+        // marshalling belong to the adapter, so whatever the model sent must arrive verbatim.
+        for (tool in listOf("query_metrics", "query_loki_logs", "list_alerts", "list_transactions")) {
+            val audit = CapturingAuditPublisher()
+            val port = downstream(tool, mapper.createObjectNode().put("status", "success"))
+            registry.objectMapper = mapper
+            registry.auditPublisher = audit
+            registry.downstream = port
 
-        val args = mapper.createObjectNode()
-        val result = registry.call("list_alerts", args, actorId = "compliance-officer")
+            val args = mapper.createObjectNode().put("limit", 99999).put("query", "up")
+            val result = registry.call(tool, args, actorId = "compliance-officer")
 
-        assertThat(result.isError).isFalse()
-        val event = audit.events.single()
-        assertThat(event.actorType).isEqualTo("AI_AGENT")
-        assertThat(event.operation).isEqualTo("agent.mcp.tool_exec")
-        assertThat(event.resourceId).isEqualTo("list_alerts")
-        assertThat(event.result).isEqualTo(AuditResult.SUCCESS)
+            assertThat(result.isError).describedAs(tool).isFalse()
+            io.mockk.verify { port.read(tool, args) }
+            assertThat(audit.events.single().resourceId).isEqualTo(tool)
+        }
     }
 }

@@ -5,6 +5,7 @@
 package com.openbank.copilot.infrastructure.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.copilot.application.port.out.ConversationStore
 import com.openbank.copilot.domain.model.ChatMessage
 import com.openbank.copilot.domain.model.ChatRole
 import io.quarkus.arc.properties.UnlessBuildProperty

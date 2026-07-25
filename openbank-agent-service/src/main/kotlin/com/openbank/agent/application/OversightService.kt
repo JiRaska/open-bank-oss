@@ -5,6 +5,7 @@
 
 package com.openbank.agent.application
 
+import com.openbank.agent.application.port.`in`.ProposalQueries
 import com.openbank.agent.domain.model.ChatMessage
 import com.openbank.agent.domain.model.ChatRole
 import com.openbank.agent.domain.policy.AgentIdentity
@@ -36,7 +37,7 @@ class OversightService {
 
     @Inject lateinit var chatService: AgentChatService
 
-    @Inject lateinit var proposalService: ProposalService
+    @Inject lateinit var proposals: ProposalQueries
 
     @Inject lateinit var injectionGuard: PromptInjectionGuard
 
@@ -58,7 +59,7 @@ class OversightService {
         // yet decided — dedup by instruction, enforced softly (a duplicate is still HITL-gated).
         // Titles are sanitized before splicing into the prompt — a previously stored
         // adversarial title must not be able to instruct this run (D6 guardrail).
-        val pendingTitles = proposalService.listPending().map { injectionGuard.sanitizeInline(it.title) }
+        val pendingTitles = proposals.listPending().map { injectionGuard.sanitizeInline(it.title) }
         log.infof("oversight sweep start: trigger=%s pendingProposals=%d", trigger, pendingTitles.size)
         val outcome = chatService.run(
             identity = OVERSIGHT_IDENTITY,

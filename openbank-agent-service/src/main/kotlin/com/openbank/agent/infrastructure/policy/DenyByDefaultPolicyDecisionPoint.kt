@@ -5,7 +5,7 @@
 
 package com.openbank.agent.infrastructure.policy
 
-import com.openbank.agent.application.PolicyDecisionPoint
+import com.openbank.agent.application.port.out.PolicyDecisionPoint
 import com.openbank.agent.domain.policy.PolicyDecision
 import com.openbank.agent.domain.policy.PolicyQuery
 import io.quarkus.arc.DefaultBean

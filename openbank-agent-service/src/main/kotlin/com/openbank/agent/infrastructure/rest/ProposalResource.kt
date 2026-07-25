@@ -5,8 +5,9 @@
 
 package com.openbank.agent.infrastructure.rest
 
-import com.openbank.agent.application.ProposalService
-import com.openbank.agent.infrastructure.persistence.AgentProposal
+import com.openbank.agent.application.port.`in`.DecideProposalUseCase
+import com.openbank.agent.application.port.`in`.ProposalQueries
+import com.openbank.agent.domain.proposal.AgentProposal
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -35,7 +36,9 @@ import java.util.UUID
 @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
 class ProposalResource {
 
-    @Inject lateinit var service: ProposalService
+    @Inject lateinit var queries: ProposalQueries
+
+    @Inject lateinit var decisions: DecideProposalUseCase
 
     data class ProposalDto(
         val id: String,
@@ -67,9 +70,9 @@ class ProposalResource {
     ): List<ProposalDto> {
         val filter = agentId?.trim()?.takeIf { it.isNotEmpty() }
         val rows = if (state.equals("all", ignoreCase = true)) {
-            service.listAll(100, filter)
+            queries.listAll(MAX_LIST, filter)
         } else {
-            service.listPending(filter)
+            queries.listPending(filter)
         }
         return rows.map { it.toDto() }
     }
@@ -81,7 +84,7 @@ class ProposalResource {
         val uuid = runCatching { UUID.fromString(id) }.getOrNull()
             ?: return Response.status(Response.Status.BAD_REQUEST).entity(mapOf("error" to "invalid id")).build()
         return try {
-            val updated = service.decide(uuid, body.approve, body.decidedBy, body.reason)
+            val updated = decisions.decide(uuid, body.approve, body.decidedBy, body.reason)
                 ?: return Response.status(
                     Response.Status.NOT_FOUND,
                 ).entity(mapOf("error" to "proposal not found")).build()
@@ -89,5 +92,10 @@ class ProposalResource {
         } catch (e: IllegalArgumentException) {
             Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
         }
+    }
+
+    private companion object {
+        /** Page cap for `?state=all`; the repository clamps anything larger. */
+        const val MAX_LIST = 100
     }
 }
