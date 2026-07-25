@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.4](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.7.3...copilot-service-v0.7.4) (2026-07-25)
+
+
+### Bug Fixes
+
+* **copilot:** stop asking Jackson to parse a balance array as an object ([#2458](https://github.com/JiRaska/open-bank-oss/issues/2458)) ([717a121](https://github.com/JiRaska/open-bank-oss/commit/717a121e29d7b44f57e66e9907bd6271e9480029)), closes [#2322](https://github.com/JiRaska/open-bank-oss/issues/2322)
+
 ## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.7.2...copilot-service-v0.7.3) (2026-07-25)
 
 
