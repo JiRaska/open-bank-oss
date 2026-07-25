@@ -40,7 +40,7 @@ What is actually running (`openbank-infra/gitops/components/mcp/mcp-service.yaml
 | Consent scoping | **[INTENT]** — `ReadPorts.kt` KDoc assigns the granted-account intersection to "the port implementation"; the only implementation is the stub, which enforces nothing |
 | Audit trail of tool calls / policy decisions | **NONE.** No `AuditEventPublisher`, no `AuditEvent`, no Kafka producer in the module |
 | Rate limiting / budgets / idempotency | **NONE** in this service |
-| NetworkPolicy | **NONE.** No `network-policies.yaml` under `openbank-infra/gitops/components/mcp/` (contrast `components/agent/network-policies.yaml`) |
+| NetworkPolicy | **LIVE.** `mcp-service-ingress-allow-list` (ADR-0081, derived) admits same-namespace + admin-ui:8150/8181 + observability/security-scanner:8085 and drops every other cross-namespace source. Ingress only — egress is unrestricted |
 | Internet exposure | **NO** ingress, no `HTTPRoute`, `Service` is `ClusterIP` — in-cluster only |
 
 **The single most important consequence:** the service is unauthenticated *and* has no caller
@@ -93,8 +93,10 @@ Assets, in priority order:
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Trust boundaries.** (a) MCP client → `/mcp`: **currently no boundary at all** — no authn, no
-NetworkPolicy; the only fence is that the `Service` is cluster-internal and nothing routes to it.
+**Trust boundaries.** (a) MCP client → `/mcp`: **no authentication boundary** — the only fences are
+the ADR-0081 ingress allow-list (which admits the whole `platform` namespace, since same-namespace
+traffic is unconditional) and the fact that the `Service` is cluster-internal with nothing routed to
+it.
 (b) service → OPA: localhost, same pod. (c) service → downstream banking services: **does not exist
 yet**; phase 2 creates it and it will carry a service bearer, at which point the confused-deputy
 threat (T-E2) becomes real.
@@ -157,7 +159,9 @@ invariant that nothing enforces. Phase 2 must land the OAuth 2.1 → PSD2-consen
   and falls back to an anonymous id; this service does not read it.
 - **T-S2 — unauthenticated surface. [LIVE gap]** `quarkus.oidc.tenant-enabled: false` and no
   `@RolesAllowed`. Every in-cluster workload — including any compromised pod anywhere in the
-  cluster — can call `tools/call` directly. **Compounded by the absent NetworkPolicy (T-E1).**
+  cluster that the ADR-0081 allow-list admits — every pod in `platform`, plus `admin-ui` — can call
+  `tools/call` directly, with no credential. **See T-E1 for what the NetworkPolicy does and does not
+  fence.**
 
 ### Tampering
 
@@ -226,8 +230,8 @@ invariant that nothing enforces. Phase 2 must land the OAuth 2.1 → PSD2-consen
 - **T-D1 — no rate limit, no budget, no idempotency. [LIVE gap]** The `mcp-anonymous` charter
   declares `limits: {tokens_per_run: 80000, runs_per_day: 1000}` — **[INTENT]**; that is
   agent-service's `CharterRateLimiter` vocabulary and **no code in `openbank-mcp-service` reads
-  `limits`**. Combined with the unauthenticated surface (T-S2) and the missing NetworkPolicy
-  (T-E1), any in-cluster caller can loop `tools/call` freely. Bounded today by the stub (no
+  `limits`**. Combined with the unauthenticated surface (T-S2), any caller the ADR-0081 allow-list
+  admits (T-E1) can loop `tools/call` freely. Bounded today by the stub (no
   downstream fan-out, so the damage is one pod's CPU at `limits: 1 CPU / 512Mi`); phase 2 makes
   every call a fan-out into account/balance/transaction/consent, making this service an in-cluster
   amplifier against the money-path read services.
@@ -243,11 +247,17 @@ invariant that nothing enforces. Phase 2 must land the OAuth 2.1 → PSD2-consen
 
 ### Elevation of privilege
 
-- **T-E1 — no NetworkPolicy. [LIVE gap]** There is no `network-policies.yaml` under
-  `openbank-infra/gitops/components/mcp/`, unlike `components/agent/`. Nothing restricts which pods
-  may reach `:8150`, and nothing restricts this pod's egress. Given T-S2 (no authn) this means the
-  in-cluster reachability graph *is* the access control, and it is open. This is the cheapest gap on
-  this page to close and it should not wait for phase 2.
+- **T-E1 — NetworkPolicy present, but the same-namespace rule is the whole fence. [LIVE, partial]**
+  `mcp-service-ingress-allow-list` (`openbank.io/derived: gen-network-policies`) has been live since
+  the phase-1 deploy (#2134); it was authored into `components/agent/network-policies.yaml` because
+  `gen-network-policies.py` keyed its output by *namespace* and `platform` is shared by agent, ap2,
+  copilot and mcp — which is why the first draft of this model recorded it as absent (issue #2207).
+  It is now generated into `components/mcp/`. What it actually fences: every cross-namespace source
+  except `admin-ui` (8150/8181), `observability` and `security-scanner` (8085) is DROPPED. What it
+  does **not** fence: the unconditional `podSelector: {}` same-namespace rule, so any pod in
+  `platform` — agent-service, ap2-service, copilot-service and their sidecars — reaches `:8150`
+  unauthenticated (T-S2). `policyTypes: [Ingress]` only, so egress is unrestricted. Closing the
+  remaining exposure is an authentication problem, not a network one.
 - **T-E2 — confused deputy (AI-specific). [INTENT — the core phase-2 design risk]** Phase 2 binds
   `@RegisterRestClient` adapters that will call account/balance/transaction/consent with a **service
   bearer**. At that point the MCP server holds the bank's own credential and acts on it in response
@@ -330,8 +340,7 @@ checksum, and the container hardening.
   it is not implemented — `main-protection` requires zero approvals (issue #2183). That is an
   argument for fixing #2183, not for skipping the listing.
 
-Recommended follow-up issues (not opened by this PR): NetworkPolicy for `components/mcp` (T-E1);
-audit events for every tool call and policy decision (T-R1); OAuth 2.1 → consent binding before the
+Recommended follow-up issues (not opened by this PR): audit events for every tool call and policy decision (T-R1); OAuth 2.1 → consent binding before the
 read ports are bound (T-S1/T-E2); server-side `inputSchema` validation + idempotency on
 `propose_payment` (T-T2/T-D2).
 
@@ -340,7 +349,12 @@ read ports are bound (T-S1/T-E2); server-side `inputSchema` validation + idempot
 - **2026-07-25 (ADR-0181 phase 1, issue #1922)** — First model. Written against the shipped phase-1
   code (PR #2104 service, #2134/#2136 deploy, #2142 OPA sidecar), not against ADR-0181's intent.
   Records that the endpoint is unauthenticated with a constant principal, that the read/proposal
-  ports are stubs, that no audit event is emitted, and that no NetworkPolicy exists; separates the
-  five genuinely enforced controls from the eight documented-but-unenforced ones (§5). Establishes
-  the phase-2 sequencing constraint: identity + consent enforcement must precede binding the real
-  read ports.
+  ports are stubs, and that no audit event is emitted; separates the five genuinely enforced
+  controls from the eight documented-but-unenforced ones (§5). Establishes the phase-2 sequencing
+  constraint: identity + consent enforcement must precede binding the real read ports.
+- **2026-07-25 (issue #2207)** — Corrected T-E1: the NetworkPolicy was never missing. It shipped
+  with the phase-1 deploy (#2134) as `mcp-service-ingress-allow-list` and is live; the original
+  finding read `components/mcp/` for a file that `gen-network-policies.py` had written into
+  `components/agent/` (one file per *namespace*, first directory alphabetically). Restated as the
+  narrower, true risk: the unconditional same-namespace rule leaves the whole `platform` namespace
+  able to reach an unauthenticated `:8150`.
