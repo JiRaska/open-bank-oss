@@ -4,8 +4,10 @@
 
 package com.openbank.vop.ratelimit
 
+import com.openbank.vop.infrastructure.observability.VopMetricsAdapter
 import com.openbank.vop.infrastructure.ratelimit.VopRateLimitFilter
 import com.openbank.vop.infrastructure.ratelimit.VopRateLimiter
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -23,9 +25,14 @@ class VopRateLimitFilterTest {
     private val limiter = mockk<VopRateLimiter>()
     private val identity = mockk<SecurityIdentity>()
 
+    // The REAL metrics adapter over a SimpleMeterRegistry, not a mock port: the outcome assertions
+    // below then fail if the filter stops reporting a decision.
+    private val registry = SimpleMeterRegistry()
+
     private fun filter(enabled: Boolean = true, limit: Int = 60) = VopRateLimitFilter().apply {
         rateLimiter = limiter
         this.identity = this@VopRateLimitFilterTest.identity
+        metrics = VopMetricsAdapter(registry)
         limitPerMinute = limit
         this.enabled = enabled
     }
@@ -113,4 +120,41 @@ class VopRateLimitFilterTest {
         verify(exactly = 0) { limiter.isAllowed(any(), any()) }
         verify(exactly = 0) { ctx.abortWith(any()) }
     }
+
+    @Test
+    fun `a throttled requester and an unreachable store are counted as DIFFERENT outcomes`() {
+        // Both answer 429 and are indistinguishable on the wire, but they mean opposite things:
+        // `throttled` is one caller enumerating, `store_unavailable` is every caller being rejected
+        // because Valkey is down. Collapsing them into one counter would hide a fleet-wide outage
+        // inside what looks like healthy enumeration defence.
+        principal("enumerator")
+        every { limiter.isAllowed("enumerator", 60) } returns true andThen false andThenThrows
+            RuntimeException("valkey unreachable")
+        val f = filter()
+
+        f.filter(context())
+        f.filter(context())
+        f.filter(context())
+
+        assertThat(decisions("allowed")).isEqualTo(1.0)
+        assertThat(decisions("throttled")).isEqualTo(1.0)
+        assertThat(decisions("store_unavailable")).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `a request that never reaches the limiter records no decision`() {
+        // An unauthenticated or management request consumes no window slot, so it must not show up
+        // as `allowed` either — that would dilute the very ratio the limit is tuned from.
+        principal(null)
+
+        filter().filter(context())
+        filter().filter(context(path = "/q/health/ready"))
+
+        assertThat(registry.find("openbank.vop.rate_limit.decisions").counters()).isEmpty()
+    }
+
+    private fun decisions(outcome: String): Double = registry.get("openbank.vop.rate_limit.decisions")
+        .tag("service", "vop")
+        .tag("outcome", outcome)
+        .counter().count()
 }

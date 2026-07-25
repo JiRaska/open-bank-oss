@@ -13,6 +13,8 @@ import com.openbank.vop.application.usecase.VopVerificationService
 import com.openbank.vop.domain.model.VopNoDataReason
 import com.openbank.vop.domain.model.VopOutcome
 import com.openbank.vop.domain.model.VopVerification
+import com.openbank.vop.infrastructure.observability.VopMetricsAdapter
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -44,10 +46,15 @@ class VopVerificationServiceTest {
         every { records.record(any(), any(), any(), any()) } returns Uni.createFrom().voidItem()
     }
 
+    // The REAL metrics adapter over a SimpleMeterRegistry rather than a mock port, so the
+    // instrumentation assertions below fail if the service stops emitting.
+    private val registry = SimpleMeterRegistry()
+
     private fun service() = VopVerificationService(
         nameLookup = nameLookup,
         schemeRouting = schemeRouting,
         records = records,
+        metrics = VopMetricsAdapter(registry),
         clock = clock,
         domesticIbanPrefixes = listOf("CZ"),
         maxEditDistance = 1,
@@ -155,4 +162,71 @@ class VopVerificationServiceTest {
         assertThat(ibanHash.captured).doesNotContain(domesticIban)
         assertThat(nameHash.captured).doesNotContain("Raška")
     }
+
+    @Test
+    fun `a domestic verification is counted by route and outcome, and timed`() {
+        every { nameLookup.lookupHolderName(domesticIban) } returns Uni.createFrom().item("Jiří Raška")
+
+        verify(domesticIban, "Petr Novák")
+
+        assertThat(verifications(route = "domestic", outcome = "NO_MATCH")).isEqualTo(1.0)
+        assertThat(
+            registry.get("openbank.vop.verification.duration")
+                .tag("service", "vop").tag("route", "domestic").timer().count(),
+        ).isEqualTo(1L)
+    }
+
+    @Test
+    fun `a lookup outage is counted as no_data with reason lookup_unavailable, not as a match`() {
+        // The whole point of the meter: failing open (ADR-0171 §3) means a total account-service
+        // outage looks exactly like normal traffic from every angle except this series.
+        every { nameLookup.lookupHolderName(domesticIban) } returns
+            Uni.createFrom().failure(NameLookupUnavailableException(RuntimeException("account-service down")))
+
+        verify(domesticIban, "Jiří Raška")
+
+        assertThat(verifications(route = "domestic", outcome = "NO_DATA")).isEqualTo(1.0)
+        assertThat(
+            registry.get("openbank.vop.no_data")
+                .tag("service", "vop").tag("route", "domestic").tag("reason", "lookup_unavailable")
+                .counter().count(),
+        ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `an external verification is tagged route=external`() {
+        every { schemeRouting.verifyExternal(externalIban, any()) } returns Uni.createFrom().item(
+            VopVerification(
+                outcome = VopOutcome.NO_DATA,
+                noDataReason = VopNoDataReason.NO_SCHEME_CONNECTIVITY,
+                verifiedAt = clock.instant(),
+            ),
+        )
+
+        verify(externalIban, "Hans Müller")
+
+        assertThat(verifications(route = "external", outcome = "NO_DATA")).isEqualTo(1.0)
+        assertThat(
+            registry.get("openbank.vop.no_data")
+                .tag("route", "external").tag("reason", "no_scheme_connectivity").counter().count(),
+        ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `a MATCH publishes no no_data series at all`() {
+        // no_data is a second series rather than a tag precisely so a MATCH does not carry a
+        // reason label it never varies over.
+        every { nameLookup.lookupHolderName(domesticIban) } returns Uni.createFrom().item("Jiří Raška")
+
+        verify(domesticIban, "Jiri Raska")
+
+        assertThat(verifications(route = "domestic", outcome = "MATCH")).isEqualTo(1.0)
+        assertThat(registry.find("openbank.vop.no_data").counters()).isEmpty()
+    }
+
+    private fun verifications(route: String, outcome: String): Double = registry.get("openbank.vop.verifications")
+        .tag("service", "vop")
+        .tag("route", route)
+        .tag("outcome", outcome)
+        .counter().count()
 }

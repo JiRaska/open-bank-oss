@@ -9,6 +9,8 @@ import com.openbank.vop.application.port.`in`.VerifyPayeeCommand
 import com.openbank.vop.application.port.`in`.VerifyPayeeUseCase
 import com.openbank.vop.application.port.out.AccountHolderNameLookupPort
 import com.openbank.vop.application.port.out.NameLookupUnavailableException
+import com.openbank.vop.application.port.out.VopMetricsPort
+import com.openbank.vop.application.port.out.VopRoute
 import com.openbank.vop.application.port.out.VopSchemeRoutingPort
 import com.openbank.vop.application.port.out.VopVerificationRecordPort
 import com.openbank.vop.domain.match.VopNameMatchPolicy
@@ -21,6 +23,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.security.MessageDigest
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 
 /**
@@ -37,12 +40,17 @@ import java.time.Instant
  * closed: a sanctions miss is a legal breach, whereas refusing every payment during a VoP outage
  * would itself breach the IPR execution-time obligation. Do not "fix" this to match its
  * neighbour.
+ *
+ * "Loudly" is what [VopMetricsPort] is for. Failing open means a total downstream outage looks, from
+ * every angle except the meters, exactly like a bank whose customers all pay strangers: the caller
+ * gets a well-formed `NO_DATA`, the payment proceeds, and the only trace is a WARN line.
  */
 @ApplicationScoped
 class VopVerificationService(
     private val nameLookup: AccountHolderNameLookupPort,
     private val schemeRouting: VopSchemeRoutingPort,
     private val records: VopVerificationRecordPort,
+    private val metrics: VopMetricsPort,
     private val clock: Clock,
     @ConfigProperty(name = "openbank.vop.domestic-iban-prefixes", defaultValue = "CZ")
     private val domesticIbanPrefixes: List<String>,
@@ -55,8 +63,21 @@ class VopVerificationService(
 
     override fun verify(command: VerifyPayeeCommand): Uni<VopVerification> {
         val iban = Iban.of(command.iban)
-        val route = if (isDomestic(iban)) resolveLocally(iban, command.payeeName) else resolveExternally(iban, command)
-        return route.call { verification -> record(iban, command, verification) }
+        val route = if (isDomestic(iban)) VopRoute.DOMESTIC else VopRoute.EXTERNAL
+        // `deferred` so the stopwatch starts on SUBSCRIPTION, not on assembly: a Uni built here and
+        // subscribed later would otherwise be timed from the wrong instant.
+        return Uni.createFrom().deferred {
+            val startedAt = System.nanoTime()
+            val resolved = when (route) {
+                VopRoute.DOMESTIC -> resolveLocally(iban, command.payeeName)
+                VopRoute.EXTERNAL -> resolveExternally(iban, command)
+            }
+            resolved
+                .call { verification -> record(iban, command, verification) }
+                .onItem().invoke { verification ->
+                    metrics.verificationCompleted(route, verification, Duration.ofNanos(System.nanoTime() - startedAt))
+                }
+        }
     }
 
     private fun resolveLocally(iban: Iban, suppliedName: String): Uni<VopVerification> =
