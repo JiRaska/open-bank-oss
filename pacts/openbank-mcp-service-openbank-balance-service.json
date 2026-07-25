@@ -1,0 +1,76 @@
+{
+  "consumer": {
+    "name": "openbank-mcp-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the balances the MCP get_balance tool returns verbatim",
+      "providerStates": [
+        {
+          "name": "balance-service is reachable and holds no balances for the pact account"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/balances/d1d1d1d1-e2e2-4f4f-8a8a-b9b9b9b9b9b9"
+      },
+      "response": {
+        "body": {
+          "balances": [
+            {
+              "available": 1000.0,
+              "currency": "CZK"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.balances": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.balances[*].available": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.balances[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-balance-service"
+  }
+}

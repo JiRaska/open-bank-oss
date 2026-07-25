@@ -98,6 +98,20 @@ class TransactionPactProviderVerificationTest {
         // account to pre-exist in this test's Postgres, only that sourceAccountId parses as a UUID.
     }
 
+    /**
+     * State for mcp-service's `TransactionListPactConsumerTest` (issue #2255, ADR-0195). No setup:
+     * `GET /api/v1/transactions?accountId=` answers 200 with an empty `data` array and a
+     * `pagination` envelope for an account that has no rows, and that 200 is the point of the
+     * interaction — it proves the listing route exists on the BASE path with `accountId` as a query
+     * parameter. A 404 would prove nothing, since Quarkus answers 404 for an absent route too.
+     */
+    @State("transaction-service is reachable and holds no transactions for the pact account")
+    fun stateNoTransactionsForPactAccount() {
+        // Intentionally empty — a fresh Testcontainer DB satisfies it by construction. Declared so
+        // the state is an explicit part of the contract; pact-jvm passes silently over an
+        // unhandled state name, which is how #468's missing states stayed invisible.
+    }
+
     @State("transaction-service has initiated a payment transaction")
     fun stateTransactionInitiated() {
         // No setup needed: the message producer below returns a deterministic payload.

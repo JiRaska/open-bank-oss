@@ -34,6 +34,10 @@ dependencies {
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.assertj)
     testImplementation(libs.rest.assured.kotlin)
+    // Consumer-driven contract tests (ADR-0063, issue #2255 dimension C3). mcp's read ports became
+    // real HTTP clients in #2262 and are not wired as the default yet — pinning the routes now is
+    // what keeps the ADR-0195 cutover from shipping a call to a path that does not exist (#2269).
+    testImplementation(libs.pact.consumer)
 }
 
 kover {
@@ -50,4 +54,24 @@ kover {
             }
         }
     }
+}
+
+// Pact: write the generated consumer contracts into the repo-root pacts/ dir (git-pact, ADR-0063),
+// where the providers replay them. The consumer tests rewrite the files on every run and the result
+// is committed; pact-drift-check.yml fails the build if a committed pact and a fresh regeneration
+// diverge. NOTE: must be set on the test JVM fork, not the Gradle daemon (System.setProperty would
+// not propagate). The pactbroker.* keys are forwarded so CI's publish step behaves as elsewhere.
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
