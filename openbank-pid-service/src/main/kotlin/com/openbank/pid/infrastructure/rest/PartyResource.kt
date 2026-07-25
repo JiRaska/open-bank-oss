@@ -5,6 +5,7 @@
 package com.openbank.pid.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.security.Roles
 import com.openbank.pid.application.port.`in`.AddRelationshipCommand
 import com.openbank.pid.application.port.`in`.ChangePartyStatusCommand
 import com.openbank.pid.application.port.`in`.CreatePartyCommand
@@ -202,7 +203,7 @@ class PartyResource(
      */
     @GET
     @Path("/pid/resolve")
-    @RolesAllowed("openbank-service")
+    @RolesAllowed(Roles.API)
     @Authorize(action = "pid.resolve")
     @Operation(
         summary = "Resolve partyId from a pre-computed RČ blind index (ADR-0072, internal M2M)",
@@ -243,7 +244,7 @@ class PartyResource(
     }
 
     @POST
-    @RolesAllowed("openbank-employee", "openbank-admin")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Operation(summary = "Create a new party (unified identity)")
     suspend fun createParty(request: CreatePartyRequest): Response {
         val party = createPartyUseCase.createParty(
@@ -268,14 +269,14 @@ class PartyResource(
 
     @GET
     @Path("/{id}")
-    @RolesAllowed("openbank-employee", "openbank-admin", "openbank-customer")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Operation(summary = "Get party by internal ID")
     suspend fun getById(@PathParam("id") id: UUID): Response =
         Response.ok(getPartyUseCase.getById(id).toResponse()).build()
 
     @GET
     @Path("/by-external-id")
-    @RolesAllowed("openbank-employee", "openbank-admin")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Operation(summary = "Get party by external ID (bankID sub, ROB AIFO, etc.)")
     suspend fun getByExternalId(
         @QueryParam("type") type: ExternalIdType,
@@ -283,7 +284,7 @@ class PartyResource(
     ): Response = Response.ok(getPartyUseCase.getByExternalId(type, value).toResponse()).build()
 
     @GET
-    @RolesAllowed("openbank-employee", "openbank-admin")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Operation(summary = "Search parties")
     suspend fun search(
         @QueryParam("givenName") givenName: String?,
@@ -310,7 +311,7 @@ class PartyResource(
 
     @POST
     @Path("/{id}/sync/bankid")
-    @RolesAllowed("openbank-employee", "openbank-admin")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Operation(summary = "Sync party attributes from bankID")
     suspend fun syncFromBankId(@PathParam("id") id: UUID, request: SyncFromBankIdRequest): Response {
         val party = updatePartyUseCase.syncFromBankId(
@@ -336,7 +337,7 @@ class PartyResource(
 
     @POST
     @Path("/{id}/sync/rob")
-    @RolesAllowed("openbank-employee", "openbank-admin")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Operation(summary = "Sync address from ROB (Registr obyvatel)")
     suspend fun syncFromRob(@PathParam("id") id: UUID, request: SyncFromRobRequest): Response {
         val party = updatePartyUseCase.syncFromRob(
@@ -353,7 +354,7 @@ class PartyResource(
 
     @PATCH
     @Path("/{id}/contact")
-    @RolesAllowed("openbank-employee", "openbank-admin", "openbank-customer")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Operation(summary = "Update contact attributes")
     suspend fun updateContact(@PathParam("id") id: UUID, request: UpdateContactRequest): Response {
         val party = updatePartyUseCase.updateContact(
@@ -370,7 +371,7 @@ class PartyResource(
 
     @PUT
     @Path("/{id}/kyc")
-    @RolesAllowed("openbank-employee", "openbank-admin")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Operation(summary = "Update KYC/AML attributes")
     suspend fun updateKyc(@PathParam("id") id: UUID, request: UpdateKycRequest): Response {
         val party = updatePartyUseCase.updateKyc(
@@ -387,7 +388,7 @@ class PartyResource(
 
     @PATCH
     @Path("/{id}/status")
-    @RolesAllowed("openbank-admin")
+    @RolesAllowed(Roles.ADMIN)
     @Authorize(action = "party.changeStatus", resource = "#id")
     @Operation(summary = "Change party status (suspend, terminate, etc.)")
     suspend fun changeStatus(@PathParam("id") id: UUID, request: ChangeStatusRequest): Response {
@@ -403,7 +404,7 @@ class PartyResource(
 
     @PATCH
     @Path("/{id}/case")
-    @RolesAllowed("openbank-employee", "openbank-admin")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Operation(summary = "Transition PID verification case lifecycle")
     suspend fun transitionCase(@PathParam("id") id: UUID, request: TransitionCaseRequest): Response {
         val party = updatePartyUseCase.transitionCase(
@@ -421,7 +422,7 @@ class PartyResource(
 
     @POST
     @Path("/{id}/relationships")
-    @RolesAllowed("openbank-employee", "openbank-admin")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Operation(summary = "Add a role/relationship to a party")
     suspend fun addRelationship(@PathParam("id") id: UUID, request: AddRelationshipRequest): Response {
         val rel = manageRelationshipUseCase.addRelationship(
@@ -438,7 +439,7 @@ class PartyResource(
 
     @DELETE
     @Path("/{id}/relationships/{relationshipId}")
-    @RolesAllowed("openbank-employee", "openbank-admin")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Operation(summary = "Terminate a party relationship/role")
     suspend fun terminateRelationship(
         @PathParam("id") id: UUID,
