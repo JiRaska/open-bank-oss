@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.15.0...notification-service-v0.15.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* **notification:** remove SMS and IN_APP — both were logging stubs reporting success ([#2386](https://github.com/JiRaska/open-bank-oss/issues/2386)) ([25f2177](https://github.com/JiRaska/open-bank-oss/commit/25f217786fcc714f7bd50ce447513f09d5c1677d))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.14.1...notification-service-v0.15.0) (2026-07-24)
 
 
