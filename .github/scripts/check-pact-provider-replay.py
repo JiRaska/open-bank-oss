@@ -49,10 +49,12 @@ PACTS = ROOT / "pacts"
 # ~44 generated files and give the PR a short shelf life. The list belongs next to the code that
 # reads it.
 KNOWN_UNCOVERED = {
-    "pacts/openbank-consent-service-openbank-sca-service.json",
-    # Landed 2026-07-25, after the #2327 audit counted 16 of 27: same three providers
-    # (balance/transaction/party), so the same debt, not a new class of it. The estate went
-    # 27 -> 33 pacts in a day, which is the argument for a gate rather than another audit.
+    # The last one, and the only entry that is BLOCKED rather than merely undone. Adding a
+    # @PactFolder class to openbank-swift-service would not help: its own build.gradle.kts
+    # statically excludes both SwiftEventPactConsumerTest and ClearingSimulatorPactConsumerTest
+    # whenever CI=true, so the pact is never regenerated there either (#2319, and #2318's drift
+    # gate declares the same exclusion for the same reason). Clear #2319 first, then delete this
+    # line and this comment together.
     "pacts/openbank-transaction-service-openbank-swift-service.json",
 }
 
