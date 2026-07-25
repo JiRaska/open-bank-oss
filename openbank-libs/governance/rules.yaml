@@ -133,6 +133,37 @@ change_requirements:
     # spec-touching PR (bump info.version to match what the diff did), which the error
     # message spells out.
     ci_producer: ".github/scripts/check-api-contract.py"
+    # A fourth class, `correction`, sits between breaking and additive: a breaking DOCUMENT diff
+    # in a PR that changes NOTHING ELSE in the service. It requires MINOR, not MAJOR.
+    #
+    # Why it had to exist. `breaking` and the D2 invariant are jointly unsatisfiable for a spec
+    # that never described the running service. Measured on aml-service (#2312/#2313) with the
+    # pinned oasdiff: red at 1.0.0 because a MAJOR is demanded, red at 2.0.0 because D2 rejects a
+    # major the served URL has not moved to. There is no third value. Worse, the only document
+    # that went green was one that kept a phantom `status` enum value and a `default` the server
+    # does not use — the gate was not merely blocking the correction, it was requiring the
+    # falsehood, and aml shipped four GATE-CONSTRAINED concessions because of it.
+    #
+    # Why it is safe. A spec-only PR leaves the running server byte-identical, so no client that
+    # works today can stop working; what "breaks" is a client generated from a document that
+    # never described this server, and that client was already broken. Touch any other file in
+    # the service — Kotlin, application.yaml, a test — and the normal breaking rule applies
+    # unchanged. Only CHANGELOG.md and version.txt are exempt, because release-please writes them
+    # and neither can change what is served.
+    #
+    # Why it is not an escape hatch. The discriminator is the diff, not a declaration: there is no
+    # marker file and no PR-body token asserting that a spec "was never served". ~22 specs are
+    # correction candidates (#2314), so anything a human asserts once would become the default
+    # path 22 times over.
+    #
+    # It opens no new hole: landing a breaking change as code in one PR and the spec in another
+    # already escapes this gate, which is scoped to spec diffs. What it does NOT check is whether
+    # the corrected document is TRUE — openapi_route_conformance (below) covers the route set,
+    # and nothing yet covers schemas.
+    #
+    # Unit tests: openbank-infra/scripts/check_api_contract_test.py, run by the
+    # "governance-script unit tests" CI step. The negative cases are the point — a
+    # reclassification that fires too eagerly disables the gate for real breaking changes.
   openapi_route_conformance:
     detect: ["openbank-*/src/main/resources/openapi.yaml", "JAX-RS @Path / @GET / @POST resource classes"]
     require:
