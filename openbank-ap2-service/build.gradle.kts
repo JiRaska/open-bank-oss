@@ -29,6 +29,12 @@ dependencies {
     implementation(project(":openbank-libs-runtime"))
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.assertj)
+    // Ap2ApiContractTest drives the real endpoint and compares the wire JSON against the committed
+    // openapi.yaml, which it PARSES rather than greps. jackson-dataformat-yaml carries no version:
+    // it is managed by the enforcedPlatform(quarkus.bom) above (testImplementation extends
+    // implementation), so it can never drift from the Jackson the runtime already uses.
+    testImplementation(libs.rest.assured.kotlin)
+    testImplementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")
 }
 
 kover {
