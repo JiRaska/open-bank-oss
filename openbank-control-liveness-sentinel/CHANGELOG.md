@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.1](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.5.0...control-liveness-sentinel-v0.5.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* **control-liveness-sentinel:** query the workflow-liveness gauge name that is actually emitted ([#2187](https://github.com/JiRaska/open-bank-oss/issues/2187)) ([#2238](https://github.com/JiRaska/open-bank-oss/issues/2238)) ([407488a](https://github.com/JiRaska/open-bank-oss/commit/407488a44ed214098d6ed0c702c25b72167d8e38))
+
+
+### Security
+
+* **liveness:** strengthen the control-liveness-sentinel prompt against injected remediation commands ([#1918](https://github.com/JiRaska/open-bank-oss/issues/1918)) ([#2321](https://github.com/JiRaska/open-bank-oss/issues/2321)) ([cffc5ff](https://github.com/JiRaska/open-bank-oss/commit/cffc5ff933be268d3ee675de96382607cad9877b))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.4.0...control-liveness-sentinel-v0.5.0) (2026-07-25)
 
 
