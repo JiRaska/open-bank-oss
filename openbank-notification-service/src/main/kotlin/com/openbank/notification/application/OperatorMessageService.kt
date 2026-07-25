@@ -36,9 +36,10 @@ class OperatorMessageRejected(message: String) : RuntimeException(message)
  * EMAIL only, for now. PUSH is refused: `sendPush` puts rendered content in the APNs/FCM payload,
  * which ADR-0135 §3 forbids (issue #1182, unresolved, blocked on the customer app's fetch-on-tap
  * handling in another repository) — adding a second producer onto that broken path would make it
- * worse, not better. IN_APP is refused because it is a stub that never leaves `PENDING` (no real
- * delivery exists yet). SMS was never implemented for any template. Real multi-channel delivery is
- * the remaining ADR-0176 D2/D3 work.
+ * worse, not better. SMS and IN_APP are not options at all — issue #2372 removed them from
+ * [com.openbank.notification.domain.model.NotificationChannel] because neither ever delivered
+ * anything (both were logging stubs that reported success). Real multi-channel delivery is the
+ * remaining ADR-0176 D2/D3 work.
  *
  * **`partyId` is trusted, unvalidated, caller-supplied input (issue #1384, explicit decision, not
  * an oversight).** Every other write into `notifications.party_id` originates from an

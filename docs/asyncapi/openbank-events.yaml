@@ -722,7 +722,7 @@ components:
           format: uuid
         channel:
           type: string
-          enum: [EMAIL, SMS, PUSH]
+          enum: [EMAIL, PUSH]
         templateId:
           type: string
           enum: [ACCOUNT_OPENED, PAYMENT_COMPLETED, KYC_REJECTED, OTP_CODE, WELCOME]
