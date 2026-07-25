@@ -9,7 +9,6 @@ dataLineageRole: both
 dataClassification: confidential
 retentionPolicy: 7 years
 evidenceExported: true
-lineage:
 schemaLineage:
   ownedSchemas:
     - disputes_schema

@@ -9,7 +9,6 @@ dataLineageRole: both
 dataClassification: confidential
 retentionPolicy: 5 years
 evidenceExported: false
-lineage:
 schemaLineage:
   ownedSchemas:
     - fx_schema

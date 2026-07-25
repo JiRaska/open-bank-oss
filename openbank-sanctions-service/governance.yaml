@@ -9,7 +9,6 @@ dataLineageRole: both
 dataClassification: restricted
 retentionPolicy: 10 years
 evidenceExported: true
-lineage:
 schemaLineage:
   ownedSchemas:
     - sanctions_schema

@@ -92,6 +92,11 @@ jobs:
       - name: Governance manifest gate (ADR-0071, enforced)
         working-directory: openbank-admin-ui
         run: |
+          # The generator compiles openbank-libs/governance/governance.schema.json with ajv
+          # and validates every governance.yaml against it, so a schema violation (wrong type,
+          # unknown key, malformed lineage node) is just another entry in `gaps` and needs no
+          # separate step here. The schema was advisory — cited in a comment, hand-mirrored in
+          # the generator — until the two drifted and 4 services shipped a null `lineage:` key.
           node scripts/generate-governance.mjs
           GAPS=$(node -e "console.log(require('./governance.json').totals.withGaps)")
           if [ "$GAPS" -gt 0 ]; then
