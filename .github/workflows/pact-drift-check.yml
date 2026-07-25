@@ -60,6 +60,7 @@ jobs:
             :openbank-consent-service:test --tests "com.openbank.consent.contract.*PactConsumerTest" \
             :openbank-domestic-payment:test --tests "com.openbank.domestic.contract.*PactConsumerTest" \
             :openbank-fraud-service:test --tests "com.openbank.fraud.contract.*PactConsumerTest" \
+            :openbank-fx-service:test --tests "com.openbank.fx.contract.*PactConsumerTest" \
             :openbank-kyc-service:test --tests "com.openbank.kyc.contract.*PactConsumerTest" \
             :openbank-lending-service:test --tests "com.openbank.lending.contract.*PactConsumerTest" \
             :openbank-notification-service:test --tests "com.openbank.notification.contract.*PactConsumerTest" \

@@ -36,8 +36,11 @@ import java.util.UUID
  * IMPORTANT — regenerate on change: if the `@Pact` method below changes (new interaction, renamed
  * field, different matcher), re-run this test
  * (`./gradlew :openbank-fx-service:test --tests "*AmlCaseCreationPactConsumerTest*"`) and commit the
- * updated pact JSON in the same PR. There is no CI drift check yet (ADR-0063 Phase 2) — a
- * un-regenerated pact file silently verifies the OLD contract on the provider side.
+ * updated pact JSON in the same PR — an un-regenerated pact file silently verifies the OLD contract
+ * on the provider side. `pact-drift-check.yml` enforces this, but its module list is hand-maintained:
+ * `:openbank-fx-service` had to be ADDED to it for this pact, because an unlisted module is never
+ * regenerated, so the `git diff -- pacts/` step finds nothing and the gate goes green while checking
+ * nothing. Any future consumer pact in a new module must be added to that list too.
  *
  * ## What this pins, and why the response side is deliberately thin
  *
