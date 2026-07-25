@@ -33,9 +33,11 @@ is `input.principal.type == "SERVICE"`. That rule can never fire. `AuthorizeInte
 `ANONYMOUS`, `AI_AGENT` and `HUMAN`; an M2M caller presenting a Keycloak client_credentials JWT is
 classified `HUMAN`, and no realm client is granted `ROLE_SERVICE`. A rule gated on a `SERVICE` principal
 is structurally unreachable dead code that silently denies its intended caller the moment
-`AUTHZ_ENFORCE` is true — found live in the shared `rest.rego` `edge-service-notification` rule (issue
-#266) and now blocked by `.github/scripts/check-no-service-principal-type.sh`. Any design where agent A
-calls agent B's surface walks straight into this.
+`AUTHZ_ENFORCE` is true — caught pre-merge on the sca/domestic-payment ADR-0034 Phase 5 PRs (issue
+#266), and separately found live and already deployed with `AUTHZ_ENFORCE=true` in the shared
+`rest.rego` `edge-service-notification` rule, now blocked by
+`.github/scripts/check-no-service-principal-type.sh`. Any design where agent A calls agent B's surface
+walks straight into this.
 
 **Constraint 2 — the MCP caller identity is not yet real.** ADR-0195 is `proposed/planned`:
 mcp-service's `resolveContext()` returns a hardcoded constant and ignores the headers its own KDoc
@@ -207,5 +209,7 @@ inside Art. 14 human oversight. ADR-0031's AI-attributed audit already records e
   exposure D6 responds to.
 - [ADR-0197](0197-agpl-open-core-boundary-covers-the-whole-agent-plane.md) — the licence property test.
 - [ADR-0203](0203-business-plane-ai-agents.md) — the agents that need this.
-- Issue #266 and `.github/scripts/check-no-service-principal-type.sh` — why D3 matches on principal id.
+- Issue #266 (the pre-merge sca/domestic-payment catch) and
+  `.github/scripts/check-no-service-principal-type.sh` (whose own comment also records the separately
+  deployed `edge-service-notification` instance) — why D3 matches on principal id.
 - `openbank-libs/governance/agents.yaml` and `docs/agents/` — the fifteen current agents and charters.

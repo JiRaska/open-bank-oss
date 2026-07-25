@@ -89,7 +89,13 @@ campaign-service to order or suppress steps. It is explicitly **not** permitted 
 creditworthiness, pricing, limits, or eligibility for a credit product, and it is not permitted to
 suppress a product a customer has actively asked about. Any such use is a different system requiring
 its own ADR under ADR-0142's high-risk controls (adverse-action reasons, deterministic affordability
-supremacy, four-eyes on declines). This boundary is the load-bearing sentence of this ADR.
+supremacy, four-eyes on declines). This boundary is the load-bearing sentence of this ADR, and a
+sentence alone is not an enforcement mechanism — the concrete gate is a type boundary: the NBA
+port's return type (a ranked list of catalogue message ids) is structurally incapable of expressing a
+credit decision, and `MlModelPort`/its NBA equivalent must never share an interface, a DTO, or a
+`scope` value with anything ADR-0142's credit engine calls. This is tracked as its own follow-up
+issue at implementation time rather than left as prose here, so the boundary has an owner before code
+exists to cross it.
 
 **D6 — Serving reuses ADR-0139 by promotion, not duplication.** The in-process ONNX serving path moves
 from `openbank-fraud-service/infrastructure/ml` to `openbank-libs-runtime` with the `onnxruntime`
@@ -109,7 +115,16 @@ produced by `gen-eu-ai-act.py` and the generated inventory regenerated in the sa
 `eu-ai-act-registry` has gone red on a PR that merged anyway (#2216) — an advisory check over a
 *generated* artifact leaves drift mergeable, and a registry that omits a live AI system is the exact
 failure it exists to prevent. And `deployed: false` must flip to `true` in the PR that deploys, not
-later.
+later. The existing registry already distinguishes two things the `campaign-next-best-action` entry
+must not conflate: `ml-decisioning-platform` (the shared feature-store/ONNX substrate) stays
+`deployed: false`, because it is infrastructure, not a standalone decision system, while
+`fraud-real-time-scoring`, the system that actually consumes that substrate, is `deployed: true`
+(that entry's `basis` describes the fleet's rule-engine decision outcome and does not separately
+distinguish the ML shadow score within it — a pre-existing registry granularity question this ADR
+does not need to resolve). `campaign-next-best-action` follows the second pattern: it is a consuming
+system, not infrastructure, so `deployed: true` applies once campaign-service runs it in shadow per
+D7 — shadow running in production is deployed, and this entry should not wait for champion promotion
+to say so.
 
 **D9 — Licensing.** Segment and NBA logic lives in campaign-service and `openbank-libs`, neither of
 which is agent-plane, so both stay Apache-2.0 (ADR-0197). The campaign-copilot *agent* of ADR-0203 is

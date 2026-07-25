@@ -45,9 +45,10 @@ topology *is not deployed at all*, so there is no per-agent token accounting and
 prompts leaving for a US provider (the ADR-0175 open exposure). Six new agents multiply a cost nobody
 currently measures.
 
-**The estate already has an unfixed privilege problem.** agent-service holds a blanket `ROLE_OPERATOR`
-privilege-escalation issue (draft advisory GHSA-r5r5-2934-w92f). Adding agents before that is understood
-risks propagating the pattern rather than the governance.
+**The estate already has an unfixed privilege problem.** agent-service has a known, unfixed
+privilege-scoping gap in its M2M authorization path, tracked privately pending a maintainer
+disclosure decision. Adding agents before that is resolved risks propagating the pattern rather
+than the governance.
 
 Why now: ADR-0199 and ADR-0201 create the read surface these agents need, ADR-0202 defines how they
 cooperate, and the fraud queue is a case where the human is already doing the work and the agent's only
@@ -107,9 +108,22 @@ capture including `model_id`, `prompt_hash`, `tool_calls`, `policy_decision` and
 the `agents.yaml` defaults. Each agent gets an `ml-systems.yaml` entry with its own risk classification
 in the same PR that declares it, generated rather than hand-edited (#2216).
 
+Note honestly: `plane` is today an unenforced free-text field — no schema validates its value, unlike
+`data_scope`/`tools`/`requires_human`, which the charter-registry gate does check. A typo'd `plane`
+value would go unnoticed at review time, not caught by CI. Six agents declaring `plane: business` is
+therefore a convention this ADR establishes, not one the tooling yet enforces; extending
+`check-agent-charter-registry.sh` to validate `plane` against a closed enum is follow-up work this
+ADR surfaces but does not itself do.
+
 **D8 — Sequencing gates, stated as blocking.** No business agent that reads customer data through
-mcp-service ships before ADR-0195 / #2206, because `resolveContext()` currently returns a constant and
-every caller would authorize identically. The LiteLLM gateway (ADR-0031/0174) should be deployed before
+mcp-service ships before ADR-0195 / #2206 is fully closed. `resolveContext()` in mcp-service now
+resolves the caller from a real validated OAuth token (`CallerContextResolver`) rather than a
+hardcoded constant — the phase-1 gap this ADR was originally drafted against — but it still falls
+back to the `agent:mcp-anonymous` placeholder when no token is presented, and that fallback path is
+metered (`caller_identity{source="anonymous_fallback"}`) specifically so #2206's own precondition —
+the fallback must be unreachable, not merely documented as such — can be verified rather than
+asserted. The gate here is that metric reading zero in production, not the code existing. The
+LiteLLM gateway (ADR-0031/0174) should be deployed before
 the second agent, so token cost has a denominator. And each newly graduating service must be added to
 every fleet-sweep exclusion list it was previously absent from — the standing-order case shipped missing
 both Kafka mTLS and its OPA sidecar precisely this way.
@@ -233,5 +247,6 @@ The 2026-08-02 milestone applies, so a registry entry must land with the agent a
   [ADR-0175](0175-data-residency-and-sovereignty.md) — the undeployed gateway and the prompt-egress
   exposure D8 gates on.
 - `openbank-libs/governance/agents.yaml` and `docs/agents/` — the fifteen existing agents and charters.
-- Draft advisory GHSA-r5r5-2934-w92f — agent-service's blanket `ROLE_OPERATOR` privilege escalation.
+- agent-service's unfixed M2M privilege-scoping gap — tracked privately; not detailed here per this
+  repo's convention against writing unpatched security specifics to tracked files.
 

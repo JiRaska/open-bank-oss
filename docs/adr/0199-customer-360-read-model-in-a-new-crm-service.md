@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [analytics, privacy-gdpr, architecture, admin-ui]
-summary: "A new crm-service holds Customer 360 as a pure event-fed read model that owns no facts, so GDPR erasure is a replay rather than a cross-table delete sweep and no consumer has to invent its own cross-service join."
+summary: "A new crm-service holds Customer 360 as a pure event-fed read model that owns no facts; GDPR erasure anonymises in place on the PARTY_ERASED event, the same pattern every other consumer already uses."
 ---
 
 # ADR-0199 — Customer 360 read model in a new crm-service
@@ -67,7 +67,8 @@ identity and contact events (including ADR-0179 merges), account and balance eve
 summaries, product holdings, lending exposure, consent grant and revoke (ADR-0126 as extended by
 ADR-0198), notification and message-history metadata, and copilot interaction metadata. Storage is a
 CNPG Postgres, denormalised for query — not a graph or document store. Consumers are idempotent on
-event id, so a replay is safe by construction, which is what D4 rests on.
+event id, so applying the same event twice is safe by construction — a property D4 needs for a
+different reason than replay.
 
 **D3 — What it deliberately does not project.** No transaction-level rows (transaction-service stays
 the query surface; the CRM holds counts, volumes and recency). No balances presented as authoritative
@@ -76,13 +77,30 @@ service still holds, and the CRM does not become the exception. No KYC document 
 risk or propensity score: scores belong to ADR-0201's feature store, which has point-in-time
 correctness guarantees a projection does not.
 
-**D4 — Erasure is a replay, and that is the reason to build it this way.** An ADR-0118 erasure request
-drops the customer's projection rows and rebuilds from the event log with the erased subject's events
-filtered out. The statutory-override data (ledger, KYC, audit) is never in the projection, so the
-projection cannot be the thing that retains what it must not. This has to be *exercised*, not assumed:
-a test that erases a seeded customer and asserts the rebuilt projection retains no trace of them.
-An erasure path that has only ever been reasoned about is the unfalsified-gate failure mode
-`CLAUDE.md` documents at length — feed it the input it must flag.
+**D4 — Erasure follows the ADR-0118 pattern every other consumer already uses: direct anonymisation
+on the `PARTY_ERASED` event, not a replay.** An earlier draft of this ADR proposed rebuilding the
+projection from the event log with the erased subject's events filtered out. That does not hold
+against this fleet's actual Kafka configuration: every topic's `kafka-topic.yaml` sets
+`retention.ms: 604800000` (7 days) with `cleanup.policy: delete`, not compacted and not
+infinite-retention, so a full rebuild is only possible for events younger than a week — which is
+false for nearly every real customer. `openbank-analytics-sink`, the one existing analog in this
+codebase, was checked for precedent and does *not* rely on replay either: its `ErasureService` does
+per-row crypto-shredding against stored data, gated by `RetentionPolicies`, and its `BackfillService`
+pulls from a dedicated `BackfillSource`, never by re-consuming Kafka from offset zero.
+
+The corrected mechanism: crm-service subscribes to `PARTY_ERASED` exactly as `notification-service`'s
+`PartyErasureConsumer`, `kyc-service`'s `PartyEventConsumer.handleErased`, and
+`card-issuance-service`'s `PartyEventConsumer` already do, and on receipt anonymises or deletes its
+own persisted projection rows for that `partyId` directly — an in-place `UPDATE`/`DELETE` keyed by
+party, not a rebuild. This needs no durable event history at all, matches the pattern every other
+ADR-0118 consumer already uses (so it is the *expected* shape for a new consumer, not a novel one),
+and sidesteps the retention question entirely: the projection only ever needs the live event stream
+going forward, never a full historical replay. The statutory-override data (ledger, KYC, audit) is
+never in the projection to begin with, so the projection cannot be the thing that retains what it
+must not. This has to be *exercised*, not assumed: a test that erases a seeded customer and asserts
+the projection retains no trace of them after the event is consumed. An erasure path that has only
+ever been reasoned about is the unfalsified-gate failure mode `CLAUDE.md` documents at length — feed
+it the input it must flag.
 
 **D5 — Two consumers, one model.** A banker-facing admin-ui page, and MCP read tools so the ADR-0203
 agents query the same view a human sees. Tool-calls are authorized by the ADR-0034 OPA sidecar as
@@ -128,9 +146,11 @@ crm-service fails on the first clause.
 **Positive**
 - One place answers "who is this customer", and every consumer — banker, agent, segmenter — sees the
   same answer, so the CRM and a campaign cannot disagree about a customer.
-- Erasure over the customer aggregate becomes a replay, the operation a projection supports natively,
-  instead of a cross-table delete sweep that must itself be audited.
-- Closes two named BIAN gaps (Customer Case, Customer Workbench) with one service.
+- Erasure over the customer aggregate becomes an in-place anonymisation on a single event, the same
+  mechanism every other ADR-0118 consumer already uses, instead of a cross-table delete sweep that
+  must itself be audited.
+- Closes the named BIAN gap (Customer Case) and strengthens the partial one (Customer Workbench,
+  today only partially covered by admin-ui) with one service.
 - The fraud REVIEW queue gains the context it lacks today, which is the precondition for ADR-0203's
   triage agent rather than a separate build.
 
@@ -160,7 +180,8 @@ crm-service fails on the first clause.
 - DORA: this is an internal service in the ICT dependency picture rather than a third party, and
   choosing it over a commercial CRM is the exit position recorded in the ADR-0174 register.
 - GDPR: Art. 5(1)(c) data minimisation, for which D3's exclusions are the mechanism; Art. 17 erasure,
-  where the ADR-0118 projection-replay model is what makes the request satisfiable; Art. 32, since a
+  where D4's direct anonymisation-on-event, matching ADR-0118's existing consumer pattern, is what
+  makes the request satisfiable; Art. 32, since a
   concentrated PII store needs the access and segmentation controls named above; Art. 30, since a new
   processing purpose needs its own record-of-processing row. The lawful basis is legitimate interest
   for servicing, deliberately distinct from the consent basis marketing requires under ADR-0198 — a

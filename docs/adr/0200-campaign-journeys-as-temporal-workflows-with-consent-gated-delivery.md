@@ -36,12 +36,17 @@ to, and a customer who revokes mid-sequence keeps receiving the remaining steps 
 notices. GDPR Art. 7(3) requires withdrawal to be as easy as giving it; a control that takes effect at
 the next batch boundary is weaker than the promise the UI makes when the customer flips the toggle.
 
-**Force 3 — the delivery channels a campaign needs are partly stubs.** This must be stated plainly
-because it is the real cost. In `NotificationConsumer`, `IN_APP` is `log.infof("IN_APP stub: …")` and
-the row stays `PENDING` — ADR-0176 already lists this as a consequence ("It has to become real delivery
-before any of this works"). `SMS` is likewise a stub with no port or adapter. `PUSH` is real
+**Force 3 — the delivery channels a campaign needs are missing or half-working.** This must be stated
+plainly because it is the real cost, and it has gotten more expensive since ADR-0176 was written.
+`IN_APP` and `SMS` were stub branches in `NotificationConsumer` (`log.infof("IN_APP stub: …")`, row
+stays `PENDING`) — ADR-0176 listed `IN_APP` as a consequence ("It has to become real delivery before
+any of this works"). Issue #2372 has since removed both from `NotificationChannel` entirely, so
+`IN_APP` is no longer a stub waiting to be finished — it does not exist as a deliverable option at
+all, and re-adding it means a real terminal-status transition and a wake-signal design, not flipping
+a flag on existing dead code. `SMS` needs an actual provider port from nothing. `PUSH` is real
 (`ApnsPushSender`, `FcmPushSender` behind `PushSenderRouter`) but both adapters default to
-`enabled=false` and return a skipped success. EMAIL is the only channel that both works and is enabled.
+`enabled=false` and return a skipped success. EMAIL is the only channel that both works and is
+enabled — force 3 is therefore narrower than it was when this ADR was first drafted, not wider.
 A campaign capability that assumed four working channels would be shipping against three fictions.
 
 **Force 4 — ADR-0135 §3 is still unbuilt (#1182), and a campaign is what makes it urgent.** Push
@@ -83,7 +88,7 @@ The push alone would depend on an event arriving. Force 2 is closed by having bo
 **D3 — Delivery goes through notification-service, never direct.** campaign-service publishes a
 notification request; it holds no SMTP, APNs or FCM credentials and has no delivery adapter. This keeps
 the ADR-0198 D4 consent gate on the single choke point every channel passes through, so a campaign
-cannot bypass the gate even by mistake. It also means the channel stubs of force 3 are fixed once, in
+cannot bypass the gate even by mistake. It also means force 3's missing channels get built once, in
 the service that owns them, for every sender.
 
 **D4 — Templates stay a catalogue; a campaign composes, it does not author.** ADR-0176's closed
@@ -108,9 +113,11 @@ a customer who consented to marketing is still someone the bank must not send a 
 day their card was frozen for fraud.
 
 **D7 — Blocking dependencies, stated as blocking.** This ADR cannot ship before: ADR-0198 (a real
-consent to check), `IN_APP` becoming real delivery, and ADR-0135 §3 / #1182 for any push step carrying
-customer-specific content. Launching EMAIL-only against ADR-0198 is a legitimate first slice; SMS stays
-out of scope until a port exists at all.
+consent to check), `IN_APP` being rebuilt as a real channel (it was removed from `NotificationChannel`
+entirely by #2372, not merely left as a stub — re-adding it needs a terminal-status transition and a
+wake-signal design from scratch), and ADR-0135 §3 / #1182 for any push step carrying customer-specific
+content. Launching EMAIL-only against ADR-0198 is a legitimate first slice; SMS stays out of scope
+until a port exists at all.
 
 **D8 — Licensing.** campaign-service sends to customers under a consent basis and is not agent-plane, so
 it is Apache-2.0 and is **not** added to `rules.yaml agpl_modules` (ADR-0197). The campaign-copilot agent
@@ -153,8 +160,8 @@ of ADR-0203 is a separate component and is.
   make, and it is demonstrable to a regulator as a running workflow that terminated on a signal.
 - Every send is on the ADR-0198 gate at the single choke point, so the enforcement cannot be bypassed by
   adding a second sender later.
-- Fixing the `IN_APP` stub and #1182 has an owner and a deadline instead of being inherited silently — the
-  outcome ADR-0176 wanted for the same two items.
+- Rebuilding `IN_APP` and closing #1182 have an owner and a deadline instead of being inherited
+  silently — the outcome ADR-0176 wanted for the same two items.
 - Closes BIAN row 13 (Marketing Plan Activity / Campaign management).
 - Retries, timeouts, per-step audit and journey visibility come from Temporal rather than being built.
 
@@ -218,5 +225,7 @@ advice.
 - [ADR-0197](0197-agpl-open-core-boundary-covers-the-whole-agent-plane.md) — why campaign-service stays
   Apache-2.0.
 - `openbank-notification-service/src/main/kotlin/com/openbank/notification/application/NotificationConsumer.kt`
-  — the `IN_APP` and `SMS` stubs, and the per-channel dispatch.
+  — the per-channel dispatch `IN_APP` needs to rejoin.
+- Issue #2372 — removed `IN_APP` and `SMS` from `NotificationChannel` rather than leaving them as
+  unreachable stubs.
 - `docs/strategy/01-bian-service-domain-mapping.md` — row 13, the named gap.

@@ -112,8 +112,8 @@ consent is a consent that survives its own revocation.
 - **One `MARKETING_COMMS` scope with the channel carried in adjacent metadata.** Fewer enum values,
   and the channel axis still expressible. Rejected because every existing consent decision in this
   codebase is made by scope matching; putting the channel elsewhere means every caller must remember
-  to check a second field, and the one that forgets fails open. Three enum values are checked by the
-  compiler.
+  to check a second field, and the one that forgets fails open. Three enum values are at least
+  visible in every `ConsentScope` reference a reviewer reads, which a second field on the side is not.
 - **Keep `notification_preferences.marketing_push` as the consent and flip its default to FALSE.** A
   one-line migration that would make the push path defensible. Rejected: it fixes one channel of
   three, leaves the EMAIL path with no gate at all, still holds an Art. 7 consent outside the
@@ -145,8 +145,16 @@ consent is a consent that survives its own revocation.
   opted in silently reverts to denied. Rollback note: the projection columns are additive and the
   forwarder is flag-guarded, so rollback is flipping the flag back; a rollback after the V2 drop
   cannot restore that column, which is acceptable because it has no readers.
-- Three new values on a fleet-shared enum that is matched exhaustively in several places, so this is
-  a compile-error sweep at first build.
+- Three new values on a fleet-shared enum. This is **not** a compile-error sweep — `ConsentScope` is
+  not matched exhaustively anywhere in production code today. The validity-cap and frequency-cap
+  logic (`Consent.kt`'s `maxDays` computation and `frequencyPerDay()`) both branch on
+  `scopes.any { it in AISP_SCOPES }` against an explicit `setOf(...)` allow-list, not a `when`. A new
+  `MARKETING_COMMS_*` scope not added to that allow-list falls through to the 365-day, no-frequency-cap
+  branch by default — correctly, since it is not an AISP scope, but silently, by omission rather than
+  by a compiler-enforced check. D1 must explicitly confirm the three new scopes are excluded from
+  `AISP_SCOPES` (they should be — this is a GDPR consent, not an account-access one), and that
+  confirmation has to be a reviewed line in the PR, not an assumption resting on exhaustiveness that
+  does not exist.
 
 **Neutral**
 - The customer-facing API shape does not change: `PATCH /customer/v1/profile/consent` keeps its
