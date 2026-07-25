@@ -249,4 +249,3 @@ The 2026-08-02 milestone applies, so a registry entry must land with the agent a
 - `openbank-libs/governance/agents.yaml` and `docs/agents/` — the fifteen existing agents and charters.
 - agent-service's unfixed M2M privilege-scoping gap — tracked privately; not detailed here per this
   repo's convention against writing unpatched security specifics to tracked files.
-
