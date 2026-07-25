@@ -27,79 +27,133 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: ledger-service-ingress-allow-list
-  namespace: ledger
+  name: kafka-broker-ingress-allow-list
+  namespace: messaging
   labels:
-    app.kubernetes.io/part-of: ledger
+    app.kubernetes.io/part-of: messaging
     openbank.io/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: ledger-service
+      strimzi.io/cluster: openbank-cluster
   policyTypes:
     - Ingress
   ingress:
     - from:
         - podSelector: {}
     - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: accounts
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: aml
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: anacredit
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: audit
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: balances
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: billing
+              kubernetes.io/metadata.name: consent
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: finrep
+              kubernetes.io/metadata.name: customer-edge
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: dispute
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: documents
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: fraud
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: fx
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: interest
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kyc
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ledger
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: lending
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: messaging
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: notifications
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: onboarding
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: party
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: payments
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pid
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: platform
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: security-scanner
+              kubernetes.io/metadata.name: psd2
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: admin-ui
-      ports:
-        - protocol: TCP
-          port: 8101
-        - protocol: TCP
-          port: 8181
-    - from:
+              kubernetes.io/metadata.name: sanctions
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: observability
-      ports:
-        - protocol: TCP
-          port: 8085
-    - from:
+              kubernetes.io/metadata.name: sca
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sdd
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: security-scanner
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: statements
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tpp-registry
       ports:
         - protocol: TCP
-          port: 8085
+          port: 9092
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: redis-ingress-allow-list
-  namespace: ledger
+  name: kafka-ui-ingress-allow-list
+  namespace: messaging
   labels:
-    app.kubernetes.io/part-of: ledger
+    app.kubernetes.io/part-of: messaging
     openbank.io/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: redis
+      app.kubernetes.io/name: kafka-ui
   policyTypes:
     - Ingress
   ingress:
     - from:
         - podSelector: {}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: admin-ui
+      ports:
+        - protocol: TCP
+          port: 8080

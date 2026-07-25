@@ -27,15 +27,15 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: interest-service-ingress-allow-list
-  namespace: interest
+  name: document-service-ingress-allow-list
+  namespace: documents
   labels:
-    app.kubernetes.io/part-of: interest
+    app.kubernetes.io/part-of: documents
     openbank.io/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: interest-service
+      app.kubernetes.io/name: document-service
   policyTypes:
     - Ingress
   ingress:
@@ -47,19 +47,10 @@ spec:
               kubernetes.io/metadata.name: customer-edge
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: platform
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: security-scanner
-        - namespaceSelector:
-            matchLabels:
               kubernetes.io/metadata.name: admin-ui
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: keda
       ports:
         - protocol: TCP
-          port: 8125
+          port: 8143
         - protocol: TCP
           port: 8181
     - from:
@@ -68,22 +59,22 @@ spec:
               kubernetes.io/metadata.name: observability
       ports:
         - protocol: TCP
-          port: 8085
+          port: 8088
     - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: security-scanner
       ports:
         - protocol: TCP
-          port: 8085
+          port: 8088
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: redis-ingress-allow-list
-  namespace: interest
+  namespace: documents
   labels:
-    app.kubernetes.io/part-of: interest
+    app.kubernetes.io/part-of: documents
     openbank.io/derived: gen-network-policies
 spec:
   podSelector:
