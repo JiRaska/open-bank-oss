@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.10.1...party-service-v0.11.0) (2026-07-25)
+
+
+### Features
+
+* **party:** project consent-service's marketing consent into consent_marketing (ADR-0205 D4) ([#2432](https://github.com/JiRaska/open-bank-oss/issues/2432)) ([5423ee9](https://github.com/JiRaska/open-bank-oss/commit/5423ee9cc9fbf0e05c044da6ab7bebdceebe36bd))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.10.0...party-service-v0.10.1) (2026-07-22)
 
 
