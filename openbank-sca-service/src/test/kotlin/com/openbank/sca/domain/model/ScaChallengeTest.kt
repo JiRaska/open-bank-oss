@@ -111,7 +111,7 @@ class ScaChallengeTest {
         id = UUID.randomUUID(),
         partyId = UUID.randomUUID(),
         purpose = ScaPurpose.LOGIN,
-        method = ScaMethod.SMS_OTP,
+        method = ScaMethod.TOTP,
         status = status,
         expiresAt = expiresAt,
         attemptCount = attemptCount,

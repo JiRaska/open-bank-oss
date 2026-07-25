@@ -231,33 +231,31 @@ class ScaServiceTest {
     }
 
     @Test
-    fun `initiate generates OTP for SMS_OTP method`(): Unit = runBlocking {
+    fun `initiate generates OTP for TOTP method`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         every { otpGenerator.generate() } returns "123456"
         coEvery { idempotencyStore.get(any()) } returns null
         coEvery { repository.save(any()) } answers { firstArg() }
         coEvery { idempotencyStore.save(any(), any(), any()) } returns Unit
         coEvery { otpStore.store(any(), any(), any()) } returns Unit
-        coEvery { notificationDispatchGuard.sendSmsOtp(any(), any()) } returns Unit
 
         val result = service.initiate(
             InitiateScaCommand(
                 partyId = partyId,
                 purpose = ScaPurpose.LOGIN,
-                preferredMethod = ScaMethod.SMS_OTP,
+                preferredMethod = ScaMethod.TOTP,
                 dynamicLinkingData = null,
                 redirectUrl = null,
             ),
         )
 
-        assertThat(result.method).isEqualTo(ScaMethod.SMS_OTP)
+        assertThat(result.method).isEqualTo(ScaMethod.TOTP)
         coVerify(exactly = 1) { otpStore.store(result.id, "123456", 300L) }
-        coVerify(exactly = 1) { notificationDispatchGuard.sendSmsOtp(partyId, "123456") }
     }
 
     @Test
     fun `verify completes challenge on successful OTP verification`(): Unit = runBlocking {
-        val challenge = challenge(method = ScaMethod.SMS_OTP)
+        val challenge = challenge(method = ScaMethod.TOTP)
 
         coEvery { repository.findById(challenge.id) } returns challenge
         coEvery { otpStore.verify(challenge.id, "123456") } returns true
@@ -319,7 +317,7 @@ class ScaServiceTest {
 
     @Test
     fun `verify fails challenge on invalid OTP`(): Unit = runBlocking {
-        val challenge = challenge(method = ScaMethod.SMS_OTP)
+        val challenge = challenge(method = ScaMethod.TOTP)
 
         coEvery { repository.findById(challenge.id) } returns challenge
         coEvery { otpStore.verify(challenge.id, "bad-otp") } returns false
@@ -653,7 +651,7 @@ class ScaServiceTest {
 
     @Test
     fun `verify emits scaChallengeResolved completed on a successful OTP verification`(): Unit = runBlocking {
-        val challenge = challenge(method = ScaMethod.SMS_OTP)
+        val challenge = challenge(method = ScaMethod.TOTP)
         coEvery { repository.findById(challenge.id) } returns challenge
         coEvery { otpStore.verify(challenge.id, "123456") } returns true
         coEvery { otpStore.invalidate(challenge.id) } returns Unit
@@ -667,12 +665,12 @@ class ScaServiceTest {
             ),
         )
 
-        verify(exactly = 1) { metrics.scaChallengeResolved("SMS_OTP", "completed") }
+        verify(exactly = 1) { metrics.scaChallengeResolved("TOTP", "completed") }
     }
 
     @Test
     fun `verify emits scaChallengeResolved failed when the last OTP attempt fails`(): Unit = runBlocking {
-        val challenge = challenge(method = ScaMethod.SMS_OTP, maxAttempts = 1)
+        val challenge = challenge(method = ScaMethod.TOTP, maxAttempts = 1)
         coEvery { repository.findById(challenge.id) } returns challenge
         coEvery { otpStore.verify(challenge.id, "bad") } returns false
         coEvery { repository.save(any()) } answers { firstArg() }
@@ -689,12 +687,12 @@ class ScaServiceTest {
             }
         }.isInstanceOf(ScaVerificationFailedException::class.java)
 
-        verify(exactly = 1) { metrics.scaChallengeResolved("SMS_OTP", "failed") }
+        verify(exactly = 1) { metrics.scaChallengeResolved("TOTP", "failed") }
     }
 
     @Test
     fun `verify does not emit scaChallengeResolved for a retryable OTP failure`(): Unit = runBlocking {
-        val challenge = challenge(method = ScaMethod.SMS_OTP, maxAttempts = 3)
+        val challenge = challenge(method = ScaMethod.TOTP, maxAttempts = 3)
         coEvery { repository.findById(challenge.id) } returns challenge
         coEvery { otpStore.verify(challenge.id, "bad") } returns false
         coEvery { repository.save(any()) } answers { firstArg() }
@@ -1009,7 +1007,7 @@ class ScaServiceTest {
 
     @Test
     fun `a card-management challenge that is not approved cannot be consumed`(): Unit = runBlocking {
-        val ch = cardChallenge().copy(status = ScaStatus.PENDING, method = ScaMethod.SMS_OTP)
+        val ch = cardChallenge().copy(status = ScaStatus.PENDING, method = ScaMethod.TOTP)
         coEvery { repository.findById(ch.id) } returns ch
         assertThatThrownBy {
             runBlocking {
@@ -1061,7 +1059,7 @@ class ScaServiceTest {
     private fun challenge(
         id: UUID = UUID.randomUUID(),
         partyId: UUID = UUID.randomUUID(),
-        method: ScaMethod = ScaMethod.SMS_OTP,
+        method: ScaMethod = ScaMethod.TOTP,
         expiresAt: OffsetDateTime = now.plusMinutes(5),
         attemptCount: Int = 0,
         maxAttempts: Int = 3,

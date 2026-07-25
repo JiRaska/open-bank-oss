@@ -27,14 +27,4 @@ class NotificationDispatchGuardTest {
 
         coVerify(exactly = 1) { sender.sendPushNotification(partyId, challengeId, "Approve transaction") }
     }
-
-    @Test
-    fun `sendSmsOtp delegates to NotificationSender`(): Unit = runBlocking {
-        val partyId = UUID.randomUUID()
-        coEvery { sender.sendSmsOtp(partyId, any()) } returns Unit
-
-        guard.sendSmsOtp(partyId, "123456")
-
-        coVerify(exactly = 1) { sender.sendSmsOtp(partyId, "123456") }
-    }
 }

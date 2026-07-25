@@ -4,7 +4,7 @@
 
 `openbank-sca-service` je **stroj pro silné ověření zákazníka (SCA)** na platformě OpenBank. Provádí step-up autentizaci, když si jiná služba potřebuje být jistá, že je přítomen skutečný zákazník a schválil citlivou akci. Drží:
 
-- **Agregát ScaChallenge** — jedna autentizační výzva: party, účel (PAYMENT_INITIATION / CONSENT_GRANT / LOGIN / AGENT_ACTION / SENSITIVE_DATA_ACCESS), metoda (SMS_OTP / TOTP / PUSH_NOTIFICATION / BIOMETRIC), stav (PENDING / COMPLETED / FAILED / EXPIRED / CANCELLED), čítač pokusů, expirace a volitelná **data dynamického provázání** (částka, měna, IBAN/jméno příjemce, reference) dle PSD2 RTS čl. 5.
+- **Agregát ScaChallenge** — jedna autentizační výzva: party, účel (PAYMENT_INITIATION / CONSENT_GRANT / LOGIN / AGENT_ACTION / SENSITIVE_DATA_ACCESS), metoda (TOTP / PUSH_NOTIFICATION / BIOMETRIC), stav (PENDING / COMPLETED / FAILED / EXPIRED / CANCELLED), čítač pokusů, expirace a volitelná **data dynamického provázání** (částka, měna, IBAN/jméno příjemce, reference) dle PSD2 RTS čl. 5.
 - **EnrolledDevice** — credential zařízení (veřejný klíč + algoritmus ES256/ED25519) zapsaný k party, slouží k ověření pozdějších podpisů schválení (ADR-0021). Privátní klíč nikdy neopustí hardwarové úložiště zařízení (Secure Enclave / Android Keystore).
 - **DeviceApprovalDecision** — podpisem ověřené, dynamicky provázané rozhodnutí APPROVED/DENIED zaznamenané out-of-band zapsaným zařízením; uloženo přechodně (musí jen přežít svou výzvu).
 

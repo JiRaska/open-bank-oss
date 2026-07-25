@@ -9,7 +9,6 @@ import java.util.UUID
 
 enum class ScaMethod {
     PUSH_NOTIFICATION,
-    SMS_OTP,
     TOTP,
     BIOMETRIC,
 }
