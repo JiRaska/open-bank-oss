@@ -13,7 +13,9 @@ import com.openbank.libs.authz.PolicyDecisionPoint
 import com.openbank.libs.authz.Principal
 import com.openbank.mcp.application.McpCallAuditor
 import com.openbank.mcp.application.McpToolRegistry
+import com.openbank.mcp.application.port.out.CallerIdentitySource
 import com.openbank.mcp.application.port.out.ConsentContext
+import com.openbank.mcp.application.port.out.McpMetricsPort
 import com.openbank.mcp.application.protocol.InitializeResult
 import com.openbank.mcp.application.protocol.McpError
 import com.openbank.mcp.application.protocol.McpErrorCode
@@ -23,6 +25,7 @@ import com.openbank.mcp.application.protocol.ServerInfo
 import com.openbank.mcp.application.protocol.ToolCallResult
 import com.openbank.mcp.application.protocol.ToolContent
 import com.openbank.mcp.application.protocol.ToolsListResult
+import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -32,6 +35,7 @@ import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.time.Duration
 
 /**
  * The Model Context Protocol server (ADR-0181): JSON-RPC 2.0 over HTTP POST, exposing the curated
@@ -44,6 +48,12 @@ import org.jboss.logging.Logger
  * AI-attributed [McpCallAuditor] audit event (ADR-0031 D5 / ADR-0086), so an AI-initiated action
  * against the bank is reconstructable. `tools/list`, `initialize` and `ping` do not: they touch no
  * customer data and expose only the static tool catalogue.
+ *
+ * The same terminal branches also report to [McpMetricsPort] — audit and meter are emitted from one
+ * place so the aggregate can never disagree with the per-call trail. The audit event answers "what
+ * did this agent do"; the meters answer the questions a trail cannot without a query: the rate, the
+ * outcome mix, the latency, and — via `caller_identity` — how many calls still run under the phase-1
+ * placeholder identity rather than a validated token (blocker #2206).
  *
  * Caller identity (ADR-0195): the acting agent + presented consent come from the caller's validated
  * OAuth 2.1 access token via [CallerContextResolver] — `sub` (`agent:<id>`, classified AI_AGENT by
@@ -68,6 +78,15 @@ class McpEndpoint(
     private val protocolVersion: String,
 ) {
 
+    /**
+     * Field-injected rather than a constructor parameter: the constructor already carries the four
+     * collaborators plus the three `@ConfigProperty` server-identity strings, and a ninth parameter
+     * trips detekt's `LongParameterList`. Same shape as `LoanStageEventConsumer` / `VopRateLimitFilter`
+     * elsewhere in the fleet.
+     */
+    @Inject
+    lateinit var metrics: McpMetricsPort
+
     private val log = Logger.getLogger(McpEndpoint::class.java)
 
     @POST
@@ -76,6 +95,10 @@ class McpEndpoint(
         val id = body.path("id").let { if (it.isMissingNode) NullNode.instance else it }
         val method = body.path("method").asText("")
         val params = body.path("params")
+
+        // Bounded before it becomes a tag: `method` is a caller-supplied string on a public agent
+        // surface, so an unrecognised value must not mint a new metric series (cardinality contract).
+        metrics.requestHandled(if (method in KNOWN_METHODS) method else McpMetricsPort.UNKNOWN_METHOD)
 
         val result: Any = when (method) {
             "initialize" -> InitializeResult(
@@ -94,11 +117,16 @@ class McpEndpoint(
 
     @Suppress("ReturnCount", "TooGenericExceptionCaught")
     private fun handleToolCall(id: JsonNode, params: JsonNode): Response {
+        val startedAt = System.nanoTime()
         val toolName = params.path("name").asText("")
         val arguments = params.path("arguments").let { if (it.isMissingNode) mapper.createObjectNode() else it }
         // Argument KEY names only — the values are customer data and must never enter the audit
         // trail (McpCallAuditor KDoc).
         val argumentKeys = arguments.fieldNames().asSequence().sorted().toList()
+        // Bounded before it becomes a tag: an unmapped tool name is caller-supplied, so it is
+        // reported as the single "unmapped" value rather than as itself (cardinality contract). The
+        // audit event still carries the exact name — that is a per-call record, not a label.
+        val toolTag = if (registry.capabilities.containsKey(toolName)) toolName else McpMetricsPort.UNMAPPED_TOOL
 
         // Caller authentication (ADR-0195): the acting agent + presented consent come from the
         // validated OAuth token. A malformed agent token (e.g. no consent_id) fails CLOSED — a
@@ -106,6 +134,8 @@ class McpEndpoint(
         val ctx = resolveCaller(toolName, argumentKeys)
             ?: return toolError(id, "Authorization unavailable")
 
+        // Audit and meter together, at every terminal branch, so the aggregate can never disagree
+        // with the per-call trail about what happened.
         fun audit(
             capability: String?,
             decision: McpCallAuditor.Decision,
@@ -124,6 +154,7 @@ class McpEndpoint(
                     argumentKeys = argumentKeys,
                 ),
             )
+            metrics.toolCallCompleted(toolTag, decision, result, Duration.ofNanos(System.nanoTime() - startedAt))
         }
 
         // Deny-by-default: no capability mapping ⇒ no OPA action ⇒ refuse.
@@ -180,6 +211,7 @@ class McpEndpoint(
         resolveContext()
     } catch (ex: Exception) {
         log.warnf("caller context resolution failed for %s: %s — denying", toolName, ex.message)
+        metrics.callerIdentityResolved(CallerIdentitySource.RESOLUTION_FAILED)
         runBlocking {
             auditor.toolCallCompleted(
                 McpCallAuditor.ToolCall(
@@ -203,8 +235,18 @@ class McpEndpoint(
     // deployed stub surface keeps working unchanged. The `agent:mcp-anonymous` literal deliberately
     // lives HERE: the #2206 CI guard keys on it, refusing to let a real read port land while this
     // fallback is still reachable. It is removed when OIDC is enabled and a token becomes mandatory.
-    private fun resolveContext(): ConsentContext = callerResolver.resolveOrNull()
-        ?: ConsentContext(agentId = "agent:mcp-anonymous", consentId = "none", grantedAccounts = emptyList())
+    //
+    // Which of the two branches was taken is METERED, because "the fallback is still reachable" is
+    // exactly the #2206 precondition and a code comment cannot be evaluated against production.
+    // `caller_identity{source="anonymous_fallback"}` must be zero before a real read port lands.
+    private fun resolveContext(): ConsentContext {
+        val fromToken = callerResolver.resolveOrNull()
+        metrics.callerIdentityResolved(
+            if (fromToken == null) CallerIdentitySource.ANONYMOUS_FALLBACK else CallerIdentitySource.TOKEN,
+        )
+        return fromToken
+            ?: ConsentContext(agentId = "agent:mcp-anonymous", consentId = "none", grantedAccounts = emptyList())
+    }
 
     private fun toolError(id: JsonNode, message: String): Response = Response.ok(
         McpResponse(id = id, result = ToolCallResult(listOf(ToolContent(text = message)), isError = true)),
@@ -212,4 +254,12 @@ class McpEndpoint(
 
     private fun error(id: JsonNode, code: Int, message: String): Response =
         Response.ok(McpResponse(id = id, error = McpError(code, message))).build()
+
+    private companion object {
+        /**
+         * The JSON-RPC methods this server implements. Used ONLY to bound the `method` metric tag —
+         * the dispatch itself is the `when` in [handle], which stays the single source of behaviour.
+         */
+        val KNOWN_METHODS = setOf("initialize", "notifications/initialized", "ping", "tools/list", "tools/call")
+    }
 }
