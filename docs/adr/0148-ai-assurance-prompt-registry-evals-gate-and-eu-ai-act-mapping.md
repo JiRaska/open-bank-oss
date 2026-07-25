@@ -21,6 +21,16 @@ summary: "Add an AI assurance layer: an in-repo versioned prompt registry that e
 > first real ops-agent prompts extracted. Still open: wiring each service to *load* its
 > system prompt from the registry (so `prompt_hash` resolves), the `check-prompt-registry`
 > guard, and the per-charter **evals gate** — tracked as the ADR-0148 code follow-up.
+>
+> **Update (2026-07-25, issue #1918).** The mapping's system inventory now covers the AI
+> systems that are **not** LLM agent charters — the fraud scoring plane (ADR-0084) and the ML
+> decisioning substrate (ADR-0139/0140/0141/0142) — from a new
+> `openbank-libs/governance/ml-systems.yaml`, kept separate from `agents.yaml` (which is hashed
+> verbatim into ~29 OPA bundles) and consumed only by `gen-eu-ai-act.py`. This closes the
+> deadline-critical (2026-08-02) inventory gap: the document now names every AI system, records
+> that the only high-risk one (credit decisioning, ADR-0142) is *planned and unbuilt*, and that
+> the nearest-to-money ML system (fraud) runs **shadow-only**. The evals-gate registry + guard
+> landed in #2070; the prompt-loading wiring remains the deferred code follow-up.
 
 ## Context
 

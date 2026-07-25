@@ -15,9 +15,12 @@ Creditworthiness assessment of natural persons is high-risk under **Annex III(5)
 performs credit scoring or credit decisioning; ADR-0142 (credit decisioning) is
 *Proposed* and unbuilt. The customer- and operator-facing agents are
 proposal-only — a human dispositions every effect — which keeps them out of the
-autonomous-decision-making category. This document is (a) the standing AI-system
-inventory a deployer must keep, and (b) the precondition ADR-0142 must satisfy
-article-by-article before it can move past *Proposed*.
+autonomous-decision-making category. The one ML system near the money path, the fraud
+scoring plane (ADR-0084), runs its model in **shadow mode** — the verdict is logged, never
+enforced — and fraud detection is not Annex III creditworthiness. This document is (a) the
+standing AI-system inventory a deployer must keep — LLM agents *and* the non-agent ML
+systems below — and (b) the precondition ADR-0142 must satisfy article-by-article before
+it can move past *Proposed*.
 
 ## System inventory
 
@@ -37,6 +40,23 @@ article-by-article before it can move past *Proposed*.
 | `docs-truth-agent` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `authz-policy-auditor` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `flaky-test-hunter` | development | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
+
+### Non-agent ML and statistical systems
+
+AI systems that are not LLM agent charters — the fraud scoring plane and the ML
+decisioning substrate (source: `openbank-libs/governance/ml-systems.yaml`). Credit
+decisioning is the only entry that becomes high-risk, and it is unbuilt.
+
+| System | ADR | Status | Plane | Risk class | Annex III | Basis |
+|---|---|---|---|---|---|---|
+| `fraud-real-time-scoring` | ADR-0084 | shipped | openbank-fraud-service | Limited / minimal risk | — | Real-time transaction fraud scoring (ALLOW/CHALLENGE/REVIEW/DECLINE). Fraud prevention is not Annex III creditworthiness; the deterministic rule layer is the permanent decision floor (ADR-0139) and the service fails open behind a flag — it can add friction, never autonomously deny a natural person a service. |
+| `ml-decisioning-platform` | ADR-0139, ADR-0140 | partial | openbank-libs (feature store + in-process ONNX serving) | Limited / minimal risk | — | Event-fed feature store + in-process ONNX serving (a real baseline model, openbank-fraud-service `ml/baseline-fraud-v1.onnx` via `MlModelPort.scoreShadow`), shadow-to-champion governance. Runs in production in SHADOW mode only — scores are logged, never honoured; the caller degrades to the deterministic rule floor — and its sole consumer is fraud scoring, so it makes no decision on a natural person. Point-in-time correctness (ADR-0140) removes train/serve skew by construction. `deployed: false` here means "acts on its output" — the model runs but its verdict is never enforced. |
+| `model-registry-provenance` | ADR-0141 | proposed | openbank-libs (governance substrate) | — | — | Model card + signed content-addressed ONNX artifact + in-toto attestation. Not itself an AI system that acts — it is the Art. 11 technical-documentation / provenance substrate a high-risk model would be governed by. Proposed, unbuilt. |
+| `credit-decisioning-engine` | ADR-0142 | proposed | (planned) openbank-libs ML platform | Planned high-risk (not deployed) | III.5(b) | Creditworthiness assessment of natural persons — Annex III(5)(b) high-risk. PROPOSED and unbuilt; when it ships it is the platform's first high-risk system and every Art. 9-15 obligation applies. Stricter than fraud by design: no decision without machine-readable adverse-action reasons, deterministic affordability rules supreme, declines route to mandatory four-eyes. This inventory is the precondition ADR-0142 must satisfy first. |
+
+> **Planned high-risk (not deployed):** `credit-decisioning-engine`. Inventoried in advance; the Art. 9–15
+> obligations below apply the day it ships, which is why this document is ADR-0142's
+> named precondition. No such system runs today.
 
 ## Obligation coverage (Art. 9–15) for a high-risk system
 
@@ -84,5 +104,7 @@ not deployed.
 ## Provenance
 
 - Source: `openbank-libs/governance/agents.yaml` (sha256 `db00ef54f93055dd…`, 14 charters)
-- Related: ADR-0031 (agent governance), ADR-0141 (model registry), ADR-0142 (credit
-  decisioning), ADR-0148 (this assurance layer).
+- Source: `openbank-libs/governance/ml-systems.yaml` (sha256 `9cd5cb5b20918520…`, 4 non-agent systems)
+- Related: ADR-0031 (agent governance), ADR-0084 (fraud scoring plane), ADR-0139/0140
+  (ML decisioning platform), ADR-0141 (model registry), ADR-0142 (credit decisioning),
+  ADR-0148 (this assurance layer).

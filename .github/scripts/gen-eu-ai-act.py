@@ -36,6 +36,10 @@ except ImportError:
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 AGENTS = ROOT / "openbank-libs" / "governance" / "agents.yaml"
+# Non-agent AI/ML systems (fraud scoring plane, ML decisioning substrate) — the AI systems that
+# are NOT LLM agent charters. Kept out of agents.yaml on purpose (that file is hashed verbatim
+# into ~29 OPA bundles); consumed only here to complete the EU AI Act inventory. See its header.
+ML_SYSTEMS = ROOT / "openbank-libs" / "governance" / "ml-systems.yaml"
 OUT = ROOT / "docs" / "compliance" / "eu-ai-act.md"
 
 # --- classification ruleset (encoded, reviewed here — not free text in the doc) -------------
@@ -89,6 +93,15 @@ def classify(agent):
 def main():
     data = yaml.safe_load(AGENTS.read_text())
     agents = data.get("agents", []) or []
+    ml_data = yaml.safe_load(ML_SYSTEMS.read_text()) if ML_SYSTEMS.exists() else {}
+    ml_systems = (ml_data or {}).get("ml_systems", []) or []
+    # A non-agent ML system flips the obligations to "APPLIES NOW" only if it is both HIGH-RISK
+    # and actually deployed-and-acting (deployed: true). A planned or shadow-only high-risk system
+    # is inventoried but does not yet trigger the article-by-article obligations.
+    ml_high_risk_live = [
+        m.get("id") for m in ml_systems
+        if m.get("risk_class") == "HIGH-RISK" and m.get("deployed") is True
+    ]
 
     L = []
     w = L.append
@@ -109,9 +122,12 @@ def main():
     w("performs credit scoring or credit decisioning; ADR-0142 (credit decisioning) is")
     w("*Proposed* and unbuilt. The customer- and operator-facing agents are")
     w("proposal-only — a human dispositions every effect — which keeps them out of the")
-    w("autonomous-decision-making category. This document is (a) the standing AI-system")
-    w("inventory a deployer must keep, and (b) the precondition ADR-0142 must satisfy")
-    w("article-by-article before it can move past *Proposed*.")
+    w("autonomous-decision-making category. The one ML system near the money path, the fraud")
+    w("scoring plane (ADR-0084), runs its model in **shadow mode** — the verdict is logged, never")
+    w("enforced — and fraud detection is not Annex III creditworthiness. This document is (a) the")
+    w("standing AI-system inventory a deployer must keep — LLM agents *and* the non-agent ML")
+    w("systems below — and (b) the precondition ADR-0142 must satisfy article-by-article before")
+    w("it can move past *Proposed*.")
     w("")
     w("## System inventory")
     w("")
@@ -124,6 +140,35 @@ def main():
             high_risk.append(a.get("id"))
         w(f"| `{a.get('id')}` | {a.get('plane', '—')} | {cls} | {point} | {why} |")
     w("")
+
+    # --- Non-agent ML / statistical systems (ADR-0084 fraud plane, ADR-0139/0140/0141/0142) -----
+    # The inventory the AI Act requires covers EVERY AI system, not only the LLM agent charters.
+    # The fraud scoring plane and the ML decisioning substrate are AI systems that are not charters;
+    # they are inventoried here from ml-systems.yaml so the document names them explicitly rather
+    # than leaving them out (an inventory that omits a running system reads as a false all-clear).
+    if ml_systems:
+        w("### Non-agent ML and statistical systems")
+        w("")
+        w("AI systems that are not LLM agent charters — the fraud scoring plane and the ML")
+        w("decisioning substrate (source: `openbank-libs/governance/ml-systems.yaml`). Credit")
+        w("decisioning is the only entry that becomes high-risk, and it is unbuilt.")
+        w("")
+        w("| System | ADR | Status | Plane | Risk class | Annex III | Basis |")
+        w("|---|---|---|---|---|---|---|")
+        for m in ml_systems:
+            basis = " ".join(str(m.get("basis", "—")).split())
+            w(f"| `{m.get('id')}` | {m.get('adr', '—')} | {m.get('status', '—')} | "
+              f"{m.get('plane', '—')} | {m.get('risk_class', '—')} | {m.get('annex', '—')} | {basis} |")
+        w("")
+        planned = [m.get("id") for m in ml_systems
+                   if m.get("risk_class") == "Planned high-risk (not deployed)"]
+        if planned:
+            w("> **Planned high-risk (not deployed):** "
+              f"{', '.join('`'+p+'`' for p in planned)}. Inventoried in advance; the Art. 9–15")
+            w("> obligations below apply the day it ships, which is why this document is ADR-0142's")
+            w("> named precondition. No such system runs today.")
+            w("")
+
     w("## Obligation coverage (Art. 9–15) for a high-risk system")
     w("")
     w("The controls below already exist and satisfy each obligation *in substance* for the day")
@@ -132,13 +177,14 @@ def main():
     w("")
     w("| Obligation | Existing control | Status |")
     w("|---|---|---|")
+    live_high_risk = high_risk or ml_high_risk_live
     for art, control in OBLIGATIONS:
-        status = "control exists; evidence pack open" if not high_risk else "APPLIES NOW — verify per system"
+        status = "control exists; evidence pack open" if not live_high_risk else "APPLIES NOW — verify per system"
         w(f"| {art} | {control} | {status} |")
     w("")
-    if high_risk:
-        w("> ⚠ **A high-risk system is now declared in the charters** "
-          f"({', '.join('`'+h+'`' for h in high_risk)}). "
+    if live_high_risk:
+        w("> ⚠ **A high-risk system is now declared and deployed** "
+          f"({', '.join('`'+h+'`' for h in live_high_risk)}). "
           "Every obligation above APPLIES from 2026-08-02; this table must be reviewed per system, "
           "and ADR-0142's preconditions confirmed, before deploy.")
     else:
@@ -193,8 +239,13 @@ def main():
     src = AGENTS.read_bytes()
     w(f"- Source: `openbank-libs/governance/agents.yaml` "
       f"(sha256 `{hashlib.sha256(src).hexdigest()[:16]}…`, {len(agents)} charters)")
-    w("- Related: ADR-0031 (agent governance), ADR-0141 (model registry), ADR-0142 (credit")
-    w("  decisioning), ADR-0148 (this assurance layer).")
+    if ml_systems:
+        ml_src = ML_SYSTEMS.read_bytes()
+        w(f"- Source: `openbank-libs/governance/ml-systems.yaml` "
+          f"(sha256 `{hashlib.sha256(ml_src).hexdigest()[:16]}…`, {len(ml_systems)} non-agent systems)")
+    w("- Related: ADR-0031 (agent governance), ADR-0084 (fraud scoring plane), ADR-0139/0140")
+    w("  (ML decisioning platform), ADR-0141 (model registry), ADR-0142 (credit decisioning),")
+    w("  ADR-0148 (this assurance layer).")
     w("")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
