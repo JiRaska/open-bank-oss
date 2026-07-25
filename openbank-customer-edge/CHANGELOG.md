@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.48.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.47.0...customer-edge-v0.48.0) (2026-07-25)
+
+
+### Features
+
+* **feedback:** rendering context and session id on screen feedback (ADR-0192) ([#2176](https://github.com/JiRaska/open-bank-oss/issues/2176)) ([f9c75d7](https://github.com/JiRaska/open-bank-oss/commit/f9c75d7e3c9470dfb6d669be835d792071a3cce8))
+* **feedback:** rendering context and session id on screen feedback (ADR-0192) ([#2176](https://github.com/JiRaska/open-bank-oss/issues/2176)) ([e715cb7](https://github.com/JiRaska/open-bank-oss/commit/e715cb75e4d5411801d0cf237035ae6c3a6498b9))
+
 ## [0.47.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.46.0...customer-edge-v0.47.0) (2026-07-25)
 
 
