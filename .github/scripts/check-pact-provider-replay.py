@@ -53,7 +53,6 @@ KNOWN_UNCOVERED = {
     # Landed 2026-07-25, after the #2327 audit counted 16 of 27: same three providers
     # (balance/transaction/party), so the same debt, not a new class of it. The estate went
     # 27 -> 33 pacts in a day, which is the argument for a gate rather than another audit.
-    "pacts/openbank-sepa-payment-openbank-fraud-service.json",
     "pacts/openbank-transaction-service-openbank-fx-service.json",
     "pacts/openbank-transaction-service-openbank-swift-service.json",
 }
