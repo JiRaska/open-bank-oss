@@ -317,8 +317,16 @@ jobs:
             || python3 -c "import yaml" 2>/dev/null \
             || { echo "::error::pyyaml unavailable — add it to the runner base image"; exit 1; }
           python3 openbank-infra/scripts/gen-network-policies.py
+          # `git diff` only inspects TRACKED files, so a policy the generator emits for a
+          # brand-new component that has never had one committed is UNTRACKED and therefore
+          # structurally invisible to the gate — it could only ever fail on a *modification*
+          # to an already-committed policy. That blind spot is how the `analytics` namespace
+          # shipped with no NetworkPolicy at all (issue #2064). `--intent-to-add` registers
+          # the untracked output in the index so `git diff` reports it as an addition, which
+          # makes "the generated file was never created" a first-class drift failure.
+          git add -A --intent-to-add openbank-infra/gitops/components/
           if ! git diff --exit-code openbank-infra/gitops/components/; then
-            echo "::error::NetworkPolicy drift detected — run openbank-infra/scripts/gen-network-policies.py and commit the result."
+            echo "::error::NetworkPolicy drift detected — run openbank-infra/scripts/gen-network-policies.py and commit the result (a new file listed above means a namespace has no committed policy)."
             exit 1
           fi
 
