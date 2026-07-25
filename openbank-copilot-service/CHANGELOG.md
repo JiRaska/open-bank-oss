@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.7.2...copilot-service-v0.7.3) (2026-07-25)
+
+
+### Bug Fixes
+
+* **copilot:** document themeSpec and drop the 501 the stream cannot return ([#2353](https://github.com/JiRaska/open-bank-oss/issues/2353)) ([84f1bd4](https://github.com/JiRaska/open-bank-oss/commit/84f1bd4d0f4b31ed63beda0af38b39c4ddeb6df7)), closes [#2351](https://github.com/JiRaska/open-bank-oss/issues/2351)
+
 ## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.7.1...copilot-service-v0.7.2) (2026-07-25)
 
 
