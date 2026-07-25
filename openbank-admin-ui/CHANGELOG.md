@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.55.3...admin-ui-v0.55.4) (2026-07-25)
+
+
+### Bug Fixes
+
+* **admin-ui:** drop stale glob override, lifting brace-expansion to 5.0.8 ([#2154](https://github.com/JiRaska/open-bank-oss/issues/2154)) ([d3af301](https://github.com/JiRaska/open-bank-oss/commit/d3af301b2ba4137e6ec2adddd1d938cec8407498))
+
 ## [0.55.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.55.2...admin-ui-v0.55.3) (2026-07-24)
 
 
