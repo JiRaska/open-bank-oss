@@ -103,6 +103,11 @@ const FORWARD_HEADERS = [
   // approved (AuthorizeInterceptor). Without forwarding it, every retry looks identical to the
   // original request and gets 202'd again forever.
   'x-approval-id',
+  // The audited human behind a mutation. Several backends take it as a required
+  // @HeaderParam (card-issuance's CardResource stamps it onto every
+  // CardStatusChanged event); not forwarding it turns an operator action into an
+  // anonymous one — or a 400, since the parameter is non-nullable there.
+  'x-operator-id',
 ]
 
 export const dynamic = 'force-dynamic'
