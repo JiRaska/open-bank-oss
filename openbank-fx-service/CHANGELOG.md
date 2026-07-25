@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.8.1...fx-service-v0.8.2) (2026-07-25)
+
+
+### Bug Fixes
+
+* **fx:** run the daily ČNB fixing ingestion on a Vert.x context ([#2187](https://github.com/JiRaska/open-bank-oss/issues/2187)) ([#2191](https://github.com/JiRaska/open-bank-oss/issues/2191)) ([398a043](https://github.com/JiRaska/open-bank-oss/commit/398a0433ce3475f771b88c9c2e1c6699672b6933))
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.8.0...fx-service-v0.8.1) (2026-07-17)
 
 
