@@ -51,6 +51,9 @@ jobs:
       # regenerated, so an omitted consumer's committed pact is never rewritten and so never
       # differs. Add the module in the same PR that adds the pact (finrep arrived with #2269's).
       # The "Verify every committed pact was actually regenerated" step below now enforces that.
+      # mcp/psd2/vop are the backlog of that failure mode (#2255 dim C3): three consumers landed in
+      # #2336/#2346/#2324 while this list stayed at 17 modules, so the gate was green for all three
+      # having regenerated none of their five pacts.
       #
       # --rerun is load-bearing, not a belt-and-braces flag (#2291). The generated pact JSON is
       # not a declared output of the `test` task, so nothing invalidates `test` when pacts/
@@ -87,12 +90,15 @@ jobs:
             :openbank-interest-service:test --rerun --tests "com.openbank.interest.contract.*PactConsumerTest" \
             :openbank-kyc-service:test --rerun --tests "com.openbank.kyc.contract.*PactConsumerTest" \
             :openbank-lending-service:test --rerun --tests "com.openbank.lending.contract.*PactConsumerTest" \
+            :openbank-mcp-service:test --rerun --tests "com.openbank.mcp.contract.*PactConsumerTest" \
             :openbank-notification-service:test --rerun --tests "com.openbank.notification.contract.*PactConsumerTest" \
             :openbank-onboarding-service:test --rerun --tests "com.openbank.onboarding.contract.*PactConsumerTest" \
+            :openbank-psd2-service:test --rerun --tests "com.openbank.psd2.contract.*PactConsumerTest" \
             :openbank-sepa-instant:test --rerun --tests "com.openbank.sepainstant.contract.*PactConsumerTest" \
             :openbank-sepa-payment:test --rerun --tests "com.openbank.sepa.contract.*PactConsumerTest" \
             :openbank-settlement-service:test --rerun --tests "com.openbank.settlement.contract.*PactConsumerTest" \
-            :openbank-transaction-service:test --rerun --tests "com.openbank.transaction.contract.*PactConsumerTest"
+            :openbank-transaction-service:test --rerun --tests "com.openbank.transaction.contract.*PactConsumerTest" \
+            :openbank-vop-service:test --rerun --tests "com.openbank.vop.contract.*PactConsumerTest"
 
       # Belt to --rerun's braces, and the thing that keeps the module list above honest. The diff
       # step cannot tell "regenerated and identical" from "never regenerated" — both look clean.
