@@ -41,6 +41,17 @@ enum class ConsentScope {
     // ingest gateway is gated on. Falls in the 365-day (non-AISP) validity
     // bucket — it is not subject to the PSD2 RTS Art. 10 90-day cap.
     TELEMETRY_RUM,
+
+    // Marketing communications — GDPR Art. 7 data-processing consent (ADR-0198), NOT a PSD2
+    // account-access consent and NOT SCA-gated, same shape as TELEMETRY_RUM. One value per
+    // channel, deliberately: a customer who accepted email marketing has not thereby accepted
+    // push (ADR-0198 force 4, Act 480/2004 §7(3)'s email-only soft opt-in never covers push).
+    // Falls in the 365-day (non-AISP) validity bucket. Default is absent, and absent means
+    // denied. Must NOT be added to AISP_SCOPES below — these are consent-service's only
+    // Art. 7 marketing-basis scopes, not account-access ones.
+    MARKETING_COMMS_EMAIL,
+    MARKETING_COMMS_PUSH,
+    MARKETING_COMMS_INAPP,
 }
 
 enum class GranteeType {
