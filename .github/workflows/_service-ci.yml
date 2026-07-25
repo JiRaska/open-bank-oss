@@ -158,6 +158,38 @@ jobs:
             echo "GRADLE_USER_HOME=${HOME}/.gradle" >> "$GITHUB_ENV"
           fi
 
+      # Warm this service's Gradle dependency cache BEFORE "Build + test" runs, so an
+      # interrupted-download-corrupted module cache entry (a .pom downloaded with no
+      # matching .jar — a sibling job/daemon writing to the same shared/persistent
+      # GRADLE_USER_HOME concurrently: the ARC node-local hostPath cache, or the
+      # Mac/Hetzner persistent per-service home) is caught and healed HERE, not inside
+      # "Build + test". That step must run exactly once — it re-runs `test` differently
+      # depending on PUBLISH_RESULTS (the #1009 Pact-publish hazard documented below), so
+      # retrying it on failure risks a double/uncredentialed Pact Broker publish. This
+      # warm-up runs no test code and has no side effects, so it is safe to retry.
+      # `quarkusDependenciesBuild` resolves exactly the runtime classpath that failed with
+      # a dependency-verification error in the incident this guards against; it does not
+      # compile or run anything. Deliberately narrow: heal-gradle-verification-failure.sh
+      # only removes the exact artifact/version Gradle names in its own verification-failure
+      # message — it does not scan the cache for "suspicious" entries (an earlier, broader
+      # heuristic — pom present, jar absent — flagged legitimate BOM-only and
+      # never-downloaded transitive dependencies as corrupt; do not resurrect that).
+      - name: Warm Gradle dependency cache (self-heal corrupted entries)
+        continue-on-error: true
+        run: |
+          set +e
+          ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain > /tmp/gradle-warmup.log 2>&1
+          warmup_status=$?
+          if [ $warmup_status -ne 0 ]; then
+            cat /tmp/gradle-warmup.log
+            if .github/scripts/heal-gradle-verification-failure.sh /tmp/gradle-warmup.log; then
+              echo "retrying dependency warm-up after healing corrupted cache entries"
+              ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain
+            else
+              echo "::warning::dependency warm-up failed for a reason other than cache corruption — leaving it to the real Build step to report"
+            fi
+          fi
+
       # Normalize the Testcontainers Docker endpoint across the MIXED runner pool
       # (ARC dind + Hetzner + Mac mini/OrbStack — all serve Docker at the unix socket:
       # arc-runners.tf pins DOCKER_HOST=unix:///var/run/docker.sock, Hetzner uses the
