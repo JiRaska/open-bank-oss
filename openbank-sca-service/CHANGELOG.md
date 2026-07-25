@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.12.0...sca-service-v0.12.1) (2026-07-25)
+
+
+### Security
+
+* **sca:** remove SMS_OTP — its only implementation logs the OTP instead of delivering it ([#2379](https://github.com/JiRaska/open-bank-oss/issues/2379)) ([01a9900](https://github.com/JiRaska/open-bank-oss/commit/01a990044bda316be8039aa415a51112518b1083))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.11.0...sca-service-v0.12.0) (2026-07-25)
 
 
