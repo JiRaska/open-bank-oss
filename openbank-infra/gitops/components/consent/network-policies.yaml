@@ -47,6 +47,9 @@ spec:
               kubernetes.io/metadata.name: customer-edge
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: platform
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: psd2
         - namespaceSelector:
             matchLabels:

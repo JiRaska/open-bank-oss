@@ -9,8 +9,40 @@ quarkus:
     host: 0.0.0.0
   oidc:
     auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://keycloak.iam.svc:8080/realms/openbank}
-    # Phase 1: OIDC present for health; the OAuth 2.1 -> PSD2-consent binding is phase 2.
+    # Still tenant-disabled (resource-server mode) as of ADR-0195 step 3: enabling this to REQUIRE
+    # an incoming agent token is the step-4 cutover, landed atomically with the McpEndpoint
+    # placeholder removal (#2206 ordering) — flipping it here alone would 401 every current caller
+    # with no real gate benefit yet.
     tenant-enabled: false
+  # Outbound M2M client-credentials auth (ADR-0195 step 3) — mirrors agent-service's oidc-client
+  # exactly: DownstreamClients / ConsentValidateClient (@RegisterProvider
+  # OidcClientRequestReactiveFilter) mint an `openbank-services` token and attach it as a Bearer, so
+  # RealAccountReadPort reaches consent/account/balance/transaction-service as the SAME shared
+  # least-privilege service principal (service-account-openbank-services) those services already
+  # grant reads to (rest.rego: service-consent-m2m / service-account-read / service-balance-read;
+  # transaction-service via base rest.rego operator-read-any, since the shared client's token
+  # carries ROLE_OPERATOR — no NEW rego grant needed for any of the four downstream services).
+  # Not yet consumed: RealAccountReadPort / DownstreamClients / ConsentValidateClient stay @Vetoed
+  # until step 4's CDI cutover, so this config is inert (Quarkus only validates it once injected).
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://keycloak.iam.svc:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+    tls:
+      verification: ${OIDC_TLS_VERIFICATION:none}
+  rest-client:
+    # In-cluster ClusterIPs — same targets + ports agent-service's ServiceClients already use.
+    account-service:
+      url: http://localhost:8100
+    balance-service:
+      url: http://localhost:8103
+    transaction-service:
+      url: http://localhost:8102
+    consent-service:
+      url: http://localhost:8106
   smallrye-openapi:
     info-title: OpenBank MCP Server
     info-version: "1.0.0"
