@@ -4,9 +4,20 @@
 For every `openbank-*/src/main/resources/openapi.yaml` changed against the PR
 base, classify the API-contract change from the OpenAPI diff (oasdiff):
 
-    breaking  => info.version MAJOR must move (new URL major, /api/v{N+1})
-    additive  => info.version MINOR (or MAJOR) must move within the same /v{N}
-    editorial => info.version PATCH (or higher) must move
+    breaking   => info.version MAJOR must move (new URL major, /api/v{N+1})
+    correction => a breaking DOCUMENT diff in a PR that changes nothing else in the service:
+                  the served contract is unchanged, so MINOR (see below)
+    additive   => info.version MINOR (or MAJOR) must move within the same /v{N}
+    editorial  => info.version PATCH (or higher) must move
+
+The `correction` class exists because `breaking` and the D2 invariant below are jointly
+unsatisfiable for a spec that never described the running service. Correcting one is red at
+the old version (oasdiff calls it breaking, a MAJOR is demanded) and red at MAJOR+1 (D2 rejects
+it, the served URL major has not moved). Measured both ends on aml-service, #2312/#2313: the
+only green document was one that kept a phantom enum value and a wrong default, so the gate was
+not merely blocking the fix, it was requiring the falsehood. A spec-only PR cannot break a
+working client — the server is byte-identical — so the MAJOR requirement is dropped to MINOR.
+The discriminator is the diff itself, never a declared marker.
 
 and assert the ADR-0048 D2 API invariant on the head revision:
 
@@ -173,17 +184,30 @@ def oasdiff_classify(oasdiff: str, old: Path, new: Path) -> tuple[str, list[str]
     return "none", []
 
 
-REQUIRED_BUMP = {"breaking": "MAJOR", "additive": "MINOR", "editorial": "PATCH"}
+REQUIRED_BUMP = {"breaking": "MAJOR", "correction": "MINOR", "additive": "MINOR", "editorial": "PATCH"}
 
 
 def bump_satisfied(kind: str, old_v: tuple[int, int, int], new_v: tuple[int, int, int]) -> bool:
     if kind == "breaking":
         return new_v[0] > old_v[0]
-    if kind == "additive":
+    if kind in ("additive", "correction"):
         return new_v[0] > old_v[0] or (new_v[0] == old_v[0] and new_v[1] > old_v[1])
     if kind == "editorial":
         return new_v > old_v
     return True
+
+
+# Derived files that cannot change what the service serves, so their presence in a diff does
+# not disqualify a spec correction. release-please writes both.
+BEHAVIOURLESS = {"CHANGELOG.md", "version.txt"}
+
+
+def service_touched_beyond_spec(service: str, spec_rel: str, changed_all: list[str]) -> list[str]:
+    """Files in this service the PR changed other than its openapi.yaml (and derived files)."""
+    return [
+        f for f in changed_all
+        if f.startswith(service + "/") and f != spec_rel and f.rsplit("/", 1)[-1] not in BEHAVIOURLESS
+    ]
 
 
 def main() -> int:
@@ -200,10 +224,8 @@ def main() -> int:
     level = "error" if args.enforce else "warning"
     findings: list[str] = []
 
-    changed = [
-        line for line in sh("git", "diff", "--name-only", args.base, "HEAD").splitlines()
-        if OPENAPI_GLOB.match(line)
-    ]
+    changed_all = sh("git", "diff", "--name-only", args.base, "HEAD").splitlines()
+    changed = [line for line in changed_all if OPENAPI_GLOB.match(line)]
     if not changed:
         print("api-contract gate: no openapi.yaml changed — nothing to classify.")
         return 0
@@ -245,6 +267,44 @@ def main() -> int:
                 kind = None
             finally:
                 old_path.unlink(missing_ok=True)
+
+            # A breaking DOCUMENT diff is not a breaking CONTRACT change when the PR changed
+            # nothing else in the service: the running server is byte-identical, so no client
+            # that works today can stop working. What breaks is a client generated from a
+            # document that never described this server — already broken before the edit.
+            # Demanding a MAJOR bump there is not merely strict, it is unsatisfiable: D2 below
+            # requires major(info.version) == the served URL major, which a spec-only PR cannot
+            # move. Measured on aml (#2312/#2313): red at 1.0.0 for want of a MAJOR, red at
+            # 2.0.0 for violating D2, and the only green spec was one that kept a phantom enum
+            # value and a wrong default.
+            #
+            # The discriminator is mechanical, not declared — no marker file, no PR-body token
+            # to assert a spec "was never served". Touch any other file in the service and the
+            # normal breaking rule applies unchanged.
+            #
+            # This opens no new hole. Landing a genuinely breaking change as code-only in one PR
+            # and the spec in another already escapes this gate entirely, because it is scoped to
+            # spec diffs and the first PR has none. What the reclassification does NOT check is
+            # whether the corrected document is true — that is openapi-route-conformance for the
+            # route set, and still nothing for schemas.
+            if kind == "breaking":
+                others = service_touched_beyond_spec(service, rel, changed_all)
+                if not others:
+                    detail = f" (first: {breaking[0]})" if breaking else ""
+                    print(
+                        f"::notice::api-contract gate: {service}: spec-only PR — reclassifying "
+                        f"{len(breaking)} breaking document change(s){detail} as a CORRECTION. "
+                        f"No other file in {service} changed, so the served contract is unchanged "
+                        f"and a MAJOR bump would violate the ADR-0048 D2 URL-major invariant. "
+                        f"Requiring MINOR instead."
+                    )
+                    kind = "correction"
+                else:
+                    print(
+                        f"api-contract gate: {service}: breaking, and the PR also changes "
+                        f"{len(others)} other file(s) in the service (e.g. {others[0]}) — "
+                        f"treating as a real contract change."
+                    )
 
             if kind is None:
                 pass  # unloadable spec already reported; invariant checks below still run
