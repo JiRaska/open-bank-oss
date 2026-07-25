@@ -7,6 +7,7 @@ package com.openbank.finrep.infrastructure.rest
 import com.openbank.finrep.application.port.inbound.CorepUseCase
 import com.openbank.finrep.application.port.inbound.GetCorepTemplateQuery
 import com.openbank.finrep.domain.model.CorepTemplate
+import com.openbank.libs.security.Roles
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.DefaultValue
@@ -28,11 +29,16 @@ import java.time.LocalDate
  * reported as explicit, flagged zeros ([CorepCell.isDataGap]) because the ledger's chart of
  * accounts has no capital-structure GL accounts today; see [com.openbank.finrep.domain.mapper.C0100Mapper]
  * for the detailed rationale.
+ *
+ * Roles come from [Roles], never string literals — see the note on
+ * [com.openbank.finrep.infrastructure.rest.FinrepResource]: the shipped
+ * `@RolesAllowed("SERVICE", "ADMIN", "OPERATOR")` named three roles the realm does not issue, so
+ * this resource answered 403 to every caller.
  */
 @ApplicationScoped
 @Path("/api/v1/corep")
 @Produces(MediaType.APPLICATION_JSON)
-@RolesAllowed("SERVICE", "ADMIN", "OPERATOR")
+@RolesAllowed(Roles.ADMIN, Roles.OPERATOR)
 class CorepResource(private val corepUseCase: CorepUseCase, private val clock: Clock) {
 
     @GET

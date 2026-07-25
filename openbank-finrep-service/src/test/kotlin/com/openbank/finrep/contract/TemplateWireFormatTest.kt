@@ -7,6 +7,7 @@ package com.openbank.finrep.contract
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
 import com.openbank.finrep.infrastructure.client.LedgerAdapter
+import com.openbank.libs.security.Roles
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.quarkus.test.junit.QuarkusMock
@@ -49,7 +50,13 @@ import java.time.LocalDate
  * `is not assignable to class ...LedgerAdapter`.
  */
 @QuarkusTest
-@TestSecurity(user = "finrep-spec-conformance", roles = ["SERVICE"])
+// The role MUST be one the Keycloak realm actually issues (Roles.OPERATOR == "ROLE_OPERATOR").
+// This test previously declared roles = ["SERVICE"], which matched the resource's own
+// `@RolesAllowed("SERVICE", …)` literal and nothing else in the system: @TestSecurity mints
+// whatever role string it is given, so the test minted the exact role the realm never issues and
+// went green against a resource that answered 403 to every real caller. Asserting through a
+// realm-issued role is what makes this test capable of failing.
+@TestSecurity(user = "finrep-spec-conformance", roles = [Roles.OPERATOR])
 class TemplateWireFormatTest {
 
     private val mapper = ObjectMapper()
