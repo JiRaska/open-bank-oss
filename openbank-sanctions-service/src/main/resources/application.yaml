@@ -83,6 +83,13 @@ quarkus:
     # timer. Same pattern as openbank-statement-service's scheduled-close disable under %test.
     scheduler:
       enabled: false
+  # OPA is not present in a test JVM, and AuthorizeInterceptor fails CLOSED with 503 when the PDP is
+  # unreachable and enforce is on (ADR-0034) — so every @Authorize endpoint, including
+  # POST /api/v1/sanctions/screen, would answer 503 to SanctionsPactProviderVerificationTest.
+  # Advisory mode under %test only; the deployed default (AUTHZ_ENFORCE, above) is untouched.
+  # Same override, same reason, as openbank-aml-service's %test profile.
+  authz:
+    enforce: "false"
 
 kafka:
   bootstrap:
