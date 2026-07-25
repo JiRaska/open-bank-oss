@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.6](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.7.5...aml-service-v0.7.6) (2026-07-25)
+
+
+### Bug Fixes
+
+* **aml:** describe the implemented API in openapi.yaml and correct the lineage ([#2317](https://github.com/JiRaska/open-bank-oss/issues/2317)) ([c0e1993](https://github.com/JiRaska/open-bank-oss/commit/c0e199372bed7229380e84c1d2488a266ee61aa5)), closes [#2312](https://github.com/JiRaska/open-bank-oss/issues/2312)
+
 ## [0.7.5](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.7.4...aml-service-v0.7.5) (2026-07-17)
 
 
