@@ -166,6 +166,80 @@ class CollectorScorerTest(unittest.TestCase):
         self.assertEqual(score, 1)
         self.assertIn("skeleton", evidence)
 
+    # -- C3: a contract test is an artifact, not a word in a comment --------
+    def openapi(self):
+        p = self.svc / "src" / "main" / "resources" / "openapi.yaml"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("openapi: 3.0.3\ninfo:\n  title: Widget\n  version: 1.0.0\npaths: {}\n")
+
+    def write_test_kt(self, name: str, body: str):
+        p = self.svc / "src" / "test" / "kotlin" / "com" / "openbank" / "widget" / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body)
+
+    def test_c3_the_word_contract_in_a_comment_is_not_a_contract_test(self):
+        """The exact line that scored pid, psd2 and sanctions as Verified."""
+        self.governance()
+        self.openapi()
+        self.write_test_kt(
+            "WidgetServiceTest.kt",
+            "// the mark-and-sweep reconciliation contract\nclass WidgetServiceTest\n",
+        )
+        score, evidence = self.mod.score_c3_api("widget", {}, "2026-07-25")
+        self.assertEqual(score, 1, evidence)
+        self.assertIn("NO contract test", evidence)
+
+    def test_c3_the_word_contract_in_kdoc_is_not_a_contract_test(self):
+        """psd2's actual hit was a KDoc line, not a `//` comment."""
+        self.governance()
+        self.openapi()
+        self.write_test_kt(
+            "KafkaOutboxPublisherTest.kt",
+            "/**\n * exactly as the shared header contract prescribes.\n */\nclass K\n",
+        )
+        score, evidence = self.mod.score_c3_api("widget", {}, "2026-07-25")
+        self.assertEqual(score, 1, evidence)
+
+    def test_c3_a_pact_import_is_a_contract_test(self):
+        self.governance()
+        self.openapi()
+        self.write_test_kt(
+            "WidgetLedgerPactConsumerTest.kt",
+            "import au.com.dius.pact.consumer.junit5.PactConsumerTestExt\nclass W\n",
+        )
+        score, evidence = self.mod.score_c3_api("widget", {}, "2026-07-25")
+        self.assertEqual(score, 2, evidence)
+        self.assertIn("pact test", evidence)
+
+    def test_c3_the_fleet_test_class_naming_is_a_contract_test(self):
+        """A spec-conformance test named *ContractTest.kt counts without the pact library."""
+        self.governance()
+        self.openapi()
+        self.write_test_kt("WidgetApiContractTest.kt", "class WidgetApiContractTest\n")
+        score, evidence = self.mod.score_c3_api("widget", {}, "2026-07-25")
+        self.assertEqual(score, 2, evidence)
+        self.assertIn("by naming", evidence)
+
+    def test_c3_no_openapi_still_scores_zero(self):
+        self.governance()
+        self.write_test_kt("WidgetPactConsumerTest.kt", "import au.com.dius.pact.consumer.X\nclass W\n")
+        score, evidence = self.mod.score_c3_api("widget", {}, "2026-07-25")
+        self.assertEqual(score, 0, evidence)
+
+    def test_c3_reports_committed_pacts_as_extra_evidence(self):
+        self.governance()
+        self.openapi()
+        self.write_test_kt(
+            "WidgetPactConsumerTest.kt", "import au.com.dius.pact.consumer.X\nclass W\n"
+        )
+        pacts = self.root / "pacts"
+        pacts.mkdir(parents=True, exist_ok=True)
+        (pacts / "openbank-widget-service-openbank-ledger-service.json").write_text("{}")
+        (pacts / "openbank-other-service-openbank-thing-service.json").write_text("{}")
+        score, evidence = self.mod.score_c3_api("widget", {}, "2026-07-25")
+        self.assertEqual(score, 2, evidence)
+        self.assertIn("1 committed pact", evidence)
+
     # -- C4: the data dimension of a service with no data -------------------
     def test_c4_stateless_service_is_not_penalised_for_having_no_migration(self):
         self.governance(datastore="none")

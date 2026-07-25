@@ -221,21 +221,62 @@ def score_c2_tests(short: str, att, today) -> tuple[int, str]:
     return s, f"{len(unit)} unit, {len(it)} IT, kover={'y' if kover else 'n'}"
 
 
+def has_contract_test(short: str) -> tuple[bool, str]:
+    """True when the service ships an actual contract test, with what proves it.
+
+    This used to be `grep_any(src/test, ["Pact", "ContractTest", "contract"])` — a substring
+    scan that counted the word "contract" ANYWHERE, including comments and KDoc. Five services
+    matched on prose alone, and three of them (pid, psd2, sanctions) scored C3=Verified purely
+    on a sentence like `// the mark-and-sweep reconciliation contract` while shipping no
+    contract test at all. ap2 flipped 1→2 the moment an unrelated PR added the comment
+    `// Cardinality + evidence contract: …`, which nobody wrote with a score in mind — the
+    clearest possible demonstration that prose must never be evidence.
+
+    So this asks for artifacts a contract test cannot exist without: the pact library imported,
+    or the fleet's test-class naming (`*Pact*Test.kt`, `*ContractTest.kt`). It is the same
+    correction the C8 scorer needed, where a comment in the PodMonitor claiming a service was
+    scraped scored it as scraped (#2255).
+    """
+    test = svc_dir(short) / "src" / "test"
+    if not test.is_dir():
+        return False, ""
+    by_import: list[str] = []
+    by_name: list[str] = []
+    for f in test.rglob("*.kt"):
+        if "au.com.dius.pact" in read(f):
+            by_import.append(f.name)
+        elif "Pact" in f.name or f.name.endswith("ContractTest.kt"):
+            by_name.append(f.name)
+    if by_import:
+        return True, f"{len(by_import)} pact test(s)"
+    if by_name:
+        return True, f"{len(by_name)} contract test(s) by naming"
+    return False, ""
+
+
+def committed_pacts(short: str) -> list[str]:
+    """Pact files in the repo-root `pacts/` dir naming this service on either side (ADR-0063)."""
+    pacts = REPO / "pacts"
+    if not pacts.is_dir():
+        return []
+    token = f"openbank-{short}-service"
+    return sorted(p.name for p in pacts.glob("*.json") if token in p.name)
+
+
 def score_c3_api(short: str, att, today) -> tuple[int, str]:
     d = svc_dir(short)
     openapi = (d / "src" / "main" / "resources" / "openapi.yaml").exists()
-    contract = grep_any(d / "src" / "test", ["Pact", "ContractTest", "contract"])
-    diff_gate = any(n in read(d / "build.gradle.kts") for n in ("oasdiff", "spectral"))
+    contract, how = has_contract_test(short)
+    pacts = committed_pacts(short)
     if not openapi:
         return 0, "no openapi.yaml"
-    s = 1
-    if contract:
-        s = 2
-    if contract and diff_gate:
-        s = 2  # cap; bank-grade (3) needs external consumer-verified pacts
+    s = 2 if contract else 1
     if attest_fresh(att, short, "contract_verified", today):
-        s = 3
-    return s, f"openapi=y, contract={'y' if contract else 'n'}, diffgate={'y' if diff_gate else 'n'}"
+        s = 3  # bank-grade needs an external consumer-verified pact (attested)
+    ev = ["openapi=y", how if contract else "NO contract test in src/test"]
+    if pacts:
+        ev.append(f"{len(pacts)} committed pact(s)")
+    return s, ", ".join(ev)
 
 
 def score_c4_data(short: str, att, today) -> tuple[int, str]:
