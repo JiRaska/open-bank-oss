@@ -42,12 +42,23 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    // Consumer-driven contract test for the product-catalog card-entitlement lookup (ADR-0063).
+    // Consumer side only: card issuance publishes no API that another service pacts against, so
+    // there is no pact-provider dependency here.
+    testImplementation(libs.pact.consumer)
 
     // CI infra sweep (#578): isolated PostgreSQL + Valkey(Redis) per test JVM
     // via Testcontainers. Kafka is already in-memory in the IT (no broker).
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+}
+
+// Pact: write generated pact files to the shared pacts/ dir at the repo root (git-pact, ADR-0063).
+// The consumer test regenerates the file on every run; developers commit the result.
+// NOTE: must be set on the test JVM fork, not the Gradle daemon (System.setProperty would not propagate).
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
 }
 
 kover {
