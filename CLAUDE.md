@@ -137,6 +137,19 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `function-signature` violation surfaces the first time you touch an older file. Let `ktlintFormat`
   collapse multi-line signatures; expand wildcard imports rather than hand-wrapping.
 
+### detekt
+- **`MagicNumber` fires on the fleet-standard percentile triple.** `publishPercentiles(0.5, 0.95, 0.99)`
+  is 3 violations per call site — `DomainMetrics` only escapes via
+  `openbank-libs-runtime/detekt-baseline.xml`, a new per-service adapter has no such cover. Declare
+  `private const val P50/P95/P99` in the adapter's `companion object` (`ignoreConstantDeclaration` is
+  on by default). The `Timer.builder` and `DistributionSummary.builder` call sites usually differ in
+  indentation — a single find-and-replace fixes only one.
+- **`LongParameterList` fires AT the threshold, not above it.** `config/detekt/detekt.yml` sets
+  `constructorThreshold: 9`, so a 9-parameter constructor is reported — adding a metrics port to an
+  8-param endpoint fails the gate. Use field injection
+  (`@Inject lateinit var metrics: XMetricsPort`) as `LoanStageEventConsumer`, `VopRateLimitFilter`
+  and `McpEndpoint` do.
+
 ### Flyway
 - **Never change a migration after it has been applied to a live DB** — Flyway checksums the whole
   file (comments included), so any edit triggers a `checksum mismatch` startup failure.

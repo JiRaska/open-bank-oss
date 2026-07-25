@@ -56,7 +56,7 @@ complexity:
   LongParameterList:
     # Kotlin data classes / hexagonal command objects legitimately carry many
     # constructor parameters; defaulted ones don't add call-site complexity.
-    # Threshold raised to 8: ADR-0100 clock injection adds Clock to CDI
+    # Threshold raised to 9: ADR-0100 clock injection adds Clock to CDI
     # constructors that cannot be split (framework-injected, hexagonal boundary).
     constructorThreshold: 9
     functionThreshold: 9
