@@ -62,7 +62,7 @@ def verify(si: str, sig: str, amount_minor: int) -> dict | None:
         "payment": {"payee": PAYEE, "amountMinor": amount_minor, "currency": CURRENCY, "at": "2026-06-01T00:00:00Z"},
     }
     req = urllib.request.Request(f"{AP2_URL}/ap2/verify", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json", "X-Agent-Id": "agent:ap2-demo"})
+                                 headers={"Content-Type": "application/json", "X-Agent-Id": "agent:ap2-anonymous"})
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             v = json.load(r)
