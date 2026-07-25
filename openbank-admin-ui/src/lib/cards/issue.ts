@@ -96,9 +96,23 @@ export function withPartySelected(draft: IssueDraft, party: PartyRef): IssueDraf
   }
 }
 
-/** Choosing an account re-derives the product and therefore the entitlements. */
+/**
+ * Choosing an account re-derives the product and therefore the entitlements. The
+ * limit fields reset to the defaults too, not carried over: they are minor units
+ * scaled to a currency's decimal exponent, and the new account can have a
+ * different currency than whatever was picked before. Carrying the raw integer
+ * across would reinterpret it at the new scale rather than convert it — there
+ * is no exchange rate here to convert with, so starting over is correct.
+ */
 export function withAccountSelected(draft: IssueDraft, account: AccountRef): IssueDraft {
-  return { ...draft, account, productCode: null, entitlements: null }
+  return {
+    ...draft,
+    account,
+    productCode: null,
+    entitlements: null,
+    dailyMinorUnits: DEFAULT_DAILY_LIMIT_MINOR,
+    monthlyMinorUnits: DEFAULT_MONTHLY_LIMIT_MINOR,
+  }
 }
 
 /** The card's currency is the account's — never a free choice, never typed. */

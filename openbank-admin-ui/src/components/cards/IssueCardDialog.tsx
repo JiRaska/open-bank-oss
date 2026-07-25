@@ -34,7 +34,7 @@ import {
   stepBlockers, toEmbossedName, withAccountSelected, withPartySelected,
   type IssueDraft, type IssueStep,
 } from '@/lib/cards/issue'
-import { formatMinor, minorToMajorString, parseMajorToMinor } from '@/lib/cards/money'
+import { formatMajor, formatMinor, minorToMajorString, parseMajorToMinor } from '@/lib/cards/money'
 import { useCardOperations } from '@/lib/cards/useCardOperations'
 import { CardOperationFeedback } from './CardOperationFeedback'
 
@@ -257,10 +257,19 @@ export function IssueCardDialog({ onClose, onIssued }: { onClose: () => void; on
 
   // Picking an account fixes the currency, so that is the moment the limit fields
   // are seeded — in the event handler, not in an effect watching the currency.
+  //
+  // Always the DEFAULTS, never draft.dailyMinorUnits/monthlyMinorUnits from a
+  // previous pick: those are minor units under the PREVIOUS account's currency
+  // exponent, and re-formatting them under a new currency reinterprets the same
+  // integer at a different scale rather than converting it — a value typed as
+  // 1000.00 USD (100000 minor, 2 decimals) would render as 100000 JPY (0
+  // decimals) if the operator went back and chose a JPY account instead. There
+  // is no exchange rate here to convert with, so starting over is correct, not
+  // just simpler.
   const pickAccount = (a: AccountRef) => {
     setDraft(d => withAccountSelected(d, a))
-    setDailyText(minorToMajorString(draft.dailyMinorUnits ?? DEFAULT_DAILY_LIMIT_MINOR, a.currencyCode))
-    setMonthlyText(minorToMajorString(draft.monthlyMinorUnits ?? DEFAULT_MONTHLY_LIMIT_MINOR, a.currencyCode))
+    setDailyText(minorToMajorString(DEFAULT_DAILY_LIMIT_MINOR, a.currencyCode))
+    setMonthlyText(minorToMajorString(DEFAULT_MONTHLY_LIMIT_MINOR, a.currencyCode))
     go('configure')
   }
 
@@ -519,7 +528,7 @@ export function IssueCardDialog({ onClose, onIssued }: { onClose: () => void; on
                     {draft.entitlements && draft.entitlements.monthlyFeePerCard > 0 && (
                       <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '6px' }}>
                         {t('Měsíční poplatek za kartu', 'Monthly fee per card')}{': '}
-                        {draft.entitlements.monthlyFeePerCard}
+                        {formatMajor(draft.entitlements.monthlyFeePerCard, currency, language === 'cs' ? 'cs-CZ' : 'en-US')}
                       </div>
                     )}
                   </div>

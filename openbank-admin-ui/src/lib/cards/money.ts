@@ -92,3 +92,29 @@ export function formatMinor(minor: number, code: string | null | undefined, loca
   }).format(major)
   return code ? `${amount} ${code.toUpperCase()}` : amount
 }
+
+/**
+ * A MAJOR-unit amount (e.g. `monthlyFeePerCard` from the entitlements API, a
+ * plain `Double` — not minor units like a card limit) as a localized currency
+ * string. Same fallback behaviour as `formatMinor` for an unknown code.
+ */
+export function formatMajor(major: number, code: string | null | undefined, locale = 'en-US'): string {
+  const exp = currencyExponent(code)
+  if (code) {
+    try {
+      return new Intl.NumberFormat(locale, {
+        style: 'currency',
+        currency: code.toUpperCase(),
+        minimumFractionDigits: exp,
+        maximumFractionDigits: exp,
+      }).format(major)
+    } catch {
+      // Not a currency code Intl accepts — fall through to the plain form.
+    }
+  }
+  const amount = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: exp,
+    maximumFractionDigits: exp,
+  }).format(major)
+  return code ? `${amount} ${code.toUpperCase()}` : amount
+}
