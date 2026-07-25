@@ -28,6 +28,14 @@ from datetime import date
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from gitops_facts import (  # noqa: E402  (path must be set before the import)
+    declared_datastore,
+    is_stateless,
+    podmonitor_namespaces,
+    service_namespace,
+)
+
 REPO = Path(__file__).resolve().parents[2]
 GITOPS = REPO / "openbank-infra" / "gitops"
 THREAT_MODELS = REPO / "docs" / "threat-models"
@@ -156,13 +164,33 @@ def attest_fresh(att: dict, svc: str, key: str, today: str) -> bool:
 # ---------------------------------------------------------------------------
 # per-dimension scoring (each returns (score 0-3, evidence str))
 # ---------------------------------------------------------------------------
+def has_declared_ports(main: Path) -> bool:
+    """True when the service declares hexagonal ports (ADR-0002).
+
+    This used to require a FILE NAME containing `Port`, which is not the convention the fleet
+    actually follows: anacredit and onboarding both carry a textbook
+    `application/port/{in,out}` package whose files are named `*Repository.kt`, `*UseCases.kt`
+    and `*Queries.kt`, and both were scored as having no ports at all. The architecture lives in
+    the package, not in the filename — and the fix for a false negative here must never be to
+    rename a file so the probe is satisfied. Either spelling counts now: a `port` package
+    anywhere under the application layer, or the `*Port*.kt` naming other services use.
+    """
+    for p in main.rglob("*.kt"):
+        parts = p.parts
+        if "port" in parts or "ports" in parts:
+            return True
+        if "Port" in p.name:
+            return True
+    return False
+
+
 def score_c1_code(short: str, att, today) -> tuple[int, str]:
     d = svc_dir(short)
     main = d / "src" / "main"
     if not main.is_dir():
         return 0, "no src/main"
     kt = list(main.rglob("*.kt"))
-    has_ports = (main / "kotlin").rglob("*Port*") and any(main.rglob("*Port*.kt"))
+    has_ports = has_declared_ports(main)
     gov = (d / "governance.yaml").exists()
     # skeleton heuristic: very little code
     if len(kt) < 8:
@@ -213,8 +241,21 @@ def score_c3_api(short: str, att, today) -> tuple[int, str]:
 def score_c4_data(short: str, att, today) -> tuple[int, str]:
     d = svc_dir(short)
     migs = list((d).rglob("db/migration/V*.sql"))
+    datastore = declared_datastore(short, REPO)
+    stateless = is_stateless(datastore)
+    if stateless and not migs:
+        # A service that declares no datastore has no migrations to review and no rollback note
+        # to write, so the old hardcoded `1, "no flyway (stateless?)"` made 2 UNREACHABLE for it
+        # — the matrix asked ap2, copilot, finrep and mcp for an artifact that would be wrong to
+        # produce. The dimension is not applicable, and the evidence string says so rather than
+        # implying a migration was reviewed.
+        return 2, "n/a — declares no datastore (stateless)"
+    if stateless and migs:
+        # Declared facts and shipped code disagree. Whichever is wrong, nobody can review a data
+        # dimension that is described two different ways, so this is a finding, not a pass.
+        return 1, f"CONTRADICTION: governance.yaml says datastore '{datastore or 'none'}' but {len(migs)} migration(s) exist"
     if not migs:
-        return 1, "no flyway (stateless?)"
+        return 1, f"declares datastore '{datastore}' but has no Flyway migration"
     # rollback note: a paired comment or docs/rollback reference
     rollback = any("rollback" in read(m).lower() for m in migs) or \
         grep_any(d, ["rollback"], globs=("*.md",))
@@ -223,6 +264,10 @@ def score_c4_data(short: str, att, today) -> tuple[int, str]:
 
 
 def score_c5_backup(short: str, att, today) -> tuple[int, str]:
+    if is_stateless(declared_datastore(short, REPO)):
+        # No datastore, nothing to back up. finrep scored 0 ("no CNPG cluster") for the absence
+        # of a cluster it must not have — an unachievable 0 that read like a missing backup.
+        return 2, "n/a — declares no datastore (stateless), nothing to back up"
     clusters = gitops_files_for(short, "Cluster")
     cnpg = [f for f in clusters if "postgres" in f.name or "cnpg" in read(f).lower()]
     if not cnpg:
@@ -290,26 +335,42 @@ def score_c7_security(short: str, att, today) -> tuple[int, str]:
 
 
 def score_c8_observability(short: str, att, today) -> tuple[int, str]:
-    # fleet podmonitor covers by namespaceSelector; per-service alerts are richer
-    podmon = GITOPS / "components" / "observability" / "podmonitor-openbank-services.yaml"
-    monitored = short in read(podmon)
+    # The fleet PodMonitor scrapes by namespaceSelector.matchNames, so "is this service scraped"
+    # is a question about its NAMESPACE. This used to ask `short in read(podmonitor.yaml)` — a
+    # substring match over the whole file, comments included. A comment asserting sdd-service was
+    # covered "via `payments`" was simply false (sdd runs in namespace `sdd`), and that false
+    # claim scored sdd as scraped while its metrics reached nothing; meanwhile ap2, mcp, vop,
+    # card-issuance, settlement and standing-order WERE scraped via `platform`/`payments` and
+    # scored as if they were not, because their names appear nowhere in the file (#2255).
+    ns = service_namespace(short, GITOPS)
+    scraped_namespaces = podmonitor_namespaces(GITOPS)
+    monitored = ns is not None and ns in scraped_namespaces
     alerts = bool(gitops_files_for(short, "PrometheusRule"))
     metrics = grep_any(svc_dir(short) / "src" / "main",
                        ["MeterRegistry", "DomainMetrics", "@Counted", "@Timed"])
+    # Evidence names the namespace and the specific missing half, so a 0 or 1 is actionable
+    # without re-deriving it: "add the namespace to the PodMonitor" and "instrument the domain"
+    # are different pieces of work and used to be reported identically as "not scraped".
+    ev = []
+    if ns is None:
+        ev.append("not deployed (no Deployment/Rollout in gitops)")
+    elif monitored:
+        ev.append(f"scraped (ns {ns})")
+    else:
+        ev.append(f"NOT scraped — ns '{ns}' absent from PodMonitor matchNames")
+    ev.append("domain metrics" if metrics else "NO domain metrics in src/main")
+    if alerts:
+        ev.append("alerts")
+    evidence = ", ".join(ev)
+
     if not monitored and not metrics:
-        return 0, "not scraped"
+        return 0, evidence
     s = 1
     if monitored and metrics:
-        s = 2
-    if monitored and metrics and alerts:
         s = 2  # bank-grade (3) needs defined SLO + burn-rate alerts (attestation)
     if attest_fresh(att, short, "slo_defined", today):
         s = 3
-    ev = []
-    if monitored: ev.append("scraped")
-    if metrics: ev.append("metrics")
-    if alerts: ev.append("alerts")
-    return s, ", ".join(ev) or "none"
+    return s, evidence
 
 
 def score_c9_ops(short: str, att, today) -> tuple[int, str]:

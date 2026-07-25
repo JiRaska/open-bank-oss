@@ -26,6 +26,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gitops_facts  # noqa: E402  (path must be set before the import)
+
 REPO = Path(__file__).resolve().parents[2]
 RUNBOOKS = REPO / "docs" / "runbooks"
 GITOPS = REPO / "openbank-infra" / "gitops"
@@ -64,52 +67,26 @@ def http_port(short: str) -> str:
     return "?"
 
 
-def nearest_kustomize_namespace(manifest: Path) -> str | None:
-    for parent in manifest.parents:
-        if parent != GITOPS and GITOPS not in parent.parents:
-            break
-        m = re.search(r"^namespace:\s*(\S+)", read(parent / "kustomization.yaml"), re.M)
-        if m:
-            return m.group(1)
-    return None
-
-
 def service_namespace(short: str) -> str:
     """The namespace this service's Deployment/Rollout actually lands in.
 
-    The runbook used to interpolate the service short name as its namespace, which is
-    wrong for a third of the fleet: document-service runs in `documents`, ap2 and mcp in
-    `platform`, settlement/vop/card-issuance/standing-order in `payments`. Every
-    `kubectl -n <ns>` line in those runbooks named a namespace that does not exist, so
-    the first command an on-call engineer copied out of them returned nothing. Resolve it
-    from the manifest that IS the workload — a NetworkPolicy peer or an env var merely
-    mentioning the service must not resolve, or the answer would be some caller's
-    namespace.
+    The runbook used to interpolate the service short name as its namespace, which is wrong for
+    a third of the fleet: document-service runs in `documents`, ap2 and mcp in `platform`,
+    settlement/vop/card-issuance/standing-order in `payments`. Every `kubectl -n <ns>` line in
+    those runbooks named a namespace that does not exist, so the first command an on-call
+    engineer copied out of them returned nothing.
+
+    The resolution itself now lives in gitops_facts, shared with the prod-readiness collector
+    and the PodMonitor coverage gate — three tools were each growing their own copy of this
+    question, and two of them had already answered it wrong in two different ways (#2255). Only
+    the display fallback is local: a service with no workload still needs *something* to render.
     """
-    names = {f"{short}-service", f"openbank-{short}-service"}
-    for f in sorted(GITOPS.rglob("*.yaml")):
-        text = read(f)
-        if f"openbank-{short}-service" not in text:
-            continue
-        for doc in text.split("\n---"):
-            kind = re.search(r"^kind:\s*(\S+)", doc, re.M)
-            if not kind or kind.group(1) not in ("Deployment", "Rollout"):
-                continue
-            name = re.search(r"^\s{2}name:\s*(\S+)", doc, re.M)
-            if not name or name.group(1) not in names:
-                continue
-            ns = re.search(r"^\s{2}namespace:\s*(\S+)", doc, re.M)
-            if ns:
-                return ns.group(1)
-            inherited = nearest_kustomize_namespace(f)
-            if inherited:
-                return inherited
-    return short
+    return gitops_facts.service_namespace(short, GITOPS) or short
 
 
 def is_stateless(datastore: str) -> bool:
     """A service that declares no primary datastore. `none` / `n/a` / empty all count."""
-    return (datastore or "").strip().lower() in ("", "none", "n/a", "—", "-")
+    return gitops_facts.is_stateless(datastore)
 
 
 def backup_configured(short: str) -> bool:

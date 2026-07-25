@@ -44,70 +44,19 @@ PODMON_REL = Path(
     "openbank-infra/gitops/components/observability/podmonitor-openbank-services.yaml"
 )
 
-
-def read(p: Path) -> str:
-    try:
-        return p.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        return ""
-
-
-def nearest_kustomize_namespace(manifest: Path, gitops: Path) -> str | None:
-    """The `namespace:` of the closest kustomization.yaml at or above the manifest."""
-    for parent in manifest.parents:
-        if parent != gitops and gitops not in parent.parents:
-            break
-        m = re.search(r"^namespace:\s*(\S+)", read(parent / "kustomization.yaml"), re.M)
-        if m:
-            return m.group(1)
-    return None
-
-
-def workload_namespaces(short: str, gitops: Path) -> set[str]:
-    """Namespaces of every Deployment/Rollout that IS this service.
-
-    A manifest merely *mentioning* the service does not count — a NetworkPolicy peer, an env
-    var pointing at its URL or an initContainer waiting on it would otherwise resolve to the
-    wrong namespace. The workload's metadata.name must be the service itself.
-    """
-    names = {f"{short}-service", f"openbank-{short}-service"}
-    out: set[str] = set()
-    for f in gitops.rglob("*.yaml"):
-        text = read(f)
-        if f"openbank-{short}-service" not in text:
-            continue
-        for doc in text.split("\n---"):
-            kind = re.search(r"^kind:\s*(\S+)", doc, re.M)
-            if not kind or kind.group(1) not in ("Deployment", "Rollout"):
-                continue
-            name = re.search(r"^\s{2}name:\s*(\S+)", doc, re.M)
-            if not name or name.group(1) not in names:
-                continue
-            ns = re.search(r"^\s{2}namespace:\s*(\S+)", doc, re.M)
-            out.add(
-                ns.group(1) if ns else (nearest_kustomize_namespace(f, gitops) or "?UNRESOLVED")
-            )
-    return out
-
-
-def match_names(podmon: Path) -> set[str]:
-    text = read(podmon)
-    if "matchNames:" not in text:
-        return set()
-    out: set[str] = set()
-    for line in text.split("matchNames:", 1)[1].splitlines():
-        m = re.match(r"^(\s+)-\s+(\S+)\s*$", line)
-        if m:
-            out.add(m.group(2))
-        elif line.strip():
-            break  # dedented back out of the list
-    return out
+# The namespace resolution below is shared with the prod-readiness collector's C8 scorer and the
+# per-service runbook generator. All three answer "where does this workload actually run", and
+# two of them had already answered it WRONG in two different ways before it was centralised
+# (#2255) — so it lives in exactly one place now, tested by
+# openbank-infra/scripts/prod_readiness_collector_test.py and the fixtures in --self-test below.
+sys.path.insert(0, str(REPO / "openbank-infra" / "scripts"))
+from gitops_facts import podmonitor_namespaces, workload_namespaces  # noqa: E402
 
 
 def audit(repo: Path) -> tuple[dict[str, list[str]], list[str], int]:
     """-> ({service: [missing namespaces]}, [services with no workload], ok_count)"""
     gitops = repo / "openbank-infra" / "gitops"
-    selected = match_names(repo / PODMON_REL)
+    selected = podmonitor_namespaces(gitops)
     missing: dict[str, list[str]] = {}
     no_workload: list[str] = []
     ok = 0
