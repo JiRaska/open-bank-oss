@@ -6,7 +6,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 # Runbook — openbank-copilot-service
 
 > Operational runbook for the `copilot` service. Data domain **platform**,
-> classification **confidential**, datastore **PostgreSQL**.
+> classification **confidential**, datastore **none**.
 
 ## Service identity
 
@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-copilot-service` |
 | HTTP port | `8131` |
 | Data domain | platform |
-| Datastore | PostgreSQL (schema `copilot_schema`) |
+| Datastore | none (schema `—`) |
 | Classification | confidential |
 | Retention | 1 year |
 | Lineage role | internal |
@@ -44,19 +44,20 @@ triaging an incident that starts on `copilot`.
 ## Common failure modes
 
 - **Pod CrashLoopBackOff at boot:** usually a missing/invalid config or secret
-  (`ExternalSecret` not synced) or a Flyway checksum mismatch. Check
-  `kubectl describe pod` events and the first 50 log lines.
-- **Readiness flapping:** datastore (PostgreSQL) unreachable or saturated — check the
-  datastore pod/cluster health and connection-pool metrics.
+  (`ExternalSecret` not synced). Check `kubectl describe pod` events and the
+  first 50 log lines.
+- **Readiness flapping:** this service holds no datastore, so look outward — an
+  upstream dependency below, or the OPA sidecar if `AUTHZ_ENFORCE` is on (with no
+  reachable PDP, `@Authorize` fails closed).
 - **Downstream errors:** verify the upstream dependencies above are healthy before
   assuming the fault is local.
 
 ## Disaster recovery
 
-- **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up).
-- **Mechanism:** CloudNativePG continuous WAL archiving + base backups to S3 (`barmanObjectStore`). Point-in-time recovery (PITR).
-- **Restore:** create a `Cluster` with `bootstrap.recovery` pointing at the backup object store; CNPG replays WAL to the target time. See runbook 0003 (PG major upgrade) for the cluster-recreate mechanics.
-- **Verify:** `kubectl cnpg status <db>-rw -n <ns>` shows the recovered cluster Healthy and the `*-app` secret regenerated.
+- **RPO: n/a** — no persistent state. **RTO target:** ≤ 10 min (image pull + rollout).
+- **Mechanism:** none needed — this service declares no primary datastore, so it holds no state to lose. Recovery is a redeploy from the GitOps manifests, which are the source of truth.
+- **Restore:** re-sync the ArgoCD Application (or `kubectl rollout restart` the Deployment). Any state this service reads lives in its upstream services above — recover those first, using their own runbooks.
+- **Verify:** health endpoint green, then re-drive one request end to end against an upstream that is already known-good.
 
 > RPO/RTO above are documented targets. They become **Bank-grade** (prod-readiness
 > C6=3) only once a restore/failover drill has actually been rehearsed and attested

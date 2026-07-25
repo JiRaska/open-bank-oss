@@ -3,8 +3,8 @@
 # derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
 # openbank-libs/governance/governance.schema.json
 dataDomain: platform
-primaryDatastore: PostgreSQL
-schemaName: copilot_schema
+primaryDatastore: none
+stateless: true
 dataLineageRole: internal
 dataClassification: confidential
 retentionPolicy: 1 year
@@ -23,6 +23,3 @@ lineage:
     - serviceName: fx-service
       relationType: api
       description: READ tool (FX rates)
-schemaLineage:
-  ownedSchemas:
-    - copilot_schema
