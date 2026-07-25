@@ -43,6 +43,16 @@ spec:
           env:
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
+            # Declared explicitly rather than left to the libs default (`true`), issue #2394.
+            # finrep-service contains no @Authorize annotation, so there is no OPA decision to
+            # make and no `opa` sidecar in this pod. With the default, AuthorizeInterceptor would
+            # be armed to fail closed against a PDP that does not exist — harmless while the
+            # annotation count is zero, and an instant 503/422 on whichever endpoint gets the
+            # first one. Authorization today is JWT roles (@RolesAllowed on FinrepResource /
+            # CorepResource). Flip this to true in the SAME change that adds @Authorize + the
+            # rego rules + the sidecar (ADR-0034 Phase 5), never before.
+            - name: AUTHZ_ENFORCE
+              value: "false"
             - name: LEDGER_SERVICE_URL
               value: http://ledger-service.ledger.svc:8101
           resources:
