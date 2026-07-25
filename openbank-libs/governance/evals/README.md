@@ -43,15 +43,44 @@ Assertion keys the runner understands: `must_not_be_empty` (bool), `must_contain
 `must_not_contain` (list). The set grows as scenarios need it — a new key is a runner + guard change,
 not a schema free-for-all.
 
-## Gate mechanics (runner — next increment)
+## Gate mechanics
 
-`check-evals-registry.py` (wired in CI now, **advisory**) validates this tree's *structure*. The
-**runner** that actually executes each scenario's `input` through the charter's model, evaluates the
-`assert` block, computes a pass rate, and blocks a model/prompt promotion on a regression versus the
-stored baseline is the next ADR-0148 increment — it lands once an agent's model call is invocable
-behind a deterministic test seam (the shared `LlmGatewayPort`, ADR-0174, is that seam). Writing the
-scenarios now — against today's behaviour — means the first real model swap is the first thing the
-gate ever exercises, not an untested leap (ADR-0148, alternatives considered).
+Two scripts, two jobs:
+
+| script | what it does | CI |
+|---|---|---|
+| `.github/scripts/check-evals-registry.py` | validates this tree's *structure* | advisory |
+| `.github/scripts/run-evals.py` | **the runner** — record/replay + the ratchet | see below |
+
+The runner is **record/replay**, because CI holds no model credentials and a live model is not
+deterministic:
+
+- **`--record <charter>`** (operator, off-CI, needs `EVALS_API_KEY`) sends each scenario's `input`
+  through the charter's registry prompt to an OpenAI-compatible endpoint and writes the verbatim
+  outputs — plus the prompt's `sha256`, the suite `version` and the `model_id` — to
+  [`recordings/<charter>.json`](recordings/README.md).
+- **replay** (default, every PR, offline) re-evaluates each suite's `assert` blocks against those
+  recorded outputs and computes a pass rate against the floor in [`baselines.json`](baselines.json)
+  (default `1.0`).
+
+**Where the gate bites.** Replay hard-fails when a recording is *stale* — the suite `version` moved,
+or the registered prompt's `sha256` no longer matches what was recorded. So a prompt promotion or a
+model swap cannot land without re-recording, and a re-recording that drops below the floor fails the
+PR. That is ADR-0148's decision expressed as a check: replaying yesterday's answers proves nothing
+about a model you did not change, and everything about one you did.
+
+**A charter with no recording yet** is an advisory `::warning`, not a pass — nothing is being
+replayed for it. `--require-recordings` graduates that to a hard failure once every suite has a run
+(ADR-0144's advisory→enforced path). Never hand-write a recording to clear the warning: a fabricated
+recording is a green gate over behaviour nobody observed.
+
+**Proving the gate can go red.** `run-evals.py --self-test` runs the assertion engine, the staleness
+detector and the ratchet against twelve fixtures that each declare the exit code they must produce —
+one must-pass, eleven must-fail (empty output, missing substring, an obeyed prompt injection, a
+dropped scenario, a bumped suite version, an edited prompt, a missing `model_id`, an unevaluatable
+assertion key, …) — and exits non-zero if any behaves the other way round. It is wired into CI as an
+**enforced** step *ahead of* the advisory replay, so a runner that has quietly lost the ability to
+fail takes the build down with it rather than reporting green.
 
 ## Rules
 

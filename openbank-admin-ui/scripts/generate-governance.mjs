@@ -18,20 +18,17 @@
 
 import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from 'fs'
 import path from 'path'
-import { fileURLToPath } from 'url'
+import { fileURLToPath, pathToFileURL } from 'url'
 import { parse as parseYaml } from 'yaml'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const args = process.argv.slice(2)
-const getArg = (flag, dflt) => {
-  const i = args.indexOf(flag)
-  return i >= 0 && args[i + 1] ? args[i + 1] : dflt
-}
 
-const REPO = path.resolve(getArg('--repo', path.resolve(__dirname, '..', '..')))
-const OUT = path.resolve(getArg('--out', path.resolve(__dirname, '..', 'governance.json')))
+const REQUIRED = ['dataDomain', 'primaryDatastore', 'dataLineageRole', 'dataClassification', 'retentionPolicy']
 
-const REQUIRED = ['dataDomain', 'primaryDatastore', 'schemaName', 'dataLineageRole', 'dataClassification', 'retentionPolicy']
+// schemaName is NOT in REQUIRED because a stateless module legitimately owns none.
+// It is validated conditionally below: statelessness must be ASSERTED (`stateless: true`),
+// never inferred from an absent schemaName — otherwise a forgotten field and a service
+// that owns no schema are indistinguishable, and the gate silently stops meaning anything.
 
 // Enum constraints mirror governance.schema.json — an out-of-enum value is a gap,
 // so a future bad edit fails the CI drift gate instead of passing silently.
@@ -66,65 +63,104 @@ function flywayDeclaredVersion(dir) {
   return 'V' + versions.sort(cmp).at(-1)
 }
 
-// A module is a released component iff it has version.txt (admin-ui keeps it too).
-const modules = readdirSync(REPO)
-  .filter(n => n.startsWith('openbank-'))
-  .filter(n => { try { return statSync(path.join(REPO, n)).isDirectory() } catch { return false } })
-  .filter(n => existsSync(path.join(REPO, n, 'version.txt')))
-  .sort()
+// Exported (not just run as a CLI) so the gate's rules are unit-testable without
+// spawning a subprocess per case — see src/test/generate-governance.test.ts.
+export function buildManifest(REPO) {
+  // A module is a released component iff it has version.txt (admin-ui keeps it too).
+  const modules = readdirSync(REPO)
+    .filter(n => n.startsWith('openbank-'))
+    .filter(n => { try { return statSync(path.join(REPO, n)).isDirectory() } catch { return false } })
+    .filter(n => existsSync(path.join(REPO, n, 'version.txt')))
+    .sort()
 
-const services = []
-const gaps = []
-for (const name of modules) {
-  const dir = path.join(REPO, name)
-  const short = name.replace(/^openbank-/, '')
-  const raw = readText(path.join(dir, 'governance.yaml'))
-  if (raw == null) { gaps.push(`${name}: missing governance.yaml`); continue }
+  const services = []
+  const gaps = []
+  for (const name of modules) {
+    const dir = path.join(REPO, name)
+    const short = name.replace(/^openbank-/, '')
+    const raw = readText(path.join(dir, 'governance.yaml'))
+    if (raw == null) { gaps.push(`${name}: missing governance.yaml`); continue }
 
-  let decl
-  try { decl = parseYaml(raw) } catch (e) { gaps.push(`${name}: unparseable governance.yaml (${e.message})`); continue }
-  const missing = REQUIRED.filter(k => decl?.[k] == null || decl[k] === '')
-  if (missing.length) gaps.push(`${name}: governance.yaml missing ${missing.join(', ')}`)
-  for (const [k, allowed] of Object.entries(ENUMS)) {
-    if (decl?.[k] != null && !allowed.includes(decl[k])) {
-      gaps.push(`${name}: ${k}='${decl[k]}' not in [${allowed.join(', ')}]`)
+    let decl
+    try { decl = parseYaml(raw) } catch (e) { gaps.push(`${name}: unparseable governance.yaml (${e.message})`); continue }
+    const missing = REQUIRED.filter(k => decl?.[k] == null || decl[k] === '')
+    if (missing.length) gaps.push(`${name}: governance.yaml missing ${missing.join(', ')}`)
+
+    // Conditional schemaName rule (mirrors governance.schema.json's if/then/else).
+    const stateless = decl?.stateless === true
+    const hasSchemaName = decl?.schemaName != null && decl.schemaName !== ''
+    if (decl?.stateless != null && decl.stateless !== true) {
+      gaps.push(`${name}: stateless must be 'true' or omitted, got '${decl.stateless}'`)
     }
+    if (stateless && hasSchemaName) {
+      gaps.push(`${name}: declares stateless: true but also schemaName='${decl.schemaName}' — a stateless module owns no schema`)
+    }
+    if (!stateless && !hasSchemaName) {
+      gaps.push(`${name}: governance.yaml missing schemaName (add 'stateless: true' instead if the module owns no DB schema)`)
+    }
+
+    for (const [k, allowed] of Object.entries(ENUMS)) {
+      if (decl?.[k] != null && !allowed.includes(decl[k])) {
+        gaps.push(`${name}: ${k}='${decl[k]}' not in [${allowed.join(', ')}]`)
+      }
+    }
+
+    services.push({
+      serviceName: short,
+      dataDomain: decl.dataDomain ?? null,
+      primaryDatastore: decl.primaryDatastore ?? null,
+      schemaName: decl.schemaName ?? null,
+      stateless: stateless || undefined,
+      dataLineageRole: decl.dataLineageRole ?? null,
+      dataClassification: decl.dataClassification ?? 'unknown',
+      retentionPolicy: decl.retentionPolicy ?? 'unknown',
+      evidenceExported: typeof decl.evidenceExported === 'boolean' ? decl.evidenceExported : undefined,
+      flywayDeclaredVersion: flywayDeclaredVersion(dir),
+      lineage: decl.lineage ?? undefined,
+      schemaLineage: decl.schemaLineage ?? undefined,
+    })
   }
 
-  services.push({
-    serviceName: short,
-    dataDomain: decl.dataDomain ?? null,
-    primaryDatastore: decl.primaryDatastore ?? null,
-    schemaName: decl.schemaName ?? null,
-    dataLineageRole: decl.dataLineageRole ?? null,
-    dataClassification: decl.dataClassification ?? 'unknown',
-    retentionPolicy: decl.retentionPolicy ?? 'unknown',
-    evidenceExported: typeof decl.evidenceExported === 'boolean' ? decl.evidenceExported : undefined,
-    flywayDeclaredVersion: flywayDeclaredVersion(dir),
-    lineage: decl.lineage ?? undefined,
-    schemaLineage: decl.schemaLineage ?? undefined,
-  })
+  const totals = {
+    modules: services.length,
+    withLineage: services.filter(s => s.lineage).length,
+    evidenceExported: services.filter(s => s.evidenceExported).length,
+    withGaps: gaps.length,
+  }
+
+  return {
+    schema: 'openbank.governance/v1',
+    generator: 'generate-governance.mjs',
+    source: 'code-derived (governance.yaml + db/migration) — ADR-0071 / ADR-0029 D3',
+    collectedAt: null,
+    totals,
+    // The gap LIST, not just totals.withGaps — so the CI gate can name the offending
+    // modules from the artifact instead of guessing at a shape that never existed
+    // (issue #2165: the old reporter read `.modules`, which is not a field here, and
+    // therefore threw on every single failure without ever printing a gap).
+    gaps,
+    services,
+  }
 }
 
-const totals = {
-  modules: services.length,
-  withLineage: services.filter(s => s.lineage).length,
-  evidenceExported: services.filter(s => s.evidenceExported).length,
-  withGaps: gaps.length,
+function main() {
+  const args = process.argv.slice(2)
+  const getArg = (flag, dflt) => {
+    const i = args.indexOf(flag)
+    return i >= 0 && args[i + 1] ? args[i + 1] : dflt
+  }
+  const REPO = path.resolve(getArg('--repo', path.resolve(__dirname, '..', '..')))
+  const OUT = path.resolve(getArg('--out', path.resolve(__dirname, '..', 'governance.json')))
+
+  const manifest = buildManifest(REPO)
+  const { totals, gaps } = manifest
+  writeFileSync(OUT, JSON.stringify(manifest, null, 2) + '\n')
+  console.log(`[generate-governance] ${totals.modules} modules (${totals.withLineage} with lineage, ${totals.withGaps} gaps) → ${OUT}`)
+  if (gaps.length) {
+    console.log('[generate-governance] gaps:')
+    for (const g of gaps) console.log(`  - ${g}`)
+  }
 }
 
-const manifest = {
-  schema: 'openbank.governance/v1',
-  generator: 'generate-governance.mjs',
-  source: 'code-derived (governance.yaml + db/migration) — ADR-0071 / ADR-0029 D3',
-  collectedAt: null,
-  totals,
-  services,
-}
-
-writeFileSync(OUT, JSON.stringify(manifest, null, 2) + '\n')
-console.log(`[generate-governance] ${totals.modules} modules (${totals.withLineage} with lineage, ${totals.withGaps} gaps) → ${OUT}`)
-if (gaps.length) {
-  console.log('[generate-governance] gaps:')
-  for (const g of gaps) console.log(`  - ${g}`)
-}
+// CLI entrypoint only — importing this module (tests) must not write or log.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()

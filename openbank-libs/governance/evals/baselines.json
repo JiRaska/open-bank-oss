@@ -1,0 +1,14 @@
+{
+  "_comment": [
+    "ADR-0148 evals ratchet floors, consumed by .github/scripts/run-evals.py (issue #1918).",
+    "The floor is the pass rate a charter's recorded run must meet or exceed. The default is 1.0:",
+    "every declared scenario must pass, because a scenario is only written when the behaviour it",
+    "asserts is required — there is no 'nice to have' row in a suite that gates a money-adjacent",
+    "agent. `overrides` is the escape hatch, and it is deliberately a reviewed diff rather than a",
+    "value the runner can lower on its own: dropping a floor is how a ratchet quietly stops",
+    "ratcheting (ADR-0020's own failure mode). Each override must carry a `reason` and an issue.",
+    "A charter with no override entry inherits default_min_pass_rate."
+  ],
+  "default_min_pass_rate": 1.0,
+  "overrides": {}
+}

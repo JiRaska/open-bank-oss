@@ -119,6 +119,9 @@ interface CurrencyReconciliation {
   subLedgerBookedSum: number | string
   difference: number | string
   withinTolerance: boolean
+  // ADR-0178 Phase 3 — future-value-dated pipeline (posted, not yet effective). Optional: reports
+  // recorded before the field existed omit it, so render 0 rather than NaN.
+  futureValueDatedPipeline?: number | string
 }
 
 interface ReconciliationReport {
@@ -319,18 +322,21 @@ function EodPanel() {
                     <th style={{ textAlign: 'left', padding: '8px 16px', fontWeight: 600 }}>{t('Měna', 'Currency')}</th>
                     <th style={{ padding: '8px 16px', fontWeight: 600 }}>{t('Kontrolní účet HK', 'Ledger control')}</th>
                     <th style={{ padding: '8px 16px', fontWeight: 600 }}>{t('Součet sub-ledgeru', 'Sub-ledger sum')}</th>
-                    <th style={{ padding: '8px 16px', fontWeight: 600 }}>{t('Rozdíl', 'Difference')}</th>
+                    <th style={{ padding: '8px 16px', fontWeight: 600 }} title={t('Zaúčtované pohyby s pozdějším datem valuty — ještě nejsou v žádné straně vyrovnání, proto nejde o rozdíl.', 'Posted movements value-dated after asOf — counted by neither side of the tie-out, so not drift.')}>{t('Očekávané pohyby (valuta)', 'Value-date pipeline')}</th>
+                    <th style={{ padding: '8px 16px', fontWeight: 600 }}>{t('Nevysvětlený rozdíl', 'Unexplained difference')}</th>
                     <th style={{ textAlign: 'center', padding: '8px 16px', fontWeight: 600 }}>{t('Stav', 'Status')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {report.currencies.map(row => {
                     const diff = num(row.difference)
+                    const pipeline = num(row.futureValueDatedPipeline ?? 0)
                     return (
                       <tr key={row.currency} style={{ borderTop: '1px solid var(--border)' }}>
                         <td style={{ padding: '10px 16px', fontWeight: 600, color: 'var(--text-primary)' }}>{row.currency}</td>
                         <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-secondary)' }}>{fmtAmount(row.ledgerControlBalance)}</td>
                         <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-secondary)' }}>{fmtAmount(row.subLedgerBookedSum)}</td>
+                        <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', color: pipeline === 0 ? 'var(--text-tertiary)' : 'var(--text-secondary)' }}>{fmtAmount(row.futureValueDatedPipeline ?? 0)}</td>
                         <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600, color: diff === 0 ? 'var(--text-secondary)' : 'var(--danger)' }}>{fmtAmount(row.difference)}</td>
                         <td style={{ padding: '10px 16px', textAlign: 'center' }}>
                           <span className={row.withinTolerance ? 'pill pill-success' : 'pill pill-danger'}>

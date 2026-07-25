@@ -96,7 +96,12 @@ jobs:
           GAPS=$(node -e "console.log(require('./governance.json').totals.withGaps)")
           if [ "$GAPS" -gt 0 ]; then
             echo "::error::Governance drift — $GAPS module(s) missing or with an invalid governance.yaml (ADR-0071 Phase 4). Add a governance.yaml to each flagged service."
-            node -e "const g=require('./governance.json'); g.modules.filter(m=>m.hasGap).forEach(m=>console.log('  gap: '+m.name))"
+            # Reads governance.json's real shape: a top-level `gaps` string array
+            # (issue #2165 — this used to read a `.modules` field that never existed,
+            # so it threw a TypeError on every failure and never named a module).
+            # No `?? []` fallback on purpose: a missing array is a generator bug and
+            # must be loud, not silently reported as "no gaps".
+            node -e "const g=require('./governance.json'); if(!Array.isArray(g.gaps)){console.error('::error::governance.json has no gaps array — generate-governance.mjs is broken');process.exit(2)} for(const x of g.gaps) console.log('  gap: '+x)"
             exit 1
           else
             echo "Governance manifest clean: $(node -e "console.log(require('./governance.json').totals.modules)") modules, 0 gaps."
@@ -358,11 +363,31 @@ jobs:
       # criteria the promotion ratchet consumes; this guard keeps it well-formed (charter resolves,
       # version is v<N>, scenarios have id/description/input/assert, assert keys the runner
       # understands, prompt refs resolve). ADVISORY first (ADR-0144): backlog charters are
-      # ::warning; the runner that executes scenarios and blocks a regressing model/prompt promotion
-      # is the next increment (needs the model call behind a deterministic seam, ADR-0174).
+      # ::warning; run-evals.py below is the runner that consumes this registry.
       - name: "evals-registry integrity (ADR-0148, advisory)"
         continue-on-error: true
         run: python3 .github/scripts/check-evals-registry.py
+
+      # ADR-0148 evals gate — the RUNNER's self-test. ENFORCED on purpose, and deliberately placed
+      # BEFORE the replay step below: it feeds run-evals.py twelve fixtures that each declare the
+      # exit code they must produce (one must-pass, eleven must-fail — empty output, an obeyed
+      # prompt injection, a stale recording, a floor breach, …) and goes red if any behaves the
+      # other way round. It touches no external service, so there is nothing here to be flaky. A
+      # gate nobody has watched fail is not evidence of anything: this repo has shipped a reporter
+      # that crashed on every finding and a scanner that printed nothing, and both read as green.
+      - name: "evals runner self-test (ADR-0148, enforced)"
+        run: python3 .github/scripts/run-evals.py --self-test
+
+      # ADR-0148 evals gate — replay. Re-evaluates each charter's `assert` blocks against the
+      # recorded model outputs in evals/recordings/ and hard-fails on a STALE recording (the suite
+      # version moved, or the registered prompt's sha256 changed) or a pass rate below the
+      # baselines.json floor — i.e. a prompt/model promotion cannot land without being re-recorded
+      # and re-passing. ADVISORY first (ADR-0144): no charter has a recorded run yet, so today this
+      # emits ::warning per suite. Graduate by adding --require-recordings and dropping
+      # continue-on-error once every suite has a committed recording.
+      - name: "evals gate replay (ADR-0148, advisory)"
+        continue-on-error: true
+        run: python3 .github/scripts/run-evals.py
 
       # rules.yaml: alerting.critical_alerts_must_egress. A severity=critical alert must
       # reach a receiver that leaves the cluster. Guards the "severity inversion": critical
@@ -380,6 +405,16 @@ jobs:
       # brought unallowlisted violations to zero across three rounds.
       - name: "event-consumer liveness (ADR-0160, enforced)"
         run: python3 .github/scripts/check-event-consumer-liveness.py --enforce
+
+      # rules.yaml: scheduled_methods.no_runblocking_in_scheduled_body. Fleet-wide scan (not
+      # diff-scoped): `runBlocking` in the body of a @Scheduled method runs the coroutine on a
+      # bare executor-thread with no Vert.x context, so the first reactive Panache call throws
+      # HR000068 and the job silently does nothing. Found live five times (#2148 standing-order;
+      # #2187 ledger tie-out + FX revaluation, fx ČNB ingestion, billing cycle) — none had ever
+      # run. It is a gate rather than a doc because the natural test cannot fail: calling the
+      # method directly supplies the context the scheduler does not. ENFORCED.
+      - name: "no runBlocking in a @Scheduled body (rules.yaml: scheduled_methods, enforced)"
+        run: python3 .github/scripts/check-no-runblocking-in-scheduled.py
 
       # ADR-0160 mechanism 2 / rules.yaml: change_requirements.lineage_code_audit. Fleet-wide scan
       # (not diff-scoped): every governance.yaml lineage.downstream edge must be backed by

@@ -96,14 +96,14 @@ class BalanceRepositoryImpl(private val repo: BalancePanacheRepo) : BalanceRepos
         // audit, so a write-path bug that desynchronized `balances` from `ledger_projection_event` still
         // surfaces as drift instead of being hidden by summing the audit alone.
         val current = sumBookedByCurrency()
-        val futureDated = sumBookedDeltaAfterByCurrency(asOf)
+        val futureDated = sumFutureValueDatedByCurrency(asOf)
         return (current.keys + futureDated.keys).associateWith { ccy ->
             (current[ccy] ?: BigDecimal.ZERO).subtract(futureDated[ccy] ?: BigDecimal.ZERO)
         }
     }
 
     /** Σ of projected booked deltas whose value date is strictly after [asOf], grouped by currency. */
-    private suspend fun sumBookedDeltaAfterByCurrency(asOf: java.time.LocalDate): Map<String, BigDecimal> =
+    override suspend fun sumFutureValueDatedByCurrency(asOf: java.time.LocalDate): Map<String, BigDecimal> =
         Panache.withSession {
             Panache.getSession().flatMap { session ->
                 session.createQuery(

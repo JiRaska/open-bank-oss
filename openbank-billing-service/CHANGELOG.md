@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.6](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.6.5...billing-service-v0.6.6) (2026-07-25)
+
+
+### Bug Fixes
+
+* **billing:** run the monthly cycle sweep on a Vert.x context ([#2187](https://github.com/JiRaska/open-bank-oss/issues/2187)) ([#2194](https://github.com/JiRaska/open-bank-oss/issues/2194)) ([8477733](https://github.com/JiRaska/open-bank-oss/commit/847773329cb2b2ddfb7c7999d1f348e087bcf176))
+
 ## [0.6.5](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.6.4...billing-service-v0.6.5) (2026-07-19)
 
 

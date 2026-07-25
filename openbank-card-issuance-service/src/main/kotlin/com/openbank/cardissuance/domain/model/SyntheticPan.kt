@@ -53,20 +53,65 @@ object SyntheticPanGenerator {
 
     fun generate(network: CardNetwork): SyntheticCardCredential {
         val prefix = TEST_BIN_PREFIXES.getValue(network)
-        val panLength = if (network == CardNetwork.AMEX) PAN_LENGTH_AMEX else PAN_LENGTH_DEFAULT
-        val cvvLength = if (network == CardNetwork.AMEX) CVV_LENGTH_AMEX else CVV_LENGTH_DEFAULT
-
         val body = buildString {
             append(prefix)
-            repeat(panLength - prefix.length - 1) { append(random.nextInt(DECIMAL_RADIX)) }
+            repeat(panLength(network) - prefix.length - 1) { append(random.nextInt(DECIMAL_RADIX)) }
         }
-        val pan = body + luhnCheckDigit(body)
-        val cvv = (1..cvvLength).joinToString("") { random.nextInt(DECIMAL_RADIX).toString() }
-        return SyntheticCardCredential(pan = pan, cvv = cvv, maskedPan = mask(pan))
+        return credential(network, body + luhnCheckDigit(body))
+    }
+
+    /**
+     * Same as [generate], but the PAN is forced to END in [requiredLast4].
+     *
+     * This exists for the vault backfill: a card issued before the vault has a `maskedPan` the
+     * customer has already seen (`**** **** **** 3901`). Minting a fresh PAN for it must not
+     * silently change the card's identity under them, so the generated number keeps those four
+     * digits and only the hidden middle is new.
+     *
+     * The subtlety is that **the Luhn check digit IS the last digit** — it cannot be appended once
+     * the last 4 are pinned. Instead we pick the free middle digits, then solve for the one
+     * immediately preceding the fixed tail: at any single position, varying that digit 0..9 walks
+     * the Luhn sum through all ten residues mod 10 (undoubled trivially; doubled-with-rollover maps
+     * 0..9 → 0,2,4,6,8,1,3,5,7,9, also a bijection), so exactly one value makes the required final
+     * digit the correct check digit. The search is written as a bounded loop over 0..9 rather than
+     * arithmetic anyway, so an unrepresentable input returns `null` instead of a wrong number.
+     *
+     * Returns `null` when [requiredLast4] is not exactly four digits — the caller must then leave
+     * the card alone rather than renumber it.
+     */
+    fun generate(network: CardNetwork, requiredLast4: String?): SyntheticCardCredential? {
+        if (requiredLast4 == null) return null
+        if (requiredLast4.length != MASK_VISIBLE_DIGITS) return null
+        if (!requiredLast4.all { it.isDigit() }) return null
+
+        val prefix = TEST_BIN_PREFIXES.getValue(network)
+        val freeDigits = panLength(network) - prefix.length - MASK_VISIBLE_DIGITS
+        if (freeDigits < 1) return null
+
+        // One free digit is reserved as the solved "pivot"; the rest is random filler.
+        val filler = (1 until freeDigits).joinToString("") { random.nextInt(DECIMAL_RADIX).toString() }
+        val head = prefix + filler
+        val tail = requiredLast4.dropLast(1)
+        val checkDigit = requiredLast4.last().digitToInt()
+
+        val pivot = (0 until DECIMAL_RADIX).firstOrNull { candidate ->
+            luhnCheckDigit("$head$candidate$tail") == checkDigit
+        } ?: return null
+
+        return credential(network, "$head$pivot$tail${requiredLast4.last()}")
     }
 
     /** `**** **** **** 1234` — the last [MASK_VISIBLE_DIGITS] of the real PAN, everything else hidden. */
     fun mask(pan: String): String = "**** **** **** ${pan.takeLast(MASK_VISIBLE_DIGITS)}"
+
+    private fun panLength(network: CardNetwork) =
+        if (network == CardNetwork.AMEX) PAN_LENGTH_AMEX else PAN_LENGTH_DEFAULT
+
+    private fun credential(network: CardNetwork, pan: String): SyntheticCardCredential {
+        val cvvLength = if (network == CardNetwork.AMEX) CVV_LENGTH_AMEX else CVV_LENGTH_DEFAULT
+        val cvv = (1..cvvLength).joinToString("") { random.nextInt(DECIMAL_RADIX).toString() }
+        return SyntheticCardCredential(pan = pan, cvv = cvv, maskedPan = mask(pan))
+    }
 
     /** True when [pan] satisfies the Luhn (mod-10) checksum. */
     fun isLuhnValid(pan: String): Boolean {

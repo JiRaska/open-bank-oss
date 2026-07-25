@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.15.1...agent-service-v1.15.2) (2026-07-25)
+
+
+### Bug Fixes
+
+* **agent:** route the assistant LLM call through the in-cluster gateway (ADR-0174/0175) ([#2209](https://github.com/JiRaska/open-bank-oss/issues/2209)) ([bca0318](https://github.com/JiRaska/open-bank-oss/commit/bca0318ddc9fee5287b374eefab4d7c0f12960f6))
+
 ## [1.15.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.15.0...agent-service-v1.15.1) (2026-07-13)
 
 

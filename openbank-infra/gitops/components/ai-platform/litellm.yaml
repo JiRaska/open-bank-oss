@@ -19,6 +19,14 @@ spec:
       labels:
         app.kubernetes.io/name: litellm
         app.kubernetes.io/part-of: ai-platform
+      annotations:
+        # LiteLLM parses --config ONCE at startup, and the ConfigMap is a plain volume mount, so a
+        # config edit reaches the filesystem and changes nothing: the proxy keeps serving the model
+        # list it booted with. Adding the llama-3.3-70b-versatile route without rolling the pod
+        # would leave agent-service's repointed call failing "model not found" with a green,
+        # in-sync ArgoCD — the same silent-degradation shape as an `optional: true` secret ref.
+        # BUMP THIS whenever litellm-config.yaml changes; that is what rolls the pod.
+        openbank.tech/litellm-config-revision: "2"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -45,6 +53,14 @@ spec:
                 secretKeyRef:
                   name: litellm-secrets
                   key: DEEPINFRA_API_KEY
+                  optional: true
+            # Second upstream provider key (Groq) — backs the llama-3.3-70b-versatile route used by
+            # agent-service (#1919). Same trade as above: it lives ONLY in this pod.
+            - name: GROQ_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-secrets
+                  key: GROQ_API_KEY
                   optional: true
             # Virtual key callers present to LiteLLM.
             - name: LITELLM_MASTER_KEY

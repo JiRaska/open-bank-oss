@@ -9,7 +9,6 @@ import com.openbank.ledger.application.port.`in`.RevalueFxCommand
 import com.openbank.libs.persistence.lock.ClusterLock
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
-import kotlinx.coroutines.runBlocking
 import org.jboss.logging.Logger
 import java.time.LocalDate
 import java.time.ZoneId
@@ -33,12 +32,24 @@ class FxRevaluationScheduler(private val useCase: FxRevaluationUseCase, private 
     private val log: Logger = Logger.getLogger(FxRevaluationScheduler::class.java)
     private val zone: ZoneId = ZoneId.of("Europe/Prague")
 
+    // `suspend`, never `runBlocking` (#2187, the fleet sweep of #2148). Quarkus invokes a plain
+    // @Scheduled method on a bare `executor-thread`, which carries no Vert.x context, so
+    // `runBlocking { clusterLock.tryRunExclusively(…) }` ran [PostgresClusterLock]'s
+    // `Panache.withTransaction` — the FIRST reactive call, and it sits *outside* the inner
+    // try/catch below — off the event loop and threw `HR000068: This method should exclusively be
+    // invoked from a Vert.x EventLoop thread`. Every tick aborted before `revalue` was ever
+    // reached, so no FX position was ever marked to the fixing. A suspending @Scheduled method is
+    // dispatched by Quarkus on a proper (duplicated) Vert.x context instead.
+    //
+    // The cron is a config expression (same default as before) purely so an IT can shrink it and
+    // drive the *real* scheduler dispatch — calling this method directly supplies a context the
+    // scheduler does not, and would pass against the broken code.
     @Scheduled(
-        cron = "0 0 15 * * ?",
+        cron = "{openbank.ledger.fx-revaluation.cron:0 0 15 * * ?}",
         timeZone = "Europe/Prague",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
-    fun revalueDaily() = runBlocking {
+    suspend fun revalueDaily() {
         val ran = clusterLock.tryRunExclusively(JOB_NAME) {
             try {
                 val result = useCase.revalue(RevalueFxCommand(LocalDate.now(zone)))

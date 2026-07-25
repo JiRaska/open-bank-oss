@@ -75,7 +75,18 @@ jobs:
       # on a persistent runner isn't reused. file.encoding=UTF-8 alone does NOT fix filename decoding.
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
-      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
+      # Heap is a RATCHET, and nothing measures it — expect to raise it again as the fleet grows.
+      # This is the only workflow that configures AND executes every module in ONE invocation, so
+      # its peak heap scales with the whole task graph (455 actionable tasks and climbing), not with
+      # one service. At -Xmx4g it started dying with `java.lang.OutOfMemoryError: Java heap space`
+      # in Gradle's MissingTaskDependencyDetector / ExecutionNodeAccessHierarchy — the execution-time
+      # VFS hierarchy that records every task's input/output locations, which grows with the graph.
+      # An OOM here is worse than a slow run: it aborts PART-WAY (235 of 455 tasks executed), so the
+      # modules after the abort are never linted at all, and the red check reads as "the fleet is
+      # broken" when nothing is. dependency-submission.yml already ratcheted 4g→6g for this same
+      # OOM class, and security.yml runs at 6g; ubuntu-latest has 16 GB, so 6g leaves ample room for
+      # the separate Kotlin compile daemon and the worker processes.
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
