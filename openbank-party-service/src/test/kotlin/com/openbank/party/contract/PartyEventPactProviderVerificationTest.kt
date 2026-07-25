@@ -248,7 +248,46 @@ class PartyEventPactProviderVerificationTest {
         )
     }
 
+    /**
+     * State for vop-service's `PartyNameLookupPactConsumerTest` (issue #2255): hop 2 of the ADR-0171
+     * §4 VoP name resolution reads `legalName`/`tradingName` off `GET /api/v1/parties/{id}`, and the
+     * adapter falls back to `tradingName` when `legalName` is blank — so both fields must be present
+     * and non-blank on the seeded row, unlike [FIXED_PARTY_ID] above which has a null trading name.
+     *
+     * Seeded as a COMPANY: a party carrying both names is by construction a legal entity, and it
+     * keeps this row from colliding with the individual the KYC-expiry state above inserts.
+     */
+    @State("a party exists with both a legal name and a trading name")
+    fun partyExistsWithLegalAndTradingName() = runOnVertxContext {
+        // Idempotent for the same reason as the state above: pact-jvm 4.7.3 invokes each @State
+        // setup callback twice per interaction, and this one inserts with a fixed id.
+        if (partyRepository.findById(VOP_NAME_PARTY_ID) != null) return@runOnVertxContext
+        partyRepository.save(
+            Party(
+                id = VOP_NAME_PARTY_ID,
+                partyType = PartyType.COMPANY,
+                status = PartyStatus.ACTIVE,
+                legalName = "Pact Verify Trading Company a.s.",
+                tradingName = "PactVerify",
+                dateOfBirth = null,
+                nationality = null,
+                taxId = null,
+                registrationNumber = null,
+                email = "pact-verify-vop@example.com",
+                phone = null,
+                address = null,
+                kycStatus = KycStatus.APPROVED,
+                createdAt = Instant.now(),
+                updatedAt = Instant.now(),
+                amlStatus = AmlStatus.NOT_SCREENED,
+            ),
+        )
+    }
+
     companion object {
         private val FIXED_PARTY_ID = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+
+        /** Must equal `PartyNameLookupPactConsumerTest.PACT_PARTY_ID` (openbank-vop-service). */
+        private val VOP_NAME_PARTY_ID = UUID.fromString("b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9")
     }
 }
