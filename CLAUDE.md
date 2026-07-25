@@ -145,6 +145,25 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
 - **One `@Provider` test per provider.** Two provider-verification classes with the same `@Provider`
   both pull every pact the broker holds and collide; use a single test that picks the target per
   interaction in `@BeforeEach`. Provider tests are gated on `pactbroker.url` and run only in CI.
+- **A consumer pact alone CANNOT catch a wrong request path — only the provider replay can.** The
+  Pact mock server answers whatever path the client asks for, so pointing a client at a route that
+  does not exist leaves the consumer test green; the real provider has no such route, so only
+  verification goes red. Both halves were measured on #2283: renaming a response field in the client
+  DTO reddens the *consumer*, changing the path reddens only the *provider*. A committed pact nobody
+  replays is therefore worthless against the likeliest defect — and that is exactly how
+  finrep-service shipped a call to `/api/v1/ledger/trial-balance`, a ledger path that has never
+  existed, breaking every FINREP/COREP render while its unit tests passed against a mocked port
+  (#2269). Corollary: derive the path in the consumer test from the client's own `@Path` rather than
+  retyping it, and never add a consumer pact without wiring (or confirming) the provider's
+  `@PactFolder` replay.
+- **Read the pact verdict from the JUnit XML, not the console.** pact-jvm prints
+  `Not all of the N were verified` even on a fully green run — it is an artifact, not a failure.
+  (`./gradlew … | tail` also masks the exit code; see the Kotlin block-comment note.)
+- **`grep`ping `src/test` for the word "contract" does not find contract tests.** The prod-readiness
+  C3 scorer did exactly that and scored pid, psd2 and sanctions as Verified on comment lines like
+  `// the mark-and-sweep reconciliation contract`, while ap2 flipped Declared→Verified the moment an
+  unrelated PR added a comment containing the word. Detect the artifact — an `au.com.dius.pact`
+  import, or the `*Pact*Test.kt` / `*ContractTest.kt` naming — never the prose (#2291).
 
 ### OPA / authorization
 - **`input.principal.type == "SERVICE"` can never fire — don't write it.** `AuthorizeInterceptor`
