@@ -1,11 +1,11 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-07-24T22:59:39.921Z",
+  "generatedAt": "2026-07-25T00:01:21.592Z",
   "counts": {
     "namespaces": 66,
-    "networkPolicies": 93,
-    "externalSecrets": 130,
+    "networkPolicies": 94,
+    "externalSecrets": 131,
     "clusterPolicies": 4
   },
   "groups": [
@@ -464,9 +464,9 @@
       "icon": "network",
       "status": "planned",
       "analogy": "Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.",
-      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 93 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
+      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 94 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
       "controls": [
-        "NetworkPolicy (93 / 66)",
+        "NetworkPolicy (94 / 66)",
         "per-namespace deny-by-default (cíl)"
       ],
       "adr": [
@@ -534,10 +534,10 @@
       "icon": "key",
       "status": "live",
       "analogy": "Trezor s časovým zámkem — hesla nikdy neleží v kódu.",
-      "summary": "OpenBao drží tajemství; 130 ExternalSecret je sype do k8s. Žádný secret v gitu.",
+      "summary": "OpenBao drží tajemství; 131 ExternalSecret je sype do k8s. Žádný secret v gitu.",
       "controls": [
         "OpenBao",
-        "External Secrets (130)",
+        "External Secrets (131)",
         "KMS unseal"
       ],
       "adr": [
@@ -630,7 +630,7 @@
     {
       "item": "NetworkPolicy (east-west)",
       "plan": "deny-by-default v každém ns",
-      "reality": "93 / 66 ns má NetworkPolicy → většina provozu otevřená",
+      "reality": "94 / 66 ns má NetworkPolicy → většina provozu otevřená",
       "status": "planned"
     },
     {
@@ -642,7 +642,7 @@
     {
       "item": "Tajemství",
       "plan": "OpenBao + ESO, nic v gitu",
-      "reality": "130 ExternalSecret",
+      "reality": "131 ExternalSecret",
       "status": "live"
     },
     {
