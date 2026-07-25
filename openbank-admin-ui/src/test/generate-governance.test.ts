@@ -7,6 +7,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { parse as parseYaml } from 'yaml'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 // @ts-expect-error - plain .mjs build script, no type declarations by design
@@ -201,6 +202,36 @@ describe('generate-governance.mjs — schema violations the hand rules cannot se
     for (const key of schema.required as string[]) {
       const m = buildRepo({ 'openbank-x': STATEFUL.replace(new RegExp(`^${key}:.*\n`, 'm'), '') })
       expect(gapFor(m, 'openbank-x').join('\n'), `missing ${key} must gap`).toContain(key)
+    }
+  })
+
+  // The LAST hand-mirror. The generator deliberately suppresses ajv's `#/allOf` errors,
+  // because its own schemaName/stateless messages carry the remedy and ajv's "must NOT be
+  // valid" does not. That suppression is the exact shape of the bug this PR fixes — a rule
+  // asserted in two places — so the two verdicts are compared directly here instead of
+  // trusted. If the schema's allOf branch is ever edited without the generator following,
+  // this goes red and names the disagreeing document.
+  it('agrees with the schema on every schemaName/stateless case (the one suppressed branch)', async () => {
+    const schema = JSON.parse(
+      readFileSync(path.resolve(HERE, '../../../openbank-libs/governance/governance.schema.json'), 'utf-8'),
+    )
+    const { default: Ajv2020 } = await import('ajv/dist/2020.js')
+    const validate = new Ajv2020({ allErrors: true, strict: true, strictRequired: false }).compile(schema)
+
+    const CASES: Record<string, string> = {
+      'stateful-with-schemaname': STATEFUL,
+      'stateless-asserted': STATELESS,
+      'neither-stateless-nor-schemaname': STATEFUL.replace(/^schemaName:.*\n/m, ''),
+      'stateless-and-schemaname': STATELESS + 'schemaName: contradiction_schema\n',
+      'stateless-false-with-schemaname': STATEFUL + 'stateless: false\n',
+      'stateless-false-without-schemaname': STATEFUL.replace(/^schemaName:.*\n/m, '') + 'stateless: false\n',
+    }
+
+    for (const [label, yaml] of Object.entries(CASES)) {
+      const m = buildRepo({ 'openbank-case': yaml })
+      const generatorRejects = gapFor(m, 'openbank-case').length > 0
+      const schemaRejects = !validate(parseYaml(yaml))
+      expect(generatorRejects, `${label}: generator and governance.schema.json disagree`).toBe(schemaRejects)
     }
   })
 })
