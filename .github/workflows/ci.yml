@@ -20,13 +20,19 @@ jobs:
   # ---------------------------------------------------------------------------
 
   # ---------------------------------------------------------------------------
-  # Admin UI — path-scoped: only runs when openbank-admin-ui/** changes.
+  # Admin UI — path-scoped: runs when openbank-admin-ui/** changes, OR when a file
+  # the ADR-0071 governance gate READS changes. That gate lives in this job but
+  # validates every openbank-*/governance.yaml in the fleet, so scoping the job to
+  # admin-ui files alone let a backend PR add a service and never reach it: the job
+  # skipped, the always-run "Admin UI" gate job reads a skip as a pass, and the
+  # breakage landed on main where it blocked the next admin-ui PR (#2124 and #2104
+  # each shipped a governance.yaml with 0 admin-ui files touched — issue #2236).
   # On push to main (post-merge) always rebuilds to keep the sandbox image current.
   # A separate gate job ("Admin UI") always runs and fails only when the build
   # itself failed — so branch-protection never blocks a backend-only PR.
   # ---------------------------------------------------------------------------
   changes-ui:
-    name: Detect UI changes
+    name: Detect UI or governance changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -46,9 +52,15 @@ jobs:
             # Force the remote-tracking ref to the true tip (persistent self-hosted
             # runners reuse the workdir, so the cached ref can be stale).
             git fetch origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" --no-tags
-            N=$(git diff --name-only "${BASE}...HEAD" -- openbank-admin-ui/ | wc -l | tr -d ' ')
+            # The extra pathspecs are the governance gate's INPUTS, not UI code:
+            # every per-service governance.yaml, plus the schema it validates them
+            # against. The generator itself lives under openbank-admin-ui/.
+            N=$(git diff --name-only "${BASE}...HEAD" -- \
+                  openbank-admin-ui/ \
+                  '*/governance.yaml' \
+                  openbank-libs/governance/governance.schema.json | wc -l | tr -d ' ')
             echo "changed=$( [ "$N" -gt 0 ] && echo 'true' || echo 'false' )" >> "$GITHUB_OUTPUT"
-            echo "Admin UI files changed: $N"
+            echo "Admin UI or governance files changed: $N"
           fi
 
   ui-build:
