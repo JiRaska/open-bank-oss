@@ -201,6 +201,13 @@ jobs:
       # [self-hosted, openbank-sandbox] pool (ADR-0040).
       - name: Trivy fs scan
         run: |
+          # Print findings to the log FIRST (|| true) so a failure below is self-explaining.
+          # Without this the gate's only output is "Process completed with exit code 1" and the
+          # package/CVE has to be recovered from the code-scanning API. Mirrors the config scan.
+          trivy fs --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --skip-version-check \
+            --skip-dirs node_modules,.next,build,.gradle \
+            --format table . || true
+          # Gate: fail on any fixed HIGH/CRITICAL in the dependency tree.
           trivy fs --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --skip-version-check \
             --skip-dirs node_modules,.next,build,.gradle \
             --format sarif --output trivy-fs.sarif --exit-code 1 .
