@@ -4,6 +4,8 @@
 
 package com.openbank.vop.infrastructure.ratelimit
 
+import com.openbank.vop.application.port.out.VopMetricsPort
+import com.openbank.vop.application.port.out.VopRateLimitOutcome
 import io.quarkus.logging.Log
 import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.common.annotation.Blocking
@@ -60,6 +62,9 @@ class VopRateLimitFilter : ContainerRequestFilter {
     @Inject
     lateinit var identity: SecurityIdentity
 
+    @Inject
+    lateinit var metrics: VopMetricsPort
+
     @ConfigProperty(name = "openbank.vop.rate-limit.requests-per-minute", defaultValue = DEFAULT_LIMIT_STR)
     var limitPerMinute: Int = DEFAULT_LIMIT
 
@@ -81,9 +86,10 @@ class VopRateLimitFilter : ContainerRequestFilter {
             return
         }
 
-        val allowed = failClosedOnStoreError(requesterId)
+        val outcome = failClosedOnStoreError(requesterId)
+        metrics.rateLimitDecision(outcome)
 
-        if (!allowed) {
+        if (outcome != VopRateLimitOutcome.ALLOWED) {
             ctx.abortWith(
                 Response.status(HTTP_TOO_MANY_REQUESTS)
                     .header("X-RateLimit-Limit", limitPerMinute)
@@ -105,15 +111,23 @@ class VopRateLimitFilter : ContainerRequestFilter {
      * pool error, and every one of them means the same thing — we cannot prove this caller is
      * under the limit. Narrowing the catch would let an unanticipated client exception escape as a
      * 500 and, worse, skip the limit entirely on the retry path.
+     *
+     * Returns the outcome rather than a boolean so the metric can tell the two rejections apart:
+     * `throttled` is one caller hitting the limit, `store_unavailable` is *every* caller being
+     * rejected because Valkey is down. Both produce a 429 and are indistinguishable on the wire.
      */
     @Suppress("TooGenericExceptionCaught")
-    private fun failClosedOnStoreError(requesterId: String): Boolean = try {
-        rateLimiter.isAllowed(requesterId, limitPerMinute)
+    private fun failClosedOnStoreError(requesterId: String): VopRateLimitOutcome = try {
+        if (rateLimiter.isAllowed(requesterId, limitPerMinute)) {
+            VopRateLimitOutcome.ALLOWED
+        } else {
+            VopRateLimitOutcome.THROTTLED
+        }
     } catch (e: Exception) {
         // Fail closed — see the class doc. A 429 degrades to `no_data` at the caller; it does not
         // block the payment.
         Log.errorf(e, "VoP rate-limit store unavailable; rejecting requester=%s (fail-closed)", requesterId)
-        false
+        VopRateLimitOutcome.STORE_UNAVAILABLE
     }
 
     companion object {
