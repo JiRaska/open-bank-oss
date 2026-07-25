@@ -12,7 +12,6 @@ import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
 import jakarta.inject.Inject
-import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
@@ -64,10 +63,16 @@ class StandingOrderExecutionScheduler {
         cron = "{openbank.scheduler.execution-cron}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
-    fun sweep(): Unit = runBlocking {
+    // MUST be a suspend fun, NOT `runBlocking { }`: Quarkus dispatches a suspend @Scheduled method
+    // on a Vert.x context, whereas runBlocking runs the coroutine on the bare scheduler
+    // executor-thread, which carries no Vert.x context — the first Hibernate-Reactive call
+    // (findDueForExecution) then throws HR000068 and the whole sweep aborts with zero outbox rows
+    // (issue #2148). The sibling StandingOrderOutboxDispatcher.dispatch() is already a suspend fun for
+    // exactly this reason. Covered by StandingOrderExecutionSweepIT against a real DB.
+    suspend fun sweep() {
         if (!enabled) {
             log.debug("[execution-scheduler] Disabled — skipping sweep")
-            return@runBlocking
+            return
         }
         val today = LocalDate.now(clock)
         log.infof("[execution-scheduler] Starting daily execution sweep for %s", today)
