@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.5.0...mcp-service-v0.6.0) (2026-07-25)
+
+
+### Features
+
+* **mcp:** instrument tool-call outcomes, JSON-RPC methods and caller identity ([#2285](https://github.com/JiRaska/open-bank-oss/issues/2285)) ([889c4eb](https://github.com/JiRaska/open-bank-oss/commit/889c4eba204ff1997e783931803404c3563e2316)), closes [#2255](https://github.com/JiRaska/open-bank-oss/issues/2255)
+* **mcp:** M2M OIDC client + downstream URLs for consent-validated read ports (ADR-0195 step 3) ([#2278](https://github.com/JiRaska/open-bank-oss/issues/2278)) ([8b0341c](https://github.com/JiRaska/open-bank-oss/commit/8b0341c4d788cb11855179d51ccef9eca99436be))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.4.0...mcp-service-v0.5.0) (2026-07-25)
 
 
