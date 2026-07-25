@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.58.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.58.0...admin-ui-v0.58.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop displaying the card network name on read-only rows ([#2337](https://github.com/JiRaska/open-bank-oss/issues/2337)) ([ba74a4c](https://github.com/JiRaska/open-bank-oss/commit/ba74a4cf89f287c55f0d51985632643e096643b3))
+
 ## [0.58.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.57.0...admin-ui-v0.58.0) (2026-07-25)
 
 
