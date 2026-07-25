@@ -31,7 +31,7 @@ class ReleaseStewardResource(
     // thread, not the event loop. It touches no reactive DB session, so runBlocking is fine here.
     @POST
     @Path("/check/trigger")
-    @RolesAllowed("platform-admin")
+    @RolesAllowed("ROLE_ADMIN")
     @Blocking
     fun triggerCheck(): ReleaseStewardReport = runBlocking {
         runCheck.run(RunTrigger.OPERATOR_MANUAL)
@@ -41,12 +41,12 @@ class ReleaseStewardResource(
     // Kotlin suspend resource methods on one, so the session resolves correctly.
     @GET
     @Path("/findings")
-    @RolesAllowed("platform-admin", "platform-viewer")
+    @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
     suspend fun getActiveFindings(): List<ReleaseStewardFinding> = getFindings.getActive()
 
     @GET
     @Path("/findings/{id}")
-    @RolesAllowed("platform-admin", "platform-viewer")
+    @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
     suspend fun getFinding(@PathParam("id") id: String): ReleaseStewardFinding =
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
 }

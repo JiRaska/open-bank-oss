@@ -28,7 +28,7 @@ class DocsTruthResource(private val runCheck: RunDocsTruthCheckUseCase, private 
     // thread, not the event loop. It touches no reactive DB session, so runBlocking is fine here.
     @POST
     @Path("/check/trigger")
-    @RolesAllowed("platform-admin")
+    @RolesAllowed("ROLE_ADMIN")
     @Blocking
     fun triggerCheck(): DocsTruthReport = runBlocking {
         runCheck.run(RunTrigger.OPERATOR_MANUAL)
@@ -38,12 +38,12 @@ class DocsTruthResource(private val runCheck: RunDocsTruthCheckUseCase, private 
     // Kotlin suspend resource methods on one, so the session resolves correctly.
     @GET
     @Path("/findings")
-    @RolesAllowed("platform-admin", "platform-viewer")
+    @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
     suspend fun getActiveFindings(): List<DocsTruthFinding> = getFindings.getActive()
 
     @GET
     @Path("/findings/{id}")
-    @RolesAllowed("platform-admin", "platform-viewer")
+    @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
     suspend fun getFinding(@PathParam("id") id: String): DocsTruthFinding =
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
 }

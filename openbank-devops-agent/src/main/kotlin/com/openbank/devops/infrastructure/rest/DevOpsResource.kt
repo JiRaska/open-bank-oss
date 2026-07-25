@@ -33,7 +33,7 @@ class DevOpsResource(
     // thread, not the event loop. It touches no reactive DB session, so runBlocking is fine here.
     @POST
     @Path("/analysis/trigger")
-    @RolesAllowed("platform-admin")
+    @RolesAllowed("ROLE_ADMIN")
     @Blocking
     fun triggerAnalysis(): DevOpsRunReport = runBlocking {
         runAnalysis.run(RunTrigger.OPERATOR_MANUAL)
@@ -43,12 +43,12 @@ class DevOpsResource(
     // Kotlin suspend resource methods on one, so the session resolves correctly.
     @GET
     @Path("/findings")
-    @RolesAllowed("platform-admin", "platform-viewer")
+    @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
     suspend fun getActiveFindings(): List<DevOpsFinding> = getFindings.getActive()
 
     @GET
     @Path("/findings/{id}")
-    @RolesAllowed("platform-admin", "platform-viewer")
+    @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
     suspend fun getFinding(@PathParam("id") id: String): DevOpsFinding =
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
 
@@ -56,13 +56,13 @@ class DevOpsResource(
     // (a viewer at most) can never approve its own proposal (segregation of duties).
     @POST
     @Path("/findings/{id}/approve")
-    @RolesAllowed("platform-admin")
+    @RolesAllowed("ROLE_ADMIN")
     suspend fun approve(@PathParam("id") id: String): DevOpsFinding =
         decide.approve(id) ?: throw NotFoundException("Finding $id not found")
 
     @POST
     @Path("/findings/{id}/reject")
-    @RolesAllowed("platform-admin")
+    @RolesAllowed("ROLE_ADMIN")
     suspend fun reject(@PathParam("id") id: String): DevOpsFinding =
         decide.reject(id) ?: throw NotFoundException("Finding $id not found")
 }

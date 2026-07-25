@@ -784,6 +784,22 @@ jobs:
       - name: "authz-enforce ⇒ PDP sidecar parity (advisory, #1797)"
         run: python3 .github/scripts/check-authz-pdp-parity.py .
 
+      # @RolesAllowed ⇒ realm parity (issue #2404). The JWT-role half of the check above: a role
+      # name that exists in no realm never matches, so the endpoint answers 403 to every caller,
+      # silently and forever. finrep's FINREP/COREP shipped that way (#2403), and 39 sites across
+      # 9 services were in the same state at introduction — three invented vocabularies
+      # (`openbank-employee`, `platform-admin`, `SERVICE`) that no Keycloak ever issued.
+      # ENFORCED from day one, on the mechanical half only: it fails when EVERY role in an
+      # @RolesAllowed is unknown (the endpoint is unreachable by construction — a fact, not a
+      # judgement). A single dead name inside an otherwise-live list is ::warning, because
+      # clearing those ~163 sites (ROLE_SERVICE ×152, ROLE_CREDIT_RISK ×9, ROLE_LENDING_OFFICER ×6)
+      # means deciding per service whether to grant the role in Keycloak or delete the path.
+      # A unit test cannot replace this: @TestSecurity mints whatever role string it is handed, so
+      # a test written from the annotation matches the annotation and passes against a resource
+      # that 403s in production — exactly how finrep's stayed green.
+      - name: "@RolesAllowed ⇒ realm parity (issue #2404, enforced)"
+        run: python3 .github/scripts/check-roles-allowed-realm.py
+
       # openbank.outbox.dispatch-enabled guard (the CLAUDE.md "outbox footgun":
       # a service whose OutboxDispatcher actually gates on this flag silently
       # never dispatches if it's left at its false default — no error,

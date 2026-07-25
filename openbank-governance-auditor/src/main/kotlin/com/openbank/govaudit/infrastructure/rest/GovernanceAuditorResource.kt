@@ -28,21 +28,21 @@ class GovernanceAuditorResource(
 ) {
     @POST
     @Path("/audit/trigger")
-    @RolesAllowed("platform-admin")
+    @RolesAllowed("ROLE_ADMIN")
     fun triggerAudit(): GovernanceAuditReport = runBlocking {
         runAudit.run(RunTrigger.OPERATOR_MANUAL)
     }
 
     @GET
     @Path("/findings")
-    @RolesAllowed("platform-admin", "platform-viewer")
+    @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
     fun getActiveFindings(): List<GovernanceFinding> = runBlocking {
         getFindings.getActive()
     }
 
     @GET
     @Path("/findings/{id}")
-    @RolesAllowed("platform-admin", "platform-viewer")
+    @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
     fun getFinding(@PathParam("id") id: String): GovernanceFinding = runBlocking {
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
     }
