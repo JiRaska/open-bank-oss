@@ -54,6 +54,14 @@ facts that cannot be derived: `dataDomain`, `primaryDatastore`, `schemaName`,
 `lineage` (upstream/downstream edges). It is reviewed *with the service*, in the service's
 own hexagon (ADR-0002) — the team that owns the data owns its classification.
 
+The schema is **compiled and enforced**, not merely cited: `generate-governance.mjs`
+validates every `governance.yaml` against it with ajv (2020-12) and derives its required
+list and enums from it, so each violation becomes a `gap` and fails the CI gate. It was
+advisory for its first months — referenced only from a comment, with the generator
+re-implementing a subset of it by hand — and the two drifted: four services shipped a bare
+`lineage:` key (YAML parses that to `null`, the schema says `type: object`) and the gate
+stayed green. One source of truth, read by the checker, is the fix.
+
 **2. Derivable fields are derived, never declared.** `flywayDeclaredVersion` comes from
 `src/main/resources/db/migration/V*.sql` (max version); `apiVersion`/`apiTitle` and
 `moneyPath` come from the existing catalog inputs. Declaring them in `governance.yaml`
