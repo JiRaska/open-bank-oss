@@ -7,7 +7,7 @@ openapi: "3.1.0"
 
 info:
   title: OpenBank Copilot Service API
-  version: "1.0.0"
+  version: "1.1.0"
   description: |
     Customer-facing AI assistant (mobile copilot), per ADR-0089.
 
@@ -84,6 +84,63 @@ paths:
         "501":
           description: Capability not yet enabled (feature flag off)
 
+  /copilot/actions/{tokenId}/confirm:
+    post:
+      operationId: confirmAction
+      summary: Confirm a copilot action proposal (human-in-the-loop)
+      description: |
+        Exchanges a one-time proposal token for a confirmed action. This is the
+        human-in-the-loop half of "the model proposes, the bank disposes" (ADR-0089 D2): the
+        assistant never executes a money-path action, it only emits a proposal the customer
+        confirms here from a non-AI-controlled card.
+
+        The token is bound to the customer that owns it — a token confirmed by a different
+        subject is refused, and the response deliberately does not distinguish that case from
+        an unknown token. The confirm is re-checked against the OPA policy gate (ADR-0034,
+        fail-closed: an unreachable PDP denies), and the token is single-use — it is deleted on
+        confirm, on expiry, and on an ownership mismatch is left untouched.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          description: The proposal token id handed out with the `ActionProposal` (UUID).
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Action confirmed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionConfirmation"
+        "401":
+          description: Authenticated token carries no usable subject
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: OPA policy denied the action, or the token belongs to another customer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Token not found (also returned for a malformed token id)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Token expired (the proposal must be re-issued by a new turn)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -131,3 +188,23 @@ components:
           additionalProperties:
             type: string
           description: Validated parameters (fromAccountId, payeeIban, amount, currency, …) — authoritative.
+    ActionConfirmation:
+      type: object
+      required: [status, actionId]
+      properties:
+        status:
+          type: string
+          enum: [CONFIRMED]
+        actionId:
+          type: string
+          format: uuid
+          description: Id of the confirmed action, for correlating the downstream execution.
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: |
+            Stable machine-readable code where one exists (`PROPOSAL_NOT_FOUND`,
+            `PROPOSAL_EXPIRED`, `ACTION_DENIED`); otherwise a short human-readable reason.
