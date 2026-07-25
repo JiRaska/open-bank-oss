@@ -33,11 +33,18 @@ import java.util.UUID
  * IMPORTANT — regenerate on change: if this test's `@Pact` methods change (new interaction,
  * different matcher, renamed field), re-run this test (`./gradlew :openbank-account-service:test
  * --tests "*PartyCreatedMessagePactConsumerTest*"`) and commit the updated
- * `pacts/openbank-account-service-openbank-party-service.json` in the same PR. There is no CI
- * drift check yet (ADR-0063 Phase 2) — an un-regenerated pact file silently verifies the OLD
- * contract on the provider side (this is exactly what had happened here: the committed pact was
- * missing the KYC_STATUS_CHANGED interaction this test already generates — regenerated and
- * recommitted alongside this doc comment).
+ * `pacts/openbank-account-service-openbank-party-service.json` in the same PR — an un-regenerated
+ * pact file silently verifies the OLD contract on the provider side (this is exactly what had
+ * happened here: the committed pact was missing the KYC_STATUS_CHANGED interaction this test
+ * already generates — regenerated and recommitted alongside this doc comment).
+ *
+ * `pact-drift-check.yml` (ADR-0063 Phase 2, issue #468) enforces this now: it regenerates every
+ * consumer pact and fails on `git diff -- pacts/`. Note what that gate can and cannot see — its
+ * only assertion is the diff, so a module it does not regenerate does not read as *unchecked*, it
+ * reads as *passing*. Its scope is therefore DERIVED, by
+ * `.github/scripts/derive-pact-drift-scope.sh`, from the `@Pact(consumer = .., provider = ..)`
+ * annotations themselves; a consumer test in a new module needs no workflow edit, and a pact
+ * nothing regenerates fails the derivation instead of going quietly green.
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(

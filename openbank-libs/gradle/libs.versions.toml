@@ -122,6 +122,9 @@ mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 wiremock-standalone = { module = "org.wiremock:wiremock-standalone", version.ref = "wiremock" }
 quarkus-junit5 = { module = "io.quarkus:quarkus-junit5" }
 quarkus-test-security = { module = "io.quarkus:quarkus-test-security" }
+# @OidcSecurity/@Claim — simulates a validated OIDC bearer token's JsonWebToken claims in a
+# @QuarkusTest without a real IdP round-trip (ADR-0195 step 4, openbank-mcp-service).
+quarkus-test-security-oidc = { module = "io.quarkus:quarkus-test-security-oidc" }
 rest-assured-kotlin = { module = "io.rest-assured:kotlin-extensions" }
 # In-memory reactive-messaging connector for outbox dispatch ITs (ADR-0050): swaps the Kafka
 # leg so the test asserts exactly what was produced (key/headers) without a live broker.

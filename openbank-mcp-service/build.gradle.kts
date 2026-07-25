@@ -38,6 +38,10 @@ dependencies {
     // real HTTP clients in #2262 and are not wired as the default yet — pinning the routes now is
     // what keeps the ADR-0195 cutover from shipping a call to a path that does not exist (#2269).
     testImplementation(libs.pact.consumer)
+    // @TestSecurity + @OidcSecurity(claims=...) — simulates a validated agent OAuth token
+    // (sub, consent_id) for McpAuditEventIT (ADR-0195 step 4), no real IdP round-trip.
+    testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.quarkus.test.security.oidc)
 }
 
 kover {

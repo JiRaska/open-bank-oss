@@ -8,7 +8,8 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
-import jakarta.enterprise.inject.Vetoed
+import jakarta.enterprise.context.ApplicationScoped
+import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.util.UUID
 
 /**
@@ -24,22 +25,20 @@ import java.util.UUID
  * [AccountServiceClient.getAccountByIban] before calling balance-service / transaction-service,
  * which are keyed by that UUID.
  *
- * NOT WIRED as the default port yet: mcp-service has no provisioned M2M OIDC client for
- * `consent-service`/`account-service`/`balance-service`/`transaction-service` and no `rest.rego`
- * grant for `consent.validate` — that infra + the switch away from `StubAccountReadPort` land
- * together (ADR-0195 next step). The `check-mcp-stub-ports-vs-caller-auth.sh` CI guard (#2230)
- * refuses that switch until the phase-1 placeholder identity is removed from `McpEndpoint` first.
- *
- * [Vetoed]: NOT a CDI bean in this PR — Quarkus's implicit bean discovery would otherwise make it a
- * `@Default`-qualified `AccountReadPort` candidate ambiguous with `StubAccountReadPort`. The wiring
- * step (which removes the stub / decides the switch mechanism) adds the scope annotation back.
+ * The default `AccountReadPort` bean as of ADR-0195 step 4: `StubAccountReadPort` is retired and
+ * the `McpEndpoint` placeholder identity is removed in the same change (#2206's ordering — the CI
+ * guard `check-mcp-stub-ports-vs-caller-auth.sh`, #2230, enforced this could not happen apart).
+ * The M2M OIDC client + downstream URLs it needs landed in step 3 (#2278); the OpenBao secret value
+ * itself is a manual operator step (`es-mcp-service.yaml`'s own header comment) — until it is
+ * seeded, `consent.validate` and the downstream reads 401, which surfaces as a denied tool call,
+ * never as an unauthenticated success.
  */
-@Vetoed
+@ApplicationScoped
 class RealAccountReadPort(
-    private val consent: ConsentValidateClient,
-    private val accounts: AccountServiceClient,
-    private val balances: BalanceServiceClient,
-    private val transactions: TransactionServiceClient,
+    @RestClient private val consent: ConsentValidateClient,
+    @RestClient private val accounts: AccountServiceClient,
+    @RestClient private val balances: BalanceServiceClient,
+    @RestClient private val transactions: TransactionServiceClient,
     private val mapper: ObjectMapper,
 ) : AccountReadPort {
 

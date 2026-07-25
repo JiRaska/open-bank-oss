@@ -155,9 +155,14 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   file (comments included), so any edit triggers a `checksum mismatch` startup failure.
 
 ### Contract tests (Pact)
-- **One `@Provider` test per provider.** Two provider-verification classes with the same `@Provider`
-  both pull every pact the broker holds and collide; use a single test that picks the target per
-  interaction in `@BeforeEach`. Provider tests are gated on `pactbroker.url` and run only in CI.
+- **One BROKER-sourced `@Provider` test per provider.** Two verification classes with the same
+  `@Provider` that both pull from the broker collide — each fetches every pact the broker holds; use
+  a single test that picks the target per interaction in `@BeforeEach`. This does NOT forbid a second
+  class with a different *source*: the sanctioned pair is a `@PactFolder` class (always runs, no
+  infra) plus a `@PactBroker` + `@EnabledIfSystemProperty(pactbroker.url)` one (main-push only), as
+  `openbank-ledger-service` carries. Do not read the older, shorter form of this rule ("one test per
+  provider, gated on `pactbroker.url`") as licence to have only the broker class — see the next
+  bullet for what that costs.
 - **A consumer pact alone CANNOT catch a wrong request path — only the provider replay can.** The
   Pact mock server answers whatever path the client asks for, so pointing a client at a route that
   does not exist leaves the consumer test green; the real provider has no such route, so only
@@ -167,7 +172,15 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   finrep-service shipped a call to `/api/v1/ledger/trial-balance`, a ledger path that has never
   existed, breaking every FINREP/COREP render while its unit tests passed against a mocked port
   (#2269). Never add a consumer pact without wiring (or confirming) the provider's `@PactFolder`
-  replay.
+  replay. **`@PactFolder` specifically, and confirm it runs on a PR** — a `@PactBroker` class does
+  not count: `_service-ci.yml` puts the PR lane on `ubuntu-latest` and blanks `PACT_BROKER_URL` off
+  main-push (the broker has no public ingress, ADR-0056), so its
+  `@EnabledIfSystemProperty(pactbroker.url)` gate skips it and the contract is replayed only *after*
+  the merge. Measured 2026-07-25: **16 of 27 committed pacts** were in that state, across eight
+  providers, several money-path (#2327). Nothing enforced the rule — it was prose here and nowhere
+  else, which is why the gap was invisible; a derived coverage check is #2338. Until that lands,
+  confirm the replay by hand: an always-running `@PactFolder` class for that provider, not merely a
+  class bearing its `@Provider` name.
 - **In a consumer test the expected path must be a LITERAL; only the outgoing request may be
   reflected off the client's `@Path`.** Deriving *both* sides from the annotation feels DRY and is
   vacuous — expectation and request move together, so the test stays green when the client points
@@ -175,7 +188,8 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   came from the annotation passed against the broken `/api/v1/ledger/trial-balance`; with the path
   written as a literal, both interactions went red. The asymmetry IS the test.
   (`ProductCatalogPactConsumerTest` from #2283 still has the symmetric shape, and its KDoc promises
-  a redness it cannot deliver at the consumer layer — the provider replay is what backstops it.)
+  a redness it cannot deliver at the consumer layer — the provider replay is what backstops it;
+  tracked as #2328. A 2026-07-25 audit of all 27 consumer tests found it is the only one.)
 - **Read the pact verdict from the JUnit XML, not the console.** pact-jvm prints
   `Not all of the N were verified` even on a fully green run — it is an artifact, not a failure.
   (`./gradlew … | tail` also masks the exit code; see the Kotlin block-comment note.)
@@ -184,6 +198,17 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `// the mark-and-sweep reconciliation contract`, while ap2 flipped Declared→Verified the moment an
   unrelated PR added a comment containing the word. Detect the artifact — an `au.com.dius.pact`
   import, or the `*Pact*Test.kt` / `*ContractTest.kt` naming — never the prose (#2291).
+- **A gate whose SCOPE is a hand-kept list of the thing it checks reads as *passing* when the list
+  is short, never as *unchecked*.** `pact-drift-check.yml` regenerates consumer pacts and asserts
+  `git diff --exit-code -- pacts/`; that diff can only see files the regeneration step rewrote, so
+  a module missing from the list leaves its committed pact untouched, the diff finds nothing, and
+  the gate is green about work it never did. `:openbank-interest-service` sat that way from the day
+  its pact was committed, and `:openbank-fx-service` needed a hand-edit in #2284. The scope is now
+  DERIVED from the `@Pact(consumer = .., provider = ..)` annotations by
+  `.github/scripts/derive-pact-drift-scope.sh`, which also fails on an orphan pact, an uncommitted
+  pact, and a module dropped out of scope without declaring what that strands. Generalize: never
+  let a gate's coverage set be maintained separately from the artifacts it covers — enumerate the
+  artifacts, and make the exclusions the thing a human has to justify.
 
 ### OPA / authorization
 - **`input.principal.type == "SERVICE"` can never fire — don't write it.** `AuthorizeInterceptor`

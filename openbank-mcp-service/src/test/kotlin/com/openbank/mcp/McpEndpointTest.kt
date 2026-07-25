@@ -37,12 +37,14 @@ class McpEndpointTest {
     // instrumentation assertions below fail if the endpoint stops emitting.
     private val registry = SimpleMeterRegistry()
 
-    private fun endpoint(pdp: PolicyDecisionPoint): McpEndpoint {
+    // A validated agent token (sub + consent_id) — ADR-0195 step 4 removed the phase-1 placeholder
+    // fallback, so every test that exercises protocol dispatch / the PDP gate / audit / metering
+    // needs a real-shaped identity to reach `handleToolCall` at all. The dedicated "no token" test
+    // below builds its own endpoint with an anonymous JWT to cover that (now denying) path instead.
+    private fun endpoint(pdp: PolicyDecisionPoint, jwt: TestJsonWebToken = testAgentJwt()): McpEndpoint {
         val stub = StubReads(mapper)
         val toolRegistry = McpToolRegistry(stub, stub, mapper)
-        // Anonymous JWT (no `sub`) → the resolver returns null → the endpoint uses the phase-1
-        // placeholder identity, so these protocol/authorization assertions are unchanged (ADR-0195).
-        val caller = CallerContextResolver(TestJsonWebToken())
+        val caller = CallerContextResolver(jwt)
         return McpEndpoint(
             registry = toolRegistry,
             pdp = pdp,
@@ -136,7 +138,7 @@ class McpEndpointTest {
         assertThat(event.payload)
             .containsEntry("policy_decision", "ALLOW")
             .containsEntry("capability", "query.account.readonly")
-            .containsEntry("charter", "mcp-anonymous")
+            .containsEntry("charter", "test-agent")
             .containsEntry("argument_keys", listOf("unused"))
     }
 
@@ -239,19 +241,40 @@ class McpEndpointTest {
     }
 
     @Test
-    fun `a call under the phase-1 placeholder identity is metered as anonymous_fallback`() {
-        // This is blocker #2206 expressed as a number rather than a code comment: it must reach zero
-        // before a real read port replaces the stub. TestJsonWebToken carries no `sub`, so the
-        // resolver returns null and the endpoint takes the fallback branch.
+    fun `a call under a validated token is metered as source=token`() {
         endpoint(allowAll()).handle(
             rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
         )
 
         assertThat(
             registry.get("openbank.mcp.caller_identity")
-                .tag("service", "mcp").tag("source", "anonymous_fallback").counter().count(),
+                .tag("service", "mcp").tag("source", "token").counter().count(),
         ).isEqualTo(1.0)
-        assertThat(registry.find("openbank.mcp.caller_identity").tag("source", "token").counters()).isEmpty()
+        assertThat(registry.find("openbank.mcp.caller_identity").tag("source", "anonymous_fallback").counters())
+            .isEmpty()
+    }
+
+    // ADR-0195 step 4 (BLOCKER #2206): the phase-1 placeholder identity is gone — a call with no
+    // agent token must be denied, never silently allowed. Own endpoint instance with an anonymous
+    // JWT (no `sub`), since every other test in this file deliberately presents a real token.
+    @Test
+    fun `a tool call with no agent token is denied and metered as resolution_failed`() {
+        val resp = body(
+            endpoint(allowAll(), jwt = TestJsonWebToken()).handle(
+                rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+            ).entity,
+        )
+
+        assertThat(resp.path("result").path("isError").asBoolean()).isTrue()
+        assertThat(
+            resp.path("result").path("content").first().path("text").asText(),
+        ).isEqualTo("Authorization unavailable")
+        assertThat(audit.events.single().result).isEqualTo(AuditResult.DENIED)
+        assertThat(audit.events.single().payload).containsEntry("reason", "caller authentication failed")
+        assertThat(
+            registry.get("openbank.mcp.caller_identity")
+                .tag("service", "mcp").tag("source", "resolution_failed").counter().count(),
+        ).isEqualTo(1.0)
     }
 
     @Test
@@ -262,7 +285,7 @@ class McpEndpointTest {
 
         val tags = registry.meters.flatMap { it.id.tags }
         assertThat(tags.map { it.key }).doesNotContain("agent_id", "consent_id", "charter", "account_id")
-        assertThat(tags.map { it.value }).doesNotContain(SECRET, "agent:mcp-anonymous")
+        assertThat(tags.map { it.value }).doesNotContain(SECRET, "agent:test-agent")
     }
 
     private fun toolCalls(tool: String, decision: String, result: String): Double =
@@ -295,8 +318,14 @@ class McpEndpointTest {
         override suspend fun allow(query: AuthzQuery): AuthzDecision = error("PDP down")
     }
 
+    // A validated agent token (ADR-0195): sub carries the `agent:` prefix the shared
+    // AuthorizeInterceptor/rego convention expects; consent_id is required by CallerContextResolver
+    // (a present-but-blank/missing claim fails closed, not silently).
+    private fun testAgentJwt() = TestJsonWebToken(mapOf("sub" to "agent:test-agent", "consent_id" to TEST_CONSENT_ID))
+
     private companion object {
         const val SECRET = "CZ6508000000192000145399"
+        const val TEST_CONSENT_ID = "11111111-1111-1111-1111-111111111111"
     }
 
     private class StubReads(private val m: com.fasterxml.jackson.databind.ObjectMapper) :
