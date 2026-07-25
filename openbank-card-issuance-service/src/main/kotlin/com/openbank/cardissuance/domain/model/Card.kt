@@ -144,5 +144,12 @@ data class Card(
 
         /** Card types with no plastic, i.e. the only ones whose PAN may be re-served digitally. */
         val VIRTUAL_FORM_TYPES = setOf(CardType.VIRTUAL, CardType.SINGLE_USE)
+
+        /**
+         * Statuses a card can never leave — the complement of [CANCELLABLE_STATUSES]. A card here
+         * is dead: no transition applies, and nothing should be provisioned for it (the PAN-vault
+         * backfill skips them for exactly that reason).
+         */
+        val TERMINAL_STATUSES = setOf(CardStatus.CANCELLED, CardStatus.EXPIRED)
     }
 }

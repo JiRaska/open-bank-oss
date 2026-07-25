@@ -211,10 +211,36 @@ def main():
         w("goes today — distinct from `model_gateway_target`, the ADR-0031 D6 decision that is")
         w("not deployed.")
         w("")
+        gateway = mg.get("gateway", "none")
+        egress = mg.get("egress_enforced", "none")
+        routed = mg.get("routed") or []
+        not_routed = mg.get("not_routed") or []
+        # The bearing column states what the value MEANS for the obligation, so it must track the
+        # value. Hard-coding the gateway-absent prose survived the gateway being deployed once
+        # already; a generated compliance doc that contradicts its own inventory row is the exact
+        # failure this file exists to prevent.
+        gateway_bearing = (
+            "No single point to enforce residency, redaction, or an egress NetworkPolicy."
+            if gateway == "none" else
+            "A single in-cluster choke point exists — the place where residency, redaction and an "
+            "egress NetworkPolicy CAN be enforced. Whether every caller is actually forced through "
+            "it is the `Egress enforced` row, not this one."
+        )
+        egress_bearing = {
+            "full": "Every LLM caller is network-forced through the gateway; the provider is "
+                    "unreachable directly.",
+            "partial": "The gateway is enforced for its own egress, but at least one caller's pod "
+                       "can still reach a provider directly — the choke point is bypassable.",
+        }.get(egress, "No egress policy forces callers through the gateway.")
         w("| Property | As-built value | AI Act / GDPR bearing |")
         w("|---|---|---|")
-        w(f"| Gateway / egress choke point | `{mg.get('gateway', 'none')}` | "
-          "No single point to enforce residency, redaction, or an egress NetworkPolicy. |")
+        w(f"| Gateway / egress choke point | `{gateway}` | {gateway_bearing} |")
+        w(f"| Egress enforced | `{egress}` | {egress_bearing} |")
+        if routed or not_routed:
+            w(f"| Callers routed through the gateway | {', '.join('`'+r+'`' for r in routed) or 'none'} | "
+              "Prompt content from these systems has a single auditable egress path. |")
+            w(f"| Callers NOT routed | {', '.join('`'+r+'`' for r in not_routed) or 'none'} | "
+              "Prompt content from these systems reaches a provider directly. |")
         w(f"| Hosted (external) provider(s) | {', '.join('`'+h+'`' for h in hosted) or 'none'} | "
           "Prompt content leaves the platform trust boundary — Art. 10 data governance applies. |")
         w(f"| Sensitive-data routing | `{mg.get('routing', 'none')}` | "
@@ -224,7 +250,16 @@ def main():
         w(f"| Fallback | `{mg.get('fallback', 'none')}` | "
           "Single provider; on failure the agent degrades to a deterministic path. |")
         w("")
-        if hosted and mg.get("gateway", "none") == "none":
+        if hosted and gateway != "none" and egress != "full":
+            w("> ⚠ **Partially closed gap (Art. 10 / GDPR).** A hosted external provider is in use")
+            w("> behind an in-cluster gateway, so the provider credential and the egress path are")
+            w("> centralised and auditable — but the gateway is not yet the *only* way out. Until")
+            w("> `egress_enforced` reads `full`, a caller pod can still reach the provider directly")
+            w("> and the choke point is a convention, not a control. Sensitive-data routing remains")
+            w("> absent either way. Residency, DPA and the synthetic-data licence position are")
+            w("> recorded in **ADR-0175**.")
+            w("")
+        if hosted and gateway == "none":
             w("> ⚠ **Open gap (Art. 10 / GDPR).** A hosted external provider is in use with no")
             w("> gateway and no sensitive-data routing, so prompt content egresses with no enforced")
             w("> residency or redaction control. This is the platform's most material AI-egress")

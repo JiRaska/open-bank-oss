@@ -40,6 +40,7 @@ The **management interface is enabled on a separate port 8085** (`quarkus.manage
 | Redis hosts | `redis://localhost:6379` | Valkey/Redis |
 | OTel OTLP endpoint | `http://localhost:4317` | tracing |
 | `openbank.rate-limit.max-concurrent-requests` | `200` | concurrency cap |
+| `openbank.card.pan-vault-backfill.enabled` | `true` | mint a synthetic PAN at boot for non-terminal cards issued before the vault (`pan_encrypted IS NULL`), preserving each card's displayed last 4. Idempotent, non-blocking, and never fails the boot; it logs one `[pan-vault-backfill]` summary line per start |
 
 Security headers (`X-Content-Type-Options`, `X-Frame-Options: DENY`, CSP `default-src 'self'`, HSTS, etc.) are set globally in `application.yaml`. Logs are JSON in non-dev profiles.
 

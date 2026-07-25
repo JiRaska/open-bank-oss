@@ -10,6 +10,7 @@ import com.openbank.fx.application.port.`in`.IngestCnbFixingCommand
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import java.time.LocalDate
 
@@ -23,7 +24,7 @@ class CnbRateIngestionSchedulerTest {
         coEvery { useCase.ingest(IngestCnbFixingCommand(date = null)) } returns
             CnbIngestionResult(LocalDate.of(2026, 5, 30), 104, 3, 0, listOf("EUR", "USD", "GBP"))
 
-        scheduler.ingestDailyFixing()
+        runBlocking { scheduler.ingestDailyFixing() }
 
         coVerify(exactly = 1) { useCase.ingest(IngestCnbFixingCommand(date = null)) }
     }
@@ -33,7 +34,7 @@ class CnbRateIngestionSchedulerTest {
         coEvery { useCase.ingest(any()) } throws RuntimeException("ČNB feed unreachable")
 
         // Must not throw — the scheduler must never crash the Quarkus scheduler thread.
-        scheduler.ingestDailyFixing()
+        runBlocking { scheduler.ingestDailyFixing() }
 
         coVerify(exactly = 1) { useCase.ingest(any()) }
     }

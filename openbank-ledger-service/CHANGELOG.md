@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.7](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.15.6...ledger-service-v1.15.7) (2026-07-25)
+
+
+### Bug Fixes
+
+* **ledger:** run both daily schedulers on a Vert.x context ([#2187](https://github.com/JiRaska/open-bank-oss/issues/2187)) ([#2190](https://github.com/JiRaska/open-bank-oss/issues/2190)) ([7c2fae9](https://github.com/JiRaska/open-bank-oss/commit/7c2fae99e5e582237501d3713eae4841b756bcf5))
+
 ## [1.15.6](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.15.5...ledger-service-v1.15.6) (2026-07-24)
 
 

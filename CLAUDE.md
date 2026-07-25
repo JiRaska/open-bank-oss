@@ -113,6 +113,24 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `require-trusted-issuer` — documented as "refuses to **start**" — would have thrown on a *request*,
   long after the deploy went green. Add `@Startup` (`io.quarkus.runtime.Startup`) to any bean whose
   `init` is a boot-time gate or a config-sanity warning.
+- **A plain (non-`suspend`) `@Scheduled` method carries NO Vert.x context** — Quarkus invokes it on a
+  bare `executor-thread`, so a body of `runBlocking { … }` around a reactive Panache call throws
+  `HR000068` and the job aborts having done nothing, silently (the throw lands before the per-item
+  try/catch). Make it a `suspend fun` — the unanimous fleet convention.
+  `VertxContextSupport.subscribeAndAwait` is not the fix: it swaps one blocking bridge for another
+  and *throws* if ever called from an event loop, so it breaks the day the method gains
+  `@NonBlocking` or a virtual thread. Five schedulers, three of them money-path, had **never** run
+  (#2148, #2187). Now a hard rule:
+  `rules.yaml: scheduled_methods` + `.github/scripts/check-no-runblocking-in-scheduled.py`.
+- **A test that calls a `@Scheduled` method directly cannot see that bug** — the direct call supplies
+  the very Vert.x context the scheduler does not, so it passes against broken code (and where
+  `%test.quarkus.scheduler.enabled` is `false`, as in ledger and billing, the scheduler class is
+  structurally invisible to every test). Drive the REAL cron from a `@TestProfile` that re-enables
+  the scheduler and shrinks the cron expression: `StandingOrderExecutionSweepIT`,
+  `LedgerSchedulerVertxContextIT`, `CnbIngestionSchedulerVertxContextIT`. Footgun inside that
+  profile: a `QuarkusTestProfile` loads in a **different classloader** from the test class, so a
+  companion object initializes twice — a randomized id in `getConfigOverrides()` hands the scheduler
+  one value and the assertion another. Use literals.
 
 ### ktlint
 - Path-scoped CI only lints changed files, so a pre-existing wildcard import or a latent
@@ -156,6 +174,20 @@ fire from *outside* it, so they stay here:
   amd64 and silently miss an arm64-only image) and checks the SBOM *before* attesting; `cosign
   attest` is additive, so a green `verify-attestation` can be about an earlier build's envelope.
 
+### CI gates — exercise the failure path before trusting the green
+- **A gate that has only ever passed is unfalsified.** Its failure path is code nobody has run, and
+  it fails in ways a green/red signal cannot express. Three independent instances in one week: the
+  ADR-0071 governance reporter crashed with a `TypeError` on *every* failure, so it had never once
+  printed a gap (#2165); a `Trivy fs scan` step exited 1 while printing no finding, so the actual CVE
+  had to be read out of the code-scanning API instead (PR #2154); an OOM'd `fleet-lint` reported a
+  plain red while having silently left half the fleet unlinted — 455 actionable findings against a
+  true 920 (#2177). Feed every new gate an input it MUST flag, and read what it *prints*, not just
+  its exit code.
+- **An advisory check over a *generated* artifact is a contradiction.** On a hand-written artifact a
+  red advisory check means "someone should look"; on a generated one it means "the committed document
+  does not match reality" — there is no judgement left to exercise, so advisory just makes the drift
+  mergeable. `eu-ai-act-registry` went red twice on #2156 and the PR merged anyway, leaving the EU AI
+  Act inventory omitting an AI system until it was regenerated. Tracked as #2216.
 
 ### CI / bot commit signing
 - **What signs a bot commit is the *endpoint*, not the token — and `main-protection` enforces

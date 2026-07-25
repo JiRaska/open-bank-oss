@@ -284,6 +284,9 @@ class BalanceServiceTest {
             currency: String,
             asOf: java.time.LocalDate,
         ): BigDecimal = futureDelta
+
+        override suspend fun sumFutureValueDatedByCurrency(asOf: java.time.LocalDate): Map<String, BigDecimal> =
+            mapOf(seed.currency to futureDelta)
     }
 
     /**

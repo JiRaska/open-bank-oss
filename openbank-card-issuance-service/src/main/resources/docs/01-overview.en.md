@@ -5,7 +5,7 @@
 `openbank-card-issuance-service` is the **system of record for cards** in the OpenBank platform. It holds:
 
 - **Card aggregate** — the card's `id`, the owning `partyId` and `accountId`, `productCode`, `cardType` (DEBIT / CREDIT / PREPAID / VIRTUAL), `network` (VISA / MASTERCARD / AMEX / UNIONPAY), a **masked PAN** (last 4 digits only), cardholder and embossed name, expiry date, status, per-card spend limits (daily / monthly, in minor units), currency and optional delivery address.
-- **Lifecycle state machine** — `PENDING → ACTIVE` (activate), `ACTIVE → SUSPENDED` (suspend) / `SUSPENDED → ACTIVE` (resume), `{ACTIVE, SUSPENDED} → BLOCKED` (permanent block, requires a reason). `EXPIRED` and `CANCELLED` are terminal states in the model.
+- **Lifecycle state machine** — a card with plastic is issued `PENDING` and activated when the customer receives it; a `VIRTUAL` / `SINGLE_USE` card has nothing to receive and is issued `ACTIVE` directly. Then `PENDING → ACTIVE` (activate), `ACTIVE → SUSPENDED` (suspend) / `SUSPENDED → ACTIVE` (resume), `{ACTIVE, SUSPENDED} → BLOCKED` (permanent block, requires a reason). `EXPIRED` and `CANCELLED` are terminal states in the model.
 - **Domain events** — `CardIssued` and `CardStatusChanged`, emitted on every state change and published via the transactional outbox.
 
 ## What the service **does NOT** do

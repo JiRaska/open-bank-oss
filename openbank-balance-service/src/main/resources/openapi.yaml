@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Balance Service API
-  version: 1.4.1
+  version: 1.5.0
   description: >-
     Account balance management — holds, credits, debits, multi-currency. Per ADR-0039 (Phase A) a
     read-only reconciliation ties out, per currency, the ledger deposit-control balance against the
@@ -382,9 +382,22 @@ components:
           description: Sum of balance-service booked amounts across all accounts in the currency.
         difference:
           type: number
-          description: subLedgerBookedSum − ledgerControlBalance; zero (within tolerance) means agreement.
+          description: >-
+            subLedgerBookedSum − ledgerControlBalance; zero (within tolerance) means agreement. Both
+            sides are on the ledger's value-date basis (ADR-0178 Phase 1), so this is UNEXPLAINED
+            drift — value-date timing cannot contribute to it.
         withinTolerance:
           type: boolean
+        futureValueDatedPipeline:
+          type: number
+          default: 0
+          description: >-
+            ADR-0178 Phase 3 — the future-value-dated pipeline: sum of projected booked deltas whose
+            value date is strictly after asOf. These movements are POSTED but not yet effective, so
+            neither side of the tie-out counts them and they never contribute to `difference`.
+            Reported so an operator can see the expected upcoming movement rather than an unexplained
+            gap between subLedgerBookedSum and the raw materialized booked total. Absent on runs
+            recorded before this field existed; treat as 0.
 
     ApiError:
       type: object

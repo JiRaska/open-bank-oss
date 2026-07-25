@@ -225,6 +225,51 @@ class CardServiceTest {
         coVerify(exactly = 0) { repo.save(any(), any()) }
     }
 
+    // ── issued status by card type ─────────────────────────────────────────────────────
+    // PENDING means "waiting for someone to receive the plastic". A card with no plastic has
+    // nothing to wait for and no customer-facing activate route, so PENDING there is a dead end.
+
+    @Test fun `a card with plastic is issued PENDING and not activated`(): Unit = runBlocking {
+        listOf(CardType.DEBIT, CardType.CREDIT, CardType.PREPAID).forEach { type ->
+            val command = issueCmd("idem-$type").copy(cardType = type)
+            coEvery { repo.findByIdempotencyKey(command.idempotencyKey) } returns null
+            coEvery { repo.save(any(), any()) } answers { firstArg() }
+
+            val issued = service.issueCard(command)
+
+            assertThat(issued.status).describedAs("%s", type).isEqualTo(CardStatus.PENDING)
+            assertThat(issued.activatedAt).describedAs("%s", type).isNull()
+        }
+    }
+
+    @Test fun `a card with no plastic is issued ACTIVE and stamped as activated`(): Unit = runBlocking {
+        listOf(CardType.VIRTUAL, CardType.SINGLE_USE).forEach { type ->
+            val command = issueCmd("idem-$type").copy(cardType = type)
+            coEvery { repo.findByIdempotencyKey(command.idempotencyKey) } returns null
+            coEvery { repo.save(any(), any()) } answers { firstArg() }
+
+            val issued = service.issueCard(command)
+
+            assertThat(issued.status).describedAs("%s", type).isEqualTo(CardStatus.ACTIVE)
+            assertThat(issued.activatedAt).describedAs("%s", type).isEqualTo(Instant.now(clock))
+        }
+    }
+
+    // The physical path must keep working: an ACTIVE-on-issue virtual card is NOT allowed to make
+    // activate() unreachable for the plastic it exists for.
+    @Test fun `a physical card issued PENDING can still be activated afterwards`(): Unit = runBlocking {
+        val command = issueCmd("idem-physical-activate")
+        coEvery { repo.findByIdempotencyKey(command.idempotencyKey) } returns null
+        coEvery { repo.save(any(), any()) } answers { firstArg() }
+        val issued = service.issueCard(command)
+        coEvery { repo.findById(issued.id) } returns issued
+
+        val activated = service.activateCard(CardStatusCommand(issued.id, "Plastic received", "ops-user"))
+
+        assertThat(activated.status).isEqualTo(CardStatus.ACTIVE)
+        assertThat(activated.activatedAt).isEqualTo(Instant.now(clock))
+    }
+
     // ── synthetic PAN vault (#3) ───────────────────────────────────────────────────────
 
     @Test fun `issue stores an encrypted Luhn-valid PAN and derives the mask from it`(): Unit = runBlocking {

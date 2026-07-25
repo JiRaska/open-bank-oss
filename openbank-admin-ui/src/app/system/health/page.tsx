@@ -250,7 +250,7 @@ function ServiceCard({ snapshot, resilience, governance, govTimestamp }: { snaps
           </div>
           <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center' }}>
             <span className="tag" style={{ background: 'var(--surface-3)', border: 'none' }} title="Schema">
-              {governance.schemaName}
+              {governance.schemaName ?? 'no schema (stateless)'}
             </span>
             <span className="tag" style={{ background: 'var(--surface-3)', border: 'none' }} title="Current Version">
               {governance.flywayCurrentVersion || 'No version'}

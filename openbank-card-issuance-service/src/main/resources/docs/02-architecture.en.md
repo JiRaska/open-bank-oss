@@ -91,7 +91,7 @@ sequenceDiagram
   R->>S: issueCard(cmd)
   S->>DB: findByIdempotencyKey (replay check)
   S->>DB: BEGIN TX
-  S->>DB: INSERT INTO cards (status=PENDING)
+  S->>DB: INSERT INTO cards<br/>(status=PENDING with plastic,<br/>ACTIVE for VIRTUAL / SINGLE_USE)
   S->>DB: INSERT INTO card_outbox<br/>(event=card.issued.v1, status=PENDING)
   S->>DB: COMMIT
   R-->>C: 201 Created

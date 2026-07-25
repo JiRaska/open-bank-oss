@@ -105,4 +105,72 @@ class BalanceReconciliationAsOfIT {
         assertThat(asOfSum["CZK"]).isEqualByComparingTo("1000.00")
         assertThat(asOfSum["EUR"]).isEqualByComparingTo("200.00")
     }
+
+    /**
+     * ADR-0178 Phase 3 — the pipeline the tie-out subtracts must also be readable on its own, against
+     * a REAL database. A mocked repository cannot prove the `entry_date > :asOf` grouping or the
+     * `sumBookedByCurrencyAsOf = sumBookedByCurrency − pipeline` identity that the operator-facing
+     * explanation rests on; it would happily return whatever the fake was told to.
+     */
+    @Test
+    fun `sumFutureValueDatedByCurrency reports the tail that the as-of sum subtracts`() {
+        val asOf = LocalDate.of(2026, 7, 18)
+        val acctCzk = UUID.randomUUID()
+        val acctEur = UUID.randomUUID()
+        clean()
+
+        onEventLoop {
+            // CZK: 1000 effective + two future-value-dated credits (500 + 250) = 750 pipeline.
+            projection.applyBookedDelta(
+                journalEntryId = UUID.randomUUID(),
+                accountId = acctCzk,
+                currency = "CZK",
+                delta = BigDecimal("1000.00"),
+                transactionId = UUID.randomUUID(),
+                entryDate = asOf.minusDays(1),
+            )
+            projection.applyBookedDelta(
+                journalEntryId = UUID.randomUUID(),
+                accountId = acctCzk,
+                currency = "CZK",
+                delta = BigDecimal("500.00"),
+                transactionId = UUID.randomUUID(),
+                entryDate = asOf.plusDays(2),
+            )
+            projection.applyBookedDelta(
+                journalEntryId = UUID.randomUUID(),
+                accountId = acctCzk,
+                currency = "CZK",
+                delta = BigDecimal("250.00"),
+                transactionId = UUID.randomUUID(),
+                entryDate = asOf.plusDays(5),
+            )
+            // EUR: entirely effective — must NOT appear in the pipeline at all.
+            projection.applyBookedDelta(
+                journalEntryId = UUID.randomUUID(),
+                accountId = acctEur,
+                currency = "EUR",
+                delta = BigDecimal("200.00"),
+                transactionId = UUID.randomUUID(),
+                entryDate = asOf.minusDays(1),
+            )
+        }
+
+        val pipeline = onEventLoop { balanceRepo.sumFutureValueDatedByCurrency(asOf) }
+        val current = onEventLoop { balanceRepo.sumBookedByCurrency() }
+        val asOfSum = onEventLoop { balanceRepo.sumBookedByCurrencyAsOf(asOf) }
+
+        assertThat(pipeline["CZK"]).isEqualByComparingTo("750.00")
+        // A currency with no future-value-dated movement must be absent, not a spurious zero row.
+        assertThat(pipeline).doesNotContainKey("EUR")
+
+        // The identity the operator-facing explanation rests on: the pipeline is exactly the gap
+        // between the raw materialized total and the value-date-correct tie-out figure.
+        assertThat(current.getValue("CZK").subtract(asOfSum.getValue("CZK"))).isEqualByComparingTo("750.00")
+        assertThat(current.getValue("EUR").subtract(asOfSum.getValue("EUR"))).isEqualByComparingTo("0.00")
+
+        // An asOf beyond every value date leaves nothing in the pipeline — it drains, never accumulates.
+        val drained = onEventLoop { balanceRepo.sumFutureValueDatedByCurrency(asOf.plusDays(10)) }
+        assertThat(drained).isEmpty()
+    }
 }

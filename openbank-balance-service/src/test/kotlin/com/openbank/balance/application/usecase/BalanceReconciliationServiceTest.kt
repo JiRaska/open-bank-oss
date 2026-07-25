@@ -65,6 +65,62 @@ class BalanceReconciliationServiceTest {
     }
 
     @Test
+    fun `reconcile reports the future-value-dated pipeline without turning it into drift`(): Unit = runBlocking {
+        // ADR-0178 Phase 3. Same scenario as the value-date test above: 1500 booked, of which 500 is
+        // value-dated forward, so the value-date-correct sum (1000) ties out to the control (1000).
+        // The 500 must be REPORTED as the pipeline and must NOT move `difference` — the tie-out sides
+        // already exclude it, so subtracting it again would re-create the false drift Phase 1 removed.
+        val ledger = FakeLedgerControl(mapOf("CZK" to BigDecimal("1000.00")))
+        val balanceRepo = FakeSumRepository(
+            sums = mapOf("CZK" to BigDecimal("1500.00")),
+            valueDatedSums = mapOf("CZK" to BigDecimal("1000.00")),
+            futureValueDated = mapOf("CZK" to BigDecimal("500.00")),
+        )
+        val records = FakeRecordRepository()
+        val service = BalanceReconciliationService(
+            balanceRepo,
+            ledger,
+            records,
+            java.time.Clock.systemUTC(),
+            mockk<DomainMetrics>(relaxed = true),
+        )
+
+        val report = service.reconcile(asOf)
+
+        val czk = report.currencies.single()
+        assertEquals(0, czk.futureValueDatedPipeline.compareTo(BigDecimal("500.00")), "pipeline must be surfaced")
+        assertEquals(0, czk.difference.compareTo(BigDecimal.ZERO), "pipeline must not leak into drift")
+        assertFalse(report.hasDrift, "a purely future-value-dated batch must raise ZERO alerts")
+        assertEquals(asOf, balanceRepo.askedPipelineAsOf, "pipeline must be read as of the tie-out date")
+    }
+
+    @Test
+    fun `a genuine divergence still drifts even while a pipeline is outstanding`(): Unit = runBlocking {
+        // The pipeline is explanatory only: a real 10.00 shortfall on the value-date basis must still
+        // alert, and must not be masked by an unrelated future-value-dated batch sitting in the tail.
+        val ledger = FakeLedgerControl(mapOf("CZK" to BigDecimal("1000.00")))
+        val balanceRepo = FakeSumRepository(
+            sums = mapOf("CZK" to BigDecimal("1490.00")),
+            valueDatedSums = mapOf("CZK" to BigDecimal("990.00")),
+            futureValueDated = mapOf("CZK" to BigDecimal("500.00")),
+        )
+        val service = BalanceReconciliationService(
+            balanceRepo,
+            ledger,
+            FakeRecordRepository(),
+            java.time.Clock.systemUTC(),
+            mockk<DomainMetrics>(relaxed = true),
+        )
+
+        val report = service.reconcile(asOf)
+
+        assertTrue(report.hasDrift, "unexplained drift must still alert while a pipeline is outstanding")
+        val czk = report.currencies.single()
+        assertEquals(0, czk.difference.compareTo(BigDecimal("-10.00")), "drift is the value-date-basis gap only")
+        assertEquals(0, czk.futureValueDatedPipeline.compareTo(BigDecimal("500.00")))
+    }
+
+    @Test
     fun `reconcile flags drift when ledger and booked disagree`(): Unit = runBlocking {
         val ledger = FakeLedgerControl(mapOf("CZK" to BigDecimal("1000.00")))
         val balanceRepo = FakeSumRepository(mapOf("CZK" to BigDecimal("990.00")))
@@ -145,8 +201,10 @@ class BalanceReconciliationServiceTest {
     private class FakeSumRepository(
         private val sums: Map<String, BigDecimal>,
         private val valueDatedSums: Map<String, BigDecimal> = sums,
+        private val futureValueDated: Map<String, BigDecimal> = emptyMap(),
     ) : com.openbank.balance.application.port.out.BalanceRepository {
         var askedAsOf: LocalDate? = null
+        var askedPipelineAsOf: LocalDate? = null
         override suspend fun findByAccountIdAndCurrency(accountId: UUID, currency: String) = null
         override suspend fun findAllByAccountId(accountId: UUID) =
             emptyList<com.openbank.balance.domain.model.Balance>()
@@ -162,6 +220,10 @@ class BalanceReconciliationServiceTest {
             currency: String,
             asOf: java.time.LocalDate,
         ): BigDecimal = BigDecimal.ZERO
+        override suspend fun sumFutureValueDatedByCurrency(asOf: LocalDate): Map<String, BigDecimal> {
+            askedPipelineAsOf = asOf
+            return futureValueDated
+        }
     }
 
     private class FakeRecordRepository : ReconciliationRecordRepository {

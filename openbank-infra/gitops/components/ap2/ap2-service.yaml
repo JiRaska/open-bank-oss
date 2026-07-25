@@ -3,12 +3,12 @@
 # mandate + the payment it authorizes and returns a verdict (valid + evidence + failures).
 # It MOVES NO FUNDS — authorization evidence only. No DB, no Kafka.
 #
-# PHASE 1 DEPLOY (ADR-0193): every /ap2/verify call is authorized by the shared ADR-0034
-# PDP as an AI_AGENT principal and FAILS CLOSED here (HTTP 503) because no OPA sidecar is
-# deployed yet — deliberate, to keep the OPA-bundle blast radius out of this change. OIDC
-# tenant-disabled; only in-cluster callers (fenced by the generated NetworkPolicy). The
-# image runs as numeric uid 100 (USER 100), so runAsNonRoot admits it; runAsUser is pinned
-# for explicitness (matches agent-service).
+# Every /ap2/verify call is authorized by the shared ADR-0034 PDP as an AI_AGENT principal —
+# the OPA sidecar below (localhost:8181) serves data.openbank.rest.allow, bridging the
+# verify.mandate capability to the ap2-anonymous charter (ADR-0193 phase 2). A PDP connectivity
+# error still fails /ap2/verify CLOSED (503). OIDC tenant-disabled; only in-cluster callers
+# (fenced by the generated NetworkPolicy). The image runs as numeric uid 100 (USER 100), so
+# runAsNonRoot admits it; runAsUser is pinned for explicitness (matches agent-service).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,6 +27,10 @@ spec:
       labels:
         app.kubernetes.io/name: ap2-service
         app.kubernetes.io/part-of: platform
+      annotations:
+        # Roll the pod when the OPA policy bundle changes (subPath mounts don't hot-reload).
+        # Kept in sync by gen-ap2-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "39551e1032eb36b2"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -47,14 +51,17 @@ spec:
           env:
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
-            # ADR-0034 PDP. No sidecar in phase 1 → this localhost target is unreachable and
-            # every /ap2/verify fails CLOSED (HTTP 503, the intended posture). Sidecar is a follow-up.
+            # ADR-0034 PDP: the OPA sidecar in this pod (localhost:8181), serving
+            # data.openbank.rest.allow (ap2-opa-bundle ConfigMap) — the shared PDP bridges the
+            # AI_AGENT verify.mandate capability to the ap2-anonymous charter (agents.rego). A PDP
+            # connectivity error still fails /ap2/verify CLOSED (503).
             - name: OPA_URL
               value: http://localhost:8181
-            # AP2 issuer trust list (phase 1). Empty = no trusted issuer, so a reachable verify
-            # would fail every mandate at the signature stage until issuers are configured.
+            # AP2 issuer trust list. Carries the demo issuer's public key so the sandbox demo
+            # (openbank-ap2-service/demo/ap2-mandate-demo.py) verifies valid=true. Format:
+            # `issuer=<x509-spki-base64>;...`. A test key — authorizes nothing real.
             - name: AP2_TRUST_LIST
-              value: ""
+              value: "demo-issuer=MCowBQYDK2VwAyEApZUA0ryfjfNx1Xy49S8m5v/Ckii44uzt2r+Z5dOtzCk="
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://tempo.observability.svc:4317
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -92,9 +99,74 @@ spec:
             limits:
               cpu: "1"
               memory: 512Mi
+        # OPA policy-decision sidecar (ADR-0034 / ADR-0193 phase 2). Serves
+        # data.openbank.rest.allow for the /ap2/verify gate — the shared PDP bridges the
+        # AI_AGENT verify.mandate capability to the ap2-anonymous charter (agents.rego). Bundle
+        # mounted from ap2-opa-bundle ConfigMap (gen-ap2-opa-bundle.sh). Bind 0.0.0.0 so kubelet
+        # httpGet probes reach /health (the image is scratch — no shell for an exec probe);
+        # reachability is fenced by the pod network, and OPA serves only policy decisions.
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet: {path: "/health?bundles=true", port: 8181}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /health, port: 8181}
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem: true.
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: ap2-opa-bundle
 ---
 apiVersion: v1
 kind: Service
