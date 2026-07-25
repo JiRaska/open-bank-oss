@@ -1,0 +1,161 @@
+{
+  "consumer": {
+    "name": "openbank-finrep-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the GL trial balance for a FINREP reporting date",
+      "providerStates": [
+        {
+          "name": "ledger has journal entries for the reporting date"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/journals/trial-balance",
+        "query": {
+          "asOf": [
+            "2026-06-30"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "asOf": "2026-06-30",
+          "balanced": true,
+          "lines": [
+            {
+              "code": "1100-CASH-CLEARING-CZK",
+              "net": 150000.0,
+              "type": "ASSET"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.asOf": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.balanced": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.lines[*].code": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines[*].net": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.lines[*].type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the GL trial balance for a date with no ledger activity",
+      "providerStates": [
+        {
+          "name": "ledger has no journal entries"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/journals/trial-balance",
+        "query": {
+          "asOf": [
+            "2000-01-01"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "asOf": "2000-01-01",
+          "balanced": true,
+          "lines": [
+
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.asOf": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.balanced": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-ledger-service"
+  }
+}

@@ -46,6 +46,11 @@ jobs:
       # pacts/ dir (systemProperty("pact.rootDir", ...) in the consuming service's
       # build.gradle.kts). --continue so one module's failure doesn't hide drift elsewhere.
       #
+      # THIS LIST IS THE GATE'S SCOPE — a new consumer whose module is missing here is not merely
+      # unchecked, it reads as PASSING: the diff step only ever sees pacts/ files this step
+      # regenerated, so an omitted consumer's committed pact is never rewritten and so never
+      # differs. Add the module in the same PR that adds the pact (finrep arrived with #2269's).
+      #
       # openbank-swift-service is deliberately excluded here: its own build.gradle.kts
       # statically excludes SwiftEventPactConsumerTest whenever CI=true (PactConsumerTestExt
       # auto-publishes to pactbroker.url in CI and hangs/401s — issue #2404), so it can never
@@ -60,6 +65,7 @@ jobs:
             :openbank-card-issuance-service:test --tests "com.openbank.cardissuance.contract.*PactConsumerTest" \
             :openbank-consent-service:test --tests "com.openbank.consent.contract.*PactConsumerTest" \
             :openbank-domestic-payment:test --tests "com.openbank.domestic.contract.*PactConsumerTest" \
+            :openbank-finrep-service:test --tests "com.openbank.finrep.contract.*PactConsumerTest" \
             :openbank-fraud-service:test --tests "com.openbank.fraud.contract.*PactConsumerTest" \
             :openbank-fx-service:test --tests "com.openbank.fx.contract.*PactConsumerTest" \
             :openbank-kyc-service:test --tests "com.openbank.kyc.contract.*PactConsumerTest" \
