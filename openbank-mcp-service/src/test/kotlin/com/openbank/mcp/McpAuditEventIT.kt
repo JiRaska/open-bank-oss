@@ -5,6 +5,9 @@ package com.openbank.mcp
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditResult
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import jakarta.inject.Inject
@@ -21,6 +24,11 @@ import org.junit.jupiter.api.Test
  * exists for — is that the container resolves `McpCallAuditor` and its `AuditEventPublisher` at
  * all, which is the way an audit trail actually goes missing in production: silently, with every
  * unit test green.
+ *
+ * ADR-0195 step 4: the phase-1 placeholder identity is gone, so a real `tools/call` needs a
+ * validated agent token. `@TestSecurity` + `@OidcSecurity` simulate one (`sub` + `consent_id`)
+ * without a real IdP round-trip — the same mechanism the fleet already uses for OIDC resource-server
+ * tests (see `openbank-agent-service`).
  */
 @QuarkusTest
 class McpAuditEventIT {
@@ -46,23 +54,31 @@ class McpAuditEventIT {
     }
 
     @Test
+    @TestSecurity(user = "agent:test-agent")
+    @OidcSecurity(
+        claims = [Claim(key = "sub", value = "agent:test-agent"), Claim(key = "consent_id", value = TEST_CONSENT_ID)],
+    )
     fun `an allowed tool call emits an AI-attributed audit event`() {
         toolsCall(TestPolicyDecisionPoint.ALLOWED_TOOL)
 
         val event = singleEvent()
         assertThat(event.actorType).isEqualTo("AI_AGENT")
-        assertThat(event.actorId).isEqualTo("agent:mcp-anonymous")
+        assertThat(event.actorId).isEqualTo("agent:test-agent")
         assertThat(event.operation).isEqualTo("mcp.tool.call")
         assertThat(event.resourceType).isEqualTo("mcp.tool")
         assertThat(event.resourceId).isEqualTo(TestPolicyDecisionPoint.ALLOWED_TOOL)
         assertThat(event.result).isEqualTo(AuditResult.SUCCESS)
         assertThat(event.payload)
             .containsEntry("policy_decision", "ALLOW")
-            .containsEntry("charter", "mcp-anonymous")
+            .containsEntry("charter", "test-agent")
             .containsEntry("capability", "query.account.readonly")
     }
 
     @Test
+    @TestSecurity(user = "agent:test-agent")
+    @OidcSecurity(
+        claims = [Claim(key = "sub", value = "agent:test-agent"), Claim(key = "consent_id", value = TEST_CONSENT_ID)],
+    )
     fun `a denied tool call emits a DENIED audit event carrying the policy reason`() {
         toolsCall(TestPolicyDecisionPoint.DENIED_TOOL)
 
@@ -76,6 +92,10 @@ class McpAuditEventIT {
     }
 
     @Test
+    @TestSecurity(user = "agent:test-agent")
+    @OidcSecurity(
+        claims = [Claim(key = "sub", value = "agent:test-agent"), Claim(key = "consent_id", value = TEST_CONSENT_ID)],
+    )
     fun `the audit event records argument key names but never their values`() {
         toolsCall(TestPolicyDecisionPoint.DENIED_TOOL, """{"accountId":"CZ6508000000192000145399"}""")
 
@@ -95,5 +115,31 @@ class McpAuditEventIT {
             .statusCode(200)
 
         assertThat(recorder.events).isEmpty()
+    }
+
+    // ADR-0195 step 4 (BLOCKER #2206): a tools/call with NO agent token must be denied, never
+    // silently allowed via a placeholder identity — the exact vulnerability this cutover closes.
+    @Test
+    fun `a tool call with no agent token is denied and audited as unavailable`() {
+        given()
+            .contentType(ContentType.JSON)
+            .body(
+                """{"jsonrpc":"2.0","id":1,"method":"tools/call",""" +
+                    """"params":{"name":"${TestPolicyDecisionPoint.ALLOWED_TOOL}","arguments":{}}}""",
+            )
+            .post("/mcp")
+            .then()
+            .statusCode(200)
+            .body("result.isError", org.hamcrest.Matchers.equalTo(true))
+            .body("result.content[0].text", org.hamcrest.Matchers.equalTo("Authorization unavailable"))
+
+        val event = singleEvent()
+        assertThat(event.actorId).isEqualTo("unknown")
+        assertThat(event.result).isEqualTo(AuditResult.DENIED)
+        assertThat(event.payload).containsEntry("reason", "caller authentication failed")
+    }
+
+    private companion object {
+        const val TEST_CONSENT_ID = "11111111-1111-1111-1111-111111111111"
     }
 }

@@ -9,11 +9,15 @@ quarkus:
     host: 0.0.0.0
   oidc:
     auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://keycloak.iam.svc:8080/realms/openbank}
-    # Still tenant-disabled (resource-server mode) as of ADR-0195 step 3: enabling this to REQUIRE
-    # an incoming agent token is the step-4 cutover, landed atomically with the McpEndpoint
-    # placeholder removal (#2206 ordering) — flipping it here alone would 401 every current caller
-    # with no real gate benefit yet.
-    tenant-enabled: false
+    # ADR-0195 step 4: resource-server mode enabled. Quarkus now validates any presented Bearer
+    # token and populates JsonWebToken from it; without this flip the Authorization header is never
+    # even inspected, so CallerContextResolver could never see a real `sub`/`consent_id` no matter
+    # what a caller sent. No @Authenticated/permission policy is added — a request WITHOUT a token
+    # still reaches McpEndpoint (anonymous JsonWebToken, subject null); CallerContextResolver's own
+    # null-check + the now-removed McpEndpoint placeholder fallback is what turns "no token" into a
+    # deny, not a framework-level 401. A PRESENT-but-invalid/expired token IS rejected by Quarkus
+    # OIDC itself before reaching the endpoint (fail-closed either way).
+    tenant-enabled: true
   # Outbound M2M client-credentials auth (ADR-0195 step 3) — mirrors agent-service's oidc-client
   # exactly: DownstreamClients / ConsentValidateClient (@RegisterProvider
   # OidcClientRequestReactiveFilter) mint an `openbank-services` token and attach it as a Bearer, so

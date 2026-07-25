@@ -52,16 +52,18 @@ import java.time.Duration
  * The same terminal branches also report to [McpMetricsPort] — audit and meter are emitted from one
  * place so the aggregate can never disagree with the per-call trail. The audit event answers "what
  * did this agent do"; the meters answer the questions a trail cannot without a query: the rate, the
- * outcome mix, the latency, and — via `caller_identity` — how many calls still run under the phase-1
- * placeholder identity rather than a validated token (blocker #2206).
+ * outcome mix, the latency, and — via `caller_identity` — whether each call was attributed to a
+ * validated token or failed resolution (blocker #2206's placeholder-fallback source is gone as of
+ * step 4; the enum value remains only as that closed blocker's historical record).
  *
- * Caller identity (ADR-0195): the acting agent + presented consent come from the caller's validated
- * OAuth 2.1 access token via [CallerContextResolver] — `sub` (`agent:<id>`, classified AI_AGENT by
- * the shared AuthorizeInterceptor/rego and bridged to `agents.allow`) and the `consent_id` claim.
- * While OIDC is still tenant-disabled no agent token is presented, so the resolver returns null and
- * the endpoint falls back to the phase-1 placeholder identity (unchanged deployed behaviour). The
- * consent's `grantedAccounts` are validated live at consent-service by the real read ports (the next
- * ADR-0195 step); account scope is never taken from the token.
+ * Caller identity (ADR-0195, step 4 cutover): the acting agent + presented consent come from the
+ * caller's validated OAuth 2.1 access token via [CallerContextResolver] — `sub` (`agent:<id>`,
+ * classified AI_AGENT by the shared AuthorizeInterceptor/rego and bridged to `agents.allow`) and the
+ * `consent_id` claim. No agent token ⇒ [CallerContextResolver.resolveOrNull] returns null ⇒ the call
+ * is denied with "Authorization unavailable" — the phase-1 placeholder identity is gone, so there is
+ * no path from an unauthenticated caller to a real read. The consent's `grantedAccounts` are
+ * validated LIVE at consent-service by [com.openbank.mcp.infrastructure.read.RealAccountReadPort];
+ * account scope is never taken from the token.
  */
 @Path("/mcp")
 @Consumes(MediaType.APPLICATION_JSON)
@@ -229,23 +231,16 @@ class McpEndpoint(
         null
     }
 
-    // ADR-0195: the acting agent + consent come from the caller's validated OAuth token
-    // (CallerContextResolver). Until OIDC is enabled and a token is required, no agent token is
-    // presented and the resolver returns null, so we fall back to the phase-1 placeholder — the
-    // deployed stub surface keeps working unchanged. The `agent:mcp-anonymous` literal deliberately
-    // lives HERE: the #2206 CI guard keys on it, refusing to let a real read port land while this
-    // fallback is still reachable. It is removed when OIDC is enabled and a token becomes mandatory.
-    //
-    // Which of the two branches was taken is METERED, because "the fallback is still reachable" is
-    // exactly the #2206 precondition and a code comment cannot be evaluated against production.
-    // `caller_identity{source="anonymous_fallback"}` must be zero before a real read port lands.
+    // ADR-0195 step 4: the phase-1 placeholder identity is REMOVED. The acting agent + consent come
+    // ONLY from a validated OAuth token (CallerContextResolver) — no agent token is treated the same
+    // as a malformed one: resolveCaller's catch below denies, audits, and meters
+    // CallerIdentitySource.RESOLUTION_FAILED. ANONYMOUS_FALLBACK can no longer fire; it stays in the
+    // enum as the historical record of the #2206 blocker this cutover closes — the metric that used
+    // to track it now reads zero by construction, not because fallback traffic happened to taper off.
     private fun resolveContext(): ConsentContext {
-        val fromToken = callerResolver.resolveOrNull()
-        metrics.callerIdentityResolved(
-            if (fromToken == null) CallerIdentitySource.ANONYMOUS_FALLBACK else CallerIdentitySource.TOKEN,
-        )
-        return fromToken
-            ?: ConsentContext(agentId = "agent:mcp-anonymous", consentId = "none", grantedAccounts = emptyList())
+        val ctx = callerResolver.resolveOrNull() ?: error("no agent token presented")
+        metrics.callerIdentityResolved(CallerIdentitySource.TOKEN)
+        return ctx
     }
 
     private fun toolError(id: JsonNode, message: String): Response = Response.ok(
