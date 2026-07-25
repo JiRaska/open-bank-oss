@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.9](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.8.8...pid-service-v0.8.9) (2026-07-25)
+
+
+### Bug Fixes
+
+* **pid:** document the two endpoints openapi.yaml omits ([#2341](https://github.com/JiRaska/open-bank-oss/issues/2341)) ([107ba94](https://github.com/JiRaska/open-bank-oss/commit/107ba945a46cacffffa0be2b8d2bfda84f672ebe)), closes [#2255](https://github.com/JiRaska/open-bank-oss/issues/2255)
+
 ## [0.8.8](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.8.7...pid-service-v0.8.8) (2026-07-17)
 
 
