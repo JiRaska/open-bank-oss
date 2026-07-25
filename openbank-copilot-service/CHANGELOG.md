@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.7.0...copilot-service-v0.7.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* **copilot:** declare the datastore copilot actually has, which is none ([#2268](https://github.com/JiRaska/open-bank-oss/issues/2268)) ([a5a615e](https://github.com/JiRaska/open-bank-oss/commit/a5a615ef74e6346e76c8e2a6c279b5ab1cb3837e)), closes [#2255](https://github.com/JiRaska/open-bank-oss/issues/2255)
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.6.0...copilot-service-v0.7.0) (2026-07-24)
 
 
