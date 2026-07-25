@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors.
+#
+# Scheduling priority for CI runners.
+#
+# THE PROBLEM. Until now the cluster had no PriorityClasses at all, so every pod —
+# a payment service and a CI build alike — sat at priority 0. When the cluster
+# filled, the scheduler had no way to prefer the bank over its build system, and
+# whoever asked first won. Observed 2026-07-25: a card-issuance rollout sat Pending
+# for ~10 minutes behind six ARC runners that were compiling a pull request, with
+# Karpenter reporting "all available instance types exceed limits for nodepool".
+# A deploy waiting on a lint job is the wrong way round.
+#
+# THE FIX, and why it is one object and not fifty. Giving CI a NEGATIVE priority
+# orders the whole cluster correctly without touching a single service manifest:
+# pods with no priorityClassName default to 0, which is already above -100. So the
+# entire platform outranks CI by construction, and stays that way for workloads
+# added later by people who have never read this file. Marking the bank explicitly
+# would mean editing every Deployment and would silently fail for the next one.
+#
+# preemptionPolicy: Never is the important half. It means a CI runner will never
+# evict anything to get scheduled — it waits. The reverse is still true and is the
+# point: a platform pod at priority 0 CAN preempt a runner, because preemption is
+# decided by the INCOMING pod's policy, not the victim's.
+#
+# WHAT THIS COSTS. Preempting a runner kills its job mid-build (EphemeralRunner has
+# restartPolicy: Never, so GitHub reports it as failed and it must be re-run). That
+# is a deliberate trade: a build is repeatable, a stuck deploy is not. It should
+# also be rare — it only happens when the cluster is genuinely full, which is the
+# situation this exists for.
+#
+# NOT a replacement for ARC's own queueing. This orders POD scheduling in
+# Kubernetes; which GitHub job gets an ARC runner slot is a separate queue that
+# maxRunners governs. Do not reach for this to fix a starving CI lane.
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: openbank-ci
+  labels:
+    app.kubernetes.io/part-of: openbank-platform
+    app.kubernetes.io/managed-by: argocd
+value: -100
+globalDefault: false
+preemptionPolicy: Never
+description: >-
+  CI runners and other build-time workloads. Below every platform workload (which
+  default to 0) so a build can never delay a deploy, and never preempts anything
+  itself.
