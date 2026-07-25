@@ -8,7 +8,14 @@ export const dynamic = 'force-dynamic'
 
 // BFF proxy for the HITL decision on a DevOps finding (ADR-0119 / ADR-0031 D4). A human operator
 // approves or rejects a proposed remediation; this forwards to the devops-agent. The admin-UI is
-// already behind AuthGuard; the agent enforces @RolesAllowed("platform-admin") on its side.
+// already behind AuthGuard; the agent enforces @RolesAllowed(ROLE_ADMIN) on its side (it read
+// `platform-admin` until #2418 — a role no Keycloak realm has ever issued, so the endpoint 403'd
+// for everyone).
+//
+// NOTE: the fetch below sends no Authorization header, unlike the sibling proxies under
+// src/app/api/agent/ and src/app/api/svc/. An unauthenticated request cannot satisfy any
+// @RolesAllowed, so this path stays broken on the agent side even now that the role name is real —
+// the M2M token story is issue #2442. Do not read the corrected comment as "this works".
 
 function devopsBase(): string {
   if (process.env.SERVICES_HOST === 'container') {

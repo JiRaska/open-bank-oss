@@ -52,8 +52,8 @@ class DevOpsResource(
     suspend fun getFinding(@PathParam("id") id: String): DevOpsFinding =
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
 
-    // HITL decisions (ADR-0031 D4). platform-admin only — a human operator disposes; the agent
-    // (a viewer at most) can never approve its own proposal (segregation of duties).
+    // HITL decisions (ADR-0031 D4). ROLE_ADMIN only — a human operator disposes; the agent
+    // (ROLE_VIEWER at most) can never approve its own proposal (segregation of duties).
     @POST
     @Path("/findings/{id}/approve")
     @RolesAllowed("ROLE_ADMIN")
