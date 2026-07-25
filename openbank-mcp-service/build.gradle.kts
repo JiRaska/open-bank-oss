@@ -38,9 +38,10 @@ kover {
         verify {
             rule {
                 bound {
-                    // Ratchet floor (ADR-0020). Set from the measured value at introduction with
-                    // ~5pt headroom; raise-only from here.
-                    minValue = 55
+                    // Ratchet floor (ADR-0020). Raise-only. 55 at introduction; the audit-event
+                    // tests (#2207) took the measured value to 82.1% LINE, so the floor moves to 75
+                    // (~7pt headroom) rather than leaving a 27pt gap the ratchet cannot see through.
+                    minValue = 75
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }
