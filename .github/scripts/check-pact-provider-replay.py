@@ -51,23 +51,17 @@ PACTS = ROOT / "pacts"
 KNOWN_UNCOVERED = {
     "pacts/openbank-account-service-openbank-balance-service.json",
     "pacts/openbank-account-service-openbank-party-service.json",
-    "pacts/openbank-account-service-openbank-transaction-service.json",
     "pacts/openbank-balance-service-openbank-account-service.json",
     "pacts/openbank-consent-service-openbank-sca-service.json",
-    "pacts/openbank-domestic-payment-openbank-transaction-service.json",
-    "pacts/openbank-fraud-service-openbank-transaction-service.json",
     "pacts/openbank-kyc-service-openbank-party-service.json",
     # Landed 2026-07-25, after the #2327 audit counted 16 of 27: same three providers
     # (balance/transaction/party), so the same debt, not a new class of it. The estate went
     # 27 -> 33 pacts in a day, which is the argument for a gate rather than another audit.
     "pacts/openbank-mcp-service-openbank-balance-service.json",
-    "pacts/openbank-mcp-service-openbank-transaction-service.json",
     "pacts/openbank-vop-service-openbank-party-service.json",
     "pacts/openbank-notification-service-openbank-account-service.json",
     "pacts/openbank-onboarding-service-openbank-party-service.json",
-    "pacts/openbank-sepa-instant-openbank-transaction-service.json",
     "pacts/openbank-sepa-payment-openbank-fraud-service.json",
-    "pacts/openbank-sepa-payment-openbank-transaction-service.json",
     "pacts/openbank-transaction-service-openbank-balance-service.json",
     "pacts/openbank-transaction-service-openbank-fx-service.json",
     "pacts/openbank-transaction-service-openbank-swift-service.json",
