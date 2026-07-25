@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/JiRaska/open-bank-oss/compare/ap2-service-v0.2.0...ap2-service-v0.2.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* **ap2:** demo uses agent:ap2-anonymous so the OPA charter matches ([#1923](https://github.com/JiRaska/open-bank-oss/issues/1923)) ([#2172](https://github.com/JiRaska/open-bank-oss/issues/2172)) ([a8e5032](https://github.com/JiRaska/open-bank-oss/commit/a8e5032ac7bb63009c0495c31bc54c01eed7b940))
+
 ## [0.2.0](https://github.com/JiRaska/open-bank-oss/compare/ap2-service-v0.1.0...ap2-service-v0.2.0) (2026-07-24)
 
 
