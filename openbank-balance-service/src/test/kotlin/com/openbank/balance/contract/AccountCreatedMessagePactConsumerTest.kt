@@ -33,9 +33,15 @@ import java.util.UUID
  * IMPORTANT — regenerate on change: if this test's `@Pact` methods change (new interaction,
  * different matcher, renamed field), re-run this test (`./gradlew :openbank-balance-service:test
  * --tests "*AccountCreatedMessagePactConsumerTest*"`) and commit the updated
- * `pacts/openbank-balance-service-openbank-account-service.json` in the same PR. There is no CI
- * drift check yet (ADR-0063 Phase 2) — an un-regenerated pact file silently verifies the OLD
- * contract on the provider side.
+ * `pacts/openbank-balance-service-openbank-account-service.json` in the same PR — an un-regenerated
+ * pact file silently verifies the OLD contract on the provider side. `pact-drift-check.yml`
+ * (ADR-0063 Phase 2, issue #468) enforces this: it regenerates every consumer pact and fails on
+ * `git diff -- pacts/`. Note what that gate can and cannot see — its only assertion is the diff,
+ * so a module it does not regenerate does not read as *unchecked*, it reads as *passing*. Its
+ * scope is therefore DERIVED, by `.github/scripts/derive-pact-drift-scope.sh`, from the
+ * `@Pact(consumer = .., provider = ..)` annotations themselves; a consumer test in a new module
+ * needs no workflow edit, and a pact nothing regenerates fails the derivation instead of going
+ * quietly green.
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(

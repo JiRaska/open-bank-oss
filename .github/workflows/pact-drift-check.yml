@@ -42,18 +42,30 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
 
-      # One Gradle invocation, every consumer pact test module — each writes to the shared
+      # The gate's scope is DERIVED, not listed here. It used to be a hand-written list of Gradle
+      # module paths, and that list is the one thing this workflow cannot check: its only assertion
+      # is `git diff -- pacts/`, which can only see files the regeneration step actually rewrote.
+      # So a consumer module missing from the list did not read as *unchecked* — it read as
+      # *passing*, forever, silently. `:openbank-fx-service` had to be added by hand in #2284, and
+      # `:openbank-interest-service` had been missing since the day its pact was committed. Then, in
+      # the two days it took to write this, three more consumers landed unlisted — vop→party
+      # (#2324), mcp→consent/balance/transaction (#2336), psd2→tpp-registry (#2346) — five pacts the
+      # gate was green about having regenerated none of. #2357 added those three by hand; this
+      # removes the need to. Three hand-maintenance commits in one week is the argument.
+      #
+      # derive-pact-drift-scope.sh discovers every `*PactConsumerTest.kt`, maps it to the pacts/
+      # file its `@Pact(consumer = .., provider = ..)` names, and fails on an orphan pact, an
+      # uncommitted pact, or a module dropped out of scope without declaring what that strands.
+      # It is bash-3.2 clean, so it runs (and can be fed a failing case) on a dev machine too.
+      - name: Derive the set of modules to regenerate
+        run: |
+          set -euo pipefail
+          .github/scripts/derive-pact-drift-scope.sh > "${RUNNER_TEMP}/pact-gradle-args.txt"
+          .github/scripts/derive-pact-drift-scope.sh --uncovered > "${RUNNER_TEMP}/pact-uncovered.txt"
+
+      # One Gradle invocation, every gated consumer pact test module — each writes to the shared
       # pacts/ dir (systemProperty("pact.rootDir", ...) in the consuming service's
       # build.gradle.kts). --continue so one module's failure doesn't hide drift elsewhere.
-      #
-      # THIS LIST IS THE GATE'S SCOPE — a new consumer whose module is missing here is not merely
-      # unchecked, it reads as PASSING: the diff step only ever sees pacts/ files this step
-      # regenerated, so an omitted consumer's committed pact is never rewritten and so never
-      # differs. Add the module in the same PR that adds the pact (finrep arrived with #2269's).
-      # The "Verify every committed pact was actually regenerated" step below now enforces that.
-      # mcp/psd2/vop are the backlog of that failure mode (#2255 dim C3): three consumers landed in
-      # #2336/#2346/#2324 while this list stayed at 17 modules, so the gate was green for all three
-      # having regenerated none of their five pacts.
       #
       # --rerun is load-bearing, not a belt-and-braces flag (#2291). The generated pact JSON is
       # not a declared output of the `test` task, so nothing invalidates `test` when pacts/
@@ -65,57 +77,37 @@ jobs:
       # the tasks named on the command line, so compileKotlin/compileTestKotlin still come from
       # the cache and only the (pure-JVM, mock-server) pact tests re-execute.
       #
-      # openbank-swift-service is deliberately excluded here: its own build.gradle.kts
-      # statically excludes both SwiftEventPactConsumerTest and ClearingSimulatorPactConsumerTest
-      # whenever CI=true (PactConsumerTestExt auto-publishes to pactbroker.url in CI and
-      # hangs/401s — issue #2404), so they can never run in a CI job regardless of --tests
-      # filtering; a run there fails outright with "No tests found for given includes". Their two
-      # pacts are named in PACT_UNCOVERED below and are NOT covered by this gate until #2404
-      # re-enables them.
+      # openbank-swift-service is out of scope: its own build.gradle.kts statically excludes both
+      # SwiftEventPactConsumerTest and ClearingSimulatorPactConsumerTest whenever CI=true
+      # (PactConsumerTestExt auto-publishes to pactbroker.url in CI and hangs/401s — #2319), so
+      # they can never run in a CI job regardless of --tests filtering; a run there fails outright
+      # with "No tests found for given includes". That exclusion, and the two pacts it strands, are
+      # declared in the derivation script — the SAME source the coverage check below reads, so the
+      # scope and its documented exceptions cannot drift apart into two hand-kept lists.
       - name: Regenerate every consumer pact
         run: |
+          set -euo pipefail
+          mapfile -t GRADLE_ARGS < "${RUNNER_TEMP}/pact-gradle-args.txt"
+          printf 'Regenerating with: %s\n' "${GRADLE_ARGS[*]}"
           # Marker for the coverage check below: anything under pacts/ older than this was not
           # rewritten by the run that follows.
           touch "${RUNNER_TEMP}/pact-regen-marker"
-          ./gradlew --continue \
-            :openbank-account-service:test --rerun --tests "com.openbank.account.contract.*PactConsumerTest" \
-            :openbank-balance-service:test --rerun --tests "com.openbank.balance.contract.*PactConsumerTest" \
-            :openbank-billing-service:test --rerun --tests "com.openbank.billing.contract.*PactConsumerTest" \
-            :openbank-card-issuance-service:test --rerun --tests "com.openbank.cardissuance.contract.*PactConsumerTest" \
-            :openbank-consent-service:test --rerun --tests "com.openbank.consent.contract.*PactConsumerTest" \
-            :openbank-domestic-payment:test --rerun --tests "com.openbank.domestic.contract.*PactConsumerTest" \
-            :openbank-finrep-service:test --rerun --tests "com.openbank.finrep.contract.*PactConsumerTest" \
-            :openbank-fraud-service:test --rerun --tests "com.openbank.fraud.contract.*PactConsumerTest" \
-            :openbank-fx-service:test --rerun --tests "com.openbank.fx.contract.*PactConsumerTest" \
-            :openbank-interest-service:test --rerun --tests "com.openbank.interest.contract.*PactConsumerTest" \
-            :openbank-kyc-service:test --rerun --tests "com.openbank.kyc.contract.*PactConsumerTest" \
-            :openbank-lending-service:test --rerun --tests "com.openbank.lending.contract.*PactConsumerTest" \
-            :openbank-mcp-service:test --rerun --tests "com.openbank.mcp.contract.*PactConsumerTest" \
-            :openbank-notification-service:test --rerun --tests "com.openbank.notification.contract.*PactConsumerTest" \
-            :openbank-onboarding-service:test --rerun --tests "com.openbank.onboarding.contract.*PactConsumerTest" \
-            :openbank-psd2-service:test --rerun --tests "com.openbank.psd2.contract.*PactConsumerTest" \
-            :openbank-sepa-instant:test --rerun --tests "com.openbank.sepainstant.contract.*PactConsumerTest" \
-            :openbank-sepa-payment:test --rerun --tests "com.openbank.sepa.contract.*PactConsumerTest" \
-            :openbank-settlement-service:test --rerun --tests "com.openbank.settlement.contract.*PactConsumerTest" \
-            :openbank-transaction-service:test --rerun --tests "com.openbank.transaction.contract.*PactConsumerTest" \
-            :openbank-vop-service:test --rerun --tests "com.openbank.vop.contract.*PactConsumerTest"
+          ./gradlew --continue "${GRADLE_ARGS[@]}"
 
-      # Belt to --rerun's braces, and the thing that keeps the module list above honest. The diff
-      # step cannot tell "regenerated and identical" from "never regenerated" — both look clean.
-      # This can: every file under pacts/ must have been rewritten by the step above. It catches
-      # the UP-TO-DATE/FROM-CACHE skip if --rerun ever regresses, AND the failure mode that let
-      # openbank-interest-service sit uncovered since the gate landed (#2283) — a consumer test
-      # added without adding its module to the list, which no green run would otherwise reveal.
+      # Belt to --rerun's braces. The diff step cannot tell "regenerated and identical" from
+      # "never regenerated" — both look clean. This can: every file under pacts/ must have been
+      # rewritten by the step above. It catches the UP-TO-DATE/FROM-CACHE skip if --rerun ever
+      # regresses, and it is the runtime proof that the derived scope actually covered what it
+      # claimed — a derivation bug would otherwise be as silent as the hand-written list was.
       - name: Verify every committed pact was actually regenerated
-        env:
-          # Uncovered by construction until #2404 re-enables the swift consumer tests in CI.
-          PACT_UNCOVERED: |
-            pacts/openbank-swift-service-openbank-clearing-simulator.json
-            pacts/openbank-transaction-service-openbank-swift-service.json
         run: |
+          set -euo pipefail
+          uncovered="$(cat "${RUNNER_TEMP}/pact-uncovered.txt")"
           stale=""
           for f in pacts/*.json; do
-            case "$PACT_UNCOVERED" in *"$f"*) continue ;; esac
+            if [ -n "$uncovered" ] && printf '%s\n' "$uncovered" | grep -qxF -- "$f"; then
+              continue
+            fi
             if [ ! "$f" -nt "${RUNNER_TEMP}/pact-regen-marker" ]; then
               stale="$stale $f"
             fi
@@ -123,10 +115,10 @@ jobs:
           if [ -n "$stale" ]; then
             echo "::error::These committed pacts were NOT rewritten by the regeneration step, so the drift check below would pass without having read them:"
             for f in $stale; do echo "::error::  $f"; done
-            echo "::error::Either the consumer's module is missing from the Gradle invocation above, or its test task was skipped. Add the module (and its --tests filter) to the 'Regenerate every consumer pact' step."
+            echo "::error::The derivation in .github/scripts/derive-pact-drift-scope.sh did not put this consumer's module in scope, or its test task was skipped. Run that script locally to see what it derives."
             exit 1
           fi
-          echo "Coverage OK — every committed pact except the documented #2404 exclusions was regenerated by this run."
+          echo "Coverage OK — every committed pact except the declared exclusions was regenerated by this run."
 
       - name: Fail on drift between regenerated and committed pacts
         run: |
