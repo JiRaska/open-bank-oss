@@ -28,21 +28,21 @@ class AuthzPolicyResource(
 ) {
     @POST
     @Path("/check/trigger")
-    @RolesAllowed("platform-admin")
+    @RolesAllowed("ROLE_ADMIN")
     fun triggerCheck(): AuthzPolicyReport = runBlocking {
         runCheck.run(RunTrigger.OPERATOR_MANUAL)
     }
 
     @GET
     @Path("/findings")
-    @RolesAllowed("platform-admin", "platform-viewer")
+    @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
     fun getActiveFindings(): List<AuthzPolicyFinding> = runBlocking {
         getFindings.getActive()
     }
 
     @GET
     @Path("/findings/{id}")
-    @RolesAllowed("platform-admin", "platform-viewer")
+    @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
     fun getFinding(@PathParam("id") id: String): AuthzPolicyFinding = runBlocking {
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
     }

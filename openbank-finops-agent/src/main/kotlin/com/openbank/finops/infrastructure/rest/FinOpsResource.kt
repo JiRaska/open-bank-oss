@@ -28,21 +28,21 @@ class FinOpsResource(
 ) {
     @POST
     @Path("/analysis/trigger")
-    @RolesAllowed("platform-admin")
+    @RolesAllowed("ROLE_ADMIN")
     fun triggerAnalysis(): FinOpsRunReport = runBlocking {
         runAnalysis.run(RunTrigger.OPERATOR_MANUAL)
     }
 
     @GET
     @Path("/anomalies")
-    @RolesAllowed("platform-admin", "platform-viewer")
+    @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
     fun getActiveAnomalies(): List<CostAnomaly> = runBlocking {
         getAnomalies.getActive()
     }
 
     @GET
     @Path("/anomalies/{id}")
-    @RolesAllowed("platform-admin", "platform-viewer")
+    @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
     fun getAnomaly(@PathParam("id") id: String): CostAnomaly = runBlocking {
         getAnomalies.getById(id) ?: throw NotFoundException("Anomaly $id not found")
     }

@@ -25,21 +25,21 @@ import kotlinx.coroutines.runBlocking
 class FlakyTestResource(private val runCheck: RunFlakyTestCheckUseCase, private val getFindings: GetFindingsUseCase) {
     @POST
     @Path("/check/trigger")
-    @RolesAllowed("platform-admin")
+    @RolesAllowed("ROLE_ADMIN")
     fun triggerCheck(): FlakyTestReport = runBlocking {
         runCheck.run(RunTrigger.OPERATOR_MANUAL)
     }
 
     @GET
     @Path("/findings")
-    @RolesAllowed("platform-admin", "platform-viewer")
+    @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
     fun getActiveFindings(): List<FlakyTestFinding> = runBlocking {
         getFindings.getActive()
     }
 
     @GET
     @Path("/findings/{id}")
-    @RolesAllowed("platform-admin", "platform-viewer")
+    @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
     fun getFinding(@PathParam("id") id: String): FlakyTestFinding = runBlocking {
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
     }
