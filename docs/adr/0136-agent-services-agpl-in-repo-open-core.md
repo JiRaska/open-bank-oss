@@ -12,6 +12,14 @@ summary: "The four AI agent services are relicensed AGPL-3.0-only in-repo with a
 
 # Agent services licensed AGPL-3.0-only in-repo (open-core)
 
+> **Membership superseded by [ADR-0197](0197-agpl-open-core-boundary-covers-the-whole-agent-plane.md).**
+> The decision below — AGPL-3.0-only open-core in-repo, with a parallel commercial licence,
+> kept safe by dependency direction — is still in force. Its **enumeration is not**: the
+> boundary now covers the whole agent plane (twelve modules today, not the four named here),
+> and the authoritative list is `dependencies.license_boundary_exceptions[0].agpl_modules` in
+> `openbank-libs/governance/rules.yaml`. Read "the four agent services" below as
+> point-in-time. Enumerating them in prose is what drifted (#2280).
+
 ## Context
 
 OpenBank's platform is licensed Apache-2.0 (ADR-0123, superseding the original
