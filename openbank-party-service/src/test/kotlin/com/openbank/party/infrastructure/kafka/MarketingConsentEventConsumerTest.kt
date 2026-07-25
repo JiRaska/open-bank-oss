@@ -106,4 +106,20 @@ class MarketingConsentEventConsumerTest {
 
         coVerify(exactly = 0) { projectionUseCase.applyGranted(any(), any(), any()) }
     }
+
+    // A missing/unparseable occurredAt must still process the event (partyId/consentId/eventType
+    // are all present and valid) rather than being swallowed like a truly malformed payload —
+    // the fallback-to-now() path, not the poison-pill path.
+    @Test
+    fun `consume still applies the event when occurredAt is missing, falling back to now`(): Unit = runBlocking {
+        coEvery { projectionUseCase.applyGranted(any(), any(), any()) } returns Unit
+
+        consumer.consume(
+            """{"aggregateId":"$consentId","partyId":"$partyId","granteeId":"party-service:marketing-comms",
+                "granteeType":"INTERNAL_SERVICE","scopes":["MARKETING_COMMS_EMAIL"],
+                "eventType":"ConsentGranted","version":1}""",
+        )
+
+        coVerify(exactly = 1) { projectionUseCase.applyGranted(partyId, consentId, any()) }
+    }
 }

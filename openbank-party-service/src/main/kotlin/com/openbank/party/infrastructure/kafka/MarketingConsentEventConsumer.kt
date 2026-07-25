@@ -47,7 +47,17 @@ class MarketingConsentEventConsumer(
 
             val partyId = node.path("partyId").asUuidOrNull() ?: return
             val consentId = node.path("aggregateId").asUuidOrNull() ?: return
-            val occurredAt = node.path("occurredAt").asInstantOrNull() ?: Instant.now()
+            // Falling back to wall-clock time silently would corrupt consent_marketing_updated_at
+            // with no way to tell "real event timestamp" from "consumer processed this late/replayed
+            // it" apart in an audit trail — log it loudly so the fallback is never mistaken for the
+            // happy path.
+            val occurredAt = node.path("occurredAt").asInstantOrNull() ?: run {
+                log.warnf(
+                    "Marketing consent event missing/unparseable occurredAt, falling back to now(): %.300s",
+                    payload,
+                )
+                Instant.now()
+            }
 
             when (node.path("eventType").asText()) {
                 "ConsentGranted" -> {
