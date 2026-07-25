@@ -51,5 +51,5 @@
   "openbank-swift-service": "0.7.2",
   "openbank-tpp-registry-service": "0.6.7",
   "openbank-transaction-service": "1.15.0",
-  "openbank-vop-service": "0.2.0"
+  "openbank-vop-service": "0.3.0"
 }
