@@ -96,7 +96,12 @@ jobs:
           GAPS=$(node -e "console.log(require('./governance.json').totals.withGaps)")
           if [ "$GAPS" -gt 0 ]; then
             echo "::error::Governance drift — $GAPS module(s) missing or with an invalid governance.yaml (ADR-0071 Phase 4). Add a governance.yaml to each flagged service."
-            node -e "const g=require('./governance.json'); g.modules.filter(m=>m.hasGap).forEach(m=>console.log('  gap: '+m.name))"
+            # Reads governance.json's real shape: a top-level `gaps` string array
+            # (issue #2165 — this used to read a `.modules` field that never existed,
+            # so it threw a TypeError on every failure and never named a module).
+            # No `?? []` fallback on purpose: a missing array is a generator bug and
+            # must be loud, not silently reported as "no gaps".
+            node -e "const g=require('./governance.json'); if(!Array.isArray(g.gaps)){console.error('::error::governance.json has no gaps array — generate-governance.mjs is broken');process.exit(2)} for(const x of g.gaps) console.log('  gap: '+x)"
             exit 1
           else
             echo "Governance manifest clean: $(node -e "console.log(require('./governance.json').totals.modules)") modules, 0 gaps."
@@ -317,8 +322,16 @@ jobs:
             || python3 -c "import yaml" 2>/dev/null \
             || { echo "::error::pyyaml unavailable — add it to the runner base image"; exit 1; }
           python3 openbank-infra/scripts/gen-network-policies.py
+          # `git diff` only inspects TRACKED files, so a policy the generator emits for a
+          # brand-new component that has never had one committed is UNTRACKED and therefore
+          # structurally invisible to the gate — it could only ever fail on a *modification*
+          # to an already-committed policy. That blind spot is how the `analytics` namespace
+          # shipped with no NetworkPolicy at all (issue #2064). `--intent-to-add` registers
+          # the untracked output in the index so `git diff` reports it as an addition, which
+          # makes "the generated file was never created" a first-class drift failure.
+          git add -A --intent-to-add openbank-infra/gitops/components/
           if ! git diff --exit-code openbank-infra/gitops/components/; then
-            echo "::error::NetworkPolicy drift detected — run openbank-infra/scripts/gen-network-policies.py and commit the result."
+            echo "::error::NetworkPolicy drift detected — run openbank-infra/scripts/gen-network-policies.py and commit the result (a new file listed above means a namespace has no committed policy)."
             exit 1
           fi
 

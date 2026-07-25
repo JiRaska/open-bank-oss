@@ -25,7 +25,10 @@ export interface GovernanceManifestEntry {
   serviceName: string
   dataDomain: DataDomain
   primaryDatastore: string
-  schemaName: string
+  /** Null iff the module declared `stateless: true` in its governance.yaml — it owns no DB schema (ADR-0071). */
+  schemaName: string | null
+  /** True iff the module asserted `stateless: true`; absent otherwise. */
+  stateless?: true
   dataLineageRole: DataLineageRole
   flywayDeclaredVersion: string
   flywayCurrentVersion: string | null

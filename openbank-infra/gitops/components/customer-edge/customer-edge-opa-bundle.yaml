@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: customer-edge
     app.kubernetes.io/part-of: customer-edge
   annotations:
-    openbank.tech/policy-checksum: "3f4eee07f47dc3ba"
+    openbank.tech/policy-checksum: "b98b878286dda238"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -122,10 +122,16 @@ data:
     	# skill_ok, none of which charter_allowed alone consults. Calling charter_allowed
     	# directly would let a fleet-wide hard-denied tool tier, or an agent's own
     	# tools.deny glob, silently reach a REST action anyway.
+    	# object.get (not input.resource): the PDP omits `resource` from the query entirely when
+    	# it is null (OpaSidecarPolicyDecisionPoint.toInput only puts it when non-null), and a bare
+    	# `input.resource` reference is then UNDEFINED, which makes this whole object — and the
+    	# agents.allow call — undefined, silently denying every resource-less AI_AGENT REST call.
+    	# The MCP server (openbank-mcp-service) is the first caller to route AI_AGENT through
+    	# rest.allow with no resource; agent-service queries agents.allow directly and never hit this.
     	data.openbank.agents.allow with input as {
     		"agent": input.principal.id,
     		"tool": input.action,
-    		"resource": input.resource,
+    		"resource": object.get(input, "resource", null),
     	}
     }
 
@@ -2203,6 +2209,9 @@ data:
         - query.observability.readonly # Prometheus metrics / Loki logs / Alertmanager alerts (read-only)
         - query.balance.readonly      # the signed-in customer's own balance (customer-copilot, edge-enforced ownership)
         - query.transaction.readonly  # the signed-in customer's own transactions (customer-copilot, edge-enforced ownership)
+        - query.account.readonly      # PSD2 consent-scoped account list (openbank-mcp-service, ADR-0181)
+        - query.consent.readonly      # the PSD2 consents the acting agent holds (openbank-mcp-service, ADR-0181)
+        - verify.mandate              # bank-side AP2 mandate verification (openbank-ap2-service, ADR-0193) — evidence only, moves no funds
       write_proposal: # produces a reviewable artifact, never a direct effect
         - draft.ticket
         - gh.pr.open
@@ -2323,6 +2332,57 @@ data:
           - every: proposal                          # ActionProposal on the reply, never a direct effect
           - sca: dynamic_linking                     # HITL + SCA bound to amount+payee before any state change
           - scope: customer_own                      # audience-scoped on-behalf-of token (one customer)
+        limits: { tokens_per_run: 80000, runs_per_day: 1000 }
+
+      - id: mcp-anonymous
+        plane: customer
+        charter: "The first-party MCP server's acting identity (ADR-0181). Exposes a curated, PSD2-consent-scoped tool set — read the granted accounts/balances/transactions/consents, and PROPOSE a payment — to governed AI agents over the Model Context Protocol. Reads only; propose.payment is a reviewable artifact a human + SCA disposes, never a debit."
+        # `mcp-anonymous` is the phase-1 FIXED principal id McpEndpoint.resolveContext() sets
+        # (ctx.agentId = "agent:mcp-anonymous"); the shared ADR-0034 PDP classifies it AI_AGENT and
+        # rest.rego's agent bridge trims the "agent:" prefix, so this charter's `id` must stay
+        # `mcp-anonymous` or every tools/call defaults to deny. Phase 2 (ADR-0126) replaces this single
+        # placeholder with a per-agent OAuth 2.1 → PSD2-consent identity; each real caller then gets its
+        # own charter and this one is retired.
+        data_scope:
+          # The accounts/consents the presented PSD2 consent grants; ownership is enforced at the
+          # consent edge, never widened by the model. PII masked (defaults).
+          read: [account, balance, transaction, consent]
+          pii: masked
+        tools:
+          # Exact MCP capability strings the ADR-0034 PDP evaluates as input.action (McpToolRegistry
+          # .capabilities). Deny-by-default: only these five are grantable; propose.payment emits a
+          # reviewable proposal only (customer-copilot's ADR-0089 regime), never a direct money move.
+          allow: [query.account.readonly, query.balance.readonly, query.transaction.readonly,
+                  query.consent.readonly, propose.payment]
+          deny:  ["money.*", "gh.pr.*", "*.write", secrets.read.raw]
+        requires_human:
+          - every: proposal                          # propose.payment surfaces a proposal, never a debit
+          - sca: dynamic_linking                     # HITL + SCA bound to amount+payee before any state change
+          - scope: consent_granted                   # reads never exceed the presented PSD2 consent
+        limits: { tokens_per_run: 80000, runs_per_day: 1000 }
+
+      - id: ap2-anonymous
+        plane: customer
+        charter: "The bank-side AP2 mandate verifier's acting identity (ADR-0193). Verifies a presented AP2 (Agent Payments Protocol) signed mandate — its signature chain + constraints (payee, amount cap, currency, expiry) — as an authorization-evidence type. Verification only: it moves NO funds; a valid verdict is an input to the SCA/payment decision, never a payment."
+        # `ap2-anonymous` is the phase-1 FIXED principal id Ap2VerifyEndpoint sets when the X-Agent-Id
+        # header is absent (ANONYMOUS_AGENT = "agent:ap2-anonymous"); the shared ADR-0034 PDP classifies
+        # it AI_AGENT and rest.rego's agent bridge trims the "agent:" prefix, so this charter's `id` must
+        # stay `ap2-anonymous` or every /ap2/verify defaults to deny. Phase 2 replaces this placeholder
+        # with a per-agent OAuth 2.1 identity; each real caller then gets its own charter.
+        data_scope:
+          # The verifier reads nothing from the banking domain — it evaluates a presented mandate against
+          # a presented payment and returns a verdict + evidence. No domain read scope.
+          read: []
+          pii: masked
+        tools:
+          # The single MCP-style capability the ADR-0034 PDP evaluates as input.action
+          # (Ap2VerifyEndpoint.VERIFY_CAPABILITY). Deny-by-default: only verify.mandate is grantable.
+          allow: [verify.mandate]
+          deny:  ["money.*", "gh.pr.*", "*.write", secrets.read.raw]
+        requires_human:
+          # The verifier itself never executes; when a future ADR wires the verdict into the payment
+          # path, agent-initiated execution stays behind HITL + SCA dynamic-linking above a threshold.
+          - sca: dynamic_linking
         limits: { tokens_per_run: 80000, runs_per_day: 1000 }
 
       - id: finops-agent

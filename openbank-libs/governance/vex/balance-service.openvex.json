@@ -1,0 +1,22 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://open-bank.tech/vex/balance-service",
+  "author": "OpenBank Security",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2025-14969"
+      },
+      "status": "affected",
+      "action_statement": "Resolved org.hibernate.reactive:hibernate-reactive-core is 3.4.1.Final (bundled by the Quarkus platform BOM io.quarkus.platform:quarkus-bom:3.37.2). The connection-leak DoS is fixed in 4.2.1.Final, a major-version jump that cannot be forced independently of the Quarkus platform (a bare force desyncs from the Quarkus-tested Vert.x/Hibernate-Reactive combination), so remediation is tracked as the Quarkus platform bump in issue #1446. Compensating controls in place: the reactive PostgreSQL pool is bounded with idle-connection eviction (shared openbank-libs default, PRs #1682/#1894), so a leaked-connection condition self-heals rather than permanently exhausting the pool, and every service is reachable only in-mesh (Istio STRICT mTLS) and via the authenticated BFF, not directly by an external client. Residual risk: medium-severity DoS only, no data exposure."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-45292"
+      },
+      "status": "affected",
+      "action_statement": "Resolved io.opentelemetry:opentelemetry-api is 1.60.1 (bundled by the Quarkus platform BOM io.quarkus.platform:quarkus-bom:3.37.2). The unbounded W3C-baggage memory allocation is fixed in 1.62.0, which is binary-incompatible with the OpenTelemetry extension Quarkus 3.37.2 ships (a force to 1.62.0 fails every service at boot with NoClassDefFoundError: io/opentelemetry/common/impl/ApiUsageLogger, verified and reverted in PR #1367), so remediation requires the Quarkus platform bump tracked in issue #1446. Compensating control: the `baggage` propagator only parses the W3C `baggage` header on the in-mesh trace-context path (Istio STRICT mTLS between services); the customer-facing edge does not accept or forward an attacker-supplied baggage header, so the oversized-baggage parse path is not reachable from untrusted input. Residual risk: medium-severity DoS only, no data exposure."
+    }
+  ]
+}
