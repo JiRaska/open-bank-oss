@@ -4,7 +4,9 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.ap2.application
 
+import com.openbank.ap2.application.port.out.Ap2MetricsPort
 import com.openbank.ap2.application.port.out.MandateKeyResolver
+import com.openbank.ap2.application.port.out.MandateSignatureOutcome
 import com.openbank.ap2.application.port.out.SignatureVerifier
 import com.openbank.ap2.domain.Ap2Mandate
 import com.openbank.ap2.domain.ConstraintResult
@@ -14,6 +16,7 @@ import com.openbank.ap2.domain.PresentedPayment
 import com.openbank.ap2.domain.VerificationEvidence
 import jakarta.enterprise.context.ApplicationScoped
 import java.security.MessageDigest
+import java.time.Duration
 import java.util.HexFormat
 
 /**
@@ -24,36 +27,28 @@ import java.util.HexFormat
  * This class NEVER moves funds and never decides SCA exemption — it answers only "is this mandate
  * valid, and what does it authorize?" The verdict is evidence the SCA/payment path may later consult
  * (openbank-sca-service), gated by the HITL threshold, and only once a further ADR wires it in.
+ *
+ * Both stages report to [Ap2MetricsPort] separately, because they fail for opposite reasons: a
+ * signature-stage failure is usually **ours** (a rotated or mis-seeded trust list rejecting a
+ * legitimate issuer, which looks exactly like a forgery on the wire), while a constraint failure is
+ * **theirs** (a payment outside the delegated authority). The free-text `failures` list is for the
+ * caller and the evidence record; it is never a metric tag — it embeds the issuer, which is
+ * attacker-controlled.
  */
 @ApplicationScoped
 class Ap2MandateVerifier(
     private val signatureVerifier: SignatureVerifier,
     private val keyResolver: MandateKeyResolver,
+    private val metrics: Ap2MetricsPort,
 ) {
 
-    @Suppress("TooGenericExceptionCaught")
     fun verify(mandate: Ap2Mandate, payment: PresentedPayment): MandateVerdict {
+        val startedAt = System.nanoTime()
         val failures = mutableListOf<String>()
 
         // Stage 1: signature chain against a TRUSTED issuer key (fail closed on either miss).
-        val spki = keyResolver.resolve(mandate.issuer)
-        val signatureValid = when {
-            spki == null -> {
-                failures.add("issuer not trusted: ${mandate.issuer}")
-                false
-            }
-            else -> {
-                val ok = try {
-                    signatureVerifier.verify(mandate.algorithm, spki, mandate.signingInput, mandate.signatureB64)
-                } catch (ex: Exception) {
-                    // A malformed key/signature is a verification failure, never an exception out.
-                    failures.add("signature verification error: ${ex.message}")
-                    false
-                }
-                if (!ok && failures.isEmpty()) failures.add("signature invalid")
-                ok
-            }
-        }
+        val signature = verifySignature(mandate, failures)
+        val signatureValid = signature == MandateSignatureOutcome.VALID
 
         // Stage 2: pure constraint check (payee, amount cap, currency, expiry).
         val constraintsSatisfied = when (val cr = MandateConstraintChecks.check(mandate, payment)) {
@@ -73,7 +68,42 @@ class Ap2MandateVerifier(
             signatureValid = signatureValid,
             constraintsSatisfied = constraintsSatisfied,
         )
-        return MandateVerdict(valid = signatureValid && constraintsSatisfied, evidence = evidence, failures = failures)
+        val valid = signatureValid && constraintsSatisfied
+        metrics.mandateVerified(
+            kind = mandate.kind,
+            signature = signature,
+            constraintsSatisfied = constraintsSatisfied,
+            valid = valid,
+            duration = Duration.ofNanos(System.nanoTime() - startedAt),
+        )
+        return MandateVerdict(valid = valid, evidence = evidence, failures = failures)
+    }
+
+    /**
+     * Classify the signature stage into a bounded outcome and append the human-readable reason.
+     * `ISSUER_NOT_TRUSTED` is kept distinct from `INVALID` on purpose: the first is a trust-list
+     * defect on our side, the second is a genuinely bad signature, and the HTTP response cannot tell
+     * them apart.
+     */
+    @Suppress("TooGenericExceptionCaught") // any crypto/key malformation is a failed verdict, never a throw
+    private fun verifySignature(mandate: Ap2Mandate, failures: MutableList<String>): MandateSignatureOutcome {
+        val spki = keyResolver.resolve(mandate.issuer)
+        if (spki == null) {
+            failures.add("issuer not trusted: ${mandate.issuer}")
+            return MandateSignatureOutcome.ISSUER_NOT_TRUSTED
+        }
+        return try {
+            if (signatureVerifier.verify(mandate.algorithm, spki, mandate.signingInput, mandate.signatureB64)) {
+                MandateSignatureOutcome.VALID
+            } else {
+                failures.add("signature invalid")
+                MandateSignatureOutcome.INVALID
+            }
+        } catch (ex: Exception) {
+            // A malformed key/signature is a verification failure, never an exception out.
+            failures.add("signature verification error: ${ex.message}")
+            MandateSignatureOutcome.VERIFICATION_ERROR
+        }
     }
 
     /** Data minimisation (ADR-0193 GDPR row): store the mandate hash, not the credential. */
