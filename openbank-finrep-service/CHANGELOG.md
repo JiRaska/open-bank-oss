@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.6.1...finrep-service-v0.6.2) (2026-07-25)
+
+
+### Bug Fixes
+
+* **finrep:** realm-issued role names + declare AUTHZ_ENFORCE on finrep/onboarding ([#2394](https://github.com/JiRaska/open-bank-oss/issues/2394)) ([#2403](https://github.com/JiRaska/open-bank-oss/issues/2403)) ([f5c3601](https://github.com/JiRaska/open-bank-oss/commit/f5c3601d0c725d0c548553e4173b58ca755bac3a))
+
 ## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.6.0...finrep-service-v0.6.1) (2026-07-25)
 
 
