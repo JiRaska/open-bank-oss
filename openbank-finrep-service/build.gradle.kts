@@ -32,6 +32,17 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    // Consumer-driven contract test for the ledger trial-balance call (ADR-0063, git-pact).
+    // Consumer side only — finrep is not a Pact provider for anyone, so no libs.pact.provider.
+    testImplementation(libs.pact.consumer)
+}
+
+// Pact: write generated pact files to the shared pacts/ dir at the repo root (git-pact, ADR-0063).
+// The consumer test regenerates the file on every run; developers commit the result, and
+// openbank-ledger-service's LedgerPactProviderVerificationTest (@PactFolder("../pacts")) replays it.
+// NOTE: must be set on the test JVM fork, not the Gradle daemon (System.setProperty would not propagate).
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
 }
 
 kover {

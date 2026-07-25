@@ -1,0 +1,216 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+#
+# NOTE ON THE `is`/`has`-PREFIXED FIELD NAMES (isBalanced, isDataGap, hasDataGaps):
+# both resources return the DOMAIN objects directly (`Response.ok(template)`), so these key names
+# are produced by the Jackson/Kotlin naming interplay rather than by an explicit REST DTO. They were
+# measured, not assumed — `TemplateWireFormatTest` asserts the exact key SET this file documents and
+# fails if a Jackson/Kotlin upgrade ever changes it. Do not "tidy" `isBalanced` to `balanced` here:
+# that would make the published contract disagree with the bytes on the wire.
+openapi: 3.0.3
+info:
+  title: OpenBank FINREP / COREP Service
+  description: >-
+    Supervisory financial and prudential reporting (ADR-0097): renders EBA FINREP templates
+    (F01.01 Balance Sheet, F02.00 Profit & Loss) and the COREP C 01.00 Own Funds template from
+    openbank-ledger-service's GL trial balance. Derive-only and stateless — it holds no datastore,
+    moves no money, and has NO ČNB transmission channel; EBA XBRL/DPM taxonomy rendering is
+    explicitly out of scope for this increment.
+
+    Cells are always fully rendered: a value the platform cannot honestly derive is an explicit
+    flagged zero (`isDataGap`), never an omitted row, so a regulatory return never has a silent gap.
+  version: 1.0.0
+tags:
+  - name: FINREP
+  - name: COREP
+paths:
+  /api/v1/finrep/templates/{templateId}:
+    get:
+      tags: [FINREP]
+      summary: Render a FINREP template as of a reporting date
+      description: >-
+        Derives the template from the ledger GL trial balance as of `asOf`. Supported
+        `templateId` values are `F01.01` (Balance Sheet) and `F02.00` (Profit & Loss); any other
+        value is rejected.
+      operationId: getFinrepTemplate
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          description: EBA FINREP template identifier
+          schema: { type: string, enum: [F01.01, F02.00] }
+        - name: asOf
+          in: query
+          required: false
+          description: Reporting reference date, ISO yyyy-MM-dd. Defaults to today when omitted.
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The rendered FINREP template
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinrepTemplate' }
+        '400':
+          description: >-
+            Unknown templateId. The use case rejects it with an IllegalArgumentException, which the
+            shared CommonExceptionMappers renders as this envelope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks one of the SERVICE / ADMIN / OPERATOR roles
+
+  /api/v1/corep/templates/{templateId}:
+    get:
+      tags: [COREP]
+      summary: Render a COREP template as of a reporting date
+      description: >-
+        Derives the template from the ledger GL trial balance as of `asOf`. Only `C_01.00`
+        (Own Funds) is implemented in this increment; any other value is rejected.
+
+        The ledger's chart of accounts has no capital-structure GL accounts today, so every
+        capital row comes back as an explicit zero with `isDataGap: true` and a `gapReason` — a
+        documented gap, never to be read as an attested zero balance.
+      operationId: getCorepTemplate
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          description: EBA COREP template identifier
+          schema: { type: string, enum: [C_01.00] }
+        - name: asOf
+          in: query
+          required: false
+          description: Reporting reference date, ISO yyyy-MM-dd. Defaults to today when omitted.
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The rendered COREP template
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CorepTemplate' }
+        '400':
+          description: >-
+            Unknown or unimplemented templateId. The use case rejects it with an
+            IllegalArgumentException, which the shared CommonExceptionMappers renders as this
+            envelope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks one of the SERVICE / ADMIN / OPERATOR roles
+
+components:
+  schemas:
+    FinrepCell:
+      type: object
+      description: One FINREP template cell — an (row, column) coordinate with its monetary value.
+      required: [rowRef, colRef, value, currency]
+      properties:
+        rowRef:
+          type: string
+          description: EBA FINREP row reference
+          example: r010
+        colRef:
+          type: string
+          description: EBA FINREP column reference
+          example: c010
+        value: { type: number }
+        currency: { type: string, example: CZK }
+
+    FinrepTemplate:
+      type: object
+      description: >-
+        One rendered FINREP template. F01.01 populates rows r010 (total assets), r380 (total
+        liabilities) and r490 (derived equity); F02.00 populates r010 (total income), r030 (total
+        expense) and r450 (net profit).
+      required: [templateId, period, cells, isBalanced]
+      properties:
+        templateId: { type: string, example: F01.01 }
+        period:
+          type: string
+          format: date
+          description: The reporting reference date the template was rendered as of
+        cells:
+          type: array
+          items: { $ref: '#/components/schemas/FinrepCell' }
+        isBalanced:
+          type: boolean
+          description: >-
+            Whether the template's internal accounting identity holds. Serialized as `isBalanced`,
+            not `balanced` — see the note at the top of this file.
+
+    CorepCell:
+      type: object
+      description: One COREP template cell — an (row, column) coordinate with its monetary value.
+      required: [rowRef, colRef, label, value, currency, isDataGap]
+      properties:
+        rowRef:
+          type: string
+          description: EBA COREP row reference
+          example: r010
+        colRef:
+          type: string
+          description: EBA COREP column reference
+          example: c010
+        label: { type: string, example: OWN FUNDS }
+        value: { type: number }
+        currency: { type: string, example: CZK }
+        isDataGap:
+          type: boolean
+          description: >-
+            True when the value could NOT be honestly derived from data available in the platform
+            today and is reported as an explicit flagged zero. MUST NOT be read as an attested
+            zero balance.
+        gapReason:
+          type: string
+          nullable: true
+          description: Why the cell is a gap. Present only when `isDataGap` is true.
+
+    CorepTemplate:
+      type: object
+      description: >-
+        One rendered COREP template. A structured representation of the template's cells — NOT an
+        EBA XBRL/DPM taxonomy rendering. Always fully rendered: every row is present even when its
+        value is a flagged gap.
+      required: [templateId, period, cells, hasDataGaps]
+      properties:
+        templateId: { type: string, example: C_01.00 }
+        period:
+          type: string
+          format: date
+          description: The reporting reference date the template was rendered as of
+        cells:
+          type: array
+          items: { $ref: '#/components/schemas/CorepCell' }
+        hasDataGaps:
+          type: boolean
+          description: >-
+            Derived — true when at least one cell has `isDataGap`. A template with data gaps is
+            still fully rendered, never silently truncated.
+
+    ApiError:
+      type: object
+      description: >-
+        Shared error envelope served by openbank-libs-runtime's CommonExceptionMappers
+        (`com.openbank.libs.api.error.ApiError`). Null fields are omitted.
+      required: [traceId, status, code, message]
+      properties:
+        traceId: { type: string }
+        status: { type: integer }
+        code: { type: string, example: VALIDATION_ERROR }
+        message: { type: string }
+        timestamp: { type: string, format: date-time }
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              message: { type: string }
+              rejectedValue: {}

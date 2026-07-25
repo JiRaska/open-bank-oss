@@ -53,6 +53,13 @@ openbank:
   service:
     name: finrep-service
     port: 8140
+  # API-contract major (ADR-0048 D2). MUST equal major(openapi.yaml:info.version) and the
+  # /api/v{N} segment both resources are mounted under; the api-contract gate asserts all three.
+  # Previously absent: the runtime fell back to the openbank-libs default of "1" (so the served
+  # X-API-Version was already v1) while the gate read no key and skipped that half of the check —
+  # moot anyway, since finrep had no openapi.yaml to assert anything against (#2255).
+  api:
+    version: "1"
 
 "%test":
   quarkus:
