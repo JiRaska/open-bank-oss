@@ -5,7 +5,7 @@
 
 package com.openbank.agent.infrastructure.rest
 
-import com.openbank.agent.application.KillSwitchService
+import com.openbank.agent.application.port.`in`.KillSwitchControlUseCase
 import io.mockk.every
 import io.mockk.justRun
 import io.mockk.mockk
@@ -17,14 +17,14 @@ import java.security.Principal
 
 class AdminControlResourceTest {
 
-    private fun resource(operator: String?): Pair<AdminControlResource, KillSwitchService> {
-        val ks = mockk<KillSwitchService>()
+    private fun resource(operator: String?): Pair<AdminControlResource, KillSwitchControlUseCase> {
+        val ks = mockk<KillSwitchControlUseCase>()
         justRun { ks.halt(any(), any(), any()) }
         justRun { ks.resume(any(), any()) }
         val identity = mockk<SecurityIdentity>()
         every { identity.principal } returns operator?.let { Principal { it } }
         val res = AdminControlResource().also {
-            it.killSwitch = ks
+            it.control = ks
             it.identity = identity
         }
         return res to ks

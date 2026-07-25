@@ -6,6 +6,7 @@
 package com.openbank.agent.application
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.agent.application.port.out.ModelProvider
 import com.openbank.agent.domain.model.ChatMessage
 import com.openbank.agent.domain.model.ChatRole
 import com.openbank.agent.domain.model.ModelRequest

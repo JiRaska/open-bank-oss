@@ -4,17 +4,16 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.copilot.infrastructure.rest
 
+import com.openbank.copilot.application.port.out.ProposalTokenStore
+import com.openbank.copilot.application.port.out.ToolPolicyDecision
+import com.openbank.copilot.application.port.out.ToolPolicyPort
 import com.openbank.copilot.domain.ProposalToken
-import com.openbank.copilot.infrastructure.authz.OpaToolGate
-import com.openbank.copilot.infrastructure.persistence.ProposalTokenStore
 import io.mockk.every
 import io.mockk.just
-import io.mockk.justRun
 import io.mockk.mockk
 import io.mockk.runs
 import io.mockk.verify
 import io.quarkus.security.identity.SecurityIdentity
-import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.jwt.JsonWebToken
@@ -29,7 +28,7 @@ private const val HTTP_UNPROCESSABLE_ENTITY = 422
 class ActionConfirmResourceTest {
 
     private val tokenStore: ProposalTokenStore = mockk()
-    private val opaGate: OpaToolGate = mockk()
+    private val opaGate: ToolPolicyPort = mockk()
     private val identity: SecurityIdentity = mockk()
 
     private lateinit var resource: ActionConfirmResource
@@ -108,7 +107,7 @@ class ActionConfirmResourceTest {
         stubIdentity(customerId)
         val token = validToken(customerId)
         every { tokenStore.find(token.id) } returns token
-        justRun { opaGate.authorize(token.toolName, customerId, null) }
+        every { opaGate.authorize(token.toolName, customerId, null) } returns ToolPolicyDecision.ALLOWED
         every { tokenStore.delete(token.id) } just runs
 
         val response = resource.confirm(token.id.toString())
@@ -127,7 +126,9 @@ class ActionConfirmResourceTest {
         stubIdentity(customerId)
         val token = validToken(customerId)
         every { tokenStore.find(token.id) } returns token
-        every { opaGate.authorize(token.toolName, customerId, null) } answers { throw WebApplicationException(403) }
+        // The port is fail-closed and returns the deny; the resource is what maps it onto 403.
+        every { opaGate.authorize(token.toolName, customerId, null) } returns
+            ToolPolicyDecision.denied("opa-denied: policy")
 
         val response = resource.confirm(token.id.toString())
 

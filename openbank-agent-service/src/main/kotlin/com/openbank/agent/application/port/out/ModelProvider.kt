@@ -3,16 +3,16 @@
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 
-package com.openbank.agent.application
+package com.openbank.agent.application.port.out
 
 import com.openbank.agent.domain.model.ModelDescriptor
 import com.openbank.agent.domain.model.ModelRequest
 import com.openbank.agent.domain.model.ModelResponse
 
 /**
- * Port for a model backend (ADR-0031 D6). One implementation per *kind* of backend
- * (mock, a hosted public API, a self-hosted vLLM endpoint, …). The [ModelGateway] selects
- * the provider whose [key] matches a [ModelDescriptor.provider], so the rest of the system
+ * Outbound port for a model backend (ADR-0031 D6). One implementation per *kind* of backend
+ * (mock, a hosted public API, a self-hosted vLLM endpoint, …). `ModelGateway` selects the
+ * provider whose [key] matches a [ModelDescriptor.provider], so the rest of the system
  * never depends on a concrete vendor.
  *
  * Implementations must be side-effect-free beyond the network call and must NOT log raw

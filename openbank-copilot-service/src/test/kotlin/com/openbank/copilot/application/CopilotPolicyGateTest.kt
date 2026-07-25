@@ -3,13 +3,12 @@
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 package com.openbank.copilot.application
 
-import com.openbank.copilot.infrastructure.authz.OpaToolGate
+import com.openbank.copilot.application.port.out.ToolPolicyDecision
+import com.openbank.copilot.application.port.out.ToolPolicyPort
 import com.openbank.libs.audit.AuditEventPublisher
 import io.mockk.coJustRun
 import io.mockk.every
 import io.mockk.mockk
-import jakarta.ws.rs.WebApplicationException
-import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -18,12 +17,13 @@ class CopilotPolicyGateTest {
 
     private fun gate(opaEnforce: Boolean = false, opaAllow: Boolean = true): CopilotPolicyGate {
         val publisher = mockk<AuditEventPublisher>().also { coJustRun { it.publish(any()) } }
-        val opaGate = mockk<OpaToolGate>().also {
-            if (opaAllow) {
-                every { it.authorize(any(), any(), any()) } returns Unit
+        val opaGate = mockk<ToolPolicyPort>().also {
+            // The port is fail-closed and never throws: a deny — policy, unreachable sidecar or
+            // unparseable body alike — arrives as a decision the gate must honour.
+            every { it.authorize(any(), any(), any()) } returns if (opaAllow) {
+                ToolPolicyDecision.ALLOWED
             } else {
-                every { it.authorize(any(), any(), any()) } throws
-                    WebApplicationException("denied", Response.Status.FORBIDDEN)
+                ToolPolicyDecision.denied("opa-denied: policy")
             }
         }
         return CopilotPolicyGate(publisher, opaGate, opaEnforce)

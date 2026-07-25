@@ -3,28 +3,14 @@
   <ManuallySuppressedIssues/>
   <CurrentIssues>
     <ID>CyclomaticComplexMethod:AgentChatService.kt$AgentChatService$private suspend fun chatLoop( identity: AgentIdentity, systemPrompt: String, history: List&lt;ChatMessage&gt;, modelId: String?, ): LoopResult</ID>
-    <ID>CyclomaticComplexMethod:McpToolRegistry.kt$McpToolRegistry$fun call(toolName: String, arguments: JsonNode?, actorId: String = "unknown"): ToolCallResult</ID>
     <ID>LongMethod:AgentChatService.kt$AgentChatService$private suspend fun chatLoop( identity: AgentIdentity, systemPrompt: String, history: List&lt;ChatMessage&gt;, modelId: String?, ): LoopResult</ID>
-    <ID>LongMethod:McpToolRegistry.kt$McpToolRegistry$fun call(toolName: String, arguments: JsonNode?, actorId: String = "unknown"): ToolCallResult</ID>
     <ID>LongParameterList:ProposalService.kt$ProposalService$( title: String, rationale: String, suggestedAction: String, proposedBy: String, modelId: String?, correlationId: String?, )</ID>
     <ID>MagicNumber:AgentChatService.kt$AgentChatService$200</ID>
-    <ID>MagicNumber:McpToolRegistry.kt$McpToolRegistry$20</ID>
-    <ID>MagicNumber:McpToolRegistry.kt$McpToolRegistry$50</ID>
     <ID>MagicNumber:OpenAiCompatibleModelProvider.kt$OpenAiCompatibleModelProvider$10</ID>
     <ID>MagicNumber:OpenAiCompatibleModelProvider.kt$OpenAiCompatibleModelProvider$200</ID>
     <ID>MagicNumber:OpenAiCompatibleModelProvider.kt$OpenAiCompatibleModelProvider$299</ID>
     <ID>MagicNumber:OpenAiCompatibleModelProvider.kt$OpenAiCompatibleModelProvider$60</ID>
-    <ID>MagicNumber:ProposalResource.kt$ProposalResource$100</ID>
-    <ID>MagicNumber:ProposalService.kt$ProposalService$200</ID>
-    <ID>MagicNumber:ProposalService.kt$ProposalService$3</ID>
-    <ID>MagicNumber:ProposalService.kt$ProposalService$4</ID>
-    <ID>MagicNumber:ProposalService.kt$ProposalService$5</ID>
-    <ID>MagicNumber:ProposalService.kt$ProposalService$6</ID>
-    <ID>MagicNumber:ProposalService.kt$ProposalService$7</ID>
-    <ID>MagicNumber:ProposalService.kt$ProposalService$8</ID>
-    <ID>MagicNumber:ProposalService.kt$ProposalService$9</ID>
     <ID>NestedBlockDepth:OpenAiCompatibleModelProvider.kt$OpenAiCompatibleModelProvider$internal fun buildRequestBody(model: ModelDescriptor, request: ModelRequest): ObjectNode</ID>
-    <ID>NestedBlockDepth:ProposalService.kt$ProposalService$fun get(id: UUID): AgentProposal?</ID>
     <ID>TooGenericExceptionCaught:AgentChatService.kt$AgentChatService$e: Exception</ID>
     <ID>TooGenericExceptionCaught:McpToolRegistry.kt$McpToolRegistry$e: Exception</ID>
     <ID>TooGenericExceptionCaught:ModelGateway.kt$ModelGateway$e: Exception</ID>

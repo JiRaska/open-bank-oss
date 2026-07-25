@@ -5,7 +5,8 @@
 
 package com.openbank.agent.infrastructure.rest
 
-import com.openbank.agent.application.KillSwitchService
+import com.openbank.agent.application.port.`in`.KillSwitchControlUseCase
+import com.openbank.agent.application.port.`in`.KillSwitchQueries
 import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.RolesAllowed
@@ -32,7 +33,9 @@ import java.time.Instant
 @RolesAllowed("ROLE_ADMIN")
 class AdminControlResource {
 
-    @Inject lateinit var killSwitch: KillSwitchService
+    @Inject lateinit var control: KillSwitchControlUseCase
+
+    @Inject lateinit var queries: KillSwitchQueries
 
     @Inject lateinit var identity: SecurityIdentity
 
@@ -53,7 +56,7 @@ class AdminControlResource {
             return Response.status(Response.Status.BAD_REQUEST)
                 .entity(mapOf("error" to "scope and reason are required")).build()
         }
-        killSwitch.halt(body.scope.trim(), body.reason.trim(), actor())
+        control.halt(body.scope.trim(), body.reason.trim(), actor())
         return Response.ok(mapOf("scope" to body.scope.trim(), "halted" to true)).build()
     }
 
@@ -65,12 +68,12 @@ class AdminControlResource {
             return Response.status(Response.Status.BAD_REQUEST)
                 .entity(mapOf("error" to "scope is required")).build()
         }
-        killSwitch.resume(body.scope.trim(), actor())
+        control.resume(body.scope.trim(), actor())
         return Response.ok(mapOf("scope" to body.scope.trim(), "halted" to false)).build()
     }
 
     @GET
     @Path("/halts")
     @Blocking
-    fun halts(): List<HaltDto> = killSwitch.listHalts().map { HaltDto(it.scope, it.reason, it.setBy, it.setAt) }
+    fun halts(): List<HaltDto> = queries.listHalts().map { HaltDto(it.scope, it.reason, it.setBy, it.setAt) }
 }

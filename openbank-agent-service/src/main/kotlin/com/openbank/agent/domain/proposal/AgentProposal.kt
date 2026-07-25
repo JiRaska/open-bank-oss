@@ -3,7 +3,7 @@
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 
-package com.openbank.agent.infrastructure.persistence
+package com.openbank.agent.domain.proposal
 
 import java.time.Instant
 import java.util.UUID
@@ -12,13 +12,13 @@ import java.util.UUID
 enum class ProposalState { PROPOSED, APPROVED, REJECTED }
 
 /**
- * Plain immutable row for the agent_proposal table.
+ * A reviewable proposal an agent materialised for a human to approve or reject (ADR-0031 D4:
+ * agents propose, governance disposes). Immutable, framework-free: it is the aggregate the
+ * lifecycle service reasons about, independent of how it is stored.
  *
- * Deliberately NOT a Hibernate/Panache entity: this service depends on openbank-libs, which ships
- * Hibernate *Reactive* Panache entities (outbox, four-eyes). Pulling in Hibernate ORM here makes the
- * ORM JpaJandexScavenger try to register those reactive entities and fail (reactive Panache is not
- * on this service's classpath). The synchronous MCP tool path also can't drive reactive Panache. So
- * the proposals store is plain Agroal JDBC (see ProposalService) — sync, immediate-consistency CRUD.
+ * Storage lives behind [com.openbank.agent.application.port.out.AgentProposalRepository]; the
+ * only implementation today is plain Agroal JDBC, because this service depends on openbank-libs'
+ * Hibernate *Reactive* Panache entities and the synchronous MCP `call()` path cannot drive them.
  */
 data class AgentProposal(
     val id: UUID,

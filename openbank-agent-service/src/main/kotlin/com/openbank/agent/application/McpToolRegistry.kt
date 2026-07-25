@@ -7,85 +7,39 @@ package com.openbank.agent.application
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.agent.application.port.`in`.CreateProposalUseCase
+import com.openbank.agent.application.port.out.DownstreamReadPort
 import com.openbank.agent.domain.ToolCallResult
 import com.openbank.agent.domain.ToolContent
 import com.openbank.agent.domain.ToolDefinition
-import com.openbank.agent.infrastructure.client.AccountServiceClient
-import com.openbank.agent.infrastructure.client.AlertmanagerClient
-import com.openbank.agent.infrastructure.client.AmlServiceClient
-import com.openbank.agent.infrastructure.client.BalanceServiceClient
-import com.openbank.agent.infrastructure.client.ClearingServiceClient
-import com.openbank.agent.infrastructure.client.DisputeServiceClient
-import com.openbank.agent.infrastructure.client.FxServiceClient
-import com.openbank.agent.infrastructure.client.InterestServiceClient
-import com.openbank.agent.infrastructure.client.LedgerServiceClient
-import com.openbank.agent.infrastructure.client.LokiClient
-import com.openbank.agent.infrastructure.client.ProductCatalogClient
-import com.openbank.agent.infrastructure.client.PrometheusClient
-import com.openbank.agent.infrastructure.client.SanctionsServiceClient
-import com.openbank.agent.infrastructure.client.SepaInstantServiceClient
-import com.openbank.agent.infrastructure.client.TransactionServiceClient
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
-import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 
-/** Hard cap on Loki log lines a single query_loki_logs call may pull back. */
-private const val MAX_LOKI_LINES = 1000
-
+/**
+ * The MCP tool catalog and its governance (ADR-0031). This class owns what the model may be
+ * offered, which charter capability each tool needs, the two HITL proposal tools, and the
+ * AI-attributed audit of every execution outcome.
+ *
+ * It owns no transport: the read tools resolve through [DownstreamReadPort], so adding a downstream
+ * service never touches this file and the application layer never sees a REST client (ADR-0002).
+ * Proposals are created through [CreateProposalUseCase] only — the narrowest inbound port, which by
+ * construction cannot decide a proposal the loop just drafted.
+ */
 @ApplicationScoped
+// One function per governance concern (catalog lookups, dispatch, the two HITL proposal tools, the
+// two audit shapes, schema builders). They are small and cohesive; the transport that used to bulk
+// this class out now lives in the adapter, and splitting the rest would scatter the catalog.
+@Suppress("TooManyFunctions")
 class McpToolRegistry {
 
-    @Inject @RestClient
-    lateinit var accountClient: AccountServiceClient
+    @Inject lateinit var downstream: DownstreamReadPort
 
-    @Inject @RestClient
-    lateinit var transactionClient: TransactionServiceClient
-
-    @Inject @RestClient
-    lateinit var balanceClient: BalanceServiceClient
-
-    @Inject @RestClient
-    lateinit var productCatalogClient: ProductCatalogClient
-
-    @Inject @RestClient
-    lateinit var ledgerClient: LedgerServiceClient
-
-    @Inject @RestClient
-    lateinit var amlClient: AmlServiceClient
-
-    @Inject @RestClient
-    lateinit var sanctionsClient: SanctionsServiceClient
-
-    @Inject @RestClient
-    lateinit var fxClient: FxServiceClient
-
-    @Inject @RestClient
-    lateinit var clearingClient: ClearingServiceClient
-
-    @Inject @RestClient
-    lateinit var interestClient: InterestServiceClient
-
-    @Inject @RestClient
-    lateinit var disputeClient: DisputeServiceClient
-
-    @Inject @RestClient
-    lateinit var sepaInstantClient: SepaInstantServiceClient
-
-    @Inject @RestClient
-    lateinit var prometheusClient: PrometheusClient
-
-    @Inject @RestClient
-    lateinit var lokiClient: LokiClient
-
-    @Inject @RestClient
-    lateinit var alertmanagerClient: AlertmanagerClient
-
-    @Inject lateinit var proposalService: ProposalService
+    @Inject lateinit var proposals: CreateProposalUseCase
 
     @Inject lateinit var objectMapper: ObjectMapper
 
@@ -433,216 +387,25 @@ class McpToolRegistry {
     /** The product domain of a tool's service (#744), or null when unmapped. */
     fun domainOf(toolName: String): String? = ToolServiceCatalog.domainOf(toolName)
 
+    /**
+     * Dispatch one MCP tool call: the two HITL proposal tools are handled here (they are governance,
+     * not data access), everything else is a downstream read resolved through [downstream].
+     * Every outcome is audited exactly once (ADR-0031 D5).
+     */
     fun call(toolName: String, arguments: JsonNode?, actorId: String = "unknown"): ToolCallResult {
+        val args = arguments ?: objectMapper.createObjectNode()
         return try {
-            val args = arguments ?: objectMapper.createObjectNode()
-            val result = when (toolName) {
-                "get_account" -> accountClient.getAccount(args.requiredString("accountId"))
-                "get_account_by_iban" -> accountClient.getAccountByIban(args.requiredString("iban"))
-                "get_account_balance" -> accountClient.getBalance(args.requiredString("accountId"))
-                "list_transactions" -> transactionClient.listTransactions(
-                    accountId = args.requiredString("accountId"),
-                    limit = args["limit"]?.asInt() ?: 20,
-                    cursor = args["cursor"]?.asText(),
-                )
-                "get_transaction" -> transactionClient.getTransaction(args.requiredString("transactionId"))
-                "get_balance_holds" -> balanceClient.getHolds(args.requiredString("accountId"))
-                "list_products" -> productCatalogClient.listProducts(args["limit"]?.asInt() ?: 50)
-                "get_product" -> productCatalogClient.getProduct(args.requiredString("productId"))
-                "get_product_fees" -> productCatalogClient.getProductFees(args.requiredString("productId"))
-                "list_ledger_journals" -> ledgerClient.listJournals(args["limit"]?.asInt() ?: 20)
-                "get_trial_balance" -> ledgerClient.trialBalance(args["asOf"]?.asText())
-                "aml_list_cases" -> amlClient.listCases(
-                    status = args["status"]?.asText(),
-                    partyId = args["partyId"]?.asText(),
-                    limit = args["limit"]?.asInt() ?: 20,
-                    offset = 0,
-                )
-                "aml_get_case" -> amlClient.getCase(args.requiredString("caseId"))
-                "sanctions_list_checks" -> sanctionsClient.listChecks()
-                "sanctions_get_check" -> sanctionsClient.getCheck(args.requiredString("id"))
-                "sanctions_list_pending" -> sanctionsClient.listPending()
-                "fx_list_rates" -> fxClient.getRates()
-                "fx_get_rate" -> fxClient.getRate(
-                    base = args.requiredString("base"),
-                    quote = args.requiredString("quote"),
-                    source = args["source"]?.asText(),
-                )
-                "clearing_list_batches" -> clearingClient.listBatches(
-                    status = args["status"]?.asText(),
-                    page = 0,
-                    size = args["size"]?.asInt() ?: 20,
-                )
-                "clearing_get_batch" -> clearingClient.getBatch(args.requiredString("batchId"))
-                "clearing_get_batch_items" -> clearingClient.getBatchItems(args.requiredString("batchId"))
-                "interest_list_accruals" -> interestClient.listAccruals()
-                "interest_get_accruals" -> interestClient.getAccruals(
-                    accountId = args.requiredString("accountId"),
-                    from = args["from"]?.asText(),
-                    to = args["to"]?.asText(),
-                )
-                "interest_accrual_summary" -> interestClient.getSummary(
-                    accountId = args.requiredString("accountId"),
-                    from = args["from"]?.asText() ?: "",
-                    to = args["to"]?.asText() ?: "",
-                )
-                "dispute_list" -> disputeClient.list(args["status"]?.asText())
-                "dispute_get" -> disputeClient.get(args.requiredString("disputeId"))
-                "dispute_list_by_account" -> disputeClient.listByAccount(args.requiredString("accountId"))
-                "dispute_get_timeline" -> disputeClient.getTimeline(args.requiredString("disputeId"))
-                "sepa_instant_list" -> sepaInstantClient.listPayments()
-                "sepa_instant_get" -> sepaInstantClient.getPayment(args.requiredString("paymentId"))
-                "sepa_instant_list_by_debtor" -> sepaInstantClient.listByDebtor(
-                    debtorAccountId = args.requiredString("debtorAccountId"),
-                    page = 0,
-                    size = 20,
-                )
-                "query_metrics" -> {
-                    // Range query when both bounds are given; otherwise an instant query.
-                    val query = args.requiredString("query")
-                    val start = args["start"]?.asText()
-                    val end = args["end"]?.asText()
-                    if (!start.isNullOrBlank() && !end.isNullOrBlank()) {
-                        prometheusClient.queryRange(query, start, end, args["step"]?.asText() ?: "60s")
-                    } else {
-                        prometheusClient.query(query, args["time"]?.asText())
-                    }
-                }
-                "query_loki_logs" -> lokiClient.queryRange(
-                    query = args.requiredString("query"),
-                    start = args["start"]?.asText(),
-                    end = args["end"]?.asText(),
-                    // Cap the line count so a broad selector can't pull an unbounded result set.
-                    limit = (args["limit"]?.asInt() ?: 100).coerceIn(1, MAX_LOKI_LINES),
-                    direction = "backward",
-                )
-                "list_alerts" -> alertmanagerClient.listAlerts(
-                    active = true,
-                    silenced = false,
-                    filter = args["filter"]?.asText(),
-                )
-                "flip_feature_flag" -> {
-                    // Propose a feature-flag flip (ADR-0067 / issue #419).
-                    //
-                    // Safety invariants (mirror OPA rest.rego `prohibited` rule):
-                    //   1. Prohibited safety-control keys are rejected outright — no approval can
-                    //      override them (SCA, sanctions, AML, fail-closed payment gate).
-                    //   2. All other flips create a HITL Proposal with operation=featureflag.flip
-                    //      in the AuditEvent, so the OPA four_eyes_required rule can gate approval.
-                    //   3. The Proposal has NO runtime effect until a human approves it in the
-                    //      admin-ui queue and the gitops ConfigMap is updated.
-                    val flagKey = args.requiredString("flagKey")
-                    val targetVariant = args.requiredString("targetVariant")
-                    val rationale = args.requiredString("rationale")
-
-                    // Prohibited keys (mirrors rules.yaml:feature_flags.prohibited_flag_combinations
-                    // and OPA rest.rego `prohibited` rule — kept in sync by the CI gate).
-                    val prohibitedKeys = setOf(
-                        "sca-enforcement-disabled",
-                        "sanctions-screening-disabled",
-                        "aml-screening-disabled",
-                        "payment-gate-fail-open",
-                    )
-                    if (flagKey in prohibitedKeys) {
-                        runBlocking {
-                            auditPublisher.publish(
-                                AuditEvent(
-                                    actorId = actorId,
-                                    actorType = "AI_AGENT",
-                                    operation = "featureflag.flip",
-                                    resourceType = "feature-flag",
-                                    resourceId = flagKey,
-                                    result = AuditResult.FAILURE,
-                                    payload = mapOf("targetVariant" to targetVariant, "reason" to "prohibited"),
-                                ),
-                            )
-                        }
-                        return ToolCallResult(
-                            content = listOf(
-                                ToolContent(
-                                    text = "Flag '$flagKey' is a prohibited safety control (ADR-0067/OPA). " +
-                                        "This flag may never be flipped — it guards SCA, sanctions/AML " +
-                                        "screening, or the fail-closed payment gate.",
-                                ),
-                            ),
-                            isError = true,
-                        )
-                    }
-
-                    val p = proposalService.create(
-                        title = "Feature-flag flip: $flagKey → $targetVariant",
-                        rationale = rationale,
-                        suggestedAction = "In the flagd ConfigMap for the owning service, set flag " +
-                            "'$flagKey' defaultVariant to '$targetVariant'. Verify behaviour in staging " +
-                            "before approving for production.",
-                        proposedBy = actorId,
-                        modelId = null,
-                        correlationId = null,
-                    )
-
-                    // ADR-0067 §5/§7: emit AuditEvent with operation=featureflag.flip so the OPA
-                    // four_eyes_required rule is visible in the audit trail and the admin-ui can
-                    // surface the approval requirement alongside the proposal.
-                    runBlocking {
-                        auditPublisher.publish(
-                            AuditEvent(
-                                actorId = actorId,
-                                actorType = "AI_AGENT",
-                                operation = "featureflag.flip",
-                                resourceType = "feature-flag",
-                                resourceId = flagKey,
-                                result = AuditResult.SUCCESS,
-                                payload = mapOf(
-                                    "targetVariant" to targetVariant,
-                                    "proposalId" to p.id.toString(),
-                                    "state" to p.state.name,
-                                ),
-                            ),
-                        )
-                    }
-
-                    objectMapper.createObjectNode()
-                        .put("status", "proposed")
-                        .put("flagKey", flagKey)
-                        .put("targetVariant", targetVariant)
-                        .put("proposalId", p.id.toString())
-                        .put("state", p.state.name)
-                        .put(
-                            "message",
-                            "Flag flip proposal recorded (HITL, ADR-0067). It has NO runtime effect " +
-                                "until a human approves it in the admin-ui approval queue. " +
-                                "MONEY_PATH flags require a second approver before gitops ConfigMap is updated.",
-                        )
-                }
-
-                "draft_ticket" -> {
-                    // Materialise a proposal into the HITL queue (ADR-0031 D4). No side effect — it
-                    // sits PROPOSED until a human approves. Runs on the worker thread (McpEndpoint is
-                    // blocking), so the imperative @Transactional store is safe to call here.
-                    val p = proposalService.create(
-                        title = args.requiredString("title"),
-                        rationale = args.requiredString("rationale"),
-                        suggestedAction = args.requiredString("suggested_action"),
-                        proposedBy = actorId,
-                        modelId = null,
-                        correlationId = null,
-                    )
-                    objectMapper.createObjectNode()
-                        .put("status", "proposed")
-                        .put("proposalId", p.id.toString())
-                        .put("state", p.state.name)
-                        .put(
-                            "message",
-                            "Proposal recorded for human review (HITL). It has NO effect until a human approves it in the admin-ui approval queue.",
-                        )
-                }
-                else -> return ToolCallResult(
+            when {
+                toolName == "flip_feature_flag" -> flipFeatureFlag(args, actorId)
+                toolName == "draft_ticket" -> succeed(toolName, actorId, draftTicket(args, actorId))
+                // Every remaining registered tool is a downstream READ; the adapter owns which
+                // service it reaches and how the arguments marshal onto that call.
+                downstream.handles(toolName) -> succeed(toolName, actorId, downstream.read(toolName, args))
+                else -> ToolCallResult(
                     content = listOf(ToolContent(text = "Unknown tool: $toolName")),
                     isError = true,
                 )
             }
-            auditExec(actorId, toolName, AuditResult.SUCCESS)
-            ToolCallResult(content = listOf(ToolContent(text = objectMapper.writeValueAsString(result))))
         } catch (e: IllegalArgumentException) {
             auditExec(actorId, toolName, AuditResult.FAILURE, "invalid_params")
             ToolCallResult(content = listOf(ToolContent(text = "Invalid parameters: ${e.message}")), isError = true)
@@ -650,6 +413,124 @@ class McpToolRegistry {
             log.warnf(e, "Tool call failed: %s", toolName)
             auditExec(actorId, toolName, AuditResult.FAILURE, "execution_error")
             ToolCallResult(content = listOf(ToolContent(text = "Tool execution failed: ${e.message}")), isError = true)
+        }
+    }
+
+    /** Audit the successful execution and hand the document to the model as text. */
+    private fun succeed(toolName: String, actorId: String, result: JsonNode): ToolCallResult {
+        auditExec(actorId, toolName, AuditResult.SUCCESS)
+        return ToolCallResult(content = listOf(ToolContent(text = objectMapper.writeValueAsString(result))))
+    }
+
+    /**
+     * Propose a feature-flag flip (ADR-0067 / issue #419).
+     *
+     * Safety invariants (mirror the OPA `rest.rego` `prohibited` rule):
+     *   1. Prohibited safety-control keys are rejected outright — no approval can override them
+     *      (SCA, sanctions, AML, fail-closed payment gate).
+     *   2. All other flips create a HITL proposal and emit `operation=featureflag.flip`, so the OPA
+     *      four_eyes_required rule can gate the approval.
+     *   3. The proposal has NO runtime effect until a human approves it in the admin-ui queue and
+     *      the gitops ConfigMap is updated.
+     */
+    private fun flipFeatureFlag(args: JsonNode, actorId: String): ToolCallResult {
+        val flagKey = args.requiredString("flagKey")
+        val targetVariant = args.requiredString("targetVariant")
+        val rationale = args.requiredString("rationale")
+
+        if (flagKey in PROHIBITED_FLAG_KEYS) {
+            auditFlip(
+                actorId,
+                flagKey,
+                AuditResult.FAILURE,
+                mapOf(
+                    "targetVariant" to targetVariant,
+                    "reason" to "prohibited",
+                ),
+            )
+            return ToolCallResult(
+                content = listOf(
+                    ToolContent(
+                        text = "Flag '$flagKey' is a prohibited safety control (ADR-0067/OPA). " +
+                            "This flag may never be flipped — it guards SCA, sanctions/AML " +
+                            "screening, or the fail-closed payment gate.",
+                    ),
+                ),
+                isError = true,
+            )
+        }
+
+        val p = proposals.create(
+            title = "Feature-flag flip: $flagKey → $targetVariant",
+            rationale = rationale,
+            suggestedAction = "In the flagd ConfigMap for the owning service, set flag " +
+                "'$flagKey' defaultVariant to '$targetVariant'. Verify behaviour in staging " +
+                "before approving for production.",
+            proposedBy = actorId,
+            modelId = null,
+            correlationId = null,
+        )
+        auditFlip(
+            actorId,
+            flagKey,
+            AuditResult.SUCCESS,
+            mapOf("targetVariant" to targetVariant, "proposalId" to p.id.toString(), "state" to p.state.name),
+        )
+
+        val body = objectMapper.createObjectNode()
+            .put("status", "proposed")
+            .put("flagKey", flagKey)
+            .put("targetVariant", targetVariant)
+            .put("proposalId", p.id.toString())
+            .put("state", p.state.name)
+            .put(
+                "message",
+                "Flag flip proposal recorded (HITL, ADR-0067). It has NO runtime effect " +
+                    "until a human approves it in the admin-ui approval queue. " +
+                    "MONEY_PATH flags require a second approver before gitops ConfigMap is updated.",
+            )
+        return succeed("flip_feature_flag", actorId, body)
+    }
+
+    /**
+     * Materialise a proposal into the HITL queue (ADR-0031 D4). No side effect — it sits PROPOSED
+     * until a human approves. Runs on the worker thread (McpEndpoint is blocking), so the imperative
+     * store is safe to call here.
+     */
+    private fun draftTicket(args: JsonNode, actorId: String): JsonNode {
+        val p = proposals.create(
+            title = args.requiredString("title"),
+            rationale = args.requiredString("rationale"),
+            suggestedAction = args.requiredString("suggested_action"),
+            proposedBy = actorId,
+            modelId = null,
+            correlationId = null,
+        )
+        return objectMapper.createObjectNode()
+            .put("status", "proposed")
+            .put("proposalId", p.id.toString())
+            .put("state", p.state.name)
+            .put(
+                "message",
+                "Proposal recorded for human review (HITL). It has NO effect until a human " +
+                    "approves it in the admin-ui approval queue.",
+            )
+    }
+
+    /** ADR-0067 §5/§7: the flip's own audit event, distinct from the tool-execution outcome. */
+    private fun auditFlip(actorId: String, flagKey: String, result: AuditResult, payload: Map<String, Any?>) {
+        runBlocking {
+            auditPublisher.publish(
+                AuditEvent(
+                    actorId = actorId,
+                    actorType = "AI_AGENT",
+                    operation = "featureflag.flip",
+                    resourceType = "feature-flag",
+                    resourceId = flagKey,
+                    result = result,
+                    payload = payload,
+                ),
+            )
         }
     }
 
@@ -695,5 +576,18 @@ class McpToolRegistry {
             put("properties", properties)
             if (required.isNotEmpty()) put("required", required)
         }
+    }
+
+    private companion object {
+        /**
+         * Flags no approval can ever flip. Mirrors `rules.yaml:feature_flags` and the OPA
+         * `rest.rego` `prohibited` rule — kept in sync by the CI gate.
+         */
+        val PROHIBITED_FLAG_KEYS = setOf(
+            "sca-enforcement-disabled",
+            "sanctions-screening-disabled",
+            "aml-screening-disabled",
+            "payment-gate-fail-open",
+        )
     }
 }

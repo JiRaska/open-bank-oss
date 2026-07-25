@@ -5,18 +5,19 @@
 
 package com.openbank.agent.application
 
-import com.openbank.agent.infrastructure.persistence.AgentProposal
-import com.openbank.agent.infrastructure.persistence.ProposalState
+import com.openbank.agent.application.port.`in`.CreateProposalUseCase
+import com.openbank.agent.application.port.`in`.DecideProposalUseCase
+import com.openbank.agent.application.port.`in`.ProposalQueries
+import com.openbank.agent.application.port.out.AgentProposalRepository
+import com.openbank.agent.domain.proposal.AgentProposal
+import com.openbank.agent.domain.proposal.ProposalState
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.runBlocking
-import java.sql.ResultSet
-import java.sql.Timestamp
 import java.time.Clock
 import java.util.UUID
-import javax.sql.DataSource
 
 /**
  * The agent's proposal lifecycle (ADR-0031 D4: agents propose, governance disposes). A control
@@ -29,17 +30,20 @@ import javax.sql.DataSource
  * `human_approver` + `reason` half of the AI-attribution evidence chain. Audited here, at the
  * lifecycle owner, so every creator/decider path (MCP tool, REST, scheduled run) is covered.
  *
- * Plain Agroal JDBC, not Hibernate: the MCP `call()` path is synchronous (worker thread) and this
- * service depends on openbank-libs' reactive Panache entities — see AgentProposal for the full why.
+ * Storage is behind [AgentProposalRepository] (ADR-0002 hexagonal): the rules live here, the SQL
+ * lives in the adapter. Callers depend on the narrowest inbound port they need — the MCP tool path
+ * only ever sees [CreateProposalUseCase], so the reasoning loop cannot decide its own proposal.
  */
 @ApplicationScoped
 class ProposalService(
-    private val dataSource: DataSource,
+    private val repository: AgentProposalRepository,
     private val auditPublisher: AuditEventPublisher,
     private val clock: Clock,
-) {
+) : CreateProposalUseCase,
+    ProposalQueries,
+    DecideProposalUseCase {
 
-    fun create(
+    override fun create(
         title: String,
         rationale: String,
         suggestedAction: String,
@@ -61,26 +65,7 @@ class ProposalService(
             modelId = modelId,
             correlationId = correlationId,
         )
-        dataSource.connection.use { c ->
-            c.prepareStatement(
-                """
-                INSERT INTO agent_proposal
-                  (id, title, rationale, suggested_action, proposed_by, proposed_at, state, model_id, correlation_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """.trimIndent(),
-            ).use { ps ->
-                ps.setObject(1, row.id)
-                ps.setString(2, row.title)
-                ps.setString(3, row.rationale)
-                ps.setString(4, row.suggestedAction)
-                ps.setString(5, row.proposedBy)
-                ps.setTimestamp(6, Timestamp.from(row.proposedAt))
-                ps.setString(7, row.state.name)
-                ps.setString(8, row.modelId)
-                ps.setString(9, row.correlationId)
-                ps.executeUpdate()
-            }
-        }
+        repository.insert(row)
         runBlocking {
             auditPublisher.publish(
                 AuditEvent(
@@ -104,59 +89,28 @@ class ProposalService(
     }
 
     /** [agentId] filters to one agent's proposals (matches proposed_by) — the /iaops/agents/<id> drill-down. */
-    fun listPending(agentId: String? = null): List<AgentProposal> {
-        val sql = "SELECT * FROM agent_proposal WHERE state = 'PROPOSED'" +
-            (if (agentId != null) " AND proposed_by = ?" else "") +
-            " ORDER BY proposed_at DESC"
-        return query(sql, agentId)
-    }
+    override fun listPending(agentId: String?): List<AgentProposal> = repository.listPending(agentId)
 
-    fun listAll(limit: Int, agentId: String? = null): List<AgentProposal> {
-        val sql = "SELECT * FROM agent_proposal" +
-            (if (agentId != null) " WHERE proposed_by = ?" else "") +
-            " ORDER BY proposed_at DESC LIMIT ${limit.coerceIn(1, 200)}"
-        return query(sql, agentId)
-    }
+    override fun listAll(limit: Int, agentId: String?): List<AgentProposal> = repository.listAll(limit, agentId)
 
-    fun get(id: UUID): AgentProposal? = dataSource.connection.use { c ->
-        c.prepareStatement("SELECT * FROM agent_proposal WHERE id = ?").use { ps ->
-            ps.setObject(1, id)
-            ps.executeQuery().use { rs -> if (rs.next()) rs.toProposal() else null }
-        }
-    }
+    override fun get(id: UUID): AgentProposal? = repository.findById(id)
 
     /**
      * Approve or reject. Fails closed on a double-decision and on self-approval (segregation of
      * duties). The proposal has NO side effect on approval — the agent never executes; approval is
-     * the human's recorded sign-off (the operator then acts), ADR-0031 D4. The state guard runs in
-     * the same transaction as the update (WHERE state = 'PROPOSED') so two concurrent decisions
-     * can't both win.
+     * the human's recorded sign-off (the operator then acts), ADR-0031 D4. The state guard is
+     * pushed into the repository's conditional update, so two concurrent decisions can't both win.
      */
-    fun decide(id: UUID, approve: Boolean, decidedBy: String, reason: String?): AgentProposal? {
-        val current = get(id) ?: return null
+    override fun decide(id: UUID, approve: Boolean, decidedBy: String, reason: String?): AgentProposal? {
+        val current = repository.findById(id) ?: return null
         require(current.state == ProposalState.PROPOSED) { "Proposal already ${current.state}" }
         require(decidedBy.isNotBlank() && decidedBy != current.proposedBy) {
             "Segregation of duties: the approver must differ from the author"
         }
         val newState = if (approve) ProposalState.APPROVED else ProposalState.REJECTED
         val decidedAt = clock.instant()
-        val updated = dataSource.connection.use { c ->
-            c.prepareStatement(
-                """
-                UPDATE agent_proposal
-                   SET state = ?, decided_by = ?, decided_at = ?, decision_reason = ?
-                 WHERE id = ? AND state = 'PROPOSED'
-                """.trimIndent(),
-            ).use { ps ->
-                ps.setString(1, newState.name)
-                ps.setString(2, decidedBy)
-                ps.setTimestamp(3, Timestamp.from(decidedAt))
-                ps.setString(4, reason)
-                ps.setObject(5, id)
-                ps.executeUpdate()
-            }
-        }
-        if (updated == 0) throw IllegalArgumentException("Proposal already decided")
+        val won = repository.compareAndSetDecision(id, newState, decidedBy, decidedAt, reason)
+        if (!won) throw IllegalArgumentException("Proposal already decided")
         runBlocking {
             auditPublisher.publish(
                 AuditEvent(
@@ -177,29 +131,4 @@ class ProposalService(
         }
         return current.copy(state = newState, decidedBy = decidedBy, decidedAt = decidedAt, decisionReason = reason)
     }
-
-    /** [agentId] binds to the sole '?' placeholder in [sql] (proposed_by), if the caller included one. */
-    private fun query(sql: String, agentId: String? = null): List<AgentProposal> = dataSource.connection.use { c ->
-        c.prepareStatement(sql).use { ps ->
-            agentId?.let { ps.setString(1, it) }
-            ps.executeQuery().use { rs ->
-                buildList { while (rs.next()) add(rs.toProposal()) }
-            }
-        }
-    }
-
-    private fun ResultSet.toProposal() = AgentProposal(
-        id = getObject("id", UUID::class.java),
-        title = getString("title"),
-        rationale = getString("rationale"),
-        suggestedAction = getString("suggested_action"),
-        proposedBy = getString("proposed_by"),
-        proposedAt = getTimestamp("proposed_at").toInstant(),
-        state = ProposalState.valueOf(getString("state")),
-        decidedBy = getString("decided_by"),
-        decidedAt = getTimestamp("decided_at")?.toInstant(),
-        decisionReason = getString("decision_reason"),
-        modelId = getString("model_id"),
-        correlationId = getString("correlation_id"),
-    )
 }

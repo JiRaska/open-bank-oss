@@ -3,12 +3,11 @@
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 package com.openbank.copilot.application
 
-import com.openbank.copilot.infrastructure.authz.OpaToolGate
+import com.openbank.copilot.application.port.out.ToolPolicyPort
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.WebApplicationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 
@@ -31,7 +30,7 @@ import org.jboss.logging.Logger
 @ApplicationScoped
 class CopilotPolicyGate(
     private val auditPublisher: AuditEventPublisher,
-    private val opaGate: OpaToolGate,
+    private val opaGate: ToolPolicyPort,
     @ConfigProperty(name = "copilot.opa.enforce", defaultValue = "false")
     private val opaEnforce: Boolean,
 ) {
@@ -54,35 +53,30 @@ class CopilotPolicyGate(
             return Decision(allow = false, reason = whitelistReason)
         }
 
-        // Layer 2: OPA sidecar — per-tool, per-amount policy (advisory or enforce mode).
-        val opaResult = runCatching { opaGate.authorize(tool, customerId) }
-        val opaVerdict = when {
-            opaResult.isSuccess -> "allow"
-            else -> "deny"
-        }
-        if (opaResult.isFailure) {
-            val ex = opaResult.exceptionOrNull()
+        // Layer 2: OPA sidecar — per-tool, per-amount policy (advisory or enforce mode). The port
+        // is fail-closed: unreachable, non-2xx and unparseable all arrive here as a plain deny with
+        // a distinguishing reason, so this branch never has to tell a policy deny from a transport
+        // bug by inspecting an exception type.
+        val opa = opaGate.authorize(tool, customerId)
+        val opaVerdict = if (opa.allow) "allow" else "deny"
+        if (!opa.allow) {
             if (opaEnforce) {
                 log.warnf(
-                    ex,
-                    "OPA gate denied tool=%s customer=%s (enforce mode)",
+                    "OPA gate denied tool=%s customer=%s reason=%s (enforce mode)",
                     tool,
                     customerId,
+                    opa.reason,
                 )
-                val reason = if (ex is WebApplicationException) {
-                    "opa-denied: ${ex.message ?: "policy"}"
-                } else {
-                    "opa-unreachable"
-                }
-                audit(customerId, tool, capability, AuditResult.DENIED, reason, opaVerdict = "deny")
-                return Decision(allow = false, reason = reason)
+                audit(customerId, tool, capability, AuditResult.DENIED, opa.reason, opaVerdict = "deny")
+                return Decision(allow = false, reason = opa.reason)
             } else {
                 // Advisory mode: log and pass through.
                 log.warnf(
-                    ex,
-                    "OPA advisory-denied (allowing) tool=%s cust=%s — flip copilot.opa.enforce=true to block",
+                    "OPA advisory-denied (allowing) tool=%s cust=%s reason=%s — " +
+                        "flip copilot.opa.enforce=true to block",
                     tool,
                     customerId,
+                    opa.reason,
                 )
             }
         }

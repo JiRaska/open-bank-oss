@@ -4,8 +4,8 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.copilot.infrastructure.rest
 
-import com.openbank.copilot.infrastructure.authz.OpaToolGate
-import com.openbank.copilot.infrastructure.persistence.ProposalTokenStore
+import com.openbank.copilot.application.port.out.ProposalTokenStore
+import com.openbank.copilot.application.port.out.ToolPolicyPort
 import io.quarkus.security.Authenticated
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.enterprise.context.ApplicationScoped
@@ -15,7 +15,6 @@ import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
-import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
@@ -39,7 +38,7 @@ class ActionConfirmResource {
     lateinit var tokenStore: ProposalTokenStore
 
     @Inject
-    lateinit var opaGate: OpaToolGate
+    lateinit var opaGate: ToolPolicyPort
 
     @Inject
     lateinit var identity: SecurityIdentity
@@ -111,18 +110,21 @@ class ActionConfirmResource {
         Response.ok(mapOf("status" to "CONFIRMED", "actionId" to actionId.toString())).build()
     }
 
-    private fun checkOpaGate(tokenId: UUID, toolName: String, customerId: String): Response? = try {
-        opaGate.authorize(toolName, customerId, null)
-        null
-    } catch (e: WebApplicationException) {
+    /**
+     * Returns null when policy allows the confirm, or the 403 to send back. The port is fail-closed,
+     * so an unreachable OPA sidecar lands here as a deny — a confirm never proceeds unauthorised.
+     */
+    private fun checkOpaGate(tokenId: UUID, toolName: String, customerId: String): Response? {
+        val decision = opaGate.authorize(toolName, customerId, null)
+        if (decision.allow) return null
         log.warnf(
-            e,
-            "ActionConfirmResource: OPA denied confirm for token=%s tool=%s customer=%s",
+            "ActionConfirmResource: OPA denied confirm for token=%s tool=%s customer=%s reason=%s",
             tokenId,
             toolName,
             customerId,
+            decision.reason,
         )
-        Response.status(Response.Status.FORBIDDEN).entity(mapOf("error" to "ACTION_DENIED")).build()
+        return Response.status(Response.Status.FORBIDDEN).entity(mapOf("error" to "ACTION_DENIED")).build()
     }
 
     private companion object {

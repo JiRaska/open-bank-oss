@@ -5,6 +5,8 @@ package com.openbank.copilot.application
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.copilot.application.port.out.ProposalResult
+import com.openbank.copilot.application.port.out.ToolResult
 import com.openbank.copilot.domain.ActionKind
 import com.openbank.copilot.domain.ActionProposal
 import com.openbank.copilot.domain.ChatOutcome

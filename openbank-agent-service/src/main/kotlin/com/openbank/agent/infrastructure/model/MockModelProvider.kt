@@ -6,7 +6,7 @@
 package com.openbank.agent.infrastructure.model
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.agent.application.ModelProvider
+import com.openbank.agent.application.port.out.ModelProvider
 import com.openbank.agent.domain.model.ChatRole
 import com.openbank.agent.domain.model.ModelDescriptor
 import com.openbank.agent.domain.model.ModelRequest
