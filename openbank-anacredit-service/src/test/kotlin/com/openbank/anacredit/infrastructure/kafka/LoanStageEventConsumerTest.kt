@@ -7,10 +7,13 @@ package com.openbank.anacredit.infrastructure.kafka
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.anacredit.application.port.out.LoanStageProjectionRepository
 import com.openbank.anacredit.domain.model.LoanStageProjection
+import com.openbank.anacredit.infrastructure.observability.AnaCreditMetricsAdapter
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
@@ -22,10 +25,15 @@ class LoanStageEventConsumerTest {
 
     private val projections = mockk<LoanStageProjectionRepository>()
     private val fixedClock = Clock.fixed(Instant.parse("2026-07-01T00:00:00Z"), ZoneOffset.UTC)
+
+    // The REAL metrics adapter over a SimpleMeterRegistry, not a mock: the outcome assertions below
+    // then fail if the consumer stops reporting an outcome on any of its acked-and-dropped branches.
+    private val registry = SimpleMeterRegistry()
     private val consumer = LoanStageEventConsumer().also {
         it.projections = projections
         it.objectMapper = ObjectMapper()
         it.clock = fixedClock
+        it.metrics = AnaCreditMetricsAdapter(registry)
     }
 
     @Test
@@ -112,4 +120,32 @@ class LoanStageEventConsumerTest {
             )
         }
     }
+
+    @Test
+    fun `every terminal branch reports its outcome to the metrics port`(): Unit = runBlocking {
+        val loanId = UUID.randomUUID()
+        coEvery { projections.applyIfNewer(any()) } returns true andThen false andThenThrows RuntimeException("db down")
+        val applied = """{"eventType":"loan.stage_changed","loanId":"$loanId","newStage":"STAGE_2",""" +
+            """"daysPastDue":40,"asOf":"2026-07-01"}"""
+
+        consumer.consume(applied) // -> applied
+        consumer.consume(applied) // -> stale (applyIfNewer answers false)
+        consumer.consume(applied) // -> apply_error (the repository throws)
+        consumer.consume("""{"eventType":"loan.provisioned","loanId":"$loanId"}""") // -> ignored
+        consumer.consume("not json") // -> parse_error
+        consumer.consume("""{"eventType":"loan.stage_changed"}""") // -> malformed (no loanId)
+        consumer.consume("""{"eventType":"loan.stage_changed","loanId":"$loanId"}""") // -> malformed (no newStage)
+
+        assertThat(outcome("applied")).isEqualTo(1.0)
+        assertThat(outcome("stale")).isEqualTo(1.0)
+        assertThat(outcome("apply_error")).isEqualTo(1.0)
+        assertThat(outcome("ignored")).isEqualTo(1.0)
+        assertThat(outcome("parse_error")).isEqualTo(1.0)
+        assertThat(outcome("malformed")).isEqualTo(2.0)
+    }
+
+    private fun outcome(value: String): Double = registry.get("openbank.anacredit.loan_stage.events")
+        .tag("service", "anacredit")
+        .tag("outcome", value)
+        .counter().count()
 }
