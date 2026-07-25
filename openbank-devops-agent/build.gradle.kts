@@ -45,6 +45,17 @@ dependencies {
     testImplementation(libs.rest.assured.kotlin)
 }
 
+// Package the ADR-0148 prompt registry onto the classpath so LlmDiagnosisAdapter loads its system
+// prompts from the registered files (byte-for-byte, so the prompt_hash resolves) instead of an inline
+// constant. The registry is the single source of truth (openbank-libs/governance/prompts/); this copy
+// is derived — never hand-edit the packaged copy.
+tasks.named<Copy>("processResources") {
+    from(rootProject.file("openbank-libs/governance/prompts/devops-agent")) {
+        include("*.md")
+        into("governance-prompts/devops-agent")
+    }
+}
+
 kover {
     reports {
         filters {
