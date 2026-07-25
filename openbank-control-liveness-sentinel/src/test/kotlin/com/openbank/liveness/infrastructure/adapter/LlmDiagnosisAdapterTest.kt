@@ -44,7 +44,7 @@ class LlmDiagnosisAdapterTest {
     )
 
     private fun registeredPrompt(): String =
-        javaClass.getResourceAsStream("/governance-prompts/control-liveness-sentinel/system.v1.md")!!
+        javaClass.getResourceAsStream("/governance-prompts/control-liveness-sentinel/system.v2.md")!!
             .bufferedReader().use { it.readText() }
 
     @Test
