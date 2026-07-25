@@ -8,10 +8,20 @@
   "required": [
     "dataDomain",
     "primaryDatastore",
-    "schemaName",
     "dataLineageRole",
     "dataClassification",
     "retentionPolicy"
+  ],
+  "allOf": [
+    {
+      "$comment": "schemaName is required unless the module ASSERTS statelessness. 'Stateless' must be declared, never inferred from an absent field — otherwise a forgotten schemaName is indistinguishable from a service that owns no schema.",
+      "if": {
+        "properties": { "stateless": { "const": true } },
+        "required": ["stateless"]
+      },
+      "then": { "not": { "required": ["schemaName"] } },
+      "else": { "required": ["schemaName"] }
+    }
   ],
   "properties": {
     "dataDomain": {
@@ -23,8 +33,12 @@
       "type": "string",
       "minLength": 1
     },
+    "stateless": {
+      "description": "True iff this module owns no persistent DB schema. Explicit assertion, not an inference from a missing schemaName — a stateless module MUST set this and MUST NOT declare schemaName. When a later phase adds persistence, drop this flag and declare primaryDatastore + schemaName.",
+      "const": true
+    },
     "schemaName": {
-      "description": "Primary DB schema this service owns, e.g. 'accounts_schema'. Use 'n/a' if stateless.",
+      "description": "Primary DB schema this service owns, e.g. 'accounts_schema'. Omit it and set 'stateless: true' if the module owns no schema.",
       "type": "string",
       "minLength": 1
     },

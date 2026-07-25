@@ -7,9 +7,11 @@ package com.openbank.mcp.infrastructure.mcp
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.NullNode
+import com.openbank.libs.audit.AuditResult
 import com.openbank.libs.authz.AuthzQuery
 import com.openbank.libs.authz.PolicyDecisionPoint
 import com.openbank.libs.authz.Principal
+import com.openbank.mcp.application.McpCallAuditor
 import com.openbank.mcp.application.McpToolRegistry
 import com.openbank.mcp.application.port.out.ConsentContext
 import com.openbank.mcp.application.protocol.InitializeResult
@@ -38,6 +40,11 @@ import org.jboss.logging.Logger
  * in-service PDP), so an MCP tool-call is gated by exactly the same policy plane as a human REST
  * call. Deny-by-default: a tool with no capability entry, or an OPA `deny`, is refused.
  *
+ * Every `tools/call` — allowed, denied, unmapped, or denied by a PDP outage — emits one
+ * AI-attributed [McpCallAuditor] audit event (ADR-0031 D5 / ADR-0086), so an AI-initiated action
+ * against the bank is reconstructable. `tools/list`, `initialize` and `ping` do not: they touch no
+ * customer data and expose only the static tool catalogue.
+ *
  * Phase 1: the acting agent + consent are resolved from headers (X-Agent-Id / X-Consent-Id); the
  * real OAuth 2.1 → PSD2-consent binding (ADR-0126) is phase 2. The principal id is `agent:`-prefixed
  * so the shared AuthorizeInterceptor/rego classify it AI_AGENT and bridge to `agents.allow`.
@@ -48,6 +55,7 @@ import org.jboss.logging.Logger
 class McpEndpoint(
     private val registry: McpToolRegistry,
     private val pdp: PolicyDecisionPoint,
+    private val auditor: McpCallAuditor,
     private val mapper: ObjectMapper,
     @ConfigProperty(name = "mcp.server.name", defaultValue = "openbank-mcp") private val serverName: String,
     @ConfigProperty(name = "mcp.server.version", defaultValue = "0.1.0") private val serverVersion: String,
@@ -84,10 +92,36 @@ class McpEndpoint(
         val toolName = params.path("name").asText("")
         val arguments = params.path("arguments").let { if (it.isMissingNode) mapper.createObjectNode() else it }
         val ctx = resolveContext()
+        // Argument KEY names only — the values are customer data and must never enter the audit
+        // trail (McpCallAuditor KDoc).
+        val argumentKeys = arguments.fieldNames().asSequence().sorted().toList()
+
+        fun audit(
+            capability: String?,
+            decision: McpCallAuditor.Decision,
+            result: AuditResult,
+            reason: String? = null,
+        ) = runBlocking {
+            auditor.toolCallCompleted(
+                McpCallAuditor.ToolCall(
+                    agentId = ctx.agentId,
+                    consentId = ctx.consentId,
+                    tool = toolName,
+                    capability = capability,
+                    decision = decision,
+                    result = result,
+                    reason = reason,
+                    argumentKeys = argumentKeys,
+                ),
+            )
+        }
 
         // Deny-by-default: no capability mapping ⇒ no OPA action ⇒ refuse.
         val capability = registry.capabilities[toolName]
-            ?: return toolError(id, "Tool not permitted: $toolName")
+        if (capability == null) {
+            audit(null, McpCallAuditor.Decision.DENY, AuditResult.DENIED, "no capability mapping")
+            return toolError(id, "Tool not permitted: $toolName")
+        }
 
         // Gate on the SHARED ADR-0034 PDP as an AI_AGENT principal (input.action = the capability).
         val decision = try {
@@ -104,18 +138,25 @@ class McpEndpoint(
         } catch (ex: Exception) {
             // Fail closed: a PDP outage denies (never fail-open on a money-adjacent surface).
             log.warnf("PDP error authorizing %s: %s — denying", toolName, ex.message)
+            audit(capability, McpCallAuditor.Decision.UNAVAILABLE, AuditResult.DENIED, "pdp unavailable")
             return toolError(id, "Authorization unavailable")
         }
         if (!decision.allow) {
-            return toolError(id, "Denied by policy: ${decision.reason ?: "no matching allow rule"}")
+            val reason = decision.reason ?: "no matching allow rule"
+            audit(capability, McpCallAuditor.Decision.DENY, AuditResult.DENIED, reason)
+            return toolError(id, "Denied by policy: $reason")
         }
 
         return try {
-            Response.ok(McpResponse(id = id, result = registry.call(toolName, arguments, ctx))).build()
+            val result = registry.call(toolName, arguments, ctx)
+            audit(capability, McpCallAuditor.Decision.ALLOW, AuditResult.SUCCESS)
+            Response.ok(McpResponse(id = id, result = result)).build()
         } catch (ex: IllegalArgumentException) {
+            audit(capability, McpCallAuditor.Decision.ALLOW, AuditResult.FAILURE, "invalid params")
             error(id, McpErrorCode.INVALID_PARAMS, ex.message ?: "invalid params")
         } catch (ex: Exception) {
             log.warnf("tool %s failed: %s", toolName, ex.message)
+            audit(capability, McpCallAuditor.Decision.ALLOW, AuditResult.FAILURE, "tool error")
             Response.ok(
                 McpResponse(id = id, result = ToolCallResult(listOf(ToolContent(text = "tool error")), isError = true)),
             ).build()

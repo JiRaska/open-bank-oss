@@ -34,6 +34,19 @@ class CardService(
         // Synthetic, Luhn-valid test PAN — see SyntheticPanGenerator. maskedPan is DERIVED from it,
         // so the displayed last-4 finally matches a number that exists (it used to be random).
         val credential = SyntheticPanGenerator.generate(cmd.network)
+        // PENDING exists for ONE reason: somebody still has to physically receive the plastic and
+        // activate it. A card with no plastic has nothing to receive, and the only PENDING → ACTIVE
+        // route (POST /cards/{id}/activate) is OPERATOR/ADMIN-only with no customer path through
+        // customer-edge — so a self-issued virtual card left PENDING can never transact and never
+        // be rescued. Issue those ACTIVE instead.
+        //
+        // The discriminator is the FORM FACTOR, not deliveryAddress, even though the delivery step
+        // is the real distinction: deliveryAddress is optional on IssueCardCommand, so a caller who
+        // simply omits it for a DEBIT card would get an ACTIVE card whose plastic is still in the
+        // post — the dangerous direction to be wrong in. Card.VIRTUAL_FORM_TYPES is already the
+        // module's single definition of "this card has no plastic" (it also governs secure-details),
+        // so reusing it keeps one answer to that question rather than two.
+        val activatedOnIssue = cmd.cardType in Card.VIRTUAL_FORM_TYPES
         val card = Card(
             id = UUID.randomUUID(), idempotencyKey = cmd.idempotencyKey,
             partyId = cmd.partyId, accountId = cmd.accountId,
@@ -41,11 +54,11 @@ class CardService(
             maskedPan = credential.maskedPan,
             cardholderName = cmd.cardholderName, embossedName = cmd.embossedName,
             expiryDate = LocalDate.now(clock).plusYears(EXPIRY_YEARS),
-            status = CardStatus.PENDING,
+            status = if (activatedOnIssue) CardStatus.ACTIVE else CardStatus.PENDING,
             dailyLimitMinorUnits = cmd.dailyLimitMinorUnits,
             monthlyLimitMinorUnits = cmd.monthlyLimitMinorUnits,
             currency = cmd.currency, deliveryAddress = cmd.deliveryAddress,
-            activatedAt = null, blockedAt = null, blockedReason = null,
+            activatedAt = if (activatedOnIssue) now else null, blockedAt = null, blockedReason = null,
             createdAt = now, updatedAt = now,
             panEncrypted = cipher.encrypt(credential.pan),
             cvvEncrypted = cipher.encrypt(credential.cvv),

@@ -40,6 +40,7 @@ Služba používá sdílenou Gradle konvenci `openbank.quarkus-service`; Dockerf
 | Redis hosts | `redis://localhost:6379` | Valkey/Redis |
 | OTel OTLP endpoint | `http://localhost:4317` | tracing |
 | `openbank.rate-limit.max-concurrent-requests` | `200` | strop souběžnosti |
+| `openbank.card.pan-vault-backfill.enabled` | `true` | při startu vygeneruje syntetický PAN pro neterminální karty vydané před trezorem (`pan_encrypted IS NULL`) a zachová jim zobrazené poslední 4 číslice. Idempotentní, neblokující a nikdy neshodí start; při každém startu zaloguje jednu souhrnnou řádku `[pan-vault-backfill]` |
 
 Bezpečnostní hlavičky (`X-Content-Type-Options`, `X-Frame-Options: DENY`, CSP `default-src 'self'`, HSTS atd.) jsou globálně nastaveny v `application.yaml`. Logy jsou JSON v ne-dev profilech.
 

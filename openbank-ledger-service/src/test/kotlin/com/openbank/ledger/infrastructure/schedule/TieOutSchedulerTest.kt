@@ -19,6 +19,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -88,7 +89,7 @@ class TieOutSchedulerTest {
         val saved = slot<TieOutRunRecord>()
         coEvery { runs.save(capture(saved)) } answers { saved.captured }
 
-        scheduler.runTieOut()
+        runBlocking { scheduler.runTieOut() }
 
         assertThat(saved.captured.status).isEqualTo(TieOutRunStatus.OK)
         assertThat(saved.captured.accountsChecked).isEqualTo(1)
@@ -107,7 +108,7 @@ class TieOutSchedulerTest {
         val saved = slot<TieOutRunRecord>()
         coEvery { runs.save(capture(saved)) } answers { saved.captured }
 
-        scheduler.runTieOut()
+        runBlocking { scheduler.runTieOut() }
 
         assertThat(saved.captured.status).isEqualTo(TieOutRunStatus.BREAK)
         assertThat(saved.captured.breaks).isEqualTo(1)
@@ -124,7 +125,7 @@ class TieOutSchedulerTest {
         val saved = slot<TieOutRunRecord>()
         coEvery { runs.save(capture(saved)) } answers { saved.captured }
 
-        scheduler.runTieOut()
+        runBlocking { scheduler.runTieOut() }
 
         assertThat(saved.captured.status).isEqualTo(TieOutRunStatus.ERROR)
         assertThat(saved.captured.errors).isEqualTo(1)
@@ -146,7 +147,7 @@ class TieOutSchedulerTest {
         val saved = slot<TieOutRunRecord>()
         coEvery { runs.save(capture(saved)) } answers { saved.captured }
 
-        scheduler.runTieOut()
+        runBlocking { scheduler.runTieOut() }
 
         assertThat(saved.captured.status).isEqualTo(TieOutRunStatus.BREAK)
         assertThat(saved.captured.breaks).isEqualTo(1)
@@ -162,7 +163,7 @@ class TieOutSchedulerTest {
         coEvery { ledger.getControlAccountTieOut(any()) } returns listOf(tieOut(account.id, BigDecimal.ZERO))
         coEvery { runs.save(any()) } throws IllegalStateException("insert failed")
 
-        scheduler.runTieOut() // must not throw
+        runBlocking { scheduler.runTieOut() } // must not throw
 
         coVerify(exactly = 1) { runs.save(any()) }
     }
@@ -185,7 +186,7 @@ class TieOutSchedulerTest {
             record
         }
 
-        scheduler.runTieOut()
+        runBlocking { scheduler.runTieOut() }
 
         assertThat(savedDates).containsExactly(
             LocalDate.of(2026, 7, 13),
@@ -212,7 +213,7 @@ class TieOutSchedulerTest {
             record
         }
 
-        capped.runTieOut()
+        runBlocking { capped.runTieOut() }
 
         assertThat(savedDates).containsExactly(LocalDate.of(2026, 7, 11), LocalDate.of(2026, 7, 12))
     }
@@ -221,7 +222,7 @@ class TieOutSchedulerTest {
     fun `does nothing when already caught up through yesterday`() {
         coEvery { runs.findLatest() } returns runRecord(LocalDate.of(2026, 7, 15)) // == through
 
-        scheduler.runTieOut()
+        runBlocking { scheduler.runTieOut() }
 
         coVerify(exactly = 0) { runs.save(any()) }
         coVerify(exactly = 0) { glAccounts.findByCode(any()) }

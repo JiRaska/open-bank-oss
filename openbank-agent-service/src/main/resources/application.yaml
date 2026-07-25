@@ -172,10 +172,18 @@ model-gateway:
       provider: mock
       sensitivity: hosted
     # Groq — free, fast, OpenAI-compatible. `id` is sent verbatim as the upstream model name.
-    # Served by the single `openai-compat` adapter; needs GROQ_API_KEY (see agent.model.openai).
+    # Served by the single `openai-compat` adapter; needs an API key (see agent.model.openai).
+    #
+    # ADR-0174/0175 (#1919): in a deployed environment the endpoint is repointed at the in-cluster
+    # LiteLLM gateway (`http://litellm.ai-platform.svc:4000/v1`) via AGENT_MODEL_ENDPOINT, so the
+    # gateway is the single pod allowed to leave the cluster to a US LLM provider and the provider
+    # key never lands in this pod. The model id is unchanged — litellm-config maps
+    # `llama-3.3-70b-versatile` to `groq/llama-3.3-70b-versatile` — so this is an endpoint + key
+    # change only. The direct-to-Groq URL stays the default for local dev / `./gradlew quarkusDev`,
+    # where there is no gateway to route through.
     - id: llama-3.3-70b-versatile
       provider: openai-compat
-      endpoint: https://api.groq.com/openai/v1
+      endpoint: ${AGENT_MODEL_ENDPOINT:https://api.groq.com/openai/v1}
       sensitivity: hosted
     # The SAME openai-compat adapter serves any OpenAI-shaped backend — just change endpoint+key:
     # - id: qwen2.5                       # self-hosted Ollama for the SELF_HOSTED (sensitive) tier
@@ -190,11 +198,15 @@ model-gateway:
 # case it degrades to advisory + logs a warn (so a dead OPA sidecar does not lock the assistant).
 # Set AGENT_POLICY_ENFORCEMENT=block in the k8s deployment env to enable enforcement in the sandbox.
 agent:
-  # API key for the openai-compat model backend (Groq by default). Empty in the committed config;
-  # supplied at runtime via GROQ_API_KEY (Vault/sealed-secret in a real deploy — never in git).
+  # API key for the openai-compat model backend. Empty in the committed config; supplied at runtime
+  # from OpenBao via ESO — never in git. In a deployed environment (ADR-0174/0175, #1919) this is the
+  # LiteLLM *virtual* key (AGENT_MODEL_API_KEY), not a provider key: the provider credential lives
+  # only in the ai-platform gateway pod. GROQ_API_KEY stays as the fallback so a local dev shell — and
+  # a deployed pod still running a pre-#1919 image — keeps working unchanged (nested-default
+  # expansion: AGENT_MODEL_API_KEY wins when set, GROQ_API_KEY otherwise, empty if neither).
   model:
     openai:
-      api-key: ${GROQ_API_KEY:}
+      api-key: ${AGENT_MODEL_API_KEY:${GROQ_API_KEY:}}
   policy:
     enforcement: ${AGENT_POLICY_ENFORCEMENT:advisory}
     opa:

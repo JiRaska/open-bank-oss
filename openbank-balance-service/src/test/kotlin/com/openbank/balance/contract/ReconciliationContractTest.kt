@@ -5,6 +5,7 @@
 package com.openbank.balance.contract
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -22,9 +23,32 @@ class ReconciliationContractTest {
     @Test
     fun `contract version is bumped for the reconciliation change`() {
         val version = Regex("""(?m)^\s+version:\s*"?([^"\s]+)"?\s*$""").find(openapi)?.groupValues?.get(1)
-        // 1.4.1: editorial bump for the 403 Forbidden documentation added across every operation
-        // (ADR-0034 Phase 5, issue #266 — OPA enforcement). No schema/behavior change.
-        assertEquals("1.4.1", version)
+        // 1.5.0: MINOR — ADR-0178 Phase 3 adds the optional, additive `futureValueDatedPipeline`
+        // property to CurrencyReconciliation (issue #1746). Backward compatible: no property removed,
+        // none made required, no behavior change. Previous 1.4.1 was an editorial bump for the 403
+        // Forbidden documentation added across every operation (ADR-0034 Phase 5, issue #266).
+        assertEquals("1.5.0", version)
+    }
+
+    /**
+     * ADR-0048: an API change ships with a contract test. Locks the Phase 3 field to the *response*
+     * schema and pins its additive shape — it must stay optional, so an older consumer that never
+     * reads it keeps parsing the report unchanged.
+     */
+    @Test
+    fun `the per-currency tie-out documents the future-value-dated pipeline as an optional field`() {
+        val currencySchema = openapi
+            .substringAfter("    CurrencyReconciliation:")
+            .substringBefore("\n    ApiError:")
+
+        assertTrue(
+            currencySchema.contains("futureValueDatedPipeline:"),
+            "CurrencyReconciliation must expose futureValueDatedPipeline (ADR-0178 Phase 3)",
+        )
+        assertFalse(
+            currencySchema.contains("required:"),
+            "futureValueDatedPipeline must stay OPTIONAL — making it required is a breaking MAJOR change",
+        )
     }
 
     @Test

@@ -12,7 +12,6 @@ import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
 import jakarta.inject.Inject
-import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
@@ -60,14 +59,22 @@ class StandingOrderExecutionScheduler {
         liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofDays(1))
     }
 
+    // `suspend`, never `runBlocking` (#2148). Quarkus invokes a plain @Scheduled method on a bare
+    // `executor-thread`, which carries no Vert.x context, so `runBlocking { executeOrders(today) }`
+    // ran the first reactive Panache query (`findDueForExecution`) off the event loop and threw
+    // `HR000068: This method should exclusively be invoked from a Vert.x EventLoop thread`. That
+    // throw sits before the per-order try/catch, so EVERY sweep aborted with zero outbox rows and
+    // no standing order ever executed. A suspending @Scheduled method is dispatched by Quarkus on a
+    // proper (duplicated) Vert.x context instead — the same reason the sibling
+    // StandingOrderOutboxDispatcher.dispatch() and every other outbox dispatcher in the fleet work.
     @Scheduled(
         cron = "{openbank.scheduler.execution-cron}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
-    fun sweep(): Unit = runBlocking {
+    suspend fun sweep() {
         if (!enabled) {
             log.debug("[execution-scheduler] Disabled — skipping sweep")
-            return@runBlocking
+            return
         }
         val today = LocalDate.now(clock)
         log.infof("[execution-scheduler] Starting daily execution sweep for %s", today)

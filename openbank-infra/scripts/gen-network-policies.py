@@ -8,7 +8,10 @@ every cross-namespace call a service makes is already declared in its Deployment
 env (`http://<svc>.<ns>.svc:<port>`), every public path in an Ingress backend,
 every Kafka client in its bootstrap URL. This script walks
 openbank-infra/gitops/components/, extracts those edges and emits one
-`network-policies.yaml` per service namespace:
+`network-policies.yaml` per component DIRECTORY (each is its own ArgoCD
+Application, so the app that owns the workload also owns the policy protecting
+it — a namespace shared by several directories, e.g. `platform`, gets one file
+per directory rather than one for the namespace):
 
   - pod-scoped ingress allow-lists (Postgres/Redis pods stay unselected — the
     blast radius of the existing accounts/balances drafts, generalised),
@@ -105,6 +108,12 @@ HEADER = """\
 # ENFORCED: the VPC CNI network-policy agent runs in standard mode (ADR-0060),
 # so this allow-list actively gates ingress — an undeclared caller is DROPPED.
 # Rollback = delete the NetworkPolicy.
+#
+# SCOPE: this file holds the policies for the workloads declared in THIS component
+# directory only, so the ArgoCD Application that owns the workload also owns the
+# policy protecting it. A namespace shared by several component directories (e.g.
+# `platform` = agent + ap2 + copilot + mcp) therefore has one such file per
+# directory, not one for the whole namespace.
 """.format(mgmt=MGMT_PORT)
 
 
@@ -139,6 +148,10 @@ def main():
     ingress_backends = defaultdict(set)  # (ns, svc-name) -> ports
     http_scaled_targets = set()  # (ns, app.kubernetes.io/name) fronted by an HTTPScaledObject
     kafka_clients = set()
+    # components/<dir> that declares the Strimzi `Kafka` CR — the broker pods are
+    # operator-managed (no Deployment), so the derived broker policy has no workload
+    # directory of its own to inherit.
+    kafka_dir = None
     # Prometheus scrape edges declared by Pod/ServiceMonitors:
     #   (target_ns, app.kubernetes.io/name) -> set of port NAMES Prometheus scrapes.
     # Resolved to container ports after the workload table is built, then admitted
@@ -164,7 +177,7 @@ def main():
                     v = e.get("value")
                     if isinstance(v, str):
                         blob_parts.append(v)
-            workloads[(ns, name)] = {"ports": ports}
+            workloads[(ns, name)] = {"ports": ports, "dir": os.path.dirname(path)}
             ns_dir.setdefault(ns, os.path.dirname(path))
             blob = "\n".join(blob_parts)
             for svc, callee_ns, port in URL_RE.findall(blob):
@@ -176,6 +189,9 @@ def main():
             for _, kns, kport in KAFKA_RE.findall(blob):
                 if kns == MESSAGING_NS:
                     kafka_clients.add(ns)
+
+        elif kind == "Kafka" and ns == MESSAGING_NS:
+            kafka_dir = os.path.dirname(path)
 
         elif kind == "Service" and ns:
             spec = doc.get("spec", {}) or {}
@@ -265,8 +281,16 @@ def main():
                 if cp:
                     scrape_ports[(tns, app)].add(cp)
 
-    # ── emit one file per namespace that has workloads ───────────────────────
-    by_ns = defaultdict(list)
+    # ── emit one file per COMPONENT DIRECTORY that has workloads ────────────
+    # Keyed by the directory the workload manifest lives in, not by namespace: each
+    # components/<dir> is its own ArgoCD Application (`path: .../components/<dir>`,
+    # automated + prune), so keying by namespace made one Application own the policy
+    # protecting another Application's workload. `platform` is shared by agent, ap2,
+    # copilot and mcp, and the whole namespace's allow-lists landed in
+    # components/agent/ (first directory alphabetically) — which is why
+    # `components/mcp/` looked like it shipped no NetworkPolicy while
+    # mcp-service-ingress-allow-list was in fact live (issue #2207).
+    by_dir = defaultdict(list)
 
     # CI infrastructure is reached by ARC runner pods whose namespace lives
     # outside GitOps (tofu-managed) — a derived allow-list cannot see them and
@@ -340,7 +364,7 @@ def main():
                 "ports": [{"protocol": "TCP", "port": p} for p in sorted(ing_ports)],
             })
 
-        by_ns[ns].append({
+        by_dir[wl.get("dir") or ns_dir.get(ns)].append({
             "apiVersion": "networking.k8s.io/v1",
             "kind": "NetworkPolicy",
             "metadata": {
@@ -362,7 +386,7 @@ def main():
 
     # ── Strimzi broker: derived client set on the client listener ───────────
     if kafka_clients:
-        by_ns[MESSAGING_NS].append({
+        by_dir[kafka_dir or ns_dir.get(MESSAGING_NS)].append({
             "apiVersion": "networking.k8s.io/v1",
             "kind": "NetworkPolicy",
             "metadata": {
@@ -388,19 +412,37 @@ def main():
             },
         })
 
-    for ns, policies in sorted(by_ns.items()):
-        out_dir = ns_dir.get(ns, os.path.join(COMPONENTS, ns))
-        out = os.path.join(out_dir, "network-policies.yaml")
-        if not os.path.isdir(out_dir):
-            print(f"  warn: no components dir for ns {ns} — skipping", file=sys.stderr)
+    written = set()
+    for out_dir, policies in sorted(by_dir.items()):
+        if not out_dir or not os.path.isdir(out_dir):
+            names = ", ".join(p["metadata"]["name"] for p in policies)
+            print(f"  warn: no components dir for {names} — skipping", file=sys.stderr)
             continue
+        out = os.path.join(out_dir, "network-policies.yaml")
+        policies.sort(key=lambda p: p["metadata"]["name"])
         with open(out, "w", encoding="utf-8") as fh:
             fh.write(HEADER)
             for pol in policies:
                 fh.write("---\n")
                 yaml.dump(pol, fh, Dumper=IndentedDumper,
                           sort_keys=False, default_flow_style=False)
+        written.add(os.path.realpath(out))
         print(f"wrote {os.path.relpath(out, ROOT)} ({len(policies)} policies)")
+
+    # Prune a previously generated file whose workloads have moved out of that
+    # directory — otherwise the stale copy keeps applying an allow-list the
+    # generator no longer derives, and two ArgoCD Applications fight over the same
+    # object. Hand-authored baselines (infrastructure namespaces, ADR-0081) do not
+    # carry the DO-NOT-EDIT marker and are never touched.
+    marker = "generated by openbank-infra/scripts/gen-network-policies.py"
+    for path in sorted(glob.glob(f"{COMPONENTS}/**/network-policies.yaml", recursive=True)):
+        if os.path.realpath(path) in written:
+            continue
+        with open(path, encoding="utf-8") as fh:
+            if marker not in fh.read():
+                continue  # hand-authored (openbank.io/derived: gitops-manual)
+        os.remove(path)
+        print(f"removed stale {os.path.relpath(path, ROOT)}")
 
 
 if __name__ == "__main__":

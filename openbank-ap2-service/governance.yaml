@@ -2,10 +2,13 @@
 # Per-service governance manifest (ADR-0071). Declarative, curatorial facts only.
 dataDomain: payments
 primaryDatastore: none
+# Owns no DB schema, asserted explicitly (ADR-0071): no schemaName key is correct here.
+stateless: true
 dataLineageRole: consumer
 dataClassification: confidential
 # Phase 1 (ADR-0193) holds no state: it verifies a presented mandate and returns a verdict. The
 # evidence record it produces is data-minimised (mandate hash, not the credential). When a phase-2
-# ADR persists evidence, set primaryDatastore/schemaName + payment-record retention (ADR-0118).
+# ADR persists evidence, drop `stateless`, set primaryDatastore/schemaName + payment-record
+# retention (ADR-0118).
 retentionPolicy: not applicable
 evidenceExported: false

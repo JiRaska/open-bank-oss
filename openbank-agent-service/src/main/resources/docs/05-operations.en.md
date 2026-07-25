@@ -19,7 +19,9 @@
 | `QUARKUS_OIDC_AUTH_SERVER_URL` | `http://localhost:8080/realms/openbank` | Keycloak realm issuer |
 | `OIDC_TLS_VERIFICATION` | `none` | set to `required` in a real HTTPS deploy |
 | `AGENT_DEFAULT_MODEL` | `mock-echo` | gateway default model id |
-| `GROQ_API_KEY` | *(empty)* | API key for the `openai-compat` backend (Vault/sealed-secret in a real deploy — never in git) |
+| `AGENT_MODEL_ENDPOINT` | `https://api.groq.com/openai/v1` | base URL of the `openai-compat` backend. In a deployed environment set to `http://litellm.ai-platform.svc:4000/v1` — the in-cluster LiteLLM gateway, the only workload permitted to egress to a hosted LLM provider (ADR-0174/0175) |
+| `AGENT_MODEL_API_KEY` | *(falls back to `GROQ_API_KEY`)* | key for the `openai-compat` backend. Deployed, this is the LiteLLM **virtual** key, not a provider key (OpenBao/ESO — never in git) |
+| `GROQ_API_KEY` | *(empty)* | legacy/local-dev fallback for the above when talking to Groq directly |
 | `AGENT_POLICY_ENFORCEMENT` | `advisory` | `advisory` (audit-only) or `block` (enforce DENY) — ADR-0031 D9 |
 | `BUILD_TIME`, `GIT_COMMIT` | `unknown` | provenance for `/api/v1/info` |
 

@@ -47,12 +47,19 @@ class BalanceReconciliationService(
         // a future-value-dated journal is POSTED but not yet in the ledger control, so counting it in
         // the sub-ledger sum would surface a self-resolving false drift for the whole pre-value window.
         val bookedByCcy = balanceRepo.sumBookedByCurrencyAsOf(asOf)
+        // ADR-0178 Phase 3 — explainability. The tail the line above subtracts, reported in its own
+        // right: POSTED movements whose value date is still ahead, which neither side of the tie-out
+        // counts yet. Attached to the report, never to `difference` — both sides already exclude it,
+        // so folding it into the drift would double-count and re-introduce the very false positive
+        // Phase 1 removed. Drift therefore stays UNEXPLAINED drift; this column is the explained part.
+        val futureValueDatedByCcy = balanceRepo.sumFutureValueDatedByCurrency(asOf)
 
         val report = ReconciliationPolicy.reconcile(
             ledgerControlByCurrency = ledgerByCcy,
             subLedgerBookedByCurrency = bookedByCcy,
             asOf = asOf,
             generatedAt = OffsetDateTime.now(clock),
+            futureValueDatedByCurrency = futureValueDatedByCcy,
         )
 
         val persisted = recordRepo.save(report)

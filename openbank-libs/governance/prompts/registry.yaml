@@ -1,0 +1,132 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Prompt-registry coverage manifest (ADR-0148, issue #1918).
+#
+# WHY THIS FILE EXISTS
+#   Before it, a charter with no directory under prompts/ was indistinguishable from a charter
+#   that CANNOT have one: `mcp-anonymous` is an identity-only principal that never calls a model,
+#   `rca-investigator`'s system prompt lives inside the third-party HolmesGPT image, and
+#   `finops-agent` simply has not been wired to an LLM yet. All three rendered identically as one
+#   line of `::warning` backlog. "Absent" and "not applicable" must be distinguishable, or the
+#   coverage number is meaningless and the EU AI Act Art. 12 record-keeping claim is unverifiable.
+#
+#   This manifest is NOT in agents.yaml on purpose: agents.yaml is embedded verbatim into ~29
+#   per-service OPA bundles and hashed, so a prompt-coverage edit there would restamp every bundle
+#   and pod-roll annotation for a change with zero policy relevance (same reasoning as
+#   ../evals/README.md).
+#
+# STATUS VOCABULARY (closed set; `.github/scripts/check-prompt-registry.py` enforces it)
+#   registered     — the charter's live system prompt(s) are in this tree. `prompts:` lists them;
+#                    every listed file must exist, and no unlisted file may exist in its directory.
+#   pending        — the charter WILL send a prompt from this repo, but the LLM wiring is not built
+#                    (today: a stub LlmDiagnosisAdapter with a TODO). Advisory ::warning; this is
+#                    the real migration backlog. `blocked_by:` names the ADR that lands it.
+#   external       — a real LLM runs for this charter, but its system prompt is NOT authored in this
+#                    repo (third-party image, or an operator-side coding agent). `reason:` says
+#                    where it lives. Not a backlog item; it is a disclosed record-keeping boundary.
+#   not-applicable — the charter never causes a model call at all (an acting identity for a
+#                    non-LLM endpoint). `reason:` says why. Not a backlog item.
+#
+# TEMPLATED PROMPTS
+#   Three of the registered prompts are built by a Kotlin `buildString` with runtime-substituted
+#   segments. They are registered as the TEMPLATE, with `{{var}}` placeholders declared in
+#   `placeholders:`, and trailing whitespace normalised away. Byte-for-byte parity with the live
+#   string therefore means "after substitution and trailing-space normalisation" — recorded here so
+#   the parity check that graduates this guard (ADR-0148 follow-up) is written against the right
+#   rule rather than silently failing every templated prompt.
+
+schema_version: 1
+related_adrs: [ADR-0031, ADR-0148, ADR-0156, ADR-0174]
+
+charters:
+
+  - id: compliance-officer
+    status: registered
+    prompts: [oversight.v1]
+    source: openbank-agent-service OversightService.systemPrompt()
+    placeholders: [pending_titles]   # sanitized titles of proposals already awaiting human review
+
+  - id: ui-assistant
+    status: registered
+    prompts: [system.v1]
+    source: openbank-agent-service AgentChatService.systemPrompt()
+    placeholders: [page_context]     # admin-UI section the operator is viewing; omitted when blank
+
+  - id: customer-copilot
+    status: registered
+    prompts: [system.v1]
+    source: openbank-copilot-service CopilotChatService.systemPrompt()
+    # Concatenated at call time with PromptInjectionGuard.UNTRUSTED_PREAMBLE, which is a shared
+    # constant rather than a per-charter prompt; it is not registered separately.
+    placeholders: []
+
+  - id: devops-agent
+    status: registered
+    prompts: [diagnosis.v1, remediation.v1]
+    source: openbank-devops-agent LlmDiagnosisAdapter.DIAGNOSIS_SYSTEM / .REMEDIATION_SYSTEM
+    placeholders: []
+
+  - id: control-liveness-sentinel
+    status: registered
+    prompts: [system.v1]
+    source: openbank-control-liveness-sentinel LlmDiagnosisAdapter.SYSTEM_PROMPT
+    placeholders: []
+
+  - id: rca-investigator
+    status: external
+    reason: >-
+      HolmesGPT (ADR-0088/0091) owns the system prompt inside its third-party image. The only
+      in-repo turn is the user-role `ask` string built by the holmes-rca CronJob in
+      openbank-infra/gitops/components/observability/holmes-rca.yaml. Registering a prompt this
+      platform does not author would misrepresent who controls it.
+
+  - id: ledger-domain-engineer
+    status: external
+    reason: >-
+      Development-plane coding agent. Its instructions are the repo's own CLAUDE.md + the
+      `skills:` list in agents.yaml, executed in an operator's coding-agent session — there is no
+      service in this repo that sends a system prompt on its behalf.
+
+  - id: mcp-anonymous
+    status: not-applicable
+    reason: >-
+      Identity-only principal — the fixed phase-1 acting identity McpEndpoint.resolveContext()
+      stamps on MCP tool calls (ADR-0181). openbank-mcp-service makes no model call of any kind;
+      the calling agent is external and brings its own prompt.
+
+  - id: ap2-anonymous
+    status: not-applicable
+    reason: >-
+      Identity-only principal for the AP2 mandate-signature verifier (ADR-0193). Pure
+      cryptographic verification with `read: []`; no model, no prompt.
+
+  - id: finops-agent
+    status: pending
+    blocked_by: ADR-0112 P4
+    reason: LlmDiagnosisAdapter is a stub that returns a placeholder; no /chat/completions call yet.
+
+  - id: governance-auditor
+    status: pending
+    blocked_by: ADR-0164
+    reason: LlmDiagnosisAdapter is a stub; no /chat/completions call yet.
+
+  - id: release-steward
+    status: pending
+    blocked_by: ADR-0165
+    reason: LlmDiagnosisAdapter is a stub; no /chat/completions call yet.
+
+  - id: docs-truth-agent
+    status: pending
+    blocked_by: ADR-0166
+    reason: LlmDiagnosisAdapter is a stub; no /chat/completions call yet.
+
+  - id: authz-policy-auditor
+    status: pending
+    blocked_by: ADR-0167
+    reason: LlmDiagnosisAdapter is a stub; no /chat/completions call yet.
+
+  - id: flaky-test-hunter
+    status: pending
+    blocked_by: ADR-0168
+    reason: LlmDiagnosisAdapter is a stub; no /chat/completions call yet.

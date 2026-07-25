@@ -131,5 +131,95 @@ class InternalOnlyPortExclusionTest(unittest.TestCase):
         self.assertEqual(pol["spec"]["ingress"], [{"from": [{"podSelector": {}}]}])
 
 
+_SHARED_NS_DIR_A = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alpha-service
+  namespace: shared
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: alpha-service
+    spec:
+      containers:
+        - name: alpha-service
+          ports:
+            - name: http
+              containerPort: 8080
+"""
+
+_SHARED_NS_DIR_Z = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zulu-service
+  namespace: shared
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zulu-service
+    spec:
+      containers:
+        - name: zulu-service
+          ports:
+            - name: http
+              containerPort: 8081
+"""
+
+
+class SharedNamespaceSplitTest(unittest.TestCase):
+    """Two component dirs, one namespace -> one policy file each (issue #2207).
+
+    Keying the output by namespace put the WHOLE namespace's allow-lists in the
+    first component directory alphabetically, so `components/zulu/` looked like it
+    shipped no NetworkPolicy while `zulu-service-ingress-allow-list` was in fact
+    live — and, worse, was owned and pruned by the *alpha* ArgoCD Application.
+    """
+
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.root = Path(self._tmpdir.name)
+        for name, manifest in (("alpha", _SHARED_NS_DIR_A), ("zulu", _SHARED_NS_DIR_Z)):
+            d = self.root / name
+            d.mkdir()
+            (d / "workloads.yaml").write_text(manifest, encoding="utf-8")
+
+        orig = gen.COMPONENTS
+        gen.COMPONENTS = str(self.root)
+        self.addCleanup(setattr, gen, "COMPONENTS", orig)
+        gen.main()
+
+    def _names(self, component_dir: str) -> list[str]:
+        path = self.root / component_dir / "network-policies.yaml"
+        self.assertTrue(path.exists(), f"{component_dir} got no network-policies.yaml")
+        return [
+            d["metadata"]["name"]
+            for d in yaml.safe_load_all(path.read_text(encoding="utf-8"))
+            if d
+        ]
+
+    def test_each_component_dir_gets_its_own_workloads_policy(self) -> None:
+        self.assertEqual(self._names("alpha"), ["alpha-service-ingress-allow-list"])
+        self.assertEqual(self._names("zulu"), ["zulu-service-ingress-allow-list"])
+
+    def test_stale_generated_file_is_pruned(self) -> None:
+        """A file the generator no longer writes must not linger and keep applying."""
+        stale = self.root / "alpha" / "network-policies.yaml"
+        gone = self.root / "gone"
+        gone.mkdir()
+        (gone / "network-policies.yaml").write_text(
+            stale.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        hand_written = self.root / "gone" / "temporal-network-policies.yaml"
+        hand_written.write_text("# hand-authored\n", encoding="utf-8")
+        gen.main()
+        self.assertFalse((gone / "network-policies.yaml").exists())
+        self.assertTrue(hand_written.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

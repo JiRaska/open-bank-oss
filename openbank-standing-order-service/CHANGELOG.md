@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.14.1...standing-order-service-v0.14.2) (2026-07-25)
+
+
+### Bug Fixes
+
+* **standing-order:** run the daily execution sweep on a Vert.x context ([#2148](https://github.com/JiRaska/open-bank-oss/issues/2148)) ([#2180](https://github.com/JiRaska/open-bank-oss/issues/2180)) ([9047a98](https://github.com/JiRaska/open-bank-oss/commit/9047a98023dbce622aed2ab8f7cb1bcb846c6777))
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.14.0...standing-order-service-v0.14.1) (2026-07-24)
 
 

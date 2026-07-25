@@ -5,7 +5,7 @@
 `openbank-card-issuance-service` je **systém záznamu pro karty** v platformě OpenBank. Drží:
 
 - **Agregát Card** — `id` karty, vlastnící `partyId` a `accountId`, `productCode`, `cardType` (DEBIT / CREDIT / PREPAID / VIRTUAL), `network` (VISA / MASTERCARD / AMEX / UNIONPAY), **maskovaný PAN** (pouze poslední 4 číslice), jméno držitele a embosované jméno, datum expirace, stav, per-kartové limity útraty (denní / měsíční v minor units), měnu a volitelnou doručovací adresu.
-- **Stavový automat životního cyklu** — `PENDING → ACTIVE` (activate), `ACTIVE → SUSPENDED` (suspend) / `SUSPENDED → ACTIVE` (resume), `{ACTIVE, SUSPENDED} → BLOCKED` (trvalá blokace, vyžaduje důvod). `EXPIRED` a `CANCELLED` jsou v modelu terminální stavy.
+- **Stavový automat životního cyklu** — karta s plastem se vydává ve stavu `PENDING` a aktivuje se, až ji klient obdrží; karta `VIRTUAL` / `SINGLE_USE` nemá co obdržet a vydává se rovnou jako `ACTIVE`. Dále `PENDING → ACTIVE` (activate), `ACTIVE → SUSPENDED` (suspend) / `SUSPENDED → ACTIVE` (resume), `{ACTIVE, SUSPENDED} → BLOCKED` (trvalá blokace, vyžaduje důvod). `EXPIRED` a `CANCELLED` jsou v modelu terminální stavy.
 - **Doménové události** — `CardIssued` a `CardStatusChanged`, emitované při každé změně stavu a publikované přes transakční outbox.
 
 ## Co služba **NEDĚLÁ**
