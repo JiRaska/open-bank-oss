@@ -442,10 +442,25 @@ jobs:
       # (openbank-libs/governance/evals/<charter>.yaml) declares per-charter scenario success
       # criteria the promotion ratchet consumes; this guard keeps it well-formed (charter resolves,
       # version is v<N>, scenarios have id/description/input/assert, assert keys the runner
-      # understands, prompt refs resolve). ADVISORY first (ADR-0144): backlog charters are
-      # ::warning; run-evals.py below is the runner that consumes this registry.
-      - name: "evals-registry integrity (ADR-0148, advisory)"
-        continue-on-error: true
+      # understands, prompt refs resolve). run-evals.py below is the runner that consumes this
+      # registry.
+      #
+      # ENFORCED (was advisory), same reasoning as the prompt-registry step above (#2363): every
+      # error this script exits non-zero on is structural and fixable in the PR that introduces it —
+      # a suite naming a charter absent from agents.yaml, a filename that is not <charter>.yaml, a
+      # version that is not v<N>, an empty or malformed scenario list, a duplicate scenario id, an
+      # assert key the runner cannot evaluate, or a dangling prompt reference. None of them waits on
+      # the migration backlog. Coverage — charters with no suite yet — is ::warning inside the
+      # script and stays advisory.
+      #
+      # The dangling-prompt-ref check is what makes this worth enforcing rather than watching: it is
+      # the only thing tying a suite to the prompt registry, so an enforced gate here means deleting
+      # or renaming a registered prompt file cannot silently orphan the eval suite that measures it.
+      #
+      # Runs in `Validate manifests`, a required check, so it now blocks merge — and that job stops
+      # at its first failing gate, leaving later steps `skipped`, not `pass`. Run it locally before
+      # pushing: python3 .github/scripts/check-evals-registry.py
+      - name: "evals-registry integrity (ADR-0148, enforced)"
         run: python3 .github/scripts/check-evals-registry.py
 
       # ADR-0148 evals gate — the RUNNER's self-test. ENFORCED on purpose, and deliberately placed
