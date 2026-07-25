@@ -256,17 +256,9 @@ jobs:
           echo "any=true" >> "$GITHUB_OUTPUT"
 
   # ── 2. Build fast-jars, bake images, push to ECR ─────────────────────────────
-  #
-  # Gated on can-i-deploy, which used to run AFTER this job. The gate rejects roughly
-  # half of all runs (22 of the last 39), and every one of those had already built,
-  # signed, pushed and Trivy-scanned every changed service before finding out it was
-  # not allowed to deploy any of them. The gate asks the Pact Broker about the commit
-  # SHA — it touches no image and needs nothing this job produces — and it takes a
-  # median of 14 seconds. So the happy path pays 14s and the rejected path skips the
-  # whole build, its ECR pushes and its KMS signatures.
   build-push:
     name: Build + push
-    needs: [changes, can-i-deploy]
+    needs: changes
     if: needs.changes.outputs.any == 'true'
     # Native arm64 GitHub-hosted runner (free on public repos) — the runtime images
     # are linux/arm64, so buildx builds natively with no QEMU. ECR push + KMS cosign
@@ -633,7 +625,7 @@ jobs:
   # the race). Services with no contracts are trivially deployable (404 probe below).
   can-i-deploy:
     name: can-i-deploy
-    needs: changes
+    needs: [changes, build-push]
     if: needs.changes.outputs.any == 'true'
     # Stays on the self-hosted pool: the Pact Broker has no public ingress
     # (ADR-0056) and is only resolvable over cluster DNS. ARC scale-to-zero
