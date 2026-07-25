@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/anacredit-service-v0.8.0...anacredit-service-v0.9.0) (2026-07-25)
+
+
+### Features
+
+* **anacredit:** instrument exposure intake, return shape and lending-event outcomes ([#2270](https://github.com/JiRaska/open-bank-oss/issues/2270)) ([81ebe48](https://github.com/JiRaska/open-bank-oss/commit/81ebe485ac2af0e5364092d2234f4747d2887fda)), closes [#2255](https://github.com/JiRaska/open-bank-oss/issues/2255)
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/anacredit-service-v0.7.1...anacredit-service-v0.8.0) (2026-07-13)
 
 
