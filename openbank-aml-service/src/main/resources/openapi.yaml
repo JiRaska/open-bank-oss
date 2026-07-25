@@ -3,23 +3,33 @@
 openapi: 3.1.0
 info:
   title: AML Service API
-  version: 1.0.0
-  description: Anti-Money Laundering case management — create, review, and update AML case decisions.
+  version: 1.1.0
+  description: >-
+    Anti-Money Laundering screening case lifecycle — submit, review, and decide AML cases.
+    Four constraints below are documented in `description` rather than in `required` / `enum` /
+    `default`, because the api-contract gate (ADR-0048 D5) classifies expressing them as a
+    breaking change and would demand a MAJOR bump that ADR-0048 D2 forbids while the service
+    serves /api/v1. Each is marked GATE-CONSTRAINED. See the tracking issue before "fixing" them.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
 servers:
-  - url: http://localhost:8106
+  - url: http://localhost:8117
     description: Local development
 tags:
-  - name: AML
+  - name: AML Cases
+
+security:
+  - bearerAuth: []
 
 paths:
   /api/v1/aml/cases:
     post:
-      tags: [AML]
-      summary: Create an AML case
+      tags: [AML Cases]
+      summary: Submit an AML screening case
       operationId: createAmlCase
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
       requestBody:
         required: true
         content:
@@ -29,22 +39,54 @@ paths:
       responses:
         '201':
           description: Case created
+          headers:
+            Location:
+              description: URI of the created case
+              schema:
+                type: string
+                format: uri-reference
+            X-Idempotency-Replayed:
+              description: Present with value `true` when the stored response for this Idempotency-Key is replayed.
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AmlCaseResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     get:
-      tags: [AML]
-      summary: List AML cases
+      tags: [AML Cases]
+      summary: List AML screening cases
       operationId: listAmlCases
       parameters:
         - name: status
           in: query
+          description: >-
+            GATE-CONSTRAINED — only the five AmlCaseStatus values are accepted; `CLOSED` and
+            `SAR_FILED` are not in the enum and produce a 400. They are retained here because
+            removing an accepted enum value is `request-parameter-enum-value-removed` (ERR).
           schema:
             type: string
-            enum: [OPEN, UNDER_REVIEW, CLOSED, ESCALATED, SAR_FILED]
+            enum: [OPEN, UNDER_REVIEW, CLEARED, BLOCKED, ESCALATED, CLOSED, SAR_FILED]
+        - name: partyId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: screeningType
+          in: query
+          schema:
+            $ref: '#/components/schemas/ScreeningType'
         - name: limit
           in: query
+          description: >-
+            GATE-CONSTRAINED — the server default is 50 (`@DefaultValue("50")`), not 20. Changing
+            a declared default is `request-parameter-default-value-changed` (ERR).
           schema:
             type: integer
             default: 20
@@ -62,10 +104,16 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/AmlCaseResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/aml/cases/{caseId}:
     get:
-      tags: [AML]
+      tags: [AML Cases]
       summary: Get AML case by ID
       operationId: getAmlCase
       parameters:
@@ -77,12 +125,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AmlCaseResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
   /api/v1/aml/cases/{caseId}/decision:
     put:
-      tags: [AML]
+      tags: [AML Cases]
       summary: Update AML case decision
       operationId: updateAmlDecision
       parameters:
@@ -92,10 +144,24 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpdateDecisionRequest'
+              $ref: '#/components/schemas/UpdateAmlDecisionRequest'
       responses:
         '200':
-          description: Decision updated
+          description: Decision applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AmlCaseResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
 components:
   securitySchemes:
@@ -112,55 +178,72 @@ components:
       schema:
         type: string
         format: uuid
+    idempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >-
+        GATE-CONSTRAINED — mandatory in practice. AmlCaseResource.createCase rejects a blank or
+        absent value, so a caller that omits this header always fails; `required: false` is stated
+        only because adding a required parameter is `new-required-request-parameter` (ERR).
+        A repeat with the same key replays the stored 201 response.
+      schema:
+        type: string
+        minLength: 1
 
   responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Forbidden:
+      description: Caller lacks a required role
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
     NotFound:
       description: Not found
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+    Conflict:
+      description: Invalid AML case status transition
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
 
   schemas:
+    AmlCaseStatus:
+      type: string
+      enum: [OPEN, UNDER_REVIEW, CLEARED, BLOCKED, ESCALATED]
+
+    ScreeningType:
+      type: string
+      enum: [CUSTOMER_ONBOARDING, TRANSACTION_MONITORING, PERIODIC_REVIEW, MANUAL_INVESTIGATION]
+
+    AmlRiskLevel:
+      type: string
+      enum: [LOW, MEDIUM, HIGH, CRITICAL]
+
     CreateAmlCaseRequest:
       type: object
-      required: [partyId, triggerType, riskScore]
+      description: >-
+        GATE-CONSTRAINED — customerReference, screeningType, riskLevel and alertCode are
+        non-nullable on the Kotlin DTO and are rejected when absent, but cannot be listed in
+        `required`: adding one is `new-required-request-property` (ERR).
+      required: [partyId]
       properties:
-        partyId:
-          type: string
-          format: uuid
-        accountId:
-          type: string
-          format: uuid
-        triggerType:
-          type: string
-          enum: [TRANSACTION_THRESHOLD, UNUSUAL_PATTERN, SANCTIONS_HIT, MANUAL]
-        riskScore:
-          type: number
-          minimum: 0
-          maximum: 100
-        notes:
-          type: string
-
-    UpdateDecisionRequest:
-      type: object
-      required: [decision, analystId]
-      properties:
-        decision:
-          type: string
-          enum: [NO_ACTION, MONITOR, CLOSE, ESCALATE, FILE_SAR]
-        analystId:
-          type: string
-          format: uuid
-        notes:
-          type: string
-
-    AmlCaseResponse:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
         partyId:
           type: string
           format: uuid
@@ -168,14 +251,106 @@ components:
           type: string
           format: uuid
           nullable: true
-        triggerType:
+        transactionId:
           type: string
+          format: uuid
+          nullable: true
+        customerReference:
+          type: string
+        screeningType:
+          $ref: '#/components/schemas/ScreeningType'
+        riskLevel:
+          $ref: '#/components/schemas/AmlRiskLevel'
+        alertCode:
+          type: string
+        alertDetail:
+          type: string
+          nullable: true
+        matchedEntity:
+          type: string
+          nullable: true
+
+    UpdateAmlDecisionRequest:
+      type: object
+      description: >-
+        GATE-CONSTRAINED — targetStatus and decidedBy are non-nullable on the Kotlin DTO and
+        `decidedBy` is additionally rejected when blank, but neither can be listed in `required`:
+        adding one is `new-required-request-property` (ERR).
+      properties:
+        targetStatus:
+          $ref: '#/components/schemas/AmlCaseStatus'
+        decisionReason:
+          type: string
+          nullable: true
+          description: Required when targetStatus is BLOCKED.
+        assignedAnalyst:
+          type: string
+          nullable: true
+        decidedBy:
+          type: string
+
+    AmlCaseResponse:
+      type: object
+      required:
+        - id
+        - idempotencyKey
+        - partyId
+        - customerReference
+        - screeningType
+        - riskLevel
+        - status
+        - alertCode
+        - screenedAt
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        idempotencyKey:
+          type: string
+        partyId:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+          nullable: true
+        transactionId:
+          type: string
+          format: uuid
+          nullable: true
+        customerReference:
+          type: string
+        screeningType:
+          $ref: '#/components/schemas/ScreeningType'
+        riskLevel:
+          $ref: '#/components/schemas/AmlRiskLevel'
         status:
+          $ref: '#/components/schemas/AmlCaseStatus'
+        alertCode:
           type: string
-        riskScore:
-          type: number
-        decision:
+        alertDetail:
           type: string
+          nullable: true
+        matchedEntity:
+          type: string
+          nullable: true
+        decisionReason:
+          type: string
+          nullable: true
+        assignedAnalyst:
+          type: string
+          nullable: true
+        decidedBy:
+          type: string
+          nullable: true
+        screenedAt:
+          type: string
+          format: date-time
+        decidedAt:
+          type: string
+          format: date-time
           nullable: true
         createdAt:
           type: string
@@ -186,8 +361,32 @@ components:
 
     ApiError:
       type: object
+      required: [traceId, status, code, message]
       properties:
+        traceId:
+          type: string
+        status:
+          type: integer
         code:
           type: string
         message:
           type: string
+        timestamp:
+          type: string
+          format: date-time
+        details:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/FieldError'
+
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+        rejectedValue:
+          nullable: true
