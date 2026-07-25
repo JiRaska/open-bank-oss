@@ -38,7 +38,7 @@ What is actually running (`openbank-infra/gitops/components/mcp/mcp-service.yaml
 | Caller authentication on `/mcp` | **NONE.** `quarkus.oidc.tenant-enabled: false` (`src/main/resources/application.yaml`); no `@RolesAllowed`, no `@Authorize`, no mTLS, no API key |
 | Caller identity | **NONE.** `McpEndpoint.resolveContext()` returns a hardcoded `ConsentContext("agent:mcp-anonymous", "none", emptyList())` — the `X-Agent-Id` / `X-Consent-Id` headers its own KDoc describes are **not read** |
 | Consent scoping | **[INTENT]** — `ReadPorts.kt` KDoc assigns the granted-account intersection to "the port implementation"; the only implementation is the stub, which enforces nothing |
-| Audit trail of tool calls / policy decisions | **NONE.** No `AuditEventPublisher`, no `AuditEvent`, no Kafka producer in the module |
+| Audit trail of tool calls / policy decisions | **LIVE** (`application/McpCallAuditor.kt`) — one canonical `AuditEvent` per `tools/call`, `actorType = AI_AGENT`, carrying tool, capability, charter, `policy_decision` and outcome. Emitted on ALL four outcomes (allow, policy deny, unmapped tool, PDP outage). Delivery is the shared `LoggingAuditEventPublisher` (log pipeline), as everywhere else in the fleet — no Kafka producer in the module |
 | Rate limiting / budgets / idempotency | **NONE** in this service |
 | NetworkPolicy | **LIVE.** `mcp-service-ingress-allow-list` (ADR-0081, derived) admits same-namespace + admin-ui:8150/8181 + observability/security-scanner:8085 and drops every other cross-namespace source. Ingress only — egress is unrestricted |
 | Internet exposure | **NO** ingress, no `HTTPRoute`, `Service` is `ClusterIP` — in-cluster only |
@@ -181,15 +181,23 @@ invariant that nothing enforces. Phase 2 must land the OAuth 2.1 → PSD2-consen
 
 ### Repudiation
 
-- **T-R1 — no audit trail whatsoever. [LIVE gap — the most serious documented-but-unenforced
-  control in this service]** `agents.rego`'s `decision` object exists precisely so "a DENY is
-  auditable, not silent", and its own comment says the MCP endpoint records it into
-  `AuditEvent.payload.policy_decision` (ADR-0031 D5). **`openbank-mcp-service` emits no audit event
-  of any kind** — there is no `AuditEventPublisher`, no audit dependency, and no Kafka producer in
-  the module. A tool call, an allow, a deny, and a payment proposal are all invisible to the
-  ADR-0086 hash chain. A DENY is logged at WARN in the pod log and nowhere else. For an
-  AI-initiated action in a bank this is the attribution requirement, not a nice-to-have; it must
-  land with phase 2, and arguably before it.
+- **T-R1 — tool-call attribution. [LIVE — closed by issue #2207]** `agents.rego`'s `decision`
+  object exists precisely so "a DENY is auditable, not silent", and its own comment says the MCP
+  endpoint records it into `AuditEvent.payload.policy_decision` (ADR-0031 D5). `McpCallAuditor` now
+  does exactly that: every `tools/call` emits one canonical `AuditEvent` with
+  `actorType = AI_AGENT`, `operation = mcp.tool.call`, `resourceId = <tool>`, and a payload of
+  tool / capability / charter / consent id / `policy_decision` / reason. All four outcomes are on
+  the record — an unmapped tool and a PDP outage included, because a trail that shows only
+  successes hides the interesting half. `tools/list`, `initialize` and `ping` are deliberately not
+  audited (static catalogue, no customer data).
+  **Residual:** (a) attribution is only as good as the identity, and the actor is the constant
+  `agent:mcp-anonymous` until T-S1 lands — the trail answers "what was done" but not yet "by whom";
+  (b) delivery is the shared `LoggingAuditEventPublisher`, so entries reach the ADR-0086 hash chain
+  via the log pipeline rather than a durable Kafka producer — the fleet-wide posture, not specific
+  to this service; (c) the payload deliberately carries **no** tool arguments and **no** tool
+  output, only argument key names, so the trail cannot be used to reconstruct the customer data an
+  agent saw (GDPR data minimisation). That last one is a trade: it bounds the blast radius of the
+  audit store at the cost of not recording *which* account was queried.
 
 ### Information disclosure
 
@@ -296,13 +304,13 @@ reader skimming `agents.yaml` would reasonably assume all of them work:
 | `pii: masked` on the agent's data scope | `agents.yaml: mcp-anonymous.data_scope` | **nothing** in this service |
 | `requires_human: {every: proposal, sca: dynamic_linking, scope: consent_granted}` | `agents.yaml` | **nothing** — stated explicitly in `agents.rego` |
 | `limits: {tokens_per_run, runs_per_day}` | `agents.yaml` | **nothing** in this service (agent-service has a `CharterRateLimiter`; this one does not) |
-| Policy decision recorded to the audit chain | `agents.rego` `decision` comment, ADR-0031 D5 | **nothing** — no audit publisher in the module |
+| ~~Policy decision recorded to the audit chain~~ | `agents.rego` `decision` comment, ADR-0031 D5 | **now enforced** — `McpCallAuditor` (#2207); see T-R1 |
 | Declared tool `inputSchema` | `McpToolRegistry.tools` | **nothing** server-side beyond presence + JSON type |
 | 2 approvals on money-path changes | `CLAUDE.md`, `rules.yaml` | **nothing** — `main-protection` has `required_approving_review_count: 0` (issue #2183). Relevant here because §7 argues for the money-path listing |
 
 Genuinely enforced today: the deny-by-default capability map, the charter allow/deny evaluation via
-the shared PDP, fail-closed on PDP error, the read-only signed OPA bundle with a pod-rolling
-checksum, and the container hardening.
+the shared PDP, fail-closed on PDP error, the AI-attributed audit event on every tool call, the
+read-only signed OPA bundle with a pod-rolling checksum, and the container hardening.
 
 ## 6. Residual risks & assumptions
 
@@ -340,7 +348,7 @@ checksum, and the container hardening.
   it is not implemented — `main-protection` requires zero approvals (issue #2183). That is an
   argument for fixing #2183, not for skipping the listing.
 
-Recommended follow-up issues (not opened by this PR): audit events for every tool call and policy decision (T-R1); OAuth 2.1 → consent binding before the
+Recommended follow-up issues (not opened by this PR): OAuth 2.1 → consent binding before the
 read ports are bound (T-S1/T-E2); server-side `inputSchema` validation + idempotency on
 `propose_payment` (T-T2/T-D2).
 
@@ -358,3 +366,7 @@ read ports are bound (T-S1/T-E2); server-side `inputSchema` validation + idempot
   `components/agent/` (one file per *namespace*, first directory alphabetically). Restated as the
   narrower, true risk: the unconditional same-namespace rule leaves the whole `platform` namespace
   able to reach an unauthenticated `:8150`.
+- **2026-07-25 (issue #2207)** — T-R1 closed: `McpCallAuditor` emits an AI-attributed `AuditEvent`
+  for every `tools/call` outcome, so the ADR-0031 D5 `policy_decision` the rego was written to
+  expose is now on the record. Residuals restated (constant actor id until T-S1, log-pipeline
+  delivery, deliberately no arguments/results in the payload).
