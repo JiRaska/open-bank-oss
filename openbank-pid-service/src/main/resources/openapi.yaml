@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: PID Service API (Party Identity)
-  version: 1.11.0
+  version: 1.12.0
   description: Party identity data management — create, update, KYC linking, BankID/ROB sync, identity resolution and four-eyes verification cases (ADR-0072).
   license:
     name: Apache-2.0
@@ -692,6 +692,39 @@ paths:
               schema:
                 $ref: '#/components/schemas/PartyResponse'
 
+  /api/v1/parties/{id}/external-ids:
+    post:
+      tags: [Parties]
+      summary: Link an external identifier to an existing party (ADR-0072 section 5)
+      description: |
+        The identity-unification merge. Called when POST /api/v1/parties/resolve returns
+        MATCH_EXISTING for a returning person arriving through a new channel, so both identities
+        map to one party. Without this call the MATCH_EXISTING decision cannot be acted on.
+
+        Idempotent: re-linking an identifier the party already owns succeeds unchanged.
+      operationId: linkExternalId
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkExternalIdRequest'
+      responses:
+        '200':
+          description: Party with the identifier linked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The identifier already belongs to a different party
+      security:
+        - bearerAuth: []
+
   /api/v1/parties/{id}/contact:
     patch:
       tags: [Parties]
@@ -742,6 +775,37 @@ paths:
       responses:
         '200':
           description: Updated
+
+  /api/v1/parties/{id}/case:
+    patch:
+      tags: [Parties]
+      summary: Transition the party's PID verification case lifecycle
+      description: |
+        Moves the party's embedded verification case to a new status, recording the acting operator
+        and a reason code. Distinct from /api/v1/parties/cases/{id}/decision, which records a
+        four-eyes verdict on a standalone verification case.
+      operationId: transitionPartyCase
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransitionCaseRequest'
+      responses:
+        '200':
+          description: Party with the transitioned case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The requested transition is not legal from the case's current status
+      security:
+        - bearerAuth: []
 
   /api/v1/parties/{id}/sync/bankid:
     post:
@@ -1253,6 +1317,48 @@ components:
             Verified EUDI PID subject identifier (ADR-0094). Set only after cryptographic
             verification by EudiVerifyPresentationService — never the raw, unverified value.
             Blind-indexed with the same pepper as RČ; raw value is never stored.
+
+    LinkExternalIdRequest:
+      type: object
+      required: [type, value]
+      properties:
+        type:
+          type: string
+          description: |
+            Identifier namespace. BIRTH_NUMBER and EUDI_PID_SUBJECT carry a keyed blind index
+            (HMAC-SHA256 hex), never a plaintext value.
+          enum:
+            - KEYCLOAK_ID
+            - BANKID_SUB
+            - ROB_AIFO
+            - ICO
+            - PASSPORT_NUMBER
+            - ID_CARD_NUMBER
+            - BIRTH_NUMBER
+            - EUDI_PID_SUB
+        value:
+          type: string
+
+    TransitionCaseRequest:
+      type: object
+      required: [status, actor, reasonCode]
+      properties:
+        status:
+          type: string
+          enum: [DRAFT, OPEN, IN_REVIEW, WAITING_FOR_CUSTOMER, WAITING_FOR_EXTERNAL_PARTY, APPROVED, REJECTED, CLOSED, CANCELLED]
+        actor:
+          type: string
+          description: The operator performing the transition, recorded on the case history.
+        reasonCode:
+          type: string
+          enum: [CREATED, REVIEW_STARTED, INFORMATION_REQUESTED, INFORMATION_RECEIVED, EXTERNAL_DEPENDENCY, APPROVED, REJECTED, CLOSED, CANCELLED, REOPENED, MANUAL_UPDATE]
+        reason:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
 
     ApiError:
       type: object
