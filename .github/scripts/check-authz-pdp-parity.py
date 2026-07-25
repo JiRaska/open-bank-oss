@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""authz-enforce ⇒ OPA PDP sidecar parity guard (issue #1797, rules.yaml: authz_pdp_parity).
+"""authz-enforce ⇒ OPA PDP sidecar parity guard (issue #1797).
 
 WHY THIS EXISTS: eight live services enforced `@Authorize` (`authz.enforce` defaults true) while
 their gitops manifest declared no `opa` sidecar. AuthorizeInterceptor fails closed when the PDP at
@@ -25,9 +25,15 @@ declares the sidecar but the running pod lacks it (manifest-vs-live drift) — a
 see that. Live-drift is a separate detector's job; this guard's contract is "the declared manifest
 is self-consistent".
 
-ADVISORY (ADR-0144 gate-graduation): findings are ::warning:: annotations; exits 0 unless invoked
-with --enforce. The fleet currently carries several known violations (the reason this exists), so it
-graduates to enforce only once they are cleared — see rules.yaml: authz_pdp_parity.target_enforce_date.
+ADVISORY: findings are ::warning:: annotations; exits 0 unless invoked with --enforce. It graduates
+to enforce once the fleet carries no violations — 2 remain on main (finrep-service,
+onboarding-service), so `--enforce` exits 1 today.
+
+There is NO rule for this gate in rules.yaml, and there never has been. Earlier text here cited an
+`authz_pdp_parity.target_enforce_date` key as the graduation deadline; that key does not exist, so
+this gate is invisible to check-gate-graduation.sh (ADR-0144) and had no deadline at all —
+it only read as though it did. Do not re-add the citation without adding the rule: the governance
+half is tracked in #2392, which covers the whole class of CI gates with no rules.yaml entry.
 
 stdlib + PyYAML (already installed for check-governance-lineage.py / check-slo-registry.py).
 Usage: check-authz-pdp-parity.py [--root .] [--enforce]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""db-migration gate (rules.yaml: change_classes.db_change, ADR-0144 graduation).
+"""db-migration gate (rules.yaml: change_requirements.db_change, ADR-0144 graduation).
 
 Discharges the two things `db_change.require` asks of a PR that touches a Flyway migration:
 
