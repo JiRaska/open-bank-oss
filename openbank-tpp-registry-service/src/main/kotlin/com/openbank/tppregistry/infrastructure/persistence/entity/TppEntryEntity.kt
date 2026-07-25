@@ -13,6 +13,13 @@ import java.util.UUID
 @Entity
 @Table(name = "tpp_entries")
 class TppEntryEntity : PanacheEntity() {
+    // The domain's TppEntry.id is a UUID; this table's real primary key (inherited `id: Long`
+    // from PanacheEntity, BIGSERIAL) is internal only — never exposed via REST or referenced by
+    // another service. entryUuid is what the domain id actually maps to; DB-generated default,
+    // see V6__tpp_entries_entry_uuid.sql (issue #2340).
+    @Column(name = "entry_uuid", nullable = false)
+    lateinit var entryUuid: UUID
+
     @Column(name = "tpp_id", unique = true, nullable = false)
     lateinit var tppId: String
 
