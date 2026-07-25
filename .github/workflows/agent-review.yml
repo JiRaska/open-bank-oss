@@ -35,6 +35,10 @@
 #   * FALLBACK. If GitHub Models errors or is rate-limited, fall back to Claude via
 #     claude-code-action (auth = CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`,
 #     which runs on a Pro/Max subscription — no paid API key required).
+#     KNOWN BROKEN (#2161): the OAuth token is currently rejected at the gateway on
+#     the first model call (`is_error:true` at `num_turns:1`, ~2s), so this standby
+#     path does not actually review anything. Re-minting the token needs the owner's
+#     Claude session, so it is tracked separately — do not assume a fallback exists.
 #
 # Prerequisites (one-time, outside this file):
 #   1. Settings → Actions → General → "Allow GitHub Actions to approve pull
@@ -182,13 +186,78 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-          # Stash a size-capped diff for the reviewer prompt. Write to a file
-          # first, then truncate — piping straight into `head -c` lets `head`
-          # close stdin early on a large diff, sending `git diff` a SIGPIPE
-          # that fails the step under `pipefail` even though the truncated
-          # diff was written successfully.
-          git diff "origin/${BASE_REF}...HEAD" > /tmp/pr.full.diff
-          head -c 30000 /tmp/pr.full.diff > /tmp/pr.diff
+          # --- Reviewer payload: derived files out, hard token budget in -------
+          #
+          # Two independent defects fixed here (#2088), both observed on PR #2082:
+          #
+          #  1. GENERATED FILES DOMINATED THE PAYLOAD. Editing rules.yaml or any
+          #     .rego restamps EVERY service's OPA bundle ConfigMap (each embeds
+          #     rules.yaml + agents.yaml + rest.rego verbatim, ~2.8k lines), so a
+          #     one-line governance edit ships ~44 changed generated YAMLs. On
+          #     #2082 the raw 3-dot diff was 211,616 bytes, of which 196,973 were
+          #     a single `standing-order-opa-bundle.yaml` — 93% of the payload was
+          #     a file marked "GENERATED … do not hand-edit" that no reviewer
+          #     should read. The same class of noise already produced three
+          #     repeat false positives on the derived admin-ui catalogs (see the
+          #     admin-ui-deploy note in the job `if:` above). EXCLUDES below are
+          #     CI-generated artifacts only — never hand-written code.
+          #
+          #  2. THE BUDGET DID NOT MATCH THE MODEL'S CAP. `head -c 30000` is
+          #     ~8-10k tokens of diff alone, on top of a 4000-char PR body and the
+          #     instructions — well past GitHub Models' hard 8000-token REQUEST
+          #     cap, so those PRs 413'd deterministically ("Request body too
+          #     large for gpt-4o model. Max size: 8000 tokens"). Budget, measured
+          #     with tiktoken's o200k_base on real diffs from this repo (3.7-4.2
+          #     chars/token; 3.0 used as a pessimistic floor):
+          #       diff  16000 chars / 3.0 = 5333 tok  (measured ~4300)
+          #       body   4000 chars       ≈ 1100 tok  (prose, ~3.6 ch/tok)
+          #       scaffold + instructions ≈  250 tok
+          #       -------------------------------------------------
+          #       worst case              ≈ 6700 tok → ~15% headroom under 8000.
+          #     20000 (the value #2088 floated) leaves only ~5% and loses the
+          #     margin to a denser-than-3.0 diff, so it is deliberately lower.
+          #
+          # SCOPE NOTE — the excludes apply to the REVIEWER PAYLOAD ONLY, never
+          # to the sensitivity classification above. A generated bundle is still
+          # a real change; it just isn't something an LLM reviews line by line.
+          # Moving these excludes up into the classifier would silently narrow
+          # the money-path / governance gate, which this workflow must never do.
+          GENERATED_EXCLUDES=(
+            ':!**/*-opa-bundle*.yaml'              # ADR-0034 OPA bundle ConfigMaps (gen-*-opa-bundle.sh)
+            ':!openbank-admin-ui/app-status.json'  # derived catalogs, ADR-0071/0079/0081
+            ':!openbank-admin-ui/cluster-topology.json'
+            ':!openbank-admin-ui/infra-lifecycle.json'
+            ':!openbank-admin-ui/infra-vulns.json'
+            ':!openbank-admin-ui/package-lock.json' # npm-generated lockfile
+            ':!gradle/verification-metadata.xml'    # Gradle-generated dependency checksums
+            ':!**/CHANGELOG.md'                     # release-please-generated
+          )
+          # Write to a file first, THEN truncate — piping straight into `head -c`
+          # lets `head` close stdin early on a large diff, sending `git diff` a
+          # SIGPIPE that fails the step under `pipefail` even though the
+          # truncated diff was written successfully (#359).
+          git diff "origin/${BASE_REF}...HEAD" -- . "${GENERATED_EXCLUDES[@]}" > /tmp/pr.full.diff
+          git diff --name-only "origin/${BASE_REF}...HEAD" > /tmp/pr.files.all
+          git diff --name-only "origin/${BASE_REF}...HEAD" -- . "${GENERATED_EXCLUDES[@]}" > /tmp/pr.files.kept
+          DIFF_BUDGET=16000
+          head -c "$DIFF_BUDGET" /tmp/pr.full.diff > /tmp/pr.diff
+
+          FULL_BYTES="$(wc -c < /tmp/pr.full.diff | tr -d ' ')"
+          KEPT_BYTES="$(wc -c < /tmp/pr.diff | tr -d ' ')"
+          EXCLUDED_FILES="$(( $(wc -l < /tmp/pr.files.all) - $(wc -l < /tmp/pr.files.kept) ))"
+          echo "review payload: ${KEPT_BYTES}/${FULL_BYTES} bytes after dropping ${EXCLUDED_FILES} generated file(s)"
+          {
+            echo "diff_full_bytes=${FULL_BYTES}"
+            echo "diff_kept_bytes=${KEPT_BYTES}"
+            echo "generated_excluded=${EXCLUDED_FILES}"
+          } >> "$GITHUB_OUTPUT"
+          # Truncation must never be silent: an APPROVE derived from a fragment
+          # of the diff is a vacuous green, which is worse than no review.
+          if [ "$KEPT_BYTES" -lt "$FULL_BYTES" ]; then
+            echo "diff_truncated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "diff_truncated=false" >> "$GITHUB_OUTPUT"
+          fi
 
       # --- Sensitive: defer to a human, do not approve ------------------------
       - name: Defer to human review
@@ -208,6 +277,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           TITLE: ${{ github.event.pull_request.title }}
+          DIFF_TRUNCATED: ${{ steps.scope.outputs.diff_truncated }}
+          DIFF_FULL_BYTES: ${{ steps.scope.outputs.diff_full_bytes }}
+          DIFF_KEPT_BYTES: ${{ steps.scope.outputs.diff_kept_bytes }}
+          GENERATED_EXCLUDED: ${{ steps.scope.outputs.generated_excluded }}
         run: |
           set -euo pipefail
           # Fetch the PR body FRESH via the API, not from the event payload — the
@@ -219,6 +292,10 @@ jobs:
           # guard as the diff above.
           gh pr view "$PR" --json body --jq '.body // ""' > /tmp/pr.body.full
           head -c 4000 /tmp/pr.body.full > /tmp/pr.body
+          DIFF_TRUNCATED_LABEL=""
+          if [ "$DIFF_TRUNCATED" = "true" ]; then
+            DIFF_TRUNCATED_LABEL=" (TRUNCATED — ${DIFF_KEPT_BYTES} of ${DIFF_FULL_BYTES} bytes)"
+          fi
           {
             echo "You are an INDEPENDENT, adversarial code reviewer for a banking-grade"
             echo "Quarkus/Kotlin monorepo. Your default posture is skepticism: actively"
@@ -233,7 +310,22 @@ jobs:
             cat /tmp/pr.body
             echo '```'
             echo
-            echo "Unified diff (may be truncated):"
+            if [ "${GENERATED_EXCLUDED:-0}" -gt 0 ]; then
+              echo "NOTE: ${GENERATED_EXCLUDED} CI-generated file(s) (OPA bundle ConfigMaps,"
+              echo "derived catalogs, lockfiles, CHANGELOGs) were removed from the diff below."
+              echo "They are regenerated by scripts and are never hand-edited — do not comment"
+              echo "on their absence, and do not treat it as an incomplete change."
+              echo
+            fi
+            if [ "$DIFF_TRUNCATED" = "true" ]; then
+              echo "WARNING: THE DIFF BELOW IS TRUNCATED. Only ${DIFF_KEPT_BYTES} of"
+              echo "${DIFF_FULL_BYTES} bytes are shown; the rest of the change is NOT visible"
+              echo "to you. You have therefore not seen the whole change and MUST NOT answer"
+              echo "APPROVE — answer REQUEST_CHANGES and say in the summary that the diff was"
+              echo "too large to review in full."
+              echo
+            fi
+            echo "Unified diff${DIFF_TRUNCATED_LABEL}:"
             echo '```diff'
             cat /tmp/pr.diff
             echo '```'
@@ -260,6 +352,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           RESPONSE: ${{ steps.ghmodels.outputs.response }}
+          DIFF_TRUNCATED: ${{ steps.scope.outputs.diff_truncated }}
+          DIFF_FULL_BYTES: ${{ steps.scope.outputs.diff_full_bytes }}
+          DIFF_KEPT_BYTES: ${{ steps.scope.outputs.diff_kept_bytes }}
+          GENERATED_EXCLUDED: ${{ steps.scope.outputs.generated_excluded }}
         run: |
           set -euo pipefail
           # Extract the first {...} JSON object; tolerate stray prose. Same fix as the
@@ -273,9 +369,31 @@ jobs:
           JSON="$(grep -oE '\{.*\}' -m1 /tmp/response.txt || true)"
           DECISION="$(printf '%s' "$JSON" | jq -r '.decision // "REQUEST_CHANGES"')"
           SUMMARY="$(printf '%s' "$JSON" | jq -r '.summary // "no summary"')"
+
+          # Coverage footer — the reader must be able to tell what the verdict
+          # was actually based on. A green tick on a fragment of the diff reads
+          # exactly like a green tick on the whole thing, which is the failure
+          # class this repo works hardest to avoid (#2088).
+          FOOTER=""
+          if [ "${GENERATED_EXCLUDED:-0}" -gt 0 ]; then
+            FOOTER="${FOOTER}
+          _Excluded ${GENERATED_EXCLUDED} CI-generated file(s) (OPA bundles, derived catalogs, lockfiles, CHANGELOGs) from the reviewed diff — they are regenerated, not hand-written._"
+          fi
+          if [ "$DIFF_TRUNCATED" = "true" ]; then
+            FOOTER="${FOOTER}
+          ⚠️ **Partial review — the diff was truncated.** Only ${DIFF_KEPT_BYTES} of ${DIFF_FULL_BYTES} diff bytes fit the model's request budget, so this verdict covers PART of the change only. Do not read it as a clean pass; a human should review the rest."
+            # Belt and braces: even if the model ignored the in-prompt
+            # instruction and answered APPROVE, an approval based on a fragment
+            # must not be posted as an approving review.
+            if [ "$DECISION" = "APPROVE" ]; then
+              echo "::warning::model returned APPROVE on a truncated diff — downgrading to a comment review"
+              DECISION="REQUEST_CHANGES"
+            fi
+          fi
           BODY="🤖 **Agent review (GitHub Models · gpt-4o)**
 
           ${SUMMARY}
+          ${FOOTER}
 
           _Automated independent review. Sensitive changes are always deferred to a human._"
           if [ "$DECISION" = "APPROVE" ]; then
