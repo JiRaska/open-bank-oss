@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.7](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.7.6...aml-service-v0.7.7) (2026-07-25)
+
+
+### Bug Fixes
+
+* **aml:** state the four constraints the gate previously forced into prose ([#2373](https://github.com/JiRaska/open-bank-oss/issues/2373)) ([67508f4](https://github.com/JiRaska/open-bank-oss/commit/67508f452534cf2ad13872c295e66c485e4c93a1))
+
 ## [0.7.6](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.7.5...aml-service-v0.7.6) (2026-07-25)
 
 
