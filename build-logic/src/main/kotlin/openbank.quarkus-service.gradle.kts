@@ -93,6 +93,18 @@ tasks.test {
         providers.environmentVariable("DOCKER_HOST").orElse("unix:///var/run/docker.sock").get(),
     )
     environment("TESTCONTAINERS_RYUK_DISABLED", "true")
+
+    // Committed pacts are derived data (ADR-0063), so a regenerated pact must be AUTHORITATIVE —
+    // it has to be able to remove an interaction, not only add one. pact-jvm's default writer
+    // MERGES a freshly generated pact into whatever JSON already sits at pact.rootDir, so a
+    // hand-edited or stale interaction survives regeneration untouched and the pact-drift gate's
+    // `git diff -- pacts/` only ever sees additions. Proven locally on 2026-07-25: a committed
+    // tamper of openbank-card-issuance-service-openbank-product-catalog.json came back as
+    // "132 insertions(+), 0 deletions(-)" with the tampered interaction still present and the
+    // correct one appended alongside it. With overwrite the same tamper diffs 3(+)/3(-) and the
+    // tampered text is gone. Set here (not per module) so the 21 services that write pacts cannot
+    // drift apart on it.
+    systemProperty("pact.writer.overwrite", "true")
 }
 
 tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {

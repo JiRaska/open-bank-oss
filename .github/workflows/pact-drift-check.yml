@@ -50,32 +50,77 @@ jobs:
       # unchecked, it reads as PASSING: the diff step only ever sees pacts/ files this step
       # regenerated, so an omitted consumer's committed pact is never rewritten and so never
       # differs. Add the module in the same PR that adds the pact (finrep arrived with #2269's).
+      # The "Verify every committed pact was actually regenerated" step below now enforces that.
+      #
+      # --rerun is load-bearing, not a belt-and-braces flag (#2291). The generated pact JSON is
+      # not a declared output of the `test` task, so nothing invalidates `test` when pacts/
+      # changes: Gradle reports UP-TO-DATE (or FROM-CACHE — this job runs with `cache: gradle`,
+      # so a warm cache is the expected state), the pact files are never rewritten, the diff
+      # below is empty and the gate prints "No drift" having checked nothing. That is worst
+      # exactly where the gate matters most — a PR whose only change is under pacts/, i.e. the
+      # hand-edited-derived-file case this whole workflow exists to catch. --rerun is scoped to
+      # the tasks named on the command line, so compileKotlin/compileTestKotlin still come from
+      # the cache and only the (pure-JVM, mock-server) pact tests re-execute.
       #
       # openbank-swift-service is deliberately excluded here: its own build.gradle.kts
-      # statically excludes SwiftEventPactConsumerTest whenever CI=true (PactConsumerTestExt
-      # auto-publishes to pactbroker.url in CI and hangs/401s — issue #2404), so it can never
-      # run in a CI job regardless of --tests filtering. openbank-transaction-service-
-      # openbank-swift-service.json is NOT covered by this drift gate until #2404 re-enables it.
+      # statically excludes both SwiftEventPactConsumerTest and ClearingSimulatorPactConsumerTest
+      # whenever CI=true (PactConsumerTestExt auto-publishes to pactbroker.url in CI and
+      # hangs/401s — issue #2404), so they can never run in a CI job regardless of --tests
+      # filtering; a run there fails outright with "No tests found for given includes". Their two
+      # pacts are named in PACT_UNCOVERED below and are NOT covered by this gate until #2404
+      # re-enables them.
       - name: Regenerate every consumer pact
         run: |
+          # Marker for the coverage check below: anything under pacts/ older than this was not
+          # rewritten by the run that follows.
+          touch "${RUNNER_TEMP}/pact-regen-marker"
           ./gradlew --continue \
-            :openbank-account-service:test --tests "com.openbank.account.contract.*PactConsumerTest" \
-            :openbank-balance-service:test --tests "com.openbank.balance.contract.*PactConsumerTest" \
-            :openbank-billing-service:test --tests "com.openbank.billing.contract.*PactConsumerTest" \
-            :openbank-card-issuance-service:test --tests "com.openbank.cardissuance.contract.*PactConsumerTest" \
-            :openbank-consent-service:test --tests "com.openbank.consent.contract.*PactConsumerTest" \
-            :openbank-domestic-payment:test --tests "com.openbank.domestic.contract.*PactConsumerTest" \
-            :openbank-finrep-service:test --tests "com.openbank.finrep.contract.*PactConsumerTest" \
-            :openbank-fraud-service:test --tests "com.openbank.fraud.contract.*PactConsumerTest" \
-            :openbank-fx-service:test --tests "com.openbank.fx.contract.*PactConsumerTest" \
-            :openbank-kyc-service:test --tests "com.openbank.kyc.contract.*PactConsumerTest" \
-            :openbank-lending-service:test --tests "com.openbank.lending.contract.*PactConsumerTest" \
-            :openbank-notification-service:test --tests "com.openbank.notification.contract.*PactConsumerTest" \
-            :openbank-onboarding-service:test --tests "com.openbank.onboarding.contract.*PactConsumerTest" \
-            :openbank-sepa-instant:test --tests "com.openbank.sepainstant.contract.*PactConsumerTest" \
-            :openbank-sepa-payment:test --tests "com.openbank.sepa.contract.*PactConsumerTest" \
-            :openbank-settlement-service:test --tests "com.openbank.settlement.contract.*PactConsumerTest" \
-            :openbank-transaction-service:test --tests "com.openbank.transaction.contract.*PactConsumerTest"
+            :openbank-account-service:test --rerun --tests "com.openbank.account.contract.*PactConsumerTest" \
+            :openbank-balance-service:test --rerun --tests "com.openbank.balance.contract.*PactConsumerTest" \
+            :openbank-billing-service:test --rerun --tests "com.openbank.billing.contract.*PactConsumerTest" \
+            :openbank-card-issuance-service:test --rerun --tests "com.openbank.cardissuance.contract.*PactConsumerTest" \
+            :openbank-consent-service:test --rerun --tests "com.openbank.consent.contract.*PactConsumerTest" \
+            :openbank-domestic-payment:test --rerun --tests "com.openbank.domestic.contract.*PactConsumerTest" \
+            :openbank-finrep-service:test --rerun --tests "com.openbank.finrep.contract.*PactConsumerTest" \
+            :openbank-fraud-service:test --rerun --tests "com.openbank.fraud.contract.*PactConsumerTest" \
+            :openbank-fx-service:test --rerun --tests "com.openbank.fx.contract.*PactConsumerTest" \
+            :openbank-interest-service:test --rerun --tests "com.openbank.interest.contract.*PactConsumerTest" \
+            :openbank-kyc-service:test --rerun --tests "com.openbank.kyc.contract.*PactConsumerTest" \
+            :openbank-lending-service:test --rerun --tests "com.openbank.lending.contract.*PactConsumerTest" \
+            :openbank-notification-service:test --rerun --tests "com.openbank.notification.contract.*PactConsumerTest" \
+            :openbank-onboarding-service:test --rerun --tests "com.openbank.onboarding.contract.*PactConsumerTest" \
+            :openbank-sepa-instant:test --rerun --tests "com.openbank.sepainstant.contract.*PactConsumerTest" \
+            :openbank-sepa-payment:test --rerun --tests "com.openbank.sepa.contract.*PactConsumerTest" \
+            :openbank-settlement-service:test --rerun --tests "com.openbank.settlement.contract.*PactConsumerTest" \
+            :openbank-transaction-service:test --rerun --tests "com.openbank.transaction.contract.*PactConsumerTest"
+
+      # Belt to --rerun's braces, and the thing that keeps the module list above honest. The diff
+      # step cannot tell "regenerated and identical" from "never regenerated" — both look clean.
+      # This can: every file under pacts/ must have been rewritten by the step above. It catches
+      # the UP-TO-DATE/FROM-CACHE skip if --rerun ever regresses, AND the failure mode that let
+      # openbank-interest-service sit uncovered since the gate landed (#2283) — a consumer test
+      # added without adding its module to the list, which no green run would otherwise reveal.
+      - name: Verify every committed pact was actually regenerated
+        env:
+          # Uncovered by construction until #2404 re-enables the swift consumer tests in CI.
+          PACT_UNCOVERED: |
+            pacts/openbank-swift-service-openbank-clearing-simulator.json
+            pacts/openbank-transaction-service-openbank-swift-service.json
+        run: |
+          stale=""
+          for f in pacts/*.json; do
+            case "$PACT_UNCOVERED" in *"$f"*) continue ;; esac
+            if [ ! "$f" -nt "${RUNNER_TEMP}/pact-regen-marker" ]; then
+              stale="$stale $f"
+            fi
+          done
+          if [ -n "$stale" ]; then
+            echo "::error::These committed pacts were NOT rewritten by the regeneration step, so the drift check below would pass without having read them:"
+            for f in $stale; do echo "::error::  $f"; done
+            echo "::error::Either the consumer's module is missing from the Gradle invocation above, or its test task was skipped. Add the module (and its --tests filter) to the 'Regenerate every consumer pact' step."
+            exit 1
+          fi
+          echo "Coverage OK — every committed pact except the documented #2404 exclusions was regenerated by this run."
 
       - name: Fail on drift between regenerated and committed pacts
         run: |
