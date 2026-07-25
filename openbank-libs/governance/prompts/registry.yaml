@@ -69,8 +69,14 @@ charters:
 
   - id: control-liveness-sentinel
     status: registered
-    prompts: [system.v1]
-    source: openbank-control-liveness-sentinel LlmDiagnosisAdapter.SYSTEM_PROMPT
+    prompts: [system.v1, system.v2]
+    # v2 is what the adapter loads today (see the resource path in loadRegisteredPrompt): it forbids
+    # emitting a concrete, copy-pasteable remediation command anywhere in the output, after the
+    # #1918 evals gate caught v1 partially complying with an injected `kubectl scale --replicas=0`.
+    # v1 stays listed and on disk because a shipped prompt is immutable — an AuditEvent written
+    # while v1 was live carries its prompt_hash, and delisting the file makes that hash unresolvable,
+    # which is the exact EU AI Act Art. 12 property this registry exists to hold.
+    source: openbank-control-liveness-sentinel LlmDiagnosisAdapter.SYSTEM_PROMPT (loads system.v2)
     placeholders: []
 
   - id: rca-investigator

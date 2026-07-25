@@ -416,12 +416,26 @@ jobs:
 
       # ADR-0148: the prompt registry (openbank-libs/governance/prompts/) must stay resolvable —
       # every prompt file names a real charter, uses <name>.v<N>.md, is non-empty, and never
-      # re-uses a shipped version (a prompt is immutable, like a Flyway migration). ADVISORY first
-      # (ADR-0144): coverage gaps are ::warning while services still hold inline prompt constants;
-      # graduate to enforced (drop continue-on-error) once they load from the registry and a
-      # deployed prompt_hash can be resolved. Structural corruption still exits non-zero.
-      - name: "prompt-registry integrity (ADR-0148, advisory)"
-        continue-on-error: true
+      # re-uses a shipped version (a prompt is immutable, like a Flyway migration).
+      #
+      # ENFORCED (was advisory). What the advisory period actually bought: nothing. It went red on
+      # main from cffc5ff9 (#2321) until #2363 — the PR that added the injection-hardened
+      # system.v2.md left it unlisted in registry.yaml, so the one prompt written specifically to
+      # resist prompt injection sat outside the reviewed set, and continue-on-error meant no PR
+      # ever saw it. Coverage gaps were never the failing half; they are ::warning by construction
+      # inside the script (`pending` charters), and stay that way after this flip. Everything that
+      # exits non-zero here is structural and fixable in the same PR that breaks it: a prompt for a
+      # charter that does not exist in agents.yaml, a malformed filename, an empty file, a re-used
+      # version, or a registry.yaml claim that contradicts the tree. So the original graduation
+      # condition ("once services load from the registry and a deployed prompt_hash resolves") was
+      # never a precondition for THESE errors — it gates the byte-for-byte parity check, which this
+      # script does not yet perform (2 of 5 registered charters load from the registry today:
+      # devops-agent #2240, control-liveness-sentinel #2321).
+      #
+      # This step runs in `Validate manifests`, a required check, so it now blocks merge — and that
+      # job stops at its first failing gate, leaving later steps `skipped`, not `pass`. Run it
+      # locally before pushing: python3 .github/scripts/check-prompt-registry.py
+      - name: "prompt-registry integrity (ADR-0148, enforced)"
         run: python3 .github/scripts/check-prompt-registry.py
 
       # ADR-0148 evals gate — structure check. The eval registry

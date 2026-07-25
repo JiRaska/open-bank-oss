@@ -19,7 +19,7 @@ import jakarta.inject.Inject
  *    deterministic placeholder exactly as before; the adapter is now injectable, so an eval can
  *    drive it with a stub gateway.
  *  - The system prompt is loaded from the ADR-0148 prompt registry (the
- *    control-liveness-sentinel `system.v1.md` file), packaged at build time (see
+ *    control-liveness-sentinel `system.v2.md` file), packaged at build time (see
  *    build.gradle.kts) and read verbatim, so the runtime prompt equals the registered content
  *    byte-for-byte — the `prompt_hash` in an AI-attributed AuditEvent now resolves.
  *
