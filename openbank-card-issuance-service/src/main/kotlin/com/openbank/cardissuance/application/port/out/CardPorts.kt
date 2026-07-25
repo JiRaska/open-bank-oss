@@ -35,4 +35,19 @@ interface CardRepository {
 
     /** Anonymises PII (cardholderName, embossedName) for cards whose expiry_date is before [cutoff]. Returns the count updated. */
     suspend fun anonymizeExpiredCardPii(cutoff: LocalDate): Int
+
+    /**
+     * Cards with **no stored PAN credential** that are still worth one — i.e. `pan_encrypted IS NULL`
+     * and the card is not in a terminal status. Feeds the vault backfill (ADR-0194 follow-up); a
+     * CANCELLED or EXPIRED card is dead and needs no credential minted for it.
+     */
+    suspend fun findWithoutPanCredential(): List<Card>
+
+    /**
+     * Writes the encrypted PAN/CVV onto a card **only if it has none** (`pan_encrypted IS NULL`).
+     * Returns true when the row was written. The NULL guard is what makes the backfill idempotent
+     * and safe to race: a second boot, or a concurrent replica, updates nothing and cannot renumber
+     * a card that already has a credential.
+     */
+    suspend fun storePanCredentialIfAbsent(cardId: UUID, panEncrypted: String, cvvEncrypted: String): Boolean
 }

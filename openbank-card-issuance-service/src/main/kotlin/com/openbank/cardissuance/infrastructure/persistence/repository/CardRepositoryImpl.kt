@@ -18,6 +18,7 @@ import java.time.LocalDate
 import java.util.UUID
 
 @ApplicationScoped
+@Suppress("TooManyFunctions") // one adapter method per CardRepository port method (hexagonal)
 class CardRepositoryImpl(private val outboxRepository: CardOutboxRepositoryImpl) :
     CardRepository,
     PanacheRepository<CardEntity> {
@@ -74,6 +75,28 @@ class CardRepositoryImpl(private val outboxRepository: CardOutboxRepositoryImpl)
         )
     }.awaitSuspending()
 
+    override suspend fun findWithoutPanCredential(): List<Card> = Panache.withSession {
+        find("panEncrypted IS NULL AND status NOT IN ?1", TERMINAL_STATUS_NAMES).list()
+    }.awaitSuspending().map { it.toDomain() }
+
+    /**
+     * Bulk UPDATE rather than a load-mutate-flush: the `panEncrypted IS NULL` predicate has to be
+     * part of the *write*, not a check the caller made earlier, or two replicas booting together
+     * could both decide a card needs a credential and the second would overwrite the first's.
+     */
+    override suspend fun storePanCredentialIfAbsent(
+        cardId: UUID,
+        panEncrypted: String,
+        cvvEncrypted: String,
+    ): Boolean = Panache.withTransaction {
+        update(
+            "panEncrypted = ?1, cvvEncrypted = ?2 WHERE id = ?3 AND panEncrypted IS NULL",
+            panEncrypted,
+            cvvEncrypted,
+            cardId,
+        )
+    }.awaitSuspending() == 1
+
     /** Copy the mutable (lifecycle) fields of [card] onto a managed entity for an in-place update. */
     private fun CardEntity.applyFrom(card: Card) {
         status = card.status.name
@@ -93,5 +116,10 @@ class CardRepositoryImpl(private val outboxRepository: CardOutboxRepositoryImpl)
         blockedAt = card.blockedAt
         blockedReason = card.blockedReason
         updatedAt = card.updatedAt
+    }
+
+    private companion object {
+        /** `status` is persisted as its enum NAME (see CardMapper), so the query compares strings. */
+        val TERMINAL_STATUS_NAMES = Card.TERMINAL_STATUSES.map { it.name }
     }
 }
