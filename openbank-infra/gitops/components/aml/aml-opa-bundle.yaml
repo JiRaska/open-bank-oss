@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: aml-service
     app.kubernetes.io/part-of: aml
   annotations:
-    openbank.tech/policy-checksum: "a2893c45b7a64281"
+    openbank.tech/policy-checksum: "7959961a5a9f67c8"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2771,19 +2771,6 @@ data:
     # MEASURED behaviour by a classifier + CI gate (derive -> enforce -> show, ADR-0029/0054).
     # ---------------------------------------------------------------------------------------
     finops_tiers:
-      # Declared-side validation (check-finops-tiers.py, finops-lifecycle.yml) runs ADVISORY: the
-      # script always exits 0 today, so a tier declared here that contradicts the manifest is a
-      # ::warning. Graduating needs the MEASURED classifier (the derive->enforce->show half below);
-      # until that lands there is nothing to compare a declaration against except itself.
-      #
-      # Registered with a date as part of issue #2392: this gate ran advisory with no `enforced` /
-      # `target_enforce_date` on its rule, so check-gate-graduation.sh (ADR-0144) skipped it entirely
-      # and it had no deadline at all.
-      enforced: advisory
-      target_enforce_date: "2026-12-31"   # ADR-0144 — gated on the measured classifier, not on triage
-      blocked_on: "the measured-side classifier must land before the declared side can hard-fail;
-        without it, enforcing would only assert that the file agrees with itself"
-      ci_producer: "openbank-infra/scripts/check-finops-tiers.py"
       tiers:
         T0:                                   # Always-on
           definition: "Money-path HOT path where a cold-start / scaled-to-zero gap is unacceptable, or a regulator-mandated continuous service."
@@ -2886,6 +2873,9 @@ data:
       enforced: advisory                      # ADR-0057; -> block when the classifier lands
       target_enforce_date: "2026-09-30"   # ADR-0144
       blocked_on: "the measured-signal classifier (http_request_rate, kafka_consumer_lag, cpu/replica utilisation) has not shipped yet — only 2 services have a declared tier today (notification-service, product-catalog)"
+      # Added by issue #2392: the rule carried `enforced`/`target_enforce_date` but never named the
+      # script that produces the finding, so nothing tied the advisory CI step to this deadline.
+      ci_producer: "openbank-infra/scripts/check-finops-tiers.py"
 
     # ---------------------------------------------------------------------------------------
     # FinOps cost-allocation groups — showback business flows (ADR-0062). The /api/finops/costs
