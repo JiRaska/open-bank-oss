@@ -18,6 +18,9 @@ dependencies {
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.oidc)
+    // M2M client-credentials token attached to the downstream account/balance/transaction/consent
+    // RestClient calls (ADR-0195 step 2) — same pattern as openbank-agent-service's ServiceClients.
+    implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
