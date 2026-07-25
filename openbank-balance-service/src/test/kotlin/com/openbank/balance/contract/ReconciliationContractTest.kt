@@ -23,11 +23,13 @@ class ReconciliationContractTest {
     @Test
     fun `contract version is bumped for the reconciliation change`() {
         val version = Regex("""(?m)^\s+version:\s*"?([^"\s]+)"?\s*$""").find(openapi)?.groupValues?.get(1)
-        // 1.5.0: MINOR — ADR-0178 Phase 3 adds the optional, additive `futureValueDatedPipeline`
-        // property to CurrencyReconciliation (issue #1746). Backward compatible: no property removed,
-        // none made required, no behavior change. Previous 1.4.1 was an editorial bump for the 403
-        // Forbidden documentation added across every operation (ADR-0034 Phase 5, issue #266).
-        assertEquals("1.5.0", version)
+        // 1.6.0: MINOR — publishes PATCH /api/v1/balances/approvals/{id}, the ADR-0155 four-eyes
+        // decision point, which the service has always served and the contract never named
+        // (issue #2358). Additive: a path added, nothing removed or made required.
+        // 1.5.0 was ADR-0178 Phase 3 adding the optional `futureValueDatedPipeline` property to
+        // CurrencyReconciliation (issue #1746); 1.4.1 was an editorial bump for the 403 Forbidden
+        // documentation added across every operation (ADR-0034 Phase 5, issue #266).
+        assertEquals("1.6.0", version)
     }
 
     /**
