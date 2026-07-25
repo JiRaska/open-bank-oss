@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/ap2-service-v0.2.1...ap2-service-v0.3.0) (2026-07-25)
+
+
+### Features
+
+* **ap2:** instrument mandate verdicts, signature stages and PDP decisions ([#2282](https://github.com/JiRaska/open-bank-oss/issues/2282)) ([56c13a0](https://github.com/JiRaska/open-bank-oss/commit/56c13a0c9c89b1e73304b346fda678c4c44311a4)), closes [#2255](https://github.com/JiRaska/open-bank-oss/issues/2255)
+
 ## [0.2.1](https://github.com/JiRaska/open-bank-oss/compare/ap2-service-v0.2.0...ap2-service-v0.2.1) (2026-07-25)
 
 
