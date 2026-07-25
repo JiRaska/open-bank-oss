@@ -9,8 +9,18 @@
 # C8 sweep (prod-readiness collector): added fraud, pid, psd2 — previously absent from
 # the list, so fraud-service, pid-service and psd2-service metrics never reached Prometheus.
 # agent-service and copilot-service are covered via the existing `platform` entry;
-# sdd-service, transaction-service, clearing-service, swift-service via `payments`;
+# transaction-service, clearing-service, swift-service via `payments`;
 # onboarding-service via `onboarding`; lending-service via `lending`.
+#
+# Second C8 sweep (#2255): added anacredit, billing, documents, finrep, sdd, tpp-registry.
+# Those six services' metrics had never reached Prometheus, and billing, document-service
+# and tpp-registry ship PrometheusRules that therefore could not fire. `sdd` is the reason
+# this list must not be maintained by reading the comment above: that comment claimed
+# sdd-service was covered "via `payments`", but sdd-service's Deployment is in namespace
+# `sdd` and payments-services.yaml does not mention sdd at all. The prod-readiness
+# collector's C8 scorer read this file as a plain substring, so the false claim scored
+# sdd as scraped. Coverage is now asserted from the workload manifests by
+# .github/scripts/check-podmonitor-namespace-coverage.py — do not hand-audit it.
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
@@ -27,12 +37,16 @@ spec:
     matchNames:
       - accounts
       - aml
+      - anacredit
       - analytics
       - audit
       - balances
+      - billing
       - consent
       - customer-edge
       - dispute
+      - documents
+      - finrep
       - fraud
       - fx
       - interest
@@ -48,8 +62,10 @@ spec:
       - psd2
       - sanctions
       - sca
+      - sdd
       - security-scanner
       - statements
+      - tpp-registry
   podMetricsEndpoints:
     - port: management
       path: /q/metrics

@@ -352,6 +352,20 @@ jobs:
             exit 1
           fi
 
+      # issue #2255. The fleet PodMonitor selects pods fleet-wide but restricts them with an
+      # explicit namespaceSelector.matchNames, so a service whose namespace is missing from
+      # that list is never scraped — and NOTHING goes red: the pod is healthy, the
+      # PrometheusRule written against its metrics is valid, and the series simply does not
+      # exist. It has drifted twice (the header comment records the first). The second drift
+      # also proves prose is not a control: that comment claimed sdd-service was covered "via
+      # `payments`" while sdd-service's Deployment is in namespace `sdd`. This resolves each
+      # namespace from the workload manifests instead. Its own --self-test below feeds it a
+      # fixture it MUST flag, because a gate that has only ever passed is unfalsified.
+      - name: "PodMonitor namespace coverage self-test (issue #2255)"
+        run: python3 .github/scripts/check-podmonitor-namespace-coverage.py --self-test
+      - name: "PodMonitor namespace coverage (issue #2255, enforced)"
+        run: python3 .github/scripts/check-podmonitor-namespace-coverage.py
+
       # The governance gates in this job (threat-model coverage + diff, network-policy
       # generation, authz-coverage) are stdlib Python with committed *_test.py suites that,
       # until now, no workflow ran — a gate whose own logic is untested silently rots. Run
