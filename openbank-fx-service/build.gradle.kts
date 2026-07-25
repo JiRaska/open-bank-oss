@@ -55,6 +55,9 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     // Provider verification (ADR-0063 P2 Batch B): transaction-service calls GET /api/v1/fx/rates.
     testImplementation(libs.pact.provider)
+    // Consumer-driven contract for the aml-service case store (issue #2255, C3): fx is the consumer
+    // of POST /api/v1/aml/cases, so this module also generates a pact.
+    testImplementation(libs.pact.consumer)
 }
 
 kover {

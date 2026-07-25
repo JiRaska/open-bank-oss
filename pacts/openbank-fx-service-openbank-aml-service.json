@@ -1,0 +1,48 @@
+{
+  "consumer": {
+    "name": "openbank-fx-service"
+  },
+  "interactions": [
+    {
+      "description": "POST a CRITICAL TRANSACTION_MONITORING case for a sanctions-hit FX conversion",
+      "providerStates": [
+        {
+          "name": "no AML case exists for the FX conversion idempotency key"
+        }
+      ],
+      "request": {
+        "body": {
+          "accountId": "44444444-4444-4444-4444-444444444444",
+          "alertCode": "SANCTIONS_HIT",
+          "alertDetail": "DEBTOR '22222222-2222-2222-2222-222222222222' POTENTIAL_MATCH score=92",
+          "customerReference": "22222222-2222-2222-2222-222222222222 CZK->EUR 100000",
+          "matchedEntity": "OFAC SDN entry 'ACME EXPORT LLC'",
+          "partyId": "22222222-2222-2222-2222-222222222222",
+          "riskLevel": "CRITICAL",
+          "screeningType": "TRANSACTION_MONITORING",
+          "transactionId": "33333333-3333-3333-3333-333333333333"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "aml-33333333-3333-3333-3333-333333333333-SANCTIONS_HIT"
+        },
+        "method": "POST",
+        "path": "/api/v1/aml/cases"
+      },
+      "response": {
+        "status": 201
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-aml-service"
+  }
+}

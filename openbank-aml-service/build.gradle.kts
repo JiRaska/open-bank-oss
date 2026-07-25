@@ -46,6 +46,28 @@ dependencies {
 
     // Shared authz conformance kit (issue #467) — AmlCaseSecurityTest pilot migration.
     testImplementation(project(":openbank-libs-testing"))
+
+    // Pact provider verification (issue #2255, C3): fx-service is a consumer of
+    // POST /api/v1/aml/cases. @TestSecurity supplies the operator role Pact replays with.
+    testImplementation(libs.pact.provider)
+    testImplementation(libs.quarkus.test.security)
+}
+
+// Pact: replay the committed git-pact contracts (ADR-0063) and forward broker config when CI
+// supplies it, so a later broker migration needs no build change here.
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
 
 kover {
