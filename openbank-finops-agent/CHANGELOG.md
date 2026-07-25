@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/JiRaska/open-bank-oss/compare/finops-agent-v0.3.0...finops-agent-v0.3.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* **authz:** realm-issued role names across 9 services + enforce @RolesAllowed parity ([#2404](https://github.com/JiRaska/open-bank-oss/issues/2404)) ([#2418](https://github.com/JiRaska/open-bank-oss/issues/2418)) ([64a1f9b](https://github.com/JiRaska/open-bank-oss/commit/64a1f9be47bedbda5ffad876bb0394f404503821))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/finops-agent-v0.2.3...finops-agent-v0.3.0) (2026-07-23)
 
 
