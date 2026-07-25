@@ -7,6 +7,15 @@
 # (docs/agents/*.md). Enforces full id parity between the two — see the script's
 # header for the drift class this prevents. Mirrors adr-registry.yml: small,
 # named, own workflow rather than a step buried in the services-ci matrix.
+#
+# WHERE THE TEETH ACTUALLY ARE (2026-07-25): like adr-registry.yml and
+# eu-ai-act-registry.yml, this workflow is NOT in the main-protection ruleset's
+# required-status-checks list, and cannot be — it is path-filtered, and GitHub holds
+# a required context that never runs as permanently "Expected", which would block
+# every PR touching none of the paths below. The binding gate is the
+# `agent charter registry parity` step inside the REQUIRED `Validate manifests` job
+# in ci.yml, which runs this same script unconditionally. This workflow is the fast,
+# path-filtered echo. Do not delete either without moving the other.
 # -----------------------------------------------------------------------------
 name: Agent charter registry
 

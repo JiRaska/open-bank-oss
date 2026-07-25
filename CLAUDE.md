@@ -267,7 +267,7 @@ fire from *outside* it, so they stay here:
   red advisory check means "someone should look"; on a generated one it means "the committed document
   does not match reality" — there is no judgement left to exercise, so advisory just makes the drift
   mergeable. `eu-ai-act-registry` went red twice on #2156 and the PR merged anyway, leaving the EU AI
-  Act inventory omitting an AI system until it was regenerated. Tracked as #2216.
+  Act inventory omitting an AI system until it was regenerated (#2216).
 - **The gate that never existed beats the unfalsified one: check whether anything reads the artifact
   at all before assuming a green covers it.** This repo is a MULTI-LICENSE tree — Apache-2.0 at the
   root, an AGPL-3.0-only open-core subset (ADR-0136 + ADR-0181/0193) — and *nothing* compared the
@@ -310,6 +310,16 @@ fire from *outside* it, so they stay here:
   duplicate key there is silently resolved by SnakeYAML keeping the LAST occurrence, so a new value
   added above an existing one is dropped with no error anywhere. Diff yamllint finding *sets*
   against `origin/main` when editing it (that is the only thing that caught it on #2457).
+- **A `paths:`-filtered workflow can never be a required status check — so its red is advisory no
+  matter how the job is written.** GitHub holds a required context that does not report as
+  permanently "Expected — waiting for status", so requiring a path-filtered workflow blocks every PR
+  that touches none of its paths. That is why all five required contexts (`all-green`,
+  `Validate manifests`, `Gitleaks`, `issue-hygiene`, `OPA policy gate`) run unconditionally. The
+  established fix is not to require the small workflow but to put the **binding copy of the script**
+  in the unconditional `Validate manifests` job in `ci.yml` and keep the path-filtered workflow as a
+  fast echo — what `adr-registry` already did, and what `agent-charter-registry` and `eu-ai-act` now
+  do too. Corollary: reaching for the ruleset is usually the wrong instinct here, since the in-repo
+  fix ships in the same PR as the gate and needs no GitHub-side config change.
 
 ### CI / bot commit signing
 - **What signs a bot commit is the *endpoint*, not the token — and `main-protection` enforces
