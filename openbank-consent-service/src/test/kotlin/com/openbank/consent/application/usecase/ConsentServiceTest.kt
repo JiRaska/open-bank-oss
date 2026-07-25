@@ -366,6 +366,23 @@ class ConsentServiceTest {
         }
     }
 
+    // ADR-0205 D1: a GDPR-only consent reaches ACTIVE via createConsent's auto-activate branch,
+    // never via activateConsent — the first scope in this codebase that can be ACTIVE without ever
+    // calling activateConsent. Confirms the existing already-active guard still applies to it, and
+    // that no SCA verification is attempted for a consent that never needed one in the first place.
+    @Test
+    fun `activateConsent throws when already active for a GDPR-only-auto-activated consent`() {
+        coEvery { consentRepository.findById(consentId) } returns consent(
+            status = ConsentStatus.ACTIVE,
+            scopes = setOf(ConsentScope.MARKETING_COMMS_EMAIL, ConsentScope.MARKETING_COMMS_INAPP),
+        )
+
+        assertThrows<ConsentAlreadyActiveException> {
+            runBlocking { service.activateConsent(consentId, UUID.randomUUID()) }
+        }
+        coVerify(exactly = 0) { scaChallengeClient.getChallenge(any()) }
+    }
+
     @Test
     fun `activateConsent maps a NotFoundException from sca client to challenge-not-found`() {
         val scaSessionId = UUID.randomUUID()
@@ -519,24 +536,27 @@ class ConsentServiceTest {
         assertThat((result as ConsentValidationResult.Invalid).code).isEqualTo("CONSENT_ACCOUNT_NOT_COVERED")
     }
 
-    private fun consent(granteeId: String = this.granteeId, status: ConsentStatus = ConsentStatus.ACTIVE): Consent =
-        Consent(
-            id = consentId,
-            partyId = partyId,
-            granteeId = granteeId,
-            granteeType = GranteeType.TPP,
-            granteeName = "Test TPP",
-            scopes = setOf(ConsentScope.ACCOUNTS_READ),
-            accountIbans = listOf("CZ6508000000192000145399"),
-            status = status,
-            validFrom = now,
-            validTo = now.plusDays(1),
-            scaSessionId = UUID.randomUUID(),
-            redirectUri = "https://example.com/redirect",
-            tppTransactionId = "txn-1",
-            ipAddress = "127.0.0.1",
-            userAgent = "JUnit",
-            createdAt = OffsetDateTime.now(),
-            updatedAt = OffsetDateTime.now(),
-        )
+    private fun consent(
+        granteeId: String = this.granteeId,
+        status: ConsentStatus = ConsentStatus.ACTIVE,
+        scopes: Set<ConsentScope> = setOf(ConsentScope.ACCOUNTS_READ),
+    ): Consent = Consent(
+        id = consentId,
+        partyId = partyId,
+        granteeId = granteeId,
+        granteeType = GranteeType.TPP,
+        granteeName = "Test TPP",
+        scopes = scopes,
+        accountIbans = listOf("CZ6508000000192000145399"),
+        status = status,
+        validFrom = now,
+        validTo = now.plusDays(1),
+        scaSessionId = UUID.randomUUID(),
+        redirectUri = "https://example.com/redirect",
+        tppTransactionId = "txn-1",
+        ipAddress = "127.0.0.1",
+        userAgent = "JUnit",
+        createdAt = OffsetDateTime.now(),
+        updatedAt = OffsetDateTime.now(),
+    )
 }
