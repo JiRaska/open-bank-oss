@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: standing-order-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "17bd6322d62baad5"
+    openbank.tech/policy-checksum: "03d68b059298ad38"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1497,6 +1497,42 @@ data:
         # spec-touching PR (bump info.version to match what the diff did), which the error
         # message spells out.
         ci_producer: ".github/scripts/check-api-contract.py"
+      openapi_route_conformance:
+        detect: ["openbank-*/src/main/resources/openapi.yaml", "JAX-RS @Path / @GET / @POST resource classes"]
+        require:
+          - "every route a resource class answers is published in that service's openapi.yaml"
+          - "every route openapi.yaml promises is declared by a resource class"
+        gate: openapi-route-conformance
+        enforced: advisory
+        target_enforce_date: "2026-09-30"
+        ci_producer: ".github/scripts/check-openapi-route-conformance.py"
+        # api_contract (above) classifies a spec's version bump against the PREVIOUS REVISION of the
+        # same document. Nothing asked whether the document is TRUE. ADR-0005 says "CI lints it with
+        # Spectral so docs cannot drift from runtime" — there is no Spectral config in this repo and
+        # no workflow references it, so that control has never existed. The #2280 failure class:
+        # check whether anything reads the artifact before assuming a green covers it.
+        #
+        # What the drift actually was, measured on the day this landed: 114 route-level findings
+        # across 44 services. aml-service published request/response schemas whose fields exist
+        # nowhere in the code (#2312, fixed in #2317); copilot-service served the human-in-the-loop
+        # confirm for a money-path action proposal without publishing it (#2323) and declared a 501
+        # its streaming endpoint cannot return (#2351, fixed in #2353). Worst single pattern: 10 of
+        # the 15 services with an ApprovalResource serve PATCH /api/v1/<svc>/approvals/{id} — the
+        # four-eyes control — without publishing it, most of them money-path.
+        #
+        # ROUTE SET ONLY. It does not read schemas, so an invented request field passes clean (that
+        # was the whole aml defect); it does not read status codes, so a documented response the
+        # handler cannot produce passes clean. A reflection test is the floor, not the ceiling — the
+        # schema half needs the Quarkus-generated document
+        # (quarkus.smallrye-openapi.store-schema-directory, a dependency the whole fleet already has
+        # and nothing uses). Do not let a green here be read as "this spec is true".
+        #
+        # NOT diff-scoped, like db_backup_association and unlike api_contract/db_change: the defect
+        # is a MISSING pair across two trees, so a PR touching only Kotlin never touches the spec and
+        # a diff-scoped gate would see nothing.
+        #
+        # Advisory because 114 pre-existing findings cannot be a merge blocker on day one. Flipping
+        # to enforced = add --enforce in ci.yml, once the backlog is cleared.
       db_backup_association:
         detect: ["openbank-infra/gitops/**/*.yaml (kind: Cluster, postgresql.cnpg.io)"]
         require:
