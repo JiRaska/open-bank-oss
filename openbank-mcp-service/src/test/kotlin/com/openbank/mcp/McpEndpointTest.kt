@@ -15,6 +15,7 @@ import com.openbank.mcp.application.McpToolRegistry
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
 import com.openbank.mcp.application.port.out.ProposalPort
+import com.openbank.mcp.infrastructure.mcp.CallerContextResolver
 import com.openbank.mcp.infrastructure.mcp.McpEndpoint
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -33,7 +34,10 @@ class McpEndpointTest {
     private fun endpoint(pdp: PolicyDecisionPoint): McpEndpoint {
         val stub = StubReads(mapper)
         val registry = McpToolRegistry(stub, stub, mapper)
-        return McpEndpoint(registry, pdp, McpCallAuditor(audit), mapper, "openbank-mcp", "0.1.0", "2025-06-18")
+        // Anonymous JWT (no `sub`) → the resolver returns null → the endpoint uses the phase-1
+        // placeholder identity, so these protocol/authorization assertions are unchanged (ADR-0195).
+        val caller = CallerContextResolver(TestJsonWebToken())
+        return McpEndpoint(registry, pdp, McpCallAuditor(audit), caller, mapper, "openbank-mcp", "0.1.0", "2025-06-18")
     }
 
     private fun rpc(method: String, params: Map<String, Any?> = emptyMap()): JsonNode =
