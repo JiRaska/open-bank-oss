@@ -98,6 +98,21 @@ out of it (they are path-scoped, not less important — several are live-inciden
   workloads), but the reflex stands: verify with
   `kubectl get netpol -n <ns>` / `grep -rl '<workload>-ingress-allow-list' gitops/components/`,
   never with `ls components/<svc>/`.
+- **The generator derives ingress ports from EVERY container's `containerPorts` — a sidecar port
+  that only ever serves loopback must be named into `SIDECAR_LOCAL_ONLY_PORT_NAMES`, or it is
+  published to the app's whole caller set.** The OPA PDP sidecar is the case that forced the rule:
+  the app reaches it at `http://localhost:8181` (`OpaSidecarPolicyDecisionPoint.DEFAULT_BASE_URL`,
+  no `OPA_URL` env in most components), so it needs no cross-namespace ingress at all — yet 8181
+  landed in the SAME derived rule as the app's HTTP port on 29 components, admitting every declared
+  caller namespace (for kyc: customer-edge, party, admin-ui, security-scanner) to an `opa run
+  --server` with no `--authentication` and no `--authorization`. That is a policy ORACLE
+  (`POST /v1/data/openbank/rest/allow` with arbitrary input), full disclosure of the rego plus
+  `data.agents` / `data.rules` (`GET /v1/policies`, `GET /v1/data`), arbitrary rego evaluation
+  (`POST /v1/query`, a CPU-burn DoS on a money-path pod) and writes to any data root the bundle's
+  `.manifest` does not own. Decision *integrity* held — a bundle root is write-protected, so
+  `openbank/rest/allow` itself cannot be overwritten. Fix is in the generator only; never hand-edit
+  a derived `network-policies.yaml`. Residual, accepted: the unconditional same-namespace rule still
+  reaches 8181 from co-tenant pods — NetworkPolicy cannot express "loopback only".
 - **The generator's `URL_RE` requires a literal `.svc` — `http://kyc-service.kyc:8114` does NOT
   match, `http://kyc-service.kyc.svc:8114` does.** Write the short form and the generator exits 0
   and changes nothing: a silent no-op indistinguishable from "already in sync". Always diff the
