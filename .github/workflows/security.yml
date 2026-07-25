@@ -192,8 +192,72 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Hosted runners don't pre-install trivy; the pinned setup action fetches it.
+      #
+      # `version` is pinned to match the fleet's other four setup-trivy call sites
+      # (admin-ui-deploy, auto-deploy, image-rescan, backfill-release-evidence). This job was the
+      # only one resolving "latest", which meant an extra releases-API lookup on every run and a
+      # scanner version that could move under us — in a repo that pins every action by SHA for
+      # exactly that reason. `cache: true` mirrors image-rescan.yml and removes the download
+      # entirely on a cache hit.
+      #
+      # `continue-on-error` + the retry below because this fetch is the job's single point of
+      # network failure: on 2026-07-25 it exited 35 (curl SSL connect error) on PR #2297, and the
+      # blast radius was four red steps that all said something other than what had happened —
+      # the fs scan SKIPPED, the config scan `trivy: command not found` (127), and two
+      # `Path does not exist: trivy-*.sarif` uploads. No vulnerability scan ran at all, and
+      # nothing said so.
       - name: Install Trivy
+        id: install-trivy
+        continue-on-error: true
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.72.0
+          cache: true
+
+      # Retry the fetch directly (the repo's `for attempt in 1 2 3` convention, as in
+      # auto-deploy.yml and record-deployment-on-merge.yml) rather than re-running the action,
+      # so a transient TLS failure costs seconds instead of a red required-adjacent check and a
+      # manual re-run. Same pinned version, checksum-verified against the release manifest.
+      - name: Retry Trivy install (transient network failure)
+        if: steps.install-trivy.outcome == 'failure'
+        env:
+          TRIVY_VERSION: 0.72.0
+        run: |
+          set -euo pipefail
+          echo "::warning::setup-trivy failed (network); retrying the release download directly."
+          cd "$RUNNER_TEMP"
+          asset="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+          for attempt in 1 2 3; do
+            if curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
+                 -o "$asset" "$base/$asset" \
+               && curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
+                 -o checksums.txt "$base/trivy_${TRIVY_VERSION}_checksums.txt"; then
+              # Verify before extracting: an unauthenticated binary is not a security scanner.
+              grep " ${asset}\$" checksums.txt | sha256sum -c -
+              tar -xzf "$asset" trivy
+              install -m 0755 trivy /usr/local/bin/trivy
+              echo "Trivy installed on attempt ${attempt}."
+              exit 0
+            fi
+            echo "attempt ${attempt} failed; retrying in $((attempt * 10))s"
+            sleep $((attempt * 10))
+          done
+          echo "::error::Trivy could not be installed after 3 retries — the vulnerability and IaC scans did NOT run. This is an install/network failure, NOT a clean scan and NOT a finding."
+          exit 1
+
+      # A missing scanner must produce ONE unambiguous error, not four misleading ones. Without
+      # this, a reader triaging "Trivy: FAILURE" looks for a CVE, finds none in the log (the scan
+      # was skipped), and has to recover the truth from the code-scanning API — the same wasted
+      # trip PR #2154 documented.
+      - name: Verify Trivy is installed
+        id: verify-trivy
+        run: |
+          if ! command -v trivy >/dev/null 2>&1; then
+            echo "::error::trivy is not on PATH — the scans below did NOT run. Treat this job as UNKNOWN, not clean."
+            exit 1
+          fi
+          trivy --version
 
       # Trivy runs as the host binary rather than the Docker container
       # action — container actions don't execute on the macOS pool member, so a
@@ -212,8 +276,12 @@ jobs:
             --skip-dirs node_modules,.next,build,.gradle \
             --format sarif --output trivy-fs.sarif --exit-code 1 .
 
+      # `always()` so a CVE found by the fs scan above does not hide the IaC findings — both are
+      # reported in one run. But NOT when the scanner is missing: that used to add a
+      # `trivy: command not found` on top of an install failure, so one root cause printed as two
+      # unrelated errors.
       - name: Trivy config (IaC) scan
-        if: always()
+        if: always() && steps.verify-trivy.outcome == 'success'
         run: |
           # Print findings to log for visibility (includes baseline-suppressed ones via || true).
           trivy config --severity CRITICAL,HIGH --ignorefile .trivyignore --skip-version-check --format table openbank-infra || true
@@ -232,14 +300,14 @@ jobs:
       # uploading multiple SARIF runs with the same category" — every run since
       # this repo went public failed here). Distinct categories per file fixes it.
       - name: Upload Trivy fs SARIF
-        if: always() && github.event.repository.private == false
+        if: always() && steps.verify-trivy.outcome == 'success' && github.event.repository.private == false
         uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
 
       - name: Upload Trivy config SARIF
-        if: always() && github.event.repository.private == false
+        if: always() && steps.verify-trivy.outcome == 'success' && github.event.repository.private == false
         uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4
         with:
           sarif_file: trivy-config.sarif
