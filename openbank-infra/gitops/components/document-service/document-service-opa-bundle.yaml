@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: document-service
     app.kubernetes.io/part-of: documents
   annotations:
-    openbank.tech/policy-checksum: "e686dc210d1bc4a8"
+    openbank.tech/policy-checksum: "f86f4fd928041707"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2218,19 +2218,48 @@ data:
     # an absent control gets found, an asserted one gets relied on. Any consumer reading the bundles
     # must now hit `_target` / `_as_built` and cannot mistake the intent for the state.
     # ---------------------------------------------------------------------------------------
-    model_gateway_as_built:            # verified 2026-07-16 against gitops + the live sandbox
-      gateway: none                    # no gateway. Agents call the provider endpoint directly.
-                                       # LLM_GATEWAY_URL=http://litellm.ai-platform.svc:4000 is set on 5
-                                       # agents and points at a Service that has never existed (#1280).
-      budgets_enforced_at: charter     # CharterRateLimiter in openbank-agent-service — NOT a gateway.
-      providers:
+    model_gateway_as_built:            # verified 2026-07-25 against gitops AND the running Deployments
+      gateway: litellm                 # in-cluster LiteLLM proxy, ai-platform ns, :4000 (ADR-0174/0175,
+                                       # #2019). Deployed and serving. It is the only workload holding a
+                                       # provider key and the only one with an internet egress hole
+                                       # (ai-platform/networkpolicy-litellm-egress.yaml), so it is a real
+                                       # choke point — but see `egress_enforced` before treating it as a
+                                       # *complete* one.
+      routed:                          # read off the RUNNING Deployments' env, not off the manifests
+        - copilot-service              # COPILOT_MODEL_ENDPOINT (#2062) — the customer-facing assistant
+        - control-liveness-sentinel    # LIVENESS_MODEL_ENDPOINT
+        - devops-agent                 # DEVOPS_MODEL_ENDPOINT
+        - docs-truth-agent             # LLM_GATEWAY_URL
+        - finops-agent                 # LLM_GATEWAY_URL
+        - flaky-test-hunter            # LLM_GATEWAY_URL
+        - governance-auditor           # LLM_GATEWAY_URL
+        - release-steward              # LLM_GATEWAY_URL
+        - authz-policy-auditor         # LLM_GATEWAY_URL
+      not_routed:
+        - agent-service                # AGENT_MODEL_ENDPOINT repoint merged (#2209), but the deployed
+                                       # image resolves the baked-in api.groq.com URL until the rebuilt
+                                       # image rolls out. Promote it to `routed` only after re-reading
+                                       # the live Deployment — merged is not deployed.
+      egress_enforced: partial         # ai-platform is egress-locked; `platform` is NOT. agent-service's
+                                       # component still declares policyTypes: [Ingress] only, so the
+                                       # gateway is bypassable from that pod. #2210 adds the Egress half,
+                                       # gated on the agent-service repoint actually being deployed.
+      budgets_enforced_at: charter     # CharterRateLimiter in openbank-agent-service — NOT the gateway.
+      providers:                       # both terminate INSIDE the gateway pod; no agent holds either key
         deepinfra:                     # api.deepinfra.com, deepseek-ai/DeepSeek-V3.2. US-hosted, no region
-                                       # pinning, no DPA. The single de-facto provider; chosen on cost.
+                                       # pinning, no DPA. Serves copilot + the ops agents.
           hosted: true                 # prompt data LEAVES THE EU. Licensed for synthetic data only —
-                                       # see ADR-0175 §4/§5. There is NO technical control enforcing that.
-      routing: none                    # no sensitive_data routing exists. See ADR-0175 D3.
-      fallback: none                   # single provider. On failure LlmDiagnosisAdapter returns null and
-                                       # the agent degrades to a deterministic path (ADR-0174 §4).
+                                       # see ADR-0175 §4/§5. Routing it through the gateway centralises
+                                       # the exposure; it does not remove it.
+        groq:                          # api.groq.com, llama-3.3-70b-versatile. US-hosted, same posture.
+                                       # Serves agent-service's admin-UI assistant (#2209).
+          hosted: true                 # prompt data LEAVES THE EU. Same licence and same caveat.
+      routing: none                    # still no sensitive_data routing: the gateway serves two hosted
+                                       # models and no self-hosted tier exists. ADR-0175 D3 stays open —
+                                       # a choke point is where routing COULD be enforced, not routing.
+      fallback: none                   # no cross-provider failover is configured. On failure
+                                       # LlmDiagnosisAdapter returns null and the agent degrades to a
+                                       # deterministic path (ADR-0174 §4).
 
     model_gateway_target:              # ADR-0031 D6 — the decision. NOT the state. Nothing here is deployed.
       tool: litellm                       # or equivalent open gateway in front of all models
