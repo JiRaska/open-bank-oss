@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/vop-service-v0.2.0...vop-service-v0.3.0) (2026-07-25)
+
+
+### Features
+
+* **vop:** instrument verification outcomes, no-data reasons and rate-limit decisions ([#2275](https://github.com/JiRaska/open-bank-oss/issues/2275)) ([fc6795a](https://github.com/JiRaska/open-bank-oss/commit/fc6795af7ee129a3ee63675f60e2d520d5d8a019)), closes [#2255](https://github.com/JiRaska/open-bank-oss/issues/2255)
+
 ## [0.2.0](https://github.com/JiRaska/open-bank-oss/compare/vop-service-v0.1.0...vop-service-v0.2.0) (2026-07-16)
 
 
