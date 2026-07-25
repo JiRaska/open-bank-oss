@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.2.0...mcp-service-v0.2.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* **mcp:** pin USER to numeric uid 100 so runAsNonRoot admits the pod ([#2137](https://github.com/JiRaska/open-bank-oss/issues/2137)) ([7623c9d](https://github.com/JiRaska/open-bank-oss/commit/7623c9d1f6f4ad4b6eb2af5999e3eb574553d54f))
+
 ## [0.2.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.1.0...mcp-service-v0.2.0) (2026-07-24)
 
 
