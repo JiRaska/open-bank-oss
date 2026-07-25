@@ -54,6 +54,9 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // Consumer-driven contract test (ADR-0063, issue #2255 dimension C3): psd2 is a real consumer of
+    // tpp-registry's eIDAS licence gate, GET /api/v1/tpp-registry/check.
+    testImplementation(libs.pact.consumer)
 }
 
 kover {
@@ -67,4 +70,25 @@ kover {
             }
         }
     }
+}
+
+// Pact: write the generated consumer contract into the repo-root pacts/ dir (git-pact, ADR-0063) so
+// the provider replays it from @PactFolder("../pacts") with no broker in the loop. The consumer test
+// rewrites the file on every run and the result is committed; pact-drift-check.yml fails the build
+// if the committed JSON and a fresh regeneration diverge.
+// NOTE: must be set on the test JVM fork, not the Gradle daemon (System.setProperty would not
+// propagate). The pactbroker.* keys are forwarded so CI's publish step behaves as it does elsewhere.
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }

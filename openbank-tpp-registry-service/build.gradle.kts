@@ -44,6 +44,12 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // Provider-side verification (ADR-0063 git-pact): TppRegistryPactProviderVerificationTest replays
+    // the consumer pacts in pacts/ naming openbank-tpp-registry-service as provider (issue #2255).
+    // quarkus-test-security supplies the @TestSecurity identity for the replayed requests, since
+    // checkAuthorization is @RolesAllowed and @TestSecurity cannot annotate pact's @TestTemplate.
+    testImplementation(libs.pact.provider)
+    testImplementation(libs.quarkus.test.security)
 }
 
 kover {
