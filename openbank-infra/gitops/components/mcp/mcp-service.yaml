@@ -59,6 +59,33 @@ spec:
               value: http://tempo.observability.svc:4317
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # ADR-0195 step 3: outbound M2M targets for RealAccountReadPort's downstream calls —
+            # NOT consumed yet (the port is @Vetoed until step 4's CDI cutover), but declared here
+            # now so gen-network-policies.py opens the cross-namespace edges ahead of that cutover
+            # (CLAUDE.md: a URL that lives only in application.yaml gets no NetworkPolicy edge at
+            # all — it must be in this env block, .svc form, for the generator to see it).
+            - name: QUARKUS_REST_CLIENT_ACCOUNT_SERVICE_URL
+              value: http://account-service.accounts.svc:8100
+            - name: QUARKUS_REST_CLIENT_BALANCE_SERVICE_URL
+              value: http://balance-service.balances.svc:8103
+            - name: QUARKUS_REST_CLIENT_TRANSACTION_SERVICE_URL
+              value: http://transaction-service.payments.svc:8102
+            - name: QUARKUS_REST_CLIENT_CONSENT_SERVICE_URL
+              value: http://consent-service.consent.svc:8106
+            # openbank-services client secret (shared M2M identity, ADR-0104 D3 — the SAME client
+            # transaction-service/lending-service/settlement-service/agent-service already use) —
+            # lets RealAccountReadPort's OidcClientRequestReactiveFilter mint a client-credentials
+            # token. Own ExternalSecret (es-mcp-service.yaml), own OpenBao KV copy — the OpenBao
+            # value itself is a manual follow-up (mirrors agent-service's own bootstrap comment).
+            # Optional so the timing gap before that key is seeded doesn't CrashLoop the pod; until
+            # then a downstream M2M call 401s — no worse than the port being unwired, and it isn't
+            # wired yet regardless (still @Vetoed).
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-service-secrets
+                  key: OIDC_CLIENT_SECRET
+                  optional: true
           startupProbe:
             tcpSocket:
               port: management

@@ -1,0 +1,33 @@
+# mcp-service secrets from OpenBao → mcp-service-secrets Secret (ADR-0195 step 3).
+#
+# OIDC_CLIENT_SECRET (openbank-services realm client, ADR-0104 D3) — the SAME shared M2M client
+# transaction-service/lending-service/settlement-service/agent-service already use, so
+# RealAccountReadPort's downstream calls (account/balance/transaction/consent-service) authenticate
+# as the identical least-privilege service principal those services already grant reads to. Own KV
+# copy per the fleet convention (each service reads its own <svc>/OIDC_CLIENT_SECRET property, all
+# holding the same underlying client secret value — see agent-service's es-agent-service.yaml).
+#
+# NOT YET SEEDED: this ExternalSecret declares the KV coordinate; an operator must still write the
+# `openbank-services` client's secret value into OpenBao at key `mcp-service`, property
+# `OIDC_CLIENT_SECRET` (manual step, same as agent-service's own bootstrap — mirrors the "Add the
+# key + restart -> real data" comment in agent-service.yaml). Until then the Deployment's
+# `optional: true` secretKeyRef keeps the pod healthy; a downstream M2M call just 401s — no
+# regression, since RealAccountReadPort is still @Vetoed (not CDI-wired) regardless.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: mcp-service-secrets
+  namespace: platform
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: mcp-service-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: OIDC_CLIENT_SECRET
+      remoteRef:
+        key: mcp-service
+        property: OIDC_CLIENT_SECRET
