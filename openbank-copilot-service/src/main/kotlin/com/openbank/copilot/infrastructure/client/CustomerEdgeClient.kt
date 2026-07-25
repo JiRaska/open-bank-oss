@@ -42,7 +42,7 @@ interface CustomerEdgeRestClient {
 
     @GET
     @Path("/customer/v1/balances/{accountId}")
-    fun getBalances(@PathParam("accountId") accountId: UUID): Uni<BalancesEnvelope>
+    fun getBalances(@PathParam("accountId") accountId: UUID): Uni<List<BalanceDto>>
 
     @GET
     @Path("/customer/v1/transactions")
@@ -77,8 +77,6 @@ data class AccountSummary(
     val currencyCode: String = "",
     val status: String = "",
 )
-
-data class BalancesEnvelope(val balances: List<BalanceDto> = emptyList())
 
 data class BalanceDto(
     val currency: String = "",

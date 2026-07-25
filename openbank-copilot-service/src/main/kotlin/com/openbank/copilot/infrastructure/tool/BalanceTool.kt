@@ -36,7 +36,7 @@ class BalanceTool(@RestClient private val client: CustomerEdgeRestClient) : Copi
         val accountId = runCatching { UUID.fromString(raw) }.getOrNull()
             ?: return ToolResult("'$raw' is not a valid account id.", isError = true)
         return try {
-            val balances = client.getBalances(accountId).awaitSuspending().balances
+            val balances = client.getBalances(accountId).awaitSuspending()
             if (balances.isEmpty()) {
                 ToolResult("No balances found for account $accountId.")
             } else {
