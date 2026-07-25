@@ -17,6 +17,8 @@ import com.openbank.mcp.application.port.out.ConsentContext
 import com.openbank.mcp.application.port.out.ProposalPort
 import com.openbank.mcp.infrastructure.mcp.CallerContextResolver
 import com.openbank.mcp.infrastructure.mcp.McpEndpoint
+import com.openbank.mcp.infrastructure.observability.McpMetricsAdapter
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -31,13 +33,26 @@ class McpEndpointTest {
 
     private val audit = Recorder()
 
+    // The REAL metrics adapter over a SimpleMeterRegistry rather than a mock port, so the
+    // instrumentation assertions below fail if the endpoint stops emitting.
+    private val registry = SimpleMeterRegistry()
+
     private fun endpoint(pdp: PolicyDecisionPoint): McpEndpoint {
         val stub = StubReads(mapper)
-        val registry = McpToolRegistry(stub, stub, mapper)
+        val toolRegistry = McpToolRegistry(stub, stub, mapper)
         // Anonymous JWT (no `sub`) → the resolver returns null → the endpoint uses the phase-1
         // placeholder identity, so these protocol/authorization assertions are unchanged (ADR-0195).
         val caller = CallerContextResolver(TestJsonWebToken())
-        return McpEndpoint(registry, pdp, McpCallAuditor(audit), caller, mapper, "openbank-mcp", "0.1.0", "2025-06-18")
+        return McpEndpoint(
+            registry = toolRegistry,
+            pdp = pdp,
+            auditor = McpCallAuditor(audit),
+            callerResolver = caller,
+            mapper = mapper,
+            serverName = "openbank-mcp",
+            serverVersion = "0.1.0",
+            protocolVersion = "2025-06-18",
+        ).apply { metrics = McpMetricsAdapter(registry) }
     }
 
     private fun rpc(method: String, params: Map<String, Any?> = emptyMap()): JsonNode =
@@ -168,6 +183,98 @@ class McpEndpointTest {
         val rendered = audit.events.single().payload.toString()
         assertThat(rendered).contains("accountId").doesNotContain(SECRET)
     }
+
+    // ── ADR-0077 Tier C: the same outcomes as an aggregate ──────────────────────────────────
+
+    @Test
+    fun `an allowed tool call is metered with the same three facts as its audit event`() {
+        endpoint(allowAll()).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+
+        assertThat(toolCalls("list_accounts", "ALLOW", "SUCCESS")).isEqualTo(1.0)
+        assertThat(
+            registry.get("openbank.mcp.tool_call.duration")
+                .tag("service", "mcp").tag("tool", "list_accounts").timer().count(),
+        ).isEqualTo(1L)
+    }
+
+    @Test
+    fun `a PDP outage is metered as UNAVAILABLE, distinct from a policy DENY`() {
+        // Fail-closed on a money-adjacent surface denies EVERY agent. Correct, and previously
+        // nothing but a WARN line.
+        endpoint(exploding()).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        endpoint(denyAll()).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+
+        assertThat(toolCalls("list_accounts", "UNAVAILABLE", "DENIED")).isEqualTo(1.0)
+        assertThat(toolCalls("list_accounts", "DENY", "DENIED")).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `an unmapped tool is metered as tool=unmapped, never under its caller-supplied name`() {
+        // Cardinality contract: the tool name arrives in the request body on a public agent surface,
+        // so an agent enumerating the tool surface must not be able to mint a series per guess. The
+        // audit event still records the exact name — that is a per-call record, not a label.
+        endpoint(exploding()).handle(
+            rpc("tools/call", mapOf("name" to "delete_everything", "arguments" to emptyMap<String, Any>())),
+        )
+
+        assertThat(toolCalls("unmapped", "DENY", "DENIED")).isEqualTo(1.0)
+        assertThat(registry.find("openbank.mcp.tool_calls").tag("tool", "delete_everything").counters()).isEmpty()
+        assertThat(audit.events.single().resourceId).isEqualTo("delete_everything")
+    }
+
+    @Test
+    fun `an unknown JSON-RPC method is metered as method=unknown`() {
+        endpoint(allowAll()).handle(rpc("tools/list"))
+        endpoint(allowAll()).handle(rpc("evil/method"))
+
+        assertThat(requests("tools/list")).isEqualTo(1.0)
+        assertThat(requests("unknown")).isEqualTo(1.0)
+        assertThat(registry.find("openbank.mcp.requests").tag("method", "evil/method").counters()).isEmpty()
+    }
+
+    @Test
+    fun `a call under the phase-1 placeholder identity is metered as anonymous_fallback`() {
+        // This is blocker #2206 expressed as a number rather than a code comment: it must reach zero
+        // before a real read port replaces the stub. TestJsonWebToken carries no `sub`, so the
+        // resolver returns null and the endpoint takes the fallback branch.
+        endpoint(allowAll()).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+
+        assertThat(
+            registry.get("openbank.mcp.caller_identity")
+                .tag("service", "mcp").tag("source", "anonymous_fallback").counter().count(),
+        ).isEqualTo(1.0)
+        assertThat(registry.find("openbank.mcp.caller_identity").tag("source", "token").counters()).isEmpty()
+    }
+
+    @Test
+    fun `no meter carries the agent id, consent id or an argument value`() {
+        endpoint(allowAll()).handle(
+            rpc("tools/call", mapOf("name" to "get_balance", "arguments" to mapOf("accountId" to SECRET))),
+        )
+
+        val tags = registry.meters.flatMap { it.id.tags }
+        assertThat(tags.map { it.key }).doesNotContain("agent_id", "consent_id", "charter", "account_id")
+        assertThat(tags.map { it.value }).doesNotContain(SECRET, "agent:mcp-anonymous")
+    }
+
+    private fun toolCalls(tool: String, decision: String, result: String): Double =
+        registry.get("openbank.mcp.tool_calls")
+            .tag("service", "mcp")
+            .tag("tool", tool)
+            .tag("decision", decision)
+            .tag("result", result)
+            .counter().count()
+
+    private fun requests(method: String): Double =
+        registry.get("openbank.mcp.requests").tag("service", "mcp").tag("method", method).counter().count()
 
     private class Recorder : AuditEventPublisher {
         val events = mutableListOf<AuditEvent>()
