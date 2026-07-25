@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.4.0...control-liveness-sentinel-v0.5.0) (2026-07-25)
+
+
+### Features
+
+* **control-liveness-sentinel:** load prompt from the registry + route via the LlmGatewayPort seam ([#1918](https://github.com/JiRaska/open-bank-oss/issues/1918)) ([#2259](https://github.com/JiRaska/open-bank-oss/issues/2259)) ([0c2a1a1](https://github.com/JiRaska/open-bank-oss/commit/0c2a1a15f2d1b5591d85f455dc87c546e480a626))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.3.1...control-liveness-sentinel-v0.4.0) (2026-07-16)
 
 
