@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.6.0...mcp-service-v0.7.0) (2026-07-25)
+
+
+### Features
+
+* **mcp:** remove the phase-1 placeholder identity and wire real read ports (ADR-0195 step 4) ([#2316](https://github.com/JiRaska/open-bank-oss/issues/2316)) ([9dc2089](https://github.com/JiRaska/open-bank-oss/commit/9dc2089bfcaaf012a2cabf8b20d0ccc790ba9992))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.5.0...mcp-service-v0.6.0) (2026-07-25)
 
 
