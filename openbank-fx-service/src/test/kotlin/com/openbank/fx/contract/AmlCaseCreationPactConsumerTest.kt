@@ -37,10 +37,14 @@ import java.util.UUID
  * field, different matcher), re-run this test
  * (`./gradlew :openbank-fx-service:test --tests "*AmlCaseCreationPactConsumerTest*"`) and commit the
  * updated pact JSON in the same PR — an un-regenerated pact file silently verifies the OLD contract
- * on the provider side. `pact-drift-check.yml` enforces this, but its module list is hand-maintained:
- * `:openbank-fx-service` had to be ADDED to it for this pact, because an unlisted module is never
- * regenerated, so the `git diff -- pacts/` step finds nothing and the gate goes green while checking
- * nothing. Any future consumer pact in a new module must be added to that list too.
+ * on the provider side. `pact-drift-check.yml` enforces this. Note what that gate can and cannot
+ * see — its only assertion is `git diff -- pacts/`, so a module it does not regenerate does not
+ * read as *unchecked*, it reads as *passing*: `:openbank-fx-service` had to be ADDED to its
+ * then-hand-maintained module list for this pact, and `:openbank-interest-service` had been
+ * missing from it since the day its pact was committed. The scope is now DERIVED, by
+ * `.github/scripts/derive-pact-drift-scope.sh`, from the `@Pact(consumer = .., provider = ..)`
+ * annotations themselves; a consumer test in a new module needs no workflow edit, and a pact
+ * nothing regenerates fails the derivation instead of going quietly green.
  *
  * ## What this pins, and why the response side is deliberately thin
  *

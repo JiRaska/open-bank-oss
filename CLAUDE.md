@@ -184,6 +184,17 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `// the mark-and-sweep reconciliation contract`, while ap2 flipped Declared→Verified the moment an
   unrelated PR added a comment containing the word. Detect the artifact — an `au.com.dius.pact`
   import, or the `*Pact*Test.kt` / `*ContractTest.kt` naming — never the prose (#2291).
+- **A gate whose SCOPE is a hand-kept list of the thing it checks reads as *passing* when the list
+  is short, never as *unchecked*.** `pact-drift-check.yml` regenerates consumer pacts and asserts
+  `git diff --exit-code -- pacts/`; that diff can only see files the regeneration step rewrote, so
+  a module missing from the list leaves its committed pact untouched, the diff finds nothing, and
+  the gate is green about work it never did. `:openbank-interest-service` sat that way from the day
+  its pact was committed, and `:openbank-fx-service` needed a hand-edit in #2284. The scope is now
+  DERIVED from the `@Pact(consumer = .., provider = ..)` annotations by
+  `.github/scripts/derive-pact-drift-scope.sh`, which also fails on an orphan pact, an uncommitted
+  pact, and a module dropped out of scope without declaring what that strands. Generalize: never
+  let a gate's coverage set be maintained separately from the artifacts it covers — enumerate the
+  artifacts, and make the exclusions the thing a human has to justify.
 
 ### OPA / authorization
 - **`input.principal.type == "SERVICE"` can never fire — don't write it.** `AuthorizeInterceptor`
