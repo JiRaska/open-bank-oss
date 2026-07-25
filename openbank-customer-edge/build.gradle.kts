@@ -46,6 +46,29 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.redpanda)
+    // Provider-side Pact verification (ADR-0063, issue #2322): replays copilot's
+    // CustomerEdgeContractConsumerTest against a real booted instance.
+    testImplementation(libs.pact.provider)
+    // Synthesizes the customer JWT (party_id claim) @TestSecurity alone cannot set for a
+    // quarkus-oidc-backed resource server — same mechanism openbank-mcp-service already uses.
+    testImplementation(libs.quarkus.test.security.oidc)
+}
+
+// Pact: read consumer pacts from the shared pacts/ dir at the repo root (git-pact, ADR-0063).
+// NOTE: must be set on the test JVM fork, not the Gradle daemon (System.setProperty would not propagate).
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
 
 // Coverage floor (ADR-0020, ratchet-only — sweep #466: this module previously had NO
