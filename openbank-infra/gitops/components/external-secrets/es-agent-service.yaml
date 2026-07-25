@@ -1,6 +1,15 @@
 # agent-service secrets from OpenBao → agent-service-secrets Secret.
-# GROQ_API_KEY (external LLM API key) + OIDC_CLIENT_SECRET (openbank-services
-# realm client). Both projected from the openbank/agent-service KV path.
+#
+# AGENT_MODEL_API_KEY = the LiteLLM virtual key (ADR-0174/0175, #1919): agent-service authenticates
+# to the in-cluster gateway, NOT to the provider — the Groq key now lives only in ai-platform. Same
+# source and same shape as copilot's COPILOT_MODEL_API_KEY (es-copilot-service.yaml).
+#
+# GROQ_API_KEY is retained ONLY for the rollout window: the currently-deployed image predates the
+# AGENT_MODEL_* config seam and still reads GROQ_API_KEY against api.groq.com directly. Drop it (and
+# the matching env in agent-service.yaml) once the repointed image is live — that removal is the
+# precondition for turning on the agent-pod egress lock.
+#
+# OIDC_CLIENT_SECRET (openbank-services realm client) is unchanged.
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
@@ -20,6 +29,10 @@ spec:
         annotations:
           argocd.argoproj.io/compare-options: IgnoreExtraneous
   data:
+    - secretKey: AGENT_MODEL_API_KEY
+      remoteRef:
+        key: litellm
+        property: LITELLM_MASTER_KEY
     - secretKey: GROQ_API_KEY
       remoteRef:
         key: agent-service

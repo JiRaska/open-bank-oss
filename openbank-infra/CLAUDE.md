@@ -86,6 +86,18 @@ out of it (they are path-scoped, not less important — several are live-inciden
   manifest error, no policy diff, just a hung call (party-service's GDPR Art. 15 hops to
   kyc-service and card-issuance-service, #1784). Declare every cross-namespace URL in the gitops
   manifest env, not only in `application.yaml`.
+- **"`components/<svc>/` has no `network-policies.yaml`" is NOT evidence the service is unprotected
+  — check the namespace, not the directory.** Until #2207 `gen-network-policies.py` emitted one file
+  per *namespace*, into the first component directory alphabetically that declared a workload there.
+  `platform` is shared by `agent`, `ap2`, `copilot` and `mcp`, so all four services' allow-lists sat
+  in `components/agent/network-policies.yaml`; `documents` (renderer + service) and `messaging`
+  (apicurio + kafka) had the same shape. The MCP threat model (PR #2200) recorded "NetworkPolicy:
+  NONE" on that basis while `mcp-service-ingress-allow-list` had been live since the phase-1 deploy,
+  and the ADR-0081 drift gate was correctly green throughout — there was no drift to find. Output is
+  now keyed by component directory (so each ArgoCD Application owns the policies for its own
+  workloads), but the reflex stands: verify with
+  `kubectl get netpol -n <ns>` / `grep -rl '<workload>-ingress-allow-list' gitops/components/`,
+  never with `ls components/<svc>/`.
 - **The generator's `URL_RE` requires a literal `.svc` — `http://kyc-service.kyc:8114` does NOT
   match, `http://kyc-service.kyc.svc:8114` does.** Write the short form and the generator exits 0
   and changes nothing: a silent no-op indistinguishable from "already in sync". Always diff the

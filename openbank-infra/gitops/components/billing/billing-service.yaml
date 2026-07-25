@@ -27,7 +27,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-billing-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "d42ace2772888f59"
+        openbank.tech/policy-checksum: "02421ff1a852528c"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -38,7 +38,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: billing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-billing-service:sandbox-95f5ffcd
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-billing-service:sandbox-ade9b5c7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

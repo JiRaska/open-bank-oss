@@ -4,9 +4,13 @@ package com.openbank.mcp
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.libs.audit.AuditEvent
+import com.openbank.libs.audit.AuditEventPublisher
+import com.openbank.libs.audit.AuditResult
 import com.openbank.libs.authz.AuthzDecision
 import com.openbank.libs.authz.AuthzQuery
 import com.openbank.libs.authz.PolicyDecisionPoint
+import com.openbank.mcp.application.McpCallAuditor
 import com.openbank.mcp.application.McpToolRegistry
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
@@ -24,10 +28,12 @@ class McpEndpointTest {
 
     private val mapper = jacksonObjectMapper()
 
+    private val audit = Recorder()
+
     private fun endpoint(pdp: PolicyDecisionPoint): McpEndpoint {
         val stub = StubReads(mapper)
         val registry = McpToolRegistry(stub, stub, mapper)
-        return McpEndpoint(registry, pdp, mapper, "openbank-mcp", "0.1.0", "2025-06-18")
+        return McpEndpoint(registry, pdp, McpCallAuditor(audit), mapper, "openbank-mcp", "0.1.0", "2025-06-18")
     }
 
     private fun rpc(method: String, params: Map<String, Any?> = emptyMap()): JsonNode =
@@ -97,6 +103,75 @@ class McpEndpointTest {
         ).contains("Authorization unavailable")
     }
 
+    // ── ADR-0031 D5: every tools/call outcome is on the record ──────────────────────────────
+
+    @Test
+    fun `an allowed tool call is audited as ALLOW + SUCCESS`() {
+        endpoint(allowAll()).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to mapOf("unused" to "x"))),
+        )
+        val event = audit.events.single()
+        assertThat(event.actorType).isEqualTo("AI_AGENT")
+        assertThat(event.operation).isEqualTo("mcp.tool.call")
+        assertThat(event.result).isEqualTo(AuditResult.SUCCESS)
+        assertThat(event.payload)
+            .containsEntry("policy_decision", "ALLOW")
+            .containsEntry("capability", "query.account.readonly")
+            .containsEntry("charter", "mcp-anonymous")
+            .containsEntry("argument_keys", listOf("unused"))
+    }
+
+    @Test
+    fun `a policy-denied tool call is audited as DENY + DENIED with the reason`() {
+        endpoint(denyAll()).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        val event = audit.events.single()
+        assertThat(event.result).isEqualTo(AuditResult.DENIED)
+        assertThat(event.payload)
+            .containsEntry("policy_decision", "DENY")
+            .containsEntry("reason", "no matching allow rule")
+    }
+
+    @Test
+    fun `an unmapped tool is audited even though the PDP is never consulted`() {
+        endpoint(exploding()).handle(
+            rpc("tools/call", mapOf("name" to "delete_everything", "arguments" to emptyMap<String, Any>())),
+        )
+        val event = audit.events.single()
+        assertThat(event.result).isEqualTo(AuditResult.DENIED)
+        assertThat(event.resourceId).isEqualTo("delete_everything")
+        assertThat(event.payload)
+            .containsEntry("capability", null)
+            .containsEntry("reason", "no capability mapping")
+    }
+
+    @Test
+    fun `a PDP outage is audited as UNAVAILABLE, distinct from a policy DENY`() {
+        endpoint(exploding()).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        val event = audit.events.single()
+        assertThat(event.result).isEqualTo(AuditResult.DENIED)
+        assertThat(event.payload).containsEntry("policy_decision", "UNAVAILABLE")
+    }
+
+    @Test
+    fun `the audit payload never carries tool arguments or tool output`() {
+        endpoint(allowAll()).handle(
+            rpc("tools/call", mapOf("name" to "get_balance", "arguments" to mapOf("accountId" to SECRET))),
+        )
+        val rendered = audit.events.single().payload.toString()
+        assertThat(rendered).contains("accountId").doesNotContain(SECRET)
+    }
+
+    private class Recorder : AuditEventPublisher {
+        val events = mutableListOf<AuditEvent>()
+        override suspend fun publish(event: AuditEvent) {
+            events.add(event)
+        }
+    }
+
     private fun allowAll() = object : PolicyDecisionPoint {
         override suspend fun allow(query: AuthzQuery) = AuthzDecision(allow = true)
     }
@@ -107,6 +182,10 @@ class McpEndpointTest {
 
     private fun exploding() = object : PolicyDecisionPoint {
         override suspend fun allow(query: AuthzQuery): AuthzDecision = error("PDP down")
+    }
+
+    private companion object {
+        const val SECRET = "CZ6508000000192000145399"
     }
 
     private class StubReads(private val m: com.fasterxml.jackson.databind.ObjectMapper) :

@@ -17,6 +17,12 @@
 # ENFORCED: the VPC CNI network-policy agent runs in standard mode (ADR-0060),
 # so this allow-list actively gates ingress — an undeclared caller is DROPPED.
 # Rollback = delete the NetworkPolicy.
+#
+# SCOPE: this file holds the policies for the workloads declared in THIS component
+# directory only, so the ArgoCD Application that owns the workload also owns the
+# policy protecting it. A namespace shared by several component directories (e.g.
+# `platform` = agent + ap2 + copilot + mcp) therefore has one such file per
+# directory, not one for the whole namespace.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -54,6 +60,8 @@ spec:
       ports:
         - protocol: TCP
           port: 8117
+        - protocol: TCP
+          port: 8181
     - from:
         - namespaceSelector:
             matchLabels:

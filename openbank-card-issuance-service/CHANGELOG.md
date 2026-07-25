@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.13.0...card-issuance-service-v0.13.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* **cards:** issue virtual cards ACTIVE and backfill the vault for pre-ADR-0194 cards ([#2214](https://github.com/JiRaska/open-bank-oss/issues/2214)) ([bc21905](https://github.com/JiRaska/open-bank-oss/commit/bc21905c004a24fb79bc4000a3ffb1bc2867c27b))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.12.0...card-issuance-service-v0.13.0) (2026-07-25)
 
 
