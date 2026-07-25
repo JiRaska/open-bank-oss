@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.58.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.57.0...admin-ui-v0.58.0) (2026-07-25)
+
+
+### Features
+
+* **admin-ui:** full operator card management — detail view, limits/controls, issue flow ([#2252](https://github.com/JiRaska/open-bank-oss/issues/2252)) ([ddadce2](https://github.com/JiRaska/open-bank-oss/commit/ddadce22b9db38e4a79ed8437d13c2f126ea49c9))
+
 ## [0.57.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.56.0...admin-ui-v0.57.0) (2026-07-25)
 
 
