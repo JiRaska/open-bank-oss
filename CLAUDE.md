@@ -297,7 +297,13 @@ fire from *outside* it, so they stay here:
   `required_signatures` with two unsigned commits behind the tip. Re-sign the whole range:
   `GIT_SEQUENCE_EDITOR=true git rebase -i --exec 'git commit --amend --no-edit -S' origin/main`,
   then verify via the API (`gh api .../pulls/<N>/commits --jq '.[].commit.verification'`) — not
-  `gh pr view`.
+  `gh pr view`. **Prevent it up front:** `git config --global commit.gpgsign true`, so every
+  `rebase`/`amend`/`commit` signs automatically and the range never desyncs. **Diagnosing the
+  stranded PR:** the symptom is green checks + `autoMerge=true` but `mergeStateStatus=BLOCKED` and an
+  empty `reviewDecision`; `gh api repos/<owner>/<repo>/branches/main/protection` returns `404 Branch
+  not protected` — that is expected (the gate is the *ruleset* `required_signatures`, not classic
+  protection), not a reason to reach for `--admin`. Confirm the tip's signature with
+  `git log -1 --format='%G?'` (`N` = unsigned) before pushing.
 - **There is no `merge_group:` trigger anywhere in the required-check workflows — and there cannot
   be one.** GitHub merge queue requires an **organization-owned** repo; this one is owned by a
   personal account, so adding a `merge_queue` rule to the ruleset returns `422 Invalid rule
