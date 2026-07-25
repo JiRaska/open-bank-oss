@@ -881,7 +881,7 @@ export default function ServiceMapPage() {
                       </div>
                       <div>
                         <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>{t('Schéma', 'Schema')}</div>
-                        <div style={{ fontWeight: 500, color: 'var(--text-secondary)' }}>{govEntry.schemaName}</div>
+                        <div style={{ fontWeight: 500, color: 'var(--text-secondary)' }}>{govEntry.schemaName ?? t('bez schématu (stateless)', 'no schema (stateless)')}</div>
                       </div>
                       <div>
                         <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>{t('Role v lineage', 'Lineage Role')}</div>

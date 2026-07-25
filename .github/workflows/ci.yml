@@ -96,7 +96,12 @@ jobs:
           GAPS=$(node -e "console.log(require('./governance.json').totals.withGaps)")
           if [ "$GAPS" -gt 0 ]; then
             echo "::error::Governance drift — $GAPS module(s) missing or with an invalid governance.yaml (ADR-0071 Phase 4). Add a governance.yaml to each flagged service."
-            node -e "const g=require('./governance.json'); g.modules.filter(m=>m.hasGap).forEach(m=>console.log('  gap: '+m.name))"
+            # Reads governance.json's real shape: a top-level `gaps` string array
+            # (issue #2165 — this used to read a `.modules` field that never existed,
+            # so it threw a TypeError on every failure and never named a module).
+            # No `?? []` fallback on purpose: a missing array is a generator bug and
+            # must be loud, not silently reported as "no gaps".
+            node -e "const g=require('./governance.json'); if(!Array.isArray(g.gaps)){console.error('::error::governance.json has no gaps array — generate-governance.mjs is broken');process.exit(2)} for(const x of g.gaps) console.log('  gap: '+x)"
             exit 1
           else
             echo "Governance manifest clean: $(node -e "console.log(require('./governance.json').totals.modules)") modules, 0 gaps."
