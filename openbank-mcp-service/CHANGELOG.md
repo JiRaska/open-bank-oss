@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.2.1...mcp-service-v0.3.0) (2026-07-25)
+
+
+### Features
+
+* **mcp:** emit an AI-attributed audit event for every tools/call (ADR-0031 D5) ([#2222](https://github.com/JiRaska/open-bank-oss/issues/2222)) ([332a9a1](https://github.com/JiRaska/open-bank-oss/commit/332a9a17f97ba341436ff006eb4f0ef882935e77)), closes [#2207](https://github.com/JiRaska/open-bank-oss/issues/2207)
+
 ## [0.2.1](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.2.0...mcp-service-v0.2.1) (2026-07-25)
 
 
