@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: domestic-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "e6b80756d377f2a0"
+    openbank.tech/policy-checksum: "8bc2dee5124ab198"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1605,6 +1605,44 @@ data:
         #
         # Advisory because 114 pre-existing findings cannot be a merge blocker on day one. Flipping
         # to enforced = add --enforce in ci.yml, once the backlog is cleared.
+      openapi_request_schema_conformance:
+        detect: ["openbank-*/src/main/resources/openapi.yaml", "the JAX-RS request-body DTO the resource actually deserializes into"]
+        require:
+          - "every property a request-body schema declares exists on the DTO the resource parses"
+          - "every property the DTO has is declared on the request-body schema"
+        gate: openapi-request-schema-conformance
+        enforced: advisory
+        target_enforce_date: "2026-09-30"
+        ci_producer: ".github/scripts/check-openapi-request-schema-conformance.py"
+        # openapi_route_conformance (above) is ROUTE SET ONLY — it does not read schemas, so aml's
+        # invented request/response fields passed it clean (#2312). This is the request half of that
+        # gap, using the document Quarkus itself generates
+        # (quarkus.smallrye-openapi.store-schema-directory) as ground truth instead of guessing.
+        # `:build` already runs `quarkusBuild` in its task graph (confirmed via --dry-run), so wiring
+        # this into `_service-ci.yml`'s existing build step costs no extra build time.
+        #
+        # NOT the response half, and that is a decision, not a gap left for later. 457 handler methods
+        # fleet-wide return a raw jakarta.ws.rs.core.Response, which erases the body type at the JVM
+        # level — the scanner that produces the generated document has no static type to build a
+        # response schema from and emits an EMPTY schema for those. Measured directly on aml-service:
+        # AmlCaseResponse does not appear anywhere in the generated document, even though it is real
+        # and correct. A generic response-schema gate over this fleet cannot distinguish "no schema
+        # published" from "the scanner could not see the type" — it would report the majority of
+        # correct endpoints as findings. The response half needs a per-endpoint contract test that
+        # asserts the DTO shape directly, the pattern `CopilotApiContractTest` and the fx/aml
+        # provider-verified pacts already use, not a generic diff.
+        #
+        # `required` is also deliberately not compared: SmallRye OpenAPI's scanner has no
+        # jackson-module-kotlin integration, so it does not read Kotlin nullability and marks nearly
+        # every constructor parameter required regardless of `?`. Measured on aml: `accountId: UUID?`
+        # comes back required. Comparing required-ness would be near-100% noise. Property NAME
+        # presence, by contrast, is unaffected by this and reliable in both directions.
+        #
+        # Found on the day this landed, not hypothetically: openbank-balance-service's
+        # `PlaceHoldRequest` publishes a phantom `expiresAt` and omits the real, USED
+        # `referenceId`/`ttlSeconds` — confirmed against `BalanceResource.placeHold`, which reads
+        # `body.referenceId` and `body.ttlSeconds` directly. A caller following the published spec
+        # cannot construct a valid request.
       db_backup_association:
         detect: ["openbank-infra/gitops/**/*.yaml (kind: Cluster, postgresql.cnpg.io)"]
         require:
