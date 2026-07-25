@@ -33,23 +33,54 @@ Act Art. 12 record-keeping obligation and an Art. 13 transparency obligation nee
   path (ADR-0148 delivery) is: the service loads its system prompt *from* this file rather
   than from an inline `const val`, so the two can never diverge.
 
-## Current contents
+## Coverage — every charter makes an explicit claim
 
-Two real ops-agent prompts are registered as the first migration (the services still hold the
-inline constant today; wiring them to load from here is the ADR-0148 code follow-up):
+[`registry.yaml`](registry.yaml) records, for **all 15** charters in `agents.yaml`, one of four
+statuses. It exists because "no directory here" used to mean three completely different things at
+once, all rendered as the same warning line: an identity-only principal that can never have a
+prompt, a charter whose prompt lives inside a third-party image, and a charter whose LLM wiring is
+simply unbuilt. **Absent and not-applicable must be distinguishable**, or the coverage number is
+noise and the EU AI Act Art. 12 record-keeping claim cannot be checked.
+
+| status | meaning | backlog? |
+|---|---|---|
+| `registered` | the live system prompt is in this tree, listed in `prompts:` | no |
+| `pending` | will send a prompt from this repo; the LLM wiring is a stub | **yes** |
+| `external` | a real model runs, but the prompt is not authored here | no — a disclosed boundary |
+| `not-applicable` | the charter never causes a model call | no |
+
+Today: **5 registered** (compliance-officer, ui-assistant, customer-copilot, devops-agent,
+control-liveness-sentinel), **6 pending** (the stub ops-agents, ADR-0164–0168 + ADR-0112 P4),
+**2 external** (rca-investigator → HolmesGPT's own image; ledger-domain-engineer → an operator's
+coding-agent session), **2 not-applicable** (mcp-anonymous, ap2-anonymous — identity-only
+principals).
 
 | File | Source (to be replaced by a registry load) |
 |---|---|
+| `compliance-officer/oversight.v1.md` | `OversightService.systemPrompt()` |
+| `ui-assistant/system.v1.md` | `AgentChatService.systemPrompt()` |
+| `customer-copilot/system.v1.md` | `CopilotChatService.systemPrompt()` |
 | `devops-agent/diagnosis.v1.md` | `LlmDiagnosisAdapter.DIAGNOSIS_SYSTEM` |
 | `devops-agent/remediation.v1.md` | `LlmDiagnosisAdapter.REMEDIATION_SYSTEM` |
 | `control-liveness-sentinel/system.v1.md` | `LlmDiagnosisAdapter.SYSTEM_PROMPT` |
 
-The remaining agents (agent-service, copilot-service, and the LiteLLM-stub ops-agents) register
-their prompts as their real LLM wiring lands (ADR-0164–0168, ADR-0174 gateway).
+The services still hold the inline constant; wiring them to load from here is the ADR-0148 code
+follow-up.
+
+### Templated prompts
+
+The first three are built by a Kotlin `buildString` with runtime-substituted segments, so they are
+registered as the **template**: `{{var}}` marks each substitution (declared in `registry.yaml` under
+`placeholders:`) and trailing whitespace is normalised away. "Byte-for-byte" therefore means *after
+substitution and trailing-space normalisation* — written down here so the parity check that
+graduates this guard is built against the right rule instead of failing every templated prompt.
 
 ## Validation
 
 `.github/scripts/check-prompt-registry.py` guards this tree in CI (ADR-0148, **advisory** first per
 ADR-0144). It fails on structural corruption — a prompt for a non-existent charter, a name that is
-not `<name>.v<N>.md`, an empty file, or a re-used version — and emits an advisory `::warning` listing
-charters not yet migrated. Run it locally: `python3 .github/scripts/check-prompt-registry.py`.
+not `<name>.v<N>.md`, an empty file, or a re-used version — and, since #1918, on coverage-manifest
+integrity: a charter with no `registry.yaml` entry, an unknown status, an unexplained exemption, a
+`registered` charter whose declared file is missing, a prompt file no entry lists, or a prompt
+directory belonging to a charter that claims it has none. Only `pending` charters produce an
+advisory `::warning`. Run it locally: `python3 .github/scripts/check-prompt-registry.py`.
