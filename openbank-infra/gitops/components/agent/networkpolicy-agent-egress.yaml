@@ -1,0 +1,186 @@
+# Egress lockdown for agent-service (ADR-0175 §4, issue #1919).
+#
+# ADR-0175 states that the in-cluster LiteLLM gateway is the ONE workload permitted to leave the
+# cluster to a hosted (US) LLM provider. Until this file existed that was an aspiration: the agent
+# component declared `policyTypes: [Ingress]` only, so nothing stopped this pod — the one with MCP
+# read access to accounts, balances, ledger, AML and sanctions — opening a TLS session to any
+# endpoint on the internet. This policy makes the claim true for agent-service.
+#
+# Hand-written and DELIBERATELY named networkpolicy-*.yaml (not network-policies.yaml) so
+# gen-network-policies.py — which owns/overwrites network-policies.yaml and emits INGRESS only —
+# never clobbers it (ADR-0081). Same convention as ai-platform/networkpolicy-litellm-egress.yaml.
+# Ingress for this pod stays generator-owned; this file is egress-only. NetworkPolicies are additive,
+# so adding `Egress` here does not weaken the generated ingress allow-list.
+#
+# PRECONDITION — do not merge before both hold:
+#   1. The agent-service image running in the sandbox honours AGENT_MODEL_ENDPOINT (i.e. the #1919
+#      routing change is deployed, not merely merged). An older image resolves the backend endpoint
+#      from the baked-in https://api.groq.com/openai/v1, which this policy denies.
+#   2. `GROQ_API_KEY` has been dropped from agent-service.yaml and es-agent-service.yaml — its
+#      presence is the marker that the direct-to-provider path is still in use.
+#
+# THE ALLOW-LIST IS EXHAUSTIVE — every rule below is a destination agent-service actually has,
+# derived from its Deployment env, its application.yaml rest-clients, and its source. A destination
+# that is missing here is DROPPED by the VPC CNI network-policy agent (standard mode, ADR-0060) with
+# no manifest error and no policy diff — just a hung call. If a tool starts failing after this lands,
+# suspect an unlisted destination first. Rollback is a single `kubectl -n platform delete
+# networkpolicy agent-service-egress-allow-list`.
+#
+# Not listed, on purpose:
+#   - the OPA sidecar (localhost:8181) — same pod, loopback, NetworkPolicy does not apply;
+#   - the Kubernetes API — no kubernetes-client on the service's classpath;
+#   - OpenBao — AGENT_IDENTITY_SVID_CA_CERT is a static value verified in-process, no runtime call;
+#   - inbound replies (admin-ui :8109, Prometheus/security-scanner :8085, kubelet probes) — policy
+#     enforcement is connection-tracked, so an established inbound connection needs no egress rule.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-service-egress-allow-list
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: agent-service
+    app.kubernetes.io/part-of: platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: agent-service
+  policyTypes:
+    - Egress
+  egress:
+    # DNS. Every other rule depends on this one resolving first.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # THE MODEL CALL — the whole point of #1919. The gateway holds the provider key and is the only
+    # workload with an internet hole; this pod reaches a hosted model exclusively through it.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ai-platform
+      ports:
+        - protocol: TCP
+          port: 4000
+    # Same namespace: the single-owner CNPG proposals store (agent-db-rw:5432). CNPG pods are
+    # operator-managed and carry no app.kubernetes.io/name we control, so select the namespace's
+    # pods wholesale rather than guessing an operator label.
+    - to:
+        - podSelector: {}
+    # Keycloak: resource-server JWKS *and* the outbound client-credentials token the MCP tool
+    # clients present to the banking services (QUARKUS_OIDC_AUTH_SERVER_URL).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: iam
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Kafka oversight-events consumer, mTLS listener (ADR-0137). The namespace — not just the
+    # bootstrap Service — because after bootstrap the client reconnects to each broker's advertised
+    # per-pod address; allowing only the bootstrap endpoint yields a consumer that connects once and
+    # then silently never fetches.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: messaging
+      ports:
+        - protocol: TCP
+          port: 9093
+    # MCP read tools — one rule per callee namespace, ports as declared in the Deployment env.
+    # accounts: account-service :8100, product-catalog :8104
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: accounts
+      ports:
+        - protocol: TCP
+          port: 8100
+        - protocol: TCP
+          port: 8104
+    # balances: balance-service :8103
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: balances
+      ports:
+        - protocol: TCP
+          port: 8103
+    # payments: transaction :8102, clearing :8124, sepa-instant :8127
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: payments
+      ports:
+        - protocol: TCP
+          port: 8102
+        - protocol: TCP
+          port: 8124
+        - protocol: TCP
+          port: 8127
+    # ledger: ledger-service :8101
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ledger
+      ports:
+        - protocol: TCP
+          port: 8101
+    # aml: aml-service :8117
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: aml
+      ports:
+        - protocol: TCP
+          port: 8117
+    # sanctions: sanctions-service :8123
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sanctions
+      ports:
+        - protocol: TCP
+          port: 8123
+    # fx / interest / dispute: the tools are registered but the services are not deployed yet. The
+    # edges are allowed now so onboarding one later does not fail as a mysterious hang.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: fx
+      ports:
+        - protocol: TCP
+          port: 8119
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: interest
+      ports:
+        - protocol: TCP
+          port: 8125
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: dispute
+      ports:
+        - protocol: TCP
+          port: 8135
+    # Observability: the query.observability.readonly tools (Prometheus :9090, Loki :3100,
+    # Alertmanager :9093) plus the OTLP trace export to Tempo :4317.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 3100
+        - protocol: TCP
+          port: 9093
+        - protocol: TCP
+          port: 4317
