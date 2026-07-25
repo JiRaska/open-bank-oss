@@ -31,14 +31,14 @@ triaging an incident that starts on `notification`.
 ## Health & probes
 
 - Readiness: `GET :8112/q/health/ready` · Liveness: `GET :8112/q/health/live`
-- Metrics: scraped by the fleet PodMonitor (namespace `notification`); dashboards in Grafana.
-- Logs: `kubectl logs -n notification deploy/notification-service -f`, or Loki
-  `{namespace="notification"}`.
+- Metrics: scraped by the fleet PodMonitor (namespace `notifications`); dashboards in Grafana.
+- Logs: `kubectl logs -n notifications deploy/notification-service -f`, or Loki
+  `{namespace="notifications"}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl rollout restart deploy/notification-service -n notification` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/notification-service -n notification --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Restart:** `kubectl rollout restart deploy/notification-service -n notifications` (rolling, zero-downtime at >1 replica).
+- **Scale:** `kubectl scale deploy/notification-service -n notifications --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

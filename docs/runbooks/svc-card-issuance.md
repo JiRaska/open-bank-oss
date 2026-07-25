@@ -23,7 +23,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 ## Dependencies
 
 - **Upstream (this service consumes):** `dispute-service`
-- **Downstream (depends on this service):** `account-service`
+- **Downstream (depends on this service):** _none declared_
 
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `card-issuance`.
@@ -31,14 +31,14 @@ triaging an incident that starts on `card-issuance`.
 ## Health & probes
 
 - Readiness: `GET :8118/q/health/ready` · Liveness: `GET :8118/q/health/live`
-- Metrics: scraped by the fleet PodMonitor (namespace `card-issuance`); dashboards in Grafana.
-- Logs: `kubectl logs -n card-issuance deploy/card-issuance-service -f`, or Loki
-  `{namespace="card-issuance"}`.
+- Metrics: scraped by the fleet PodMonitor (namespace `payments`); dashboards in Grafana.
+- Logs: `kubectl logs -n payments deploy/card-issuance-service -f`, or Loki
+  `{namespace="payments"}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl rollout restart deploy/card-issuance-service -n card-issuance` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/card-issuance-service -n card-issuance --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Restart:** `kubectl rollout restart deploy/card-issuance-service -n payments` (rolling, zero-downtime at >1 replica).
+- **Scale:** `kubectl scale deploy/card-issuance-service -n payments --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes
@@ -53,9 +53,8 @@ triaging an incident that starts on `card-issuance`.
 
 ## Disaster recovery
 
-- **RPO/RTO: undefined** — no backup is configured yet (see the prerequisite below), so no recovery-point/time guarantee can be made today.
-- **⚠ Prerequisite NOT met:** this PostgreSQL cluster has **no backup configured** (`barmanObjectStore` absent — prod-readiness C5=1). **DR is not achievable today** and the RPO/RTO targets above do NOT yet apply. Enabling the CNPG backup is the blocking prerequisite (see the backup sweep). Once enabled, the procedure is:
-- **Mechanism (after enablement):** CNPG continuous WAL + base backups → PITR.
+- **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up).
+- **Mechanism:** CloudNativePG continuous WAL archiving + base backups to S3 (`barmanObjectStore`). Point-in-time recovery (PITR).
 - **Restore:** create a `Cluster` with `bootstrap.recovery` pointing at the backup object store; CNPG replays WAL to the target time. See runbook 0003 (PG major upgrade) for the cluster-recreate mechanics.
 - **Verify:** `kubectl cnpg status <db>-rw -n <ns>` shows the recovered cluster Healthy and the `*-app` secret regenerated.
 

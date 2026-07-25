@@ -3,42 +3,42 @@ service facts. Real scaffolding — EXTEND with operational specifics; do not de
 Bank-grade ops (prod-readiness C9=3 / C6=3) still needs a real on-call rotation and an
 exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
-# Runbook — openbank-interest-service
+# Runbook — openbank-settlement-service
 
-> Operational runbook for the `interest` service. Data domain **payments**,
-> classification **internal**, datastore **PostgreSQL**.
+> Operational runbook for the `settlement` service. Data domain **payments**,
+> classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
 
 | Field | Value |
 |---|---|
-| Service | `openbank-interest-service` |
-| HTTP port | `8125` |
+| Service | `openbank-settlement-service` |
+| HTTP port | `8138` |
 | Data domain | payments |
-| Datastore | PostgreSQL (schema `interest_schema`) |
-| Classification | internal |
-| Retention | 5 years |
+| Datastore | PostgreSQL (schema `settlement_schema`) |
+| Classification | confidential |
+| Retention | 7 years |
 | Lineage role | both |
 
 ## Dependencies
 
-- **Upstream (this service consumes):** _none declared_
-- **Downstream (depends on this service):** `account-service`
+- **Upstream (this service consumes):** `ledger-service`, `sepa-payment`
+- **Downstream (depends on this service):** `audit-service`
 
 A failure here propagates to the downstream services above — check them when
-triaging an incident that starts on `interest`.
+triaging an incident that starts on `settlement`.
 
 ## Health & probes
 
-- Readiness: `GET :8125/q/health/ready` · Liveness: `GET :8125/q/health/live`
-- Metrics: scraped by the fleet PodMonitor (namespace `interest`); dashboards in Grafana.
-- Logs: `kubectl logs -n interest deploy/interest-service -f`, or Loki
-  `{namespace="interest"}`.
+- Readiness: `GET :8138/q/health/ready` · Liveness: `GET :8138/q/health/live`
+- Metrics: scraped by the fleet PodMonitor (namespace `payments`); dashboards in Grafana.
+- Logs: `kubectl logs -n payments deploy/settlement-service -f`, or Loki
+  `{namespace="payments"}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl rollout restart deploy/interest-service -n interest` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/interest-service -n interest --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Restart:** `kubectl rollout restart deploy/settlement-service -n payments` (rolling, zero-downtime at >1 replica).
+- **Scale:** `kubectl scale deploy/settlement-service -n payments --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes
@@ -60,11 +60,11 @@ triaging an incident that starts on `interest`.
 
 > RPO/RTO above are documented targets. They become **Bank-grade** (prod-readiness
 > C6=3) only once a restore/failover drill has actually been rehearsed and attested
-> (`openbank-libs/governance/attestations.yaml: interest.dr_drill`).
+> (`openbank-libs/governance/attestations.yaml: settlement.dr_drill`).
 
 ## Escalation & break-glass
 
 - First responder: the owning squad's on-call (rotation tracked as the
-  `interest.oncall` attestation — until that is live, escalate via the team channel).
+  `settlement.oncall` attestation — until that is live, escalate via the team channel).
 - Break-glass cluster access is audited; use it only for a declared incident and
   record the justification.

@@ -31,14 +31,14 @@ triaging an incident that starts on `statement`.
 ## Health & probes
 
 - Readiness: `GET :8136/q/health/ready` · Liveness: `GET :8136/q/health/live`
-- Metrics: scraped by the fleet PodMonitor (namespace `statement`); dashboards in Grafana.
-- Logs: `kubectl logs -n statement deploy/statement-service -f`, or Loki
-  `{namespace="statement"}`.
+- Metrics: scraped by the fleet PodMonitor (namespace `statements`); dashboards in Grafana.
+- Logs: `kubectl logs -n statements deploy/statement-service -f`, or Loki
+  `{namespace="statements"}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl rollout restart deploy/statement-service -n statement` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/statement-service -n statement --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Restart:** `kubectl rollout restart deploy/statement-service -n statements` (rolling, zero-downtime at >1 replica).
+- **Scale:** `kubectl scale deploy/statement-service -n statements --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

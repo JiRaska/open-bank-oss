@@ -64,6 +64,54 @@ def http_port(short: str) -> str:
     return "?"
 
 
+def nearest_kustomize_namespace(manifest: Path) -> str | None:
+    for parent in manifest.parents:
+        if parent != GITOPS and GITOPS not in parent.parents:
+            break
+        m = re.search(r"^namespace:\s*(\S+)", read(parent / "kustomization.yaml"), re.M)
+        if m:
+            return m.group(1)
+    return None
+
+
+def service_namespace(short: str) -> str:
+    """The namespace this service's Deployment/Rollout actually lands in.
+
+    The runbook used to interpolate the service short name as its namespace, which is
+    wrong for a third of the fleet: document-service runs in `documents`, ap2 and mcp in
+    `platform`, settlement/vop/card-issuance/standing-order in `payments`. Every
+    `kubectl -n <ns>` line in those runbooks named a namespace that does not exist, so
+    the first command an on-call engineer copied out of them returned nothing. Resolve it
+    from the manifest that IS the workload — a NetworkPolicy peer or an env var merely
+    mentioning the service must not resolve, or the answer would be some caller's
+    namespace.
+    """
+    names = {f"{short}-service", f"openbank-{short}-service"}
+    for f in sorted(GITOPS.rglob("*.yaml")):
+        text = read(f)
+        if f"openbank-{short}-service" not in text:
+            continue
+        for doc in text.split("\n---"):
+            kind = re.search(r"^kind:\s*(\S+)", doc, re.M)
+            if not kind or kind.group(1) not in ("Deployment", "Rollout"):
+                continue
+            name = re.search(r"^\s{2}name:\s*(\S+)", doc, re.M)
+            if not name or name.group(1) not in names:
+                continue
+            ns = re.search(r"^\s{2}namespace:\s*(\S+)", doc, re.M)
+            if ns:
+                return ns.group(1)
+            inherited = nearest_kustomize_namespace(f)
+            if inherited:
+                return inherited
+    return short
+
+
+def is_stateless(datastore: str) -> bool:
+    """A service that declares no primary datastore. `none` / `n/a` / empty all count."""
+    return (datastore or "").strip().lower() in ("", "none", "n/a", "—", "-")
+
+
 def backup_configured(short: str) -> bool:
     """True iff a deployed manifest configures a backup for this service's datastore
     (CNPG barmanObjectStore). Mirrors the readiness collector's C5 detection so the
@@ -80,6 +128,18 @@ def backup_configured(short: str) -> bool:
 
 def dr_for(datastore: str, has_backup: bool) -> str:
     d = (datastore or "").lower()
+    if is_stateless(datastore):
+        # A stateless service has nothing to restore, and telling an on-call engineer to
+        # "restore from the datastore's managed backup" sends them hunting for a backup
+        # that does not exist — during an incident, at 3am. Its recovery is a redeploy.
+        return ("- **Mechanism:** none needed — this service declares no primary datastore, so it "
+                "holds no state to lose. Recovery is a redeploy from the GitOps manifests, which "
+                "are the source of truth.\n"
+                "- **Restore:** re-sync the ArgoCD Application (or `kubectl rollout restart` the "
+                "Deployment). Any state this service reads lives in its upstream services above — "
+                "recover those first, using their own runbooks.\n"
+                "- **Verify:** health endpoint green, then re-drive one request end to end against "
+                "an upstream that is already known-good.")
     if "postgres" in d:
         proc = ("- **Restore:** create a `Cluster` with `bootstrap.recovery` pointing at the "
                 "backup object store; CNPG replays WAL to the target time. See runbook 0003 "
@@ -141,23 +201,19 @@ triaging an incident that starts on `{short}`.
 ## Health & probes
 
 - Readiness: `GET :{port}/q/health/ready` · Liveness: `GET :{port}/q/health/live`
-- Metrics: scraped by the fleet PodMonitor (namespace `{short}`); dashboards in Grafana.
-- Logs: `kubectl logs -n {short} deploy/{short}-service -f`, or Loki
-  `{{namespace="{short}"}}`.
+- Metrics: scraped by the fleet PodMonitor (namespace `{ns}`); dashboards in Grafana.
+- Logs: `kubectl logs -n {ns} deploy/{short}-service -f`, or Loki
+  `{{namespace="{ns}"}}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl rollout restart deploy/{short}-service -n {short}` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/{short}-service -n {short} --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Restart:** `kubectl rollout restart deploy/{short}-service -n {ns}` (rolling, zero-downtime at >1 replica).
+- **Scale:** `kubectl scale deploy/{short}-service -n {ns} --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes
 
-- **Pod CrashLoopBackOff at boot:** usually a missing/invalid config or secret
-  (`ExternalSecret` not synced) or a Flyway checksum mismatch. Check
-  `kubectl describe pod` events and the first 50 log lines.
-- **Readiness flapping:** datastore ({datastore}) unreachable or saturated — check the
-  datastore pod/cluster health and connection-pool metrics.
+{failure_modes}
 - **Downstream errors:** verify the upstream dependencies above are healthy before
   assuming the fault is local.
 
@@ -183,15 +239,38 @@ def render(short: str) -> str:
     f = gov_facts(short)
     up = ", ".join(f"`{s}`" for s in f.get("upstream", [])) or "_none declared_"
     down = ", ".join(f"`{s}`" for s in f.get("downstream", [])) or "_none declared_"
-    has_backup = backup_configured(short)
-    rpo = ("- **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up)."
-           if has_backup else
-           "- **RPO/RTO: undefined** — no backup is configured yet (see the prerequisite below), so "
-           "no recovery-point/time guarantee can be made today.")
+    datastore = f.get("primaryDatastore", "—")
+    stateless = is_stateless(datastore)
+    has_backup = False if stateless else backup_configured(short)
+    if stateless:
+        rpo = ("- **RPO: n/a** — no persistent state. **RTO target:** ≤ 10 min "
+               "(image pull + rollout).")
+        failure_modes = (
+            "- **Pod CrashLoopBackOff at boot:** usually a missing/invalid config or secret\n"
+            "  (`ExternalSecret` not synced). Check `kubectl describe pod` events and the\n"
+            "  first 50 log lines.\n"
+            "- **Readiness flapping:** this service holds no datastore, so look outward — an\n"
+            "  upstream dependency below, or the OPA sidecar if `AUTHZ_ENFORCE` is on (with no\n"
+            "  reachable PDP, `@Authorize` fails closed)."
+        )
+    else:
+        rpo = ("- **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up)."
+               if has_backup else
+               "- **RPO/RTO: undefined** — no backup is configured yet (see the prerequisite below), so "
+               "no recovery-point/time guarantee can be made today.")
+        failure_modes = (
+            "- **Pod CrashLoopBackOff at boot:** usually a missing/invalid config or secret\n"
+            "  (`ExternalSecret` not synced) or a Flyway checksum mismatch. Check\n"
+            "  `kubectl describe pod` events and the first 50 log lines.\n"
+            f"- **Readiness flapping:** datastore ({datastore}) unreachable or saturated — check the\n"
+            "  datastore pod/cluster health and connection-pool metrics."
+        )
     return TEMPLATE.format(
         short=short,
+        ns=service_namespace(short),
+        failure_modes=failure_modes,
         domain=f.get("dataDomain", "—"),
-        datastore=f.get("primaryDatastore", "—"),
+        datastore=datastore,
         schema=f.get("schemaName", "—"),
         classification=f.get("dataClassification", "—"),
         retention=f.get("retentionPolicy", "—"),

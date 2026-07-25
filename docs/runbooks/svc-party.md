@@ -23,7 +23,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 ## Dependencies
 
 - **Upstream (this service consumes):** `account-service`, `kyc-service`
-- **Downstream (depends on this service):** `pid-service`, `audit-service`
+- **Downstream (depends on this service):** `audit-service`, `account-service`
 
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `party`.

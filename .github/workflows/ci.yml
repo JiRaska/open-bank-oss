@@ -366,6 +366,23 @@ jobs:
       - name: "PodMonitor namespace coverage (issue #2255, enforced)"
         run: python3 .github/scripts/check-podmonitor-namespace-coverage.py
 
+
+      # issue #2255. docs/runbooks/svc-*.md are GENERATED from governance.yaml + the gitops
+      # manifests, and nothing checked them, so 25 of 30 had silently gone stale: they told
+      # an on-call engineer "DR is not achievable today — no backup configured" for services
+      # whose CNPG backups had since been enabled. A generated artifact with no drift gate is
+      # not documentation, it is a claim nobody is accountable for. Same shape as the
+      # NetworkPolicy gate above, including --intent-to-add so a NEW service with no
+      # committed runbook fails as an addition rather than being invisible to `git diff`.
+      - name: "service runbook drift (issue #2255, enforced)"
+        run: |
+          python3 openbank-infra/scripts/generate-service-runbooks.py --force
+          git add -A --intent-to-add docs/runbooks/
+          if ! git diff --exit-code docs/runbooks/; then
+            echo "::error::Service runbook drift — run 'python3 openbank-infra/scripts/generate-service-runbooks.py --force' and commit the result (a new file listed above means a service has no committed runbook). Never hand-edit a generated runbook."
+            exit 1
+          fi
+
       # The governance gates in this job (threat-model coverage + diff, network-policy
       # generation, authz-coverage) are stdlib Python with committed *_test.py suites that,
       # until now, no workflow ran — a gate whose own logic is untested silently rots. Run

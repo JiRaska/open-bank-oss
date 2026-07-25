@@ -53,7 +53,7 @@ triaging an incident that starts on `psd2`.
 
 ## Disaster recovery
 
-- **RPO/RTO: undefined** — no backup is configured yet (see the prerequisite below), so no recovery-point/time guarantee can be made today.
+- **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up).
 - **Mechanism:** restore from the datastore's managed backup to a fresh instance (confirm a backup is actually configured for this datastore first).
 - **Restore:** provision a new datastore from the latest backup, replay any incremental logs, re-point the service.
 - **Verify:** health endpoint green + a domain spot check against last known-good.
