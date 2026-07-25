@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.6.0...finrep-service-v0.6.1) (2026-07-25)
+
+
+### Bug Fixes
+
+* **finrep:** call the ledger trial-balance path that exists, pinned by a pact ([#2290](https://github.com/JiRaska/open-bank-oss/issues/2290)) ([29bdb9d](https://github.com/JiRaska/open-bank-oss/commit/29bdb9d0e318d1851003a093c878a64386c8bf70))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.5.0...finrep-service-v0.6.0) (2026-07-25)
 
 
