@@ -8,6 +8,7 @@ import com.openbank.party.domain.model.Party
 import com.openbank.party.domain.model.PartyDocument
 import com.openbank.party.domain.model.PartyDocumentFile
 import com.openbank.party.domain.model.PartyStatus
+import java.time.Instant
 import java.util.UUID
 
 /** Outbound persistence port for the party aggregate. */
@@ -46,6 +47,15 @@ interface PartyRepository {
 
     /** ADR-0072: look up a party by pre-computed RČ blind index (exact match). */
     suspend fun findByRcBlindIndex(index: String): Party?
+
+    /**
+     * Scoped update of the marketing-consent projection (ADR-0205 D4) — a targeted UPDATE, not a
+     * find-then-mutate-then-save of the whole [Party] aggregate, so it cannot clobber an unrelated
+     * concurrent write to any other party field. No-op if the party row does not exist (the
+     * consumer that calls this only has a partyId from an event, not a guarantee the party still
+     * exists locally).
+     */
+    suspend fun updateMarketingConsentProjection(partyId: UUID, granted: Boolean, at: Instant)
 }
 
 /** Outbound persistence port for party identity documents. */

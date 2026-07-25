@@ -5,9 +5,10 @@
 # control; domain-event topics without ACLs stay open under allow.everyone.if.no.acl.found=true.
 #
 # party-service ACL surface:
-#   Write + Describe: openbank.party.events  (own domain event output + outbox relay)
-#   Read  + Describe: openbank.kyc.events    (KYC case-lifecycle gate, ADR-0073)
-#   Read  + Describe: openbank.aml.events    (AML case-lifecycle gate, ADR-0073)
+#   Write + Describe: openbank.party.events    (own domain event output + outbox relay)
+#   Read  + Describe: openbank.kyc.events      (KYC case-lifecycle gate, ADR-0073)
+#   Read  + Describe: openbank.aml.events      (AML case-lifecycle gate, ADR-0073)
+#   Read  + Describe: openbank.consent.events  (marketing-consent projection, ADR-0205 D4)
 #   Read:             group openbank-party-service
 #
 # Cert projection: Strimzi User Operator mints the keystore Secret in `messaging`;
@@ -47,6 +48,12 @@ spec:
       - resource:
           type: topic
           name: openbank.aml.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.consent.events
           patternType: literal
         operations: [Read, Describe]
         host: "*"
