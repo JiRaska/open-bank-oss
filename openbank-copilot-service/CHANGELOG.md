@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.7.1...copilot-service-v0.7.2) (2026-07-25)
+
+
+### Bug Fixes
+
+* **copilot:** document the action-confirm endpoint and guard the route set ([#2323](https://github.com/JiRaska/open-bank-oss/issues/2323)) ([eafd368](https://github.com/JiRaska/open-bank-oss/commit/eafd368ac93312065a944e56339493fe97dd6b84)), closes [#2255](https://github.com/JiRaska/open-bank-oss/issues/2255)
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.7.0...copilot-service-v0.7.1) (2026-07-25)
 
 
