@@ -18,6 +18,7 @@ import com.openbank.consent.domain.event.ConsentGranted
 import com.openbank.consent.domain.event.ConsentRejected
 import com.openbank.consent.domain.event.ConsentRevoked
 import com.openbank.consent.domain.model.Consent
+import com.openbank.consent.domain.model.ConsentScope
 import com.openbank.consent.domain.model.ConsentStatus
 import com.openbank.consent.domain.model.ConsentValidationResult
 import jakarta.enterprise.context.ApplicationScoped
@@ -39,6 +40,11 @@ class ConsentScaChallengeMismatchException(id: UUID, scaSessionId: UUID) :
     RuntimeException("SCA challenge $scaSessionId does not match consent $id")
 class ConsentScaNotCompletedException(id: UUID, scaSessionId: UUID) :
     RuntimeException("SCA challenge $scaSessionId is not completed for consent $id")
+class ConsentMixedScopeException(scopes: Set<ConsentScope>) :
+    RuntimeException(
+        "Cannot mix GDPR-only scopes with SCA-required scopes in one consent request: $scopes. " +
+            "Request the GDPR-only and SCA-required scopes separately (ADR-0205 D1).",
+    )
 
 @ApplicationScoped
 class ConsentService(
@@ -66,6 +72,15 @@ class ConsentService(
             command.validTo
         }
 
+        // ADR-0205 D1: a request mixing a GDPR-only scope with any other scope is rejected
+        // outright rather than silently falling back to the SCA-gated path — mixing would let a
+        // GDPR-only request ride an SCA-required scope in without the SCA guarantee it needs.
+        val anyGdprOnly = command.scopes.any { it in Consent.GDPR_ONLY_SCOPES }
+        val allGdprOnly = command.scopes.isNotEmpty() && command.scopes.all { it in Consent.GDPR_ONLY_SCOPES }
+        if (anyGdprOnly && !allGdprOnly) {
+            throw ConsentMixedScopeException(command.scopes)
+        }
+
         val consent = Consent(
             partyId = command.partyId,
             granteeId = command.granteeId,
@@ -73,7 +88,10 @@ class ConsentService(
             granteeName = command.granteeName,
             scopes = command.scopes,
             accountIbans = command.accountIbans,
-            status = ConsentStatus.PENDING_SCA,
+            // ADR-0205 D1: a consent made entirely of GDPR_ONLY_SCOPES activates immediately — no
+            // SCA challenge exists for it to wait on. Every other consent keeps the existing
+            // PENDING_SCA -> activateConsent(scaSessionId) flow unchanged.
+            status = if (allGdprOnly) ConsentStatus.ACTIVE else ConsentStatus.PENDING_SCA,
             validFrom = now,
             validTo = validTo,
             scaSessionId = null,
@@ -85,7 +103,22 @@ class ConsentService(
             updatedAt = now,
         )
 
-        return consentRepository.save(consent)
+        return if (allGdprOnly) {
+            consentRepository.save(
+                consent,
+                ConsentGranted(
+                    aggregateId = consent.id,
+                    partyId = consent.partyId,
+                    granteeId = consent.granteeId,
+                    granteeType = consent.granteeType,
+                    scopes = consent.scopes,
+                    validTo = consent.validTo,
+                    occurredAt = clock.instant(),
+                ),
+            )
+        } else {
+            consentRepository.save(consent)
+        }
     }
 
     override suspend fun activateConsent(consentId: UUID, scaSessionId: UUID): Consent {

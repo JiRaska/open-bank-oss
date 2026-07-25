@@ -74,6 +74,112 @@ class ConsentServiceTest {
             coVerify(exactly = 1) { consentRepository.save(any()) }
         }
 
+    // ADR-0205 D1: a consent made entirely of GDPR_ONLY_SCOPES activates immediately, no SCA
+    // challenge — because activateConsent's unconditional scaChallengeClient.getChallenge() call
+    // has no scope-based bypass, this is the only way such a consent can ever reach ACTIVE.
+    @Test
+    fun `createConsent auto-activates and emits ConsentGranted for a GDPR-only scope, no SCA`(): Unit = runBlocking {
+        val savedConsent = slot<Consent>()
+        val savedEvent = slot<ConsentGranted>()
+        coEvery { consentRepository.save(capture(savedConsent), capture(savedEvent)) } answers { firstArg() }
+
+        val command = CreateConsentCommand(
+            partyId = partyId,
+            granteeId = "party-service:marketing-comms",
+            granteeType = GranteeType.INTERNAL_SERVICE,
+            granteeName = "OpenBank marketing preferences",
+            scopes = setOf(ConsentScope.MARKETING_COMMS_EMAIL, ConsentScope.MARKETING_COMMS_INAPP),
+            accountIbans = null,
+            validTo = now.plusDays(365),
+            redirectUri = null,
+            tppTransactionId = null,
+            ipAddress = null,
+            userAgent = null,
+        )
+
+        val result = service.createConsent(command)
+
+        assertThat(result.status).isEqualTo(ConsentStatus.ACTIVE)
+        assertThat(savedConsent.captured.status).isEqualTo(ConsentStatus.ACTIVE)
+        assertThat(savedEvent.captured.scopes).isEqualTo(command.scopes)
+        assertThat(savedEvent.captured.partyId).isEqualTo(partyId)
+        // never went through scaChallengeClient at all
+        coVerify(exactly = 0) { scaChallengeClient.getChallenge(any()) }
+    }
+
+    @Test
+    fun `createConsent stays PENDING_SCA for a single GDPR-only scope too`(): Unit = runBlocking {
+        val savedConsent = slot<Consent>()
+        val savedEvent = slot<ConsentGranted>()
+        coEvery { consentRepository.save(capture(savedConsent), capture(savedEvent)) } answers { firstArg() }
+
+        val command = CreateConsentCommand(
+            partyId = partyId,
+            granteeId = "party-service:marketing-comms",
+            granteeType = GranteeType.INTERNAL_SERVICE,
+            granteeName = "OpenBank marketing preferences",
+            scopes = setOf(ConsentScope.TELEMETRY_RUM),
+            accountIbans = null,
+            validTo = now.plusDays(365),
+            redirectUri = null,
+            tppTransactionId = null,
+            ipAddress = null,
+            userAgent = null,
+        )
+
+        val result = service.createConsent(command)
+
+        assertThat(result.status).isEqualTo(ConsentStatus.ACTIVE)
+        assertThat(savedEvent.captured.scopes).isEqualTo(setOf(ConsentScope.TELEMETRY_RUM))
+    }
+
+    @Test
+    fun `createConsent rejects a request mixing a GDPR-only scope with an SCA-required scope`() {
+        val command = CreateConsentCommand(
+            partyId = partyId,
+            granteeId = granteeId,
+            granteeType = GranteeType.TPP,
+            granteeName = "Test TPP",
+            scopes = setOf(ConsentScope.MARKETING_COMMS_EMAIL, ConsentScope.ACCOUNTS_READ),
+            accountIbans = listOf("CZ6508000000192000145399"),
+            validTo = now.plusDays(90),
+            redirectUri = null,
+            tppTransactionId = null,
+            ipAddress = null,
+            userAgent = null,
+        )
+
+        assertThrows<ConsentMixedScopeException> {
+            runBlocking { service.createConsent(command) }
+        }
+        coVerify(exactly = 0) { consentRepository.save(any()) }
+        coVerify(exactly = 0) { consentRepository.save(any(), any()) }
+    }
+
+    @Test
+    fun `createConsent with only SCA-required scopes is unaffected by the GDPR-only path`(): Unit = runBlocking {
+        val savedConsent = slot<Consent>()
+        coEvery { consentRepository.save(capture(savedConsent)) } answers { firstArg() }
+
+        val command = CreateConsentCommand(
+            partyId = partyId,
+            granteeId = granteeId,
+            granteeType = GranteeType.TPP,
+            granteeName = "Test TPP",
+            scopes = setOf(ConsentScope.PAYMENTS_INITIATE),
+            accountIbans = listOf("CZ6508000000192000145399"),
+            validTo = now.plusDays(90),
+            redirectUri = null,
+            tppTransactionId = null,
+            ipAddress = null,
+            userAgent = null,
+        )
+
+        val result = service.createConsent(command)
+
+        assertThat(result.status).isEqualTo(ConsentStatus.PENDING_SCA)
+    }
+
     @Test
     fun `getConsent returns consent from repo`(): Unit = runBlocking {
         val consent = consent()
@@ -198,7 +304,11 @@ class ConsentServiceTest {
             granteeId = granteeId,
             granteeType = GranteeType.CUSTOMER_AGENT,
             granteeName = "Agent",
-            scopes = setOf(ConsentScope.TELEMETRY_RUM),
+            // AGENT_QUERY, deliberately not TELEMETRY_RUM: this test's concern is the 365-day
+            // clamp on the PENDING_SCA path, kept separate from GDPR_ONLY_SCOPES' auto-activate
+            // path (ADR-0205 D1), which has its own dedicated tests and calls a different
+            // ConsentRepository.save() overload.
+            scopes = setOf(ConsentScope.AGENT_QUERY),
             accountIbans = null,
             validTo = now.plusDays(500),
             redirectUri = null,
