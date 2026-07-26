@@ -22,7 +22,7 @@ This documentation is published directly by the service at the management endpoi
 - **Persistence:** dedicated PostgreSQL database `openbank_interest`, Flyway migrations V1..V5
 - **Outbox:** `interest_outbox` → Kafka topic `openbank.interest.accrual.event` (events `interest.withholding.recorded.v1`, `interest.withholding.remitted.v1`)
 - **Idempotency:** mutations are not `Idempotency-Key`-gated in v1; the remittance assembly is idempotent by `(year, month)` (one batch per tax period)
-- **Auth:** Keycloak OIDC; reads require `ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_SERVICE`, mutations require `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_SERVICE`
+- **Auth:** Keycloak OIDC; reads require `ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API`, mutations require `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API`
 - **Tax:** Czech final withholding on CZK credit interest (15 % resident individual; 35 % non-cooperating state; treaty rate; legal entities not withheld) — ADR-0033
 - **Money path:** **No** — `interest-service` is not in `rules.yaml: money_path_services` (it moves no cash; the cash leg is delegated)
 - **Release version:** see `version.txt` (0.3.0 at time of writing); **API contract version** `1.2.0` ⇒ URL `/api/v1` (ADR-0048)

@@ -78,7 +78,7 @@ class SepaPaymentResource(
         Response.ok(paymentUseCase.getPayment(paymentId).toResponse()).build()
 
     @GET
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
     @Authorize(action = "sepaPayment.list")
     @Operation(summary = "List SEPA payments")
     suspend fun listPayments(
@@ -115,7 +115,7 @@ class SepaPaymentResource(
     @Path("/returns")
     @Consumes(MediaType.APPLICATION_XML)
     @Produces(MediaType.APPLICATION_JSON)
-    @RolesAllowed("ROLE_SERVICE", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_ADMIN")
     @Authorize(action = "sepaPayment.handleReturn")
     @Operation(summary = "Handle inbound pacs.004 payment return from clearing")
     suspend fun handlePaymentReturn(pacs004Xml: String): Response {

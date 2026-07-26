@@ -20,7 +20,7 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Disputes", description = "Dispute and chargeback management")
-@RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+@RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
 class DisputeResource(
     private val openUseCase: OpenDisputeUseCase,
     private val updateUseCase: UpdateDisputeUseCase,
@@ -28,7 +28,7 @@ class DisputeResource(
 ) {
     @POST
     @Operation(summary = "Open a new dispute")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     fun open(request: OpenDisputeRequest): Uni<Response> =
         openUseCase.open(request).map { Response.status(201).entity(it).build() }
             .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
@@ -64,7 +64,7 @@ class DisputeResource(
 
     @PUT
     @Path("/{id}")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "dispute.update", resource = "#id")
     @Operation(summary = "Update dispute status/resolution")
     fun update(@PathParam("id") id: UUID, request: UpdateDisputeRequest): Uni<Response> =
@@ -73,28 +73,28 @@ class DisputeResource(
 
     @POST
     @Path("/{id}/evidence")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Operation(summary = "Add evidence to a dispute")
     fun addEvidence(@PathParam("id") id: UUID, evidence: DisputeEvidence): Uni<Response> =
         updateUseCase.addEvidence(id, evidence).map { Response.status(201).entity(it).build() }
 
     @POST
     @Path("/{id}/withdraw")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Operation(summary = "Withdraw a dispute")
     fun withdraw(@PathParam("id") id: UUID, @QueryParam("actor") actor: String): Uni<Response> =
         updateUseCase.withdraw(id, actor).map { Response.ok(it).build() }
 
     @POST
     @Path("/{id}/escalate")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Operation(summary = "Escalate a dispute")
     fun escalate(@PathParam("id") id: UUID, @QueryParam("actor") actor: String): Uni<Response> =
         updateUseCase.escalate(id, actor).map { Response.ok(it).build() }
 
     @POST
     @Path("/{id}/resolve")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "dispute.resolve", resource = "#id")
     @Operation(
         summary = "Record a dispute's remediation outcome",
@@ -125,7 +125,7 @@ class DisputeResource(
 
     @GET
     @Path("/{id}/evidence/verify")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "dispute.read", resource = "#id")
     @Operation(summary = "Walk and verify a dispute's evidence hash chain (ADR-0117/ADR-0133 pattern)")
     fun verifyEvidenceChain(@PathParam("id") id: UUID): Uni<EvidenceChainVerification> =

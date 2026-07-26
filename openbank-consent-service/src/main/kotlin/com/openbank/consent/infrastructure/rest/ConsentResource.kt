@@ -45,7 +45,7 @@ import java.util.UUID
 @Path("/api/v1/consents")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+@RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
 class ConsentResource(
     private val createConsent: CreateConsentUseCase,
     private val revokeConsent: RevokeConsentUseCase,

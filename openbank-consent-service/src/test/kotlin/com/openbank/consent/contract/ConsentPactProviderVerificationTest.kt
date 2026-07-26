@@ -43,7 +43,7 @@ import javax.sql.DataSource
  * classes with the same provider name each pull every pact naming that provider and fight over the
  * same `@BeforeEach` target, so they collide.
  *
- * Authentication: `ConsentResource` is `@RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")`
+ * Authentication: `ConsentResource` is `@RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")`
  * at class level. `@TestSecurity` cannot annotate a `@TestTemplate`, so it is applied to the class
  * and Quarkus's test-security extension supplies the identity on every replayed request — matching
  * the production path, where callers present an M2M client-credentials token (ADR-0018). The
@@ -67,7 +67,7 @@ import javax.sql.DataSource
 @QuarkusTest
 @QuarkusTestResource(ConsentPactProviderVerificationTest.InMemoryKafkaResource::class)
 @QuarkusTestResource(ConsentPostgresRedisTestResource::class)
-@TestSecurity(user = "pact-verifier", roles = ["ROLE_SERVICE", "ROLE_OPERATOR"])
+@TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-consent-service")
 @PactFolder("../pacts")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")

@@ -90,7 +90,7 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 
 ### 403 on every call
 
-The resource requires one of `ROLE_OPERATOR / ROLE_ADMIN / ROLE_AUDITOR / ROLE_COMPLIANCE / ROLE_SERVICE`. Check the token's realm roles.
+The resource requires one of `ROLE_OPERATOR / ROLE_ADMIN / ROLE_AUDITOR / ROLE_COMPLIANCE / ROLE_API`. Check the token's realm roles.
 
 ## Tech-stack version matrix
 

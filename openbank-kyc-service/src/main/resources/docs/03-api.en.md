@@ -8,7 +8,7 @@ The REST contract is described in [`openapi.yaml`](../openapi.yaml) (`info.versi
 
 | Method | Path | Roles | Purpose |
 |---|---|---|---|
-| `GET` | `/api/v1/kyc/cases?page=&size=&status=` | `ROLE_VIEWER`,`ROLE_OPERATOR`,`ROLE_ADMIN`,`ROLE_KYC`,`ROLE_COMPLIANCE`,`ROLE_SERVICE` | Paginated list; optional `status` funnel filter (ADR-0068) |
+| `GET` | `/api/v1/kyc/cases?page=&size=&status=` | `ROLE_VIEWER`,`ROLE_OPERATOR`,`ROLE_ADMIN`,`ROLE_KYC`,`ROLE_COMPLIANCE`,`ROLE_API` | Paginated list; optional `status` funnel filter (ADR-0068) |
 | `POST` | `/api/v1/kyc/cases` | `ROLE_OPERATOR`,`ROLE_ADMIN`,`ROLE_KYC` | Open a new case for a party |
 | `GET` | `/api/v1/kyc/cases/{id}` | viewer/operator/admin/kyc/compliance/service | Get case by id |
 | `GET` | `/api/v1/kyc/cases/party/{partyId}` | viewer/operator/admin/kyc/compliance/service | Get latest case for a party (404 if none) |

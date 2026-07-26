@@ -45,7 +45,7 @@ import java.util.UUID
  * pass, per the libs authz contract, so OPA strengthens rather than replaces RBAC. See
  * `openbank-infra/gitops/components/balances/gen-balance-opa-bundle.sh` for the composed policy and
  * the verified in-repo M2M caller map (residual risk: OPA cannot distinguish between SERVICE callers
- * beyond ROLE_SERVICE, so `balance.credit`/`balance.debit` admit any ROLE_SERVICE caller, not just
+ * beyond ROLE_API, so `balance.credit`/`balance.debit` admit any ROLE_API caller, not just
  * the one verified caller, settlement-service).
  *
  * Customer ownership (A1 / issue #628): if X-Customer-Party-Id is present (set by customer-edge for
@@ -65,7 +65,7 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
 
     @GET
     @Path("/{accountId}")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "balance.read", resource = "#accountId")
     suspend fun getBalances(
         @PathParam("accountId") accountId: UUID,
@@ -80,7 +80,7 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
 
     @GET
     @Path("/{accountId}/{currency}")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "balance.read", resource = "#accountId")
     suspend fun getBalance(
         @PathParam("accountId") accountId: UUID,
@@ -99,7 +99,7 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
 
     @POST
     @Path("/{accountId}/holds")
-    @RolesAllowed(Roles.SERVICE, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "balance.hold", resource = "#accountId")
     suspend fun placeHold(@PathParam("accountId") accountId: UUID, body: PlaceHoldRequest): Response {
         val hold = svc.placeHold(
@@ -110,28 +110,28 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
 
     @DELETE
     @Path("/holds/{holdId}")
-    @RolesAllowed(Roles.SERVICE, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "balance.holdRelease", resource = "#holdId")
     suspend fun releaseHold(@PathParam("holdId") holdId: UUID): Response =
         Response.ok(svc.releaseHold(ReleaseHoldCommand(holdId))).build()
 
     @POST
     @Path("/{accountId}/credit")
-    @RolesAllowed(Roles.SERVICE, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "balance.credit", resource = "#accountId")
     suspend fun credit(@PathParam("accountId") accountId: UUID, body: BalanceOperationRequest): Response =
         Response.ok(svc.credit(CreditAccountCommand(accountId, body.amount, body.currency, body.referenceId))).build()
 
     @POST
     @Path("/{accountId}/debit")
-    @RolesAllowed(Roles.SERVICE, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "balance.debit", resource = "#accountId")
     suspend fun debit(@PathParam("accountId") accountId: UUID, body: BalanceOperationRequest): Response =
         Response.ok(svc.debit(DebitAccountCommand(accountId, body.amount, body.currency, body.referenceId))).build()
 
     @POST
     @Path("/{accountId}/initialize")
-    @RolesAllowed(Roles.SERVICE, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "balance.initialize", resource = "#accountId")
     suspend fun initialize(@PathParam("accountId") accountId: UUID, body: InitializeRequest): Response {
         val balance = svc.initializeBalance(

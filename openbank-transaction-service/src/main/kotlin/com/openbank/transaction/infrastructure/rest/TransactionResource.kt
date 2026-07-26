@@ -57,7 +57,7 @@ class TransactionResource(
 ) {
 
     @GET
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "transaction.list", resource = "")
     @Operation(summary = "List transactions for an account")
     suspend fun listTransactions(
@@ -71,7 +71,7 @@ class TransactionResource(
 
     @GET
     @Path("/search")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "transaction.search", resource = "")
     @Operation(summary = "Search transactions — BIAN aligned, supports IBAN/BBAN/reference/counterparty/amount/date")
     @Suppress("LongParameterList")
@@ -121,7 +121,7 @@ class TransactionResource(
 
     @GET
     @Path("/{transactionId}")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "transaction.read", resource = "#transactionId")
     @Operation(summary = "Get transaction by ID")
     suspend fun getTransaction(@PathParam("transactionId") transactionId: UUID): Response {
@@ -166,7 +166,7 @@ class TransactionResource(
 
     @POST
     @Path("/{transactionId}/reverse")
-    @RolesAllowed(Roles.SERVICE, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "transaction.reverse", resource = "")
     @Operation(summary = "Reverse a completed transaction — R-transaction return path (ADR-0111)")
     suspend fun reverseTransaction(

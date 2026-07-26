@@ -28,7 +28,7 @@ import java.util.UUID
 class SignatureCeremonyResource(private val useCase: SignatureCeremonyUseCase) {
 
     @POST
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun open(req: OpenCeremonyRequest): Response {
         val ceremony = useCase.openCeremony(
             OpenCeremonyCommand(
@@ -42,13 +42,13 @@ class SignatureCeremonyResource(private val useCase: SignatureCeremonyUseCase) {
 
     @GET
     @Path("/{id}")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "signatureCeremony.read", resource = "#id")
     suspend fun get(@PathParam("id") id: UUID) = useCase.getCeremony(id)?.toResponse() ?: throw NotFoundException()
 
     @POST
     @Path("/{id}/decisions")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "signatureCeremony.recordDecision", resource = "#id")
     suspend fun recordDecision(@PathParam("id") id: UUID, req: RecordDecisionRequest) =
         useCase.recordDecision(id, req.partyRef, req.decision, req.evidenceRef).toResponse()

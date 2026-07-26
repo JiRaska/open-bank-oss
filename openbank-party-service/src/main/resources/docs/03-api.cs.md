@@ -14,7 +14,7 @@ Všechny endpointy vyžadují **Keycloak Bearer token** (realm `openbank`). Role
 
 | Endpoint | Role |
 |---|---|
-| `GET /parties`, `GET /parties/search`, `GET /parties/{id}`, `GET /parties/{id}/documents` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_KYC`, `ROLE_SERVICE` |
+| `GET /parties`, `GET /parties/search`, `GET /parties/{id}`, `GET /parties/{id}/documents` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_KYC`, `ROLE_API` |
 | `POST /parties`, `POST /parties/{id}/documents` | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_KYC` |
 | `PATCH /parties/{id}` | `ROLE_OPERATOR`, `ROLE_ADMIN` (+ `@Authorize(action="party.update")` přes OPA, advisory) |
 | `PUT /parties/{id}/kyc-status` | `ROLE_ADMIN`, `ROLE_KYC` |

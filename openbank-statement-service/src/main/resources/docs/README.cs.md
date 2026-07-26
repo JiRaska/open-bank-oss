@@ -22,5 +22,5 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 - **Perzistence:** dedikovaná databáze `openbank_statement`, Flyway migrace V1..V3. Ukládá se pouze záznam uzávěrky období — nikdy ne vyrenderované bajty výpisu.
 - **Outbox:** `statement_outbox` → Kafka topic `openbank.statement.event` (událost `account.statement.period.closed.v1`); příchozí projekce z `openbank.accounts.account.created`.
 - **Idempotence:** uzávěrka období je idempotentní na `(accountId, pocketCurrency, periodFrom, periodTo)` — opakované spuštění vrátí existující uzávěrku, nikdy ne novou právní sekvenci.
-- **Autentizace:** Keycloak OIDC; čtení povoluje `ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_AUDITOR`/`ROLE_SERVICE`, mutace (uzávěrka, manuální běh) vyžadují `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_SERVICE`. Odchozí čtení upstreamů používají M2M token client-credentials.
+- **Autentizace:** Keycloak OIDC; čtení povoluje `ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_AUDITOR`/`ROLE_API`, mutace (uzávěrka, manuální běh) vyžadují `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API`. Odchozí čtení upstreamů používají M2M token client-credentials.
 - **Money-path:** Ne — statement-service není v `rules.yaml: money_path_services` (rekonciliuje proti penězům, ale s nimi nehýbe).

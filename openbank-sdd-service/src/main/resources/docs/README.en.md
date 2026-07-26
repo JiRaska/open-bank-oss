@@ -22,5 +22,5 @@ This documentation is published directly by the service at the management endpoi
 - **Persistence:** PostgreSQL database `openbank_sdd`, Flyway migration `V1` (tables `sdd_mandate`, `sdd_outbox`).
 - **Outbox:** `sdd_outbox` → Kafka topic `openbank.sdd.event` (channel `sdd-events-out`).
 - **Idempotency:** natural-key idempotent — re-registering the same `(creditorIdentifier, UMR)` returns the stored mandate. No `Idempotency-Key` header / Redis.
-- **Auth:** Keycloak OIDC (RS256 JWT); mutations require `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_PAYMENTS`/`ROLE_SERVICE`, reads additionally allow `ROLE_VIEWER`.
+- **Auth:** Keycloak OIDC (RS256 JWT); mutations require `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_PAYMENTS`/`ROLE_API`, reads additionally allow `ROLE_VIEWER`.
 - **Money-path:** **No** — `openbank-sdd-service` is not in `rules.yaml: money_path_services`; v1 never executes an irreversible posting.

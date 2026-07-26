@@ -46,7 +46,7 @@
 ## Callers
 
 - **admin-ui / operators** (via Keycloak token) — compliance and regulatory-reporting staff registering exposures and pulling the monthly return.
-- **upstream feed / service accounts** (`ROLE_SERVICE`) — a batch or upstream service that pushes overdraft exposures (v1: manual/REST; future: event-driven).
+- **upstream feed / service accounts** (`ROLE_API`) — a batch or upstream service that pushes overdraft exposures (v1: manual/REST; future: event-driven).
 - **auditors** (`ROLE_AUDITOR`) — read the return plus its exclusion trail for evidence.
 
 ## Dependencies

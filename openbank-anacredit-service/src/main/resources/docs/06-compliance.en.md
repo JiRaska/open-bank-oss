@@ -66,7 +66,7 @@ The AnaCredit return is **self-auditing**: every instrument either appears as a 
 ## Security controls
 
 - ✅ AuthN: Keycloak OIDC bearer token (realm `openbank`)
-- ✅ AuthZ: Quarkus `@RolesAllowed` (`ROLE_OPERATOR / ROLE_ADMIN / ROLE_AUDITOR / ROLE_COMPLIANCE / ROLE_SERVICE`)
+- ✅ AuthZ: Quarkus `@RolesAllowed` (`ROLE_OPERATOR / ROLE_ADMIN / ROLE_AUDITOR / ROLE_COMPLIANCE / ROLE_API`)
 - ✅ Hardened HTTP headers: CSP `default-src 'self'`, HSTS, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, Referrer-Policy, Permissions-Policy
 - ✅ CORS: restricted to the admin-UI origins
 - ✅ Input validation: typed enums (`CounterpartyType`, `InstrumentType`), `BigDecimal` amounts, ISO-date parsing

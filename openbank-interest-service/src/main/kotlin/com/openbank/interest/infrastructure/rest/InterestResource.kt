@@ -40,7 +40,7 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Interest", description = "Interest accrual and capitalization")
-@RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+@RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
 class InterestResource(
     private val accrueUseCase: AccrueInterestUseCase,
     private val capitalizeUseCase: CapitalizeInterestUseCase,
@@ -64,7 +64,7 @@ class InterestResource(
     @POST
     @Path("/accrue")
     @Operation(summary = "Accrue interest for an account")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "interest.create", resource = "")
     fun accrue(request: AccrualRequest): Uni<Response> = accrueUseCase.accrue(request)
         .map { Response.status(201).entity(it).build() }
@@ -77,7 +77,7 @@ class InterestResource(
     @POST
     @Path("/accrue/all")
     @Operation(summary = "Trigger daily accrual for all accounts")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "interest.trigger", resource = "")
     fun accrueAll(@QueryParam("date") date: String?): Uni<Response> =
         accrueUseCase.accrueAll(date?.let { LocalDate.parse(it) } ?: LocalDate.now(clock))
@@ -86,7 +86,7 @@ class InterestResource(
     @POST
     @Path("/capitalize/{accountId}")
     @Operation(summary = "Capitalize accrued interest for an account")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "interest.create", resource = "#accountId")
     fun capitalize(
         @PathParam("accountId") accountId: UUID,
@@ -132,7 +132,7 @@ class InterestResource(
     @POST
     @Path("/rates")
     @Operation(summary = "Create interest rate configuration")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "interest.create", resource = "")
     fun createRateConfig(config: InterestRateConfig): Uni<Response> = rateConfigUseCase.createConfig(config)
         .map { Response.status(201).entity(it).build() }
@@ -168,7 +168,7 @@ class InterestResource(
     @DELETE
     @Path("/rates/{id}")
     @Operation(summary = "Deactivate interest rate configuration")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "interest.delete", resource = "#id")
     fun deactivateRateConfig(@PathParam("id") id: UUID): Uni<Response> = rateConfigUseCase.deactivateConfig(id)
         .map { Response.ok(it).build() }

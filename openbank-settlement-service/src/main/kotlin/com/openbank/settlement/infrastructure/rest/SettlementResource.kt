@@ -39,7 +39,7 @@ import java.util.UUID
 class SettlementResource(private val settlementUseCase: SettlementUseCase) {
 
     @POST
-    @RolesAllowed(Roles.SERVICE, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "settlement.create", resource = "")
     @Operation(summary = "Originate a settlement and start its workflow")
     suspend fun originate(request: CreateSettlementRequest): Response {

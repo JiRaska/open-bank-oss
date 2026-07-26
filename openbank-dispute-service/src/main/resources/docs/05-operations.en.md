@@ -66,7 +66,7 @@ Never edit an applied migration. Set `QUARKUS_FLYWAY_REPAIR_AT_START=true` in th
 The V3 sequence migration did not apply. Re-run migrations / confirm V3 is present.
 
 ### 401/403 on the API
-Confirm the bearer token comes from the `openbank` realm and carries `ROLE_VIEWER` (reads) or `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_SERVICE` (mutations). If OPA enforcement was flipped on (`AUTHZ_ENFORCE=true`), check the OPA sidecar decision logs.
+Confirm the bearer token comes from the `openbank` realm and carries `ROLE_VIEWER` (reads) or `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API` (mutations). If OPA enforcement was flipped on (`AUTHZ_ENFORCE=true`), check the OPA sidecar decision logs.
 
 ## Release
 

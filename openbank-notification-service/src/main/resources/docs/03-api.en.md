@@ -10,9 +10,9 @@ Keycloak OIDC (`realms/openbank`, client `openbank-services`), RS256 bearer toke
 
 | Surface | Roles |
 |---|---|
-| Read notifications (`GET /notifications…`) | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_SERVICE` |
-| List devices (`GET /devices`) | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_SERVICE` |
-| Register device (`POST /devices`) | `ROLE_OPERATOR`, `ROLE_SERVICE`, `ROLE_ADMIN` |
+| Read notifications (`GET /notifications…`) | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API` |
+| List devices (`GET /devices`) | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API` |
+| Register device (`POST /devices`) | `ROLE_OPERATOR`, `ROLE_API`, `ROLE_ADMIN` |
 | Dispatch control (`/ops/dispatch…`) | `ROLE_OPERATOR`, `ROLE_ADMIN` (read also `ROLE_AUDITOR`) |
 
 For dispatch-control, the **actor identity is taken from the authenticated JWT subject**, never from the request body — so the four-eyes rule cannot be spoofed. `ROLE_SRE` is the intended operator role once it exists in the realm; until then it is gated on `ROLE_OPERATOR`/`ROLE_ADMIN`.

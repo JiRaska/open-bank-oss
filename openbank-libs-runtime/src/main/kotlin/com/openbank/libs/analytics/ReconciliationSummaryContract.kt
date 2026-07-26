@@ -56,7 +56,7 @@ data class ServiceReconciliationSummary(
  *
  * **Security:** role-gated, never `@PermitAll` (the metadata is audit material). The caller is the
  * analytics-sink calling service-to-service under the `openbank-services` client-credentials grant, so
- * [Roles.SERVICE] must be allowed; the human audit roles let an examiner-facing operator read it too.
+ * [Roles.API] must be allowed; the human audit roles let an examiner-facing operator read it too.
  *
  * **Performance:** implementations must serve this off the customer path — read-only, off-peak (the
  * sink drives it from its off-peak cron), ideally a read-replica, and `since`-windowed where the table
@@ -77,6 +77,6 @@ interface ReconciliationSummaryContract {
      */
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    @RolesAllowed(Roles.SERVICE, Roles.AUDITOR, Roles.ADMIN, Roles.COMPLIANCE)
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.ADMIN, Roles.COMPLIANCE)
     fun reconciliationSummary(@QueryParam("since") since: String?): Uni<ServiceReconciliationSummary>
 }

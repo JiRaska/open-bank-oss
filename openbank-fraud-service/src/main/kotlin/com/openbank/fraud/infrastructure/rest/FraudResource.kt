@@ -37,7 +37,7 @@ class FraudResource {
      */
     @POST
     @Path("/score")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "fraud.score")
     @Operation(summary = "Score a payment intent and return a fraud verdict (ALLOW/CHALLENGE/REVIEW/DECLINE)")
     suspend fun score(req: ScoreFraudRequest): Response {

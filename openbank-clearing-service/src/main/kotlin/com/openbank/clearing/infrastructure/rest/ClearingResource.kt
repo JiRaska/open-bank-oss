@@ -66,7 +66,7 @@ class ClearingResource(
 
     @POST
     @Path("/submit")
-    @RolesAllowed(Roles.SERVICE, Roles.PAYMENTS, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "clearingBatch.submit")
     @Operation(summary = "Submit payment for clearing")
     fun submit(request: SubmitPaymentRequest): Uni<Response> = submitUseCase.submit(request)
@@ -75,7 +75,7 @@ class ClearingResource(
 
     @GET
     @Path("/batches")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "clearingBatch.list")
     @Operation(summary = "List clearing batches")
     fun listBatches(
@@ -86,7 +86,7 @@ class ClearingResource(
 
     @GET
     @Path("/batches/{id}")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "clearingBatch.read", resource = "#id")
     @Operation(summary = "Get clearing batch by ID")
     fun getBatch(@PathParam("id") id: UUID): Uni<Response> = getBatchUseCase.getBatch(id)
@@ -94,7 +94,7 @@ class ClearingResource(
 
     @GET
     @Path("/batches/{id}/items")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "clearingBatch.readItems", resource = "#id")
     @Operation(summary = "List items in a clearing batch")
     fun getBatchItems(@PathParam("id") id: UUID): Uni<List<ClearingItem>> = getItemUseCase.listItemsByBatch(id)
@@ -120,7 +120,7 @@ class ClearingResource(
 
     @GET
     @Path("/positions/{cycleId}")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "clearingBatch.readPositions")
     @Operation(summary = "Get settlement positions for a cycle")
     fun getPositions(@PathParam("cycleId") cycleId: String): Uni<List<SettlementPosition>> =
@@ -128,7 +128,7 @@ class ClearingResource(
 
     @GET
     @Path("/items/{id}")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "clearingBatch.readItem", resource = "#id")
     @Operation(summary = "Get clearing item by ID")
     fun getItem(@PathParam("id") id: UUID): Uni<Response> = getItemUseCase.getItem(id)
@@ -136,7 +136,7 @@ class ClearingResource(
 
     @GET
     @Path("/items/by-payment/{paymentId}")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "clearingBatch.readItemsByPayment", resource = "#paymentId")
     @Operation(summary = "Get clearing items by payment ID")
     fun getItemsByPayment(@PathParam("paymentId") paymentId: UUID): Uni<List<ClearingItem>> =

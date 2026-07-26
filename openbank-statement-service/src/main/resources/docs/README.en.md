@@ -22,5 +22,5 @@ This documentation is published directly by the service at the management endpoi
 - **Persistence:** dedicated database `openbank_statement`, Flyway migrations V1..V3. Only the period-close record is stored — never rendered statement bytes.
 - **Outbox:** `statement_outbox` → Kafka topic `openbank.statement.event` (event `account.statement.period.closed.v1`); inbound projection from `openbank.accounts.account.created`.
 - **Idempotency:** period-close is idempotent on `(accountId, pocketCurrency, periodFrom, periodTo)` — a re-run returns the existing close, never a new legal sequence.
-- **Auth:** Keycloak OIDC; reads allow `ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_AUDITOR`/`ROLE_SERVICE`, mutations (close, manual run) require `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_SERVICE`. Outbound upstream reads use a client-credentials M2M token.
+- **Auth:** Keycloak OIDC; reads allow `ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_AUDITOR`/`ROLE_API`, mutations (close, manual run) require `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API`. Outbound upstream reads use a client-credentials M2M token.
 - **Money-path:** No — statement-service is not in `rules.yaml: money_path_services` (it reconciles against, but does not move, money).

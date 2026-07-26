@@ -41,7 +41,7 @@ class SctInstResource @Inject constructor(
 ) {
 
     @GET
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
     @Authorize(action = "sctInstPayment.list")
     @Operation(summary = "List SCT Inst payments")
     fun listAll(): Uni<Response> = getUseCase.listAll().map { list ->
@@ -82,7 +82,7 @@ class SctInstResource @Inject constructor(
 
     @GET
     @Path("/debtor/{debtorAccountId}")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
     @Authorize(action = "sctInstPayment.list", resource = "#debtorAccountId")
     @Operation(summary = "List payments by debtor account")
     fun listByDebtor(

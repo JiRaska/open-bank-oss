@@ -69,6 +69,14 @@
       {
         "name": "ROLE_PAYMENTS",
         "description": "Payment ops: initiation, recall, return, clearing reconciliation"
+      },
+      {
+        "name": "ROLE_CREDIT_RISK",
+        "description": "Credit-risk officer: takes the credit decision on a loan application (openbank-lending-service). Declared in @RolesAllowed since the service shipped; created here by issue #2442"
+      },
+      {
+        "name": "ROLE_LENDING_OFFICER",
+        "description": "Lending officer: opens and services loan applications, cannot take the credit decision (four-eyes with ROLE_CREDIT_RISK). Declared in @RolesAllowed since the service shipped; created here by issue #2442"
       }
     ]
   },
@@ -326,6 +334,14 @@
       "serviceAccountClientId": "openbank-edge",
       "realmRoles": [
         "ROLE_OPERATOR"
+      ]
+    },
+    {
+      "username": "service-account-openbank-services",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-services",
+      "realmRoles": [
+        "ROLE_API"
       ]
     }
   ]

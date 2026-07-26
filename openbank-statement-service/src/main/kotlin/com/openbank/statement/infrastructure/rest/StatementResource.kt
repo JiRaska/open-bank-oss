@@ -32,7 +32,7 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Statements", description = "Account statements: per-pocket period-close + on-demand render (ADR-0035)")
-@RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_SERVICE")
+@RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_API")
 class StatementResource(
     private val closePeriod: ClosePeriodUseCase,
     private val renderStatement: RenderStatementUseCase,
@@ -42,7 +42,7 @@ class StatementResource(
 
     @POST
     @Path("/{accountId}/close")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "statement.close", resource = "#accountId")
     @Operation(summary = "Close a month for every pocket of an account (assigns sequences, reconciles fail-closed)")
     fun close(

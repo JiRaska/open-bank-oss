@@ -66,7 +66,7 @@ Nikdy needituj aplikovanou migraci. Nastav `QUARKUS_FLYWAY_REPAIR_AT_START=true`
 Migrace sekvence V3 se neaplikovala. Spusť migrace znovu / ověř, že V3 je přítomna.
 
 ### 401/403 na API
-Ověř, že bearer token pochází z realmu `openbank` a nese `ROLE_VIEWER` (čtení) nebo `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_SERVICE` (zápisy). Pokud bylo zapnuto vynucení OPA (`AUTHZ_ENFORCE=true`), zkontroluj rozhodovací logy OPA sidecaru.
+Ověř, že bearer token pochází z realmu `openbank` a nese `ROLE_VIEWER` (čtení) nebo `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API` (zápisy). Pokud bylo zapnuto vynucení OPA (`AUTHZ_ENFORCE=true`), zkontroluj rozhodovací logy OPA sidecaru.
 
 ## Release
 

@@ -54,7 +54,7 @@ Případ otevírá buď operátor (`POST /api/v1/kyc/cases`), nebo se otevře au
 - **admin-ui** (přes Keycloak token) — KYC pracovníci, compliance ops, funnel onboarding cockpitu (ADR-0068)
 - **party-service** (události) — upstream producent `PARTY_CREATED`; downstream konzument schválení pro aktivaci
 - **aml-service / sanctions-service** — konzumují KYC události pro spuštění nebo korelaci screeningu
-- **service-to-service čtenáři** (`ROLE_SERVICE`) — čtou KYC stav party během onboardingu
+- **service-to-service čtenáři** (`ROLE_API`) — čtou KYC stav party během onboardingu
 
 ## Závislosti
 

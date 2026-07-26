@@ -109,5 +109,5 @@ Mandátové závady mapuje `MandateNotFoundMapper` (404) a `IllegalMandateTransi
 ## Autentizace a autorizace
 
 - **AuthN:** Keycloak OIDC, RS256 JWT bearer token (`auth-server-url .../realms/openbank`, klient `openbank-services`).
-- **AuthZ:** Quarkus `@RolesAllowed`. Mutace vyžadují jednu z `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS`, `ROLE_SERVICE`; read endpointy (`GET` výpis/načtení, `GET refund-assessment`) navíc povolují `ROLE_VIEWER`.
+- **AuthZ:** Quarkus `@RolesAllowed`. Mutace vyžadují jednu z `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS`, `ROLE_API`; read endpointy (`GET` výpis/načtení, `GET refund-assessment`) navíc povolují `ROLE_VIEWER`.
 - CORS je v dodávané konfiguraci omezen na `http://localhost:3000`; bezpečnostní hlavičky (CSP, HSTS, X-Frame-Options DENY, nosniff) jsou nastaveny na každé odpovědi.

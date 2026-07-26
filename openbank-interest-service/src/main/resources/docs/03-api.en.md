@@ -16,8 +16,8 @@ All endpoints require a **Keycloak Bearer token** (realm `openbank`). Roles are 
 
 | Operation class | Allowed roles |
 |---|---|
-| Reads (`GET` accruals, summary, capitalizations, rates, remittances) | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_SERVICE` (remittances also `ROLE_AUDITOR`) |
-| Mutations (`POST` accrue, capitalize, rates, remittances; `DELETE` rate) | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_SERVICE` |
+| Reads (`GET` accruals, summary, capitalizations, rates, remittances) | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API` (remittances also `ROLE_AUDITOR`) |
+| Mutations (`POST` accrue, capitalize, rates, remittances; `DELETE` rate) | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API` |
 
 ## Idempotence
 

@@ -8,7 +8,7 @@ REST kontrakt je popsán v [`openapi.yaml`](../openapi.yaml) (`info.version: 1.1
 
 | Metoda | Cesta | Role | Účel |
 |---|---|---|---|
-| `GET` | `/api/v1/kyc/cases?page=&size=&status=` | `ROLE_VIEWER`,`ROLE_OPERATOR`,`ROLE_ADMIN`,`ROLE_KYC`,`ROLE_COMPLIANCE`,`ROLE_SERVICE` | Stránkovaný výpis; volitelný `status` filtr funnelu (ADR-0068) |
+| `GET` | `/api/v1/kyc/cases?page=&size=&status=` | `ROLE_VIEWER`,`ROLE_OPERATOR`,`ROLE_ADMIN`,`ROLE_KYC`,`ROLE_COMPLIANCE`,`ROLE_API` | Stránkovaný výpis; volitelný `status` filtr funnelu (ADR-0068) |
 | `POST` | `/api/v1/kyc/cases` | `ROLE_OPERATOR`,`ROLE_ADMIN`,`ROLE_KYC` | Otevření nového případu pro party |
 | `GET` | `/api/v1/kyc/cases/{id}` | viewer/operator/admin/kyc/compliance/service | Načtení případu podle id |
 | `GET` | `/api/v1/kyc/cases/party/{partyId}` | viewer/operator/admin/kyc/compliance/service | Načtení posledního případu pro party (404 pokud žádný) |

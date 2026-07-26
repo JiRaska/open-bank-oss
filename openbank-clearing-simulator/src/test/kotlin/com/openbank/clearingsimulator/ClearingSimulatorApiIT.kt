@@ -61,7 +61,7 @@ class ClearingSimulatorApiIT {
     }
 
     @Test
-    @TestSecurity(user = "rail", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "rail", roles = ["ROLE_API"])
     fun `submitting a pacs_008 returns an ACSC pacs_002`() {
         val body = (
             Given {

@@ -37,7 +37,7 @@ class TppRegistryResource(
 ) {
     @GET
     @Path("/check")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun checkAuthorization(@QueryParam("tppId") tppId: String, @QueryParam("role") role: String): Response {
         val result = svc.checkAuthorization(
             CheckTppAuthorizationQuery(tppId, TppRole.valueOf(role.uppercase())),
@@ -72,7 +72,7 @@ class TppRegistryResource(
     }
 
     @GET
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun listTpps(
         @QueryParam("countryCode") countryCode: String?,
         @QueryParam("role") role: String?,
@@ -94,7 +94,7 @@ class TppRegistryResource(
 
     @GET
     @Path("/{tppId}")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun getTpp(@PathParam("tppId") tppId: String): Response =
         Response.ok(svc.getTpp(GetTppQuery(tppId))).build()
 
@@ -126,7 +126,7 @@ class TppRegistryResource(
 
     @POST
     @Path("/sync/eba")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun triggerEbaSync(@HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
         val cacheKey = idempotencyKey?.takeIf { it.isNotBlank() }?.let(::syncKey)
         cacheKey?.let { key ->
@@ -146,7 +146,7 @@ class TppRegistryResource(
 
     @GET
     @Path("/sync/state")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     suspend fun getSyncState(): Response = Response.ok(svc.getSyncState()).build()
 
     private fun registerKey(tppId: String, idempotencyKey: String) = "tpp:register:$tppId:$idempotencyKey"

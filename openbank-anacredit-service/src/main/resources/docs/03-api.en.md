@@ -13,13 +13,13 @@ The REST contract is formalized in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.
 All endpoints require a **Keycloak Bearer token** (realm `openbank`). The resource is class-level role-gated:
 
 ```
-@RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_COMPLIANCE", "ROLE_SERVICE")
+@RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_COMPLIANCE", "ROLE_API")
 ```
 
 | Role | Typical use |
 |---|---|
 | `ROLE_OPERATOR` | register exposures, render returns |
-| `ROLE_SERVICE` | upstream feed pushing exposures |
+| `ROLE_API` | upstream feed pushing exposures |
 | `ROLE_AUDITOR` | read returns + exclusion trail |
 | `ROLE_COMPLIANCE` | regulatory review |
 | `ROLE_ADMIN` | everything |

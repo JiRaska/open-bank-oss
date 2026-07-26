@@ -46,7 +46,7 @@ class ClearingResource {
     @Path("/credit-transfers")
     @Consumes(MediaType.APPLICATION_XML)
     @Produces(MediaType.APPLICATION_XML)
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Operation(summary = "Submit a pacs.008; receive a pacs.002 status report")
     fun submitCreditTransfer(pacs008Xml: String): Response =
         Response.ok(simulator.clear(pacs008Xml).statusReportXml).build()
@@ -60,7 +60,7 @@ class ClearingResource {
     @Path("/returns")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Operation(summary = "Simulate a pacs.004 payment return — calls sepa-payment return handler")
     fun simulateReturn(request: ReturnRequest): Response {
         val pacs004Xml = simulator.generateReturn(request)
@@ -78,7 +78,7 @@ class ClearingResource {
     @Path("/notifications")
     @Consumes(MediaType.APPLICATION_XML)
     @Produces(MediaType.APPLICATION_XML)
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Operation(summary = "Submit a pacs.008; receive the camt.054 credit notification if it settles")
     fun creditNotification(pacs008Xml: String): Response {
         val result = simulator.clear(pacs008Xml)

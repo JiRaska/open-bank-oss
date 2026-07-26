@@ -52,9 +52,9 @@ When a transaction is initiated it runs the saga synchronously: place a hold on 
 
 ## Callers
 
-- **payment services** (`sepa-payment`, `sepa-instant`, `domestic-payment`, `swift-service`, `standing-order-service`, `clearing-service`) — initiate transactions (`ROLE_SERVICE`/`ROLE_OPERATOR`).
+- **payment services** (`sepa-payment`, `sepa-instant`, `domestic-payment`, `swift-service`, `standing-order-service`, `clearing-service`) — initiate transactions (`ROLE_API`/`ROLE_OPERATOR`).
 - **fx-service** — upstream rate source for cross-currency settlement (this service calls *out* to it).
-- **agent-service** — read-only MCP tool over transaction history (`ROLE_SERVICE`).
+- **agent-service** — read-only MCP tool over transaction history (`ROLE_API`).
 - **admin-ui** — operators / compliance read transaction history and search.
 
 ## Dependencies

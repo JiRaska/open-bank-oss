@@ -70,7 +70,7 @@ class EudiCredentialIssuerResource(
     @POST
     @Path("credential-offers")
     @Consumes(MediaType.APPLICATION_JSON)
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "identity.eudi.issue")
     @Operation(summary = "Create an OpenID4VCI credential offer for a verified identity (ADR-0094)")
     suspend fun createOffer(body: String): Response {
@@ -164,7 +164,7 @@ class EudiCredentialIssuerResource(
 
     @POST
     @Path("credentials/{index}/revoke")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "identity.eudi.revoke")
     @Operation(summary = "Revoke a previously-issued credential by its status-list index (ADR-0094)")
     suspend fun revoke(@PathParam("index") index: Long): Response {

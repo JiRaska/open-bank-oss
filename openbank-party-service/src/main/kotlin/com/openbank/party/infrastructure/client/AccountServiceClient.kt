@@ -26,7 +26,7 @@ import java.util.UUID
  * `@RolesAllowed(SERVICE, VIEWER, OPERATOR, ADMIN)`, so the call carries an M2M bearer via
  * [OidcClientRequestReactiveFilter] — the `openbank-services` client_credentials token resolves to
  * ROLE_OPERATOR, which is what actually satisfies the check (nothing in either Keycloak realm
- * grants ROLE_SERVICE, so that constant in the list is dead).
+ * grants ROLE_API, so that constant in the list is dead).
  */
 @RegisterRestClient(configKey = "account-service")
 @RegisterProvider(OidcClientRequestReactiveFilter::class)

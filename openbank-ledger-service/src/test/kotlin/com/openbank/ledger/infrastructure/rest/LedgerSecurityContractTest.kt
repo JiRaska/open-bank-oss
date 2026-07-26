@@ -32,7 +32,7 @@ class LedgerSecurityContractTest {
         ).forEach { name ->
             assertThat(rolesOf(name))
                 .describedAs("%s read roles (financial-control evidence)", name)
-                .containsExactlyInAnyOrder("ROLE_SERVICE", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN")
+                .containsExactlyInAnyOrder("ROLE_API", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN")
         }
     }
 

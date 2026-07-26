@@ -23,12 +23,15 @@
 #   is unreachable by construction: there is no token any Keycloak in this platform can mint that
 #   satisfies it. This is a mechanical fact, not a policy judgement, which is why it blocks.
 #
-#   ADVISORY (::warning) — an individual unknown role inside a list that also names a live one
-#   (e.g. `("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")`). Humans still get in; only the caller
-#   the dead name was meant for is silently denied. Fleet-wide there are ~150 of these across ~29
-#   services (ROLE_SERVICE, ROLE_CREDIT_RISK, ROLE_LENDING_OFFICER), and clearing them is a real
-#   decision per service — grant the role in Keycloak, or delete the path it was reserved for.
-#   Tracked separately; warning here so the number stays visible instead of being rediscovered.
+#   HARD (exit 1) — an individual unknown role inside a list that also names a live one
+#   (e.g. the old `("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")`). Humans still get in, so this
+#   fails quietly: only the caller the dead name was meant for is denied, forever, with nothing to
+#   read. This was ADVISORY at introduction because 163 sites across 29 modules were in that state
+#   (ROLE_SERVICE ×152, ROLE_CREDIT_RISK ×9, ROLE_LENDING_OFFICER ×6) and clearing them needed a
+#   decision, not a rename: #2442 granted ROLE_API to service-account-openbank-services, created
+#   the two lending roles, and swept ROLE_SERVICE -> ROLE_API fleet-wide. The count is 0, so the
+#   warning became a hard gate — an advisory over a set that is empty is just a future regression
+#   waiting to be merged.
 #
 # COMMENTS ARE STRIPPED FIRST, and that is load-bearing rather than tidy. #2403 fixed finrep by
 # replacing the literals and writing a KDoc that QUOTES the broken annotation to explain what went
@@ -144,27 +147,23 @@ def main() -> int:
             f"this endpoint answers 403 to every caller. Known roles: {', '.join(sorted(known))}",
         )
 
-    if partial:
-        by_role = {}
-        for _, _, dead in partial:
-            for d in dead:
-                by_role[d] = by_role.get(d, 0) + 1
-        detail = ", ".join(f"{r}×{c}" for r, c in sorted(by_role.items(), key=lambda kv: -kv[1]))
-        print(
-            f"::warning title=RolesAllowed realm parity::{len(partial)} @RolesAllowed site(s) name "
-            f"a role no realm issues alongside a live one — the caller it was reserved for is "
-            f"silently denied ({detail}). Grant the role in Keycloak or delete the path.",
+    for rel, line, dead in partial:
+        errors.append(
+            f"{rel}:{line} — @RolesAllowed names {', '.join(dead)}, which no realm issues. The "
+            f"endpoint still admits its other roles, so this fails quietly: only the caller the "
+            f"dead name was reserved for is denied, and nothing else says so. Grant the role in "
+            f"Keycloak or delete it from the annotation.",
         )
 
     if errors:
         for e in errors:
             sys.stderr.write(f"::error title=RolesAllowed realm parity::{e}\n")
-        sys.stderr.write(f"::error::check-roles-allowed-realm: {len(errors)} unreachable endpoint(s).\n")
+        sys.stderr.write(f"::error::check-roles-allowed-realm: {len(errors)} @RolesAllowed name(s) no realm issues.\n")
         return 1
 
     print(
         f"roles-allowed parity: {checked} @RolesAllowed site(s) checked against "
-        f"{len(known)} role(s) from {', '.join(realm_files)}; 0 unreachable, {len(partial)} advisory.",
+        f"{len(known)} role(s) from {', '.join(realm_files)}; every named role is issued by a realm.",
     )
     return 0
 

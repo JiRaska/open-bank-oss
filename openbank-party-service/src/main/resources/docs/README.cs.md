@@ -23,5 +23,5 @@ Tuto dokumentaci služba publikuje přímo na management endpointu `/q/openbank/
 - **Outbox:** `party_outbox` → Kafka topic `openbank.party.events` (dispatcher pollne každých 5 s s fault-tolerancí: circuit breaker + retry + bulkhead + timeout)
 - **Příchozí eventy:** konzumuje `openbank.kyc.events` a `openbank.aml.events` pro řízení dvouklíčové KYC+AML aktivační brány
 - **Idempotence:** hlavička `Idempotency-Key` je povinná na `POST /api/v1/parties`; unikátní omezení na e-mail navíc deduplikuje party (409 při replay)
-- **Auth:** Keycloak OIDC, role `ROLE_VIEWER` / `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_KYC` / `ROLE_SERVICE`; OPA authz v advisory režimu (ADR-0034)
+- **Auth:** Keycloak OIDC, role `ROLE_VIEWER` / `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_KYC` / `ROLE_API`; OPA authz v advisory režimu (ADR-0034)
 - **Klasifikace dat:** `restricted` — služba drží PII (jméno, e-mail, telefon, adresu, národnost, DIČ). Není to money-path služba.

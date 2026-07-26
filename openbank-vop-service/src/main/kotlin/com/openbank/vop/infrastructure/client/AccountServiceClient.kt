@@ -22,7 +22,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  *
  * We deliberately do NOT send the `X-Customer-Party-Id` header account-service uses for
  * owner-scoping: VoP is a service-to-service check on behalf of a payer who is *not* the account
- * owner, so the M2M token (ROLE_SERVICE) is the right identity and owner-scoping must not apply.
+ * owner, so the M2M token (ROLE_API) is the right identity and owner-scoping must not apply.
  */
 @RegisterRestClient(configKey = "account-service")
 @RegisterProvider(OidcClientRequestReactiveFilter::class)

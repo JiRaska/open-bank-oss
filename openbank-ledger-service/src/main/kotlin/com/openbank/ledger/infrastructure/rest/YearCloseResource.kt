@@ -56,7 +56,7 @@ class YearCloseResource(private val yearCloseUseCase: YearCloseUseCase) {
 
     @GET
     @Path("/trial-balance")
-    @RolesAllowed(Roles.SERVICE, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "ledger.read", resource = "")
     @Operation(summary = "Fiscal-year GL trial balance, grouped by account type (computed on demand)")
     suspend fun trialBalance(@QueryParam("fiscalYear") fiscalYear: Int?): Response {
@@ -68,7 +68,7 @@ class YearCloseResource(private val yearCloseUseCase: YearCloseUseCase) {
 
     @GET
     @Path("/{fiscalYear}")
-    @RolesAllowed(Roles.SERVICE, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "ledger.read", resource = "#fiscalYear")
     @Operation(summary = "Get the year-close record for a fiscal year")
     suspend fun getYearClose(@PathParam("fiscalYear") fiscalYear: Int): Response {
@@ -90,7 +90,7 @@ class YearCloseResource(private val yearCloseUseCase: YearCloseUseCase) {
 
     @GET
     @Path("/{fiscalYear}/verify")
-    @RolesAllowed(Roles.SERVICE, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "ledger.read", resource = "#fiscalYear")
     @Operation(
         summary = "Re-verify a year close's content hash against a fresh trial balance (read-only, " +

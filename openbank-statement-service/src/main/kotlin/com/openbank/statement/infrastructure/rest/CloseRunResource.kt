@@ -30,7 +30,7 @@ import java.util.UUID
 @Path("/api/v1/statements/close-runs")
 @Produces(MediaType.APPLICATION_JSON)
 @Tag(name = "Statement close runs", description = "Scheduled close cadence telemetry + manual retry (ADR-0069)")
-@RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_SERVICE")
+@RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_API")
 class CloseRunResource(private val query: CloseRunQueryUseCase, private val runClose: RunCloseUseCase) {
 
     @GET
@@ -55,7 +55,7 @@ class CloseRunResource(private val query: CloseRunQueryUseCase, private val runC
         query.failuresForRun(runId).map { Response.ok(it).build() }
 
     @POST
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "statement.close-run.trigger", resource = "")
     @Operation(summary = "Trigger a manual catch-up close pass now (operator retry)")
     fun trigger(): Uni<Response> = runClose.runClose(CloseTrigger.MANUAL).map { Response.accepted(it).build() }

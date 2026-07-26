@@ -46,7 +46,7 @@
 ## Kdo službu volá
 
 - **admin-ui / operátoři** (přes Keycloak token) — compliance a pracovníci regulatorního výkaznictví registrují expozice a stahují měsíční výkaz.
-- **upstream feed / servisní účty** (`ROLE_SERVICE`) — dávková nebo navazující služba posílající kontokorentní expozice (v1: manuálně/REST; budoucnost: event-driven).
+- **upstream feed / servisní účty** (`ROLE_API`) — dávková nebo navazující služba posílající kontokorentní expozice (v1: manuálně/REST; budoucnost: event-driven).
 - **auditoři** (`ROLE_AUDITOR`) — čtou výkaz včetně stopy vyloučení jako důkaz.
 
 ## Závislosti

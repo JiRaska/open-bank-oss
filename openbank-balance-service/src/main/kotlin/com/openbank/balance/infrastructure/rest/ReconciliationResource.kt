@@ -35,7 +35,7 @@ class ReconciliationResource(private val reconcile: ReconcileBalancesUseCase, pr
 
     @GET
     @Path("/latest")
-    @RolesAllowed(Roles.SERVICE, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "balance.reconciliation.read")
     suspend fun latest(): Response = reconcile.latest()
         ?.let { Response.ok(it).build() }

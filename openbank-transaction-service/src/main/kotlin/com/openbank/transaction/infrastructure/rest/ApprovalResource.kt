@@ -27,7 +27,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag
  * [com.openbank.libs.authz.AuthorizeInterceptor] with HTTP 202 and a
  * `PendingApproval` id; a DIFFERENT operator decides it here, then the maker
  * retries the original call with an `X-Approval-Id` header. Note `transaction.reverse`
- * also permits `Roles.SERVICE` (M2M) makers, unlike account.freeze's human-only maker
+ * also permits `Roles.API` (M2M) makers, unlike account.freeze's human-only maker
  * set — this endpoint's checker role set is unaffected either way, since
  * `authz.four-eyes.enforce` stays false and no blocking behavior is introduced here.
  */

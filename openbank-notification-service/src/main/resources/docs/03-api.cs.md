@@ -10,9 +10,9 @@ Keycloak OIDC (`realms/openbank`, klient `openbank-services`), RS256 bearer toke
 
 | Plocha | Role |
 |---|---|
-| Čtení notifikací (`GET /notifications…`) | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_SERVICE` |
-| Výpis zařízení (`GET /devices`) | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_SERVICE` |
-| Registrace zařízení (`POST /devices`) | `ROLE_OPERATOR`, `ROLE_SERVICE`, `ROLE_ADMIN` |
+| Čtení notifikací (`GET /notifications…`) | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API` |
+| Výpis zařízení (`GET /devices`) | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API` |
+| Registrace zařízení (`POST /devices`) | `ROLE_OPERATOR`, `ROLE_API`, `ROLE_ADMIN` |
 | Řízení výpravy (`/ops/dispatch…`) | `ROLE_OPERATOR`, `ROLE_ADMIN` (čtení i `ROLE_AUDITOR`) |
 
 U řízení výpravy se **identita aktéra bere z autentizovaného JWT subjektu**, nikdy z těla požadavku — aby four-eyes pravidlo nešlo podvrhnout. `ROLE_SRE` je zamýšlená operátorská role, jakmile bude v realmu existovat; do té doby je gated na `ROLE_OPERATOR`/`ROLE_ADMIN`.

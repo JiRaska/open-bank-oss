@@ -66,7 +66,7 @@ Výkaz AnaCredit je **sebe-auditující**: každý nástroj se objeví buď jako
 ## Bezpečnostní kontroly
 
 - ✅ AuthN: Keycloak OIDC bearer token (realm `openbank`)
-- ✅ AuthZ: Quarkus `@RolesAllowed` (`ROLE_OPERATOR / ROLE_ADMIN / ROLE_AUDITOR / ROLE_COMPLIANCE / ROLE_SERVICE`)
+- ✅ AuthZ: Quarkus `@RolesAllowed` (`ROLE_OPERATOR / ROLE_ADMIN / ROLE_AUDITOR / ROLE_COMPLIANCE / ROLE_API`)
 - ✅ Zpevněné HTTP hlavičky: CSP `default-src 'self'`, HSTS, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, Referrer-Policy, Permissions-Policy
 - ✅ CORS: omezeno na originy admin-UI
 - ✅ Validace vstupu: typové enumy (`CounterpartyType`, `InstrumentType`), `BigDecimal` částky, parsování ISO data

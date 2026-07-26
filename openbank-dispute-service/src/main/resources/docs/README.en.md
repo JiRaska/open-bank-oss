@@ -22,5 +22,5 @@ This documentation is published directly by the service at the management endpoi
 - **Persistence:** PostgreSQL database `openbank_dispute`, Flyway migrations V1..V4
 - **Outbox:** `dispute_outbox` table → Kafka topic `openbank.disputes.dispute.event` (channel `dispute-events-out`)
 - **Idempotency:** `Idempotency-Key` accepted by CORS; a Redis client is available but enforcement is **not yet wired** (TBD) — open uses a generated `DSP-<epochMillis>` reference
-- **Auth:** Keycloak OIDC (realm `openbank`, client `openbank-services`); roles `ROLE_VIEWER` (read), `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_SERVICE` (mutations); OPA/`@Authorize` advisory (ADR-0034)
+- **Auth:** Keycloak OIDC (realm `openbank`, client `openbank-services`); roles `ROLE_VIEWER` (read), `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API` (mutations); OPA/`@Authorize` advisory (ADR-0034)
 - **Money-path:** **No** — not listed in `rules.yaml: money_path_services` (1 approval, no threat model required)

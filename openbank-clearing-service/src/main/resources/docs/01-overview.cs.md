@@ -53,7 +53,7 @@ Podporované platební raily: `SEPA_SCT`, `SEPA_SCT_INST`, `SWIFT`, `DOMESTIC`, 
 
 ## Volající
 
-- **platební služby** (`sepa-payment`, `sepa-instant`, `domestic-payment`, `swift-service`) — předávají platby ke clearingu (`ROLE_SERVICE` / `ROLE_PAYMENTS`).
+- **platební služby** (`sepa-payment`, `sepa-instant`, `domestic-payment`, `swift-service`) — předávají platby ke clearingu (`ROLE_API` / `ROLE_PAYMENTS`).
 - **provoz / payment-ops** (přes admin UI, Keycloak token) — spouští cykly a zúčtovávají dávky (`ROLE_PAYMENTS` / `ROLE_ADMIN`).
 - **admin-ui / vieweři / operátoři** — read-only pohledy na dávky, položky a pozice.
 

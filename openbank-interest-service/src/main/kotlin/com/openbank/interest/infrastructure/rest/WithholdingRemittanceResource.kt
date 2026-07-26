@@ -26,10 +26,10 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag
 @Path("/api/v1/interest/withholding/remittances")
 @Produces(MediaType.APPLICATION_JSON)
 @Tag(name = "Withholding remittance", description = "Monthly withholding-tax remittance (§38d ZDP)")
-@RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_SERVICE")
+@RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_API")
 class WithholdingRemittanceResource(private val remitUseCase: RemitWithholdingUseCase) {
     @POST
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "interest.create", resource = "")
     @Operation(summary = "Assemble (or return) the monthly withholding remittance for a tax period")
     fun assemble(@QueryParam("year") year: Int, @QueryParam("month") month: Int): Uni<Response> =

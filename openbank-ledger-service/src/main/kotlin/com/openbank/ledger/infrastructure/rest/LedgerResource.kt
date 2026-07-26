@@ -62,7 +62,7 @@ class LedgerResource(
 ) {
 
     @GET
-    @RolesAllowed(Roles.SERVICE, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "ledger.list", resource = "")
     @Operation(summary = "List journal entries")
     suspend fun listJournals(
@@ -79,7 +79,7 @@ class LedgerResource(
 
     @GET
     @Path("/trial-balance")
-    @RolesAllowed(Roles.SERVICE, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "ledger.read", resource = "")
     @Operation(summary = "Trial balance — debit/credit totals per GL account (must net to zero)")
     suspend fun trialBalance(@QueryParam("asOf") asOf: String?): Response {
@@ -90,7 +90,7 @@ class LedgerResource(
 
     @GET
     @Path("/sub-ledger-balances")
-    @RolesAllowed(Roles.SERVICE, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "ledger.read", resource = "")
     @Operation(summary = "Per-customer deposit-control sub-ledger balances (ADR-0039 Phase B)")
     suspend fun subLedgerBalances(
@@ -108,7 +108,7 @@ class LedgerResource(
 
     @GET
     @Path("/{journalId}")
-    @RolesAllowed(Roles.SERVICE, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "ledger.read", resource = "#journalId")
     @Operation(summary = "Get journal entry by ID")
     suspend fun getJournal(@PathParam("journalId") journalId: UUID): Response {
@@ -118,7 +118,7 @@ class LedgerResource(
 
     @GET
     @Path("/transaction/{transactionId}")
-    @RolesAllowed(Roles.SERVICE, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "ledger.read", resource = "#transactionId")
     @Operation(summary = "Get journal entries by transaction ID")
     suspend fun getJournalsByTransaction(@PathParam("transactionId") transactionId: UUID): Response {

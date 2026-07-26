@@ -53,8 +53,8 @@ It also runs the **daily FX revaluation** (mark-to-ČNB of foreign FX positions,
 
 ## Callers
 
-- **transaction-service** (`ROLE_OPERATOR`/`ROLE_SERVICE`) — posts the balanced journal for every settled transaction; the only writer of business postings.
-- **balance-service** (`ROLE_SERVICE`) — reads the ledger / sub-ledger for reconciliation against the balance read-model (ADR-0039).
+- **transaction-service** (`ROLE_OPERATOR`/`ROLE_API`) — posts the balanced journal for every settled transaction; the only writer of business postings.
+- **balance-service** (`ROLE_API`) — reads the ledger / sub-ledger for reconciliation against the balance read-model (ADR-0039).
 - **audit-service** — consumes the `JournalPosted` event stream for the tamper-evident audit chain.
 - **admin-ui** (`ROLE_OPERATOR` / `ROLE_AUDITOR` / `ROLE_VIEWER`) — operators and auditors browse journals, trial balance, sub-ledger; operators trigger FX-revaluation backfill.
 - **FxRevaluationScheduler** (in-process) — drives the daily revaluation automatically.

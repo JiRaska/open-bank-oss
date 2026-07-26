@@ -26,7 +26,7 @@ import java.time.LocalDate
 /**
  * Typed client for consent-service's real REST surface (`/api/v1/consents`), replacing the
  * always-`ACTIVE`/always-`true` [StubConsentServiceClient] for the load-bearing AIS read/validate
- * gate (issue #1500). Every endpoint is `@RolesAllowed(ROLE_SERVICE, ROLE_OPERATOR, ROLE_ADMIN)`
+ * gate (issue #1500). Every endpoint is `@RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN)`
  * plus an OPA `@Authorize` action on consent-service, so calls carry an M2M bearer via
  * [OidcClientRequestReactiveFilter] (oidc-client `openbank-services` → ROLE_OPERATOR), the same
  * pattern account-service's `TransactionServiceRestClient` uses.

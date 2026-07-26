@@ -18,7 +18,7 @@ All endpoints require a **Keycloak Bearer token** (realm `openbank`). Roles are 
 |---|---|
 | `POST /sepa-payments` | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS` |
 | `GET /sepa-payments/{id}` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS` |
-| `GET /sepa-payments` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS`, `ROLE_SERVICE` |
+| `GET /sepa-payments` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS`, `ROLE_API` |
 | `PATCH /sepa-payments/{id}/status` | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS` |
 
 The status transition is additionally guarded by OPA via `@Authorize(action = "sepaPayment.transitionStatus", resource = "#paymentId")` — advisory by default, enforced when `AUTHZ_ENFORCE=true` (ADR-0034).

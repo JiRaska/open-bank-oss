@@ -52,7 +52,7 @@ A dispute carries an SLA: `resolutionDeadline = filingDate + resolution-sla-days
 
 - **admin-ui** (via Keycloak token) — operators and compliance staff managing disputes
 - **customer app / API** — opening a dispute and uploading evidence references on behalf of the cardholder
-- **service callers** (`ROLE_SERVICE`) — automated flows that open or update disputes
+- **service callers** (`ROLE_API`) — automated flows that open or update disputes
 
 ## Dependencies
 

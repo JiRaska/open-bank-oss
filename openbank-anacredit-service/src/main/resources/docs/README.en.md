@@ -22,5 +22,5 @@ This documentation is published directly by the service at the management endpoi
 - **Persistence:** **PostgreSQL** (`openbank_anacredit`, governance schema label `anacredit_schema`, ADR-0037 v2 — the `openbank-product-catalog` pattern). `credit_exposures` table, Flyway-migrated, reactive-Panache-backed.
 - **Outbox / events:** **none** — derive-only, the service emits no domain events and consumes none.
 - **Idempotency:** none — exposure registration is an `upsert` keyed by `instrumentId` (naturally idempotent); reads are pure.
-- **Auth:** Keycloak OIDC, roles `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_AUDITOR`, `ROLE_COMPLIANCE`, `ROLE_SERVICE`.
+- **Auth:** Keycloak OIDC, roles `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_AUDITOR`, `ROLE_COMPLIANCE`, `ROLE_API`.
 - **Money-path:** **No** — off the ADR-0030 gate (no threat model / 2-approval requirement).

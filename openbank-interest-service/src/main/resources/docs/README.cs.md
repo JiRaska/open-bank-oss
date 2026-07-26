@@ -22,7 +22,7 @@ Tuto dokumentaci publikuje služba přímo na management endpointu `/q/openbank/
 - **Persistence:** dedikovaná PostgreSQL databáze `openbank_interest`, Flyway migrace V1..V5
 - **Outbox:** `interest_outbox` → Kafka topic `openbank.interest.accrual.event` (události `interest.withholding.recorded.v1`, `interest.withholding.remitted.v1`)
 - **Idempotence:** mutace ve v1 nejsou hlídány hlavičkou `Idempotency-Key`; sestavení odvodu je idempotentní podle `(year, month)` (jeden batch na zdaňovací období)
-- **Auth:** Keycloak OIDC; čtení vyžaduje `ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_SERVICE`, mutace vyžadují `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_SERVICE`
+- **Auth:** Keycloak OIDC; čtení vyžaduje `ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API`, mutace vyžadují `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API`
 - **Daň:** česká srážková daň z CZK úrokového výnosu (15 % rezident fyzická osoba; 35 % nespolupracující stát; smluvní sazba; právnické osoby se nesráží) — ADR-0033
 - **Money path:** **Ne** — `interest-service` není v `rules.yaml: money_path_services` (nepřesouvá hotovost; peněžní část je delegována)
 - **Release verze:** viz `version.txt` (v době psaní 0.3.0); **verze API kontraktu** `1.2.0` ⇒ URL `/api/v1` (ADR-0048)

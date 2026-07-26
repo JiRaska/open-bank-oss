@@ -53,8 +53,8 @@ Služba také provádí **denní FX revalvaci** (mark-to-ČNB devizových pozic,
 
 ## Volající
 
-- **transaction-service** (`ROLE_OPERATOR`/`ROLE_SERVICE`) — účtuje vyvážený zápis pro každou vypořádanou transakci; jediný zapisovatel obchodních zápisů.
-- **balance-service** (`ROLE_SERVICE`) — čte hlavní knihu / analytickou evidenci pro rekonciliaci proti read-modelu zůstatků (ADR-0039).
+- **transaction-service** (`ROLE_OPERATOR`/`ROLE_API`) — účtuje vyvážený zápis pro každou vypořádanou transakci; jediný zapisovatel obchodních zápisů.
+- **balance-service** (`ROLE_API`) — čte hlavní knihu / analytickou evidenci pro rekonciliaci proti read-modelu zůstatků (ADR-0039).
 - **audit-service** — konzumuje proud událostí `JournalPosted` pro neměnný audit řetězec.
 - **admin-ui** (`ROLE_OPERATOR` / `ROLE_AUDITOR` / `ROLE_VIEWER`) — operátoři a auditoři prochází zápisy, předvahu, analytiku; operátoři spouští backfill FX revalvace.
 - **FxRevaluationScheduler** (v procesu) — automaticky řídí denní revalvaci.

@@ -64,9 +64,9 @@ class SecurityContextExtensionsTest {
     @Test
     fun `actorType returns the single held role`() {
         val ctx = contextWith("svc")
-        every { ctx.isUserInRole(Roles.SERVICE) } returns true
+        every { ctx.isUserInRole(Roles.API) } returns true
 
-        assertThat(ctx.actorType).isEqualTo(Roles.SERVICE)
+        assertThat(ctx.actorType).isEqualTo(Roles.API)
     }
 
     @Test

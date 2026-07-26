@@ -61,30 +61,20 @@ object Roles {
     const val PAYMENTS = "ROLE_PAYMENTS"
 
     /**
-     * Machine-to-machine API access — the realm's own name for what a service-account token
-     * should carry (`ROLE_API`, "Machine-to-machine API access" in realm-template.json).
+     * Machine-to-machine API access — the realm's role for a service-account token, and the only
+     * M2M grant in this platform.
      *
-     * NOTE: no service account is granted this role today, so an endpoint gated on it alone is
-     * still unreachable until someone grants it in Keycloak (issue #2404). That is a deliberate,
-     * visible gap rather than the invisible one [SERVICE] created.
+     * Granted to `service-account-openbank-services` (issue #2442), the service account behind the
+     * `openbank-services` OIDC client that 23 services use for outbound calls. Before that grant
+     * the account existed in no realm template at all, so every M2M token carried an EMPTY role
+     * set and no `@RolesAllowed` could ever admit it — which is why the dead `ROLE_SERVICE` name
+     * it replaced went unnoticed for so long: both were unreachable, for different reasons.
+     *
+     * Prefer this over widening an M2M path to [OPERATOR]: real staff hold that role too, so
+     * gating on it admits every human operator as well — the JWT-role twin of the over-grant the
+     * rego side already documents.
      */
     const val API = "ROLE_API"
-
-    /**
-     * Service-to-service authentication.
-     *
-     * DEAD: no realm in this platform declares `ROLE_SERVICE` — not the staff realm, not the
-     * customers realm — so no token can ever carry it and this name authorizes nobody. It appears
-     * at ~150 `@RolesAllowed` sites across ~29 services, always alongside a live role, so humans
-     * still get in and only the M2M caller it was reserved for is silently denied (issue #2404).
-     * The JWT-role twin of the unreachable `principal.type == "SERVICE"` rego rules that
-     * `check-no-service-principal-type.sh` already forbids.
-     *
-     * Use [API] for new M2M grants. Retiring the existing sites is a per-service decision — grant
-     * the role or delete the path — not a mechanical rename, so this constant stays until they
-     * are cleared rather than breaking 29 services' compilation today.
-     */
-    const val SERVICE = "ROLE_SERVICE"
 
     /** All canonical roles, in declaration order. Use for policy/audit enumeration. */
     val ALL: List<String> = listOf(
@@ -99,6 +89,5 @@ object Roles {
         KYC_REVIEWER,
         PAYMENTS,
         API,
-        SERVICE,
     )
 }

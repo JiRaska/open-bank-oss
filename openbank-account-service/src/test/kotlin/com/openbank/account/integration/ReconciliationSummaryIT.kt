@@ -53,7 +53,7 @@ class ReconciliationSummaryIT {
 
     @Test
     @Order(3)
-    @TestSecurity(user = "analytics-sink", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "analytics-sink", roles = ["ROLE_API"])
     fun `the service-to-service caller gets the summary projection`() {
         Given { this } When {
             get(path)
@@ -102,7 +102,7 @@ class ReconciliationSummaryIT {
      */
     @Test
     @Order(5)
-    @TestSecurity(user = "analytics-sink", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "analytics-sink", roles = ["ROLE_API"])
     fun `a freshly opened account falls inside the incremental since-window`() {
         Given {
             queryParam("since", openedAfter.toString())

@@ -65,7 +65,7 @@ class BalanceMovementIdempotencyApiIT {
 
     @Test
     @Order(1)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `initialize the CZK pocket with a zero balance`() {
         Given {
             contentType("application/json")
@@ -81,7 +81,7 @@ class BalanceMovementIdempotencyApiIT {
 
     @Test
     @Order(2)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `credit with a referenceId books the funds once`() {
         val response = postMovement("credit", "250.00", CREDIT_REF)
         assertThat(amount(response, "bookedAmount")).isEqualByComparingTo(BigDecimal("250.00"))
@@ -90,7 +90,7 @@ class BalanceMovementIdempotencyApiIT {
 
     @Test
     @Order(3)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `credit replay with the SAME referenceId is NOT re-applied (one posting)`() {
         // At-least-once redelivery: same (account, currency, referenceId, CREDIT) → marker row in
         // balance_movement (V8) short-circuits, the booked amount must not double.
@@ -101,7 +101,7 @@ class BalanceMovementIdempotencyApiIT {
 
     @Test
     @Order(4)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `credit with a DIFFERENT referenceId applies again (dedup keys on reference, not amount)`() {
         val response = postMovement("credit", "250.00", "saga-credit-0002")
         assertThat(amount(response, "bookedAmount")).isEqualByComparingTo(BigDecimal("500.00"))
@@ -109,7 +109,7 @@ class BalanceMovementIdempotencyApiIT {
 
     @Test
     @Order(5)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `debit with a referenceId books the outflow once`() {
         val response = postMovement("debit", "100.00", DEBIT_REF)
         assertThat(amount(response, "bookedAmount")).isEqualByComparingTo(BigDecimal("400.00"))
@@ -118,7 +118,7 @@ class BalanceMovementIdempotencyApiIT {
 
     @Test
     @Order(6)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `debit replay with the SAME referenceId is NOT re-applied (one posting)`() {
         val replay = postMovement("debit", "100.00", DEBIT_REF)
         assertThat(amount(replay, "bookedAmount")).isEqualByComparingTo(BigDecimal("400.00"))
@@ -127,7 +127,7 @@ class BalanceMovementIdempotencyApiIT {
 
     @Test
     @Order(7)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `debit and credit with the SAME referenceId are independent operations`() {
         // The V8 idempotency key includes the operation: a CREDIT marker must not swallow a DEBIT
         // that happens to reuse the reference string (and vice versa).
@@ -137,7 +137,7 @@ class BalanceMovementIdempotencyApiIT {
 
     @Test
     @Order(8)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `debit beyond available funds returns 422 and books nothing`() {
         Given {
             contentType("application/json")
@@ -153,7 +153,7 @@ class BalanceMovementIdempotencyApiIT {
 
     @Test
     @Order(9)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `a rejected debit leaves the referenceId free - the retry with funds succeeds`() {
         // The idempotency marker is written in the same transaction as the mutation, so a FAILED
         // attempt must not poison the referenceId for the saga's later (funded) retry.
@@ -163,7 +163,7 @@ class BalanceMovementIdempotencyApiIT {
 
     @Test
     @Order(10)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `credit to an unknown currency pocket returns 404, no implicit pocket creation`() {
         Given {
             contentType("application/json")

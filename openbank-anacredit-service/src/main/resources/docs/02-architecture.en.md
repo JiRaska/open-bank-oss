@@ -5,7 +5,7 @@
 ```mermaid
 graph LR
   admin[admin-ui / operator]
-  feed[upstream feed<br/>ROLE_SERVICE]
+  feed[upstream feed<br/>ROLE_API]
   fx[fx-service]
 
   ana[(anacredit-service)]:::svc

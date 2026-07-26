@@ -48,7 +48,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  * Authentication: `POST /api/v1/aml/cases` is `@RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN",
  * "ROLE_COMPLIANCE")`. `@TestSecurity` cannot annotate a `@TestTemplate` method, so it is applied at
  * class level and Pact replays every interaction as that principal. Note the POST — unlike the
- * `@GET` reads — does NOT accept `ROLE_SERVICE`, so the caller's Keycloak client must carry an
+ * `@GET` reads — does NOT accept `ROLE_API`, so the caller's Keycloak client must carry an
  * operator-grade role; the pact cannot assert that, only that the endpoint honours the contract once
  * the caller is authorised.
  */

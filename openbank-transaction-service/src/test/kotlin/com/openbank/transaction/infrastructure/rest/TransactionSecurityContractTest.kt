@@ -55,7 +55,7 @@ class TransactionSecurityContractTest {
         listOf("listTransactions", "searchTransactions", "getTransaction").forEach { name ->
             assertThat(rolesOf(name))
                 .describedAs("%s read roles", name)
-                .containsExactlyInAnyOrder("ROLE_SERVICE", "ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN")
+                .containsExactlyInAnyOrder("ROLE_API", "ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN")
         }
     }
 

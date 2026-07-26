@@ -91,7 +91,7 @@ class DomesticPaymentResource(
         Response.ok(paymentUseCase.getPayment(paymentId).toResponse()).build()
 
     @GET
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
     @Authorize(action = "domestic-payment.list")
     @Operation(summary = "List domestic payments")
     suspend fun listPayments(

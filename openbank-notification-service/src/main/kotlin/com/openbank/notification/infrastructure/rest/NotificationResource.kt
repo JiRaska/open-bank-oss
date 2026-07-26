@@ -36,7 +36,7 @@ class NotificationResource {
     @Inject lateinit var repo: NotificationRepository
 
     @GET
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "notification.list", resource = "")
     @Operation(summary = "List notifications (paginated)")
     suspend fun listNotifications(
@@ -74,7 +74,7 @@ class NotificationResource {
 
     @GET
     @Path("/{id}")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "notification.read", resource = "#id")
     @Operation(summary = "Get notification by ID")
     suspend fun getNotification(@PathParam("id") id: UUID): Response {
@@ -86,13 +86,13 @@ class NotificationResource {
      * Party-scoped single read for the customer app's fetch-on-tap (ADR-0135 §3, issue #1182).
      * The push payload now carries no amount/PII (see NotificationConsumer.sendPush); on tap the
      * app calls this to load the full detail. partyId is the edge-injected authoritative identity
-     * (customer-edge translates the mobile JWT to ROLE_SERVICE and injects it) — the repository
+     * (customer-edge translates the mobile JWT to ROLE_API and injects it) — the repository
      * SELECT is scoped by it, so a caller can never read another party's notification (IDOR guard,
      * same shape as [markRead]). A missing/other-party id is a 404 with no existence oracle.
      */
     @GET
     @Path("/{id}/self")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_SERVICE", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_API", "ROLE_ADMIN")
     @Authorize(action = "notification.read.self", resource = "#id")
     @Operation(summary = "Get one of the caller's own notifications (party-scoped)")
     suspend fun getOwnNotification(@PathParam("id") id: UUID, @QueryParam("partyId") partyId: UUID?): Response {
@@ -126,7 +126,7 @@ class NotificationResource {
      */
     @PATCH
     @Path("/{id}/read")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_SERVICE", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_API", "ROLE_ADMIN")
     @Authorize(action = "notification.mark-read", resource = "#id")
     @Operation(summary = "Mark a notification as read")
     suspend fun markRead(@PathParam("id") id: UUID, @QueryParam("partyId") partyId: UUID?): Response {
@@ -143,7 +143,7 @@ class NotificationResource {
     /** Mark ALL of a party's notifications read. Returns the number flipped. */
     @PATCH
     @Path("/read-all")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_SERVICE", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_API", "ROLE_ADMIN")
     @Authorize(action = "notification.mark-read", resource = "")
     @Operation(summary = "Mark all of a party's notifications as read")
     suspend fun markAllRead(@QueryParam("partyId") partyId: UUID?): Response {

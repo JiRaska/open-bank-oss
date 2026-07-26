@@ -49,7 +49,7 @@ class EudiOpenId4VpResource(
 
     @POST
     @Path("/presentation-requests")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "identity.eudi.request")
     @Operation(summary = "Start an OpenID4VP presentation exchange; returns the wallet authorization request URI")
     suspend fun createPresentationRequest(): Response {
@@ -69,7 +69,7 @@ class EudiOpenId4VpResource(
 
     @GET
     @Path("/presentation-requests/{id}")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "identity.eudi.poll")
     @Operation(summary = "Poll an OpenID4VP exchange for the wallet's resolved presentation result")
     suspend fun getPresentationExchange(@PathParam("id") id: String): Response {

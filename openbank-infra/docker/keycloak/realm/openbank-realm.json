@@ -152,7 +152,8 @@
       "enabled": true,
       "serviceAccountClientId": "openbank-services",
       "realmRoles": [
-        "ROLE_OPERATOR"
+        "ROLE_OPERATOR",
+        "ROLE_API"
       ]
     }
   ]

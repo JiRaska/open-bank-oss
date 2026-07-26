@@ -56,7 +56,7 @@ class BalanceSecurityContractTest {
             val m = BalanceResource::class.java.declaredMethods.single { it.name == name }
             assertThat(rolesOf(m))
                 .describedAs("%s roles", name)
-                .containsExactlyInAnyOrder("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+                .containsExactlyInAnyOrder("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
         }
     }
 

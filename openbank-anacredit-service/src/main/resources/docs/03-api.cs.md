@@ -13,13 +13,13 @@ REST kontrakt je formalizován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.0.
 Všechny endpointy vyžadují **Keycloak Bearer token** (realm `openbank`). Resource je role-gated na úrovni třídy:
 
 ```
-@RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_COMPLIANCE", "ROLE_SERVICE")
+@RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_COMPLIANCE", "ROLE_API")
 ```
 
 | Role | Typické použití |
 |---|---|
 | `ROLE_OPERATOR` | registrace expozic, vykreslení výkazů |
-| `ROLE_SERVICE` | upstream feed posílající expozice |
+| `ROLE_API` | upstream feed posílající expozice |
 | `ROLE_AUDITOR` | čtení výkazů + stopy vyloučení |
 | `ROLE_COMPLIANCE` | regulatorní review |
 | `ROLE_ADMIN` | vše |
