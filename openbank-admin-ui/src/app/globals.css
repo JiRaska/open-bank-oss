@@ -311,6 +311,19 @@ main {
 .stat-hint {
   font-size: 11px; color: var(--text-tertiary); margin-top: 4px;
 }
+/* Square tone swatch (ADR-0208 D2): a fixed-size tile carrying a score or a level, where a
+   .badge would not work — .badge sets `padding: 4px 10px; border-radius: 20px`, and with the
+   global `box-sizing: border-box` above that turns an 18px box into zero content width and a
+   pill into a circle. Size comes from --swatch-size so a caller sets one variable instead of
+   overriding geometry. Colour still comes from the .badge-* classes, applied alongside. */
+.tone-swatch {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--swatch-size, 26px); height: var(--swatch-size, 26px);
+  padding: 0; border-radius: var(--r-md, 7px);
+  font-weight: 800; font-size: 12px; line-height: 1;
+}
+.tone-swatch-sm { --swatch-size: 18px; font-size: 11px; border-radius: 5px; }
+
 /* Tone text colours (ADR-0208 D2), for cases where a full badge is too heavy — a tinted metric
    label, an inline verdict. Same tokens the .badge-* rules use, so a theme change moves both. */
 .tone-text-success { color: var(--success); }

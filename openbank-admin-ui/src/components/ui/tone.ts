@@ -25,6 +25,24 @@ export const BADGE_CLASS: Record<Tone, string> = {
 }
 
 /**
+ * Fixed-size square swatch classes, for a score or level tile.
+ *
+ * Composes `.tone-swatch` (geometry) with the `.badge-*` colour rule — which is safe precisely
+ * because `.badge-*` carries ONLY background/colour/border, while padding and border-radius live on
+ * `.badge`. Reusing `BADGE_CLASS` here and overriding width/height inline does not work: `.badge`
+ * sets `padding: 4px 10px; border-radius: 20px`, and under the global `box-sizing: border-box` an
+ * 18px-wide box then has zero content width and renders as a circle.
+ */
+export const SWATCH_CLASS: Record<Tone, string> = {
+  success: 'tone-swatch badge-success',
+  warning: 'tone-swatch badge-warning',
+  danger: 'tone-swatch badge-danger',
+  info: 'tone-swatch badge-info',
+  neutral: 'tone-swatch badge-neutral',
+  accent: 'tone-swatch badge-accent',
+}
+
+/**
  * Text-colour classes for a tone, for the cases where a badge is too heavy — a tinted metric label,
  * an inline verdict. Defined in `globals.css` alongside the badge classes so the token stays the
  * single place a colour is chosen.
@@ -96,7 +114,15 @@ const TONE_BY_STATUS: Record<string, Tone> = {
   REJECTED: 'danger',
   SUSPENDED: 'danger',
 
-  // Terminal-neutral: over, but not a failure
+  // Terminal-neutral: over, but not a failure.
+  //
+  // EXPIRED and REVOKED are DOMAIN-AMBIGUOUS and the default here is the consent reading, where a
+  // revocation is the customer exercising Art. 7(3) normally and an expiry is the clock doing its
+  // job — neither is an incident, and colouring them red on a screen operators scan for real
+  // problems is noise. Other domains legitimately disagree: `src/app/pid/page.tsx` renders EXPIRED
+  // as warning (an unusable credential the holder must renew) and REVOKED as danger (a credential
+  // withdrawn for cause). Those pages must pass an explicit `tone` to StatusBadge when they migrate
+  // — see its `tone` prop. Do not "fix" this map to match one domain; that just moves the conflict.
   CANCELLED: 'neutral',
   CLOSED: 'neutral',
   DISABLED: 'neutral',

@@ -6,8 +6,8 @@
 
 import { useState, useEffect } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { RefreshCw, Star, CheckCircle2, XCircle } from 'lucide-react'
-import { BADGE_CLASS, PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
+import { ClipboardCheck, RefreshCw, Star, CheckCircle2, XCircle } from 'lucide-react'
+import { PageHeader, StatCard, StatusBadge, SWATCH_CLASS, type Tone } from '@/components/ui'
 
 interface ReadinessService {
   service: string
@@ -60,6 +60,7 @@ export default function ReadinessPage() {
   return (
     <div style={{ padding: '32px', maxWidth: '1280px', margin: '0 auto' }}>
       <PageHeader
+        icon={<ClipboardCheck size={28} className="tone-text-accent" />}
         title={t('Připravenost na produkci', 'Production Readiness')}
         subtitle={t(
           'Odvozená matice zralosti per služba × 9 technicko-provozních dimenzí (C1–C9). Generuje ji v CI prod-readiness-collector.py z repu + atestace s TTL — nikdy needitováno ručně. Gate: money-path musí mít vše ≥ Verified, kritické (Kód/Zálohy/Security) = Bank-grade.',
@@ -129,10 +130,7 @@ export default function ReadinessPage() {
                     const L = lvl(sc)
                     return (
                       <td key={d.code} style={tdStyle} title={`${d.name}: ${t(L.cs, L.en)} (${sc})\n${s.evidence[d.code] ?? ''}`}>
-                        <span
-                          className={BADGE_CLASS[L.tone]}
-                          style={{ width: '26px', height: '26px', justifyContent: 'center', fontWeight: 800 }}
-                        >{sc}</span>
+                        <span className={SWATCH_CLASS[L.tone]}>{sc}</span>
                       </td>
                     )
                   })}
@@ -151,7 +149,7 @@ export default function ReadinessPage() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', marginTop: '16px', fontSize: '12px', color: 'var(--text-secondary)' }}>
           {LEVELS.map(L => (
             <span key={L.score} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-              <span className={BADGE_CLASS[L.tone]} style={{ width: '18px', height: '18px', justifyContent: 'center', fontWeight: 800 }}>{L.score}</span>
+              <span className={`${SWATCH_CLASS[L.tone]} tone-swatch-sm`}>{L.score}</span>
               {t(L.cs, L.en)}
             </span>
           ))}

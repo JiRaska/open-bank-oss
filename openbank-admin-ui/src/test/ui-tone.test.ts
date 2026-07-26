@@ -3,7 +3,15 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { describe, expect, it } from 'vitest'
-import { BADGE_CLASS, DOT_CLASS, statusBadgeClass, statusDotClass, statusTone } from '@/components/ui/tone'
+import {
+  BADGE_CLASS,
+  DOT_CLASS,
+  SWATCH_CLASS,
+  TONE_TEXT_CLASS,
+  statusBadgeClass,
+  statusDotClass,
+  statusTone,
+} from '@/components/ui/tone'
 
 describe('statusTone (ADR-0208 D2)', () => {
   it('maps terminal-good statuses to success', () => {
@@ -73,5 +81,28 @@ describe('statusTone (ADR-0208 D2)', () => {
     expect(statusBadgeClass('FAILED')).toBe(BADGE_CLASS.danger)
     expect(statusDotClass('ACTIVE')).toBe(DOT_CLASS.success)
     expect(statusBadgeClass('NOPE')).toBe(BADGE_CLASS.neutral)
+  })
+
+  it('every Tone has a swatch and a text class, and swatch never reuses .badge geometry', () => {
+    for (const tone of Object.keys(BADGE_CLASS) as Array<keyof typeof BADGE_CLASS>) {
+      // Must compose .tone-swatch with the COLOUR-only .badge-* rule, never `.badge` itself:
+      // `.badge` sets padding 4px 10px + border-radius 20px, which under the global
+      // box-sizing: border-box collapses an 18px swatch to zero content width and a circle.
+      expect(SWATCH_CLASS[tone], `swatch ${tone}`).toMatch(/^tone-swatch badge-/)
+      expect(SWATCH_CLASS[tone], `swatch ${tone} must not apply .badge`).not.toMatch(/(^|\s)badge(\s|$)/)
+      expect(TONE_TEXT_CLASS[tone], `text ${tone}`).toMatch(/^tone-text-/)
+    }
+  })
+
+  // EXPIRED/REVOKED are domain-ambiguous: the shared default is the consent reading (a normal
+  // lifecycle end), while pid/page.tsx reads them as warning/danger (an unusable or withdrawn
+  // credential). This documents that the default is deliberate and that the override exists, so a
+  // later migration of pid cannot silently inherit the wrong semantics.
+  it('documents the domain-ambiguous defaults for EXPIRED and REVOKED', () => {
+    expect(statusTone('EXPIRED')).toBe('neutral')
+    expect(statusTone('REVOKED')).toBe('neutral')
+    // A domain that disagrees passes an explicit tone rather than editing the shared map.
+    expect(BADGE_CLASS.warning).toBe('badge badge-warning')
+    expect(BADGE_CLASS.danger).toBe('badge badge-danger')
   })
 })

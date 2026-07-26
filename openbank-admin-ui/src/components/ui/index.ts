@@ -9,17 +9,20 @@
  * own tables, headings and status colours, so the marginal cost of a page never fell. Import from
  * `@/components/ui` rather than reaching into the individual files.
  *
- * Deliberately small. A primitive is added when a migrating page needs it, never speculatively —
- * a component invented ahead of a caller ends up fitting no real page, which is how the eight
- * declared-but-unused UI dependency families got there in the first place.
+ * Deliberately small, and every export here has a real caller. A primitive is added when a
+ * migrating page needs it, never speculatively — a component invented ahead of its first caller
+ * ends up fitting no real page, which is how eight declared-but-unused UI dependency families got
+ * into `package.json` in the first place. (A generic Card and a DataTable were written for this
+ * tranche and removed again for exactly that reason: nothing consumed them yet.)
  */
-export { Card, StatCard } from './Card'
-export { DataTable, type Column } from './DataTable'
 export { PageHeader } from './PageHeader'
+export { StatCard } from './StatCard'
 export { StatusBadge } from './StatusBadge'
 export {
   BADGE_CLASS,
   DOT_CLASS,
+  SWATCH_CLASS,
+  TONE_TEXT_CLASS,
   type Tone,
   statusBadgeClass,
   statusDotClass,
