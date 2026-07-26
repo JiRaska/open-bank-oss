@@ -11,10 +11,21 @@ checked against code). This script closes the general case for `governance.yaml`
 reusing check-event-consumer-liveness.py's fleet-wide topic map (ADR-0160 mechanism 1) for the
 `topic` half instead of re-scanning the fleet a second time.
 
-WHAT IT CHECKS: for every service's `governance.yaml`, each `lineage.downstream` edge (an
-UPSTREAM edge is a claim about another service's code, not this one's, so it is out of scope here
-— the corresponding downstream edge on the OTHER service's own governance.yaml is what verifies
-that relationship) must be backed by grep-verifiable code in the SAME service:
+WHAT IT CHECKS: for every service's `governance.yaml`, each `lineage` edge must be backed by
+grep-verifiable code. An edge is checked in whichever service's code can actually witness it:
+
+  - a `downstream` edge on S naming T is a claim about S's OWN code, verified in S;
+  - an `upstream` edge on S naming T is a claim about T's code — so it is verified in T, exactly
+    as if T had declared the mirrored downstream edge. It was originally called out of scope for
+    that reason, but "someone else's code" is not "nobody's code": 63 upstream edges across 23
+    services were never opened by anything, and a service declaring ONLY upstream was skipped
+    outright. `openbank-aml-service` had 3 of its 6 upstream edges wrong — two topic sources it
+    consumes nothing from, one API caller that mentions it only in prose (#2312, #2315).
+
+Both directions normalize to the same `<source>-><target>:<relation>` key, so a relationship
+declared from both ends is checked and allowlisted ONCE, not twice under two spellings.
+
+The backing evidence, for the source service of the edge:
   - `relationType: api`  -> a `@RegisterRestClient(configKey = "<serviceName>")` somewhere under
     this service's `src/main/kotlin` (exact match, or matching once both sides have any trailing
     "-service" suffix stripped — `product-catalog` vs `product-catalog-service` naming varies
@@ -24,8 +35,9 @@ that relationship) must be backed by grep-verifiable code in the SAME service:
     by this service — a `topic` edge doesn't name the specific topic, just the service, so this is
     a service-level cross-reference, not a topic-name match.
 
-A service with no `lineage:` key, or no `downstream` list, is skipped entirely (nothing declared,
-nothing to verify). Findings may be allowlisted with a one-line reason (same idiom as mechanism 1)
+A service with no `lineage:` key, or neither list, is skipped entirely (nothing declared,
+nothing to verify). An edge naming a service directory that does not exist is a finding: an
+un-resolvable claim is exactly the class this gate exists for. Findings may be allowlisted with a one-line reason (same idiom as mechanism 1)
 for a legitimate case this heuristic can't see — e.g. a REST call made through a shared/generic
 client class without a per-target configKey.
 
@@ -56,6 +68,16 @@ REGISTER_REST_CLIENT = re.compile(r'@RegisterRestClient\s*\(\s*configKey\s*=\s*"
 
 
 def normalize_service_name(name: str) -> str:
+    """Canonical form for comparing a service name against a `@RegisterRestClient` configKey.
+
+    The fleet spells the same service three ways — `balance-service` (configKey and most
+    governance.yaml entries), `openbank-balance-service` (directory name, and what an upstream
+    edge's target resolves to), and bare `product-catalog` — so both the `openbank-` prefix and
+    the `-service` suffix are stripped. Stripping only the suffix silently failed EVERY upstream
+    api edge, because that side is always the full directory name.
+    """
+    if name.startswith("openbank-"):
+        name = name[len("openbank-"):]
     return name[: -len("-service")] if name.endswith("-service") else name
 
 
@@ -74,12 +96,22 @@ def find_rest_client_config_keys(service_dir: pathlib.Path) -> set[str]:
     return keys
 
 
-def load_governance_downstream(gov_path: pathlib.Path) -> list[dict]:
+def load_governance_lineage(gov_path: pathlib.Path) -> tuple[list[dict], list[dict]]:
+    """(downstream, upstream) edge lists declared in a service's governance.yaml."""
     if not gov_path.exists():
-        return []
+        return [], []
     data = yaml.safe_load(gov_path.read_text(encoding="utf-8")) or {}
     lineage = data.get("lineage") or {}
-    return lineage.get("downstream") or []
+    return (lineage.get("downstream") or []), (lineage.get("upstream") or [])
+
+
+def service_dir_for(root: pathlib.Path, name: str) -> pathlib.Path | None:
+    """The directory of the service an edge names, tolerating the bare/`openbank-` spellings."""
+    for candidate in (name, f"{name}-service", f"openbank-{name}", f"openbank-{name}-service"):
+        path = root / candidate
+        if path.is_dir():
+            return path
+    return None
 
 
 def load_allowlist(rules_path: pathlib.Path) -> dict[str, str]:
@@ -112,47 +144,80 @@ def main() -> int:
 
     violations: list[tuple[str, str]] = []
     allowlisted_hits: list[tuple[str, str]] = []
-    checked = 0
+    seen: set[str] = set()
+    unresolved: list[tuple[str, str]] = []
+    checked = {"downstream": 0, "upstream": 0}
+    rest_client_cache: dict[pathlib.Path, set[str]] = {}
+
+    def rest_client_keys_of(path: pathlib.Path) -> set[str]:
+        if path not in rest_client_cache:
+            rest_client_cache[path] = find_rest_client_config_keys(path)
+        return rest_client_cache[path]
+
+    def topic_names(service: str, produced: bool) -> set[str]:
+        table = all_producers if produced else all_consumers
+        return {topic for topic, services in table.items() if service in services}
+
+    def is_backed(source_dir: pathlib.Path, source: str, target: str, relation: str) -> bool:
+        """Is there code in the SOURCE service witnessing `source -> target` over `relation`?"""
+        if relation == "api":
+            keys = rest_client_keys_of(source_dir)
+            normalized_targets = {target, normalize_service_name(target)}
+            normalized_keys = keys | {normalize_service_name(k) for k in keys}
+            return bool(normalized_targets & normalized_keys)
+        # topic: `relationType: topic` names a service, not a topic, so this is a service-level
+        # cross-reference in either direction (#1021: both sides must be the full directory name).
+        source_full = source if source.startswith("openbank-") else f"openbank-{source}"
+        target_full = target if target.startswith("openbank-") else f"openbank-{target}"
+        return bool(
+            (topic_names(source_full, True) & topic_names(target_full, False))
+            or (topic_names(target_full, True) & topic_names(source_full, False))
+        )
 
     for service_dir in service_dirs:
         service = service_dir.name
-        downstream = load_governance_downstream(service_dir / "governance.yaml")
-        if not downstream:
-            continue
+        downstream, upstream = load_governance_lineage(service_dir / "governance.yaml")
 
-        rest_client_keys = None  # lazily computed only if an api edge is present
-        for edge in downstream:
-            target = edge.get("serviceName")
+        # Normalize both directions to (source, target): a downstream edge on S naming T is
+        # S -> T; an upstream edge on S naming T is T -> S. Same key space, so a relationship
+        # declared from both ends is one check and one allowlist entry.
+        edges = [("downstream", service, edge) for edge in downstream]
+        edges += [("upstream", edge.get("serviceName"), edge) for edge in upstream]
+
+        for direction, source, edge in edges:
+            other = edge.get("serviceName")
             relation = edge.get("relationType")
-            if not target or relation not in ("api", "topic"):
+            if not other or not source or relation not in ("api", "topic"):
                 continue
-            checked += 1
-            edge_key = f"{service}->{target}:{relation}"
+            target = other if direction == "downstream" else service
+            source_dir = service_dir if direction == "downstream" else service_dir_for(root, source)
+            edge_key = f"{source}->{target}:{relation}"
+            checked[direction] += 1
+            if edge_key in seen:
+                continue
+            seen.add(edge_key)
 
-            if relation == "api":
-                if rest_client_keys is None:
-                    rest_client_keys = find_rest_client_config_keys(service_dir)
-                normalized_targets = {target, normalize_service_name(target)}
-                normalized_keys = rest_client_keys | {normalize_service_name(k) for k in rest_client_keys}
-                backed = bool(normalized_targets & normalized_keys)
-            else:  # topic
-                # `target` (governance.yaml's serviceName) is written bare ("audit-service"), but
-                # build_topic_maps() keys its producer/consumer dicts by the full directory name
-                # ("openbank-audit-service") — comparing bare-against-full can never match (#1021).
-                # The `api` branch above already normalizes both sides; this branch didn't.
-                target_full = target if target.startswith("openbank-") else f"openbank-{target}"
-                produces = {t for t, producers in all_producers.items() if service in producers}
-                consumes = {t for t, consumers in all_consumers.items() if service in consumers}
-                target_produces = {t for t, producers in all_producers.items() if target_full in producers}
-                target_consumes = {t for t, consumers in all_consumers.items() if target_full in consumers}
-                backed = bool((produces & target_consumes) or (target_produces & consumes))
+            if source_dir is None:
+                # The edge names something with no directory in this tree: an external system
+                # (github, prometheus, temporal) or a typo. Either way there is no code here to
+                # witness it, and calling that a code-drift violation would be a category error —
+                # so it is reported as its own class rather than folded into the count.
+                unresolved.append((edge_key, source))
+                continue
 
-            if backed:
+            if is_backed(source_dir, source, target, relation):
                 continue
             if edge_key in allowlist:
                 allowlisted_hits.append((edge_key, allowlist[edge_key]))
             else:
                 violations.append((edge_key, relation))
+
+    for edge_key, source in sorted(set(unresolved)):
+        print(
+            f"::notice::lineage-code-audit: {edge_key} names '{source}', which has no service "
+            f"directory in this repo — an external system or a stale name. Not counted as a "
+            f"code-drift violation: there is no in-tree code that could witness it either way."
+        )
 
     for edge_key, reason in sorted(allowlisted_hits):
         print(f"::notice::lineage-code-audit: {edge_key} has no backing code found — allowlisted: {reason}")
@@ -168,9 +233,11 @@ def main() -> int:
         )
 
     print(
-        f"check-governance-lineage: {checked} downstream edge(s) checked across "
-        f"{len(service_dirs)} service(s) with a governance.yaml; {len(violations)} unallowlisted "
-        f"violation(s), {len(allowlisted_hits)} allowlisted."
+        f"check-governance-lineage: {checked['downstream']} downstream + {checked['upstream']} "
+        f"upstream edge(s) declared across {len(service_dirs)} service(s) with a governance.yaml, "
+        f"{len(seen)} distinct relationship(s) checked; {len(violations)} unallowlisted "
+        f"violation(s), {len(allowlisted_hits)} allowlisted, {len(set(unresolved))} naming no "
+        f"in-tree service."
     )
 
     if violations and args.enforce:
