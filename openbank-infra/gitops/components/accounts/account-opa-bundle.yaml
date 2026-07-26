@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: account-service
     app.kubernetes.io/part-of: accounts
   annotations:
-    openbank.tech/policy-checksum: "d98ef807906115ef"
+    openbank.tech/policy-checksum: "3cff4ee22a307a62"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2816,6 +2816,50 @@ data:
             jdbc-postgresql (build.gradle.kts) — it has no OLTP datasource to reach. The
             reconciliation reads the warehouse and the WORM archive over blocking clients.
       ci_producer: ".github/scripts/check-no-runblocking-in-scheduled.py"
+
+
+    # ---------------------------------------------------------------------------------------
+    # Kafka topic existence (issue #2598). A service may only reference a topic that exists.
+    # ---------------------------------------------------------------------------------------
+    kafka_topics:
+      referenced_topics_must_be_declared: true
+      # A Kafka consumer subscribed to a topic that does not exist does NOT error. It joins its
+      # consumer group, reports healthy, and receives nothing — forever. There is no runtime
+      # signal that can distinguish it from a topic with no traffic: pod ready, group joined,
+      # lag zero, metrics flat. So this is only catchable statically, before the merge.
+      #
+      # Found live: openbank-analytics-sink subscribed to `openbank.account.events` and
+      # `openbank.transaction.events`. NEITHER has ever existed — the real topics are
+      # `openbank.accounts.account.created` and `openbank.transactions.transaction.initiated`,
+      # both declared, both produced, both already consumed by audit-service. The sink ran for
+      # weeks green while no ACCOUNT_OPENED and no TRANSACTION row ever reached bronze_events,
+      # which silently made ADR-0210 D2's account->party resolution dead code and left Customer
+      # 360 structurally unable to show a customer's accounts or transactions (PR #2629).
+      #
+      # Same failure shape as a client pointed at a REST path that does not exist — the one that
+      # shipped finrep's call to `/api/v1/ledger/trial-balance` (see the contract-test notes in
+      # CLAUDE.md). There the answer was to make the provider replay the contract at PR time;
+      # here it is to compare the name a service asks for against the set declared to exist.
+      #
+      # `openbank-infra/gitops` carries a KafkaTopic CR for every topic, so the declared set is
+      # authoritative and complete — that is what makes this checkable without a live broker.
+      #
+      # ENFORCED from the day it was written, not advisory. The fleet is at zero unresolved
+      # topics, so there is no judgement left to exercise; an advisory verdict over a checkable
+      # fact only makes the next violation mergeable.
+      scope: |
+        Every dotted topic name in a `topics:`/`topic:` key of any
+        openbank-*/src/main/resources/application.yaml must resolve to a KafkaTopic CR
+        (metadata.name or spec.topicName) under openbank-infra/gitops.
+      # EMPTY, and that is the point. An entry needs a reason, and the check fails on a stale
+      # declaration in BOTH directions — a name listed here that IS declared is itself reported —
+      # so a temporary exception cannot quietly become permanent. Same idiom as the pact gate's
+      # KNOWN_UNCOVERED and the runblocking_allowlist above.
+      allowed_absent: []
+      # The check ships with a --selftest that feeds it inputs it MUST flag and inputs it must
+      # NOT, run on every CI invocation: once the fleet is clean the flagging branch would
+      # otherwise never execute again, and a gate that has only ever passed is unfalsified.
+      ci_producer: ".github/scripts/check-kafka-topics-exist.py"
 
     # ---------------------------------------------------------------------------------------
     # Vulnerability-management lifecycle SLAs (ADR-0030 D1). Detection -> closure, in days.
