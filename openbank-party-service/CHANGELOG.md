@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.11.0...party-service-v0.12.0) (2026-07-26)
+
+
+### Features
+
+* **party:** forward marketing-consent toggle to consent-service (ADR-0198 D3, ADR-0206 D5) ([#2499](https://github.com/JiRaska/open-bank-oss/issues/2499)) ([09a626c](https://github.com/JiRaska/open-bank-oss/commit/09a626c30b671cde5390f0f589446b30d6d0023d))
+
+
+### Bug Fixes
+
+* **authz:** grant ROLE_API to the M2M account, sweep the dead ROLE_SERVICE name, enforce parity ([#2442](https://github.com/JiRaska/open-bank-oss/issues/2442)) ([#2475](https://github.com/JiRaska/open-bank-oss/issues/2475)) ([9f138c1](https://github.com/JiRaska/open-bank-oss/commit/9f138c133051a44c13790578a2864a703bda3425))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.10.1...party-service-v0.11.0) (2026-07-25)
 
 
