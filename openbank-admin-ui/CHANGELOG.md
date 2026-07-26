@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.59.0...admin-ui-v0.60.0) (2026-07-26)
+
+
+### Features
+
+* **admin-ui:** add the consents page (ADR-0208 D1 second consumer) ([#2568](https://github.com/JiRaska/open-bank-oss/issues/2568)) ([c164c1a](https://github.com/JiRaska/open-bank-oss/commit/c164c1a710b57f8b06b3024c1afc02902b7c6ff2))
+
 ## [0.59.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.58.2...admin-ui-v0.59.0) (2026-07-26)
 
 
