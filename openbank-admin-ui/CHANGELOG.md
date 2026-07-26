@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.62.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.62.1...admin-ui-v0.62.2) (2026-07-26)
+
+
+### Bug Fixes
+
+* **admin-ui:** stamp committed derived artifacts from the input commit, not the wall clock ([#2626](https://github.com/JiRaska/open-bank-oss/issues/2626)) ([06bf5e1](https://github.com/JiRaska/open-bank-oss/commit/06bf5e112d5b30aa1ab6c72a05fce8d455508f8b)), closes [#2621](https://github.com/JiRaska/open-bank-oss/issues/2621)
+
 ## [0.62.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.62.0...admin-ui-v0.62.1) (2026-07-26)
 
 
