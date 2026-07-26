@@ -105,7 +105,9 @@ class McpToolRegistry(
                     arguments.path("limit").asInt(DEFAULT_TX_LIMIT),
                 )
             "list_consents" -> accounts.listConsents(ctx)
-            "propose_payment" -> proposals.proposePayment(ctx, arguments)
+            // The PROPOSED-only invariant is enforced HERE, on the call path, not left to whichever
+            // ProposalPort is bound (T-E4, #2414). See ProposedOnly for why it is a whitelist of one.
+            "propose_payment" -> ProposedOnly.enforce(proposals.proposePayment(ctx, arguments))
             else -> return ToolCallResult(listOf(ToolContent(text = "Unknown tool: $toolName")), isError = true)
         }
         // The charter's `data_scope.pii: masked` (agents.yaml, `mcp-anonymous`) is enforced HERE —
