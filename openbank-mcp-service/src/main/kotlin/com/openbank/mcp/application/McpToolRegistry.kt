@@ -110,9 +110,16 @@ class McpToolRegistry(
             "propose_payment" -> ProposedOnly.enforce(proposals.proposePayment(ctx, arguments))
             else -> return ToolCallResult(listOf(ToolContent(text = "Unknown tool: $toolName")), isError = true)
         }
-        // The charter's `data_scope.pii: masked` (agents.yaml, `mcp-anonymous`) is enforced HERE —
-        // one response-shaping step every tool passes through, so a new tool cannot forget it (#2412).
-        return ToolCallResult(listOf(ToolContent(text = mapper.writeValueAsString(masker.mask(result)))))
+        // Two orthogonal controls, both applied HERE — one response-shaping step every tool passes
+        // through, so a new tool cannot forget either of them (#2412).
+        //   masker  — the charter's `data_scope.pii: masked` (agents.yaml, `mcp-anonymous`):
+        //             narrows WHAT can leave the bank.
+        //   wrap    — instruction/data separation (ADR-0195 T-I3): narrows what the data that DOES
+        //             leave can make the calling client's model do. See McpUntrustedData.
+        // Order matters only in that wrapping must come last: it must enclose the final bytes, or
+        // a later step could re-introduce text outside the markers.
+        val masked = mapper.writeValueAsString(masker.mask(result))
+        return ToolCallResult(listOf(ToolContent(text = McpUntrustedData.wrap(masked))))
     }
 
     private fun JsonNode.reqText(field: String): String = path(field).takeIf { it.isTextual }?.asText()
