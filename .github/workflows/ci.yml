@@ -440,8 +440,14 @@ jobs:
       # generation, authz-coverage) are stdlib Python with committed *_test.py suites that,
       # until now, no workflow ran — a gate whose own logic is untested silently rots. Run
       # them here so a regression in a gate's parser fails the PR that introduced it.
+      # BOTH script directories, not just openbank-infra/scripts: gates live in .github/scripts
+      # too, and a discovery root that covers only one of them is a coverage set maintained
+      # separately from the artifacts it covers — the exact shape that let 16 pacts go
+      # unreplayed (#2327). Adding a *_test.py beside a gate must be enough to have it run.
       - name: governance-script unit tests
-        run: python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
+        run: |
+          python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
+          python3 -m unittest discover -s .github/scripts -p '*_test.py' -v
 
       # issue #669 scope item 3 / rules.yaml: slo. Every money_path_services entry needs a
       # matching availability + latency Pyrra ServiceLevelObjective whose target/window match
