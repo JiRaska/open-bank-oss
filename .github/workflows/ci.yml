@@ -783,6 +783,16 @@ jobs:
       - name: "can-i-deploy block classifier unit test"
         run: bash .github/scripts/test-classify-can-i-deploy-block.sh
 
+      # co-deploy set derivation unit test (issue #1985). The classifier above says WHAT KIND
+      # of block a service has; this one says whether the block can be resolved by deploying
+      # that service at all. Two services that name each other never converge one at a time,
+      # and until this landed the set was reconstructed from the broker matrix by hand and
+      # dispatched past the gate — three times in one week, all money-path. Its load-bearing
+      # case is the parser one: the CLI's matrix table TRUNCATES service names, so a parser
+      # that reads it names a co-deploy set no dispatch can satisfy.
+      - name: "co-deploy set derivation unit test"
+        run: bash .github/scripts/test-derive-codeploy-set.sh
+
       # gitops ref-integrity guard (rules.yaml: gitops_ref_integrity). The layer below
       # deploy-coverage: that one proves a service gets BUILT, this one proves the manifest
       # it deploys can actually START. A secretKeyRef to a Secret nobody declares passes
