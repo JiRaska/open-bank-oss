@@ -35,7 +35,7 @@
   "openbank-notification-service": "0.15.1",
   "openbank-onboarding-service": "0.5.8",
   "openbank-party-service": "0.11.0",
-  "openbank-pid-service": "0.8.10",
+  "openbank-pid-service": "0.8.11",
   "openbank-product-catalog": "0.11.2",
   "openbank-psd2-service": "0.8.9",
   "openbank-release-steward": "0.3.1",
