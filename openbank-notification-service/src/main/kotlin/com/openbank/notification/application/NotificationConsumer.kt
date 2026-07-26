@@ -298,6 +298,21 @@ class NotificationConsumer {
      * Gate a PUSH by the party's preferences (#2). SECURITY-category notifications (OTP, SCA, KYC,
      * account freeze) always send. For a togglable category, a missing preference row means "on";
      * a muted category records the notification as SUPPRESSED and skips egress.
+     *
+     * MARKETING is the exception and is fail-CLOSED (ADR-0198 D4, issue #2369). PAYMENTS/PRODUCT
+     * ride contract / legitimate-interest bases, so "no preference row yet" legitimately means
+     * "send". Marketing does not: under GDPR Art. 6(1)(a) it needs an affirmative opt-in, and
+     * `notification_preference.marketing_push` is a LOCAL toggle, not that consent record —
+     * consent-service owns it (`party-service:marketing-comms`, ADR-0205 D3). Defaulting to `true`
+     * here meant an absent preference row would have sent marketing to a party who never consented.
+     *
+     * No template maps to MARKETING today ([NotificationTemplate.category] is exhaustive and never
+     * yields it), so this branch is currently unreachable — deliberately NOT wired to a
+     * consent-service HTTP call, which would add a money-path dependency for a caller that does not
+     * exist. `NotificationTemplateCategoryTest` asserts that unreachability, so the day a MARKETING
+     * template IS added the test goes red and whoever adds it has to wire the real consent check
+     * (consent-service `POST /api/v1/consents/{id}/validate`, scope MARKETING_COMMS_PUSH) rather
+     * than inheriting a silent local-toggle default.
      */
     private fun maybeSendPush(req: NotificationRequest, subject: String, entity: NotificationEntity): Uni<Void> {
         val category = req.template.category
@@ -306,7 +321,8 @@ class NotificationConsumer {
             val enabled = when (category) {
                 NotificationCategory.PAYMENTS -> pref?.paymentsPush ?: true
                 NotificationCategory.PRODUCT -> pref?.productPush ?: true
-                NotificationCategory.MARKETING -> pref?.marketingPush ?: true
+                // Fail-closed: absent preference row => do NOT send (see KDoc above).
+                NotificationCategory.MARKETING -> pref?.marketingPush ?: false
                 NotificationCategory.SECURITY -> true
             }
             if (enabled) {
