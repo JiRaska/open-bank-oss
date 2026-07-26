@@ -75,6 +75,14 @@ updates:
     # Majors the ecosystem cannot satisfy yet. Each PR can never go green, so
     # dependabot would just re-open a red PR every Monday. Drop the entry once
     # the unblock criterion in #1314 is met.
+    #
+    # Every entry below MUST also be declared in `WATCHES` in
+    # .github/scripts/check-upstream-unblock.py — the Upstream unblock watch
+    # re-derives each criterion monthly and comments on the issue the day a
+    # block goes stale, and fails this PR if the two lists drift. An entry
+    # whose blocker lives in THIS repo is declared there with `upstream: None`;
+    # it is never simply omitted, because an omitted entry is a block nothing
+    # watches. (#1314)
     ignore:
       # eslint 10 removed context.getFilename(); the eslint-plugin-react that
       # eslint-config-next@16 bundles still calls it and peers on eslint <=9.
