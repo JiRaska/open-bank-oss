@@ -667,6 +667,18 @@ jobs:
       - name: "Kafka topic existence (issue #2598, enforced)"
         run: python3 .github/scripts/check-kafka-topics-exist.py --enforce
 
+      # issue #2204 (the structural gap #2187 closed with). `quarkus.scheduler.enabled: false` under
+      # %test leaves only DIRECT method calls, and a direct call supplies the very Vert.x context the
+      # real scheduler does not — so it passes against a @Scheduled body that can never work as a
+      # cron. #2187 found five such jobs, three money-path, that had NEVER executed while their tests
+      # were green. check-no-runblocking-in-scheduled.py catches that one defect shape; only running
+      # the real cron catches the next one. Ratchet, not a wall: 9 services predate the rule and are
+      # baselined, the list may only shrink, and a stale entry is reported too.
+      - name: "Scheduler-exercised self-test (issue #2204)"
+        run: python3 .github/scripts/check-scheduler-exercised.py --selftest
+      - name: "Scheduler exercised in tests (issue #2204, enforced)"
+        run: python3 .github/scripts/check-scheduler-exercised.py --enforce
+
       # issue #2412 (third residual). openbank-mcp-service masks PII on every tool result
       # UNCONDITIONALLY — deliberately, since a switch that can turn a declared control off is how
       # the declaration became fiction to begin with. The cost of that choice is that the charter
