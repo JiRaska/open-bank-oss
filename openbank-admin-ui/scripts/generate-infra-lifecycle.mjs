@@ -16,6 +16,7 @@
 import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { sourceDate } from './lib/source-date.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const arg = (flag, def) => {
@@ -26,6 +27,14 @@ const REPO = path.resolve(arg('--repo', path.resolve(__dirname, '..', '..')))
 const OUT = path.resolve(arg('--out', path.resolve(__dirname, '..', 'infra-lifecycle.json')))
 const REGISTRY = path.resolve(__dirname, '..', 'src', 'lib', 'infra-lifecycle', 'registry.json')
 const GITOPS = path.join(REPO, 'openbank-infra', 'gitops')
+// Repo inputs whose newest commit time becomes `generatedAt` (issue #2621). The upstream
+// endoflife.date feed is NOT a repo input: when it moves, the `components` payload itself
+// changes, so that diff is genuine and worth a conflict. What is no longer worth a conflict
+// is the stamp advancing on its own while nothing changed.
+const INPUTS = [
+  'openbank-infra/gitops',
+  'openbank-admin-ui/src/lib/infra-lifecycle/registry.json',
+]
 
 // Recursively collect every text line under the GitOps tree once (cheap; the tree is small).
 function walkFiles(dir, acc = []) {
@@ -138,7 +147,7 @@ async function main() {
   const out = {
     schema: 'openbank.infra-lifecycle/v1',
     source: 'endoflife.date + GitOps image tags — ADR-0079',
-    generatedAt: new Date().toISOString(),
+    generatedAt: sourceDate(REPO, INPUTS),
     components,
   }
   writeFileSync(OUT, JSON.stringify(out, null, 2))

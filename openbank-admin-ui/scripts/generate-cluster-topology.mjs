@@ -16,6 +16,7 @@
 import { readFileSync, readdirSync, writeFileSync, existsSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { sourceDate } from './lib/source-date.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const arg = (flag, fallback) => {
@@ -25,6 +26,18 @@ const arg = (flag, fallback) => {
 const REPO = path.resolve(arg('--repo', path.resolve(__dirname, '..', '..')))
 const OUT = path.resolve(arg('--out', path.resolve(__dirname, '..', 'cluster-topology.json')))
 const GITOPS = path.join(REPO, 'openbank-infra', 'gitops')
+// Every repo path this generator reads. The provenance stamp is the commit time of the
+// newest of them (issue #2621) — NOT the wall clock, which made every regeneration a
+// guaranteed merge conflict. Keep this list in step with what the walkers below open.
+// The generator script itself is deliberately NOT an input: including it makes the
+// artifact depend on the very commit that regenerates it, so the stamp could never be
+// settled before committing. A logic change shows up in the derived content instead.
+const INPUTS = [
+  'openbank-infra/gitops',
+  'openbank-ledger-service/Dockerfile',
+  'openbank-account-service/Dockerfile',
+  'openbank-party-service/Dockerfile',
+]
 
 const read = (p) => { try { return readFileSync(p, 'utf8') } catch { return null } }
 
@@ -218,7 +231,8 @@ const planVsReality = [
 const out = {
   schema: 'openbank.cluster-topology/v1',
   source: 'derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081',
-  generatedAt: new Date().toISOString(),
+  // Commit time of the newest input, not the clock — see scripts/lib/source-date.mjs (#2621).
+  generatedAt: sourceDate(REPO, INPUTS),
   counts,
   groups: GROUPS,
   namespaces: ns,
