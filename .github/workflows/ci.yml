@@ -477,11 +477,16 @@ jobs:
       # recorded model outputs in evals/recordings/ and hard-fails on a STALE recording (the suite
       # version moved, or the registered prompt's sha256 changed) or a pass rate below the
       # baselines.json floor — i.e. a prompt/model promotion cannot land without being re-recorded
-      # and re-passing. ADVISORY first (ADR-0144): no charter has a recorded run yet, so today this
-      # emits ::warning per suite. Graduate by adding --require-recordings and dropping
-      # continue-on-error once every suite has a committed recording.
-      - name: "evals gate replay (ADR-0148, advisory)"
-        continue-on-error: true
+      # and re-passing.
+      #
+      # ENFORCED (was continue-on-error, #2392). The `continue-on-error` was carrying a different
+      # meaning than it looked like: the runner already treats a charter with no recorded run as
+      # ::warning and exits 0 — 4 of the 5 suites are in that state today — so the flag was only
+      # ever suppressing a REAL replay failure (a drifted prompt hash, a model/version move, a pass
+      # rate under the baselines.json floor). That is the one outcome the gate exists to surface.
+      # Remaining graduation step is --require-recordings, once every suite has a committed run;
+      # that is about coverage, not about whether a failure blocks.
+      - name: "evals gate replay (ADR-0148, enforced)"
         run: python3 .github/scripts/run-evals.py
 
       # rules.yaml: alerting.critical_alerts_must_egress. A severity=critical alert must
@@ -730,6 +735,22 @@ jobs:
       - name: "gate graduation guard (ADR-0144, enforced)"
         run: bash .github/scripts/check-gate-graduation.sh
 
+      # The other half of ADR-0144 (issue #2392). The guard above walks rules.yaml and NOTHING
+      # ELSE, so it can only ever see gates that already opted in: a CI gate with no rules.yaml
+      # rule has no target_enforce_date, and therefore no deadline it can miss. Four gates were in
+      # that state — and the cost was measured, not theoretical. check-prompt-registry.py sat
+      # `continue-on-error: true` and RED on main for a month (#2363), the unregistered file being
+      # the prompt hardened against injection; check-authz-pdp-parity.py cited an
+      # `authz_pdp_parity.target_enforce_date` key that never existed (#2393), reading as governed
+      # while nothing watched it.
+      #
+      # This walks the WORKFLOWS instead and requires every advisory governance gate to name a
+      # rules.yaml rule (via that rule's `ci_producer`) carrying `enforced: advisory|planned` +
+      # `target_enforce_date`. rules.yaml can no longer be the only place that knows a gate exists.
+      # ENFORCED from day one — the tree is clean as of this PR.
+      - name: "advisory-gate registration (issue #2392, enforced)"
+        run: python3 .github/scripts/check-advisory-gate-registration.py
+
       # No dead-code SERVICE-principal rego rule (ADR-0034 Phase 5, issue #266,
       # rules.yaml: authz_policy). AuthorizeInterceptor never emits
       # principal.type == "SERVICE" and no Keycloak client is ever granted
@@ -779,10 +800,15 @@ jobs:
       # 503/422 — the opposite of the interceptor's "advisory must never brick an endpoint"
       # invariant. Eight live services were in this state (party fixed per-service in #1798).
       # Checks each gitops workload per-pod-spec (handles shared payments-services.yaml +
-      # pluralized dirs), not the live pod. ADVISORY (ADR-0144): 10 known violations at
-      # introduction — graduate to --enforce once cleared. Exits 0, so placement is safe.
-      - name: "authz-enforce ⇒ PDP sidecar parity (advisory, #1797)"
-        run: python3 .github/scripts/check-authz-pdp-parity.py .
+      # pluralized dirs), not the live pod.
+      #
+      # ENFORCED (was advisory, #2392). It had 10 violations at introduction and the last two —
+      # finrep-service and onboarding-service — were cleared in #2403, so `--enforce` exits 0 on a
+      # clean tree today. The advisory period had no deadline attached because the gate had no
+      # rules.yaml rule at all, and its docstring cited an `authz_pdp_parity.target_enforce_date`
+      # key that never existed (#2393): it read as governed while nothing watched it.
+      - name: "authz-enforce ⇒ PDP sidecar parity (enforced, #1797)"
+        run: python3 .github/scripts/check-authz-pdp-parity.py . --enforce
 
       # @RolesAllowed ⇒ realm parity (issue #2404). The JWT-role half of the check above: a role
       # name that exists in no realm never matches, so the endpoint answers 403 to every caller,
