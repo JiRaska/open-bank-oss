@@ -136,7 +136,12 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ partyId: s
 
   try {
     const rows = await chQuery(scopedRowsSql(partyId))
-    if (rows.length === 0) return NextResponse.json(empty(partyId))
+    // A query that succeeded and matched nothing means THIS PARTY has no projected events — it does
+    // NOT mean the data source is empty. Those are different facts and the page renders different
+    // copy for each, so `available` stays true: ClickHouse answered. Returning false here read as
+    // "the source contains no records yet" while the source held events for other parties, which is
+    // the shape an operator cannot tell apart from a broken page.
+    if (rows.length === 0) return NextResponse.json({ ...empty(partyId), available: true })
 
     const byDomain = new Map<string, DomainSummary>()
     const accountIds = new Set<string>()

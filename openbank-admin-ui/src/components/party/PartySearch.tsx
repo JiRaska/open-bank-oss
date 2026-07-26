@@ -1,0 +1,200 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+'use client'
+
+// Resolve a HUMAN-READABLE name to a party id.
+//
+// Why this exists: several console pages are keyed by party id because the thing they read is keyed
+// that way — the analytics silver layer by aggregate id, consent-service by partyId. Exposing that
+// key as the search box let the data model dictate the UX: an operator has a name in hand, not a
+// UUID, and a UUID-only field is unusable without a second tab open on the Parties page.
+//
+// party-service owns identity, so name search belongs there — ADR-0055's trigram `/search`, reached
+// through the BFF (ADR-0056). No page keeps its own name index, and this never becomes a second
+// lookup path into the downstream store: it resolves a name to an id, and the id is what the caller
+// queries with.
+//
+// Shared deliberately (ADR-0208): two callers need it (Customer 360, Consents), and a copy in each
+// would be two divergent search behaviours over one endpoint.
+
+import { useState } from 'react'
+import { Search } from 'lucide-react'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { StatusBadge } from '@/components/ui'
+
+const PARTY_SERVICE = '/api/svc/party-service'
+
+export const PARTY_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export interface PartyHit {
+  id: string
+  legalName?: string | null
+  tradingName?: string | null
+  email?: string | null
+  status?: string | null
+  kycStatus?: string | null
+}
+
+export function partyDisplayName(p: PartyHit): string {
+  return p.legalName || p.tradingName || p.id
+}
+
+interface Props {
+  /** Called with the chosen party. A pasted UUID is passed through as `{ id }` with no name. */
+  onSelect: (party: PartyHit) => void
+  /** Highlighted row, so the caller's current selection stays visible in the result list. */
+  selectedId?: string
+  /** Disables selection while the caller is loading the party's data. */
+  busy?: boolean
+  placeholder?: string
+}
+
+export function PartySearch({ onSelect, selectedId, busy = false, placeholder }: Props) {
+  const { t, language } = useLanguage()
+  const [term, setTerm] = useState('')
+  const [hits, setHits] = useState<PartyHit[] | null>(null)
+  const [failure, setFailure] = useState<UnavailableKind | null>(null)
+  const [searching, setSearching] = useState(false)
+
+  const run = async () => {
+    const q = term.trim()
+    if (!q) return
+    // A pasted party id is not a name — skip the trigram search entirely, so an operator who already
+    // has an id keeps the direct path instead of being forced through a result list of one.
+    if (PARTY_UUID_RE.test(q)) {
+      setHits(null)
+      setFailure(null)
+      onSelect({ id: q })
+      return
+    }
+    setSearching(true)
+    setFailure(null)
+    setHits(null)
+    try {
+      const res = await fetch(
+        `${PARTY_SERVICE}/api/v1/parties/search?q=${encodeURIComponent(q)}&limit=20`,
+        { cache: 'no-store' },
+      )
+      if (!res.ok) {
+        setFailure(res.status === 401 || res.status === 403 ? 'unauthorized' : 'unreachable')
+        return
+      }
+      const body = (await res.json()) as { data?: PartyHit[] }
+      setHits(body.data ?? [])
+    } catch {
+      setFailure('unreachable')
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  return (
+    <>
+      <div className="card" style={{ marginBottom: '20px' }}>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <input
+            value={term}
+            onChange={e => setTerm(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') run() }}
+            placeholder={placeholder ?? t('Jméno nebo název firmy (nebo UUID party)', 'Name or company name (or party UUID)')}
+            style={{
+              flex: '1 1 340px', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)',
+              background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '13px',
+            }}
+          />
+          <button
+            onClick={run}
+            disabled={searching || busy || !term.trim()}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px',
+              cursor: searching || busy || !term.trim() ? 'not-allowed' : 'pointer', borderRadius: '8px',
+              border: '1px solid var(--border)', background: 'var(--surface)',
+              color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600,
+              opacity: searching || busy || !term.trim() ? 0.6 : 1,
+            }}
+          >
+            <Search size={15} /> {t('Vyhledat', 'Search')}
+          </button>
+        </div>
+        <p style={{ margin: '10px 0 0', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+          {t(
+            'Hledá se v party-service (ADR-0055) — jména vlastní ta služba.',
+            'Search runs against party-service (ADR-0055) — it owns names.',
+          )}
+        </p>
+      </div>
+
+      {searching && (
+        <div style={{ color: 'var(--text-secondary)', padding: '24px', textAlign: 'center' }}>
+          {t('Hledám…', 'Searching…')}
+        </div>
+      )}
+
+      {!searching && failure && (
+        <DataUnavailable
+          kind={failure}
+          service="party-service"
+          feature={t('Hledání party', 'Party search')}
+          lang={language === 'cs' ? 'cs' : 'en'}
+        />
+      )}
+
+      {!searching && hits && hits.length === 0 && (
+        <div className="card" style={{ padding: '28px', textAlign: 'center', marginBottom: '20px' }}>
+          {/* Stated as a search result, not as an unavailable data source: party-service answered. */}
+          <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-primary)' }}>
+            {t('Žádná party neodpovídá hledání', 'No party matches that search')}
+          </p>
+          <p style={{ margin: '6px 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
+            {t('party-service odpověděla — hledaný výraz nic nenašel.', 'party-service answered — the term matched nothing.')}
+          </p>
+        </div>
+      )}
+
+      {!searching && hits && hits.length > 0 && (
+        <div className="card" style={{ marginBottom: '20px', overflowX: 'auto' }}>
+          <h2 className="section-title" style={{ marginBottom: '12px' }}>
+            {t('Nalezené party', 'Matching parties')} ({hits.length})
+          </h2>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>{t('Jméno', 'Name')}</th>
+                <th>{t('E-mail', 'Email')}</th>
+                <th>{t('Stav', 'Status')}</th>
+                <th>KYC</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {hits.map(p => (
+                <tr key={p.id} style={{ background: selectedId === p.id ? 'var(--surface-hover)' : undefined }}>
+                  <td style={{ fontWeight: 600 }}>{partyDisplayName(p)}</td>
+                  <td style={{ color: 'var(--text-secondary)' }}>{p.email || '—'}</td>
+                  <td>{p.status ? <StatusBadge status={p.status} withDot /> : '—'}</td>
+                  <td>{p.kycStatus ? <StatusBadge status={p.kycStatus} /> : '—'}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button
+                      onClick={() => onSelect(p)}
+                      disabled={busy}
+                      style={{
+                        padding: '5px 12px', borderRadius: '6px', border: '1px solid var(--border)',
+                        background: 'var(--surface)', color: 'var(--text-secondary)', fontSize: '12px',
+                        fontWeight: 600, cursor: busy ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {t('Vybrat', 'Select')}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  )
+}
