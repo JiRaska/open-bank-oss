@@ -984,3 +984,119 @@ test_four_eyes_not_required_when_actions_key_absent if {
 	not rest.four_eyes_required with input as {"action": "opsmessage.compose"}
 		with data.rules as {"four_eyes": {"verbs": []}}
 }
+
+# ---------------------------------------------------------------------------------------
+# The shared M2M identity may never reach a WRITE through a role-only operator reason
+# (GHSA-58jq-9hq3-66jr). `service-account-openbank-services` carries ROLE_OPERATOR in the
+# realm, so every `operator-<domain>-write` rule — which checks only type == HUMAN plus the
+# role — admitted any backend service to any write in that domain until the `prohibited`
+# guard in rest.rego.
+#
+# These tests are the falsification: removing that guard must turn the first one green in
+# the wrong direction. The three after it are the ones that would break if the guard were
+# too broad, which is the real risk of a fix at the allow head.
+# ---------------------------------------------------------------------------------------
+
+# The regression itself: a role-only write reason is the ONLY thing admitting this caller.
+test_deny_shared_m2m_write_via_role_only_reason if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "ledger.reverse",
+		"resource": {"type": "ledger", "id": "e-1"},
+	}
+		with data.openbank.bundle as bundle
+		with data.rules.shared_m2m_write_prohibition.reasons as ["operator-ledger-write"]
+		with rest.allowed_reasons as {"operator-ledger-write"}
+}
+
+# READS must be untouched: party-service's GDPR Art. 15 aggregation calls kyc-service and
+# card-issuance-service with exactly this identity and relies on operator-read-any.
+test_allow_shared_m2m_read_still_works if {
+	decision := rest.allow with input as {
+		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "card.list",
+		"resource": {"type": "card", "id": "p-1"},
+	}
+		with data.openbank.bundle as bundle
+		with rest.allowed_reasons as {"operator-read-any"}
+
+	decision.allow == true
+}
+
+# An identity-scoped reason is the sanctioned way to grant an M2M write: it names the caller
+# and enumerates the actions. One such reason is enough, even alongside a role-only one.
+test_allow_shared_m2m_write_via_identity_scoped_reason if {
+	decision := rest.allow with input as {
+		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "consent.grant",
+		"resource": {"type": "consent", "id": "party-service:marketing-comms"},
+	}
+		with data.openbank.bundle as bundle
+		with data.rules.shared_m2m_write_prohibition.reasons as ["operator-consent-write"]
+		with rest.allowed_reasons as {"operator-consent-write", "service-consent-m2m-marketing"}
+
+	decision.allow == true
+}
+
+# A real human operator is unaffected — the guard keys on one service-account identity
+# string, which no human user can hold.
+test_allow_human_operator_write_unaffected if {
+	decision := rest.allow with input as {
+		"principal": {"id": "u-op", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "ledger.reverse",
+		"resource": {"type": "ledger", "id": "e-1"},
+	}
+		with data.openbank.bundle as bundle
+		with data.rules.shared_m2m_write_prohibition.reasons as ["operator-ledger-write"]
+		with rest.allowed_reasons as {"operator-ledger-write"}
+
+	decision.allow == true
+}
+
+# Role-independent: ROLE_ADMIN on the shared identity is denied exactly as ROLE_OPERATOR is.
+# (An earlier version of this test claimed to prove coverage of a DIFFERENT service-account
+# while reusing the same id — it demonstrated nothing about other accounts. The guard IS keyed
+# solely on `service-account-openbank-services`; other service-accounts are deliberately out of
+# scope, because their callers have not been enumerated.)
+test_deny_shared_m2m_write_regardless_of_role if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "ledger.reverse",
+		"resource": {"type": "ledger", "id": "e-1"},
+	}
+		with data.openbank.bundle as bundle
+		with data.rules.shared_m2m_write_prohibition.reasons as ["operator-ledger-write"]
+		with rest.allowed_reasons as {"operator-ledger-write"}
+}
+
+# The load-bearing property of the opt-in design: a role-only write reason that is NOT in the
+# register still allows. This is what keeps transaction.create working for its six verified
+# callers — the first revision of this fix matched every `operator-*-write` by name and would
+# have 403'd them on an AUTHZ_ENFORCE=true money path.
+test_allow_role_only_write_reason_not_in_the_register if {
+	decision := rest.allow with input as {
+		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "transaction.create",
+		"resource": "",
+	}
+		with data.openbank.bundle as bundle
+		with data.rules.shared_m2m_write_prohibition.reasons as ["operator-ledger-write"]
+		with rest.allowed_reasons as {"operator-transaction-write"}
+
+	decision.allow == true
+}
+
+# A bundle whose rules.yaml predates the key sees no behaviour change: membership over an
+# undefined collection does not fire, so nothing is newly denied.
+test_allow_when_the_register_key_is_absent if {
+	decision := rest.allow with input as {
+		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "ledger.reverse",
+		"resource": {"type": "ledger", "id": "e-1"},
+	}
+		with data.openbank.bundle as bundle
+		with data.rules as {}
+		with rest.allowed_reasons as {"operator-ledger-write"}
+
+	decision.allow == true
+}
