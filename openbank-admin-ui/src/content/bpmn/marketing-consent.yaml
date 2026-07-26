@@ -1,0 +1,178 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# BPMN process diagram (ADR-0019/0029). Authored as data; validated by
+# src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
+#
+# ADR-0208 D5: the first flow explainer authored for the existing BpmnView +
+# FlowParticle renderers rather than as a bespoke page. It deliberately shows the
+# two things that make this chain interesting and are invisible in any single
+# service's code: the OPA grantee-scoped gate that lets one M2M caller do exactly
+# one thing (ADR-0206), and the single-writer invariant — parties.consent_marketing
+# is written ONLY by the Kafka projection, never by the forwarder (ADR-0205 D4).
+
+name: Marketingový souhlas
+desc: >-
+  Přepnutí marketingového souhlasu z mobilní aplikace až do consent-service a zpět
+  projekcí. Souhlas vlastní consent-service (grantee party-service:marketing-comms);
+  party-service ho jen forwarduje a promítá — sloupec parties.consent_marketing má
+  jediného pisatele, kterým je Kafka konzument, nikdy forwarder.
+regulation: GDPR Art. 6(1)(a) + Art. 7(3) · zákon 480/2004 §2 · ADR-0198/0205/0206
+services:
+  - customer-edge
+  - party-service
+  - consent-service
+steps:
+  - id: start
+    type: start
+    x: 60
+    y: 100
+    label: Přepnutí v Profilu (app)
+
+  - id: edge
+    type: task
+    x: 170
+    y: 100
+    label: customer-edge
+    lane: platform
+    apis:
+      - PATCH /customer/v1/profile/consent
+    relatedServices:
+      - customer-edge
+
+  - id: forwarder
+    type: task
+    x: 285
+    y: 100
+    label: party-service forwarder
+    lane: identity
+    apis:
+      - PATCH /api/v1/parties/{id}/consent
+    relatedServices:
+      - party-service
+
+  - id: opa
+    type: task
+    x: 400
+    y: 100
+    label: 'OPA: grantee scope'
+    lane: compliance
+    relatedServices:
+      - consent-service
+
+  - id: direction
+    type: gateway
+    x: 510
+    y: 100
+    label: Zapnout?
+
+  - id: grant
+    type: task
+    x: 620
+    y: 30
+    label: 'consent-service: grant'
+    lane: compliance
+    apis:
+      - POST /api/v1/consents
+    relatedServices:
+      - consent-service
+
+  - id: activate
+    type: task
+    x: 740
+    y: 30
+    label: Auto-aktivace bez SCA
+    lane: compliance
+    relatedServices:
+      - consent-service
+    emits:
+      - openbank.consent.events
+
+  - id: lookup
+    type: task
+    x: 620
+    y: 175
+    label: Dohledat consentId
+    lane: identity
+    relatedServices:
+      - party-service
+
+  - id: revoke
+    type: task
+    x: 740
+    y: 175
+    label: 'consent-service: revoke'
+    lane: compliance
+    apis:
+      - DELETE /api/v1/consents/{id}
+    relatedServices:
+      - consent-service
+    emits:
+      - openbank.consent.events
+
+  - id: events
+    type: event
+    x: 860
+    y: 100
+    label: Consent events
+    consumes:
+      - openbank.consent.events
+
+  - id: projection
+    type: task
+    x: 970
+    y: 100
+    label: Projekce (jediný pisatel)
+    lane: identity
+    relatedServices:
+      - party-service
+    consumes:
+      - openbank.consent.events
+
+  - id: done
+    type: end
+    x: 1080
+    y: 100
+    label: consent_marketing
+
+  - id: denied
+    type: end-err
+    x: 400
+    y: 220
+    label: 403 — jiný grantee
+
+flows:
+  - from: start
+    to: edge
+  - from: edge
+    to: forwarder
+  - from: forwarder
+    to: opa
+  - from: opa
+    to: direction
+  - from: opa
+    to: denied
+    label: jakýkoli jiný grantee
+  - from: direction
+    to: grant
+    label: Ano
+  - from: grant
+    to: activate
+  - from: direction
+    to: lookup
+    label: Ne
+  - from: lookup
+    to: revoke
+  - from: activate
+    to: events
+    kind: async
+    topic: openbank.consent.events
+  - from: revoke
+    to: events
+    kind: async
+    topic: openbank.consent.events
+  - from: events
+    to: projection
+    kind: async
+    topic: openbank.consent.events
+  - from: projection
+    to: done
