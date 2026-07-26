@@ -25,6 +25,7 @@ import com.openbank.mcp.application.protocol.ServerInfo
 import com.openbank.mcp.application.protocol.ToolCallResult
 import com.openbank.mcp.application.protocol.ToolContent
 import com.openbank.mcp.application.protocol.ToolsListResult
+import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
@@ -93,6 +94,10 @@ class McpEndpoint(
      */
     @Inject
     lateinit var metrics: McpMetricsPort
+
+    /** Field-injected for the same reason as [metrics] — see the note above. */
+    @Inject
+    lateinit var rateLimiter: McpRateLimiter
 
     private val log = Logger.getLogger(McpEndpoint::class.java)
 
@@ -193,6 +198,16 @@ class McpEndpoint(
             val reason = decision.reason ?: "no matching allow rule"
             audit(capability, McpCallAuditor.Decision.DENY, AuditResult.DENIED, reason)
             return toolError(id, "Denied by policy: $reason")
+        }
+
+        // Rate limit AFTER the PDP decision, so a denied caller cannot burn the acting agent's
+        // window, and BEFORE the tool executes, which is the fan-out into consent/account/balance/
+        // transaction-service this bounds (#2409). A throttled call is a DENY like any other: same
+        // audit event, same meter, so the aggregate cannot disagree with the trail.
+        val limit = rateLimiter.check(ctx.agentId)
+        if (limit != McpRateLimiter.Outcome.ALLOWED) {
+            audit(capability, McpCallAuditor.Decision.DENY, AuditResult.DENIED, limit.reason)
+            return toolError(id, "Rate limit exceeded: ${limit.reason}")
         }
 
         return try {
