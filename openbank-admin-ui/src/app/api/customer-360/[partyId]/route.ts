@@ -83,17 +83,30 @@ async function chQuery(sql: string): Promise<Record<string, unknown>[]> {
  * transactions — which is why `customer-360.test.ts` asserts isolation, not just assembly.
  */
 function scopedRowsSql(partyId: string): string {
+  // `aggregate_type` is UPPERCASE in bronze (PARTY, ACCOUNT, ONBOARDING_FUNNEL — confirmed against
+  // the sandbox), so every comparison is folded with upper(). The first version compared against
+  // lowercase literals and silently matched nothing on the account arm: a filter that finds no rows
+  // is indistinguishable from a party that has no accounts, so nothing failed — it just showed
+  // less. Casing is normalised here and again when the rows are grouped.
+  //
+  // party_accounts reads bronze_events, NOT silver_current_state, and that is deliberate: silver
+  // keeps only the LATEST event per aggregate, and an account's latest event is typically
+  // BALANCE_UPDATED, whose payload has accountId but no partyId. Resolving ownership needs the
+  // event that carried it (account opened), which only the full history has.
   return `
     WITH party_accounts AS (
       SELECT DISTINCT aggregate_id
-      FROM ${DB}.silver_current_state
-      WHERE aggregate_type = 'account'
+      FROM ${DB}.bronze_events
+      WHERE upper(aggregate_type) = 'ACCOUNT'
         AND JSONExtractString(payload, 'partyId') = '${partyId}'
     )
     SELECT aggregate_type, aggregate_id, event_type, occurred_at, payload
     FROM ${DB}.silver_current_state
     WHERE JSONExtractString(payload, 'partyId') = '${partyId}'
-       OR (aggregate_type = 'transaction' AND aggregate_id IN (SELECT aggregate_id FROM party_accounts))
+       OR (upper(aggregate_type) = 'TRANSACTION'
+           AND aggregate_id IN (SELECT aggregate_id FROM party_accounts))
+       OR (upper(aggregate_type) = 'ACCOUNT'
+           AND aggregate_id IN (SELECT aggregate_id FROM party_accounts))
     ORDER BY occurred_at DESC
     LIMIT 5000
   `
@@ -132,7 +145,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ partyId: s
     let asOf: string | null = null
 
     for (const r of rows) {
-      const type = String(r.aggregate_type ?? 'unknown')
+      const type = String(r.aggregate_type ?? 'unknown').toLowerCase()
       const occurredAt = String(r.occurred_at ?? '')
       const eventType = String(r.event_type ?? '')
 
