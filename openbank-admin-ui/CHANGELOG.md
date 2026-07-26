@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.58.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.58.1...admin-ui-v0.58.2) (2026-07-26)
+
+
+### Bug Fixes
+
+* **admin-ui:** correct two stale GDPR rows on the compliance page ([#2552](https://github.com/JiRaska/open-bank-oss/issues/2552)) ([a6e5eb4](https://github.com/JiRaska/open-bank-oss/commit/a6e5eb4315dba16fce2970c17515c888f8c175ed)), closes [#2370](https://github.com/JiRaska/open-bank-oss/issues/2370)
+
 ## [0.58.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.58.0...admin-ui-v0.58.1) (2026-07-25)
 
 
