@@ -4,11 +4,11 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: payments
 primaryDatastore: PostgreSQL
-schemaName: lending_schema
+databaseName: openbank_lending
 dataLineageRole: both
 dataClassification: confidential
 retentionPolicy: 7 years
 evidenceExported: false
-schemaLineage:
-  ownedSchemas:
-    - lending_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_lending

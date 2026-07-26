@@ -4,8 +4,8 @@
 
 `openbank-agent-service` je **bezstavová vrstva uvažování a směrování**. Má:
 
-- ❌ **Žádné JPA / Hibernate entity.**
-- ❌ **Žádné Flyway migrace** — neexistuje adresář `src/main/resources/db/migration/`. Není žádné relační schéma k verzování.
+- ❌ **Žádné JPA / Hibernate entity** — jedinou vlastní tabulku čte a zapisuje čistým JDBC.
+- ✅ **Flyway migrace** — `src/main/resources/db/migration/` verzuje jedinou tabulku `agent_proposal` (ADR-0031 D4, fronta HITL schvalování). Tato tabulka je jedinou perzistencí služby.
 - ❌ **Žádnou doménovou outbox tabulku** — místo toho obě hranice důvěry publikují audit eventy (viz níže).
 
 Per-service governance manifest ([`governance.yaml`](../../../../openbank-agent-service/governance.yaml)) deklaruje:
@@ -13,14 +13,14 @@ Per-service governance manifest ([`governance.yaml`](../../../../openbank-agent-
 | Pole | Hodnota |
 |---|---|
 | `dataDomain` | `platform` |
-| `primaryDatastore` | `Redis` |
-| `schemaName` | `agent_schema` |
+| `primaryDatastore` | `PostgreSQL` |
+| `databaseName` | `openbank_agent` |
 | `dataLineageRole` | `internal` |
 | `dataClassification` | `internal` |
 | `retentionPolicy` | `1 year` |
 | `evidenceExported` | `false` |
 
-> **Realita vs. deklarace:** `Redis` / `agent_schema` jsou **rezervovány** pro budoucí charter/run stav (např. distribuované rate-limit čítače, paměť konverzace). **Dnes v kódu žádné zapojení Redisu není** — jediný stav, který si služba drží, jsou **in-memory** rate-limit čítače v `CharterRateLimiter` (`ConcurrentHashMap`, vynulované při restartu podu). Berte úložiště `Redis` jako výhledovou deklaraci, ne živou závislost. (TBD dokud nebude charter/run stav implementován.)
+> **Rozsah úložiště:** `PostgreSQL` / `openbank_agent` pokrývá pouze frontu HITL návrhů — tabulky žijí ve schématu `public` vlastní databáze služby. Vše ostatní si služba drží **in-memory**: rate-limit čítače v `CharterRateLimiter` (`ConcurrentHashMap`, vynulované při restartu podu) se nikam neukládají a nejsou distribuované. **V kódu není žádné zapojení Redisu**; distribuovaný charter/run stav zůstává follow-upem.
 
 ## Přechodný / in-process stav
 

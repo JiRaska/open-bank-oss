@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-sca-service` |
 | HTTP port | `8110` |
 | Data domain | identity |
-| Datastore | PostgreSQL (schema `sca_schema`) |
+| Datastore | PostgreSQL (database `openbank_sca`) |
 | Classification | restricted |
 | Retention | 5 years |
 | Lineage role | both |

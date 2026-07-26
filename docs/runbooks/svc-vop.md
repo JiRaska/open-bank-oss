@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-vop-service` |
 | HTTP port | `8149` |
 | Data domain | payments |
-| Datastore | PostgreSQL (schema `vop_schema`) |
+| Datastore | PostgreSQL (database `openbank_vop`) |
 | Classification | confidential |
 | Retention | 13 months |
 | Lineage role | both |

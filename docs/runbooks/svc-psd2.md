@@ -6,7 +6,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 # Runbook — openbank-psd2-service
 
 > Operational runbook for the `psd2` service. Data domain **open-banking**,
-> classification **confidential**, datastore **none (stateless)**.
+> classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
 
@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-psd2-service` |
 | HTTP port | `8107` |
 | Data domain | open-banking |
-| Datastore | none (stateless) (schema `n/a`) |
+| Datastore | PostgreSQL (database `openbank_psd2`) |
 | Classification | confidential |
 | Retention | 5 years |
 | Lineage role | consumer |
@@ -46,7 +46,7 @@ triaging an incident that starts on `psd2`.
 - **Pod CrashLoopBackOff at boot:** usually a missing/invalid config or secret
   (`ExternalSecret` not synced) or a Flyway checksum mismatch. Check
   `kubectl describe pod` events and the first 50 log lines.
-- **Readiness flapping:** datastore (none (stateless)) unreachable or saturated — check the
+- **Readiness flapping:** datastore (PostgreSQL) unreachable or saturated — check the
   datastore pod/cluster health and connection-pool metrics.
 - **Downstream errors:** verify the upstream dependencies above are healthy before
   assuming the fault is local.
@@ -54,9 +54,9 @@ triaging an incident that starts on `psd2`.
 ## Disaster recovery
 
 - **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up).
-- **Mechanism:** restore from the datastore's managed backup to a fresh instance (confirm a backup is actually configured for this datastore first).
-- **Restore:** provision a new datastore from the latest backup, replay any incremental logs, re-point the service.
-- **Verify:** health endpoint green + a domain spot check against last known-good.
+- **Mechanism:** CloudNativePG continuous WAL archiving + base backups to S3 (`barmanObjectStore`). Point-in-time recovery (PITR).
+- **Restore:** create a `Cluster` with `bootstrap.recovery` pointing at the backup object store; CNPG replays WAL to the target time. See runbook 0003 (PG major upgrade) for the cluster-recreate mechanics.
+- **Verify:** `kubectl cnpg status <db>-rw -n <ns>` shows the recovered cluster Healthy and the `*-app` secret regenerated.
 
 > RPO/RTO above are documented targets. They become **Bank-grade** (prod-readiness
 > C6=3) only once a restore/failover drill has actually been rehearsed and attested

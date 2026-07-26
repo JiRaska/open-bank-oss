@@ -2,13 +2,13 @@
 
 ## Datový postoj
 
-`openbank-psd2-service` je **fakticky bezstavová**. Dle svého governance manifestu je primární datastore *none (stateless)* a role v datové lineáži je *consumer*. Jedinou perzistovanou tabulkou je **transakční outbox** používaný k publikaci asynchronních notifikací do Kafky. Všechna doménová data (účty, zůstatky, transakce, souhlasy, platby) žijí ve vlastnících službách a čtou se on-demand:
+`openbank-psd2-service` nevlastní **žádná byznysová data**. Dle svého governance manifestu je primární datastore *PostgreSQL* (`databaseName: openbank_psd2`) a role v datové lineáži je *consumer*. Jedinou perzistovanou tabulkou je **transakční outbox** používaný k publikaci asynchronních notifikací do Kafky; nad tím Redis drží idempotency store. Všechna doménová data (účty, zůstatky, transakce, souhlasy, platby) žijí ve vlastnících službách a čtou se on-demand:
 
 - účty / zůstatky / transakce → `account-service`
 - souhlasy → `consent-service`
 - stav platby → `transaction-service`
 
-Neexistuje vyhrazené byznysové schéma; služba používá Hibernate Reactive (Panache) jen pro entitu outboxu. (`schemaName: n/a`, `dataClassification: confidential`.)
+Neexistují žádné byznysové tabulky; služba používá Hibernate Reactive (Panache) jen pro entitu outboxu. Schéma vlastní Flyway — tři migrace (`V1__create_psd2_outbox.sql`, `V2__hibernate_sequences.sql`, `V3__psd2_outbox_claimed_at.sql`) — a tabulky žijí ve schématu `public` databáze `openbank_psd2`. (`databaseName: openbank_psd2`, `dataClassification: confidential`.)
 
 ## Schéma outboxu
 

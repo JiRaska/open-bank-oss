@@ -17,9 +17,9 @@ This documentation is published directly by the service at the management endpoi
 
 ## TL;DR
 
-- **Tech stack:** Kotlin / Quarkus 3 (RESTEasy Reactive) / JDK 21+ / Kotlin coroutines — **no database**, **no JPA/Flyway**
+- **Tech stack:** Kotlin / Quarkus 3 (RESTEasy Reactive) / JDK 21+ / Kotlin coroutines — PostgreSQL via **plain JDBC + Flyway**, **no JPA**
 - **Port:** 8109 (app HTTP), 8085 (management — health, metrics, docs)
-- **Persistence:** none of its own. `governance.yaml` declares Redis as primary datastore (reserved for future charter/run state); today the rate-limiter state is **in-memory** only
+- **Persistence:** one table. `governance.yaml` declares `primaryDatastore: PostgreSQL` / `databaseName: openbank_agent`; Flyway versions the `agent_proposal` HITL approval queue (ADR-0031 D4) and nothing else. The rate-limiter state is **in-memory** only
 - **Outbox:** none. The service emits **AI-attributed audit events** via `openbank-libs` `AuditEventPublisher` (no domain outbox table)
 - **Idempotency:** N/A — all operations are read-only / non-mutating
 - **Auth:** Keycloak OIDC (resource server, realm `openbank`); outbound MCP tool calls carry a `openbank-services` client-credentials Bearer (ADR-0031 / ADR-0034)

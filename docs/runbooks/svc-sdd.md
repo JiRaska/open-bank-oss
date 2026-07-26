@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-sdd-service` |
 | HTTP port | `8129` |
 | Data domain | payments |
-| Datastore | PostgreSQL (schema `sdd_schema`) |
+| Datastore | PostgreSQL (database `openbank_sdd`) |
 | Classification | confidential |
 | Retention | 7 years |
 | Lineage role | both |

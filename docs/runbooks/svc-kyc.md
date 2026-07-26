@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-kyc-service` |
 | HTTP port | `8114` |
 | Data domain | compliance |
-| Datastore | PostgreSQL (schema `kyc_schema`) |
+| Datastore | PostgreSQL (database `openbank_kyc`) |
 | Classification | restricted |
 | Retention | 10 years |
 | Lineage role | both |

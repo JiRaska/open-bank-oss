@@ -6,7 +6,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 # Runbook — openbank-audit-service
 
 > Operational runbook for the `audit` service. Data domain **compliance**,
-> classification **restricted**, datastore **Cassandra**.
+> classification **restricted**, datastore **PostgreSQL**.
 
 ## Service identity
 
@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-audit-service` |
 | HTTP port | `8113` |
 | Data domain | compliance |
-| Datastore | Cassandra (schema `audit_schema`) |
+| Datastore | PostgreSQL (database `openbank_audit`) |
 | Classification | restricted |
 | Retention | 10 years |
 | Lineage role | consumer |
@@ -46,7 +46,7 @@ triaging an incident that starts on `audit`.
 - **Pod CrashLoopBackOff at boot:** usually a missing/invalid config or secret
   (`ExternalSecret` not synced) or a Flyway checksum mismatch. Check
   `kubectl describe pod` events and the first 50 log lines.
-- **Readiness flapping:** datastore (Cassandra) unreachable or saturated — check the
+- **Readiness flapping:** datastore (PostgreSQL) unreachable or saturated — check the
   datastore pod/cluster health and connection-pool metrics.
 - **Downstream errors:** verify the upstream dependencies above are healthy before
   assuming the fault is local.
@@ -54,9 +54,9 @@ triaging an incident that starts on `audit`.
 ## Disaster recovery
 
 - **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up).
-- **Mechanism:** node-level snapshots + commitlog archiving to S3 (verify a snapshot schedule is actually configured before relying on this).
-- **Restore:** stop writes, restore the snapshot to a fresh ring, replay commitlog to the target time, then re-point the service at the recovered keyspace.
-- **Verify:** `nodetool status` shows all nodes UN and a row-count spot check against the last known-good figure.
+- **Mechanism:** CloudNativePG continuous WAL archiving + base backups to S3 (`barmanObjectStore`). Point-in-time recovery (PITR).
+- **Restore:** create a `Cluster` with `bootstrap.recovery` pointing at the backup object store; CNPG replays WAL to the target time. See runbook 0003 (PG major upgrade) for the cluster-recreate mechanics.
+- **Verify:** `kubectl cnpg status <db>-rw -n <ns>` shows the recovered cluster Healthy and the `*-app` secret regenerated.
 
 > RPO/RTO above are documented targets. They become **Bank-grade** (prod-readiness
 > C6=3) only once a restore/failover drill has actually been rehearsed and attested

@@ -3,8 +3,8 @@
 # derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
 # openbank-libs/governance/governance.schema.json
 dataDomain: platform
-primaryDatastore: "PostgreSQL"
-schemaName: "releasesteward_schema"
+primaryDatastore: PostgreSQL
+databaseName: openbank_releasesteward
 dataLineageRole: internal
 dataClassification: internal
 retentionPolicy: "7 years"
@@ -15,6 +15,6 @@ lineage:
       relationType: api
       description: reads release-please-config.json/.release-please-manifest.json/application.yaml
         via a repo checkout, and open-PR openapi.yaml diffs via the GitHub API
-schemaLineage:
-  ownedSchemas: [releasesteward_schema]
-  dependentSchemas: []
+databaseLineage:
+  ownedDatabases: [openbank_releasesteward]
+  dependentDatabases: []

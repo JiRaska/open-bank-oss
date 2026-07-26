@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: payments
 primaryDatastore: PostgreSQL
-schemaName: sepa_instant_schema
+databaseName: openbank_sepa_instant
 dataLineageRole: both
 dataClassification: confidential
 retentionPolicy: 7 years
@@ -17,9 +17,9 @@ lineage:
     - serviceName: aml-service
       relationType: api
       description: screens
-schemaLineage:
-  ownedSchemas:
-    - sepa_instant_schema
-  dependentSchemas:
-    - transactions_schema
-    - aml_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_sepa_instant
+  dependentDatabases:
+    - openbank_transactions
+    - openbank_aml

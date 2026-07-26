@@ -7,7 +7,7 @@
 - **Schema:** tabulky žijí ve schématu `public` (granty jsou vydány `IN SCHEMA public`).
 - **Hibernate:** `database.generation = none` — schema vlastní Flyway, nikdy se auto-negeneruje.
 
-> Poznámka: kurátorský `governance.yaml` uvádí `primaryDatastore: Cassandra` / `schemaName: audit_schema`. **Běžící kód používá PostgreSQL** (`openbank_audit`, schema `public`) — governance manifest je v tomto bodě zastaralý a měl by se sladit (označeno v 05/notes).
+> Poznámka: kurátorský `governance.yaml` deklaruje `primaryDatastore: PostgreSQL` / `databaseName: openbank_audit`, což odpovídá běžícímu kódu.
 
 ## Flyway migrace
 

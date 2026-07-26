@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-swift-service` |
 | HTTP port | `8122` |
 | Data domain | payments |
-| Datastore | PostgreSQL (schema `swift_schema`) |
+| Datastore | PostgreSQL (database `openbank_swift`) |
 | Classification | confidential |
 | Retention | 10 years |
 | Lineage role | both |

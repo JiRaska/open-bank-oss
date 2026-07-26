@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: open-banking
 primaryDatastore: PostgreSQL
-schemaName: tpp_schema
+databaseName: openbank_tpp_registry
 dataLineageRole: producer
 dataClassification: internal
 retentionPolicy: 5 years
@@ -14,6 +14,6 @@ lineage:
     - serviceName: psd2-service
       relationType: api
       description: validates
-schemaLineage:
-  ownedSchemas:
-    - tpp_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_tpp_registry

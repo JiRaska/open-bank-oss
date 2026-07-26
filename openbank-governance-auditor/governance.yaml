@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: platform
 primaryDatastore: PostgreSQL
-schemaName: govaudit_schema
+databaseName: openbank_govaudit
 dataLineageRole: internal
 dataClassification: internal
 retentionPolicy: "7 years"
@@ -14,7 +14,7 @@ lineage:
     - serviceName: github
       relationType: api
       description: reads merged-PR metadata (reviews, merge-commit verification, labels, body) via the GitHub API
-schemaLineage:
-  ownedSchemas:
-    - govaudit_schema
-  dependentSchemas: []
+databaseLineage:
+  ownedDatabases:
+    - openbank_govaudit
+  dependentDatabases: []

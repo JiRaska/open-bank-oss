@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-aml-service` |
 | HTTP port | `8117` |
 | Data domain | compliance |
-| Datastore | PostgreSQL (schema `aml_schema`) |
+| Datastore | PostgreSQL (database `openbank_aml`) |
 | Classification | restricted |
 | Retention | 10 years |
 | Lineage role | both |

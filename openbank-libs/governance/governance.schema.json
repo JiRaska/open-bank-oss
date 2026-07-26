@@ -2,100 +2,329 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://open-bank.tech/governance/governance.schema.json",
   "title": "openbank per-service governance.yaml",
-  "description": "Declarative, curatorial governance facts for one released module (ADR-0071). Lives at the module root next to version.txt and is reviewed WITH the service. Carries ONLY what cannot be derived from code. Derived fields (flywayDeclaredVersion, apiVersion, moneyPath) and runtime fields (flywayCurrentVersion, flywayDrift, schema driftStatus) MUST NOT appear here — the generator and the runtime path own those respectively.",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "dataDomain",
-    "primaryDatastore",
-    "dataLineageRole",
-    "dataClassification",
-    "retentionPolicy"
-  ],
-  "allOf": [
+  "description": "Declarative, curatorial governance facts for one released module (ADR-0071/ADR-0196). Lives at the module root next to version.txt and is reviewed WITH the service. Carries ONLY what cannot be derived from code. Derived fields (flywayDeclaredVersion, apiVersion, moneyPath) and runtime fields (flywayCurrentVersion, flywayDrift, driftStatus) MUST NOT appear here — the generator and the runtime path own those respectively.",
+  "$comment": "DERIVED FILE — do not hand-edit. Generated from openbank-admin-ui/scripts/governance-schema.mjs (the single source of these rules); regenerate with `node scripts/generate-governance.mjs --emit-schema`. src/test/generate-governance.test.ts fails if this file and that module disagree.",
+  "anyOf": [
     {
-      "$comment": "schemaName is required unless the module ASSERTS statelessness. 'Stateless' must be declared, never inferred from an absent field — otherwise a forgotten schemaName is indistinguishable from a service that owns no schema.",
-      "if": {
-        "properties": { "stateless": { "const": true } },
-        "required": ["stateless"]
-      },
-      "then": { "not": { "required": ["schemaName"] } },
-      "else": { "required": ["schemaName"] }
-    }
-  ],
-  "properties": {
-    "dataDomain": {
-      "description": "Business data domain the service belongs to.",
-      "enum": ["core", "payments", "compliance", "identity", "open-banking", "platform"]
-    },
-    "primaryDatastore": {
-      "description": "Primary persistent datastore, e.g. 'PostgreSQL', 'none (stateless)'.",
-      "type": "string",
-      "minLength": 1
-    },
-    "stateless": {
-      "description": "True iff this module owns no persistent DB schema. Explicit assertion, not an inference from a missing schemaName — a stateless module MUST set this and MUST NOT declare schemaName. When a later phase adds persistence, drop this flag and declare primaryDatastore + schemaName.",
-      "const": true
-    },
-    "schemaName": {
-      "description": "Primary DB schema this service owns, e.g. 'accounts_schema'. Omit it and set 'stateless: true' if the module owns no schema.",
-      "type": "string",
-      "minLength": 1
-    },
-    "dataLineageRole": {
-      "description": "Role in cross-service data lineage.",
-      "enum": ["producer", "consumer", "both", "internal"]
-    },
-    "dataClassification": {
-      "description": "Highest sensitivity of data the service handles (GDPR Art. 30 / DORA Art. 8).",
-      "enum": ["public", "internal", "confidential", "restricted", "unknown"]
-    },
-    "retentionPolicy": {
-      "description": "Human-readable retention statement, e.g. '7 years', 'transient'. GDPR Art. 5(1)(e).",
-      "type": "string",
-      "minLength": 1
-    },
-    "evidenceExported": {
-      "description": "Whether this service exports signed compliance evidence (ADR-0029/0030).",
-      "type": "boolean"
-    },
-    "lineage": {
-      "description": "Declared upstream/downstream service relationships. Runtime interface discovery is separate.",
       "type": "object",
-      "additionalProperties": false,
       "properties": {
-        "upstream": { "type": "array", "items": { "$ref": "#/$defs/lineageNode" } },
-        "downstream": { "type": "array", "items": { "$ref": "#/$defs/lineageNode" } }
-      }
-    },
-    "schemaLineage": {
-      "description": "Declared schema ownership. driftStatus is RUNTIME and is added by /api/services/governance, not here.",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "ownedSchemas": { "type": "array", "items": { "type": "string" } },
-        "dependentSchemas": { "type": "array", "items": { "type": "string" } }
-      }
-    }
-  },
-  "$defs": {
-    "lineageNode": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["serviceName", "relationType"],
-      "properties": {
-        "serviceName": {
-          "description": "Counterparty service short name, e.g. 'transaction-service'.",
+        "dataDomain": {
           "type": "string",
-          "minLength": 1
+          "enum": [
+            "core",
+            "payments",
+            "compliance",
+            "identity",
+            "open-banking",
+            "platform"
+          ],
+          "description": "Business data domain the service belongs to."
         },
-        "relationType": {
-          "enum": ["api", "topic", "datastore", "unknown"]
+        "primaryDatastore": {
+          "type": "string",
+          "enum": [
+            "PostgreSQL",
+            "Redis",
+            "none"
+          ],
+          "description": "Primary store the module USES. `none` means it talks to no datastore at all — a module that owns no database but caches in Redis declares `Redis` + `ownsNoDatabase: true`."
         },
-        "description": {
-          "type": "string"
+        "dataLineageRole": {
+          "type": "string",
+          "enum": [
+            "producer",
+            "consumer",
+            "both",
+            "internal"
+          ],
+          "description": "Role in cross-service data lineage."
+        },
+        "dataClassification": {
+          "type": "string",
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted",
+            "unknown"
+          ],
+          "description": "Highest sensitivity of data the service handles (GDPR Art. 30 / DORA Art. 8)."
+        },
+        "retentionPolicy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable retention statement, e.g. '7 years', 'transient'. GDPR Art. 5(1)(e)."
+        },
+        "evidenceExported": {
+          "description": "Whether this service exports signed compliance evidence (ADR-0029/0030).",
+          "type": "boolean"
+        },
+        "lineage": {
+          "description": "Declared upstream/downstream service relationships. Runtime interface discovery is separate.",
+          "type": "object",
+          "properties": {
+            "upstream": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "serviceName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Counterparty service short name, e.g. 'transaction-service'."
+                  },
+                  "relationType": {
+                    "type": "string",
+                    "enum": [
+                      "api",
+                      "topic",
+                      "datastore",
+                      "unknown"
+                    ]
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "serviceName",
+                  "relationType"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "downstream": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "serviceName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Counterparty service short name, e.g. 'transaction-service'."
+                  },
+                  "relationType": {
+                    "type": "string",
+                    "enum": [
+                      "api",
+                      "topic",
+                      "datastore",
+                      "unknown"
+                    ]
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "serviceName",
+                  "relationType"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "databaseLineage": {
+          "description": "Declared database ownership plus the databases whose data this module DEPENDS ON — whether it reads them directly or derives its own records from their events. Names are cross-checked against the fleet by the generator; it does not assert direct SQL access. driftStatus is RUNTIME and is added by /api/services/governance, not here.",
+          "type": "object",
+          "properties": {
+            "ownedDatabases": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The database this module OWNS, e.g. `openbank_ledger`. Cross-checked against the datasource URL in application.yaml / the GitOps manifest. Omit it and declare `ownsNoDatabase: true` if the module owns none."
+              }
+            },
+            "dependentDatabases": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The database this module OWNS, e.g. `openbank_ledger`. Cross-checked against the datasource URL in application.yaml / the GitOps manifest. Omit it and declare `ownsNoDatabase: true` if the module owns none."
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "databaseName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The database this module OWNS, e.g. `openbank_ledger`. Cross-checked against the datasource URL in application.yaml / the GitOps manifest. Omit it and declare `ownsNoDatabase: true` if the module owns none."
         }
-      }
+      },
+      "required": [
+        "dataDomain",
+        "primaryDatastore",
+        "dataLineageRole",
+        "dataClassification",
+        "retentionPolicy",
+        "databaseName"
+      ],
+      "additionalProperties": false,
+      "description": "A module that owns a database: it declares databaseName and must NOT declare ownsNoDatabase."
+    },
+    {
+      "type": "object",
+      "properties": {
+        "dataDomain": {
+          "type": "string",
+          "enum": [
+            "core",
+            "payments",
+            "compliance",
+            "identity",
+            "open-banking",
+            "platform"
+          ],
+          "description": "Business data domain the service belongs to."
+        },
+        "primaryDatastore": {
+          "type": "string",
+          "enum": [
+            "PostgreSQL",
+            "Redis",
+            "none"
+          ],
+          "description": "Primary store the module USES. `none` means it talks to no datastore at all — a module that owns no database but caches in Redis declares `Redis` + `ownsNoDatabase: true`."
+        },
+        "dataLineageRole": {
+          "type": "string",
+          "enum": [
+            "producer",
+            "consumer",
+            "both",
+            "internal"
+          ],
+          "description": "Role in cross-service data lineage."
+        },
+        "dataClassification": {
+          "type": "string",
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted",
+            "unknown"
+          ],
+          "description": "Highest sensitivity of data the service handles (GDPR Art. 30 / DORA Art. 8)."
+        },
+        "retentionPolicy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable retention statement, e.g. '7 years', 'transient'. GDPR Art. 5(1)(e)."
+        },
+        "evidenceExported": {
+          "description": "Whether this service exports signed compliance evidence (ADR-0029/0030).",
+          "type": "boolean"
+        },
+        "lineage": {
+          "description": "Declared upstream/downstream service relationships. Runtime interface discovery is separate.",
+          "type": "object",
+          "properties": {
+            "upstream": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "serviceName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Counterparty service short name, e.g. 'transaction-service'."
+                  },
+                  "relationType": {
+                    "type": "string",
+                    "enum": [
+                      "api",
+                      "topic",
+                      "datastore",
+                      "unknown"
+                    ]
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "serviceName",
+                  "relationType"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "downstream": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "serviceName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Counterparty service short name, e.g. 'transaction-service'."
+                  },
+                  "relationType": {
+                    "type": "string",
+                    "enum": [
+                      "api",
+                      "topic",
+                      "datastore",
+                      "unknown"
+                    ]
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "serviceName",
+                  "relationType"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "databaseLineage": {
+          "description": "Declared database ownership plus the databases whose data this module DEPENDS ON — whether it reads them directly or derives its own records from their events. Names are cross-checked against the fleet by the generator; it does not assert direct SQL access. driftStatus is RUNTIME and is added by /api/services/governance, not here.",
+          "type": "object",
+          "properties": {
+            "ownedDatabases": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The database this module OWNS, e.g. `openbank_ledger`. Cross-checked against the datasource URL in application.yaml / the GitOps manifest. Omit it and declare `ownsNoDatabase: true` if the module owns none."
+              }
+            },
+            "dependentDatabases": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The database this module OWNS, e.g. `openbank_ledger`. Cross-checked against the datasource URL in application.yaml / the GitOps manifest. Omit it and declare `ownsNoDatabase: true` if the module owns none."
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "ownsNoDatabase": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "dataDomain",
+        "primaryDatastore",
+        "dataLineageRole",
+        "dataClassification",
+        "retentionPolicy",
+        "ownsNoDatabase"
+      ],
+      "additionalProperties": false,
+      "description": "A module that owns no database: it asserts ownsNoDatabase: true and declares no databaseName."
     }
-  }
+  ]
 }

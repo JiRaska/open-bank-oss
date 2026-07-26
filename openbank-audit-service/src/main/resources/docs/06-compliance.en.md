@@ -80,4 +80,4 @@ Deletion before expiry is blocked at the database layer (`no_delete_audit` rule)
 - ✅ Observability: Prometheus + OpenTelemetry + SmallRye Health
 - ✅ Secrets: env-injected, dev placeholders never shipped (Vault, ADR-0017)
 - ⚠️ Outbound re-emit channel (`audit-events-out`) not yet configured — dormant ([05](./05-operations.md))
-- ⚠️ `governance.yaml` datastore/schema fields stale (say Cassandra/`audit_schema`; code is PostgreSQL/`public`) — reconcile
+- ✅ `governance.yaml` datastore fields match the code (`primaryDatastore: PostgreSQL`, `databaseName: openbank_audit`; tables in `public`)

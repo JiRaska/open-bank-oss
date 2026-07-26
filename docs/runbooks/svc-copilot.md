@@ -6,7 +6,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 # Runbook — openbank-copilot-service
 
 > Operational runbook for the `copilot` service. Data domain **platform**,
-> classification **confidential**, datastore **none**.
+> classification **confidential**, datastore **Redis**.
 
 ## Service identity
 
@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-copilot-service` |
 | HTTP port | `8131` |
 | Data domain | platform |
-| Datastore | none (schema `—`) |
+| Datastore | Redis (database `—`) |
 | Classification | confidential |
 | Retention | 1 year |
 | Lineage role | internal |
@@ -46,18 +46,20 @@ triaging an incident that starts on `copilot`.
 - **Pod CrashLoopBackOff at boot:** usually a missing/invalid config or secret
   (`ExternalSecret` not synced). Check `kubectl describe pod` events and the
   first 50 log lines.
-- **Readiness flapping:** this service holds no datastore, so look outward — an
-  upstream dependency below, or the OPA sidecar if `AUTHZ_ENFORCE` is on (with no
-  reachable PDP, `@Authorize` fails closed).
+- **Readiness flapping:** this service owns no database, but check its **Redis**
+  connectivity before ruling out the datastore — an upstream dependency below, or the
+  OPA sidecar if `AUTHZ_ENFORCE` is on (with no reachable PDP, `@Authorize` fails
+  closed), are the other likely causes.
 - **Downstream errors:** verify the upstream dependencies above are healthy before
   assuming the fault is local.
 
 ## Disaster recovery
 
-- **RPO: n/a** — no persistent state. **RTO target:** ≤ 10 min (image pull + rollout).
-- **Mechanism:** none needed — this service declares no primary datastore, so it holds no state to lose. Recovery is a redeploy from the GitOps manifests, which are the source of truth.
-- **Restore:** re-sync the ArgoCD Application (or `kubectl rollout restart` the Deployment). Any state this service reads lives in its upstream services above — recover those first, using their own runbooks.
-- **Verify:** health endpoint green, then re-drive one request end to end against an upstream that is already known-good.
+- **RPO/RTO: not this service's to promise** — it owns no database. Its **Redis** state has its own recovery posture; see the mechanism below before assuming zero impact.
+- **Mechanism:** this service owns no database — there is no managed backup to restore, and none is expected. It does hold state in **Redis**.
+- **Before assuming zero impact:** check this service's own `governance.yaml` and `Redis` keys for anything with a long or no TTL (a durable credential, not a session cache) — losing that requires its own recovery path, not a redeploy.
+- **Restore:** re-sync the ArgoCD Application (or `kubectl rollout restart` the Deployment). Verify against the `Redis` cluster's own health/backup posture, which this runbook does not track.
+- **Verify:** health endpoint green, then re-drive one request end to end.
 
 > RPO/RTO above are documented targets. They become **Bank-grade** (prod-readiness
 > C6=3) only once a restore/failover drill has actually been rehearsed and attested

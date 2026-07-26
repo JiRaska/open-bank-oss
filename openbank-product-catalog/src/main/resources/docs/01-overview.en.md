@@ -60,7 +60,9 @@ No domain events are emitted today (no Kafka/outbox) — the service is read-mos
 ## Dependencies
 
 - **openbank-libs** — shared runtime plumbing (BuildInfo / `ServiceInfoResource`, DocsResource for Docs-as-Service, API-version filter).
-- **No** PostgreSQL / Kafka / Redis / Keycloak wiring in the code today. The persistence backend (`MongoDB` per `governance.yaml`) is a planned follow-up; see [04 — Data](./04-data.md).
+- **PostgreSQL** — reactive Panache + reactive PG client for the app path, JDBC for Flyway (ADR-0009 / ADR-0105 P1); see [04 — Data](./04-data.md).
+- **Keycloak** — pure OIDC resource server (`quarkus-oidc`, realm `openbank`): it validates bearer tokens against the realm JWKS and mints none, so it needs no client secret.
+- **No** Kafka / Redis wiring in the code today.
 
 ## Business value
 

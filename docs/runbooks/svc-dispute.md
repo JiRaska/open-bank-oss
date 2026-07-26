@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-dispute-service` |
 | HTTP port | `8135` |
 | Data domain | compliance |
-| Datastore | PostgreSQL (schema `disputes_schema`) |
+| Datastore | PostgreSQL (database `openbank_dispute`) |
 | Classification | confidential |
 | Retention | 7 years |
 | Lineage role | both |

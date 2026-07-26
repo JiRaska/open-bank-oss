@@ -182,19 +182,24 @@ npx next build          # full production build
 npx eslint .            # lint
 ```
 
-- **A generator that VALIDATES something must read the schema, never re-type it.** `scripts/` holds
-  the fleet's derived-data generators (`generate-governance.mjs`, `generate-catalog.mjs`,
-  `generate-security-graph.mjs`, …) and several are also the CI gate for the thing they read. A gate
-  that hand-copies its constraints out of a spec into a `const` is a *second* source of truth, and
-  the copy is always the one that stops being checked. `governance.schema.json` was cited only from a
-  comment while `generate-governance.mjs` re-implemented a subset of it (required list, enums, the
-  schemaName/stateless rule) — the two drifted and four services shipped a bare `lineage:` key (YAML
-  parses that to `null`, the schema says `type: object`) that the green gate accepted for months.
-  Compile the spec (ajv 8, `ajv/dist/2020.js`, `strict: true` so an unhandled keyword **throws**
-  instead of being skipped) and derive the constant lists from it. Where a friendlier message is
-  worth keeping a hand-written rule, keep it — but assert in a test that the two verdicts *agree*
-  case-by-case, or you have just re-created the drift with extra steps. Same footgun as the CI-probe
-  one: the checker could not express the failure, so it reported success.
+- **A generator that VALIDATES something must read the schema, never re-type it — and the schema
+  itself should have exactly one author.** `scripts/` holds the fleet's derived-data generators
+  (`generate-governance.mjs`, `generate-catalog.mjs`, `generate-security-graph.mjs`, …) and several
+  are also the CI gate for the thing they read. A gate that hand-copies its constraints out of a spec
+  into a `const` is a *second* source of truth, and the copy is always the one that stops being
+  checked: `governance.schema.json` was cited only from a comment while `generate-governance.mjs`
+  re-implemented a subset of it (required list, enums, the schemaName/stateless rule) — the two
+  drifted and four services shipped a bare `lineage:` key (YAML parses that to `null`, the schema
+  says `type: object`) that the green gate accepted for months. The first fix compiled the JSON
+  Schema with ajv and derived the constants from it — a real improvement, but it left the JSON
+  Schema itself hand-maintained, i.e. a schema with one author who might still drift its prose from
+  its constraints. ADR-0196 went one step further: the rules now live ONCE, as a Zod schema in
+  `scripts/governance-schema.mjs` (Zod was already an admin-UI dependency — no new package), and
+  `governance.schema.json` is DERIVED from it (`--emit-schema`), with a unit test failing on drift.
+  Where a friendlier message is worth keeping a hand-written rule, keep it — but assert in a test
+  that the two verdicts *agree* case-by-case, or you have just re-created the drift with extra
+  steps. Same footgun as the CI-probe one: the checker could not express the failure, so it reported
+  success.
 - **Keep `package-lock.json` in sync — a drift breaks CI *fleet-wide*, not just admin-ui.** The
   "Customer-app dossier" job runs `npm ci` here (it installs admin-ui for the YAML parser) on **every
   repo PR**, and `npm ci` hard-fails on any lockfile drift: a missing transitive dep

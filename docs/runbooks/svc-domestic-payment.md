@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-domestic-payment` |
 | HTTP port | `8116` |
 | Data domain | payments |
-| Datastore | PostgreSQL (schema `domestic_schema`) |
+| Datastore | PostgreSQL (database `openbank_domestic_payments`) |
 | Classification | confidential |
 | Retention | 7 years |
 | Lineage role | both |

@@ -3,8 +3,8 @@
 # derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
 # openbank-libs/governance/governance.schema.json
 dataDomain: platform
-primaryDatastore: none
-stateless: true
+primaryDatastore: Redis
+ownsNoDatabase: true
 dataLineageRole: internal
 dataClassification: confidential
 retentionPolicy: 1 year

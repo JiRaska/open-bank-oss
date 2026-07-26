@@ -17,9 +17,9 @@ This documentation is published directly by the service at the management endpoi
 
 ## TL;DR
 
-- **Tech stack:** Kotlin / Quarkus 3.x / JDK 25 (Eclipse Temurin) / RESTEasy Reactive — **no datastore**
+- **Tech stack:** Kotlin / Quarkus 3.x / JDK 25 (Eclipse Temurin) / RESTEasy Reactive — **no database**, Redis only
 - **Port:** 8128 (app), 8085 (management)
-- **Persistence:** none — stateless proxy (`primaryDatastore: none`, ADR-0071 governance.yaml)
+- **Persistence:** owns no database — stateless proxy in that sense (`primaryDatastore: Redis`, `ownsNoDatabase: true`, no `databaseName`, ADR-0071 governance.yaml). It does keep two Redis stores: pending onboardings keyed by `caseId` with a 30-day TTL (ADR-0072) and WebAuthn passkeys keyed by credential id, which are durable (no TTL, ADR-0066 F2)
 - **Outbox:** none — the edge emits no domain events; downstream services own their own outboxes
 - **Idempotency:** the caller's `Idempotency-Key` is forwarded to upstreams that require it (payments); the edge does not store keys itself
 - **Auth (inbound):** Keycloak OIDC, realm `openbank-customers`, role `ROLE_CUSTOMER` required for all routes except `POST /onboarding/start` (anonymous)

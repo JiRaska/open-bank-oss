@@ -17,9 +17,9 @@ Tuto dokumentaci publikuje služba přímo na management endpointu `/q/openbank/
 
 ## TL;DR
 
-- **Tech stack:** Kotlin / Quarkus 3 (RESTEasy Reactive) / JDK 21+ / Kotlin coroutines — **bez databáze**, **bez JPA/Flyway**
+- **Tech stack:** Kotlin / Quarkus 3 (RESTEasy Reactive) / JDK 21+ / Kotlin coroutines — PostgreSQL přes **čisté JDBC + Flyway**, **bez JPA**
 - **Port:** 8109 (app HTTP), 8085 (management — health, metriky, docs)
-- **Perzistence:** žádná vlastní. `governance.yaml` deklaruje Redis jako primární úložiště (rezervováno pro budoucí charter/run stav); dnes je stav rate-limiteru pouze **v paměti**
+- **Perzistence:** jedna tabulka. `governance.yaml` deklaruje `primaryDatastore: PostgreSQL` / `databaseName: openbank_agent`; Flyway verzuje frontu HITL schvalování `agent_proposal` (ADR-0031 D4) a nic dalšího. Stav rate-limiteru je pouze **v paměti**
 - **Outbox:** žádný. Služba emituje **AI-atribuované audit eventy** přes `openbank-libs` `AuditEventPublisher` (žádná doménová outbox tabulka)
 - **Idempotence:** N/A — všechny operace jsou read-only / neměnící stav
 - **Auth:** Keycloak OIDC (resource server, realm `openbank`); odchozí MCP volání nesou `openbank-services` client-credentials Bearer (ADR-0031 / ADR-0034)

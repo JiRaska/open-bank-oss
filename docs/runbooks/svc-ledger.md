@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-ledger-service` |
 | HTTP port | `8101` |
 | Data domain | core |
-| Datastore | PostgreSQL (schema `ledger_schema`) |
+| Datastore | PostgreSQL (database `openbank_ledger`) |
 | Classification | confidential |
 | Retention | 10 years |
 | Lineage role | both |

@@ -15,9 +15,9 @@ export interface ServiceInterfaces {
   datastores: string[]
 }
 
-export interface SchemaLineage {
-  ownedSchemas: string[]
-  dependentSchemas: string[]
+export interface DatabaseLineage {
+  ownedDatabases: string[]
+  dependentDatabases: string[]
   driftStatus: Record<string, boolean | 'unknown'>
 }
 
@@ -25,10 +25,18 @@ export interface GovernanceManifestEntry {
   serviceName: string
   dataDomain: DataDomain
   primaryDatastore: string
-  /** Null iff the module declared `stateless: true` in its governance.yaml — it owns no DB schema (ADR-0071). */
-  schemaName: string | null
-  /** True iff the module asserted `stateless: true`; absent otherwise. */
-  stateless?: true
+  /** The database this module OWNS. Null iff it declared `ownsNoDatabase: true` (ADR-0071/ADR-0196). */
+  databaseName: string | null
+  /**
+   * Whether `databaseName` was confirmed against a datasource URL in the tree ('derived') or is
+   * an unconfirmed claim ('declared-only'). Null when there is no databaseName to verify.
+   */
+  databaseNameEvidence?: 'derived' | 'declared-only' | null
+  /**
+   * True iff the module asserted `ownsNoDatabase: true`. NOT the same as "stateless" — such a
+   * module may still hold durable Redis state (customer-edge keeps passkeys there).
+   */
+  ownsNoDatabase?: true
   dataLineageRole: DataLineageRole
   flywayDeclaredVersion: string
   flywayCurrentVersion: string | null
@@ -41,7 +49,7 @@ export interface GovernanceManifestEntry {
     downstream: LineageNode[]
     interfaces: ServiceInterfaces
   }
-  schemaLineage?: SchemaLineage
+  databaseLineage?: DatabaseLineage
 }
 
 

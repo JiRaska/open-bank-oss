@@ -55,12 +55,22 @@ facts that cannot be derived: `dataDomain`, `primaryDatastore`, `schemaName`,
 own hexagon (ADR-0002) — the team that owns the data owns its classification.
 
 The schema is **compiled and enforced**, not merely cited: `generate-governance.mjs`
-validates every `governance.yaml` against it with ajv (2020-12) and derives its required
-list and enums from it, so each violation becomes a `gap` and fails the CI gate. It was
-advisory for its first months — referenced only from a comment, with the generator
-re-implementing a subset of it by hand — and the two drifted: four services shipped a bare
-`lineage:` key (YAML parses that to `null`, the schema says `type: object`) and the gate
-stayed green. One source of truth, read by the checker, is the fix.
+validates every `governance.yaml` against it and derives its required list and enums from
+it, so each violation becomes a `gap` and fails the CI gate. It was advisory for its first
+months — referenced only from a comment, with the generator re-implementing a subset of it
+by hand — and the two drifted: four services shipped a bare `lineage:` key (YAML parses that
+to `null`, the schema says `type: object`) and the gate stayed green. One source of truth,
+read by the checker, is the fix.
+
+> **Amended by ADR-0196.** `schemaName` named a Postgres schema that existed nowhere in the
+> fleet — isolation is per-database (ADR-0009) and every service's tables live in `public`.
+> It is replaced by `databaseName` (with an explicit `ownsNoDatabase: true` for modules that
+> own none), `schemaLineage` by `databaseLineage`, and every claim the code can settle is now
+> cross-checked by the generator instead of being taken on trust. The single source of truth
+> for the schema itself moved from a hand-written `governance.schema.json` (compiled with
+> ajv) to a Zod schema in `scripts/governance-schema.mjs`, from which `governance.schema.json`
+> is now DERIVED — no separate JSON Schema author to keep in sync, and no new dependency
+> (Zod was already an admin-UI dependency).
 
 **2. Derivable fields are derived, never declared.** `flywayDeclaredVersion` comes from
 `src/main/resources/db/migration/V*.sql` (max version); `apiVersion`/`apiTitle` and

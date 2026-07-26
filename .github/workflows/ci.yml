@@ -104,11 +104,12 @@ jobs:
       - name: Governance manifest gate (ADR-0071, enforced)
         working-directory: openbank-admin-ui
         run: |
-          # The generator compiles openbank-libs/governance/governance.schema.json with ajv
-          # and validates every governance.yaml against it, so a schema violation (wrong type,
-          # unknown key, malformed lineage node) is just another entry in `gaps` and needs no
-          # separate step here. The schema was advisory — cited in a comment, hand-mirrored in
-          # the generator — until the two drifted and 4 services shipped a null `lineage:` key.
+          # The generator validates every governance.yaml against the Zod schema in
+          # scripts/governance-schema.mjs (governance.schema.json is DERIVED from it, ADR-0196),
+          # so a shape violation (wrong type, unknown key, malformed lineage node) is just
+          # another entry in `gaps` and needs no separate step here. It also cross-checks every
+          # declaration the tree can settle — Flyway migrations, datasource URLs, Redis config —
+          # so a wrong claim (not just a malformed one) fails too.
           node scripts/generate-governance.mjs
           GAPS=$(node -e "console.log(require('./governance.json').totals.withGaps)")
           if [ "$GAPS" -gt 0 ]; then
@@ -121,7 +122,10 @@ jobs:
             node -e "const g=require('./governance.json'); if(!Array.isArray(g.gaps)){console.error('::error::governance.json has no gaps array — generate-governance.mjs is broken');process.exit(2)} for(const x of g.gaps) console.log('  gap: '+x)"
             exit 1
           else
-            echo "Governance manifest clean: $(node -e "console.log(require('./governance.json').totals.modules)") modules, 0 gaps."
+            # Also print the unverifiable count (ADR-0196): a declared databaseName that no
+            # datasource URL in the tree could confirm is not a gap, but it is not a fact
+            # either — printed every run so it stays visible instead of quietly growing.
+            node -e "const t=require('./governance.json').totals; console.log(\`Governance manifest clean: \${t.modules} modules, 0 gaps, \${t.unverifiedDatabaseNames} unverified databaseName.\`)"
           fi
 
       - name: Test (unit + integration)

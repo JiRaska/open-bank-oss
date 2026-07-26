@@ -2,12 +2,12 @@
 # Per-service governance manifest (ADR-0071). Declarative, curatorial facts only.
 dataDomain: payments
 primaryDatastore: none
-# Owns no DB schema, asserted explicitly (ADR-0071): no schemaName key is correct here.
-stateless: true
+# Owns no database, asserted explicitly (ADR-0071): no databaseName key is correct here.
+ownsNoDatabase: true
 dataLineageRole: consumer
 dataClassification: confidential
 # Phase 1 holds no state (tools delegate to other services; proposals are a stub). When phase 2
-# adds a maker-checker proposal store, drop `stateless` and set
-# primaryDatastore/schemaName + a 13-month retention.
+# adds a maker-checker proposal store, drop `ownsNoDatabase` and set
+# primaryDatastore/databaseName + a 13-month retention.
 retentionPolicy: not applicable
 evidenceExported: false

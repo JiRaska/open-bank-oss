@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-party-service` |
 | HTTP port | `8111` |
 | Data domain | identity |
-| Datastore | PostgreSQL (schema `parties_schema`) |
+| Datastore | PostgreSQL (database `openbank_parties`) |
 | Classification | restricted |
 | Retention | 10 years |
 | Lineage role | producer |

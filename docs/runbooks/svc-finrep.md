@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-finrep-service` |
 | HTTP port | `8140` |
 | Data domain | compliance |
-| Datastore | none (schema `n/a`) |
+| Datastore | none (database `—`) |
 | Classification | confidential |
 | Retention | 10 years |
 | Lineage role | consumer |

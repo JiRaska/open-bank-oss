@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: identity
 primaryDatastore: PostgreSQL
-schemaName: sca_schema
+databaseName: openbank_sca
 dataLineageRole: both
 dataClassification: restricted
 retentionPolicy: 5 years
@@ -14,6 +14,6 @@ lineage:
     - serviceName: psd2-service
       relationType: api
       description: triggers
-schemaLineage:
-  ownedSchemas:
-    - sca_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_sca

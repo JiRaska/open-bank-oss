@@ -17,9 +17,9 @@ Tuto dokumentaci publikuje služba přímo na management endpointu `/q/openbank/
 
 ## TL;DR
 
-- **Tech stack:** Kotlin / Quarkus 3.x / JDK 25 (Eclipse Temurin) / RESTEasy Reactive — **bez úložiště**
+- **Tech stack:** Kotlin / Quarkus 3.x / JDK 25 (Eclipse Temurin) / RESTEasy Reactive — **bez databáze**, pouze Redis
 - **Port:** 8128 (aplikace), 8085 (management)
-- **Perzistence:** žádná — bezstavová proxy (`primaryDatastore: none`, governance.yaml dle ADR-0071)
+- **Perzistence:** nevlastní žádnou databázi — v tomto smyslu bezstavová proxy (`primaryDatastore: Redis`, `ownsNoDatabase: true`, bez `databaseName`, governance.yaml dle ADR-0071). Drží ale dvě úložiště v Redisu: rozpracované onboardingy klíčované `caseId` s TTL 30 dní (ADR-0072) a WebAuthn passkeys klíčované id credentialu, které jsou trvalé (bez TTL, ADR-0066 F2)
 - **Outbox:** žádný — edge nevydává doménové události; downstream služby mají vlastní outboxy
 - **Idempotence:** `Idempotency-Key` od volajícího se přeposílá upstreamům, které jej vyžadují (platby); edge sám klíče neukládá
 - **Auth (příchozí):** Keycloak OIDC, realm `openbank-customers`, role `ROLE_CUSTOMER` vyžadována na všech cestách kromě `POST /onboarding/start` (anonymní)

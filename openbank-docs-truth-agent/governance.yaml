@@ -3,8 +3,8 @@
 # derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
 # openbank-libs/governance/governance.schema.json
 dataDomain: platform
-primaryDatastore: "PostgreSQL"
-schemaName: "docstruth_schema"
+primaryDatastore: PostgreSQL
+databaseName: openbank_docstruth
 dataLineageRole: internal
 dataClassification: internal
 retentionPolicy: "7 years"
@@ -15,6 +15,6 @@ lineage:
       relationType: api
       description: reads docs/adr/*.md Delivery-Status lines and rules.yaml enforced flags via a
         repo checkout, and greps the repo for the artifacts each ADR names
-schemaLineage:
-  ownedSchemas: [docstruth_schema]
-  dependentSchemas: []
+databaseLineage:
+  ownedDatabases: [openbank_docstruth]
+  dependentDatabases: []

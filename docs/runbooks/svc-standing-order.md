@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-standing-order-service` |
 | HTTP port | `8121` |
 | Data domain | payments |
-| Datastore | PostgreSQL (schema `standing_orders_schema`) |
+| Datastore | PostgreSQL (database `openbank_standing_orders`) |
 | Classification | confidential |
 | Retention | 5 years |
 | Lineage role | both |

@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-consent-service` |
 | HTTP port | `8106` |
 | Data domain | open-banking |
-| Datastore | PostgreSQL (schema `consents_schema`) |
+| Datastore | PostgreSQL (database `openbank_consents`) |
 | Classification | confidential |
 | Retention | 5 years |
 | Lineage role | both |

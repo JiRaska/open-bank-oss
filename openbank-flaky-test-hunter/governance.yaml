@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: platform
 primaryDatastore: PostgreSQL
-schemaName: flakytest_schema
+databaseName: openbank_flakytest
 dataLineageRole: internal
 dataClassification: internal
 retentionPolicy: "7 years"
@@ -15,7 +15,7 @@ lineage:
       relationType: api
       description: reads fleet-wide */src/test/kotlin/**/*.kt test sources, .github/scripts/*.sh CI
         guard scripts, and JUnit/Gradle test-result reports via a repo checkout
-schemaLineage:
-  ownedSchemas:
-    - flakytest_schema
-  dependentSchemas: []
+databaseLineage:
+  ownedDatabases:
+    - openbank_flakytest
+  dependentDatabases: []

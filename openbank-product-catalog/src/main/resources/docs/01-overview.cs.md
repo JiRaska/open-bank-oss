@@ -60,7 +60,9 @@ Dnes se nevydávají žádné doménové události (žádná Kafka/outbox) — s
 ## Závislosti
 
 - **openbank-libs** — sdílené runtime instalatérství (BuildInfo / `ServiceInfoResource`, DocsResource pro Docs-as-Service, filtr API verze).
-- **Žádné** zapojení PostgreSQL / Kafka / Redis / Keycloak v kódu dnes. Perzistentní backend (`MongoDB` dle `governance.yaml`) je plánovaný follow-up; viz [04 — Data](./04-data.md).
+- **PostgreSQL** — reaktivní Panache + reaktivní PG klient pro aplikační cestu, JDBC pro Flyway (ADR-0009 / ADR-0105 P1); viz [04 — Data](./04-data.md).
+- **Keycloak** — čistý OIDC resource server (`quarkus-oidc`, realm `openbank`): validuje bearer tokeny proti JWKS realmu a žádné nevydává, takže nepotřebuje client secret.
+- **Žádné** zapojení Kafky / Redisu v kódu dnes.
 
 ## Obchodní hodnota
 

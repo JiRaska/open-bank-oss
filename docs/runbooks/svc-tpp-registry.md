@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-tpp-registry-service` |
 | HTTP port | `8108` |
 | Data domain | open-banking |
-| Datastore | PostgreSQL (schema `tpp_schema`) |
+| Datastore | PostgreSQL (database `openbank_tpp_registry`) |
 | Classification | internal |
 | Retention | 5 years |
 | Lineage role | producer |

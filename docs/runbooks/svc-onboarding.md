@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-onboarding-service` |
 | HTTP port | `8130` |
 | Data domain | compliance |
-| Datastore | PostgreSQL (schema `onboarding_schema`) |
+| Datastore | PostgreSQL (database `openbank_onboarding`) |
 | Classification | confidential |
 | Retention | 7 years |
 | Lineage role | both |

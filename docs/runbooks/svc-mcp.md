@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-mcp-service` |
 | HTTP port | `8150` |
 | Data domain | payments |
-| Datastore | none (schema `—`) |
+| Datastore | none (database `—`) |
 | Classification | confidential |
 | Retention | not applicable |
 | Lineage role | consumer |

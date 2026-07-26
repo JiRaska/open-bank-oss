@@ -4,11 +4,11 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: payments
 primaryDatastore: PostgreSQL
-schemaName: sdd_schema
+databaseName: openbank_sdd
 dataLineageRole: both
 dataClassification: confidential
 retentionPolicy: 7 years
 evidenceExported: false
-schemaLineage:
-  ownedSchemas:
-    - sdd_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_sdd

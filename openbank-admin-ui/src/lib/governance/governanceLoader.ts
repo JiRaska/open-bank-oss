@@ -33,8 +33,9 @@ export function getGovernanceManifest(): GovernanceManifestEntry[] {
       serviceName: s.serviceName!,
       dataDomain: s.dataDomain!,
       primaryDatastore: s.primaryDatastore!,
-      schemaName: s.schemaName ?? null,   // null = declared stateless (ADR-0071)
-      stateless: s.stateless,
+      databaseName: s.databaseName ?? null,   // null = declared ownsNoDatabase (ADR-0071/ADR-0196)
+      databaseNameEvidence: s.databaseNameEvidence ?? null,
+      ownsNoDatabase: s.ownsNoDatabase,
       dataLineageRole: s.dataLineageRole!,
       flywayDeclaredVersion: s.flywayDeclaredVersion ?? '',
       flywayCurrentVersion: null,        // runtime, no live-DB integration yet
@@ -43,7 +44,7 @@ export function getGovernanceManifest(): GovernanceManifestEntry[] {
       retentionPolicy: s.retentionPolicy,
       evidenceExported: s.evidenceExported,
       lineage: s.lineage,
-      schemaLineage: s.schemaLineage,
+      databaseLineage: s.databaseLineage,
     }))
   } catch {
     cache = [] // honest empty if the snapshot isn't baked (e.g. clean checkout)

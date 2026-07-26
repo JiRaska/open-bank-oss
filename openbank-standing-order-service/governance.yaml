@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: payments
 primaryDatastore: PostgreSQL
-schemaName: standing_orders_schema
+databaseName: openbank_standing_orders
 dataLineageRole: both
 dataClassification: confidential
 retentionPolicy: 5 years
@@ -14,8 +14,8 @@ lineage:
     - serviceName: sepa-payment
       relationType: api
       description: creates
-schemaLineage:
-  ownedSchemas:
-    - standing_orders_schema
-  dependentSchemas:
-    - transactions_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_standing_orders
+  dependentDatabases:
+    - openbank_transactions

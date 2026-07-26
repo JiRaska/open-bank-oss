@@ -2,13 +2,13 @@
 
 ## Storage posture
 
-`openbank-psd2-service` is **effectively stateless**. Per its governance manifest the primary datastore is *none (stateless)* and the data-lineage role is *consumer*. The only persisted table is the **transactional outbox** used to publish asynchronous notifications to Kafka. All domain data (accounts, balances, transactions, consents, payments) lives in the owning services and is read on demand:
+`openbank-psd2-service` owns **no business data**. Per its governance manifest the primary datastore is *PostgreSQL* (`databaseName: openbank_psd2`) and the data-lineage role is *consumer*. The only persisted table is the **transactional outbox** used to publish asynchronous notifications to Kafka; Redis backs the idempotency store on top of that. All domain data (accounts, balances, transactions, consents, payments) lives in the owning services and is read on demand:
 
 - accounts / balances / transactions → `account-service`
 - consents → `consent-service`
 - payment status → `transaction-service`
 
-There is no dedicated business schema; the service uses Hibernate Reactive (Panache) only for the outbox entity. (`schemaName: n/a`, `dataClassification: confidential`.)
+There are no business tables; the service uses Hibernate Reactive (Panache) only for the outbox entity. Flyway owns the schema — three migrations (`V1__create_psd2_outbox.sql`, `V2__hibernate_sequences.sql`, `V3__psd2_outbox_claimed_at.sql`) — and the tables live in the `public` schema of `openbank_psd2`. (`databaseName: openbank_psd2`, `dataClassification: confidential`.)
 
 ## Outbox schema
 

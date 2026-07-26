@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-transaction-service` |
 | HTTP port | `8102` |
 | Data domain | core |
-| Datastore | PostgreSQL (schema `transactions_schema`) |
+| Datastore | PostgreSQL (database `openbank_transactions`) |
 | Classification | confidential |
 | Retention | 7 years |
 | Lineage role | both |
