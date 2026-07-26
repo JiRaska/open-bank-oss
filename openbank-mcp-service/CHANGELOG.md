@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.9.1...mcp-service-v0.9.2) (2026-07-26)
+
+
+### Security
+
+* **mcp:** mark tool results as untrusted data, and bind the charter to the code ([#2610](https://github.com/JiRaska/open-bank-oss/issues/2610)) ([04ad12b](https://github.com/JiRaska/open-bank-oss/commit/04ad12b75b0f0014b549bf806cd337581d9977c9)), closes [#2412](https://github.com/JiRaska/open-bank-oss/issues/2412)
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.9.0...mcp-service-v0.9.1) (2026-07-26)
 
 
