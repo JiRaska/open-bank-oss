@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.61.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.60.0...admin-ui-v0.61.0) (2026-07-26)
+
+
+### Features
+
+* **admin-ui:** Customer 360 over the analytics silver layer (ADR-0210) ([#2580](https://github.com/JiRaska/open-bank-oss/issues/2580)) ([5766808](https://github.com/JiRaska/open-bank-oss/commit/5766808282b061bd00853500ec83741aee761463))
+
 ## [0.60.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.59.0...admin-ui-v0.60.0) (2026-07-26)
 
 
