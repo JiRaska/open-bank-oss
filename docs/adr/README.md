@@ -217,7 +217,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0207](0207-business-date-authority-and-the-accounting-day-state-machine.md) | Business date authority and the accounting day state machine | Proposed | Planned | accounting-close,ledger,statements | — |
 | [0208](0208-admin-ui-consolidation-a-primitive-layer-one-status-vocabulary-and-an-interactive-flow-explainer.md) | Admin UI consolidation: a primitive layer, one status vocabulary, and an interactive flow explainer | Proposed | Planned | admin-ui,architecture,governance | — |
 | [0209](0209-crm-and-campaign-sequencing-prerequisites-first-slice-and-what-must-not-start-yet.md) | CRM and campaign sequencing: prerequisites, first slice, and what must not start yet | Proposed | Planned | governance,architecture,ml,analytics | — |
-| [0210](0210-customer-360-as-a-query-over-the-analytics-silver-layer.md) | Customer 360 as a query over the analytics silver layer | Proposed | Planned | analytics,architecture,privacy-gdpr,admin-ui | — |
+| [0210](0210-customer-360-as-a-query-over-the-analytics-silver-layer.md) | Customer 360 as a query over the analytics silver layer | Accepted | Shipped | analytics,architecture,privacy-gdpr,admin-ui | — |
 
 ## By tag
 
