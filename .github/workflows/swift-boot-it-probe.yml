@@ -1,0 +1,157 @@
+# -----------------------------------------------------------------------------
+# swift-service boot-IT probe — a ONE-QUESTION experiment, not a gate (#2320 item 1).
+#
+# THE QUESTION: does the 37-minute Quarkus boot stall that got `SwiftBootSmokeIT`
+# excluded from CI still reproduce on the runner pool today?
+#
+# WHY IT NEEDS ITS OWN WORKFLOW. The question is unanswerable anywhere else:
+#
+#   - Not locally. `openbank-swift-service/build.gradle.kts` gates its exclusions on
+#     `CI=true`, so on a developer machine the class already runs and already passes.
+#     The failing environment IS the runner pool — that is the whole finding.
+#   - Not by narrowing the filter. The blanket `filter { excludeTestsMatching("*IT") }`
+#     also swallows `SwiftOutboxClaimIT`, which is itself a @QuarkusTest with
+#     @QuarkusTestResource(PostgresRedisTestResource) — the same
+#     Quarkus-boots-before-JUnit-evaluates-@DisabledIfEnvironmentVariable shape
+#     (quarkusio/quarkus#21555). Narrowing to SwiftBootSmokeIT alone looks like the cheap
+#     half-fix and is not: it would most likely relocate the stall, not remove it.
+#   - Not in `services-ci`. A wrong answer there costs a stalled FULL-FLEET run — the
+#     45-minute job timeout with the whole matrix behind it, which is what #2039 is about.
+#
+# SO: `workflow_dispatch` only, one module, one test class, its own short
+# `timeout-minutes`, nothing `needs:` it and it needs nothing. A wrong answer costs a
+# few runner-minutes. If it comes back green and fast, that is most of the job definition
+# #2320 item 3 wants; if it stalls, the timeout kills it and the exclusions are vindicated
+# with a date attached instead of a two-year-old comment.
+#
+# NOT A REQUIRED CHECK, and must not become one on this trigger — a workflow_dispatch-only
+# workflow reports no status on a PR at all. Re-enabling the class for real means deleting
+# the exclusions in build.gradle.kts (#2320 item 3), not requiring this.
+#
+# The `-Pswift.boot.it=true` property that lifts the exclusions is read ONLY by
+# openbank-swift-service/build.gradle.kts and is deliberately set nowhere else.
+# -----------------------------------------------------------------------------
+name: swift boot-IT probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_class:
+        description: "Which excluded IT to run (both are @QuarkusTest + Testcontainers)"
+        type: choice
+        required: true
+        default: SwiftBootSmokeIT
+        options:
+          - SwiftBootSmokeIT
+          - SwiftOutboxClaimIT
+      timeout_minutes:
+        description: "Hard cap in minutes. Keep well under the 45-min fleet timeout."
+        type: string
+        required: false
+        default: "12"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swift-boot-it-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: "swift boot-IT probe (${{ inputs.test_class }})"
+    # ubuntu-latest, not the ARC pool: the stall was observed on the runner pool and this
+    # job must not be able to occupy a self-hosted runner for its whole timeout.
+    runs-on: ubuntu-latest
+    # A literal ceiling as well as the input one — an input cannot be trusted to bound the
+    # job, and `timeout-minutes` at job level does not accept an expression reliably enough
+    # to be the only guard. The step below carries the operator-chosen value.
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+
+      # Both inputs are interpolated into a shell command below, so both are validated
+      # against a closed set first rather than quoted and hoped for. `type: choice` already
+      # constrains test_class in the UI; a workflow_dispatch API call is not bound by it.
+      - name: Validate inputs
+        env:
+          TEST_CLASS: ${{ inputs.test_class }}
+          TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+        run: |
+          set -euo pipefail
+          case "$TEST_CLASS" in
+            SwiftBootSmokeIT|SwiftOutboxClaimIT) ;;
+            *) echo "::error::unknown test class '$TEST_CLASS'"; exit 1 ;;
+          esac
+          case "$TIMEOUT_MINUTES" in
+            ''|*[!0-9]*) echo "::error::timeout_minutes must be a positive integer"; exit 1 ;;
+          esac
+          if [ "$TIMEOUT_MINUTES" -lt 1 ] || [ "$TIMEOUT_MINUTES" -gt 15 ]; then
+            echo "::error::timeout_minutes must be 1..15 (the point of this probe is a CHEAP wrong answer)"
+            exit 1
+          fi
+          echo "TEST_CLASS=$TEST_CLASS" >> "$GITHUB_ENV"
+          echo "TIMEOUT_MINUTES=$TIMEOUT_MINUTES" >> "$GITHUB_ENV"
+
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          cache-disabled: true
+
+      # `timeout` wraps the Gradle run so the ANSWER is a distinguishable exit code (124 =
+      # still stalling) rather than a job the platform killed, which prints nothing useful.
+      # `--info` because what this probe produces is a LOG — where boot stopped — not a
+      # pass/fail. Read the output, not the exit code.
+      - name: "Run the excluded IT with the exclusions lifted"
+        id: run
+        env:
+          CI: "true"
+        run: |
+          set -uo pipefail
+          echo "::notice::probing ${TEST_CLASS} with a ${TIMEOUT_MINUTES}-minute cap (#2320 item 1)"
+          start=$(date -u +%s)
+          timeout --signal=TERM --kill-after=60s "${TIMEOUT_MINUTES}m" \
+            ./gradlew :openbank-swift-service:test \
+              -Pswift.boot.it=true \
+              --tests "*${TEST_CLASS}" \
+              --info --no-daemon --stacktrace
+          rc=$?
+          echo "elapsed_seconds=$(( $(date -u +%s) - start ))" >> "$GITHUB_OUTPUT"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: "Verdict"
+        env:
+          RC: ${{ steps.run.outputs.rc }}
+          SECS: ${{ steps.run.outputs.elapsed_seconds }}
+        run: |
+          set -euo pipefail
+          rc="$RC"
+          secs="$SECS"
+          {
+            echo "### swift boot-IT probe — \`${TEST_CLASS}\`"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| exit code | \`${rc}\` |"
+            echo "| elapsed | ${secs}s (cap ${TIMEOUT_MINUTES}m) |"
+            echo
+            case "$rc" in
+              0)   echo "**PASSES.** The #2320 stall does not reproduce. The build.gradle.kts exclusions are now costing this service its only real boot test for no live reason — proceed to #2320 item 3 (delete both exclusions), which is a normal PR that services-ci will exercise." ;;
+              124|137) echo "**STILL STALLS.** Killed at the cap, same shape as the original 37-minute boot hang. The exclusions stay; record this run's date on #2320 so the next reader is not re-deriving a two-year-old comment. Next lead: the Testcontainers startup in the \`--info\` log above — find the last line before the gap." ;;
+              *)   echo "**FAILS for another reason** (exit ${rc}) — a real test failure or a build error, NOT the stall. Read the log: this is a different bug from #2320 and should be filed as its own issue." ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"
+          # The probe answers a question; it does not gate anything. Only an unexpected
+          # exit code is worth surfacing as a failure, and even that only as a warning.
+          [ "$rc" = "0" ] || echo "::warning::probe did not pass (exit ${rc}) — see the job summary"
