@@ -10,6 +10,7 @@ import com.openbank.analytics.application.port.out.AnalyticsSink
 import com.openbank.analytics.application.port.out.DeadLetterRecord
 import com.openbank.analytics.application.port.out.DeadLetterSink
 import com.openbank.libs.analytics.AnalyticsEnvelope
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -161,7 +162,8 @@ class AnalyticsConsumer {
         val aggregateType = resolveAggregateType(node, address)
         return AnalyticsEnvelope(
             eventId = node["eventId"]?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
-                ?: UUID.randomUUID(),
+                    // ADR-0106: a synthesised dedupe key is a durable, indexed identifier -> UUIDv7.
+                ?: Ids.newId(),
             aggregateType = aggregateType,
             // The id MUST agree with aggregateType — bronze_events is keyed (aggregate_type,
             // aggregate_id) and silver_current_state reduces per that key. An independent precedence
@@ -190,6 +192,7 @@ class AnalyticsConsumer {
             payload = PayloadMasker.maskToMap(node["payload"] ?: node),
         )
     }
+
 
     private fun resolveAggregateType(node: JsonNode, address: EventAddress): String = node["aggregateType"]?.asText()
         ?: inferAggregateType(node).takeIf { it != UNKNOWN }
