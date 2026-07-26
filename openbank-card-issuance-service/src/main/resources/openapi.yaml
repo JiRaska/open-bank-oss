@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Card Issuance Service API
-  version: 1.1.0
+  version: 1.2.0
   description: Debit/credit card lifecycle — issue, activate, block, suspend, resume, cancel;
     synthetic PAN vault and product-catalog entitlements.
   license:
@@ -17,6 +17,23 @@ tags:
 
 paths:
   /api/v1/cards:
+    get:
+      tags: [Cards]
+      summary: List every card
+      description: >-
+        The unfiltered collection. Requires ROLE_VIEWER, ROLE_OPERATOR or ROLE_ADMIN (authorize
+        action `card.list`). Never carries PAN/CVV — those are only ever served by
+        `/api/v1/cards/{id}/secure-details`.
+      operationId: listCards
+      responses:
+        '200':
+          description: All cards
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CardResponse'
     post:
       tags: [Cards]
       summary: Issue a new card
@@ -237,6 +254,76 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CardEntitlementsResponse'
+
+  /api/v1/cards/{id}/limits:
+    put:
+      tags: [Cards]
+      summary: Set a card's daily and monthly spending limits
+      operationId: updateCardLimits
+      parameters:
+        - $ref: '#/components/parameters/cardId'
+        - name: X-Operator-Id
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dailyLimitMinorUnits, monthlyLimitMinorUnits]
+              properties:
+                dailyLimitMinorUnits:
+                  type: integer
+                  format: int64
+                monthlyLimitMinorUnits:
+                  type: integer
+                  format: int64
+      responses:
+        '200':
+          description: Limits updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardResponse'
+
+  /api/v1/cards/{id}/controls:
+    put:
+      tags: [Cards]
+      summary: Set a card's channel controls (contactless / online / ATM / abroad)
+      operationId: updateCardControls
+      parameters:
+        - $ref: '#/components/parameters/cardId'
+        - name: X-Operator-Id
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contactlessEnabled, onlineEnabled, atmEnabled, abroadEnabled]
+              properties:
+                contactlessEnabled:
+                  type: boolean
+                onlineEnabled:
+                  type: boolean
+                atmEnabled:
+                  type: boolean
+                abroadEnabled:
+                  type: boolean
+      responses:
+        '200':
+          description: Controls updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardResponse'
 
   /api/v1/cards/{id}/suspend:
     post:

@@ -6,7 +6,7 @@ openapi: "3.1.0"
 
 info:
   title: OpenBank SWIFT Service API
-  version: "1.1.0"
+  version: "1.2.0"
   description: |
     SWIFT MT/MX message dispatch, acknowledgement, and status tracking.
     Supports MT103 (customer credit transfer), MT202 (bank transfer), MT900/910/940/950 (confirmations/statements).
@@ -80,6 +80,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ValidationError'
+
+  /api/v1/swift/messages:
+    get:
+      tags: [swift]
+      operationId: listSwiftMessages
+      summary: List every SWIFT message
+      description: >-
+        The unfiltered collection. Requires ROLE_VIEWER, ROLE_OPERATOR, ROLE_PAYMENTS or ROLE_ADMIN
+        (authorize action `swift.list`).
+      responses:
+        "200":
+          description: All SWIFT messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SwiftMessage'
+        "403":
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/swift/{id}:
     get:
