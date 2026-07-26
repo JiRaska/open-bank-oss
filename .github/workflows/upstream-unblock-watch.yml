@@ -1,0 +1,158 @@
+# -----------------------------------------------------------------------------
+# Upstream-unblock watch (issue #1314).
+#
+# WHY THIS EXISTS
+#   `.github/dependabot.yml` ignores two majors the ecosystem cannot satisfy yet
+#   (eslint 10, typescript 7). Each entry says "drop it once the criterion in
+#   #1314 is met" — and until now the only thing that evaluated that criterion
+#   was a person re-running two `npm view` commands. #1314's comment history is
+#   three separate triage passes across ten days, each re-deriving the same
+#   "still blocked".
+#
+#   The cost of that is not the wasted passes. It is that the block has no
+#   expiry: on the day the peer range DOES admit eslint 10, nothing notices, and
+#   an ignore entry that was a reasoned block quietly becomes an unexplained
+#   permanent pin. This workflow is what makes the block self-clearing — it
+#   re-derives the criterion on a schedule and says so on the issue.
+#
+# WHY IT ALSO RUNS ON PRs
+#   The script's OTHER half is a drift check: every npm `ignore:` entry must be
+#   declared in the script's WATCHES table and vice versa. That is a property of
+#   the committed files, checkable with no network, and it is what stops a new
+#   ignore entry from becoming a block this watch silently knows nothing about.
+#   Running it on PRs that touch either file is the only moment that check can
+#   block anything.
+#
+# ESCALATION
+#   A red push/schedule run is addressed to nobody, so a stale block posts a
+#   comment on its own issue and drops the `blocked` label — the state change is
+#   the notification, not the workflow conclusion.
+# -----------------------------------------------------------------------------
+name: Upstream unblock watch
+
+on:
+  schedule:
+    # 06:20 UTC on the 1st of the month. Monthly is the right cadence: these are
+    # upstream peer ranges that move on a major-release timescale, and #1314's
+    # own comments recommend re-checking monthly rather than re-triaging.
+    - cron: "20 6 1 * *"
+  pull_request:
+    paths:
+      - ".github/dependabot.yml"
+      - ".github/scripts/check-upstream-unblock.py"
+      - ".github/workflows/upstream-unblock-watch.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-unblock-watch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    name: upstream-unblock-watch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install PyYAML
+        run: python3 -m pip install --quiet pyyaml
+
+      # The matcher decides whether a block is stale. A matcher that has only
+      # ever returned "still blocked" is indistinguishable from one that always
+      # returns it — so it is exercised against inputs it MUST accept before its
+      # verdict is trusted. This step failing means the verdict below is void.
+      - name: Self-test the range matcher
+        run: python3 .github/scripts/check-upstream-unblock.py --self-test
+
+      - name: Evaluate declared blocks
+        id: watch
+        run: |
+          set +e
+          python3 .github/scripts/check-upstream-unblock.py --root . | tee /tmp/unblock.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) echo "All declared blocks still justified." ;;
+            1) echo "::notice::A declared block is stale, or the watch has drifted." ;;
+            *) echo "::error::The unblock probe could not run — this is NOT a "
+               echo "::error::'still blocked' verdict. Investigate before trusting it."
+               exit "$code" ;;
+          esac
+
+      # On a PR the drift half is the gate: fail so it cannot merge undeclared.
+      # (The liveness half also lands here, which is correct — a PR touching
+      # dependabot.yml is exactly when someone should learn the block is stale.)
+      - name: Fail the PR on drift or a stale block
+        if: ${{ github.event_name == 'pull_request' && steps.watch.outputs.code != '0' }}
+        run: |
+          echo "::error::upstream-unblock: see the log above."
+          exit 1
+
+      - name: Report a stale block on its issue
+        if: ${{ github.event_name != 'pull_request' && steps.watch.outputs.code == '1' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs')
+            const report = fs.readFileSync('/tmp/unblock.txt', 'utf8')
+            const MARKER = '<!-- upstream-unblock-watch -->'
+            // The issues named by the WATCHES table. Kept here rather than
+            // parsed out of the report so a formatting change cannot silently
+            // retarget a comment at the wrong issue.
+            const issues = [1314, 1653]
+            const body = [
+              MARKER,
+              '## Upstream unblock watch — a declared block looks stale',
+              '',
+              'The scheduled watch re-derived the unblock criteria and something',
+              'changed. Full output:',
+              '',
+              '```',
+              report.trim(),
+              '```',
+              '',
+              'If a dependency reads `UNBLOCKED`, drop its `ignore:` entry in',
+              '`.github/dependabot.yml` (and its `WATCHES` entry in',
+              '`.github/scripts/check-upstream-unblock.py`) and let the major bump',
+              'through. If this is drift, reconcile the two files.',
+              '',
+              `_Automated: \`${context.workflow}\` run ${context.runId}._`,
+            ].join('\n')
+
+            for (const issue_number of issues) {
+              let issue
+              try {
+                issue = (await github.rest.issues.get({
+                  ...context.repo, issue_number,
+                })).data
+              } catch (e) {
+                core.warning(`issue #${issue_number}: ${e.message}`)
+                continue
+              }
+              if (issue.state !== 'open') {
+                core.notice(`issue #${issue_number} is closed — not commenting`)
+                continue
+              }
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number, body,
+              })
+              // Drop `blocked`: the label is the thing that tells a human to
+              // skip this issue, and it is now the wrong signal.
+              if ((issue.labels ?? []).some(l => (l.name ?? l) === 'blocked')) {
+                try {
+                  await github.rest.issues.removeLabel({
+                    ...context.repo, issue_number, name: 'blocked',
+                  })
+                } catch (e) {
+                  core.warning(`could not remove 'blocked' from #${issue_number}: ${e.message}`)
+                }
+              }
+            }
