@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.59.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.58.2...admin-ui-v0.59.0) (2026-07-26)
+
+
+### Features
+
+* **admin-ui:** add the components/ui primitive layer and one status vocabulary (ADR-0208 D1/D2) ([#2556](https://github.com/JiRaska/open-bank-oss/issues/2556)) ([f98baca](https://github.com/JiRaska/open-bank-oss/commit/f98baca9910f2e14a183a024e54398c89b2306e9))
+
 ## [0.58.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.58.1...admin-ui-v0.58.2) (2026-07-26)
 
 
