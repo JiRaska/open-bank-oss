@@ -63,3 +63,13 @@ mcp:
     name: openbank-mcp
     version: "0.1.0"
     protocol-version: "2025-06-18"
+
+# Per-acting-agent rate limit on tools/call (#2409). The defaults are the code defaults
+# (McpRateLimiter); `calls-per-day` mirrors the `mcp-anonymous` charter's `limits.runs_per_day`
+# in openbank-libs/governance/agents.yaml, which nothing read before this landed.
+openbank:
+  mcp:
+    rate-limit:
+      enabled: ${MCP_RATE_LIMIT_ENABLED:true}
+      calls-per-minute: ${MCP_RATE_LIMIT_PER_MINUTE:60}
+      calls-per-day: ${MCP_RATE_LIMIT_PER_DAY:1000}

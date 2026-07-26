@@ -18,6 +18,7 @@ import com.openbank.mcp.application.port.out.ProposalPort
 import com.openbank.mcp.infrastructure.mcp.CallerContextResolver
 import com.openbank.mcp.infrastructure.mcp.McpEndpoint
 import com.openbank.mcp.infrastructure.observability.McpMetricsAdapter
+import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -54,7 +55,33 @@ class McpEndpointTest {
             serverName = "openbank-mcp",
             serverVersion = "0.1.0",
             protocolVersion = "2025-06-18",
-        ).apply { metrics = McpMetricsAdapter(registry) }
+        ).apply {
+            metrics = McpMetricsAdapter(registry)
+            rateLimiter = limiter
+        }
+    }
+
+    /**
+     * One limiter shared by every endpoint a test builds, so a test that wants to exhaust the
+     * window can, and every other test gets the production defaults (60/min) — well above the
+     * handful of calls they each make.
+     */
+    private val limiter = McpRateLimiter()
+
+    @Test
+    fun `tools call is throttled once the acting agent exhausts its per-minute window`() {
+        val ep = endpoint(allowAll())
+        limiter.callsPerMinute = 2
+        val call = rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>()))
+
+        repeat(2) { assertThat(body(ep.handle(call).entity).path("result").path("isError").asBoolean(false)).isFalse() }
+        val throttled = body(ep.handle(call).entity)
+
+        assertThat(throttled.path("result").path("isError").asBoolean()).isTrue()
+        assertThat(throttled.path("result").path("content").first().path("text").asText())
+            .contains("Rate limit exceeded")
+        // A throttled call is auditable like any other denial — the trail must not go quiet on it.
+        assertThat(audit.events.last().result).isEqualTo(AuditResult.DENIED)
     }
 
     private fun rpc(method: String, params: Map<String, Any?> = emptyMap()): JsonNode =
