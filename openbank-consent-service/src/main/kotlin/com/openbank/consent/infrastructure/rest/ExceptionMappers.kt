@@ -28,6 +28,13 @@ class ConsentNotOwnedMapper : ExceptionMapper<ConsentNotOwnedByPartyException> {
 }
 
 @Provider
+class ConsentGranteeMismatchMapper : ExceptionMapper<ConsentGranteeMismatchException> {
+    override fun toResponse(e: ConsentGranteeMismatchException): Response =
+        Response.status(ErrorCode.FORBIDDEN.httpStatus)
+            .entity(errorResponse(ErrorCode.FORBIDDEN, e.message ?: "Forbidden")).build()
+}
+
+@Provider
 class ConsentAlreadyActiveMapper : ExceptionMapper<ConsentAlreadyActiveException> {
     override fun toResponse(e: ConsentAlreadyActiveException): Response =
         Response.status(409).entity(errorResponse(ErrorCode.CONFLICT, e.message ?: "Already active")).build()

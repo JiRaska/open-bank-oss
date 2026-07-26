@@ -19,11 +19,14 @@ CONSENT_REST_EXT=$(cat << 'REGO'
 #   consent.grant     — create (PENDING_SCA); operator console / onboarding flows (renamed from
 #                       consent.create, issue #938 follow-up: "grant" is a distinctive four-eyes
 #                       verb, so it cannot silently gate every OTHER money-path service's
-#                       unrelated `.create` action fleet-wide); four-eyes gated, no M2M caller
+#                       unrelated `.create` action fleet-wide); four-eyes gated. ALSO grantable by
+#                       the shared M2M principal, but ONLY for grantee=party-service:marketing-comms
+#                       (ADR-0206) — see service-consent-m2m-marketing below.
 #   consent.read      — getById
 #   consent.list      — listByParty (#partyId), listByGrantee (#granteeId)
 #   consent.revoke    — revoke (DELETE); four-eyes gated (operator-initiated denial of a
-#                       customer's active consent, rules.yaml four_eyes.verbs), no M2M caller
+#                       customer's active consent, rules.yaml four_eyes.verbs). Same M2M exception
+#                       as consent.grant above (ADR-0206), same grantee restriction.
 #   consent.activate  — activate after SCA challenge completes. Deliberately NOT four-eyes
 #                       gated (issue #938 follow-up): the M2M grant below already reserves this
 #                       action for a possible SCA-completion-callback caller — four_eyes_required
@@ -57,12 +60,13 @@ allowed_reasons contains "operator-consent-write" if {
 # consent before serving an AIS/PIS call (consent.read / consent.validate), and
 # the SCA completion callback activates or rejects a PENDING_SCA consent
 # (consent.activate / consent.reject). Deliberately narrow: consent.grant and
-# consent.revoke are NOT granted to M2M clients — those originate from a human
+# consent.revoke are otherwise NOT granted to M2M clients — those originate from a human
 # channel (customer or operator), mirroring edge-service-notification's stance
 # that a blanket SERVICE allow would open every @Authorize endpoint to any
-# M2M client. This is also why consent.activate stays OUT of four_eyes.verbs
-# (rules.yaml) despite being a risk-relevant action — see that file's guardrail
-# note (issue #938 follow-up).
+# M2M client (the narrow, grantee-scoped exception below is the sanctioned deviation —
+# ADR-0206 — not a reopening of that blanket-allow question). This is also why
+# consent.activate stays OUT of four_eyes.verbs (rules.yaml) despite being a
+# risk-relevant action — see that file's guardrail note (issue #938 follow-up).
 #
 # NOTE (found post-merge, issue tracked separately): AuthorizeInterceptor never
 # emits principal.type == "SERVICE" — M2M callers authenticate via Keycloak
@@ -78,6 +82,28 @@ allowed_reasons contains "service-consent-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
 	input.action in {"consent.read", "consent.validate", "consent.activate", "consent.reject"}
+}
+
+# ADR-0206: narrow, resource-scoped exception to the "M2M never grants/revokes" stance above.
+# party-service forwards the mobile app's marketing-consent toggle here (ADR-0198/ADR-0205) —
+# it authenticates via the SAME shared M2M client as every other backend service, so this rule
+# cannot distinguish party-service from any other `openbank-services` caller by identity alone.
+# It instead scopes by RESOURCE: AuthorizeInterceptor's dotted-path extraction
+# (ADR-0206 D1, `#request.granteeId` on create / `#granteeId` on revoke) binds
+# input.resource.id to the request's own granteeId field, and this rule only fires when that
+# equals the one fixed grantee party-service's forwarder uses. Any other `openbank-services`
+# caller — or party-service itself, for any OTHER granteeId — still falls through to deny,
+# same as before this rule existed. ConsentService.revokeConsent additionally cross-checks the
+# passed granteeId against the loaded consent's actual granteeId before revoking (defense in
+# depth: the OPA decision alone can't see the DB row on this action, and — see rules.yaml's
+# openbank-consent-service guardrail note — AUTHZ_FOUR_EYES_ENFORCE is false for this service
+# today, so this M2M path isn't paused pending a second human approver; revisit before ever
+# flipping that flag here).
+allowed_reasons contains "service-consent-m2m-marketing" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-services"
+	input.action in {"consent.grant", "consent.revoke"}
+	input.resource.id == "party-service:marketing-comms"
 }
 REGO
 )
