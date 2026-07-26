@@ -45,7 +45,7 @@
   "openbank-security-scanner": "0.5.4",
   "openbank-sepa-instant": "0.7.3",
   "openbank-sepa-payment": "0.8.5",
-  "openbank-settlement-service": "0.4.8",
+  "openbank-settlement-service": "0.4.9",
   "openbank-standing-order-service": "0.14.2",
   "openbank-statement-service": "0.5.8",
   "openbank-swift-service": "0.7.2",
