@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: mcp-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "465bc216e2560311"
+    openbank.tech/policy-checksum: "4673877eb208bc64"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2727,6 +2727,28 @@ data:
             jdbc-postgresql (build.gradle.kts) — it has no OLTP datasource to reach. The
             reconciliation reads the warehouse and the WORM archive over blocking clients.
       ci_producer: ".github/scripts/check-no-runblocking-in-scheduled.py"
+
+      # The structural reason the HR000068 class was invisible (#2204). `quarkus.scheduler.enabled:
+      # false` under %test is a reasonable default — it stops crons firing during unrelated tests —
+      # but it leaves only DIRECT method calls, and a direct call supplies the very Vert.x context
+      # the scheduler does not. So `scheduler.sweep()` in a test passes against a body that can
+      # never work as a cron. The guard above catches ONE defect shape; only running the real cron
+      # catches the next.
+      #
+      # Rule: a service that disables the scheduler under %test AND has an @Scheduled method must
+      # have at least one test that sets `quarkus.scheduler.enabled=true` (a @TestProfile with a
+      # shrunken cron, as LedgerSchedulerVertxContextIT / BillingCycleSweepVertxContextIT do).
+      #
+      # Measured 2026-07-26: 11 services qualify, only 2 exercise it. The other 9 are baselined in
+      # the producer — the list may only SHRINK, and a stale entry (a service that now IS covered)
+      # is reported too, so the debt cannot quietly become permanent.
+      #
+      # Detection is narrow on purpose: only `quarkus.scheduler.enabled` set to `true` counts. A
+      # looser sweep for the string `scheduler.enabled` scored card-issuance as covered on
+      # `scheduler(enabled = false).enforceRetention()` — a direct call with an unrelated feature
+      # flag, i.e. exactly what this rule rejects.
+      scheduler_exercised_in_tests: true
+      scheduler_exercised_ci_producer: ".github/scripts/check-scheduler-exercised.py"
 
 
     # ---------------------------------------------------------------------------------------
