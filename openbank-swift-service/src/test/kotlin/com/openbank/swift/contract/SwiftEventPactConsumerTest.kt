@@ -16,6 +16,9 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import java.time.Instant
+import java.util.Date
+import java.util.TimeZone
 import java.util.UUID
 
 /**
@@ -50,7 +53,19 @@ class SwiftEventPactConsumerTest {
                 o.stringMatcher("messageType", "MT103|MT202|MX_PACS_008", "MT103")
                 o.decimalType("amount", 1000.00)
                 o.stringMatcher("currency", "[A-Z]{3}", "EUR")
-                o.datetime("occurredAt", "yyyy-MM-dd'T'HH:mm:ss'Z'")
+                // The example MUST be pinned to a fixed instant in UTC. The no-example overload
+                // renders pact-jvm's base date in the JVM's DEFAULT timezone while labelling it
+                // "Z", so the generated pact differed by the developer's UTC offset: committed
+                // from a CEST machine it read 14:00:00Z, regenerated on a UTC CI runner it read
+                // 13:00:00Z. pact-drift-check.yml regenerates and asserts `git diff
+                // --exit-code -- pacts/`, so that diff was non-empty on every CI run regardless
+                // of whether anything had changed — a gate that could not be satisfied.
+                o.datetime(
+                    "occurredAt",
+                    "yyyy-MM-dd'T'HH:mm:ss'Z'",
+                    Date.from(Instant.parse("2026-01-01T00:00:00Z")),
+                    TimeZone.getTimeZone("UTC"),
+                )
             }.build(),
         )
         .toPact()
