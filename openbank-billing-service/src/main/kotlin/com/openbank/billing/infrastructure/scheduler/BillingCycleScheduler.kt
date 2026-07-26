@@ -6,12 +6,17 @@ package com.openbank.billing.infrastructure.scheduler
 
 import com.openbank.billing.application.port.out.BillableAccountDiscoveryPort
 import com.openbank.billing.application.usecase.BillingCycleService
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.Duration
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Optional
@@ -68,7 +73,34 @@ class BillingCycleScheduler {
     @Inject
     lateinit var accountDiscovery: BillableAccountDiscoveryPort
 
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+
     private val log = Logger.getLogger(BillingCycleScheduler::class.java)
+
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    /**
+     * Set by [runDiscoveredSweep] when a page fetch throws. Without it an aborted sweep would
+     * still record a success, because that method swallows the failure and returns — which would
+     * make the liveness gauge report the scheduler's heartbeat instead of the workflow's outcome,
+     * the exact substitution that let the #2187 jobs look alive while doing nothing.
+     */
+    private var aborted = false
+
+    // ADR-0160 mechanism 3, registered once at startup (#2239). Before this the monthly cycle had
+    // no metric, no watchdog and no alert rule of any kind — success and failure both ended in a
+    // log line, so a cycle that stopped running was invisible.
+    //
+    // Registered ONLY when the sweep is enabled, unlike the always-on jobs: this scheduler is
+    // opt-in and OFF by default, so a gauge in a deployment that deliberately does not run the
+    // cycle would read as maximally stale forever and manufacture exactly the false finding the
+    // liveness mechanism exists to make trustworthy.
+    fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
+        if (enabled) {
+            liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofDays(EXPECTED_INTERVAL_DAYS))
+        }
+    }
 
     // `suspend`, never `runBlocking` (#2187, the fleet sweep of #2148). Quarkus invokes a plain
     // @Scheduled method on a bare `executor-thread`, which carries no Vert.x context, so
@@ -116,6 +148,10 @@ class BillingCycleScheduler {
             discoveryEnabled -> runDiscoveredSweep(cycleId)
             else -> log.debug("[billing-cycle-scheduler] No accounts configured, discovery off — skipping sweep")
         }
+        // The cycle completed. runDiscoveredSweep returns early on abort, so an aborted sweep
+        // falls through here — see the guard below.
+        if (!aborted) liveness?.recordSuccess()
+        aborted = false
     }
 
     /** Rule 2 (class KDoc): page through account-service's ACTIVE-account sweep, one cycle per page. */
@@ -144,6 +180,7 @@ class BillingCycleScheduler {
                 pages,
                 processed,
             )
+            aborted = true
             return
         }
         log.infof(
@@ -155,6 +192,12 @@ class BillingCycleScheduler {
     }
 
     companion object {
+        /** ADR-0160 mechanism 3 workflow tag — stable, low-cardinality. */
+        const val WORKFLOW_NAME = "billing-cycle"
+
+        /** The cycle runs monthly (`0 0 3 1 * ?`); the liveness rule fires at 2x this. */
+        const val EXPECTED_INTERVAL_DAYS = 31L
+
         /** Matches account-service's own default page size for the /accounts/active sweep. */
         const val DEFAULT_DISCOVERY_PAGE_SIZE = 100
 

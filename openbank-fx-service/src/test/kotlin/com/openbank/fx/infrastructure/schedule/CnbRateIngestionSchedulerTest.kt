@@ -7,9 +7,13 @@ package com.openbank.fx.infrastructure.schedule
 import com.openbank.fx.application.port.`in`.CnbIngestionResult
 import com.openbank.fx.application.port.`in`.CnbRateIngestionUseCase
 import com.openbank.fx.application.port.`in`.IngestCnbFixingCommand
+import com.openbank.libs.observability.DomainMetrics
+import io.micrometer.core.instrument.MeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
+import jakarta.enterprise.inject.Instance
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import java.time.LocalDate
@@ -17,7 +21,18 @@ import java.time.LocalDate
 class CnbRateIngestionSchedulerTest {
 
     private val useCase: CnbRateIngestionUseCase = mockk()
-    private val scheduler = CnbRateIngestionScheduler(useCase)
+    private val scheduler = CnbRateIngestionScheduler(useCase, noOpDomainMetrics())
+
+    /**
+     * A [DomainMetrics] with no resolvable registry — every metric method is a documented no-op, so
+     * the ADR-0160 liveness wiring added in #2239 needs no re-mocking per test here. The gauge
+     * itself is asserted at the scheduler level in the ledger's LedgerWorkflowLivenessTest.
+     */
+    private fun noOpDomainMetrics(): DomainMetrics {
+        val instance = mockk<Instance<MeterRegistry>>()
+        every { instance.isResolvable } returns false
+        return DomainMetrics().apply { registryInstance = instance }
+    }
 
     @Test
     fun `ingestDailyFixing requests the latest fixing (no explicit date)`() {

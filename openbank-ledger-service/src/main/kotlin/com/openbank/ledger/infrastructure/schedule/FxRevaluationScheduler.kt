@@ -6,10 +6,15 @@ package com.openbank.ledger.infrastructure.schedule
 
 import com.openbank.ledger.application.port.`in`.FxRevaluationUseCase
 import com.openbank.ledger.application.port.`in`.RevalueFxCommand
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.libs.persistence.lock.ClusterLock
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import org.jboss.logging.Logger
+import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -28,9 +33,27 @@ import java.time.ZoneId
  * the double-publish.
  */
 @ApplicationScoped
-class FxRevaluationScheduler(private val useCase: FxRevaluationUseCase, private val clusterLock: ClusterLock) {
+class FxRevaluationScheduler(
+    private val useCase: FxRevaluationUseCase,
+    private val clusterLock: ClusterLock,
+    private val domainMetrics: DomainMetrics,
+) {
     private val log: Logger = Logger.getLogger(FxRevaluationScheduler::class.java)
     private val zone: ZoneId = ZoneId.of("Europe/Prague")
+
+    // Nullable, not `lateinit`: the gauge is a diagnostic, and a money-path job must never fail
+    // because its observability wiring was not initialised. `lateinit` turns a missed StartupEvent
+    // into an UninitializedPropertyAccessException thrown from the middle of the run.
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    // ADR-0160 mechanism 3. Registered once at startup (CDI beans are singletons), not per-run —
+    // matches DomainMetrics.registerOutboxBacklog's "call once" contract and the one pre-existing
+    // adopter, StandingOrderExecutionScheduler. Before this, a revaluation that stopped that stopped
+    // running left NO runtime signal at all: this job has no metric, no watchdog and no alert rule of any
+    // kind, so success and failure both ended in a log line (#2239).
+    fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofDays(1))
+    }
 
     // `suspend`, never `runBlocking` (#2187, the fleet sweep of #2148). Quarkus invokes a plain
     // @Scheduled method on a bare `executor-thread`, which carries no Vert.x context, so
@@ -58,6 +81,10 @@ class FxRevaluationScheduler(private val useCase: FxRevaluationUseCase, private 
                 } else {
                     log.infof("Daily FX revaluation for %s: no movement", result.date)
                 }
+                // Success path only: the catch below is a failed run, and recording it as a
+                // success is how a liveness gauge becomes a gauge of the scheduler's heartbeat
+                // rather than of the workflow.
+                liveness?.recordSuccess()
             } catch (ex: Exception) {
                 log.errorf(ex, "Daily FX revaluation failed: %s", ex.message)
             }
@@ -69,5 +96,8 @@ class FxRevaluationScheduler(private val useCase: FxRevaluationUseCase, private 
 
     private companion object {
         const val JOB_NAME = "ledger.fx-revaluation"
+
+        /** ADR-0160 mechanism 3 workflow tag — stable, low-cardinality. */
+        const val WORKFLOW_NAME = "ledger-fx-revaluation"
     }
 }
