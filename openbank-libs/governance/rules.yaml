@@ -483,6 +483,26 @@ change_requirements:
     # all, so check-gate-graduation.sh could not see it and it had no deadline. That class is now
     # itself gated by .github/scripts/check-advisory-gate-registration.py.
     ci_producer: ".github/scripts/check-dotted-mp-messaging-keys.sh"
+  role_only_write_rule_naming:
+    # GHSA-58jq-9hq3-66jr. `service-account-openbank-services` — the identity nearly every
+    # backend service authenticates as — carries ROLE_OPERATOR in the realm, and
+    # AuthorizeInterceptor classifies every client_credentials JWT as HUMAN. So a rego rule
+    # granting a write on `type == HUMAN` + that role admitted ANY backend service to ANY write
+    # in that domain. rest.rego now prohibits that at the `allow` head, but it identifies such
+    # rules BY NAME (`operator-<domain>-write`) — which makes the naming convention
+    # load-bearing, and it turns out the convention was never actually followed.
+    detect: ["openbank-libs/governance/policies/rest.rego", "<component>/*_rest_ext.rego", "<component>/gen-*-opa-bundle.sh heredocs"]
+    require:
+      - "a role-only write rule is named operator-<domain>-write, or pins its caller with input.principal.id"
+    gate: role-only-write-rule-naming
+    enforced: advisory
+    target_enforce_date: "2026-10-31"   # ADR-0144
+    blocked_on: "18 role-only WRITE rules do not follow the naming convention and are baselined in
+      the script — each is reachable today by the shared service-account. Graduating needs the real
+      fix first: invert the default for that identity (deny except an explicit (identity, action)
+      allow-list). That allow-list cannot be guessed — AUTHZ_ENFORCE is true on most of these
+      services, so a missing entry is a money-path outage, not a test failure."
+    ci_producer: ".github/scripts/check-operator-write-naming.py"
   new_service_with_outbox:
     # A service that extends AbstractOutboxEntity / uses OutboxDispatcher but does NOT
     # set openbank.outbox.dispatch-enabled=true silently never dispatches events —

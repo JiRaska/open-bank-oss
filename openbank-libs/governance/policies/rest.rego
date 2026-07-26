@@ -354,3 +354,60 @@ prohibited if {
 	input.action == "featureflag.flip"
 	input.attributes.flag in data.rules.feature_flags.prohibited_flag_combinations
 }
+
+# ---------------------------------------------------------------------------------------
+# The shared M2M identity may never reach a WRITE through a role-only operator reason.
+#
+# Nearly every backend service authenticates with one Keycloak client, `openbank-services`,
+# whose service-account carries ROLE_OPERATOR in the realm (openbank-realm.json). Combined
+# with AuthorizeInterceptor classifying every client_credentials JWT as HUMAN (see
+# rules.yaml: dependencies.principal_type_service_unreachable), that means every
+# `operator-<domain>-write` rule — which checks only type == HUMAN plus the role — admitted
+# ANY service holding those credentials to ANY write action in that domain, for any
+# resource. Found on consent-service, where the rule's own comment claimed
+# consent.grant/consent.revoke were unreachable by M2M callers while the role check made
+# them reachable; the same shape exists on ~18 other services.
+#
+# Gated at the `allow` head rather than fixed in each service's rule, deliberately and for
+# the reason the `prohibited` block above already states: a per-rule exclusion has to be
+# remembered 19 times and again by whoever writes the 20th, and forgetting it fails OPEN.
+# Here it cannot be bypassed by adding a new reason.
+#
+# What this does NOT block, by design:
+#  - READS. `operator-read-any` / `compliance-read-any` are how real M2M callers fetch
+#    cross-service data today (party-service's GDPR Art. 15 aggregation against kyc-service
+#    and card-issuance-service depends on exactly that), so they are untouched.
+#  - Writes granted by a reason that names the caller. A rule that identifies a specific
+#    verified caller by `input.principal.id` and scopes the action set — e.g.
+#    `service-consent-m2m-marketing`, `m2m-sanctions-screening`,
+#    `service-sca-shared-client-m2m` — still fires, because the check below requires that
+#    EVERY reason admitting this principal be a role-only write reason. One identity-scoped
+#    reason is enough to allow the call. That is the sanctioned way to grant an M2M write:
+#    name the caller and enumerate the actions.
+#  - Human operators and admins. This is keyed on one service-account identity string, and
+#    no human user can hold it.
+#
+# The structural fix is a per-service Keycloak client so `principal.id` alone identifies the
+# caller and this guard becomes unnecessary; that is a standalone workload-identity project.
+# Until then this is the fleet-wide floor.
+# ---------------------------------------------------------------------------------------
+shared_m2m_identity if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-services"
+}
+
+# `operator-<domain>-write` is the established name for "granted by ROLE_OPERATOR/ROLE_ADMIN
+# alone". Enforced as a naming convention by .github/scripts/check-operator-write-naming.py
+# so a differently-named role-only write rule cannot silently escape this guard.
+role_only_write_reason(r) if {
+	startswith(r, "operator-")
+	endswith(r, "-write")
+}
+
+prohibited if {
+	shared_m2m_identity
+	count(allowed_reasons) > 0
+	every r in allowed_reasons {
+		role_only_write_reason(r)
+	}
+}

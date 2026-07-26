@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sca-service
     app.kubernetes.io/part-of: sca
   annotations:
-    openbank.tech/policy-checksum: "7cfa10c037cc0043"
+    openbank.tech/policy-checksum: "cbed46a961769c25"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -367,6 +367,63 @@ data:
     prohibited if {
     	input.action == "featureflag.flip"
     	input.attributes.flag in data.rules.feature_flags.prohibited_flag_combinations
+    }
+
+    # ---------------------------------------------------------------------------------------
+    # The shared M2M identity may never reach a WRITE through a role-only operator reason.
+    #
+    # Nearly every backend service authenticates with one Keycloak client, `openbank-services`,
+    # whose service-account carries ROLE_OPERATOR in the realm (openbank-realm.json). Combined
+    # with AuthorizeInterceptor classifying every client_credentials JWT as HUMAN (see
+    # rules.yaml: dependencies.principal_type_service_unreachable), that means every
+    # `operator-<domain>-write` rule — which checks only type == HUMAN plus the role — admitted
+    # ANY service holding those credentials to ANY write action in that domain, for any
+    # resource. Found on consent-service, where the rule's own comment claimed
+    # consent.grant/consent.revoke were unreachable by M2M callers while the role check made
+    # them reachable; the same shape exists on ~18 other services.
+    #
+    # Gated at the `allow` head rather than fixed in each service's rule, deliberately and for
+    # the reason the `prohibited` block above already states: a per-rule exclusion has to be
+    # remembered 19 times and again by whoever writes the 20th, and forgetting it fails OPEN.
+    # Here it cannot be bypassed by adding a new reason.
+    #
+    # What this does NOT block, by design:
+    #  - READS. `operator-read-any` / `compliance-read-any` are how real M2M callers fetch
+    #    cross-service data today (party-service's GDPR Art. 15 aggregation against kyc-service
+    #    and card-issuance-service depends on exactly that), so they are untouched.
+    #  - Writes granted by a reason that names the caller. A rule that identifies a specific
+    #    verified caller by `input.principal.id` and scopes the action set — e.g.
+    #    `service-consent-m2m-marketing`, `m2m-sanctions-screening`,
+    #    `service-sca-shared-client-m2m` — still fires, because the check below requires that
+    #    EVERY reason admitting this principal be a role-only write reason. One identity-scoped
+    #    reason is enough to allow the call. That is the sanctioned way to grant an M2M write:
+    #    name the caller and enumerate the actions.
+    #  - Human operators and admins. This is keyed on one service-account identity string, and
+    #    no human user can hold it.
+    #
+    # The structural fix is a per-service Keycloak client so `principal.id` alone identifies the
+    # caller and this guard becomes unnecessary; that is a standalone workload-identity project.
+    # Until then this is the fleet-wide floor.
+    # ---------------------------------------------------------------------------------------
+    shared_m2m_identity if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-services"
+    }
+
+    # `operator-<domain>-write` is the established name for "granted by ROLE_OPERATOR/ROLE_ADMIN
+    # alone". Enforced as a naming convention by .github/scripts/check-operator-write-naming.py
+    # so a differently-named role-only write rule cannot silently escape this guard.
+    role_only_write_reason(r) if {
+    	startswith(r, "operator-")
+    	endswith(r, "-write")
+    }
+
+    prohibited if {
+    	shared_m2m_identity
+    	count(allowed_reasons) > 0
+    	every r in allowed_reasons {
+    		role_only_write_reason(r)
+    	}
     }
   sca_rest_ext.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1885,6 +1942,26 @@ data:
         # all, so check-gate-graduation.sh could not see it and it had no deadline. That class is now
         # itself gated by .github/scripts/check-advisory-gate-registration.py.
         ci_producer: ".github/scripts/check-dotted-mp-messaging-keys.sh"
+      role_only_write_rule_naming:
+        # GHSA-58jq-9hq3-66jr. `service-account-openbank-services` — the identity nearly every
+        # backend service authenticates as — carries ROLE_OPERATOR in the realm, and
+        # AuthorizeInterceptor classifies every client_credentials JWT as HUMAN. So a rego rule
+        # granting a write on `type == HUMAN` + that role admitted ANY backend service to ANY write
+        # in that domain. rest.rego now prohibits that at the `allow` head, but it identifies such
+        # rules BY NAME (`operator-<domain>-write`) — which makes the naming convention
+        # load-bearing, and it turns out the convention was never actually followed.
+        detect: ["openbank-libs/governance/policies/rest.rego", "<component>/*_rest_ext.rego", "<component>/gen-*-opa-bundle.sh heredocs"]
+        require:
+          - "a role-only write rule is named operator-<domain>-write, or pins its caller with input.principal.id"
+        gate: role-only-write-rule-naming
+        enforced: advisory
+        target_enforce_date: "2026-10-31"   # ADR-0144
+        blocked_on: "18 role-only WRITE rules do not follow the naming convention and are baselined in
+          the script — each is reachable today by the shared service-account. Graduating needs the real
+          fix first: invert the default for that identity (deny except an explicit (identity, action)
+          allow-list). That allow-list cannot be guessed — AUTHZ_ENFORCE is true on most of these
+          services, so a missing entry is a money-path outage, not a test failure."
+        ci_producer: ".github/scripts/check-operator-write-naming.py"
       new_service_with_outbox:
         # A service that extends AbstractOutboxEntity / uses OutboxDispatcher but does NOT
         # set openbank.outbox.dispatch-enabled=true silently never dispatches events —
