@@ -72,6 +72,11 @@ quarkus:
     card-service:
       url: ${OPENBANK_CARD_SERVICE_URL:http://localhost:8118}
       scope: jakarta.inject.Singleton
+    consent-service:
+      # consent-service listens on 8106 in the `consent` namespace (gitops
+      # components/consent/consent-service.yaml). ADR-0206 D5 marketing-consent forwarder.
+      url: ${OPENBANK_CONSENT_SERVICE_URL:http://consent-service.consent:8106}
+      scope: jakarta.inject.Singleton
   smallrye-reactive-messaging:
     kafka:
       bootstrap-servers: localhost:29092

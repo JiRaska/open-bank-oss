@@ -46,6 +46,10 @@ class PartyService : PartyUseCase {
 
     @Inject lateinit var accountGuard: PartyAccountGuardPort
 
+    @Inject lateinit var marketingConsentForwarding: MarketingConsentForwardingPort
+
+    @Inject lateinit var marketingConsentTracking: MarketingConsentTrackingRepository
+
     @Inject lateinit var metrics: DomainMetrics
 
     @Inject lateinit var clock: Clock
@@ -101,16 +105,28 @@ class PartyService : PartyUseCase {
         return saved
     }
 
+    /**
+     * Forwards the toggle to consent-service (ADR-0198 D3, ADR-0206 D5) instead of writing
+     * `consentMarketing` here — [MarketingConsentProjectionService] (ADR-0205 D4) is the sole
+     * writer of that column, driven by consent-service's own ConsentGranted/Revoked events, so
+     * this path can never race it into a split brain. The returned [Party] reflects the caller's
+     * now-accepted intent optimistically (consent-service confirmed synchronously via ADR-0205
+     * D1's auto-activate path); the persisted row catches up asynchronously over Kafka, typically
+     * within milliseconds.
+     */
     override suspend fun updateMarketingConsent(cmd: UpdateMarketingConsentCommand): Party {
         val party = partyRepo.findById(cmd.id) ?: throw PartyNotFoundException(cmd.id)
-        val updated = party.copy(
-            consentMarketing = cmd.marketingConsent,
-            consentMarketingUpdatedAt = Instant.now(clock),
-            updatedAt = Instant.now(clock),
-        )
-        val saved = partyRepo.update(updated)
-        eventPublisher.publishPartyUpdated(saved)
-        return saved
+        if (cmd.marketingConsent) {
+            marketingConsentForwarding.grant(cmd.id)
+        } else {
+            val tracked = marketingConsentTracking.findByPartyId(cmd.id)
+            if (tracked != null) {
+                marketingConsentForwarding.revoke(cmd.id, tracked.consentId, "customer opted out")
+            }
+            // No tracked consent: already off from consent-service's point of view — nothing to
+            // revoke. Still returns the toggled-off Party below so the response matches intent.
+        }
+        return party.copy(consentMarketing = cmd.marketingConsent, consentMarketingUpdatedAt = Instant.now(clock))
     }
 
     /** Computes the RČ blind index when the pepper is configured and [taxId] is a valid Czech RČ. */

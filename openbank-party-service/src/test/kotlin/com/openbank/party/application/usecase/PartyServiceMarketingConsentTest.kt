@@ -5,6 +5,7 @@
 package com.openbank.party.application.usecase
 
 import com.openbank.party.application.port.`in`.UpdateMarketingConsentCommand
+import com.openbank.party.application.port.out.MarketingConsentTracking
 import com.openbank.party.domain.model.Address
 import com.openbank.party.domain.model.AmlStatus
 import com.openbank.party.domain.model.KycStatus
@@ -12,6 +13,7 @@ import com.openbank.party.domain.model.Party
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
 import io.mockk.coEvery
+import io.mockk.coJustRun
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -25,8 +27,14 @@ import java.util.Optional
 import java.util.UUID
 
 /**
- * Post-onboarding marketing-consent revocation (mobile app Profile screen). Split into its own
- * class to keep [PartyServiceTest] under detekt's LargeClass threshold.
+ * Post-onboarding marketing-consent toggle (mobile app Profile screen). Split into its own class
+ * to keep [PartyServiceTest] under detekt's LargeClass threshold.
+ *
+ * ADR-0198 D3 / ADR-0206 D5: [PartyService.updateMarketingConsent] now FORWARDS to consent-service
+ * instead of writing `consentMarketing`/calling `publishPartyUpdated` itself —
+ * [MarketingConsentProjectionService] (ADR-0205 D4) is the sole writer of that column, driven by
+ * consent-service's own outbox events. These tests replace the pre-ADR-0206 versions that asserted
+ * a direct `partyRepo.update()` write.
  */
 class PartyServiceMarketingConsentTest {
 
@@ -40,6 +48,8 @@ class PartyServiceMarketingConsentTest {
         eventPublisher = mockk(relaxed = true)
         metrics = mockk(relaxed = true)
         gdprAggregation = mockk(relaxed = true)
+        marketingConsentForwarding = mockk()
+        marketingConsentTracking = mockk()
         rcPepper = Optional.empty()
         clock = Clock.fixed(now, ZoneOffset.UTC)
     }
@@ -68,19 +78,50 @@ class PartyServiceMarketingConsentTest {
     )
 
     @Test
-    fun `updateMarketingConsent flips the value and stamps consentMarketingUpdatedAt`(): Unit = runBlocking {
+    fun `updateMarketingConsent true forwards a grant and does not write partyRepo`(): Unit = runBlocking {
         val service = newService()
+        coEvery { service.partyRepo.findById(partyId) } returns existingParty(consentMarketing = false)
+        coEvery { service.marketingConsentForwarding.grant(partyId) } returns UUID.randomUUID()
+
+        val result = service.updateMarketingConsent(UpdateMarketingConsentCommand(partyId, marketingConsent = true))
+
+        assertThat(result.consentMarketing).isTrue()
+        assertThat(result.consentMarketingUpdatedAt).isEqualTo(now)
+        // The immutable onboarding snapshot must not be touched by a later grant.
+        assertThat(result.consentGdpr).isTrue()
+        assertThat(result.consentCapturedAt).isEqualTo(Instant.parse("2026-01-01T00:00:00Z"))
+        coVerify(exactly = 1) { service.marketingConsentForwarding.grant(partyId) }
+        coVerify(exactly = 0) { service.partyRepo.update(any()) }
+        coVerify(exactly = 0) { service.eventPublisher.publishPartyUpdated(any()) }
+    }
+
+    @Test
+    fun `updateMarketingConsent false forwards a revoke using the tracked consentId`(): Unit = runBlocking {
+        val service = newService()
+        val trackedConsentId = UUID.randomUUID()
         coEvery { service.partyRepo.findById(partyId) } returns existingParty(consentMarketing = true)
-        coEvery { service.partyRepo.update(any()) } answers { firstArg() }
+        coEvery { service.marketingConsentTracking.findByPartyId(partyId) } returns
+            MarketingConsentTracking(partyId, trackedConsentId, now)
+        coJustRun { service.marketingConsentForwarding.revoke(partyId, trackedConsentId, any()) }
 
         val result = service.updateMarketingConsent(UpdateMarketingConsentCommand(partyId, marketingConsent = false))
 
         assertThat(result.consentMarketing).isFalse()
         assertThat(result.consentMarketingUpdatedAt).isEqualTo(now)
-        // The immutable onboarding snapshot must not be touched by a later revoke.
-        assertThat(result.consentGdpr).isTrue()
-        assertThat(result.consentCapturedAt).isEqualTo(Instant.parse("2026-01-01T00:00:00Z"))
-        coVerify { service.eventPublisher.publishPartyUpdated(result) }
+        coVerify(exactly = 1) { service.marketingConsentForwarding.revoke(partyId, trackedConsentId, any()) }
+        coVerify(exactly = 0) { service.partyRepo.update(any()) }
+    }
+
+    @Test
+    fun `updateMarketingConsent false is a no-op forward when nothing is tracked`(): Unit = runBlocking {
+        val service = newService()
+        coEvery { service.partyRepo.findById(partyId) } returns existingParty(consentMarketing = false)
+        coEvery { service.marketingConsentTracking.findByPartyId(partyId) } returns null
+
+        val result = service.updateMarketingConsent(UpdateMarketingConsentCommand(partyId, marketingConsent = false))
+
+        assertThat(result.consentMarketing).isFalse()
+        coVerify(exactly = 0) { service.marketingConsentForwarding.revoke(any(), any(), any()) }
     }
 
     @Test
