@@ -11,6 +11,7 @@ import com.openbank.libs.authz.AuthzDecision
 import com.openbank.libs.authz.AuthzQuery
 import com.openbank.libs.authz.PolicyDecisionPoint
 import com.openbank.mcp.application.McpCallAuditor
+import com.openbank.mcp.application.McpPiiMasker
 import com.openbank.mcp.application.McpToolRegistry
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
@@ -44,7 +45,7 @@ class McpEndpointTest {
     // below builds its own endpoint with an anonymous JWT to cover that (now denying) path instead.
     private fun endpoint(pdp: PolicyDecisionPoint, jwt: TestJsonWebToken = testAgentJwt()): McpEndpoint {
         val stub = StubReads(mapper)
-        val toolRegistry = McpToolRegistry(stub, stub, mapper)
+        val toolRegistry = McpToolRegistry(stub, stub, McpPiiMasker(mapper), mapper)
         val caller = CallerContextResolver(jwt)
         return McpEndpoint(
             registry = toolRegistry,

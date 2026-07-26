@@ -25,6 +25,7 @@ import jakarta.enterprise.context.ApplicationScoped
 class McpToolRegistry(
     private val accounts: AccountReadPort,
     private val proposals: ProposalPort,
+    private val masker: McpPiiMasker,
     private val mapper: ObjectMapper,
 ) {
 
@@ -107,7 +108,9 @@ class McpToolRegistry(
             "propose_payment" -> proposals.proposePayment(ctx, arguments)
             else -> return ToolCallResult(listOf(ToolContent(text = "Unknown tool: $toolName")), isError = true)
         }
-        return ToolCallResult(listOf(ToolContent(text = mapper.writeValueAsString(result))))
+        // The charter's `data_scope.pii: masked` (agents.yaml, `mcp-anonymous`) is enforced HERE —
+        // one response-shaping step every tool passes through, so a new tool cannot forget it (#2412).
+        return ToolCallResult(listOf(ToolContent(text = mapper.writeValueAsString(masker.mask(result)))))
     }
 
     private fun JsonNode.reqText(field: String): String = path(field).takeIf { it.isTextual }?.asText()
