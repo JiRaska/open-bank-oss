@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sepa-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "be9f59fe0f92e046"
+    openbank.tech/policy-checksum: "b251bdf4b9ada0af"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1746,10 +1746,17 @@ data:
         # or be explicitly allowlisted below with a one-line reason (a REST call made through a
         # shared/generic client this heuristic's exact-match can't see, or a genuinely-stale edge
         # already tracked for cleanup elsewhere).
-        detect: ["any <service>/governance.yaml lineage.downstream edge"]
+        # BOTH directions since #2315. An `upstream` edge on S naming T is a claim about T's code, so
+        # it is verified in T — exactly as if T had declared the mirrored downstream edge. Treating
+        # "someone else's code" as out of scope meant 63 upstream edges across 23 services were opened
+        # by nothing, and a service declaring ONLY upstream was skipped outright; aml-service had 3 of
+        # its 6 upstream edges wrong (#2312). Both directions normalize to one <source>-><target>
+        # key, so a relationship declared from both ends is one check and one allowlist entry.
+        detect: ["any <service>/governance.yaml lineage.downstream or lineage.upstream edge"]
         require:
           - "api edge has a matching @RegisterRestClient(configKey) in the same service, or an allowlist entry with a reason"
           - "topic edge has an actual topic overlap with the target service (per mechanism 1's producer/consumer map), or an allowlist entry with a reason"
+          - "an edge naming no in-tree service directory (github, prometheus, temporal) is reported as its own class, never counted as code drift"
         gate: lineage-code-audit
         enforced: advisory
         target_enforce_date: "2026-10-15"   # ADR-0144 — later than mechanism 1's date: first scan found a much higher (34/48) violation rate, expect a longer triage
@@ -1766,7 +1773,11 @@ data:
           checker itself (fixed), 19 are stale governance.yaml edges (corrected/removed), 6 below are
           real dependencies the heuristic's exact-match can't see, and 4 are genuine gaps tracked as
           their own issues, not fixed here. A follow-up scan found 7 more edges outside the original
-          34 (the *->admin-ui reversed-direction shape) — not yet triaged."
+          34 (the *->admin-ui reversed-direction shape) — not yet triaged. #2315 then added the
+          upstream direction: the first upstream scan surfaced 24 further unbacked edges (26 total
+          unallowlisted, of which 2 are the pre-existing downstream findings) plus 10 edges naming an
+          external system — all untriaged, which is why target_enforce_date is unchanged and this
+          stays advisory."
         ci_producer: ".github/scripts/check-governance-lineage.py"
         allowlist:
           - edge: "openbank-copilot-service->balance-service:api"

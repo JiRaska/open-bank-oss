@@ -552,10 +552,12 @@ jobs:
         run: python3 .github/scripts/check-no-runblocking-in-scheduled.py
 
       # ADR-0160 mechanism 2 / rules.yaml: change_requirements.lineage_code_audit. Fleet-wide scan
-      # (not diff-scoped): every governance.yaml lineage.downstream edge must be backed by
-      # grep-verifiable code, or a one-line-reasoned allowlist entry. Reuses mechanism 1's topic
-      # map via importlib. ADVISORY (ADR-0144) — findings are ::warning annotations. Flip to
-      # enforced once the 34-edge first-scan triage lands = add --enforce below.
+      # (not diff-scoped): every governance.yaml lineage edge — downstream AND, since #2315,
+      # upstream — must be backed by grep-verifiable code, or a one-line-reasoned allowlist entry.
+      # An upstream edge on S naming T is a claim about T's code, so it is checked in T; both
+      # directions collapse to one <source>-><target> key. Reuses mechanism 1's topic map via
+      # importlib. ADVISORY (ADR-0144) — findings are ::warning annotations. Flip to enforced once
+      # the first-scan triage (34 downstream + 24 upstream) lands = add --enforce below.
       - name: "governance lineage-vs-code audit (ADR-0160, advisory)"
         run: python3 .github/scripts/check-governance-lineage.py
 

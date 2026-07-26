@@ -29,7 +29,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-copilot-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "8b799186606ed55e"
+        openbank.tech/policy-checksum: "7b3da65956c4f71f"
     spec:
       securityContext:
         runAsNonRoot: true
