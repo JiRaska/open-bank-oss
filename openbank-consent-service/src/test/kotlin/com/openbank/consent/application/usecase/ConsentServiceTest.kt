@@ -244,6 +244,61 @@ class ConsentServiceTest {
     }
 
     @Test
+    fun `revokeConsent throws ConsentGranteeMismatchException when expectedGranteeId does not match`() {
+        coEvery { consentRepository.findById(consentId) } returns consent(granteeId = "party-service:marketing-comms")
+
+        assertThrows<ConsentGranteeMismatchException> {
+            runBlocking {
+                service.revokeConsent(
+                    RevokeConsentCommand(
+                        consentId = consentId,
+                        partyId = partyId,
+                        reason = "toggle off",
+                        expectedGranteeId = "some-other-grantee",
+                    ),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `revokeConsent succeeds when expectedGranteeId matches the consent's own granteeId`(): Unit = runBlocking {
+        val consent = consent(granteeId = "party-service:marketing-comms")
+        coEvery { consentRepository.findById(consentId) } returns consent
+        coEvery { consentRepository.save(any(), any()) } answers { firstArg() }
+
+        val result = service.revokeConsent(
+            RevokeConsentCommand(
+                consentId = consentId,
+                partyId = partyId,
+                reason = "toggle off",
+                expectedGranteeId = "party-service:marketing-comms",
+            ),
+        )
+
+        assertThat(result.status).isEqualTo(ConsentStatus.REVOKED)
+    }
+
+    @Test
+    fun `revokeConsent skips the grantee cross-check when expectedGranteeId is null (human path unchanged)`(): Unit =
+        runBlocking {
+            val consent = consent(granteeId = granteeId)
+            coEvery { consentRepository.findById(consentId) } returns consent
+            coEvery { consentRepository.save(any(), any()) } answers { firstArg() }
+
+            val result = service.revokeConsent(
+                RevokeConsentCommand(
+                    consentId = consentId,
+                    partyId = partyId,
+                    reason = "operator revoke",
+                    expectedGranteeId = null,
+                ),
+            )
+
+            assertThat(result.status).isEqualTo(ConsentStatus.REVOKED)
+        }
+
+    @Test
     fun `validateConsent returns Invalid when consent not found`(): Unit = runBlocking {
         coEvery { consentRepository.findById(consentId) } returns null
 

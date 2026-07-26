@@ -45,6 +45,12 @@ class ConsentMixedScopeException(scopes: Set<ConsentScope>) :
         "Cannot mix GDPR-only scopes with SCA-required scopes in one consent request: $scopes. " +
             "Request the GDPR-only and SCA-required scopes separately (ADR-0205 D1).",
     )
+class ConsentGranteeMismatchException(id: UUID, expectedGranteeId: String) :
+    RuntimeException(
+        "Consent $id does not belong to grantee $expectedGranteeId — refusing to revoke. " +
+            "The M2M OPA rule scopes consent.revoke to this exact grantee (ADR-0206); a caller " +
+            "presenting the right grantee string for the wrong consent is rejected here too.",
+    )
 
 @ApplicationScoped
 class ConsentService(
@@ -183,6 +189,9 @@ class ConsentService(
 
         if (consent.partyId != command.partyId) {
             throw ConsentNotOwnedByPartyException(command.consentId, command.partyId)
+        }
+        if (command.expectedGranteeId != null && consent.granteeId != command.expectedGranteeId) {
+            throw ConsentGranteeMismatchException(command.consentId, command.expectedGranteeId)
         }
 
         val revoked = consent.revoke(command.reason, OffsetDateTime.now(clock))

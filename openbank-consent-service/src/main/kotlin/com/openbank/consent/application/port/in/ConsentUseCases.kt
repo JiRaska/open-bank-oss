@@ -25,7 +25,16 @@ data class CreateConsentCommand(
     val userAgent: String?,
 )
 
-data class RevokeConsentCommand(val consentId: UUID, val partyId: UUID, val reason: String)
+// expectedGranteeId is null for a human/operator-initiated revoke (no cross-check, matches
+// today's behavior); an M2M caller authorized via the grantee-scoped OPA rule (ADR-0206) must
+// pass its own granteeId so the use case can confirm the consent it's revoking is actually the
+// one that rule authorized — the OPA resource check alone can't see the DB row.
+data class RevokeConsentCommand(
+    val consentId: UUID,
+    val partyId: UUID,
+    val reason: String,
+    val expectedGranteeId: String? = null,
+)
 
 data class ValidateConsentCommand(
     val consentId: UUID,

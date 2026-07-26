@@ -61,7 +61,11 @@ class ConsentResource(
     // Renamed from consent.create (issue #938 follow-up): "grant" is a distinctive verb so
     // adding it to rules.yaml four_eyes.verbs cannot silently four-eyes-gate every OTHER
     // money-path service's unrelated `.create` action fleet-wide.
-    @Authorize(action = "consent.grant")
+    // Dotted-path resource extraction (ADR-0206 D1/D2): scopes the shared M2M principal's
+    // consent.grant to grantee=party-service:marketing-comms only (consent-opa-bundle.yaml's
+    // service-consent-m2m-marketing rule) instead of opening it fleet-wide. Human/operator
+    // callers are unaffected — their existing OPA rule doesn't inspect this resource.
+    @Authorize(action = "consent.grant", resource = "#request.granteeId")
     suspend fun create(
         request: CreateConsentRequest?,
         @HeaderParam("X-Request-ID") xRequestId: String?,
@@ -132,14 +136,21 @@ class ConsentResource(
     @Operation(summary = "Revoke an ACTIVE consent; transitions to REVOKED and enqueues ConsentRevoked event")
     @DELETE
     @Path("/{id}")
+    // "resource = #id" is unaffected (unscoped human/operator rule). The optional granteeId
+    // query param is for the M2M path (ADR-0206 D2): consent-opa-bundle.yaml's
+    // service-consent-m2m-marketing rule checks it via #granteeId directly (no dotted path
+    // needed here — it's already a top-level parameter), and the use case cross-checks it
+    // against the loaded consent's actual granteeId before revoking, since the OPA decision
+    // can't see the DB row this endpoint hasn't loaded yet.
     @Authorize(action = "consent.revoke", resource = "#id")
     suspend fun revoke(
         @PathParam("id") id: UUID,
         @QueryParam("partyId") partyId: UUID,
+        @QueryParam("granteeId") granteeId: String?,
         request: RevokeConsentRequest?,
     ): ConsentResponse {
         requireNotNull(request) { "request body is required" }
-        val consent = revokeConsent.revokeConsent(RevokeConsentCommand(id, partyId, request.reason))
+        val consent = revokeConsent.revokeConsent(RevokeConsentCommand(id, partyId, request.reason, granteeId))
         return ConsentResponse.from(consent)
     }
 

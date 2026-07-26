@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: vop-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "c3a57481beb12064"
+    openbank.tech/policy-checksum: "06c74fbe07dd77f8"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1997,10 +1997,20 @@ data:
                                                # confirmed M2M automated caller (customer-edge) — gating either would brick
                                                # production automation once enforcement is ever flipped on, not just close
                                                # the risky operator-console gap. See the four_eyes.verbs guardrail note below.
-      - openbank-consent-service               # four-eyes wired (issue #938 follow-up) on consent.grant/consent.revoke —
-                                                # both confirmed human-operator-only (no M2M caller). consent.activate
-                                                # deliberately left ungated: its rego already reserves an M2M grant for a
-                                                # possible SCA-completion-callback caller.
+      - openbank-consent-service               # four-eyes wired (issue #938 follow-up) on consent.grant/consent.revoke.
+                                                # UPDATED (ADR-0206): no longer exclusively human-operator — the shared
+                                                # M2M principal may now call both, but ONLY for
+                                                # grantee=party-service:marketing-comms (consent-opa-bundle.yaml's
+                                                # service-consent-m2m-marketing rule), a low-risk SCA-exempt marketing
+                                                # toggle (ADR-0205 D1). AUTHZ_FOUR_EYES_ENFORCE is false today for
+                                                # consent-service (consent-service.yaml has no override), so this M2M
+                                                # path is not currently blocked by the maker/checker pause — but if
+                                                # four-eyes enforcement is ever flipped on for this service, the
+                                                # party-service forwarder (no human in the loop) would stall on the
+                                                # missing second approver. Flag that rollout precondition before
+                                                # flipping AUTHZ_FOUR_EYES_ENFORCE here. consent.activate deliberately
+                                                # left ungated: its rego already reserves an M2M grant for a possible
+                                                # SCA-completion-callback caller.
       - openbank-fraud-service                # ADR-0084: v4 rule engine live; domestic-payment enforcement gate merged (issue #667, flag default-off pending risk-team threshold calibration)
                                                # four-eyes assessed (issue #938 follow-up): the only REST surface today is a stateless
                                                # POST /fraud/score (fraud.score) — no operator case-decision, rule-config, or manual
