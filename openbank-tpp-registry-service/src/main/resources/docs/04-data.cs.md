@@ -3,7 +3,7 @@
 ## Datové úložiště
 
 - **Engine:** PostgreSQL 16, přístup přes Hibernate Reactive (Panache) nad reaktivním PG klientem.
-- **Databáze:** `openbank_tpp_registry` (`schemaName: tpp_schema` v `governance.yaml` je deklarovaný logický název schématu; runtime connection string míří na databázi `openbank_tpp_registry`).
+- **Databáze:** `openbank_tpp_registry` (`governance.yaml` deklaruje `databaseName: openbank_tpp_registry`, což odpovídá runtime connection stringu; tabulky žijí v jejím schématu `public`).
 - **Generování schématu:** `none` — schéma vlastní Flyway; `migrate-at-start: true`.
 
 ## Tabulky

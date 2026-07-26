@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: core
 primaryDatastore: PostgreSQL
-schemaName: ledger_schema
+databaseName: openbank_ledger
 dataLineageRole: both
 dataClassification: confidential
 retentionPolicy: 10 years
@@ -14,6 +14,6 @@ lineage:
     - serviceName: transaction-service
       relationType: api
       description: posts GL
-schemaLineage:
-  ownedSchemas:
-    - ledger_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_ledger

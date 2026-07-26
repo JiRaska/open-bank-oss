@@ -3,8 +3,8 @@
 # derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
 # openbank-libs/governance/governance.schema.json
 dataDomain: platform
-primaryDatastore: Redis
-schemaName: agent_schema
+primaryDatastore: PostgreSQL
+databaseName: openbank_agent
 dataLineageRole: internal
 dataClassification: internal
 retentionPolicy: 1 year
@@ -20,9 +20,9 @@ lineage:
     - serviceName: balance-service
       relationType: api
       description: MCP tool
-schemaLineage:
-  ownedSchemas:
-    - agent_schema
-  dependentSchemas:
-    - accounts_schema
-    - transactions_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_agent
+  dependentDatabases:
+    - openbank_accounts
+    - openbank_transactions

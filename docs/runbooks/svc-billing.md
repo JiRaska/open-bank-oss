@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-billing-service` |
 | HTTP port | `8132` |
 | Data domain | payments |
-| Datastore | PostgreSQL (schema `billing_schema`) |
+| Datastore | PostgreSQL (database `openbank_billing`) |
 | Classification | internal |
 | Retention | 7 years |
 | Lineage role | both |

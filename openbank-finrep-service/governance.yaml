@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: compliance
 primaryDatastore: none
-schemaName: n/a
+ownsNoDatabase: true
 dataLineageRole: consumer
 dataClassification: confidential
 retentionPolicy: 10 years

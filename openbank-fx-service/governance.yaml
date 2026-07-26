@@ -3,14 +3,14 @@
 # derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
 # openbank-libs/governance/governance.schema.json
 dataDomain: payments
-primaryDatastore: Redis
-schemaName: fx_schema
+primaryDatastore: PostgreSQL
+databaseName: openbank_fx
 dataLineageRole: both
 dataClassification: confidential
 retentionPolicy: 5 years
 evidenceExported: false
-schemaLineage:
-  ownedSchemas:
-    - fx_schema
-  dependentSchemas:
-    - transactions_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_fx
+  dependentDatabases:
+    - openbank_transactions

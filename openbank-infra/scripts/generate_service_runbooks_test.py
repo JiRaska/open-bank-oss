@@ -37,8 +37,7 @@ def load_module(repo_root: Path):
 
 GOVERNANCE = """dataDomain: platform
 primaryDatastore: {datastore}
-schemaName: {schema}
-dataClassification: internal
+{owns_or_db_line}dataClassification: internal
 retentionPolicy: 1 year
 dataLineageRole: consumer
 lineage:
@@ -89,11 +88,19 @@ class RunbookGeneratorTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def write_service(self, datastore="none", schema="n/a", ns="widgets", inherit=False):
+    def write_service(self, datastore="none", database=None, owns_no_database=None, ns="widgets", inherit=False):
         svc = self.root / "openbank-widget-service"
         (svc / "src" / "main" / "resources").mkdir(parents=True, exist_ok=True)
+        # At most one of database / owns_no_database is set per fixture — same as a real
+        # governance.yaml (ADR-0196), where the two are mutually exclusive.
+        if owns_no_database:
+            owns_or_db_line = "ownsNoDatabase: true\n"
+        elif database:
+            owns_or_db_line = f"databaseName: {database}\n"
+        else:
+            owns_or_db_line = ""
         (svc / "governance.yaml").write_text(
-            GOVERNANCE.format(datastore=datastore, schema=schema)
+            GOVERNANCE.format(datastore=datastore, owns_or_db_line=owns_or_db_line)
         )
         (svc / "src" / "main" / "resources" / "application.yaml").write_text(
             "quarkus:\n  http:\n    port: 8199\n"
@@ -144,6 +151,33 @@ class RunbookGeneratorTest(unittest.TestCase):
         self.assertNotIn("Flyway checksum", out)
         self.assertNotIn("connection-pool metrics", out)
 
+    # -- ownsNoDatabase but a real datastore (ADR-0196: copilot, customer-edge) --------------
+    def test_owns_no_database_with_a_real_store_is_not_told_it_has_nothing_to_lose(self):
+        """copilot/customer-edge shape: ownsNoDatabase: true + primaryDatastore: Redis. The old
+        code inferred statelessness from the datastore string alone, so 'Redis' (not in the
+        none/n/a/empty set) fell through to the generic Postgres-shaped 'restore from the
+        datastore's managed backup' text — and separately, if it HAD matched the stateless
+        branch, that branch's blanket 'holds no state to lose' claim would be actively wrong
+        for a service whose Redis entries include durable, TTL-less credentials."""
+        self.write_service(datastore="Redis", owns_no_database=True)
+        out = self.mod.render("widget")
+        self.assertIn("owns no database", out)
+        self.assertIn("Redis", out)
+        self.assertNotIn("holds no state to lose", out)
+        self.assertNotIn("restore from the datastore's managed backup", out)
+        self.assertNotIn("connection-pool metrics", out)
+
+    def test_owns_no_database_is_read_as_an_explicit_assertion_not_inferred(self):
+        """A service that owns a database must NOT take the owns-no-database branch merely
+        because ownsNoDatabase is absent — the whole point of the flag is that absence means
+        nothing (ADR-0196)."""
+        self.write_service(datastore="postgresql", database="openbank_widget")
+        self.assertFalse(self.mod.owns_no_database(self.mod.gov_facts("widget")))
+
+    def test_owns_no_database_true_flag_wins_over_a_stateful_looking_datastore(self):
+        self.write_service(datastore="Redis", owns_no_database=True)
+        self.assertTrue(self.mod.owns_no_database(self.mod.gov_facts("widget")))
+
     def test_is_stateless_accepts_the_spellings_the_fleet_actually_uses(self):
         for value in ("none", "None", "n/a", "", "  ", "—", "-"):
             self.assertTrue(self.mod.is_stateless(value), f"{value!r} should be stateless")
@@ -151,7 +185,7 @@ class RunbookGeneratorTest(unittest.TestCase):
             self.assertFalse(self.mod.is_stateless(value), f"{value!r} should be stateful")
 
     def test_stateful_service_keeps_the_datastore_recovery_text(self):
-        self.write_service(datastore="postgresql", schema="widget")
+        self.write_service(datastore="postgresql", database="openbank_widget")
         out = self.mod.render("widget")
         self.assertIn("Disaster recovery", out)
         self.assertIn("connection-pool metrics", out)
@@ -159,13 +193,13 @@ class RunbookGeneratorTest(unittest.TestCase):
 
     def test_stateful_service_without_a_backup_says_dr_is_not_achievable(self):
         """The honest case: a Postgres service whose cluster has no barmanObjectStore."""
-        self.write_service(datastore="postgresql", schema="widget")
+        self.write_service(datastore="postgresql", database="openbank_widget")
         out = self.mod.render("widget")
         self.assertIn("no backup configured", out)
         self.assertIn("RPO/RTO: undefined", out)
 
     def test_stateful_service_with_a_backup_states_the_rpo_target(self):
-        self.write_service(datastore="postgresql", schema="widget")
+        self.write_service(datastore="postgresql", database="openbank_widget")
         (self.comp / "widget-db.yaml").write_text(
             "apiVersion: postgresql.cnpg.io/v1\n"
             "kind: Cluster\n"

@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: payments
 primaryDatastore: PostgreSQL
-schemaName: swift_schema
+databaseName: openbank_swift
 dataLineageRole: both
 dataClassification: confidential
 retentionPolicy: 10 years
@@ -14,9 +14,9 @@ lineage:
     - serviceName: transaction-service
       relationType: api
       description: creates
-schemaLineage:
-  ownedSchemas:
-    - swift_schema
-  dependentSchemas:
-    - transactions_schema
-    - aml_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_swift
+  dependentDatabases:
+    - openbank_transactions
+    - openbank_aml

@@ -93,4 +93,4 @@ The whole dataset is classified **confidential** (`governance.yaml: dataClassifi
 ## Consistency & lineage
 
 - **Upstream identifiers** (`party_id`, `debit_account_id`) are foreign references with **no DB-level FK** — services are isolated; integrity is maintained at the application boundary.
-- **Downstream** (`governance.yaml: lineage.downstream`): `transaction-service` consumes the order events and creates the actual payment; this service `dependentSchemas: [transactions_schema]`.
+- **Downstream** (`governance.yaml: lineage.downstream`): `transaction-service` consumes the order events and creates the actual payment; this service `dependentDatabases: [openbank_transactions]`.

@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-statement-service` |
 | HTTP port | `8136` |
 | Data domain | compliance |
-| Datastore | PostgreSQL (schema `statement_schema`) |
+| Datastore | PostgreSQL (database `openbank_statement`) |
 | Classification | restricted |
 | Retention | 10 years |
 | Lineage role | both |

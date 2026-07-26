@@ -22,14 +22,15 @@ interface GovernanceService {
   serviceName: string
   dataDomain: string | null
   primaryDatastore: string | null
-  schemaName: string | null
+  databaseName: string | null
+  databaseNameEvidence?: 'derived' | 'declared-only' | null
   dataLineageRole: string | null
   dataClassification: string
   retentionPolicy: string
   evidenceExported?: boolean
   flywayDeclaredVersion: string | null
   lineage?: unknown
-  schemaLineage?: unknown
+  databaseLineage?: unknown
 }
 
 // Shape consumers expect (the derived service + runtime fields).

@@ -4,11 +4,11 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: core
 primaryDatastore: PostgreSQL
-schemaName: products_schema
+databaseName: openbank_products
 dataLineageRole: producer
 dataClassification: internal
 retentionPolicy: indefinite
 evidenceExported: false
-schemaLineage:
-  ownedSchemas:
-    - products_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_products

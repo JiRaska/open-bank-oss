@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: payments
 primaryDatastore: PostgreSQL
-schemaName: sepa_schema
+databaseName: openbank_sepa_payments
 dataLineageRole: both
 dataClassification: confidential
 retentionPolicy: 7 years
@@ -20,9 +20,9 @@ lineage:
     - serviceName: audit-service
       relationType: topic
       description: events
-schemaLineage:
-  ownedSchemas:
-    - sepa_schema
-  dependentSchemas:
-    - transactions_schema
-    - aml_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_sepa_payments
+  dependentDatabases:
+    - openbank_transactions
+    - openbank_aml

@@ -4,8 +4,8 @@
 
 `openbank-agent-service` is a **stateless reasoning and routing layer**. It has:
 
-- ❌ **No JPA / Hibernate entities.**
-- ❌ **No Flyway migrations** — there is no `src/main/resources/db/migration/` directory. There is no relational schema to version.
+- ❌ **No JPA / Hibernate entities** — the one table it does own is read and written with plain JDBC.
+- ✅ **Flyway migrations** — `src/main/resources/db/migration/` versions the single `agent_proposal` table (ADR-0031 D4, the HITL approval queue). That table is the service's only persistence.
 - ❌ **No domain outbox table** — the two trust boundaries publish audit events instead (see below).
 
 The per-service governance manifest ([`governance.yaml`](../../../../openbank-agent-service/governance.yaml)) declares:
@@ -13,14 +13,14 @@ The per-service governance manifest ([`governance.yaml`](../../../../openbank-ag
 | Field | Value |
 |---|---|
 | `dataDomain` | `platform` |
-| `primaryDatastore` | `Redis` |
-| `schemaName` | `agent_schema` |
+| `primaryDatastore` | `PostgreSQL` |
+| `databaseName` | `openbank_agent` |
 | `dataLineageRole` | `internal` |
 | `dataClassification` | `internal` |
 | `retentionPolicy` | `1 year` |
 | `evidenceExported` | `false` |
 
-> **Reality vs. declaration:** `Redis` / `agent_schema` are **reserved** for future charter/run state (e.g. distributed rate-limit counters, conversation memory). **Today there is no Redis wiring in the code** — the only state the service keeps is the **in-memory** rate-limit counters in `CharterRateLimiter` (`ConcurrentHashMap`, reset on pod restart). Treat the `Redis` datastore as a forward-looking declaration, not a live dependency. (TBD until charter/run state is implemented.)
+> **Scope of that datastore:** `PostgreSQL` / `openbank_agent` covers the HITL proposal queue only — the tables live in the `public` schema of the service's own database. Everything else the service keeps is **in-memory**: the rate-limit counters in `CharterRateLimiter` (`ConcurrentHashMap`, reset on pod restart) are not persisted and not distributed. There is **no Redis wiring in the code**; distributed charter/run state remains a follow-up.
 
 ## Transient / in-process state
 

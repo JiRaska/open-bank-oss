@@ -4,11 +4,11 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: compliance
 primaryDatastore: PostgreSQL
-schemaName: anacredit_schema
+databaseName: openbank_anacredit
 dataLineageRole: both
 dataClassification: restricted
 retentionPolicy: 10 years
 evidenceExported: false
-schemaLineage:
-  ownedSchemas:
-    - anacredit_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_anacredit

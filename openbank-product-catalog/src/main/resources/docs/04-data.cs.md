@@ -2,25 +2,25 @@
 
 ## Stav perzistence — čtěte nejdřív
 
-Katalog **dnes nemá zapojenou databázi**. Produkty žijí v in-memory `ConcurrentHashMap`, naseedované při startu **15 produkty** (`prod-001`…`prod-015`). Neexistují:
+Katalog je **postavený nad PostgreSQL** (ADR-0105 P1; dřív šlo o in-memory `ConcurrentHashMap`). Existují:
 
-- **žádné Flyway migrace** (`db/migration` neexistuje),
-- **žádný JDBC/Mongo driver** na classpath,
-- **žádný perzistovaný stav** — restart znovu naseeduje stejný pevný katalog.
+- **Flyway migrace** v `db/migration` — `V1__init_products.sql` zakládá dokumentově tvarovanou tabulku `products`,
+- **reaktivní Panache** klient pro aplikaci plus JDBC driver, přes který migruje Flyway,
+- **perzistovaný stav** — **15 kanonických produktů** se idempotentně naseeduje při prvním startu z kotlinského `ProductSeed` a dál žije v databázi.
 
-Per-service governance manifest (`governance.yaml`, [ADR 0071](../../../../docs/adr/0071-governance-manifest-as-derived-data.md)) **deklaruje zamýšlený** datastore a schéma:
+Per-service governance manifest (`governance.yaml`, [ADR 0071](../../../../docs/adr/0071-governance-manifest-as-derived-data.md)) deklaruje:
 
 | Pole | Deklarovaná hodnota |
 |---|---|
-| `primaryDatastore` | `MongoDB` |
-| `schemaName` | `products_schema` |
+| `primaryDatastore` | `PostgreSQL` |
+| `databaseName` | `openbank_products` |
 | `dataDomain` | `core` |
 | `dataLineageRole` | `producer` |
 | `dataClassification` | `internal` |
 | `retentionPolicy` | `indefinite` |
 | `evidenceExported` | `false` |
 
-Perzistence v DB (MongoDB / `products_schema`) je **sledovaný follow-up**; tato sekce dokumentuje jak aktuální realitu (in-memory seed), tak deklarovaný cíl.
+Tabulky žijí ve schématu `public` vlastní databáze služby `openbank_products`.
 
 ## Logický datový model
 

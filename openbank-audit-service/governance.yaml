@@ -3,8 +3,8 @@
 # derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
 # openbank-libs/governance/governance.schema.json
 dataDomain: compliance
-primaryDatastore: Cassandra
-schemaName: audit_schema
+primaryDatastore: PostgreSQL
+databaseName: openbank_audit
 dataLineageRole: consumer
 dataClassification: restricted
 retentionPolicy: 10 years
@@ -23,10 +23,10 @@ lineage:
     - serviceName: sepa-payment
       relationType: topic
       description: events
-schemaLineage:
-  ownedSchemas:
-    - audit_schema
-  dependentSchemas:
-    - accounts_schema
-    - transactions_schema
-    - parties_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_audit
+  dependentDatabases:
+    - openbank_accounts
+    - openbank_transactions
+    - openbank_parties

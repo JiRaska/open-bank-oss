@@ -7,7 +7,7 @@
 - **Schema:** tables live in the `public` schema (grants are issued `IN SCHEMA public`).
 - **Hibernate:** `database.generation = none` — the schema is owned by Flyway, never auto-generated.
 
-> Note: the curatorial `governance.yaml` lists `primaryDatastore: Cassandra` / `schemaName: audit_schema`. The **running code uses PostgreSQL** (`openbank_audit`, `public` schema) — the governance manifest is stale on this point and should be reconciled (flagged in 05/notes).
+> Note: the curatorial `governance.yaml` declares `primaryDatastore: PostgreSQL` / `databaseName: openbank_audit`, matching the running code.
 
 ## Flyway migrations
 

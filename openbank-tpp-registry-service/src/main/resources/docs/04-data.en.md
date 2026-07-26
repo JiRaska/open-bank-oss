@@ -3,7 +3,7 @@
 ## Datastore
 
 - **Engine:** PostgreSQL 16, accessed via Hibernate Reactive (Panache) over the reactive PG client.
-- **Database:** `openbank_tpp_registry` (the `governance.yaml` `schemaName: tpp_schema` is the declared logical schema name; the runtime connection string targets the `openbank_tpp_registry` database).
+- **Database:** `openbank_tpp_registry` (`governance.yaml` declares `databaseName: openbank_tpp_registry`, matching the runtime connection string; the tables live in its `public` schema).
 - **Schema generation:** `none` — Flyway owns the schema; `migrate-at-start: true`.
 
 ## Tables

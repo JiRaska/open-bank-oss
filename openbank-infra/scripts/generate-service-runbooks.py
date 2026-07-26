@@ -45,7 +45,10 @@ def gov_facts(short: str) -> dict:
     """Parse the flat scalars + lineage service names from governance.yaml."""
     txt = read(gitops_facts.module_dir(short, REPO) / "governance.yaml")
     facts = {}
-    for key in ("dataDomain", "primaryDatastore", "schemaName",
+    # databaseName (ADR-0196) replaced schemaName, which named a Postgres schema that existed
+    # nowhere in the fleet. ownsNoDatabase is an explicit assertion, not inferred from a datastore
+    # string — keep reading both here so this script doesn't reintroduce that inference.
+    for key in ("dataDomain", "primaryDatastore", "databaseName", "ownsNoDatabase",
                 "dataClassification", "retentionPolicy", "dataLineageRole"):
         m = re.search(rf"^{key}:\s*(.+?)\s*$", txt, re.M)
         if m:
@@ -89,6 +92,21 @@ def is_stateless(datastore: str) -> bool:
     return gitops_facts.is_stateless(datastore)
 
 
+def owns_no_database(facts: dict) -> bool:
+    """True iff the service owns no database — the ADR-0196 `ownsNoDatabase: true` assertion,
+    falling back to the old string-inference for a governance.yaml this script can still parse
+    but that predates the assertion (defensive; the CI schema gate should already reject that
+    shape). NOT the same question as `is_stateless(datastore)`: a service can own no database
+    while still holding real state elsewhere — copilot and customer-edge both declare
+    `primaryDatastore: Redis` + `ownsNoDatabase: true`, and customer-edge's Redis entries include
+    durable, TTL-less passkey credentials. Conflating the two is exactly the inaccuracy that
+    caused this runbook to tell an on-call engineer "restore from the datastore's managed
+    backup" for a service with no database and no such backup."""
+    if facts.get("ownsNoDatabase", "").strip().lower() == "true":
+        return True
+    return is_stateless(facts.get("primaryDatastore", ""))
+
+
 def backup_configured(short: str) -> bool:
     """True iff a deployed manifest configures a backup for this service's datastore
     (CNPG barmanObjectStore). Mirrors the readiness collector's C5 detection so the
@@ -103,10 +121,13 @@ def backup_configured(short: str) -> bool:
     return False
 
 
-def dr_for(datastore: str, has_backup: bool) -> str:
+def dr_for(datastore: str, has_backup: bool, owns_no_db: bool = None) -> str:
     d = (datastore or "").lower()
-    if is_stateless(datastore):
-        # A stateless service has nothing to restore, and telling an on-call engineer to
+    # owns_no_db defaults to the old string-inference for any caller that still passes only
+    # `datastore` (kept so this stays a narrow, additive change to a stable public function).
+    no_db = is_stateless(datastore) if owns_no_db is None else owns_no_db
+    if no_db and is_stateless(datastore):
+        # Nothing declared at all — nothing to restore, and telling an on-call engineer to
         # "restore from the datastore's managed backup" sends them hunting for a backup
         # that does not exist — during an incident, at 3am. Its recovery is a redeploy.
         return ("- **Mechanism:** none needed — this service declares no primary datastore, so it "
@@ -117,6 +138,20 @@ def dr_for(datastore: str, has_backup: bool) -> str:
                 "recover those first, using their own runbooks.\n"
                 "- **Verify:** health endpoint green, then re-drive one request end to end against "
                 "an upstream that is already known-good.")
+    if no_db:
+        # Owns no DATABASE (ADR-0196 `ownsNoDatabase: true`) but declares a real datastore —
+        # copilot and customer-edge both keep state in Redis with no database behind it. Do NOT
+        # claim "nothing to lose": customer-edge's Redis entries include durable, TTL-less
+        # passkey credentials, so a blanket "safe to lose" claim would be actively wrong there.
+        return (f"- **Mechanism:** this service owns no database — there is no managed backup to "
+                f"restore, and none is expected. It does hold state in **{datastore}**.\n"
+                f"- **Before assuming zero impact:** check this service's own `governance.yaml` "
+                f"and `{datastore}` keys for anything with a long or no TTL (a durable credential, "
+                f"not a session cache) — losing that requires its own recovery path, not a redeploy.\n"
+                "- **Restore:** re-sync the ArgoCD Application (or `kubectl rollout restart` the "
+                f"Deployment). Verify against the `{datastore}` cluster's own health/backup posture, "
+                "which this runbook does not track.\n"
+                "- **Verify:** health endpoint green, then re-drive one request end to end.")
     if "postgres" in d:
         proc = ("- **Restore:** create a `Cluster` with `bootstrap.recovery` pointing at the "
                 "backup object store; CNPG replays WAL to the target time. See runbook 0003 "
@@ -162,7 +197,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `{module}` |
 | HTTP port | `{port}` |
 | Data domain | {domain} |
-| Datastore | {datastore} (schema `{schema}`) |
+| Datastore | {datastore} (database `{database}`) |
 | Classification | {classification} |
 | Retention | {retention} |
 | Lineage role | {role} |
@@ -217,9 +252,10 @@ def render(short: str) -> str:
     up = ", ".join(f"`{s}`" for s in f.get("upstream", [])) or "_none declared_"
     down = ", ".join(f"`{s}`" for s in f.get("downstream", [])) or "_none declared_"
     datastore = f.get("primaryDatastore", "—")
-    stateless = is_stateless(datastore)
-    has_backup = False if stateless else backup_configured(short)
-    if stateless:
+    owns_none = owns_no_database(f)
+    nothing_at_all = owns_none and is_stateless(datastore)
+    has_backup = False if owns_none else backup_configured(short)
+    if nothing_at_all:
         rpo = ("- **RPO: n/a** — no persistent state. **RTO target:** ≤ 10 min "
                "(image pull + rollout).")
         failure_modes = (
@@ -229,6 +265,21 @@ def render(short: str) -> str:
             "- **Readiness flapping:** this service holds no datastore, so look outward — an\n"
             "  upstream dependency below, or the OPA sidecar if `AUTHZ_ENFORCE` is on (with no\n"
             "  reachable PDP, `@Authorize` fails closed)."
+        )
+    elif owns_none:
+        # Owns no database but declares a real datastore (copilot, customer-edge: Redis). RPO/RTO
+        # for THAT store is a separate question this runbook does not answer — see dr_for().
+        rpo = (f"- **RPO/RTO: not this service's to promise** — it owns no database. Its "
+               f"**{datastore}** state has its own recovery posture; see the mechanism below "
+               "before assuming zero impact.")
+        failure_modes = (
+            "- **Pod CrashLoopBackOff at boot:** usually a missing/invalid config or secret\n"
+            "  (`ExternalSecret` not synced). Check `kubectl describe pod` events and the\n"
+            "  first 50 log lines.\n"
+            f"- **Readiness flapping:** this service owns no database, but check its **{datastore}**\n"
+            "  connectivity before ruling out the datastore — an upstream dependency below, or the\n"
+            "  OPA sidecar if `AUTHZ_ENFORCE` is on (with no reachable PDP, `@Authorize` fails\n"
+            "  closed), are the other likely causes."
         )
     else:
         rpo = ("- **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up)."
@@ -249,7 +300,7 @@ def render(short: str) -> str:
         failure_modes=failure_modes,
         domain=f.get("dataDomain", "—"),
         datastore=datastore,
-        schema=f.get("schemaName", "—"),
+        database=f.get("databaseName", "—"),
         classification=f.get("dataClassification", "—"),
         retention=f.get("retentionPolicy", "—"),
         role=f.get("dataLineageRole", "—"),
@@ -257,7 +308,7 @@ def render(short: str) -> str:
         upstream=up,
         downstream=down,
         rpo=rpo,
-        dr=dr_for(f.get("primaryDatastore", ""), has_backup),
+        dr=dr_for(datastore, has_backup, owns_none),
     )
 
 

@@ -93,4 +93,4 @@ Celá datová sada je klasifikována jako **confidential** (`governance.yaml: da
 ## Konzistence & lineage
 
 - **Upstream identifikátory** (`party_id`, `debit_account_id`) jsou cizí reference **bez DB FK** — služby jsou izolované; integritu drží aplikační hranice.
-- **Downstream** (`governance.yaml: lineage.downstream`): `transaction-service` konzumuje události příkazů a zakládá vlastní platbu; tato služba má `dependentSchemas: [transactions_schema]`.
+- **Downstream** (`governance.yaml: lineage.downstream`): `transaction-service` konzumuje události příkazů a zakládá vlastní platbu; tato služba má `dependentDatabases: [openbank_transactions]`.

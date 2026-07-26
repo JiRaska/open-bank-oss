@@ -880,8 +880,8 @@ export default function ServiceMapPage() {
                         <div style={{ fontWeight: 500, color: 'var(--text-secondary)' }}>{govEntry.primaryDatastore}</div>
                       </div>
                       <div>
-                        <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>{t('Schéma', 'Schema')}</div>
-                        <div style={{ fontWeight: 500, color: 'var(--text-secondary)' }}>{govEntry.schemaName ?? t('bez schématu (stateless)', 'no schema (stateless)')}</div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>{t('Databáze', 'Database')}</div>
+                        <div style={{ fontWeight: 500, color: 'var(--text-secondary)' }}>{govEntry.databaseName ?? t('bez databáze (stateless)', 'no database (stateless)')}</div>
                       </div>
                       <div>
                         <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>{t('Role v lineage', 'Lineage Role')}</div>

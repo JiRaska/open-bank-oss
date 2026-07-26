@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-anacredit-service` |
 | HTTP port | `8137` |
 | Data domain | compliance |
-| Datastore | PostgreSQL (schema `anacredit_schema`) |
+| Datastore | PostgreSQL (database `openbank_anacredit`) |
 | Classification | restricted |
 | Retention | 10 years |
 | Lineage role | both |

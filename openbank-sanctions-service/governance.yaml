@@ -4,13 +4,13 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: compliance
 primaryDatastore: PostgreSQL
-schemaName: sanctions_schema
+databaseName: openbank_sanctions
 dataLineageRole: both
 dataClassification: restricted
 retentionPolicy: 10 years
 evidenceExported: true
-schemaLineage:
-  ownedSchemas:
-    - sanctions_schema
-  dependentSchemas:
-    - aml_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_sanctions
+  dependentDatabases:
+    - openbank_aml

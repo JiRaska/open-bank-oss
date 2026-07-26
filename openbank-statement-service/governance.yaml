@@ -4,11 +4,11 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: compliance
 primaryDatastore: PostgreSQL
-schemaName: statement_schema
+databaseName: openbank_statement
 dataLineageRole: both
 dataClassification: restricted
 retentionPolicy: 10 years
 evidenceExported: false
-schemaLineage:
-  ownedSchemas:
-    - statement_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_statement

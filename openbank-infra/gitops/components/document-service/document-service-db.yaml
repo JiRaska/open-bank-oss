@@ -3,10 +3,10 @@
 # Backs document metadata, blob storage (PostgresBlobStore, ADR-0161 D1 — the default
 # lightweight object-store adapter before a real S3 bucket exists, ADR-0161 D3) and the
 # outbox (dispatch-enabled=true, publishes to openbank.documents.document.event).
-# Database: openbank_documents, owner: openbank. The application-level Postgres schema
-# (documents_schema, per governance.yaml: schemaName) is created by document-service's own
-# Flyway migrations at boot, not by this Cluster's bootstrap.initdb — mirrors every other
-# CNPG-backed service in the fleet (billing-db.yaml et al.).
+# Database: openbank_documents (the name document-service declares as governance.yaml:
+# databaseName, ADR-0196), owner: openbank. Its tables live in `public` and are created by
+# document-service's own Flyway migrations at boot, not by this Cluster's bootstrap.initdb —
+# mirrors every other CNPG-backed service in the fleet (billing-db.yaml et al.).
 # Must reconcile BEFORE the document-service image that carries the datasource config
 # deploys, else Flyway-at-start fails on a missing DB (same pattern as billing-db.yaml /
 # product-catalog-db.yaml / anacredit-db.yaml).

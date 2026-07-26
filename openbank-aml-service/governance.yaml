@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: compliance
 primaryDatastore: PostgreSQL
-schemaName: aml_schema
+databaseName: openbank_aml
 dataLineageRole: both
 dataClassification: restricted
 retentionPolicy: 10 years
@@ -29,11 +29,11 @@ lineage:
     - serviceName: party-service
       relationType: topic
       description: triggers
-schemaLineage:
-  ownedSchemas:
-    - aml_schema
-  dependentSchemas:
-    - sepa_schema
-    - domestic_schema
-    - swift_schema
-    - sepa_instant_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_aml
+  dependentDatabases:
+    - openbank_sepa_payments
+    - openbank_domestic_payments
+    - openbank_swift
+    - openbank_sepa_instant

@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: open-banking
 primaryDatastore: PostgreSQL
-schemaName: consents_schema
+databaseName: openbank_consents
 dataLineageRole: both
 dataClassification: confidential
 retentionPolicy: 5 years
@@ -14,8 +14,8 @@ lineage:
     - serviceName: psd2-service
       relationType: api
       description: checks
-schemaLineage:
-  ownedSchemas:
-    - consents_schema
-  dependentSchemas:
-    - accounts_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_consents
+  dependentDatabases:
+    - openbank_accounts

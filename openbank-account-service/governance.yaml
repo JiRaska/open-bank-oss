@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: core
 primaryDatastore: PostgreSQL
-schemaName: accounts_schema
+databaseName: openbank_accounts
 dataLineageRole: producer
 dataClassification: confidential
 retentionPolicy: 7 years
@@ -33,6 +33,6 @@ lineage:
     - serviceName: audit-service
       relationType: topic
       description: events
-schemaLineage:
-  ownedSchemas:
-    - accounts_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_accounts

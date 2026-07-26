@@ -1,13 +1,13 @@
 # Data
 
-## No datastore
+## No database of its own
 
-`openbank-customer-edge` is **stateless**. It owns:
+`openbank-customer-edge` owns no banking data. It has:
 
-- ❌ no PostgreSQL schema (`primaryDatastore: none`, `schemaName: n/a` in `governance.yaml`, ADR-0071)
+- ❌ no PostgreSQL database — it owns none, so `governance.yaml` declares no `databaseName` (`primaryDatastore: Redis`, `ownsNoDatabase: true`, ADR-0071)
 - ❌ no Flyway migrations
 - ❌ no outbox table
-- ❌ no Redis / cache of business data
+- ✅ a **Redis** store — the only datastore it uses: pending onboardings paused on a four-eyes identity-verification case, keyed by `caseId` with a TTL (`PendingOnboardingStore`, ADR-0072), and WebAuthn credentials keyed by credential id (`WebAuthnStore`, ADR-0066 F2)
 
 The only in-memory state is the cached M2M service-account token in `UpstreamClient` (a JWT string + its expiry, refreshed via `client_credentials` until 60 s before expiry). It contains no customer data and is rebuilt on restart.
 
@@ -18,7 +18,7 @@ graph LR
   edge -- "reads/forwards only" --> up[(upstream services<br/>own the data)]
 ```
 
-The authoritative data lives in the upstream services the edge proxies to (party, account, balance, transaction, statement, payment, sca, notification). The edge holds nothing.
+The authoritative data lives in the upstream services the edge proxies to (party, account, balance, transaction, statement, payment, sca, notification). Beyond the Redis entries above, the edge holds nothing.
 
 ## What transits the edge (and is not stored)
 

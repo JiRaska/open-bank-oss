@@ -2,25 +2,25 @@
 
 ## Persistence status — read this first
 
-The catalog **has no database wired today**. Products live in an in-memory `ConcurrentHashMap` seeded at startup with **15 products** (`prod-001`…`prod-015`). There are:
+The catalog is **backed by PostgreSQL** (ADR-0105 P1; it used to be an in-memory `ConcurrentHashMap`). There are:
 
-- **no Flyway migrations** (`db/migration` does not exist),
-- **no JDBC/Mongo driver** on the classpath,
-- **no persisted state** — a restart re-seeds the same fixed catalog.
+- **Flyway migrations** in `db/migration` — `V1__init_products.sql` creates the document-shaped `products` table,
+- a **reactive Panache** client for the app plus the JDBC driver Flyway migrates over,
+- **persisted state** — the **15 canonical products** are seeded idempotently on first boot from the Kotlin `ProductSeed`, then live in the database.
 
-The per-service governance manifest (`governance.yaml`, [ADR 0071](../../../../docs/adr/0071-governance-manifest-as-derived-data.md)) **declares the intended** datastore and schema:
+The per-service governance manifest (`governance.yaml`, [ADR 0071](../../../../docs/adr/0071-governance-manifest-as-derived-data.md)) declares:
 
 | Field | Declared value |
 |---|---|
-| `primaryDatastore` | `MongoDB` |
-| `schemaName` | `products_schema` |
+| `primaryDatastore` | `PostgreSQL` |
+| `databaseName` | `openbank_products` |
 | `dataDomain` | `core` |
 | `dataLineageRole` | `producer` |
 | `dataClassification` | `internal` |
 | `retentionPolicy` | `indefinite` |
 | `evidenceExported` | `false` |
 
-DB-backed persistence (MongoDB / `products_schema`) is a **tracked follow-up**; this section documents both the current reality (in-memory seed) and the declared target.
+The tables live in the `public` schema of the service's own `openbank_products` database.
 
 ## Logical data model
 

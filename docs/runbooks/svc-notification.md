@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-notification-service` |
 | HTTP port | `8112` |
 | Data domain | platform |
-| Datastore | PostgreSQL (schema `notifications_schema`) |
+| Datastore | PostgreSQL (database `openbank_notifications`) |
 | Classification | confidential |
 | Retention | 2 years |
 | Lineage role | consumer |

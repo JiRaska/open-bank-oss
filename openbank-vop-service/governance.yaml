@@ -4,13 +4,13 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: payments
 primaryDatastore: PostgreSQL
-schemaName: vop_schema
+databaseName: openbank_vop
 dataLineageRole: both
 dataClassification: confidential
 # NOT the 7-year accounting default (ADR-0171): a VoP record is evidence a control ran, not an
 # accounting record. 13 months aligns with the fraud-claim window; inputs are stored hashed only.
 retentionPolicy: 13 months
 evidenceExported: false
-schemaLineage:
-  ownedSchemas:
-    - vop_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_vop

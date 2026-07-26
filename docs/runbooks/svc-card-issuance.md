@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-card-issuance-service` |
 | HTTP port | `8118` |
 | Data domain | payments |
-| Datastore | PostgreSQL (schema `cards_schema`) |
+| Datastore | PostgreSQL (database `openbank_cards`) |
 | Classification | restricted |
 | Retention | 7 years |
 | Lineage role | producer |

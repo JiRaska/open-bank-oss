@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: payments
 primaryDatastore: PostgreSQL
-schemaName: interest_schema
+databaseName: openbank_interest
 dataLineageRole: both
 dataClassification: internal
 retentionPolicy: 5 years
@@ -14,8 +14,8 @@ lineage:
     - serviceName: account-service
       relationType: api
       description: accrues
-schemaLineage:
-  ownedSchemas:
-    - interest_schema
-  dependentSchemas:
-    - accounts_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_interest
+  dependentDatabases:
+    - openbank_accounts

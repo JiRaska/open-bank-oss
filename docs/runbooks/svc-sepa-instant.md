@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-sepa-instant` |
 | HTTP port | `8127` |
 | Data domain | payments |
-| Datastore | PostgreSQL (schema `sepa_instant_schema`) |
+| Datastore | PostgreSQL (database `openbank_sepa_instant`) |
 | Classification | confidential |
 | Retention | 7 years |
 | Lineage role | both |

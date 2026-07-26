@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-lending-service` |
 | HTTP port | `8126` |
 | Data domain | payments |
-| Datastore | PostgreSQL (schema `lending_schema`) |
+| Datastore | PostgreSQL (database `openbank_lending`) |
 | Classification | confidential |
 | Retention | 7 years |
 | Lineage role | both |

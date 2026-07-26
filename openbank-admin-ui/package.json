@@ -69,7 +69,6 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "@vitejs/plugin-react": "^6.0.4",
     "@vitest/coverage-v8": "^4.1.10",
-    "ajv": "^8.20.0",
     "autoprefixer": "10.5.4",
     "eslint": "9.39.5",
     "eslint-config-next": "16.2.12",

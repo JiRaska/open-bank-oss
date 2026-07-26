@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: compliance
 primaryDatastore: PostgreSQL
-schemaName: fraud_schema
+databaseName: openbank_fraud
 dataLineageRole: consumer
 dataClassification: restricted
 retentionPolicy: 10 years
@@ -23,6 +23,6 @@ lineage:
     - serviceName: fx-service
       relationType: api
       description: scores
-schemaLineage:
-  ownedSchemas:
-    - fraud_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_fraud

@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-account-service` |
 | HTTP port | `8100` |
 | Data domain | core |
-| Datastore | PostgreSQL (schema `accounts_schema`) |
+| Datastore | PostgreSQL (database `openbank_accounts`) |
 | Classification | confidential |
 | Retention | 7 years |
 | Lineage role | producer |

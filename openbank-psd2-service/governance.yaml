@@ -3,8 +3,8 @@
 # derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
 # openbank-libs/governance/governance.schema.json
 dataDomain: open-banking
-primaryDatastore: none (stateless)
-schemaName: n/a
+primaryDatastore: PostgreSQL
+databaseName: openbank_psd2
 dataLineageRole: consumer
 dataClassification: confidential
 retentionPolicy: 5 years
@@ -20,8 +20,8 @@ lineage:
     - serviceName: tpp-registry-service
       relationType: api
       description: validates
-schemaLineage:
-  dependentSchemas:
-    - consents_schema
-    - sca_schema
-    - tpp_schema
+databaseLineage:
+  dependentDatabases:
+    - openbank_consents
+    - openbank_sca
+    - openbank_tpp_registry

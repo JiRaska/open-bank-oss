@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-settlement-service` |
 | HTTP port | `8138` |
 | Data domain | payments |
-| Datastore | PostgreSQL (schema `settlement_schema`) |
+| Datastore | PostgreSQL (database `settlement`) |
 | Classification | confidential |
 | Retention | 7 years |
 | Lineage role | both |

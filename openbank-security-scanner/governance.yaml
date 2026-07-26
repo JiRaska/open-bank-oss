@@ -4,11 +4,11 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: platform
 primaryDatastore: PostgreSQL
-schemaName: security_schema
+databaseName: openbank_security
 dataLineageRole: internal
 dataClassification: internal
 retentionPolicy: 1 year
 evidenceExported: false
-schemaLineage:
-  ownedSchemas:
-    - security_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_security

@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-interest-service` |
 | HTTP port | `8125` |
 | Data domain | payments |
-| Datastore | PostgreSQL (schema `interest_schema`) |
+| Datastore | PostgreSQL (database `openbank_interest`) |
 | Classification | internal |
 | Retention | 5 years |
 | Lineage role | both |

@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: identity
 primaryDatastore: PostgreSQL
-schemaName: pid_schema
+databaseName: openbank_pid
 dataLineageRole: both
 dataClassification: restricted
 retentionPolicy: 10 years
@@ -14,8 +14,8 @@ lineage:
     - serviceName: party-service
       relationType: api
       description: documents
-schemaLineage:
-  ownedSchemas:
-    - pid_schema
-  dependentSchemas:
-    - parties_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_pid
+  dependentDatabases:
+    - openbank_parties

@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-clearing-service` |
 | HTTP port | `8124` |
 | Data domain | payments |
-| Datastore | PostgreSQL (schema `clearing_schema`) |
+| Datastore | PostgreSQL (database `openbank_clearing`) |
 | Classification | confidential |
 | Retention | 7 years |
 | Lineage role | both |

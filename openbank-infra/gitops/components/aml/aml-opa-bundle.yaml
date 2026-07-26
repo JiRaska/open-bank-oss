@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: aml-service
     app.kubernetes.io/part-of: aml
   annotations:
-    openbank.tech/policy-checksum: "6cb0c7016a768082"
+    openbank.tech/policy-checksum: "925c21233461d0c3"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -3322,6 +3322,37 @@ data:
       # inside a string literal. Tracked, not silently accepted -- see issue below.
       known_gap: issue-1511
       incident: 2026-07-17
+
+    governance_manifest:
+      generator: openbank-admin-ui/scripts/generate-governance.mjs
+      schema_source: openbank-admin-ui/scripts/governance-schema.mjs   # Zod; the JSON Schema is DERIVED from it
+      derived_artifact: openbank-libs/governance/governance.schema.json
+      wired_into: .github/workflows/ci.yml   # "Governance manifest gate (ADR-0071, enforced)" in Admin UI build
+      # THE RULE (ADR-0071 + ADR-0196, issue #2165): a per-service governance.yaml declares only
+      # facts, and every fact the code can settle is cross-checked against the tree at generation
+      # time. A curatorial field nobody verifies decays into fiction, and the decay is invisible
+      # precisely because the gate stays green -- 51 modules named a `<x>_schema` that existed in
+      # no migration and no config, and 8 named the wrong datastore outright, all while green.
+      rule: >-
+        Each released module (a directory with version.txt) has a governance.yaml valid against
+        the Zod schema, and no declaration may contradict the code: ownsNoDatabase vs the presence
+        of src/main/resources/db/migration/V*.sql; databaseName vs the Postgres URL in
+        application.yaml or the module's GitOps manifest; primaryDatastore vs the wiring that
+        exists; databaseLineage.ownedDatabases vs the module's own databaseName;
+        databaseLineage.dependentDatabases vs the databases the fleet declares; and a
+        non-placeholder retentionPolicy whenever the module stores anything.
+      basis: declared_governance_is_verified_against_code_not_trusted
+      notes:
+        # `ownsNoDatabase`, not `stateless`: customer-edge owns no database yet keeps durable
+        # passkey credentials in Redis. The two claims are not the same and only one is true.
+        - a_module_that_owns_no_database_asserts_it_explicitly
+        # Where the tree cannot settle a claim the manifest records databaseNameEvidence:
+        # declared-only and counts it in totals.unverifiedDatabaseNames -- surfaced, not hidden.
+        - unverifiable_claims_are_reported_never_presented_as_facts
+        # Every rule has a fixture that makes it fire (src/test/generate-governance.test.ts).
+        # This gate's every historical defect lived on its failure path.
+        - each_rule_has_a_test_that_fails_without_it
+      incident: 2026-07-25
 
     knowledge_capture:
       principle: >

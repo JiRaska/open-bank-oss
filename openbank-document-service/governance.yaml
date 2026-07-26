@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: platform
 primaryDatastore: PostgreSQL
-schemaName: documents_schema
+databaseName: openbank_documents
 dataLineageRole: both
 dataClassification: restricted
 retentionPolicy: 10 years
@@ -20,10 +20,10 @@ lineage:
     - serviceName: account-service
       relationType: topic
       description: consumes account.created for onboarding document issuance (ADR-0162 D7)
-schemaLineage:
-  ownedSchemas:
-    - documents_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_documents
   # No real dependent schema today: productRef/partyRef/caseRef on Document/DocumentTemplate are
   # opaque free-text references, not a DB/schema-level coupling to product-catalog or any other
   # service's schema.
-  dependentSchemas: []
+  dependentDatabases: []

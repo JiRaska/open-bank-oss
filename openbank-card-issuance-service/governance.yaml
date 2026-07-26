@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: payments
 primaryDatastore: PostgreSQL
-schemaName: cards_schema
+databaseName: openbank_cards
 dataLineageRole: producer
 dataClassification: restricted
 retentionPolicy: 7 years
@@ -14,8 +14,8 @@ lineage:
     - serviceName: dispute-service
       relationType: api
       description: blocks
-schemaLineage:
-  ownedSchemas:
-    - cards_schema
-  dependentSchemas:
-    - accounts_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_cards
+  dependentDatabases:
+    - openbank_accounts

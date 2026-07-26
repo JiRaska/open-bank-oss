@@ -3,11 +3,15 @@
 # derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
 # openbank-libs/governance/governance.schema.json
 dataDomain: platform
-primaryDatastore: none (stateless)
-schemaName: n/a
+primaryDatastore: Redis
+ownsNoDatabase: true
 dataLineageRole: internal
 dataClassification: confidential
-retentionPolicy: N/A
+# Redis only, no database. Registered passkeys (WebAuthnStore) are DURABLE on purpose — a
+# credential, not a session artifact — and live until the customer revokes them. Everything
+# else expires on its own TTL: pending onboarding 30 days (ADR-0072 four-eyes auto-resume),
+# device session 14 days, enrollment ticket 10 minutes, WebAuthn challenge 2 minutes.
+retentionPolicy: passkeys until revoked; all other Redis keys 30 days or less
 evidenceExported: false
 lineage:
   upstream:

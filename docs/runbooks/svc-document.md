@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-document-service` |
 | HTTP port | `8143` |
 | Data domain | platform |
-| Datastore | PostgreSQL (schema `documents_schema`) |
+| Datastore | PostgreSQL (database `openbank_documents`) |
 | Classification | restricted |
 | Retention | 10 years |
 | Lineage role | both |

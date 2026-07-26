@@ -1,13 +1,13 @@
 # Data
 
-## Žádné úložiště
+## Žádná vlastní databáze
 
-`openbank-customer-edge` je **bezstavová**. Vlastní:
+`openbank-customer-edge` nevlastní žádná bankovní data. Má:
 
-- ❌ žádné PostgreSQL schéma (`primaryDatastore: none`, `schemaName: n/a` v `governance.yaml`, ADR-0071)
+- ❌ žádnou PostgreSQL databázi — žádnou nevlastní, takže `governance.yaml` neuvádí `databaseName` (`primaryDatastore: Redis`, `ownsNoDatabase: true`, ADR-0071)
 - ❌ žádné Flyway migrace
 - ❌ žádnou outbox tabulku
-- ❌ žádnou Redis / cache byznysových dat
+- ✅ **Redis** úložiště — jediné, které používá: rozpracované onboardingy pozastavené na four-eyes ověření identity, klíčované `caseId` s TTL (`PendingOnboardingStore`, ADR-0072), a WebAuthn credentials klíčované id credentialu (`WebAuthnStore`, ADR-0066 F2)
 
 Jediný stav v paměti je cachovaný M2M servisní token v `UpstreamClient` (řetězec JWT + jeho expirace, obnovovaný přes `client_credentials` do 60 s před expirací). Neobsahuje žádná zákaznická data a po restartu se sestaví znovu.
 
@@ -18,7 +18,7 @@ graph LR
   edge -- "jen čte/přeposílá" --> up[(upstream služby<br/>vlastní data)]
 ```
 
-Autoritativní data žijí v upstream službách, na které edge proxuje (party, account, balance, transaction, statement, payment, sca, notification). Edge nedrží nic.
+Autoritativní data žijí v upstream službách, na které edge proxuje (party, account, balance, transaction, statement, payment, sca, notification). Kromě výše uvedených záznamů v Redisu edge nedrží nic.
 
 ## Co edge tranzituje (a neukládá)
 

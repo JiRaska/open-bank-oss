@@ -4,11 +4,11 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: payments
 primaryDatastore: PostgreSQL
-schemaName: billing_schema
+databaseName: openbank_billing
 dataLineageRole: both
 dataClassification: internal
 retentionPolicy: 7 years
 evidenceExported: false
-schemaLineage:
-  ownedSchemas:
-    - billing_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_billing

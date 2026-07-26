@@ -80,4 +80,4 @@ Smazání před expirací je blokováno na úrovni databáze (pravidlo `no_delet
 - ✅ Observability: Prometheus + OpenTelemetry + SmallRye Health
 - ✅ Secrets: env-injektované, dev placeholdery se nikdy nešipují (Vault, ADR-0017)
 - ⚠️ Odchozí re-emit kanál (`audit-events-out`) zatím nenakonfigurován — spící ([05](./05-operations.md))
-- ⚠️ Pole datastore/schema v `governance.yaml` zastaralá (uvádí Cassandra/`audit_schema`; kód je PostgreSQL/`public`) — sladit
+- ✅ Pole datastore v `governance.yaml` odpovídají kódu (`primaryDatastore: PostgreSQL`, `databaseName: openbank_audit`; tabulky v `public`)

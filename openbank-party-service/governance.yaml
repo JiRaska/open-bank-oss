@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: identity
 primaryDatastore: PostgreSQL
-schemaName: parties_schema
+databaseName: openbank_parties
 dataLineageRole: producer
 dataClassification: restricted
 retentionPolicy: 10 years
@@ -24,9 +24,9 @@ lineage:
     - serviceName: account-service
       relationType: topic
       description: opens account on PARTY_CREATED
-schemaLineage:
-  ownedSchemas:
-    - parties_schema
-  dependentSchemas:
-    - accounts_schema
-    - kyc_schema
+databaseLineage:
+  ownedDatabases:
+    - openbank_parties
+  dependentDatabases:
+    - openbank_accounts
+    - openbank_kyc

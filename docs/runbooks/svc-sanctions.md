@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-sanctions-service` |
 | HTTP port | `8123` |
 | Data domain | compliance |
-| Datastore | PostgreSQL (schema `sanctions_schema`) |
+| Datastore | PostgreSQL (database `openbank_sanctions`) |
 | Classification | restricted |
 | Retention | 10 years |
 | Lineage role | both |

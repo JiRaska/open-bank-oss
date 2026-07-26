@@ -4,7 +4,7 @@
 # openbank-libs/governance/governance.schema.json
 dataDomain: payments
 primaryDatastore: PostgreSQL
-schemaName: settlement_schema
+databaseName: settlement
 dataLineageRole: both
 dataClassification: confidential
 retentionPolicy: 7 years
@@ -21,9 +21,9 @@ lineage:
     - serviceName: audit-service
       relationType: topic
       description: emits settlement audit events
-schemaLineage:
-  ownedSchemas:
-    - settlement_schema
-  dependentSchemas:
-    - ledger_schema
-    - transactions_schema
+databaseLineage:
+  ownedDatabases:
+    - settlement
+  dependentDatabases:
+    - openbank_ledger
+    - openbank_transactions
