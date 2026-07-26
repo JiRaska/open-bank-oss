@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.7.0...mcp-service-v0.8.0) (2026-07-26)
+
+
+### Features
+
+* **mcp:** rate-limit tools/call per acting agent ([#2484](https://github.com/JiRaska/open-bank-oss/issues/2484)) ([152131d](https://github.com/JiRaska/open-bank-oss/commit/152131d1f5ff676eb51d28ae747be5b9aaa79dd0)), closes [#2409](https://github.com/JiRaska/open-bank-oss/issues/2409)
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.6.0...mcp-service-v0.7.0) (2026-07-25)
 
 
