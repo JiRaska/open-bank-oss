@@ -12,14 +12,19 @@ import com.openbank.ledger.domain.model.GlAccount
 import com.openbank.ledger.domain.model.TieOutRunRecord
 import com.openbank.ledger.domain.model.TieOutRunStatus
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.libs.persistence.lock.ClusterLock
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -67,10 +72,26 @@ class TieOutScheduler(
     @ConfigProperty(name = "openbank.ledger.tieout.max-catchup-days", defaultValue = "7")
     private val maxCatchUpDays: Int,
     private val clusterLock: ClusterLock,
+    private val domainMetrics: DomainMetrics,
     registry: MeterRegistry,
 ) {
     private val log: Logger = Logger.getLogger(TieOutScheduler::class.java)
     private val zone: ZoneId = ZoneId.of("Europe/Prague")
+
+    // Nullable, not `lateinit`: the gauge is a diagnostic, and a money-path job must never fail
+    // because its observability wiring was not initialised. `lateinit` turns a missed StartupEvent
+    // into an UninitializedPropertyAccessException thrown from the middle of the run.
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    // ADR-0160 mechanism 3. Registered once at startup (CDI beans are singletons), not per-run —
+    // matches DomainMetrics.registerOutboxBacklog's "call once" contract and the one pre-existing
+    // adopter, StandingOrderExecutionScheduler. Before this, a tie-out that stopped that stopped
+    // running left NO runtime signal at all: SubledgerTieOutBreak is an `increase()` rule, so a job that never runs produces no increase
+    // and the rule stays silent — it alerts on the control finding a break, never on the control
+    // being absent, and TieOutFreshnessWatchdog is log-only (#2239).
+    fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofDays(1))
+    }
 
     private val breakCounter: Counter = Counter.builder("openbank.subledger.tieout.break")
         .description("Number of sub-ledger tie-out breaks detected (ADR-0039 Phase B). Non-zero = incident.")
@@ -112,6 +133,11 @@ class TieOutScheduler(
         }
         if (ran == null) {
             log.infof("Sub-ledger tie-out: another pod already holds this tick's lock — skipping")
+        } else {
+            // The control RAN — which is what liveness answers. A recorded BREAK is a successful
+            // run of the control (and pages via its own counter); only a tick that never executed
+            // is what this gauge exists to expose.
+            liveness?.recordSuccess()
         }
     }
 
@@ -234,5 +260,8 @@ class TieOutScheduler(
 
     private companion object {
         const val JOB_NAME = "ledger.tieout"
+
+        /** ADR-0160 mechanism 3 workflow tag — stable, low-cardinality. */
+        const val WORKFLOW_NAME = "ledger-tieout"
     }
 }

@@ -13,12 +13,16 @@ import com.openbank.ledger.domain.model.GlAccountType
 import com.openbank.ledger.domain.model.TieOutRunRecord
 import com.openbank.ledger.domain.model.TieOutRunStatus
 import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.testing.lock.NoOpClusterLock
+import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import jakarta.enterprise.inject.Instance
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -44,8 +48,20 @@ class TieOutSchedulerTest {
         clock,
         maxCatchUpDays = 7,
         NoOpClusterLock(),
+        noOpDomainMetrics(),
         registry,
     )
+
+    /**
+     * A [DomainMetrics] with no resolvable registry — every metric method is a documented no-op,
+     * so the liveness wiring added in #2239 does not have to be re-mocked in each of this class's
+     * behavioural tests. The liveness gauge itself is asserted in LedgerWorkflowLivenessTest.
+     */
+    private fun noOpDomainMetrics(): DomainMetrics {
+        val instance = mockk<Instance<MeterRegistry>>()
+        every { instance.isResolvable } returns false
+        return DomainMetrics().apply { registryInstance = instance }
+    }
 
     private fun runRecord(asOf: LocalDate) = TieOutRunRecord(
         id = UUID.randomUUID(),
@@ -200,7 +216,17 @@ class TieOutSchedulerTest {
         // A 5-day gap (11th..15th) capped to 2: takeLast would strand the 11th/12th forever,
         // since the cursor only ever moves forward from the latest saved as_of (the #1201-class
         // bug CloseCalendar had). take() keeps 11th, 12th and leaves 13th-15th for the next run.
-        val capped = TieOutScheduler(ledger, glAccounts, runs, clock, maxCatchUpDays = 2, NoOpClusterLock(), registry)
+        val capped =
+            TieOutScheduler(
+                ledger,
+                glAccounts,
+                runs,
+                clock,
+                maxCatchUpDays = 2,
+                NoOpClusterLock(),
+                noOpDomainMetrics(),
+                registry,
+            )
         val account = control("2100")
         coEvery { glAccounts.findByCode(any()) } returns null
         coEvery { glAccounts.findByCode("2100") } returns account

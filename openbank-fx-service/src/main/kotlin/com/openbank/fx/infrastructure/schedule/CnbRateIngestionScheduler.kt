@@ -6,9 +6,14 @@ package com.openbank.fx.infrastructure.schedule
 
 import com.openbank.fx.application.port.`in`.CnbRateIngestionUseCase
 import com.openbank.fx.application.port.`in`.IngestCnbFixingCommand
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import org.jboss.logging.Logger
+import java.time.Duration
 
 /**
  * Daily job that ingests the ČNB central-bank fixing shortly after its ~14:30 Europe/Prague
@@ -17,8 +22,25 @@ import org.jboss.logging.Logger
  * manual `POST /api/v1/fx/cnb/ingest` endpoint covers backfill.
  */
 @ApplicationScoped
-class CnbRateIngestionScheduler(private val useCase: CnbRateIngestionUseCase) {
+class CnbRateIngestionScheduler(
+    private val useCase: CnbRateIngestionUseCase,
+    private val domainMetrics: DomainMetrics,
+) {
     private val log = Logger.getLogger(CnbRateIngestionScheduler::class.java)
+
+    // Nullable, not `lateinit`: the gauge is a diagnostic, and a money-path job must never fail
+    // because its observability wiring was not initialised. `lateinit` turns a missed StartupEvent
+    // into an UninitializedPropertyAccessException thrown from the middle of the run.
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    // ADR-0160 mechanism 3. Registered once at startup (CDI beans are singletons), not per-run —
+    // matches DomainMetrics.registerOutboxBacklog's "call once" contract and the one pre-existing
+    // adopter, StandingOrderExecutionScheduler. Before this, a fixing ingestion that stopped that stopped
+    // running left NO runtime signal at all: this job has no metric, no watchdog and no alert rule of any
+    // kind, so success and failure both ended in a log line (#2239).
+    fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofDays(1))
+    }
 
     // `suspend`, never `runBlocking` (#2187, the fleet sweep of #2148). Quarkus invokes a plain
     // @Scheduled method on a bare `executor-thread`, which carries no Vert.x context, so
@@ -48,8 +70,15 @@ class CnbRateIngestionScheduler(private val useCase: CnbRateIngestionUseCase) {
                 result.skipped,
                 result.currencies,
             )
+            // Success path only — the catch below is a failed run.
+            liveness?.recordSuccess()
         } catch (ex: Exception) {
             log.errorf(ex, "ČNB fixing ingestion failed: %s", ex.message)
         }
+    }
+
+    private companion object {
+        /** ADR-0160 mechanism 3 workflow tag — stable, low-cardinality. */
+        const val WORKFLOW_NAME = "fx-cnb-ingestion"
     }
 }

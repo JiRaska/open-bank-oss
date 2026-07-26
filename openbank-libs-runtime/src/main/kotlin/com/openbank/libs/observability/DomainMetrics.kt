@@ -343,9 +343,22 @@ class DomainMetrics {
 
     /**
      * Register the liveness gauges for a scheduled workflow (ADR-0160): age-of-last-success and
-     * its expected interval, both in seconds. A single generic Prometheus rule —
-     * `openbank_workflow_last_success_age_seconds > 2 * on(workflow) openbank_workflow_expected_interval_seconds`
-     * — pages on ANY registered workflow that goes stale, with no per-service alert rule needed.
+     * its expected interval, both in seconds.
+     *
+     * **What consumes them, accurately (#2239).** `openbank-control-liveness-sentinel`'s D1
+     * detection (ADR-0163) reads both gauges and files a FINDING on any workflow past 2x its
+     * declared interval. There is **no PrometheusRule and no page**: this KDoc used to describe
+     * `openbank_workflow_last_success_age_seconds > 2 * on(workflow)
+     * openbank_workflow_expected_interval_seconds` as a rule that already exists, and ADR-0163 D1
+     * leaned on that sentence — two documents describing a paging line nothing had ever
+     * implemented. Before adding it verbatim, note why it would page falsely: the age gauge seeds
+     * from [java.time.Instant.EPOCH], so a freshly started pod reports decades of staleness until
+     * the job's first success — for a daily job that is up to 24h of continuous firing after every
+     * deploy or restart, and no `for:` duration helps because the condition genuinely persists.
+     * That EPOCH behaviour is right for a sentinel finding and wrong for a 3am page; making it a
+     * rule needs a decision (seed from persisted run state, gate on pod uptime, or stay
+     * sentinel-only), not a copy-paste. Tracked in #2239 Gap 2.
+     *
      * This exists because a scheduled job can fail SILENTLY (an exception swallowed after logging,
      * or simply stopping) and leave no record and no alarm — exactly how balance-service's daily
      * reconciliation ran zero rows for 41 days unnoticed (issue #855) before it got its own
