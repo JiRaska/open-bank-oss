@@ -103,6 +103,34 @@ interface GdprAggregationPort {
     suspend fun fetchCardData(partyId: java.util.UUID): List<Map<String, Any?>>
 }
 
+/** consent-service refused or was unreachable — the toggle must not silently appear to succeed. */
+class MarketingConsentForwardingException(message: String, cause: Throwable? = null) :
+    RuntimeException(message, cause)
+
+/**
+ * Outbound port to consent-service for the marketing-consent forwarder (ADR-0198 D3, ADR-0205,
+ * ADR-0206 D5). Unlike [GdprAggregationPort] this is a WRITE, not a best-effort read — a failure
+ * here must propagate as [MarketingConsentForwardingException], never degrade silently, or the
+ * caller would believe a toggle succeeded when consent-service never recorded it.
+ *
+ * `parties.consent_marketing` itself is never written here — [MarketingConsentProjectionService]
+ * (ADR-0205 D4) is the sole writer, driven by consent-service's own outbox events, so the two
+ * paths can never race each other into a split brain.
+ */
+interface MarketingConsentForwardingPort {
+    /**
+     * Grants the fixed internal marketing consent for [partyId] (ADR-0205 D3's
+     * `party-service:marketing-comms` grantee, all three MARKETING_COMMS_* scopes). consent-service
+     * auto-activates it synchronously (ADR-0205 D1's GDPR_ONLY_SCOPES path) — returns the new
+     * consent's id, which [MarketingConsentTrackingRepository] does not yet know until the
+     * ConsentGranted event round-trips through Kafka.
+     */
+    suspend fun grant(partyId: java.util.UUID): java.util.UUID
+
+    /** Revokes [consentId] — must belong to [partyId] and the marketing grantee (server-checked). */
+    suspend fun revoke(partyId: java.util.UUID, consentId: java.util.UUID, reason: String)
+}
+
 /**
  * ADR-0179: account-ownership guard for the merge precondition.
  *
