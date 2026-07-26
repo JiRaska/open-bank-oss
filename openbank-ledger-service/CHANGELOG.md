@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.16.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.15.7...ledger-service-v1.16.0) (2026-07-26)
+
+
+### Features
+
+* **ledger:** register workflow-liveness gauges on the money-path schedulers ([#2488](https://github.com/JiRaska/open-bank-oss/issues/2488)) ([d0332b4](https://github.com/JiRaska/open-bank-oss/commit/d0332b4201aa965504c9f2494a5b8e1639c25ec5)), closes [#2239](https://github.com/JiRaska/open-bank-oss/issues/2239)
+
+
+### Bug Fixes
+
+* **authz:** grant ROLE_API to the M2M account, sweep the dead ROLE_SERVICE name, enforce parity ([#2442](https://github.com/JiRaska/open-bank-oss/issues/2442)) ([#2475](https://github.com/JiRaska/open-bank-oss/issues/2475)) ([9f138c1](https://github.com/JiRaska/open-bank-oss/commit/9f138c133051a44c13790578a2864a703bda3425))
+
 ## [1.15.7](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.15.6...ledger-service-v1.15.7) (2026-07-25)
 
 
