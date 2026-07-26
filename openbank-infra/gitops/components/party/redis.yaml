@@ -1,0 +1,84 @@
+# Redis for the four-eyes ApprovalStore (ADR-0155, wired here for the ADR-0179
+# `party.merge` gate) — party-service has no other Redis usage. Ephemeral on purpose —
+# persistence is disabled (--save "" --appendonly no), so a restart just clears in-flight
+# pending approvals, which is acceptable for the sandbox. Prod should use an
+# operator-managed HA Redis. Pinned to the alpine image's redis uid 999/gid 1000 to
+# satisfy PSS restricted; /data is a writable emptyDir so the root fs can stay read-only.
+# Mirrors notifications/redis.yaml exactly — see issue #1354 for what happens when a
+# service ships the ApprovalStore bean without this.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: party
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/part-of: party
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: docker.io/valkey/valkey:8-alpine
+          args: ["--save", "", "--appendonly", "no"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 192Mi
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: party
+  labels:
+    app.kubernetes.io/name: redis
+spec:
+  selector:
+    app.kubernetes.io/name: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis

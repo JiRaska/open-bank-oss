@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pid-service
     app.kubernetes.io/part-of: pid
   annotations:
-    openbank.tech/policy-checksum: "c4b4dc229ad7aab8"
+    openbank.tech/policy-checksum: "7e3cc294b056189d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2359,6 +2359,27 @@ data:
                                              # explicitly excludes any service-account-* principal id
                                              # (rest.rego operator-compose-message), the same exclusion
                                              # m2m-sanctions-screening uses for the opposite carve-out.
+        - party.merge                       # ADR-0179: retire a duplicate identity into a survivor
+                                             # (POST /api/v1/parties/{id}/merge). Gated HERE and not via
+                                             # `verbs` for the same structural reason opsmessage.compose
+                                             # is: party-service is not, and should not become, a
+                                             # money_path_services entry (it moves no value), so the
+                                             # verb clause can never derive a `party` scope and no verb
+                                             # addition could ever reach this action.
+                                             # Why it needs the gate at all: a merge is destructive OF
+                                             # IDENTITY and irreversible in practice — one operator can
+                                             # retire a real customer behind another party id, and every
+                                             # downstream consumer follows `merged_into`. It carried only
+                                             # @RolesAllowed(ROLE_OPERATOR, ROLE_ADMIN) + an audit event,
+                                             # which records who did it but stops nobody.
+                                             # GUARDRAIL check (the one above, applied): confirmed no M2M
+                                             # caller. party-service's own rego states party.merge "has NO
+                                             # in-repo M2M caller today"; the edge M2M identity is granted
+                                             # only {party.consent.update, party:resolve} by the rule that
+                                             # names it (service-edge-party-m2m), and the ADR-0179 sweep
+                                             # counterpart transaction.merge-sweep is already gated by the
+                                             # `sweep` verb — so both halves of the merge flow now pause
+                                             # for a second approver, or neither does.
 
     # ---------------------------------------------------------------------------------------
     # Feature-flag flip governance (ADR-0067 follow-up, issue #419). The OPA PEP (rest.rego)

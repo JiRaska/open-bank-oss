@@ -61,7 +61,7 @@ rules_real := {
 			"transitionStatus", "recall", "settle", "disburse", "send", "credit", "debit",
 			"collateralRegister", "convert", "grant", "revoke", "clear",
 		],
-		"actions": ["opsmessage.compose"],
+		"actions": ["opsmessage.compose", "party.merge"],
 	},
 	"feature_flags": {
 		"prohibited_flag_combinations": [
@@ -353,6 +353,40 @@ test_four_eyes_required_sanctions_clear_real_action if {
 	# SanctionsResource.kt: @Authorize(action = "sanctions.clear", ...) -- decide a
 	# screening hit (CLEAR/HIT/POTENTIAL_HIT). Confirmed no M2M caller.
 	rest.four_eyes_required with input as {"action": "sanctions.clear"}
+		with data.rules as rules_real
+}
+
+# ---------------------------------------------------------------------------------------
+# party.merge (ADR-0179, issue #1984) -- gated via four_eyes.ACTIONS, not verbs. The three
+# tests below are a set: the first proves the gate fires, the second proves it fires for a
+# structural reason a verb addition could never supply, and the third proves the gate is
+# narrow. Without the second, a reader would reasonably assume `merge` had been added to
+# `verbs` and that party-service was somehow money-path; it is not, and never will be.
+# ---------------------------------------------------------------------------------------
+test_four_eyes_required_party_merge_real_action if {
+	# PartyResource.kt: @Authorize(action = "party.merge", resource = "#id") -- retire a
+	# duplicate identity into a survivor. Destructive of identity, irreversible in practice.
+	rest.four_eyes_required with input as {"action": "party.merge"}
+		with data.rules as rules_real
+}
+
+test_party_is_not_a_money_path_scope if {
+	# The reason party.merge MUST live in four_eyes.actions: `verbs` derives its scopes from
+	# money_path_services, and party-service is not on that list. If this ever flips, revisit
+	# the actions entry -- but until then, no verb addition can reach party.*.
+	not "party" in rest.money_path_scopes with data.rules as rules_real
+}
+
+test_four_eyes_not_required_for_other_party_actions if {
+	# The gate is exact-action, so the rest of the party surface is untouched -- including
+	# party.approval.decide, the checker endpoint itself. Gating that would deadlock the flow.
+	not rest.four_eyes_required with input as {"action": "party.update"}
+		with data.rules as rules_real
+
+	not rest.four_eyes_required with input as {"action": "party.consent.update"}
+		with data.rules as rules_real
+
+	not rest.four_eyes_required with input as {"action": "party.approval.decide"}
 		with data.rules as rules_real
 }
 

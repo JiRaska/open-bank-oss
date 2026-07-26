@@ -262,13 +262,20 @@ class PartyResource {
     @POST
     @Path("/{id}/merge")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
-    @Authorize(action = "party.merge")
+    // `resource = "#id"` is load-bearing for the four-eyes gate, not decoration: the interceptor
+    // stamps the PendingApproval with query.resource?.id, so WITHOUT it every approval would be
+    // created (and matched) with resourceId=null — an approval a checker granted to merge party A
+    // would then satisfy a merge of party B by the same maker. See ApprovalResource.
+    @Authorize(action = "party.merge", resource = "#id")
     @Operation(
         summary = "Merge a duplicate party into a surviving party (ADR-0179)",
         description = "Retires {id} as a duplicate, preserving all PII and history. NOT erasure: " +
             "no anonymization, no PARTY_ERASED event. Refuses while the duplicate still owns an " +
             "open account — sweep the balances via a ledger ADJUSTMENT journal entry and close " +
-            "the account first.",
+            "the account first. Four-eyes gated (ADR-0155): when four-eyes enforcement is on, the " +
+            "first call returns 202 with an approvalId; a DIFFERENT operator decides it via " +
+            "PATCH /api/v1/parties/approvals/{approvalId} and the maker retries this call with an " +
+            "X-Approval-Id header.",
     )
     suspend fun mergeParty(@PathParam("id") id: UUID, req: MergePartyRequest): Response {
         val merged = partyUseCase.mergeParty(

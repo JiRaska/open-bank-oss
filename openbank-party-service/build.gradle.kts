@@ -32,6 +32,7 @@ dependencies {
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.scheduler)
     implementation(libs.quarkus.cache)
+    implementation(libs.quarkus.redis.client) // four-eyes ApprovalStore for party.merge (ADR-0155, ADR-0179)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
     implementation(libs.jackson.module.kotlin)
