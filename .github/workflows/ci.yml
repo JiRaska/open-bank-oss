@@ -177,8 +177,27 @@ jobs:
           NEXT_TELEMETRY_DISABLED: "1"
 
   # Gate job — always runs, maps to the "Admin UI" required check name.
-  # Passes when ui-build succeeded or was skipped (no UI changes); fails only
-  # when ui-build itself failed. Backend-only PRs therefore never get blocked.
+  # Passes when ui-build succeeded or was skipped (no UI changes); fails when
+  # ui-build itself failed. Backend-only PRs therefore never get blocked.
+  #
+  # `cancelled` is deliberately NOT the same bucket as `failure` (issue #2185).
+  # The concurrency group above is `ci-${{ github.ref }}` with cancel-in-progress,
+  # so on main every push cancels the run before it — three consecutive
+  # release-please merges each killed the previous `Admin UI build` mid-flight and
+  # left main showing a red that described nothing. That is corrosive rather than
+  # merely noisy: the fleet had a GENUINE Admin UI build failure at the same time
+  # (#2165) and a reader could not tell the real red from the concurrency artifact.
+  # Same shape as #2177, where an OOM'd fleet-lint reported a red indistinguishable
+  # from a lint violation — the check reported a bucket, not a cause.
+  #
+  # Split by event, because what a cancellation MEANS differs:
+  #   push (main)      — the run was superseded by a newer push of the same ref,
+  #                      whose own gate is the one that counts. Nothing is being
+  #                      gated here, so pass with an explicit ::warning naming the
+  #                      supersession.
+  #   pull_request     — still a hard failure. A cancelled PR run has not built
+  #                      anything, and letting it read green would be exactly the
+  #                      vacuous green this repo works to avoid.
   ui:
     name: Admin UI
     needs: [changes-ui, ui-build]
@@ -187,12 +206,28 @@ jobs:
     timeout-minutes: 2
     steps:
       - name: Check build result
+        env:
+          RESULT: ${{ needs.ui-build.result }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
         run: |
-          result="${{ needs.ui-build.result }}"
-          if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
-            echo "Admin UI build failed (result: $result)." && exit 1
+          set -euo pipefail
+          if [ "$RESULT" = "failure" ]; then
+            echo "Admin UI build FAILED — this is a real build failure, not a superseded run."
+            exit 1
           fi
-          echo "Admin UI: $result (skipped = no UI changes in this PR)."
+          if [ "$RESULT" = "cancelled" ]; then
+            if [ "$EVENT" = "push" ]; then
+              echo "::warning::Admin UI build was CANCELLED, not failed: a newer push to this ref" \
+                   "superseded it (concurrency group ci-$REF). Read that newer run's" \
+                   "gate — this one built nothing and is not evidence of a broken build (#2185)."
+              exit 0
+            fi
+            echo "Admin UI build was cancelled before it finished, so nothing was built."
+            echo "Re-run it (or push again) — a cancelled run must not read as a passing gate."
+            exit 1
+          fi
+          echo "Admin UI: $RESULT (skipped = no UI changes in this PR)."
 
   # ---------------------------------------------------------------------------
   # Static config validation
