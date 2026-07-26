@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.8.0...mcp-service-v0.9.0) (2026-07-26)
+
+
+### Features
+
+* **mcp:** enforce the charter's data_scope.pii masking on every tool result ([#2481](https://github.com/JiRaska/open-bank-oss/issues/2481)) ([517a88f](https://github.com/JiRaska/open-bank-oss/commit/517a88f8e7f079ff95d7b97ee752ba1c3032e19b))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.7.0...mcp-service-v0.8.0) (2026-07-26)
 
 
