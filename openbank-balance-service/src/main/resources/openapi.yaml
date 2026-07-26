@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Balance Service API
-  version: 1.6.0
+  version: 1.7.0
   description: >-
     Account balance management — holds, credits, debits, multi-currency. Per ADR-0039 (Phase A) a
     read-only reconciliation ties out, per currency, the ledger deposit-control balance against the
@@ -66,6 +66,46 @@ paths:
       responses:
         '200':
           description: Balance for currency
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/balances/{accountId}/{currency}/overdraft-limit:
+    put:
+      tags: [Balances]
+      summary: Set the arranged overdraft limit on a balance
+      description: >-
+        A supervisory limit override, not a money movement: requires ROLE_SUPERVISOR or ROLE_ADMIN
+        (authorize action `balance.overdraftLimit`) — deliberately narrower than the credit/debit
+        endpoints, which the transaction saga's service identity may call.
+      operationId: setOverdraftLimit
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: currency
+          in: path
+          required: true
+          schema:
+            type: string
+            example: CZK
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arrangedOverdraftLimit]
+              properties:
+                arrangedOverdraftLimit:
+                  type: number
+                  description: The arranged (authorised) overdraft floor for this balance.
+      responses:
+        '200':
+          description: The updated balance
           content:
             application/json:
               schema:

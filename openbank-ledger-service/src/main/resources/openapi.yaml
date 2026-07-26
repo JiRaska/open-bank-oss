@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Ledger Service API
-  version: 1.9.0
+  version: 1.10.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -327,6 +327,28 @@ paths:
                   $ref: '#/components/schemas/ControlAccountTieOutResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/ledger/fx-revaluation:
+    post:
+      tags: [Ledger]
+      summary: Run the daily mark-to-ČNB revaluation of foreign-currency positions
+      description: >-
+        Revalues open FX positions against the ČNB fixing for a business day. Requires
+        ROLE_OPERATOR (authorize action `ledger.trigger`). The same work runs on a scheduler;
+        this endpoint is the operator re-drive for a day the scheduled run missed.
+      operationId: runFxRevaluation
+      parameters:
+        - name: date
+          in: query
+          description: Business day to revalue. Omit for today in Europe/Prague.
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: The revaluation result for that business day
         '403':
           $ref: '#/components/responses/Forbidden'
 
