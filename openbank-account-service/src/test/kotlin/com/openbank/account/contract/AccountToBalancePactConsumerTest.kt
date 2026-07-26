@@ -55,6 +55,13 @@ class AccountToBalancePactConsumerTest {
                 o.array("balances") { a ->
                     a.`object` { b ->
                         b.uuid("accountId")
+                        // stringType, DELIBERATELY (issue #2425): this endpoint returns EVERY
+                        // balance the account holds and the request names no currency, so an
+                        // account may legitimately answer with CZK, EUR and USD rows. Pinning
+                        // the value here would assert "every balance is CZK", which is a
+                        // stronger claim than the contract makes. The two single-currency
+                        // interactions below DO pin it — there the currency is an echo of the
+                        // request.
                         b.stringType("currency", "CZK")
                         b.decimalType("bookedAmount", 5000.00)
                         b.decimalType("availableAmount", 4900.00)
@@ -96,7 +103,11 @@ class AccountToBalancePactConsumerTest {
         .body(
             newJsonBody { o ->
                 o.uuid("accountId")
-                o.stringType("currency", "CZK")
+                // stringValue, NOT stringType: the currency is a path segment of the request
+                // (/balances/{accountId}/CZK), so the response echoing a DIFFERENT currency is a
+                // real defect — the consumer would read a EUR balance as the account's CZK
+                // cover. A type matcher accepted any string and made the check vacuous (#2425).
+                o.stringValue("currency", "CZK")
                 o.decimalType("bookedAmount", 5000.00)
                 o.decimalType("availableAmount", 4900.00)
                 o.decimalType("reservedAmount", 100.00)
@@ -117,7 +128,7 @@ class AccountToBalancePactConsumerTest {
             .statusCode(200)
             .extract().jsonPath()
 
-        assertThat(body.getString("currency")).isNotBlank()
+        assertThat(body.getString("currency")).isEqualTo("CZK")
         assertThat(body.getString("accountId")).isNotBlank()
     }
 
@@ -137,7 +148,10 @@ class AccountToBalancePactConsumerTest {
         .body(
             newJsonBody { o ->
                 o.uuid("accountId")
-                o.stringType("currency", "CZK")
+                // stringValue, NOT stringType: the request body asks to open a CZK balance, so
+                // the response currency is an echo of it — a different currency back means the
+                // provider opened the wrong pocket (#2425).
+                o.stringValue("currency", "CZK")
                 o.decimalType("bookedAmount", 0.00)
                 o.decimalType("availableAmount", 0.00)
                 o.decimalType("reservedAmount", 0.00)

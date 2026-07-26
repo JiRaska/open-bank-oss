@@ -70,14 +70,6 @@
                 }
               ]
             },
-            "$.currency": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
             "$.pendingAmount": {
               "combine": "AND",
               "matchers": [
@@ -287,14 +279,6 @@
               "matchers": [
                 {
                   "match": "decimal"
-                }
-              ]
-            },
-            "$.currency": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
                 }
               ]
             },

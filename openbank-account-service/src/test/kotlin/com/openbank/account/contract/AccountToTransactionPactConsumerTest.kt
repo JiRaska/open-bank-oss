@@ -21,7 +21,8 @@ import org.junit.jupiter.api.extension.ExtendWith
  * Consumer-driven contract for the welcome-bonus transaction initiation account-service makes
  * ([com.openbank.account.infrastructure.client.TransactionServiceRestClient], ADR-0063 P2).
  * The consumer sends a minimal CREDIT initiation body and expects 201 with {id, status}.
- * The saga continues asynchronously so the initial status is PENDING.
+ * transaction-service books synchronously, so the 201 already carries COMPLETED —
+ * this KDoc claimed PENDING until #2425 pinned the value and the replay disagreed.
  * The provider verification is in TransactionPactProviderVerificationTest (transaction-service).
  */
 @ExtendWith(PactConsumerTestExt::class)
@@ -56,7 +57,13 @@ class AccountToTransactionPactConsumerTest {
         .body(
             newJsonBody { o ->
                 o.uuid("id")
-                o.stringType("status", "PENDING")
+                // MEASURED, not assumed (issue #2425): pinning this value is what revealed
+                // that transaction-service answers POST /api/v1/transactions with COMPLETED —
+                // it books synchronously. Every consumer contract here claimed PENDING or
+                // PROCESSING, a status this response has never carried, and the `type` matcher
+                // made all four replays green about it for the life of the contracts.
+                // stringValue, NOT stringType: this is the field the consumer branches on.
+                o.stringValue("status", "COMPLETED")
             }.build(),
         )
         .toPact()
@@ -74,6 +81,6 @@ class AccountToTransactionPactConsumerTest {
             .extract().jsonPath()
 
         assertThat(body.getString("id")).isNotBlank()
-        assertThat(body.getString("status")).isNotBlank()
+        assertThat(body.getString("status")).isEqualTo("COMPLETED")
     }
 }

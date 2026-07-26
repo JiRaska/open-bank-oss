@@ -50,6 +50,15 @@ class SepaPaymentFraudServicePactConsumerTest {
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
             newJsonBody { o ->
+                // stringType, DELIBERATELY (issue #2425): `verdict` is the one field here that
+                // looks most like it should be pinned — it is a closed vocabulary the consumer
+                // branches on. It is left type-matched because it is a COMPUTED judgement, not
+                // an echo of the request or a fixed lifecycle value: the provider state is only
+                // "the fraud scoring engine is available", never "the engine will accept this".
+                // Pinning ACCEPT would make every scoring-threshold tweak a contract break,
+                // which is the coupling Pact exists to avoid. The honest fix is a provider state
+                // that fixes the outcome ("a payment the engine scores as ACCEPT"), which needs
+                // a matching @State handler in fraud-service — tracked, not done here.
                 o.stringType("verdict", "ACCEPT")
                 o.integerType("score", 10)
             }.build(),

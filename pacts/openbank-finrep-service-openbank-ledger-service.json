@@ -39,14 +39,6 @@
         },
         "matchingRules": {
           "body": {
-            "$.asOf": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
             "$.balanced": {
               "combine": "AND",
               "matchers": [
@@ -125,14 +117,6 @@
         },
         "matchingRules": {
           "body": {
-            "$.asOf": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
             "$.balanced": {
               "combine": "AND",
               "matchers": [

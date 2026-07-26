@@ -39,8 +39,18 @@ class FxRatePactConsumerTest {
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
             newJsonBody { o ->
-                o.stringType("baseCurrency", "EUR")
-                o.stringType("quoteCurrency", "CZK")
+                // stringValue, NOT stringType: the currency pair IS the identity of the rate.
+                // A `type` matcher accepts any string, so a provider echoing the WRONG pair —
+                // the USD/CZK rate answered on the EUR/CZK route — verified green while the
+                // consumer went on to convert money at it. Measured on #2425: making the
+                // provider answer "USD"/"HUF" left FxPactFolderProviderVerificationTest green
+                // before this change and red after it.
+                //
+                // This is not over-coupling: the route is /rates/{base}/{quote}, so the response
+                // pair is a pure function of the request path this interaction pins by literal.
+                // The rates themselves stay decimal-matched — those genuinely move.
+                o.stringValue("baseCurrency", "EUR")
+                o.stringValue("quoteCurrency", "CZK")
                 o.decimalType("bidRate", 24.80)
                 o.decimalType("askRate", 25.20)
             }.build(),

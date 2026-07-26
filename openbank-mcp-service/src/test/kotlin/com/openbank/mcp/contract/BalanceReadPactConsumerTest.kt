@@ -69,6 +69,12 @@ class BalanceReadPactConsumerTest {
                 // min = 0: the provider replays against a fresh Testcontainer DB with no balances.
                 // The element template records the shape without requiring a row to exist.
                 o.minArrayLike("balances", 0, 1) { b ->
+                    // stringType, DELIBERATELY (issue #2425): this returns EVERY balance the
+                    // account holds and the request names no currency, so an account may
+                    // legitimately answer CZK, EUR and USD rows. Pinning would assert "every
+                    // balance is CZK". account-service's single-currency lookups
+                    // (/balances/{id}/{currency}) DO pin it — there the value is an echo of the
+                    // request, which is the line this sweep draws.
                     b.stringType("currency", "CZK")
                     b.decimalType("available", 1_000.00)
                 }

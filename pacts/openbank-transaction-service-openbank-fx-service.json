@@ -34,27 +34,11 @@
                 }
               ]
             },
-            "$.baseCurrency": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
             "$.bidRate": {
               "combine": "AND",
               "matchers": [
                 {
                   "match": "decimal"
-                }
-              ]
-            },
-            "$.quoteCurrency": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
                 }
               ]
             }
