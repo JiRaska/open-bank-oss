@@ -39,6 +39,10 @@
 #     the first model call (`is_error:true` at `num_turns:1`, ~2s), so this standby
 #     path does not actually review anything. Re-minting the token needs the owner's
 #     Claude session, so it is tracked separately — do not assume a fallback exists.
+#     What IS fixed: that state no longer reports as a successful review. The action
+#     exits 0 on its own recorded failure, so a guard step reads the transcript and
+#     fails the job instead (check-claude-fallback-result.sh). The token being dead is
+#     now visible; before, a dead standby and a healthy one were indistinguishable.
 #
 # Prerequisites (one-time, outside this file):
 #   1. Settings → Actions → General → "Allow GitHub Actions to approve pull
@@ -410,10 +414,16 @@ jobs:
       # Runs only if GitHub Models failed AND the secret is configured. The action
       # is agentic: it reads the PR and submits its own review via gh.
       - name: Claude review (fallback)
+        id: claude
         if: >-
           steps.scope.outputs.skip == 'false' &&
           steps.ghmodels.outcome == 'failure' &&
           env.HAS_CLAUDE == 'true'
+        # The action exits 0 even when its own transcript says the run failed, so its
+        # step outcome carries no information either way. The verdict is the guard
+        # step below, which reads the transcript. continue-on-error keeps a genuine
+        # action-level crash from skipping that guard.
+        continue-on-error: true
         uses: anthropics/claude-code-action@af0559ee4f514d1ef21826982bed13f7edc3c35e # v1.0.178
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -435,3 +445,20 @@ jobs:
             `gh pr review ${{ github.event.pull_request.number }} --comment --body "..."`
             (a non-blocking comment — never --request-changes).
             Prefix the body with "🤖 Agent review (Claude · fallback)".
+
+      # --- The fallback must not be able to report a review that never happened ----
+      # claude-code-action exits 0 even when its transcript records the run as failed.
+      # That is exactly how #2161 stayed invisible: the OAuth token was rejected at the
+      # gateway on the first model call (`is_error: true`, `num_turns: 1`,
+      # `total_cost_usd: 0`, ~2s) and GitHub recorded a successful step in a successful
+      # job. The standby reviewer was dead and every available signal said it was fine.
+      #
+      # `always()` so a crashed action still reaches the guard; the `skipped` test keeps
+      # it silent on the overwhelmingly common path where the primary reviewer worked.
+      # Failing here is safe: this job is non-blocking and not a required check, so a red
+      # means "no review happened", never "this PR is rejected".
+      - name: Verify the Claude fallback actually reviewed
+        if: always() && steps.claude.outcome != 'skipped'
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: .github/scripts/check-claude-fallback-result.sh "$EXECUTION_FILE"
