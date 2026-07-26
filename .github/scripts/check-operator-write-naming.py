@@ -70,29 +70,64 @@ DECLARED_EXCEPTIONS = {
 #
 # Shrinking this set is the work. Adding to it is a regression and the guard says so.
 BASELINE = {
-    "operator-aml-case-update-decision",
-    "dispute-staff-write",
-    "operator-kyc-case-update-check",
-    "operator-kyc-case-pep-rescreen",
-    "operator-kyc-case-review-disposition",
-    "operator-standing-order-pause",
-    "operator-statement-close-run-trigger",
-    "operator-statement-close",
-    "operator-statement-export",
-    "operator-tpp-registry-blacklist",
+    # Verified individually, not assembled by hand: derived by emptying this set and reading what
+    # the check reports. An earlier revision of this list named 18 rules; 10 of those were NOT
+    # reachable by the shared identity at all — they either bar service-accounts outright
+    # (`not startswith(input.principal.id, "service-account-")`, as statement-close/-export do),
+    # gate on a role the shared account does not hold (ROLE_COMPLIANCE / ROLE_CREDIT_RISK /
+    # ROLE_LENDING_OFFICER), or are reads. Overstating a debt list is not a safe error: it hides
+    # the real entries among noise and invites the whole thing being ignored.
     "operator-anacredit-create",
-    "supervisor-overdraft-limit",
-    "operator-fx-trigger",
     "operator-fx-approval-decide",
-    "operator-year-close-attest",
-    "operator-vop-verify",
-    "operator-pid-resolve",
+    "operator-fx-trigger",
     "operator-party-status",
+    "operator-pid-resolve",       # pid.resolve — a lookup; classified here pending confirmation
+    "operator-standing-order-pause",
+    "operator-vop-verify",        # vop.verify — a verification; same caveat
+    "operator-year-close-attest",
 }
 
 REASON_RE = re.compile(r'allowed_reasons\s+contains\s+"([^"]+)"\s+if\s*\{')
-ROLE_GATE_RE = re.compile(r'\brole\s+in\s+input\.principal\.roles\b|"ROLE_(OPERATOR|ADMIN)"')
-IDENTITY_PIN_RE = re.compile(r"input\.principal\.id\s*==")
+# Role gating, in every idiom this fleet actually uses. Review of PR #2571 found the first
+# version missed three: a membership test whose variable is not literally `role`
+# (`some r in {...}; r in input.principal.roles`), a bare role literal with no `some` binding
+# (`"ROLE_PAYMENTS" in input.principal.roles`), and a role set sourced from `data.rules`.
+# A missed idiom here is a role-only write rule that never gets discovered, which is the one
+# failure mode this script exists to prevent.
+# Only the roles the SHARED IDENTITY ACTUALLY HOLDS make a rule reachable by it.
+# openbank-realm.json gives `service-account-openbank-services` exactly
+# `realmRoles: ["ROLE_OPERATOR"]` — nothing else. So a rule gated on ROLE_COMPLIANCE,
+# ROLE_CREDIT_RISK or ROLE_LENDING_OFFICER is unreachable by it no matter how role-only it is,
+# and flagging those was the second over-broad version of this check.
+#
+# Keep this list in step with the realm. If the shared service-account is ever granted another
+# role, add it here — otherwise this guard silently stops covering the rules that role opens.
+SHARED_IDENTITY_ROLES = ("ROLE_OPERATOR",)
+
+ROLE_GATE_RE = re.compile(
+    r"|".join(
+        # `some role in {"ROLE_OPERATOR", …}` / `"ROLE_OPERATOR" in input.principal.roles` /
+        # any body mentioning the role literal at all — the variable name is irrelevant.
+        [rf'"{r}"' for r in SHARED_IDENTITY_ROLES]
+        # A role set sourced from rules.yaml could contain it; treat as reachable and let the
+        # author narrow it explicitly rather than guessing what the data holds.
+        + [r"data\.rules\.[A-Za-z0-9_.]*roles?\b"]
+    )
+)
+
+# Reads are out of scope regardless of role: this guard is about WRITES. The fleet names them
+# `*-read` (viewer-*-read, *-oversight-read, *-telemetry-read), so the convention is the check —
+# and unlike the write convention, this one IS followed.
+READ_NAME_RE = re.compile(r"-read$")
+
+# Ways a rule can bar or pin the caller identity, so the shared service-account cannot reach it.
+# `not startswith(input.principal.id, "service-account-")` is STRONGER than an identity pin — it
+# excludes every service-account at once — and the first version of this script did not recognise
+# it, which is why it wrongly reported operator-statement-close/-export as exposed.
+IDENTITY_PIN_RE = re.compile(
+    r"input\.principal\.id\s*=="
+    r"|not\s+startswith\(\s*input\.principal\.id\s*,\s*\"service-account-\""
+)
 
 
 def rego_sources() -> list[tuple[Path, str]]:
@@ -141,6 +176,8 @@ def main() -> int:
         for reason, body in rule_bodies(clean):
             checked += 1
             if reason in READ_REASONS or reason in DECLARED_EXCEPTIONS:
+                continue
+            if READ_NAME_RE.search(reason):
                 continue
             if not ROLE_GATE_RE.search(body):
                 continue  # not role-gated: identity- or type-scoped, out of scope here
