@@ -66,18 +66,29 @@ dependencies {
 // wrong answer costs a few runner-minutes instead of a stalled full-fleet run (#2039).
 // Do not set it in services-ci / _service-ci; re-enabling for real is #2320 item 3, and needs the
 // probe's answer first.
-val swiftBootItProbe = providers.gradleProperty("swift.boot.it").orNull == "true"
-
 // Pact: write generated consumer contracts to pacts/ and forward broker config.
 tasks.withType<Test> {
-    // CI hang #3 (#2320): `@DisabledIfEnvironmentVariable` is evaluated AFTER Quarkus starts
-    // QuarkusTestResource containers (quarkusio/quarkus#21555) — Quarkus ignores the JUnit
-    // condition and boots anyway. SwiftBootSmokeIT hangs at boot for the full 45-min job
-    // timeout, stalling the entire fleet Services CI run. Gradle-level filter prevents Quarkus
-    // from discovering the class in CI; the IT still runs locally (where CI is unset).
-    if (System.getenv("CI") == "true" && !swiftBootItProbe) {
-        filter { excludeTestsMatching("*IT") }
-    }
+    // CI hang #3 (#2320) is GONE — measured, not assumed. `SwiftBootSmokeIT` used to hang 37+ min
+    // at Quarkus boot on the runner pool (`@DisabledIfEnvironmentVariable` is evaluated AFTER
+    // Quarkus starts QuarkusTestResource containers, quarkusio/quarkus#21555), so a blanket
+    // `filter { excludeTestsMatching("*IT") }` kept JUnit from discovering it at all. Both
+    // exclusions are gone as of #2320 item 3. The `swift-boot-it-probe` workflow ran each class
+    // on ubuntu-latest with the exclusions lifted, 2026-07-26:
+    //
+    //     SwiftBootSmokeIT   exit 0, 257s (cap 12m)   run 30201804638
+    //     SwiftOutboxClaimIT exit 0, 215s (cap 12m)   run 30202120687
+    //
+    // The blanket filter is why the second class matters: it was never about SwiftBootSmokeIT
+    // alone. `SwiftOutboxClaimIT` is the #1201 regression test for two dispatchers racing
+    // `claimProcessable`, itself a @QuarkusTest + Testcontainers, and it was swallowed by the same
+    // wildcard — so narrowing the filter to the named class would have looked like the cheap fix
+    // and quietly left a money-path race untested. Both run in CI now.
+    //
+    // The per-test timeout is the guard the exclusion used to be. If the boot stall ever returns,
+    // JUnit kills the test at 8 minutes and the module goes RED, instead of the class sitting on a
+    // runner until the 45-minute fleet job timeout takes the whole matrix down with it — the
+    // failure mode that caused the exclusion in the first place. Fail fast, not fail wide.
+    systemProperty("junit.jupiter.execution.timeout.default", "8m")
     systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
     listOf(
         "pactbroker.url",
@@ -91,13 +102,6 @@ tasks.withType<Test> {
         "pact.provider.tag",
     ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 
-    // SwiftBootSmokeIT is a @QuarkusTest — Quarkus's BeforeAllCallback fires before JUnit5 evaluates
-    // @DisabledIfEnvironmentVariable, so the full Quarkus boot + Testcontainers (Postgres + Valkey) still
-    // starts in CI despite the annotation. Boot hangs 37+ min on the runner pool → job timeout.
-    // Gradle-level exclusion prevents JUnit5 from ever discovering the class, so Quarkus never boots.
-    // The class still runs locally (CI env var is not set outside GHA). Re-enable per #2320 —
-    // note that means this service's only real boot test has never once gated a merge.
-    //
     // SwiftMessagePactProviderVerificationTest re-enabled 2026-07-23: the 404-hang reason is
     // gone — transaction-service publishes a consumer pact for openbank-swift-service on every
     // main push, so /for-verification returns content. The class stays
@@ -106,8 +110,9 @@ tasks.withType<Test> {
     // ClassGraph scan; the test now scopes MessageTestTarget to com.openbank.swift.contract. That
     // fix touched only src/test, which does not rebuild this service on main-push, so this
     // build-file note exists to re-trigger the provider verification (#1348 drain).
-    if (System.getenv("CI") == "true" && !swiftBootItProbe) {
-        exclude("**/SwiftBootSmokeIT*")
+    // The `exclude("**/SwiftBootSmokeIT*")` that stood here is gone with the blanket `*IT` filter
+    // above (#2320 item 3) — the stall it guarded against does not reproduce, measured 2026-07-26.
+    if (System.getenv("CI") == "true") {
         // SwiftEventPactConsumerTest and ClearingSimulatorPactConsumerTest USED to be excluded
         // here too, on the stated grounds that PactConsumerTestExt auto-publishes to
         // pactbroker.url in AfterTestTemplate and the broker 401s/hangs. That reason did not
