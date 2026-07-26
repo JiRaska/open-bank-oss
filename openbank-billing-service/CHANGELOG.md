@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.6.6...billing-service-v0.7.0) (2026-07-26)
+
+
+### Features
+
+* **ledger:** register workflow-liveness gauges on the money-path schedulers ([#2488](https://github.com/JiRaska/open-bank-oss/issues/2488)) ([d0332b4](https://github.com/JiRaska/open-bank-oss/commit/d0332b4201aa965504c9f2494a5b8e1639c25ec5)), closes [#2239](https://github.com/JiRaska/open-bank-oss/issues/2239)
+
 ## [0.6.6](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.6.5...billing-service-v0.6.6) (2026-07-25)
 
 
