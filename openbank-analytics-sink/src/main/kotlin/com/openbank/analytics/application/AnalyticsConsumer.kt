@@ -10,9 +10,14 @@ import com.openbank.analytics.application.port.out.AnalyticsSink
 import com.openbank.analytics.application.port.out.DeadLetterRecord
 import com.openbank.analytics.application.port.out.DeadLetterSink
 import com.openbank.libs.analytics.AnalyticsEnvelope
+import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.smallrye.reactive.messaging.kafka.api.IncomingKafkaRecordMetadata
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.reactive.messaging.Incoming
+import org.eclipse.microprofile.reactive.messaging.Message
 import org.jboss.logging.Logger
 import java.security.MessageDigest
 import java.time.Clock
@@ -48,13 +53,27 @@ class AnalyticsConsumer {
 
     @Inject lateinit var freshness: IngestFreshness
 
+    @Inject lateinit var attribution: IngestAttributionMetrics
+
     private val log = Logger.getLogger(AnalyticsConsumer::class.java)
 
+    /**
+     * Consumes a `Message<String>`, not a bare `String`, on purpose (issue #2598).
+     *
+     * An outbox-relayed record's BODY is `OutboxEntry.payload` — the bare domain event. Its
+     * addressing lives on the transport: the event type in the `ce-type` header, the aggregate id
+     * as the record key, the producing domain as the topic. A `String` signature throws all three
+     * away before the mapping runs, which is why plainly identifiable events (a passkey
+     * enrolment, a generated document, a signing-ceremony step) landed in bronze as
+     * UNKNOWN/UNKNOWN/unknown with nothing erroring.
+     */
     @Incoming("analytics-events-in")
-    suspend fun consume(payload: String) {
+    suspend fun consume(message: Message<String>) {
+        val payload = message.payload
+        val address = addressOf(message)
         try {
             val node: JsonNode = objectMapper.readTree(payload)
-            val envelope = toEnvelope(node)
+            val envelope = toEnvelope(node, address)
             // F7: schema governance — an unknown/newer-than-known schema is quarantined (when strict),
             // never silently written into the 10-year log of record.
             if (::schemaGovernance.isInitialized &&
@@ -74,6 +93,9 @@ class AnalyticsConsumer {
                 return
             }
             sink.write(envelope)
+            // #2598 ask 2: a row that lands without attribution must be counted and logged, or
+            // the broken state stays indistinguishable from the healthy one.
+            if (::attribution.isInitialized) attribution.record(envelope, address.topic)
             // F8: record ingest lag (now - occurredAt) so freshness/RPO can be alerted on.
             if (::freshness.isInitialized) freshness.recordIngest(envelope.occurredAt)
         } catch (e: Exception) {
@@ -87,15 +109,56 @@ class AnalyticsConsumer {
                 ),
             )
             if (::freshness.isInitialized) freshness.recordDeadLetter()
+        } finally {
+            // Switching the signature from `String` to `Message<String>` also switches SmallRye
+            // from auto-ack to manual, so the ack has to be explicit — and in a `finally`, or a
+            // quarantined message would stall the partition forever.
+            Uni.createFrom().completionStage(message.ack()).awaitSuspending()
         }
+    }
+
+    /** Lifts the broker metadata this consumer used to discard. Absent metadata is not an error. */
+    private fun addressOf(message: Message<String>): EventAddress {
+        val meta = message.getMetadata(IncomingKafkaRecordMetadata::class.java).orElse(null)
+            ?: return EventAddress.NONE
+
+        @Suppress("UNCHECKED_CAST")
+        val record = meta as IncomingKafkaRecordMetadata<Any?, String>
+        val ceType = record.headers
+            ?.lastHeader(OutboxKafkaHeaders.HEADER_EVENT_TYPE)
+            ?.value()
+            ?.toString(Charsets.UTF_8)
+            ?.takeIf { it.isNotBlank() }
+        return EventAddress(
+            topic = record.topic?.takeIf { it.isNotBlank() },
+            key = record.key?.toString()?.takeIf { it.isNotBlank() },
+            ceType = ceType,
+        )
     }
 
     private fun sha256(s: String): String =
         MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
 
-    /** Maps a raw domain event into the canonical, PII-masked [AnalyticsEnvelope]. Visible for tests. */
-    fun toEnvelope(node: JsonNode): AnalyticsEnvelope {
-        val aggregateType = node["aggregateType"]?.asText() ?: inferAggregateType(node)
+    /**
+     * Maps a raw domain event into the canonical, PII-masked [AnalyticsEnvelope]. Visible for tests.
+     *
+     * Kept as a single-argument overload for the backfill path, which replays stored bodies and has
+     * no broker metadata to offer.
+     */
+    fun toEnvelope(node: JsonNode): AnalyticsEnvelope = toEnvelope(node, EventAddress.NONE)
+
+    /**
+     * As above, but with the broker addressing the record arrived with.
+     *
+     * Fallback ORDER matters and is deliberately body-first: the topic is consulted only where the
+     * body already yielded the UNKNOWN sentinel. Putting the topic ahead of the body would rebucket
+     * events that are attributed correctly today — `openbank.balance.events` carries an `accountId`
+     * and is filed under ACCOUNT, and moving it to BALANCE would split an existing aggregate across
+     * two buckets in the silver views. This change is additive by construction: it can only turn an
+     * UNKNOWN into a value.
+     */
+    fun toEnvelope(node: JsonNode, address: EventAddress): AnalyticsEnvelope {
+        val aggregateType = resolveAggregateType(node, address)
         return AnalyticsEnvelope(
             eventId = node["eventId"]?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
                 ?: UUID.randomUUID(),
@@ -108,15 +171,17 @@ class AnalyticsConsumer {
             // one event can see. Resolve the id FROM the resolved type instead.
             aggregateId = node["aggregateId"]?.asText()
                 ?: idForType(aggregateType, node)
-                ?: "unknown",
-            aggregateVersion = node["aggregateVersion"]?.asLong()
-                ?: node["version"]?.asLong()
-                ?: node["sequenceNumber"]?.asLong()
-                ?: 0L,
-            eventType = node["eventType"]?.asText() ?: "UNKNOWN",
+                // The outbox partition key IS the aggregate id (OutboxKafkaHeaders.partitionKey).
+                ?: address.key
+                ?: UNKNOWN_SERVICE,
+            aggregateVersion = resolveAggregateVersion(node),
+            // `ce-type` is the outbox event type; a bare payload has no eventType field at all.
+            eventType = node["eventType"]?.asText() ?: address.ceType ?: UNKNOWN,
             occurredAt = node["occurredAt"]?.asText()?.let { runCatching { Instant.parse(it) }.getOrNull() }
                 ?: Instant.now(clock),
-            sourceService = node["sourceService"]?.asText() ?: "unknown",
+            sourceService = node["sourceService"]?.asText()
+                ?: TopicAttribution.sourceService(address.topic)
+                ?: UNKNOWN_SERVICE,
             schemaVersion = node["schemaVersion"]?.asInt() ?: 1,
             actorId = node["requestedBy"]?.asText() ?: node["actorId"]?.asText(),
             actorType = node["actorType"]?.asText(),
@@ -125,6 +190,16 @@ class AnalyticsConsumer {
             payload = PayloadMasker.maskToMap(node["payload"] ?: node),
         )
     }
+
+    private fun resolveAggregateType(node: JsonNode, address: EventAddress): String = node["aggregateType"]?.asText()
+        ?: inferAggregateType(node).takeIf { it != UNKNOWN }
+        ?: TopicAttribution.aggregateType(address.topic)
+        ?: UNKNOWN
+
+    private fun resolveAggregateVersion(node: JsonNode): Long = node["aggregateVersion"]?.asLong()
+        ?: node["version"]?.asLong()
+        ?: node["sequenceNumber"]?.asLong()
+        ?: 0L
 
     /**
      * The identifying field for a resolved aggregate type — the counterpart to [inferAggregateType],
@@ -158,13 +233,12 @@ class AnalyticsConsumer {
      * `templateCode`. Both were landing as `UNKNOWN/UNKNOWN` in the sandbox — identifiable events
      * with three columns of attribution silently blank (#2598).
      *
-     * This remains a HEURISTIC and should not be the mechanism. The topic name states the domain
-     * authoritatively (`openbank.documents.document.event` is a document event whatever its keys),
-     * but reading it requires the `@Incoming` method to take `Message<String>` and handle ack/nack
-     * explicitly rather than a bare `String`. That refactor is deferred deliberately, not forgotten:
-     * it changes the failure semantics of a working consumer, and it is not needed to fix the
-     * misclassification. Tracked separately — until it lands, EVERY new event shape whose keys are
-     * not listed here silently becomes UNKNOWN, and nothing goes red.
+     * This remains a HEURISTIC and is deliberately the BODY-first fallback: the broker address
+     * ([EventAddress.topic]) is consulted only when the body yields UNKNOWN (see the [toEnvelope]
+     * KDoc for why topic-first would rebucket correctly attributed events). The `@Incoming`
+     * consumer now reads `Message<String>` and hands the addressing down here — but the body
+     * still wins, so EVERY new event shape whose keys are not listed above AND whose topic is
+     * not in [TopicAttribution] still silently becomes UNKNOWN, and nothing goes red.
      */
     private fun inferAggregateType(node: JsonNode): String = when {
         node.has("transactionId") -> "TRANSACTION"
@@ -174,6 +248,11 @@ class AnalyticsConsumer {
         node.has("credentialId") -> "PASSKEY"
         node.has("accountId") -> "ACCOUNT"
         node.has("partyId") -> "PARTY"
-        else -> "UNKNOWN"
+        else -> UNKNOWN
+    }
+
+    companion object {
+        private const val UNKNOWN = IngestAttributionMetrics.UNKNOWN
+        private const val UNKNOWN_SERVICE = IngestAttributionMetrics.UNKNOWN_SERVICE
     }
 }
