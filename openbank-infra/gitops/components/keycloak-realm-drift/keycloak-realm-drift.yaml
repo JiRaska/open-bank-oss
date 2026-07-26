@@ -1,0 +1,271 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ---------------------------------------------------------------------------
+# Keycloak realm drift detector (issue #2540).
+#
+# THE GAP THIS CLOSES
+#   `check-roles-allowed-realm.py` compares every `@RolesAllowed` string to the realm TEMPLATE in
+#   git. Nothing compared that template to the realm that actually runs — and the two drift by
+#   construction, because Keycloak reads the templates via `--import-realm`, which runs on COLD
+#   START ONLY. A role added to a template after the realm first came up is a file change that
+#   reaches nothing. There is no reconciler and no ArgoCD hook.
+#
+#   ArgoCD reports Synced/Healthy throughout, correctly: the object it manages does match the
+#   repo. The drift is one layer below what ArgoCD can see. And the template in git is not even
+#   the artifact Keycloak reads — keycloak.yaml's `realm-import` volume projects the out-of-band
+#   secrets `keycloak-realm-import` / `keycloak-customers-realm-import`, so the file the CI gate
+#   reads and the file Keycloak imports are two unrelated objects. Reading the LIVE realm is the
+#   only observation that covers both layers at once.
+#
+#   Measured 2026-07-26: ROLE_KYC, ROLE_KYC_OPENER, ROLE_KYC_REVIEWER and ROLE_SUPERVISOR were
+#   declared and absent; ROLE_DEMO was live and undeclared. 20 `@RolesAllowed` sites named the
+#   four missing roles and none 403'd — each also listed a live role — so ADR-0116's KYC
+#   four-eyes silently degraded to ROLE_ADMIN/ROLE_OPERATOR and one identity could both open and
+#   approve a case. Separation of duties, declared everywhere and enforced nowhere.
+#
+# WHY A CronJob AND NOT A CI GATE
+#   The live realm is unreachable from a PR runner: the admin REST API is blocked at the nginx
+#   edge by design (keycloak.yaml), no workflow holds cluster credentials, and the admin secret is
+#   out-of-band. So the CAPTURE happens here, in-cluster, and the COMPARISON is ordinary
+#   repo code — `.github/scripts/check-realm-role-parity.py`, unit-tested in both directions by
+#   `openbank-infra/scripts/check_realm_role_parity_test.py`. This pod holds no logic worth
+#   testing; it holds a credential and a network path.
+#
+# WHY IT FAILS THE JOB RATHER THAN JUST WRITING A REPORT
+#   The sbom-drift-scanner lesson (2026-07-12): a finding that only lands in a ConfigMap is a
+#   finding nobody acts on. The report is published FIRST, then the Job fails, so the alert fires
+#   with the detail already readable.
+#
+# WHAT IT DELIBERATELY DOES NOT DO
+#   It does not reconcile. Issue #2540 leaves open whether the realm should be made to follow the
+#   template (a `kcadm` Job, or keycloak-config-cli); detection first, on purpose — a reconciler
+#   that writes to the identity provider is a much larger blast radius and wants its own decision.
+#   It also checks role EXISTENCE only, not role ASSIGNMENT. `service-account-openbank-services`
+#   held ROLE_OPERATOR live while the template declared no such user at all (#2442) — the same
+#   class one level deeper, and the natural next increment.
+#
+# NAMESPACE: `iam`, deliberately. Keycloak's ingress allow-list admits `podSelector: {}` — the
+# whole of `iam` — so a same-namespace caller needs no NetworkPolicy change, and the generated
+# policy (gen-network-policies.py derives edges from Deployments) would not have covered a
+# CronJob anyway.
+# ---------------------------------------------------------------------------
+
+# ─── ServiceAccount ─────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: keycloak-realm-drift
+  namespace: iam
+  labels:
+    app.kubernetes.io/name: keycloak-realm-drift
+    app.kubernetes.io/part-of: iam
+
+---
+# ─── RBAC: write the single report ConfigMap, nothing else ──────────────────
+# No secret read verb is granted: the admin credential arrives via secretKeyRef on the pod spec,
+# which the kubelet resolves — the ServiceAccount never needs API access to it. Granting `get`
+# on secrets here would hand any future exec into this pod the bootstrap admin.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: keycloak-realm-drift-configmap
+  namespace: iam
+  labels:
+    app.kubernetes.io/name: keycloak-realm-drift
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["keycloak-realm-drift"]
+    verbs: ["get", "patch", "update"]
+  # create: resourceNames cannot gate create — needed for the first run only.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: keycloak-realm-drift-configmap
+  namespace: iam
+  labels:
+    app.kubernetes.io/name: keycloak-realm-drift
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: keycloak-realm-drift-configmap
+subjects:
+  - kind: ServiceAccount
+    name: keycloak-realm-drift
+    namespace: iam
+
+---
+# ─── CronJob ────────────────────────────────────────────────────────────────
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: keycloak-realm-drift
+  namespace: iam
+  labels:
+    app.kubernetes.io/name: keycloak-realm-drift
+    app.kubernetes.io/part-of: iam
+spec:
+  # 03:40 UTC daily — after sbom-drift-scanner's 03:10, so the two in-cluster drift reports do
+  # not contend for the same window.
+  schedule: "40 3 * * *"
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 600
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: keycloak-realm-drift
+        spec:
+          serviceAccountName: keycloak-realm-drift
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            # Phase 1 — capture the live role sets and run the committed comparison.
+            # The comparison logic is NOT inlined here: it lives in the repo, where it is
+            # reviewable and unit-tested. This container clones the public repo (unauthenticated,
+            # depth 1 — the same pattern sbom-drift-scanner uses) and executes it.
+            - name: capture-and-compare
+              image: docker.io/alpine/k8s:1.34.1
+              command: ["/bin/sh", "-ec"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: false
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: KC_URL
+                  value: http://keycloak.iam.svc:8080
+                - name: KC_ADMIN_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: keycloak-bootstrap
+                      key: admin-username
+                - name: KC_ADMIN_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: keycloak-bootstrap
+                      key: admin-password
+              args:
+                - |
+                  set -eu
+                  echo "Cloning openbank-oss (public repo, unauthenticated, depth=1)..."
+                  git clone --depth 1 --quiet \
+                    https://github.com/JiRaska/open-bank-oss.git /tmp/repo
+
+                  # `admin-cli` is the only client in the master realm that accepts a direct
+                  # password grant (see the sandbox admin-token note in the repo runbook).
+                  # --data-urlencode reads the value from the env, so the password is never an
+                  # argv entry visible in `ps` or echoed by `set -x`.
+                  echo "Requesting an admin token..."
+                  TOKEN=$(curl -sS --fail-with-body \
+                    -X POST "${KC_URL}/realms/master/protocol/openid-connect/token" \
+                    -d "client_id=admin-cli" -d "grant_type=password" \
+                    --data-urlencode "username=${KC_ADMIN_USER}" \
+                    --data-urlencode "password=${KC_ADMIN_PASSWORD}" \
+                    | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+
+                  for REALM in openbank openbank-customers; do
+                    echo "Capturing roles for realm ${REALM}..."
+                    # briefRepresentation + an explicit max: Keycloak's default page size is 100,
+                    # and a silently truncated page would read as "these roles are missing" —
+                    # a detector's worst failure mode is inventing findings.
+                    curl -sS --fail-with-body \
+                      -H "Authorization: Bearer ${TOKEN}" \
+                      "${KC_URL}/admin/realms/${REALM}/roles?briefRepresentation=true&first=0&max=2000" \
+                      > "/work/${REALM}-roles.json"
+                    echo "  $(python3 -c "import json;print(len(json.load(open('/work/${REALM}-roles.json'))))") role(s)"
+                  done
+
+                  # --skip-annotations is NOT passed: the clone is a full checkout, so the
+                  # @RolesAllowed cross-check runs and a role the code needs but the live realm
+                  # does not issue is reported with its call sites.
+                  cd /tmp/repo
+                  python3 .github/scripts/check-realm-role-parity.py \
+                    --root /tmp/repo \
+                    --live "openbank=/work/openbank-roles.json" \
+                    --live "openbank-customers=/work/openbank-customers-roles.json" \
+                    > /work/final.json 2> /work/findings.txt \
+                    || echo "findings" > /work/findings
+                  cat /work/findings.txt
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
+
+          containers:
+            # Phase 2 — publish the report, THEN fail. Order is load-bearing: the alert must fire
+            # with the detail already readable, not with a promise of it.
+            - name: publish
+              image: docker.io/alpine/k8s:1.34.1
+              command: ["/bin/sh", "-ec"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: HOME
+                  value: /tmp
+              args:
+                - |
+                  set -eu
+                  python3 - <<'PY' > /tmp/final.json
+                  import datetime, json, pathlib
+                  raw = pathlib.Path("/work/final.json").read_text().strip()
+                  report = json.loads(raw) if raw else {"realms": {}, "captureFailed": True}
+                  report["scannedAt"] = datetime.datetime.now(datetime.timezone.utc).strftime(
+                      "%Y-%m-%dT%H:%M:%SZ")
+                  report["checkScope"] = "keycloak realm ROLE EXISTENCE, template vs live"
+                  report["doesNotVerify"] = "role ASSIGNMENTS to users/service accounts (#2540 follow-up)"
+                  findings = pathlib.Path("/work/findings.txt")
+                  report["findings"] = findings.read_text().splitlines() if findings.is_file() else []
+                  print(json.dumps(report, indent=2, sort_keys=True))
+                  PY
+
+                  cat /tmp/final.json
+                  kubectl create configmap keycloak-realm-drift \
+                    --namespace iam \
+                    --from-file=keycloak-realm-drift.json=/tmp/final.json \
+                    --dry-run=client -o yaml | kubectl apply -f -
+                  echo "Published."
+
+                  if [ -f /work/findings ]; then
+                    echo "ERROR: the realm template and the running realm disagree — see above." >&2
+                    exit 1
+                  fi
+                  echo "Done: template and live realm agree."
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+
+          volumes:
+            - name: work
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}
