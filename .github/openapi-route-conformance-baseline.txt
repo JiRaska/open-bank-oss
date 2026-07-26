@@ -24,9 +24,6 @@ openbank-agent-service served-not-published GET /api/v1/admin/agents/halts
 openbank-agent-service served-not-published POST /api/v1/admin/agents/halt
 openbank-agent-service served-not-published POST /api/v1/admin/agents/resume
 openbank-balance-service served-not-published PUT /api/v1/balances/{accountId}/{currency}/overdraft-limit
-openbank-card-issuance-service served-not-published GET /api/v1/cards
-openbank-card-issuance-service served-not-published PUT /api/v1/cards/{id}/controls
-openbank-card-issuance-service served-not-published PUT /api/v1/cards/{id}/limits
 openbank-customer-edge served-not-published DELETE /customer/v1/accounts/{accountId}/pockets/{currency}
 openbank-customer-edge served-not-published DELETE /customer/v1/consents/{id}
 openbank-customer-edge served-not-published DELETE /customer/v1/devices/{id}
@@ -76,8 +73,6 @@ openbank-customer-edge served-not-published POST /customer/v1/webauthn/session/r
 openbank-customer-edge served-not-published PUT /customer/v1/notification-preferences
 openbank-fx-service served-not-published GET /api/v1/fx/cnb/rates/{base}
 openbank-fx-service served-not-published POST /api/v1/fx/cnb/ingest
-openbank-interest-service served-not-published GET /api/v1/interest/accounts/{accountId}/effective-rate
-openbank-interest-service served-not-published GET /api/v1/interest/accruals
 openbank-ledger-service served-not-published POST /api/v1/ledger/fx-revaluation
 openbank-notification-service served-not-published GET /api/v1/preferences/party/{partyId}
 openbank-notification-service served-not-published PUT /api/v1/preferences/party/{partyId}
@@ -100,6 +95,3 @@ openbank-security-scanner served-not-published GET /api/v1/ict-incidents/{id}
 openbank-security-scanner served-not-published PATCH /api/v1/ict-incidents/{id}/status
 openbank-security-scanner served-not-published POST /api/v1/ict-incidents
 openbank-security-scanner served-not-published POST /api/v1/ict-incidents/{id}/regulatory-report
-openbank-sepa-instant served-not-published GET /api/v1/sepa-instant
-openbank-standing-order-service served-not-published GET /api/v1/standing-orders
-openbank-swift-service served-not-published GET /api/v1/swift/messages

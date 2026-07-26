@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SEPA Instant (SCT Inst) Service API
-  version: 1.2.0
+  version: 1.3.0
   description: >-
     SEPA Instant Credit Transfer — sub-10s settlement, recall support. On submit, debtor and creditor
     names are synchronously screened against the sanctions lists (ADR-0032): a clean payment proceeds
@@ -21,6 +21,24 @@ tags:
 
 paths:
   /api/v1/sepa-instant:
+    get:
+      tags: [SCT Inst]
+      summary: List every SCT Inst payment
+      description: >-
+        The unfiltered collection. Requires ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN, ROLE_PAYMENTS
+        or ROLE_API (authorize action `sctInstPayment.list`).
+      operationId: listSctInstPayments
+      responses:
+        '200':
+          description: All SCT Inst payments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SctInstPaymentResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [SCT Inst]
       summary: Submit a SEPA Instant payment
