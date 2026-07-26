@@ -52,6 +52,22 @@ dependencies {
     testImplementation(libs.pact.provider)
 }
 
+// -Pswift.boot.it=true lifts BOTH CI exclusions below, for the isolated `swift-boot-it-probe`
+// workflow only (#2320 item 1: does the 37-min boot stall still reproduce?). That question cannot
+// be answered from a developer machine — locally `CI` is unset, so the class already passes there,
+// and the failing environment IS the runner pool. It also cannot be answered by narrowing the
+// blanket `*IT` filter to SwiftBootSmokeIT alone: that filter also swallows SwiftOutboxClaimIT,
+// which is itself a @QuarkusTest + @QuarkusTestResource — the same
+// Quarkus-boots-before-JUnit-evaluates-the-condition shape — so narrowing would likely relocate
+// the stall rather than remove it.
+//
+// The flag is deliberately NOT wired into any automatic trigger. It exists so the probe workflow
+// can run one class under its own short `timeout-minutes`, isolated from the fleet matrix, where a
+// wrong answer costs a few runner-minutes instead of a stalled full-fleet run (#2039).
+// Do not set it in services-ci / _service-ci; re-enabling for real is #2320 item 3, and needs the
+// probe's answer first.
+val swiftBootItProbe = providers.gradleProperty("swift.boot.it").orNull == "true"
+
 // Pact: write generated consumer contracts to pacts/ and forward broker config.
 tasks.withType<Test> {
     // CI hang #3 (#2320): `@DisabledIfEnvironmentVariable` is evaluated AFTER Quarkus starts
@@ -59,7 +75,7 @@ tasks.withType<Test> {
     // condition and boots anyway. SwiftBootSmokeIT hangs at boot for the full 45-min job
     // timeout, stalling the entire fleet Services CI run. Gradle-level filter prevents Quarkus
     // from discovering the class in CI; the IT still runs locally (where CI is unset).
-    if (System.getenv("CI") == "true") {
+    if (System.getenv("CI") == "true" && !swiftBootItProbe) {
         filter { excludeTestsMatching("*IT") }
     }
     systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
@@ -90,7 +106,7 @@ tasks.withType<Test> {
     // ClassGraph scan; the test now scopes MessageTestTarget to com.openbank.swift.contract. That
     // fix touched only src/test, which does not rebuild this service on main-push, so this
     // build-file note exists to re-trigger the provider verification (#1348 drain).
-    if (System.getenv("CI") == "true") {
+    if (System.getenv("CI") == "true" && !swiftBootItProbe) {
         exclude("**/SwiftBootSmokeIT*")
         // SwiftEventPactConsumerTest and ClearingSimulatorPactConsumerTest USED to be excluded
         // here too, on the stated grounds that PactConsumerTestExt auto-publishes to
