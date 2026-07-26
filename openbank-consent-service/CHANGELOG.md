@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.15.1...consent-service-v0.16.0) (2026-07-26)
+
+
+### Features
+
+* **consent:** answer "does this party consent to this scope" without disclosing the consent ([#2659](https://github.com/JiRaska/open-bank-oss/issues/2659)) ([bfa6deb](https://github.com/JiRaska/open-bank-oss/commit/bfa6debd354dbcf42049f547c81c4d2106118c05))
+
 ## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.15.0...consent-service-v0.15.1) (2026-07-26)
 
 
