@@ -273,6 +273,31 @@ fire from *outside* it, so they stay here:
   `.github/scripts/check-license-headers.py` enforces every declaration against it. Frozen headers
   (an applied Flyway migration — editing one breaks its checksum and the service dies at boot) go in
   `REUSE.toml` with `precedence = "override"`, never edited in place.
+- **A text-matching guard flags the very text that explains the bug it exists to catch — decide that
+  precedence before the first run.** Three in one session, each caught only by running the new guard
+  against a case it must NOT flag: `check-roles-allowed-realm.py` reported finrep as still broken
+  because #2403's fix quotes the old `@RolesAllowed("SERVICE", …)` in a KDoc (fixed by stripping
+  comments — Kotlin's block comments NEST, so mirror that or a KDoc containing `/*` closes early);
+  `check-advisory-gate-registration.py` flagged **itself**, its own step being named
+  `advisory-gate registration (…, enforced)` (fixed by making `enforced` in a step name beat
+  `advisory`); and the `platform-admin` prose in `DevOpsResource` survived the sweep that renamed
+  the annotation, because comments are stripped *by design* (#2450). Generalize: a guard over source
+  text needs an explicit rule for code-about-code, and stale prose naming a dead identifier is
+  invisible to it forever — grep the prose separately after any vocabulary rename.
+- **An "advisory" gate is usually advisory INSIDE the script, not via `continue-on-error`** — 11 of
+  12 here print `::warning` and exit 0 unless passed `--enforce`. A sweep for `continue-on-error:
+  true` therefore finds one and silently reports the other eleven as enforced. Check both forms
+  before claiming anything about what blocks (#2392).
+- **Regenerating the OPA bundles must be the LAST step before pushing a `rules.yaml` PR, and the
+  "run twice, expect no diff" check does not prove you did that.** Idempotency only proves the
+  generators are stable against whatever `rules.yaml` said at that moment: on #2457 the bundles were
+  regenerated, verified idempotent, and *then* a duplicate-key fix landed in `rules.yaml` — all 65
+  files embedded the superseded text and the OPA gate went red on every one. Re-run after the final
+  edit, not after the first.
+- **`rules.yaml` is never linted by CI** — the yamllint step's scope is `openbank-infra .github`. A
+  duplicate key there is silently resolved by SnakeYAML keeping the LAST occurrence, so a new value
+  added above an existing one is dropped with no error anywhere. Diff yamllint finding *sets*
+  against `origin/main` when editing it (that is the only thing that caught it on #2457).
 
 ### CI / bot commit signing
 - **What signs a bot commit is the *endpoint*, not the token — and `main-protection` enforces
