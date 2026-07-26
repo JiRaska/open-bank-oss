@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.6.2...finrep-service-v0.6.3) (2026-07-26)
+
+
+### Bug Fixes
+
+* **authz:** grant ROLE_API to the M2M account, sweep the dead ROLE_SERVICE name, enforce parity ([#2442](https://github.com/JiRaska/open-bank-oss/issues/2442)) ([#2475](https://github.com/JiRaska/open-bank-oss/issues/2475)) ([9f138c1](https://github.com/JiRaska/open-bank-oss/commit/9f138c133051a44c13790578a2864a703bda3425))
+
 ## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.6.1...finrep-service-v0.6.2) (2026-07-25)
 
 
