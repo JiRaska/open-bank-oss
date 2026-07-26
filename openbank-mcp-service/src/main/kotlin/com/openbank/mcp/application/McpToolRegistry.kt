@@ -130,7 +130,13 @@ class McpToolRegistry(
             "count_marketing_consents" -> marketingReach.countMarketingConsents()
             // The PROPOSED-only invariant is enforced HERE, on the call path, not left to whichever
             // ProposalPort is bound (T-E4, #2414). See ProposedOnly for why it is a whitelist of one.
-            "propose_payment" -> ProposedOnly.enforce(proposals.proposePayment(ctx, arguments))
+            "propose_payment" -> {
+                // Validate BEFORE the port sees anything (T-T2, #2414). The advertised inputSchema
+                // is advertisement, not enforcement — the caller is a model composing its own
+                // arguments, and an MCP client is not obliged to honour the schema.
+                ProposePaymentArgs.validate(arguments)
+                ProposedOnly.enforce(proposals.proposePayment(ctx, arguments))
+            }
             else -> return ToolCallResult(listOf(ToolContent(text = "Unknown tool: $toolName")), isError = true)
         }
         // Two orthogonal controls, both applied HERE — one response-shaping step every tool passes

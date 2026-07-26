@@ -28,6 +28,18 @@ import org.junit.jupiter.api.Test
  */
 class ProposedOnlyTest {
 
+    /**
+     * Valid `propose_payment` arguments. These tests assert the PROPOSED-only invariant, not
+     * argument validation — but since #2414 the registry validates before dispatch (T-T2), so an
+     * empty object never reaches the port. It used to: `propose_payment` accepted no arguments at
+     * all, which is the gap that change closed.
+     */
+    private fun validArgs() = mapper.createObjectNode()
+        .put("fromAccountId", "acc-1")
+        .put("toIban", "CZ6508000000192000145399")
+        .put("amount", "12.34")
+        .put("currency", "CZK")
+
     private val mapper = ObjectMapper()
 
     // --- the port contract, exercised directly -------------------------------------------------
@@ -90,7 +102,7 @@ class ProposedOnlyTest {
     fun `the registry refuses a port that returns a disposed proposal`() {
         val registry = registryReturning("""{"status":"EXECUTED","paymentId":"pay-1"}""")
 
-        assertThatThrownBy { registry.call("propose_payment", mapper.createObjectNode(), CTX) }
+        assertThatThrownBy { registry.call("propose_payment", validArgs(), CTX) }
             .isInstanceOf(IllegalStateException::class.java)
 
         // And nothing about the disposed state reaches the caller: McpEndpoint maps any throw from
@@ -101,7 +113,7 @@ class ProposedOnlyTest {
     fun `the registry still serves a well-behaved PROPOSED port`() {
         val registry = registryReturning("""{"status":"PROPOSED","proposalId":"p-1"}""")
 
-        val result = registry.call("propose_payment", mapper.createObjectNode(), CTX)
+        val result = registry.call("propose_payment", validArgs(), CTX)
 
         assertThat(result.isError).isFalse()
         assertThat(result.content.single().text).contains("PROPOSED")
@@ -120,7 +132,7 @@ class ProposedOnlyTest {
             """{"status":"PROPOSED","debtorIban":"$PII_IBAN","creditorName":"$PII_NAME"}"""
 
         val text = registryReturning(proposal)
-            .call("propose_payment", mapper.createObjectNode(), CTX)
+            .call("propose_payment", validArgs(), CTX)
             .content.single().text
 
         // --- masking applied (fails if `masker.mask(...)` is dropped from the return) ---
@@ -135,7 +147,7 @@ class ProposedOnlyTest {
         val disposed =
             """{"status":"EXECUTED","debtorIban":"$PII_IBAN","creditorName":"$PII_NAME"}"""
         assertThatThrownBy {
-            registryReturning(disposed).call("propose_payment", mapper.createObjectNode(), CTX)
+            registryReturning(disposed).call("propose_payment", validArgs(), CTX)
         }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("EXECUTED")
