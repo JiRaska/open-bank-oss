@@ -33,19 +33,16 @@ cd "$(dirname "$0")/../.."
 
 MODE="${1:-args}"
 
-# Modules whose consumer pact tests cannot run in a CI job at all. Each entry needs a reason, and
-# the pacts it strands must be listed in UNGATED_PACTS below.
-#
-#   openbank-swift-service (#2319) — its own build.gradle.kts statically excludes both
-#   SwiftEventPactConsumerTest and ClearingSimulatorPactConsumerTest whenever CI=true
-#   (PactConsumerTestExt auto-publishes to pactbroker.url in CI, and the broker 401s/hangs), so no
-#   `--tests` filter can bring them back. Both of its pacts are undefended against drift.
-SKIP_MODULES="openbank-swift-service"
+# Modules whose consumer pact tests cannot run in a CI job at all. EMPTY as of #2319: openbank-
+# swift-service was the only entry, and the reason recorded for it did not hold — measured, its two
+# consumer tests run under CI=true in 17s with a broker URL set and never attempt to publish.
+# Adding an entry costs a reason here AND the pacts it strands in UNGATED_PACTS below; the checks
+# fail on a stale declaration in either direction, so the pair cannot drift apart.
+SKIP_MODULES=""
 
 # The pacts SKIP_MODULES strands, as paths under pacts/. Checked against what is actually derived,
 # in both directions, and consumed verbatim by the workflow's coverage step.
-UNGATED_PACTS="pacts/openbank-swift-service-openbank-clearing-simulator.json
-pacts/openbank-transaction-service-openbank-swift-service.json"
+UNGATED_PACTS=""
 
 fail=0
 err() {

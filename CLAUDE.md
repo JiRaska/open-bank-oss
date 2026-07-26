@@ -181,10 +181,22 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   was never going to hold it. `check-pact-provider-replay.py` now enforces it (`Validate manifests`,
   #2338): it derives the covered set from `pacts/*.json` and the `@Provider`/`@PactFolder`
   annotations, and a class that exists but cannot run — broker-sourced, gated, or excluded by its
-  `build.gradle.kts` — does not count. The pre-existing backlog is declared in that script's
-  `KNOWN_UNCOVERED`, which #2327 empties one provider at a time; an entry that becomes covered fails
-  as stale, so the list cannot outlive the debt. What this buys you: a NEW pact for a provider with
-  no `@PactFolder` replay is red at PR time, instead of being discovered by a later audit.
+  `build.gradle.kts` — does not count. `KNOWN_UNCOVERED` in that script is now **empty** (#2327
+  closed): every committed pact is replayed on a PR. An entry added there needs a reason, and the
+  check fails on a stale declaration in either direction, so a new debt cannot quietly become
+  permanent. What this buys you: a NEW pact for a provider with no `@PactFolder` replay is red at PR
+  time, instead of being discovered by a later audit.
+- **A test excluded from CI is a place where two artefacts drift with nothing to notice.** The last
+  ungated pact was swift's, and it stayed ungated because the module excluded its own consumer tests
+  when `CI=true` — so the pact was never regenerated, and the drift gate declared it out of scope for
+  exactly that reason. Under those two facts the test and its committed pact were free to disagree,
+  and did: the test asked for a `SETTLED` status `SwiftStatus` has never contained, while the pact and
+  the provider's `@PactVerifyProvider` both said `COMPLETED` (#2319). **The stated reason for the
+  exclusion was also false** — "PactConsumerTestExt auto-publishes and the broker hangs" does not
+  reproduce (17 s with a broker URL set, no publish attempt in the log), and 26 other modules forward
+  the same `pactbroker.*` properties while running their consumer tests in CI. Before honouring any
+  "this test can't run in CI" comment, reproduce it; the exclusion costs a gate, and the comment is
+  the only thing asserting it was ever needed.
 - **In a consumer test the expected path must be a LITERAL; only the outgoing request may be
   reflected off the client's `@Path`.** Deriving *both* sides from the annotation feels DRY and is
   vacuous — expectation and request move together, so the test stays green when the client points
