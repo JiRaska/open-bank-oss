@@ -40,20 +40,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PACTS = ROOT / "pacts"
 
-# Pacts with no pre-merge provider replay TODAY. Each line is a debt, not a decision: #2327 empties
-# this list one provider at a time, and an entry that becomes covered fails as stale, so the list
-# cannot quietly outlive the problem.
+# Pacts with no pre-merge provider replay. EMPTY as of #2327's completion: every committed pact is
+# replayed by an always-running @PactFolder class. Keep it that way -- an entry added here is a debt,
+# and the checks below fail on a stale one in either direction, so it cannot outlive the problem.
 #
 # Kept here rather than in rules.yaml on purpose: 25 of the 26 gen-*opa-bundle*.sh hash rules.yaml
-# into every service's OPA bundle checksum, so each line removed from this backlog would restamp
-# ~44 generated files and give the PR a short shelf life. The list belongs next to the code that
-# reads it.
-KNOWN_UNCOVERED = {
-    # Landed 2026-07-25, after the #2327 audit counted 16 of 27: same provider
-    # (balance-service), so the same debt, not a new class of it. The estate went 27 -> 33 pacts in
-    # a day, which is the argument for a gate rather than another audit.
-    "pacts/openbank-transaction-service-openbank-swift-service.json",
-}
+# into every service's OPA bundle checksum, so a line added or removed would restamp ~44 generated
+# files. The list belongs next to the code that reads it.
+KNOWN_UNCOVERED: set[str] = set()
 
 # Annotations that can stop a test class from running. @EnabledIf* is the live one here; the others
 # are listed so a future "temporarily disabled" class cannot be read as coverage either.

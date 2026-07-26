@@ -23,7 +23,7 @@ import java.util.UUID
  * swift-service produces and transaction-service consumes (ADR-0108 settlement phase,
  * ADR-0104 D4 faithful-rails).
  *
- * The event carries the Swift message ID, its new status (VALIDATED/SENT/SETTLED/REJECTED),
+ * The event carries the Swift message ID, its new status (VALIDATED/SENT/COMPLETED/REJECTED),
  * and a correlation reference to the originating payment saga.
  *
  * transaction-service (the provider) verifies this pact via its
@@ -41,12 +41,12 @@ class SwiftEventPactConsumerTest {
     @Pact(consumer = "openbank-transaction-service", provider = "openbank-swift-service")
     fun swiftMessageStatusChangedPact(builder: MessagePactBuilder): MessagePact = builder
         .given("swift-service has processed an MT103 and submitted to scheme gateway")
-        .expectsToReceive("a swift.message.status-changed event with status SETTLED")
+        .expectsToReceive("a swift.message.status-changed event with status COMPLETED")
         .withContent(
             newJsonBody { o ->
                 o.uuid("swiftMessageId")
                 o.stringType("paymentSagaRef")
-                o.stringMatcher("status", "VALIDATED|SENT|SETTLED|REJECTED", "SETTLED")
+                o.stringMatcher("status", "VALIDATED|SENT|COMPLETED|REJECTED", "COMPLETED")
                 o.stringMatcher("messageType", "MT103|MT202|MX_PACS_008", "MT103")
                 o.decimalType("amount", 1000.00)
                 o.stringMatcher("currency", "[A-Z]{3}", "EUR")
@@ -62,7 +62,7 @@ class SwiftEventPactConsumerTest {
 
         assertThat(UUID.fromString(node.path("swiftMessageId").asText())).isNotNull()
         assertThat(node.path("paymentSagaRef").asText()).isNotBlank()
-        assertThat(node.path("status").asText()).isEqualTo("SETTLED")
+        assertThat(node.path("status").asText()).isEqualTo("COMPLETED")
         assertThat(node.path("messageType").asText()).isEqualTo("MT103")
         assertThat(node.path("amount").decimalValue()).isPositive()
         assertThat(node.path("currency").asText()).hasSize(3)
