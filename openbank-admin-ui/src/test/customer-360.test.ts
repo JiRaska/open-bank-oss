@@ -47,12 +47,19 @@ describe('Customer 360 isolation (ADR-0210 D2)', () => {
 
     // Direct arm: events that carry partyId.
     expect(sql).toContain(`JSONExtractString(payload, 'partyId') = '${PARTY}'`)
-    // Indirect arm: transactions, reached ONLY through this party's accounts.
+    // Indirect arm: transactions and accounts, reached ONLY through this party's accounts.
     expect(sql).toContain('party_accounts')
-    expect(sql).toMatch(/aggregate_type = 'transaction'\s+AND aggregate_id IN \(SELECT aggregate_id FROM party_accounts\)/)
+    expect(sql).toMatch(/upper\(aggregate_type\) = 'TRANSACTION'\s+AND aggregate_id IN \(SELECT aggregate_id FROM party_accounts\)/)
     // The party_accounts CTE must itself be party-scoped — an unscoped CTE is the leak.
     const cte = sql.slice(sql.indexOf('party_accounts AS'), sql.indexOf(')\n', sql.indexOf('party_accounts AS')))
     expect(cte).toContain(`JSONExtractString(payload, 'partyId') = '${PARTY}'`)
+    // Ownership must be resolved from bronze (full history), not silver: an account's LATEST event
+    // is typically BALANCE_UPDATED, which carries accountId but no partyId. Verified against the
+    // sandbox — silver holds no ACCOUNT row with a partyId at all.
+    expect(cte).toContain('bronze_events')
+    // Type comparisons must be case-folded: bronze stores PARTY/ACCOUNT uppercase, and comparing
+    // against lowercase literals matched nothing while looking like "this party has no accounts".
+    expect(sql).not.toMatch(/aggregate_type = '[a-z]+'/)
     // And no other party may appear anywhere in the statement.
     expect(sql).not.toContain(OTHER)
   })
@@ -71,10 +78,10 @@ describe('Customer 360 isolation (ADR-0210 D2)', () => {
 
   it('assembles domains, accounts and consents, and reports staleness', async () => {
     stubClickHouse([
-      { aggregate_type: 'party', aggregate_id: PARTY, event_type: 'PartyUpdated', occurred_at: '2026-07-20 10:00:00.000', payload: JSON.stringify({ partyId: PARTY, legalName: 'Alice' }) },
-      { aggregate_type: 'account', aggregate_id: 'acc-1', event_type: 'AccountOpened', occurred_at: '2026-07-19 10:00:00.000', payload: JSON.stringify({ partyId: PARTY }) },
-      { aggregate_type: 'consent', aggregate_id: 'c-1', event_type: 'ConsentGranted', occurred_at: '2026-07-18 10:00:00.000', payload: JSON.stringify({ partyId: PARTY, status: 'ACTIVE', scopes: ['MARKETING_COMMS_EMAIL'] }) },
-      { aggregate_type: 'transaction', aggregate_id: 'tx-1', event_type: 'TransactionCompleted', occurred_at: '2026-07-17 10:00:00.000', payload: JSON.stringify({ accountId: 'acc-1' }) },
+      { aggregate_type: 'PARTY', aggregate_id: PARTY, event_type: 'PartyUpdated', occurred_at: '2026-07-20 10:00:00.000', payload: JSON.stringify({ partyId: PARTY, legalName: 'Alice' }) },
+      { aggregate_type: 'ACCOUNT', aggregate_id: 'acc-1', event_type: 'AccountOpened', occurred_at: '2026-07-19 10:00:00.000', payload: JSON.stringify({ partyId: PARTY }) },
+      { aggregate_type: 'CONSENT', aggregate_id: 'c-1', event_type: 'ConsentGranted', occurred_at: '2026-07-18 10:00:00.000', payload: JSON.stringify({ partyId: PARTY, status: 'ACTIVE', scopes: ['MARKETING_COMMS_EMAIL'] }) },
+      { aggregate_type: 'TRANSACTION', aggregate_id: 'tx-1', event_type: 'TransactionCompleted', occurred_at: '2026-07-17 10:00:00.000', payload: JSON.stringify({ accountId: 'acc-1' }) },
     ])
     const { GET } = await import('@/app/api/customer-360/[partyId]/route')
     const res = await GET({} as never, { params: Promise.resolve({ partyId: PARTY }) })
