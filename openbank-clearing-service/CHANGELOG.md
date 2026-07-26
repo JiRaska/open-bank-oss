@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.2...clearing-service-v0.7.3) (2026-07-26)
+
+
+### Bug Fixes
+
+* **authz:** grant ROLE_API to the M2M account, sweep the dead ROLE_SERVICE name, enforce parity ([#2442](https://github.com/JiRaska/open-bank-oss/issues/2442)) ([#2475](https://github.com/JiRaska/open-bank-oss/issues/2475)) ([9f138c1](https://github.com/JiRaska/open-bank-oss/commit/9f138c133051a44c13790578a2864a703bda3425))
+* **clearing:** drop the M2M grant from POST /submit — no such caller exists ([#2442](https://github.com/JiRaska/open-bank-oss/issues/2442)) ([#2532](https://github.com/JiRaska/open-bank-oss/issues/2532)) ([427000e](https://github.com/JiRaska/open-bank-oss/commit/427000e0c1e65c26c6b8f09f4c3cb9b24f280475))
+
 ## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.1...clearing-service-v0.7.2) (2026-07-17)
 
 
