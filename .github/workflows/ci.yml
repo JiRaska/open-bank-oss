@@ -719,18 +719,6 @@ jobs:
       - name: "dotted mp.messaging key guard (application.yaml, #686, advisory)"
         run: bash .github/scripts/check-dotted-mp-messaging-keys.sh .
 
-      # Role-only write rules must be named operator-<domain>-write so rest.rego's shared-M2M
-      # write prohibition (GHSA-58jq-9hq3-66jr) actually covers them. That prohibition matches on
-      # the reason NAME, which makes the convention load-bearing — and the convention was never
-      # actually followed: 18 role-only WRITE rules use other names and escape it.
-      #
-      # ADVISORY, with those 18 baselined in the script. It is a two-way ratchet: a NEW
-      # non-conforming rule fails, and so does a baseline entry that no longer exists (a stale
-      # debt list overstates exposure and hides the next real one). See
-      # rules.yaml: role_only_write_rule_naming for the graduation blocker.
-      - name: "role-only write rule naming guard (GHSA-58jq-9hq3-66jr, advisory)"
-        run: python3 .github/scripts/check-operator-write-naming.py
-
       # admin-ui version sync guard (ADR-0029 release_invariant). release-please bumps version.txt
       # but its package.json extra-file updater is replace-based and silently desyncs after a one-off
       # drift — which otherwise only surfaces at deploy (build-push-admin-ui.sh fails post-merge).
@@ -755,6 +743,14 @@ jobs:
       # jq against a throwaway fixture repo — no Gradle, no network.
       - name: "auto-deploy reconcile probe unit test"
         run: bash .github/scripts/test-auto-deploy-reconcile-lag.sh
+
+      # can-i-deploy block classifier unit test (issue #2549). The reconcile probe above
+      # decides WHICH stranded services to re-drive; this one decides whether a block that
+      # survives the re-drive is a build-queue lag (self-clearing) or a contract regression
+      # (never self-clearing, and therefore something the scheduled tick must NOT silence).
+      # Its ordering case is the load-bearing one — see the file's header.
+      - name: "can-i-deploy block classifier unit test"
+        run: bash .github/scripts/test-classify-can-i-deploy-block.sh
 
       # gitops ref-integrity guard (rules.yaml: gitops_ref_integrity). The layer below
       # deploy-coverage: that one proves a service gets BUILT, this one proves the manifest

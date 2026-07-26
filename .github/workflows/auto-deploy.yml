@@ -725,6 +725,11 @@ jobs:
             || echo "::warning::could not ensure sandbox environment (may already exist — continuing)"
           rc=0
           deployable_list=()
+          # Per-service block classification (#2549): PENDING_BUILD / UNVERIFIED /
+          # REGRESSION / UNKNOWN, plus the human reason. Read below by the left-behind
+          # summary and by the scheduled-tick silencing rule.
+          declare -A block_class=()
+          declare -A block_reason=()
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             # A service that has never published a contract is not a Pacticipant in the
             # broker; `can-i-deploy` then errors with "Pacticipant <svc> not found" (matrix
@@ -782,7 +787,27 @@ jobs:
                 echo "::warning::can-i-deploy: ${svc} has counterpart(s) not yet recorded in sandbox — treating as deployable (ADR-0092)"
                 deployable_list+=("$svc")
               else
-                echo "::error::can-i-deploy: ${svc} NOT deployable — deployment blocked (ADR-0092)"
+                # Why is it blocked? "the build has not published its pacts yet" and "a
+                # contract regressed" produce the SAME verdict, and reading them as one is
+                # how a 29-module sweep left 51 of 55 workloads behind with nothing to
+                # distinguish a queue delay from a regression (issue #2549). Probe the
+                # broker for a version of THIS commit, then classify (the classifier is
+                # unit-tested — .github/scripts/test-classify-can-i-deploy-block.sh).
+                vcode="$(curl -s -o /dev/null -w '%{http_code}' \
+                  -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
+                  "${PACT_BROKER_URL}/pacticipants/${svc}/versions/${GITHUB_SHA}" || echo 000)"
+                case "$vcode" in
+                  404) present=no ;;
+                  2??) present=yes ;;
+                  *)   present=unknown ;;
+                esac
+                cls_line="$(PACT_VERSION_PRESENT="$present" \
+                  bash .github/scripts/classify-can-i-deploy-block.sh "$svc" <<< "$cid_out")"
+                cls="$(cut -f1 <<< "$cls_line")"
+                cls_why="$(cut -f2- <<< "$cls_line")"
+                block_class["$svc"]="$cls"
+                block_reason["$svc"]="$cls_why"
+                echo "::error::can-i-deploy: ${svc} NOT deployable [${cls}] — ${cls_why} (ADR-0092, #2549)"
                 rc=1
               fi
             fi
@@ -814,17 +839,36 @@ jobs:
               echo "Rebuilt this run but blocked by the contract gate — they stay on their current (older) image while \`main\` advances:"
             } >> "$GITHUB_STEP_SUMMARY"
             mp_blocked=0
+            regression_blocked=0
             for svc in $(echo "$BLOCKED_JSON" | jq -r '.[]'); do
+              # #2549: name the KIND of block, not just the fact of it. Default UNKNOWN —
+              # a service can land in BLOCKED_JSON without going through the classifier
+              # (e.g. it never reached the per-service loop), and an unclassified block
+              # must not silently inherit a transient label.
+              svc_cls="${block_class[$svc]:-UNKNOWN}"
+              svc_why="${block_reason[$svc]:-no classification recorded for this service}"
+              [ "$svc_cls" = "REGRESSION" ] && regression_blocked=1
               if echo "$MP" | grep -qx "$svc"; then
-                echo "::error::[${svc}] MONEY-PATH service blocked by can-i-deploy — not deploying; it stays behind main (issue #1420)"
-                echo "- \`${svc}\` — **money-path**, blocked" >> "$GITHUB_STEP_SUMMARY"
+                echo "::error::[${svc}] MONEY-PATH service blocked by can-i-deploy [${svc_cls}] — ${svc_why}; it stays behind main (issue #1420)"
+                echo "- \`${svc}\` — **money-path**, blocked — \`${svc_cls}\`: ${svc_why}" >> "$GITHUB_STEP_SUMMARY"
                 mp_blocked=1
+              elif [ "$svc_cls" = "REGRESSION" ]; then
+                echo "::error::[${svc}] blocked by can-i-deploy [REGRESSION] — ${svc_why} (issue #2549)"
+                echo "- \`${svc}\` — blocked — \`REGRESSION\`: ${svc_why}" >> "$GITHUB_STEP_SUMMARY"
               else
-                echo "::warning::[${svc}] blocked by can-i-deploy — not deploying (issue #1420)"
-                echo "- \`${svc}\` — blocked" >> "$GITHUB_STEP_SUMMARY"
+                echo "::warning::[${svc}] blocked by can-i-deploy [${svc_cls}] — ${svc_why} (issue #1420)"
+                echo "- \`${svc}\` — blocked — \`${svc_cls}\`: ${svc_why}" >> "$GITHUB_STEP_SUMMARY"
               fi
             done
+            {
+              echo ""
+              echo "\`PENDING_BUILD\`/\`UNVERIFIED\` clear themselves — the every-3h reconcile tick"
+              echo "re-drives them (auto-deploy-reconcile-lag.sh, #2020). \`REGRESSION\` does not:"
+              echo "it needs a contract fix, and is reported as an error on every run including"
+              echo "scheduled ticks. \`UNKNOWN\` means the classifier could not tell — read the log."
+            } >> "$GITHUB_STEP_SUMMARY"
             [ "$mp_blocked" = "1" ] && echo "::error::can-i-deploy left one or more MONEY-PATH services behind this run — see the job summary (issue #1420)"
+            [ "$regression_blocked" = "1" ] && echo "::error::can-i-deploy: at least one block is a CONTRACT REGRESSION, which no reconcile tick can clear — see the job summary (issue #2549)"
           fi
           # On a scheduled reconcile tick an ordinary (non money-path) service still blocked by
           # the contract gate is EXPECTED — reconcile deliberately re-offers known strands and
@@ -835,8 +879,17 @@ jobs:
           # left behind (mp_blocked=1), which must stay loud. push / workflow_dispatch keep the
           # unconditional ADR-0092 behaviour below. Deploy behaviour is unchanged either way:
           # gitops-pr deploys the `deployable` subset and never the blocked complement.
-          if [ "${{ github.event_name }}" = "schedule" ] && [ "$rc" -ne 0 ] && [ "${mp_blocked:-0}" != "1" ]; then
-            echo "::notice::reconcile tick: ${BLOCKED_N:-0} service(s) still gate-blocked (non money-path) — left for a later tick; the deployable subset deployed. Not failing the scheduled run."
+          #
+          # #2549 narrows that silence. "Expected on a reconcile tick" is true of a block the
+          # tick can eventually CLEAR — PENDING_BUILD (the service's build has not published
+          # its pacts yet) and UNVERIFIED (the counterpart verifies minutes later). It is NOT
+          # true of a REGRESSION: no number of ticks fixes a failed verification, so silencing
+          # it turns the 3-hourly retry into an indefinite, invisible loop around a real
+          # contract break — retried forever, reported never. A REGRESSION therefore fails the
+          # scheduled run exactly as a money-path block does.
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$rc" -ne 0 ] \
+             && [ "${mp_blocked:-0}" != "1" ] && [ "${regression_blocked:-0}" != "1" ]; then
+            echo "::notice::reconcile tick: ${BLOCKED_N:-0} service(s) still gate-blocked (non money-path, self-clearing classes only) — left for a later tick; the deployable subset deployed. Not failing the scheduled run."
             exit 0
           fi
           # Enforce: non-zero rc still fails this job's own status for visibility (ADR-0092) —
