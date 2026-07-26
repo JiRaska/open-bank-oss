@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.15.2...notification-service-v0.15.3) (2026-07-26)
+
+
+### Bug Fixes
+
+* **notification:** fail closed on marketing push and suppress marketing email (ADR-0198 D4) ([#2543](https://github.com/JiRaska/open-bank-oss/issues/2543)) ([1beeb81](https://github.com/JiRaska/open-bank-oss/commit/1beeb8198cfef2fdd977ba3620563d4413955e01))
+
 ## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.15.1...notification-service-v0.15.2) (2026-07-26)
 
 
