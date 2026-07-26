@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.62.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.62.0...admin-ui-v0.62.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **admin-ui:** commit a lookup result only if it is still the current one ([#2612](https://github.com/JiRaska/open-bank-oss/issues/2612)) ([92ea7cf](https://github.com/JiRaska/open-bank-oss/commit/92ea7cf07de42bb30df45f966ca3bd47f479c2a5)), closes [#2598](https://github.com/JiRaska/open-bank-oss/issues/2598)
+
 ## [0.62.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.61.1...admin-ui-v0.62.0) (2026-07-26)
 
 
