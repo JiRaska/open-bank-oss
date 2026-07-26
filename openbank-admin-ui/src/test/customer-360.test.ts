@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+// ADR-0210 D2 names the risk this file exists for: bronze_events is keyed by
+// (aggregate_type, aggregate_id), and transaction events do NOT carry partyId — only accountId. So
+// a party's transactions are reached through the accounts that party owns, and if that resolution
+// is ever widened the Customer 360 shows ANOTHER CUSTOMER'S account. The ADR's Negative consequence
+// says it needs "a test asserting isolation, not just assembly". This is that test.
+//
+// It asserts on the SQL the route builds, because that is where isolation is decided — a test that
+// only checked the assembled output against a hand-written row set would pass against a query that
+// leaks, since the fixture would simply not contain the other party's rows.
+
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { readFileSync } from 'fs'
+import path from 'path'
+
+const ROUTE = path.join(process.cwd(), 'src/app/api/customer-360/[partyId]/route.ts')
+const PARTY = '11111111-1111-1111-1111-111111111111'
+const OTHER = '22222222-2222-2222-2222-222222222222'
+
+vi.mock('@/auth', () => ({ auth: vi.fn(async () => ({ user: { name: 'op' } })) }))
+
+/** Captures the SQL the route sends, so isolation can be asserted on the query itself. */
+function stubClickHouse(rows: Record<string, unknown>[]) {
+  const seen: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+    seen.push(String(init?.body ?? ''))
+    return { ok: true, json: async () => ({ data: rows }) } as Response
+  }))
+  return seen
+}
+
+beforeEach(() => {
+  vi.unstubAllGlobals()
+})
+
+describe('Customer 360 isolation (ADR-0210 D2)', () => {
+  it('scopes BOTH resolution arms to the requested party', async () => {
+    const seen = stubClickHouse([])
+    const { GET } = await import('@/app/api/customer-360/[partyId]/route')
+    await GET({} as never, { params: Promise.resolve({ partyId: PARTY }) })
+
+    expect(seen).toHaveLength(1)
+    const sql = seen[0]
+
+    // Direct arm: events that carry partyId.
+    expect(sql).toContain(`JSONExtractString(payload, 'partyId') = '${PARTY}'`)
+    // Indirect arm: transactions, reached ONLY through this party's accounts.
+    expect(sql).toContain('party_accounts')
+    expect(sql).toMatch(/aggregate_type = 'transaction'\s+AND aggregate_id IN \(SELECT aggregate_id FROM party_accounts\)/)
+    // The party_accounts CTE must itself be party-scoped — an unscoped CTE is the leak.
+    const cte = sql.slice(sql.indexOf('party_accounts AS'), sql.indexOf(')\n', sql.indexOf('party_accounts AS')))
+    expect(cte).toContain(`JSONExtractString(payload, 'partyId') = '${PARTY}'`)
+    // And no other party may appear anywhere in the statement.
+    expect(sql).not.toContain(OTHER)
+  })
+
+  it('rejects a non-UUID partyId before it reaches ClickHouse (injection boundary)', async () => {
+    const seen = stubClickHouse([])
+    const { GET } = await import('@/app/api/customer-360/[partyId]/route')
+
+    for (const bad of ["' OR 1=1 --", 'not-a-uuid', '', '../../etc']) {
+      const res = await GET({} as never, { params: Promise.resolve({ partyId: bad }) })
+      expect(res.status, bad).toBe(400)
+    }
+    // The route builds raw SQL, so a rejected id must never have produced a query at all.
+    expect(seen).toHaveLength(0)
+  })
+
+  it('assembles domains, accounts and consents, and reports staleness', async () => {
+    stubClickHouse([
+      { aggregate_type: 'party', aggregate_id: PARTY, event_type: 'PartyUpdated', occurred_at: '2026-07-20 10:00:00.000', payload: JSON.stringify({ partyId: PARTY, legalName: 'Alice' }) },
+      { aggregate_type: 'account', aggregate_id: 'acc-1', event_type: 'AccountOpened', occurred_at: '2026-07-19 10:00:00.000', payload: JSON.stringify({ partyId: PARTY }) },
+      { aggregate_type: 'consent', aggregate_id: 'c-1', event_type: 'ConsentGranted', occurred_at: '2026-07-18 10:00:00.000', payload: JSON.stringify({ partyId: PARTY, status: 'ACTIVE', scopes: ['MARKETING_COMMS_EMAIL'] }) },
+      { aggregate_type: 'transaction', aggregate_id: 'tx-1', event_type: 'TransactionCompleted', occurred_at: '2026-07-17 10:00:00.000', payload: JSON.stringify({ accountId: 'acc-1' }) },
+    ])
+    const { GET } = await import('@/app/api/customer-360/[partyId]/route')
+    const res = await GET({} as never, { params: Promise.resolve({ partyId: PARTY }) })
+    const body = await res.json()
+
+    expect(body.available).toBe(true)
+    expect(body.asOf).toBe('2026-07-20 10:00:00.000') // newest event, not first row processed
+    expect(body.accountIds).toEqual(['acc-1'])
+    expect(body.consents).toEqual([{ consentId: 'c-1', status: 'ACTIVE', scopes: ['MARKETING_COMMS_EMAIL'] }])
+    expect(body.partyState).toMatchObject({ legalName: 'Alice' })
+    expect(body.domains.map((d: { aggregateType: string }) => d.aggregateType).sort())
+      .toEqual(['account', 'consent', 'party', 'transaction'])
+  })
+
+  it('degrades to available:false when ClickHouse is unreachable, never a 5xx', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED') }))
+    const { GET } = await import('@/app/api/customer-360/[partyId]/route')
+    const res = await GET({} as never, { params: Promise.resolve({ partyId: PARTY }) })
+
+    expect(res.status).toBe(200) // house style: the page shows a calm state, not an HTTP error
+    const body = await res.json()
+    expect(body.available).toBe(false)
+    expect(body.error).toContain('ECONNREFUSED')
+  })
+
+  it('never returns a balance or transaction-level amount (ADR-0210 D3 / ADR-0089)', () => {
+    // Asserted on the source, because the guarantee is about what the route CANNOT emit, not about
+    // what one fixture happened to omit.
+    const src = readFileSync(ROUTE, 'utf-8')
+    const iface = src.slice(src.indexOf('export interface Customer360'), src.indexOf('async function chQuery'))
+    for (const forbidden of ['balance', 'amount', 'currency']) {
+      expect(iface.toLowerCase(), forbidden).not.toContain(forbidden)
+    }
+  })
+})
