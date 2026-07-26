@@ -162,7 +162,7 @@ class NotificationConsumer {
         return Panache.withTransaction { notificationRepo.persist(entity) }
             .chain { _ ->
                 when (req.channel) {
-                    NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
+                    NotificationChannel.EMAIL -> maybeSendEmail(req, subject, body, entity)
                     NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
                 }
             }
@@ -251,6 +251,40 @@ class NotificationConsumer {
     // error AFTER a successful send would silently mark the row FAILED for a message the
     // customer actually received, and the "stub mode" log message conflated the two failure
     // cases into one line.
+    /**
+     * Refuses to send a MARKETING-category EMAIL, and otherwise sends (ADR-0198 D4, issue #2369).
+     *
+     * EMAIL previously had NO gate of any kind — unlike PUSH it never consulted even the local
+     * preference row, so a marketing email would have gone out unconditionally. That asymmetry is
+     * not fixable by reading `notification_preference`: its columns (`payments_push`,
+     * `product_push`, `marketing_push`) are push-specific, and none of them is the GDPR Art. 6(1)(a)
+     * consent record anyway — consent-service owns that (`party-service:marketing-comms`,
+     * ADR-0205 D3).
+     *
+     * So this fails CLOSED rather than pretending to check: consent-gated email is SUPPRESSED until
+     * a real consent check exists. PAYMENTS / PRODUCT / SECURITY email is unchanged (contract and
+     * legitimate-interest bases, no opt-in required), so no live traffic changes. No template maps
+     * to MARKETING today (`NotificationTemplateCategoryTest` guards that), which is why declining
+     * here is correct rather than a feature regression — there is nothing to decline yet.
+     */
+    private fun maybeSendEmail(
+        req: NotificationRequest,
+        subject: String,
+        body: String,
+        entity: NotificationEntity,
+    ): Uni<Void> {
+        if (req.template.category == NotificationCategory.MARKETING) {
+            log.warnf(
+                "EMAIL suppressed: template=%s is MARKETING-category and no consent check is wired " +
+                    "(ADR-0198 D4). Wire consent-service validate (scope MARKETING_COMMS_EMAIL) before " +
+                    "sending consent-gated email.",
+                req.template,
+            )
+            return markStatus(entity, "SUPPRESSED")
+        }
+        return sendEmail(req, subject, body, entity)
+    }
+
     private fun sendEmail(
         req: NotificationRequest,
         subject: String,

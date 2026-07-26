@@ -8,18 +8,23 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 /**
- * Guards the MARKETING push gate's precondition (ADR-0198 D4, issue #2369).
+ * Guards the precondition both MARKETING channel gates rely on (ADR-0198 D4, issue #2369).
  *
- * `NotificationConsumer.maybeSendPush` gates MARKETING on `marketing_push`, a LOCAL preference
- * toggle — NOT the GDPR Art. 6(1)(a) consent record, which consent-service owns under grantee
- * `party-service:marketing-comms` (ADR-0205 D3). That is acceptable today only because no template
- * maps to MARKETING, so the branch is unreachable and wiring a consent-service HTTP call into this
- * money-path consumer would be speculative — a dependency for a caller that does not exist.
+ * Neither channel actually checks GDPR consent today:
+ *  - `maybeSendPush` gates MARKETING on `marketing_push`, a LOCAL preference toggle (now
+ *    fail-closed when the row is absent) — not the Art. 6(1)(a) consent record.
+ *  - `maybeSendEmail` cannot even do that: `notification_preference`'s columns are push-specific,
+ *    so it SUPPRESSES MARKETING email outright rather than pretend to check.
+ *
+ * The real consent record is consent-service's, under grantee `party-service:marketing-comms`
+ * (ADR-0205 D3). Not wiring an HTTP call to it is acceptable ONLY because no template maps to
+ * MARKETING, so both branches are unreachable — a consent client here would be a money-path
+ * dependency for a caller that does not exist.
  *
  * This test is what keeps that "acceptable today" honest. The moment a MARKETING template is added,
- * it goes RED, and whoever adds it must wire the real consent check (consent-service
- * `POST /api/v1/consents/{id}/validate`, scope `MARKETING_COMMS_PUSH`) instead of silently
- * inheriting a local-toggle decision for consent-gated traffic.
+ * it goes RED, and whoever adds it must wire the real check (consent-service
+ * `POST /api/v1/consents/{id}/validate`, scope `MARKETING_COMMS_EMAIL` / `MARKETING_COMMS_PUSH`)
+ * instead of inheriting a local-toggle decision (push) or a blanket suppression (email).
  *
  * Do NOT "fix" a failure here by adding the template to the expected set. The failure means a
  * consent gate is now required.
@@ -34,9 +39,10 @@ class NotificationTemplateCategoryTest {
 
         assertThat(marketingTemplates)
             .describedAs(
-                "A template now maps to NotificationCategory.MARKETING. NotificationConsumer gates " +
-                    "MARKETING on the local marketing_push toggle, which is NOT the GDPR consent " +
-                    "record — wire consent-service validate (scope MARKETING_COMMS_PUSH, grantee " +
+                "A template now maps to NotificationCategory.MARKETING. Neither channel checks GDPR " +
+                    "consent: PUSH reads the local marketing_push toggle (fail-closed, but not the " +
+                    "consent record) and EMAIL suppresses outright. Wire consent-service validate " +
+                    "(scopes MARKETING_COMMS_EMAIL / MARKETING_COMMS_PUSH, grantee " +
                     "party-service:marketing-comms) before shipping this. See ADR-0198 D4 / #2369.",
             )
             .isEmpty()
