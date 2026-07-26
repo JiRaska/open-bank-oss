@@ -112,17 +112,17 @@ Rollback (Path B): repoint back to the still-running 16 Cluster — seconds, no 
 
 | Field | Value |
 |-------|-------|
-| Date | 2026-06-26 |
+| Date | 2026-07-26 |
 | Operator | CNPG 1.29.1 |
 | imageName | ghcr.io/cloudnative-pg/postgresql:18.1 |
 | storageClass | gp3 |
-| targetTime | 2026-06-20T03:00:00Z |
+| targetTime | 2026-07-26T02:05:08Z (stoppedAt of `ledger-db-daily-20260726020500`) |
 | Source | s3://openbank-sandbox-db-backups/ledger-db |
-| RTO | N/A — restore did not complete |
-| Row count | N/A |
-| Result | **FAIL** |
+| RTO | ~84s (Cluster created 06:50:04Z → primary ready 06:51:28Z) |
+| Row count | 96 `journal_entries` — matches the live `ledger-db` primary exactly |
+| Result | **PASS** |
 
-### Diagnostika
+### Attempt 1 (2026-06-26) — FAIL, credentials
 
 Restore cluster `ledger-db-restore-drill` (namespace `ledger`) se nepodařilo spustit.
 Všechny pody `ledger-db-restore-drill-1-full-recovery-*` crashovaly opakovaně
@@ -140,18 +140,48 @@ přístup k S3. Existující `ledger-db` SA má IAM roli přidělenou přes
 `aws/.../db-backups.tf`; nový SA vznikl bez ní — barman `inheritFromIAMRole`
 tedy nenašel credentials.
 
-### Fix (aplikován 2026-06-26)
-
+**Fix (aplikován 2026-06-26, `tofu apply`d jako součást #1759 2026-07):**
 `db-backups.tf` přidává permanentní Pod Identity asociaci pro SA `ledger-db-drill`
 v namespace `ledger`. Restore drill se musí spouštět jako CNPG Cluster
 pojmenovaný **`ledger-db-drill`** (ne `ledger-db-restore-drill`) — CNPG vytvoří
 SA se stejným jménem jako cluster, a tato SA má IAM roli přidělenu.
 
+### Attempt 2 (2026-07-26) — FAIL first try, then PASS: `serverName` gotcha
+
+S IAM fixem live (ověřeno přes `tofu state show` — asociace `ledger-drill` je
+skutečně aplikovaná, ne jen deklarovaná) první pokus stejně selhal, jinou chybou:
+
+```
+"msg":"Error while restoring a backup","error":"no target backup found"
+```
+
+**Root cause:** `barmanObjectStore.serverName` v `externalClusters` **defaultuje
+na jméno externalCluster entry** (`ledger-backup`), ne na jméno originálního
+clusteru. Live `ledger-db` si zapisuje zálohy pod
+`s3://.../ledger-db/ledger-db/{base,wals}/` (server name == cluster name), takže
+barman-cloud-backup-list hledal v neexistujícím `s3://.../ledger-db/ledger-backup/`
+a nenašel nic — bez chyby přístupu, prostě prázdný list. Ověřit vždy přes
+`aws s3 ls s3://<bucket>/<svc>-db/` **před** psaním manifestu, ne až po chybě.
+
+**Fix:** přidat `serverName: <cluster-name>` explicitně pod
+`externalClusters[].barmanObjectStore` (viz manifest níže). Po tomto fixu:
+Healthy za ~84s, row count 96 `journal_entries` sedí přesně na live primary.
+
+Faktická tabulka `journal_entries` je partitioned (`journal_entries_2024`…`_2028`
++ `_default`) — `journal_entry` (singular) z předchozí verze tohoto runbooku
+nikdy neexistovala; oprav si dotaz podle toho.
+
 ### Postup pro příští drill
 
 ```bash
-# 1. Ujisti se, že tofu apply proběhl po přidání ledger-drill do db-backups.tf
-# 2. Aplikuj restore manifest:
+# 1. Ujisti se, že tofu apply proběhl po přidání <svc>-drill do db-backups.tf
+#    (ověř `tofu state show 'aws_eks_pod_identity_association.db_backups_fleet["<svc>-drill"]'`,
+#    ne jen že je v `db-backups.tf` — deklarace bez apply je přesně #1759).
+# 2. Ověř skutečnou S3 strukturu PŘED psaním manifestu:
+aws s3 ls s3://openbank-sandbox-db-backups/<svc>-db/
+# obvykle uvidíš vnořené s3://.../<svc>-db/<svc>-db/{base,wals}/ — serverName == cluster name.
+
+# 3. Aplikuj restore manifest (serverName MUSÍ odpovídat kroku 2):
 kubectl apply -f - <<'EOF'
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
@@ -168,10 +198,11 @@ spec:
     recovery:
       source: ledger-backup
       recoveryTarget:
-        targetTime: "2026-06-20T03:00:00Z"
+        targetTime: "2026-07-26T02:05:08Z"
   externalClusters:
     - name: ledger-backup
       barmanObjectStore:
+        serverName: ledger-db   # NOT the externalCluster name above — see Attempt 2
         destinationPath: s3://openbank-sandbox-db-backups/ledger-db
         s3Credentials:
           inheritFromIAMRole: true
@@ -179,18 +210,24 @@ spec:
           compression: gzip
 EOF
 
-# 3. Čekej na Healthy state (obvykle 3-5 min):
+# 4. Čekej na Healthy state (obvykle 3-5 min):
 kubectl get cluster ledger-db-drill -n ledger -w
 
-# 4. Ověř data:
-kubectl exec -n ledger ledger-db-drill-1 -- psql -U postgres -c "SELECT count(*) FROM journal_entry;"
+# 5. Ověř data (skutečná tabulka je `journal_entries`, partitioned):
+kubectl exec -n ledger ledger-db-drill-1 -c postgres -- \
+  psql -U postgres -d openbank_ledger -c "SELECT count(*) FROM journal_entries;"
+# porovnej se stejným dotazem na živý primary (read-only, nic to nemutuje):
+kubectl exec -n ledger ledger-db-2 -c postgres -- \
+  psql -U postgres -d openbank_ledger -c "SELECT count(*) FROM journal_entries;"
 
-# 5. Zaznamenej RTO a row count výše a aktualizuj tabulku.
+# 6. Zaznamenej RTO a row count výše a aktualizuj tabulku.
 
-# 6. Smaž drill cluster:
+# 7. Smaž drill cluster:
 kubectl delete cluster ledger-db-drill -n ledger
 ```
 
 > **Precheck z runbooku** „Backups verified — restore has been test-rehearsed"
-> musí být splněn **před** zahájením PG upgrade (Path A ani B). Fix v TF
-> je připraven; drill zopakovat po `platform-tofu` apply (viz issue #2207).
+> je od 2026-07-26 splněn pro `ledger` — atestováno v
+> `openbank-libs/governance/attestations.yaml: ledger.restore_drill`. Fix v TF
+> byl aplikován jako součást #1759. Zbylých ~19 money-path DB tuto drill zatím
+> nemá — postup výše je teď ověřený end-to-end, jen aplikuj per-service.
