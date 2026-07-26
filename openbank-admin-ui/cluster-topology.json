@@ -1,10 +1,10 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-07-26T12:31:51.973Z",
+  "generatedAt": "2026-07-26T12:39:03.181Z",
   "counts": {
     "namespaces": 66,
-    "networkPolicies": 96,
+    "networkPolicies": 97,
     "externalSecrets": 132,
     "clusterPolicies": 4
   },
@@ -464,9 +464,9 @@
       "icon": "network",
       "status": "planned",
       "analogy": "Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.",
-      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 96 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
+      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 97 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
       "controls": [
-        "NetworkPolicy (96 / 66)",
+        "NetworkPolicy (97 / 66)",
         "per-namespace deny-by-default (cíl)"
       ],
       "adr": [
@@ -630,7 +630,7 @@
     {
       "item": "NetworkPolicy (east-west)",
       "plan": "deny-by-default v každém ns",
-      "reality": "96 / 66 ns má NetworkPolicy → většina provozu otevřená",
+      "reality": "97 / 66 ns má NetworkPolicy → většina provozu otevřená",
       "status": "planned"
     },
     {
