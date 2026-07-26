@@ -66,7 +66,13 @@ class ClearingResource(
 
     @POST
     @Path("/submit")
-    @RolesAllowed(Roles.API, Roles.PAYMENTS, Roles.ADMIN)
+    // No M2M grant: this carried the dead `ROLE_SERVICE` name until #2442 made the M2M role real
+    // (ROLE_API, granted to service-account-openbank-services). The post-grant audit found NO
+    // service in this repo that calls it — agent-service is the only holder of a clearing-service
+    // REST client and it uses `GET /batches` only — so admitting a service token here would widen a
+    // money-path submit for a caller that does not exist. Add Roles.API back in the same change
+    // that adds the caller.
+    @RolesAllowed(Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "clearingBatch.submit")
     @Operation(summary = "Submit payment for clearing")
     fun submit(request: SubmitPaymentRequest): Uni<Response> = submitUseCase.submit(request)
