@@ -30,7 +30,7 @@
       "response": {
         "body": {
           "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
-          "status": "PROCESSING"
+          "status": "COMPLETED"
         },
         "generators": {
           "body": {
@@ -50,14 +50,6 @@
                 {
                   "match": "regex",
                   "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-                }
-              ]
-            },
-            "$.status": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
                 }
               ]
             }

@@ -60,7 +60,13 @@ class SepaPaymentTransactionServicePactConsumerTest {
         .body(
             newJsonBody { o ->
                 o.uuid("id")
-                o.stringType("status", "PROCESSING")
+                // MEASURED, not assumed (issue #2425): pinning this value is what revealed
+                // that transaction-service answers POST /api/v1/transactions with COMPLETED —
+                // it books synchronously. Every consumer contract here claimed PENDING or
+                // PROCESSING, a status this response has never carried, and the `type` matcher
+                // made all four replays green about it for the life of the contracts.
+                // stringValue, NOT stringType: this is the field the consumer branches on.
+                o.stringValue("status", "COMPLETED")
             }.build(),
         )
         .toPact()
@@ -78,6 +84,6 @@ class SepaPaymentTransactionServicePactConsumerTest {
             .extract().jsonPath()
 
         assertThat(body.getString("id")).isNotBlank()
-        assertThat(body.getString("status")).isNotBlank()
+        assertThat(body.getString("status")).isEqualTo("COMPLETED")
     }
 }

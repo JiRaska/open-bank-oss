@@ -75,14 +75,6 @@
                 }
               ]
             },
-            "$.status": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
             "$.transactionId": {
               "combine": "AND",
               "matchers": [

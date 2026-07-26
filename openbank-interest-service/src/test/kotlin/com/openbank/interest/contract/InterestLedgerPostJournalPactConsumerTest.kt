@@ -122,7 +122,7 @@ class InterestLedgerPostJournalPactConsumerTest {
             newJsonBody { o ->
                 o.uuid("id")
                 o.uuid("transactionId")
-                o.stringType("status", "POSTED")
+                o.stringValue("status", "POSTED")
             }.build(),
         )
         .toPact()
@@ -142,7 +142,7 @@ class InterestLedgerPostJournalPactConsumerTest {
             newJsonBody { o ->
                 o.uuid("id")
                 o.uuid("transactionId")
-                o.stringType("status", "POSTED")
+                o.stringValue("status", "POSTED")
             }.build(),
         )
         .toPact()

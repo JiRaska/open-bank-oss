@@ -234,7 +234,7 @@ class CustomerEdgePactConsumerTest {
         .body(
             LambdaDsl.newJsonArrayMinLike(1) { arr ->
                 arr.`object` { o ->
-                    o.uuid("id", UUID.randomUUID())
+                    o.uuid("id", UUID.fromString("11111111-2222-4333-8444-555555555501"))
                     o.stringType("maskedPan", "**** **** **** 1234")
                     o.stringType("cardType", "DEBIT")
                     o.stringType("network", "VISA")
@@ -273,7 +273,7 @@ class CustomerEdgePactConsumerTest {
         .body(
             LambdaDsl.newJsonArrayMinLike(1) { arr ->
                 arr.`object` { o ->
-                    o.uuid("id", UUID.randomUUID())
+                    o.uuid("id", UUID.fromString("11111111-2222-4333-8444-555555555502"))
                     o.stringType("pocketCurrency", "CZK")
                     o.stringType("periodFrom", "2026-06-01")
                     o.stringType("periodTo", "2026-06-30")
@@ -315,7 +315,7 @@ class CustomerEdgePactConsumerTest {
         .body(
             LambdaDsl.newJsonArrayMinLike(1) { arr ->
                 arr.`object` { o ->
-                    o.uuid("id", UUID.randomUUID())
+                    o.uuid("id", UUID.fromString("11111111-2222-4333-8444-555555555503"))
                     o.stringType("creditorIban", "CZ6508000000192000145399")
                     o.stringType("creditorName", "Elektrárna a.s.")
                     o.stringType("status", "ACTIVE")

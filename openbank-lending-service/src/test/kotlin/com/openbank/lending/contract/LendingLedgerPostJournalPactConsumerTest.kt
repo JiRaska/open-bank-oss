@@ -99,7 +99,11 @@ class LendingLedgerPostJournalPactConsumerTest {
             newJsonBody { o ->
                 o.uuid("id")
                 o.uuid("transactionId")
-                o.stringType("status", "POSTED")
+                // stringValue, NOT stringType (issue #2425): a balanced journal accepted by
+                // the ledger is POSTED — the value is the provider's answer to "did this
+                // post?", which is the entire reason the consumer makes the call. A type
+                // matcher accepted "REJECTED" just as happily.
+                o.stringValue("status", "POSTED")
             }.build(),
         )
         .toPact()

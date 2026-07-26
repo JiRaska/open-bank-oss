@@ -93,8 +93,18 @@ class LedgerTrialBalancePactConsumerTest {
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
             newJsonBody { o ->
-                o.stringType("asOf", REPORTING_DATE)
+                // stringValue, NOT stringType (issue #2425): `asOf` is echoed from the
+                // `asOf=` query parameter this interaction pins by literal. A trial balance
+                // returned for a DIFFERENT date than the one asked for is a reporting defect of
+                // the first order, and a type matcher accepted any date string at all.
+                o.stringValue("asOf", REPORTING_DATE)
                 o.booleanType("balanced", true)
+                // stringType on `code`/{currency,type}, DELIBERATELY (issue #2425): `lines`
+                // is a heterogeneous list — a real trial balance carries many GL codes, several
+                // currencies and every account type. Pinning an element value would assert
+                // "every line is this one code", a claim the contract does not make and real
+                // data would immediately falsify. The array is min=0 here anyway, so a pin
+                // would also be vacuous against the empty-DB provider.
                 o.minArrayLike("lines", 0, 1) { line ->
                     line.stringType("code", "1100-CASH-CLEARING-CZK")
                     line.stringType("type", "ASSET")
@@ -119,7 +129,11 @@ class LedgerTrialBalancePactConsumerTest {
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
             newJsonBody { o ->
-                o.stringType("asOf", PRE_HISTORY_DATE)
+                // stringValue, NOT stringType (issue #2425): `asOf` is echoed from the
+                // `asOf=` query parameter this interaction pins by literal. A trial balance
+                // returned for a DIFFERENT date than the one asked for is a reporting defect of
+                // the first order, and a type matcher accepted any date string at all.
+                o.stringValue("asOf", PRE_HISTORY_DATE)
                 o.booleanType("balanced", true)
                 o.array("lines") // empty — a date before any ledger activity
             }.build(),
