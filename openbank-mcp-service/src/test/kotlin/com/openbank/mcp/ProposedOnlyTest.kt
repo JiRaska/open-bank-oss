@@ -4,6 +4,7 @@ package com.openbank.mcp
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.mcp.application.McpPiiMasker
 import com.openbank.mcp.application.McpToolRegistry
 import com.openbank.mcp.application.ProposedOnly
 import com.openbank.mcp.application.port.out.AccountReadPort
@@ -105,6 +106,40 @@ class ProposedOnlyTest {
         assertThat(result.content.single().text).contains("PROPOSED")
     }
 
+    /**
+     * Both call-path controls must hold for the SAME tool result — PROPOSED-only enforcement
+     * (#2414) AND the charter's PII masking (#2412). They were built on separate branches that
+     * both edit [McpToolRegistry.call] within two lines of each other, and the rebase merged them
+     * without a conflict, so nothing structural proves both survived; dropping either one is
+     * silent. This asserts each independently against one payload that would trip both.
+     */
+    @Test
+    fun `a tool result gets BOTH the PROPOSED-only check and the PII masking`() {
+        val proposal =
+            """{"status":"PROPOSED","debtorIban":"$PII_IBAN","creditorName":"$PII_NAME"}"""
+
+        val text = registryReturning(proposal)
+            .call("propose_payment", mapper.createObjectNode(), CTX)
+            .content.single().text
+
+        // --- masking applied (fails if `masker.mask(...)` is dropped from the return) ---
+        assertThat(text).doesNotContain(PII_IBAN)
+        assertThat(text).doesNotContain(PII_NAME)
+        assertThat(text).contains("****5399")
+        // ...and did not eat the invariant it has to coexist with.
+        assertThat(text).contains("PROPOSED")
+
+        // --- enforcement applied (fails if `ProposedOnly.enforce(...)` is dropped from the
+        // propose_payment branch): the same PII-carrying shape, one state past PROPOSED. ---
+        val disposed =
+            """{"status":"EXECUTED","debtorIban":"$PII_IBAN","creditorName":"$PII_NAME"}"""
+        assertThatThrownBy {
+            registryReturning(disposed).call("propose_payment", mapper.createObjectNode(), CTX)
+        }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("EXECUTED")
+    }
+
     @Test
     fun `the shipped stub port satisfies the invariant`() {
         // Guards the other direction: the enforcement must not make the current binding unusable.
@@ -119,6 +154,7 @@ class ProposedOnlyTest {
             override fun proposePayment(consentContext: ConsentContext, request: JsonNode): JsonNode =
                 mapper.readTree(json)
         },
+        masker = McpPiiMasker(mapper),
         mapper = mapper,
     )
 
@@ -132,5 +168,9 @@ class ProposedOnlyTest {
 
     private companion object {
         val CTX = ConsentContext(agentId = "agent:test", consentId = "c-1", grantedAccounts = emptyList())
+
+        /** PII a proposal realistically carries, used to prove the masking half of the call path. */
+        const val PII_IBAN = "CZ6508000000192000145399"
+        const val PII_NAME = "Petra Svobodova"
     }
 }
