@@ -114,14 +114,6 @@
                 }
               ]
             },
-            "$.code": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
             "$.id": {
               "combine": "AND",
               "matchers": [
