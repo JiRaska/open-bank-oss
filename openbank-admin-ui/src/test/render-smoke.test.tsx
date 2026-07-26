@@ -146,6 +146,26 @@ function mockFetch() {
   })
 }
 
+// ── Why these mounts get a longer timeout than vitest's 5 s default ────────
+// This is a SMOKE test: it asserts "does it mount", never "does it mount fast".
+// A latency assertion is not part of its contract, and vitest's default 5 s was
+// acting as one. Measured 2026-07-25 (#2235): running this file ALONE is 5/5
+// green, but as part of the full 39-file suite 7 of 12 consecutive runs failed
+// with `Test timed out in 5000ms` — never on an assertion. The docs pages are the
+// heaviest mounts in the suite (mermaid + react-syntax-highlighter + long
+// markdown), so under shared-vitest-pool contention they cross 5 s first. The
+// same contention is already recorded in generate-governance.test.ts.
+//
+// The cost of a flake here is not a lost minute — it is that a timeout is
+// INDISTINGUISHABLE from a throw, which is the one signal this file exists to
+// carry. A ~58%-failing file trains people to re-run rather than read, and the
+// next real docs-page mount regression reads as "the flaky one again".
+//
+// So: keep the timeout generous. Do NOT tighten it back toward 5 s to "catch slow
+// pages" — that is a different test, and it would be paid for with the smoke
+// signal. If a page genuinely hangs, 30 s still fails it well inside the job.
+const MOUNT_TIMEOUT_MS = 30_000
+
 describe('admin-ui render-smoke — every page mounts', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', mockFetch())
@@ -198,6 +218,6 @@ describe('admin-ui render-smoke — every page mounts', () => {
         if (err instanceof Error && err.message === REDIRECT_SENTINEL) return
         throw err
       }
-    })
+    }, MOUNT_TIMEOUT_MS)
   }
 })
