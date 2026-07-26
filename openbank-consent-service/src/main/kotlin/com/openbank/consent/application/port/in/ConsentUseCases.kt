@@ -59,7 +59,26 @@ interface GetConsentUseCase {
 
 interface ValidateConsentUseCase {
     suspend fun validateConsent(command: ValidateConsentCommand): ConsentValidationResult
+
+    /**
+     * Does this party hold an ACTIVE consent for this grantee covering this scope? (ADR-0198 D4.)
+     *
+     * [validateConsent] cannot answer this: it is keyed by consentId, and a caller deciding whether
+     * to send a marketing message holds a partyId and a channel, never a consent id. Reaching it
+     * would mean `GET /party/{partyId}` first — which hands the caller EVERY consent the party has,
+     * including PSD2 account access, to answer a yes/no about marketing. This returns the yes/no.
+     */
+    suspend fun hasActiveConsent(command: CheckConsentCommand): Boolean
 }
+
+/**
+ * A yes/no consent question keyed by what the asking service actually holds.
+ *
+ * Deliberately carries no consent id and returns no consent: ADR-0198 requires a check per send,
+ * and a caller that receives the consent object would be able to cache it, which is the thing the
+ * per-send rule exists to prevent.
+ */
+data class CheckConsentCommand(val partyId: UUID, val granteeId: String, val requiredScope: ConsentScope)
 
 interface ActivateConsentUseCase {
     suspend fun activateConsent(consentId: UUID, scaSessionId: UUID): Consent

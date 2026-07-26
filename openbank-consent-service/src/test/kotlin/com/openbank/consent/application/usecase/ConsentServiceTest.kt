@@ -4,6 +4,7 @@
 
 package com.openbank.consent.application.usecase
 
+import com.openbank.consent.application.port.`in`.CheckConsentCommand
 import com.openbank.consent.application.port.`in`.CreateConsentCommand
 import com.openbank.consent.application.port.`in`.RevokeConsentCommand
 import com.openbank.consent.application.port.`in`.ValidateConsentCommand
@@ -614,4 +615,93 @@ class ConsentServiceTest {
         createdAt = OffsetDateTime.now(),
         updatedAt = OffsetDateTime.now(),
     )
+
+    // ── hasActiveConsent — ADR-0198 D4's per-send marketing check ─────────────────────────────
+    //
+    // `validateConsent` cannot answer this question: it is keyed by consentId, and a service
+    // deciding whether to send a marketing message holds a partyId and a channel. Reaching it would
+    // mean listing EVERY consent the party holds — PSD2 account access included — to answer a
+    // yes/no about marketing.
+
+    @Test
+    fun `hasActiveConsent - an active consent covering the scope grants the send`(): Unit = runBlocking {
+        coEvery { consentRepository.findActiveByGranteeAndParty(MARKETING_GRANTEE, partyId) } returns
+            listOf(consent(granteeId = MARKETING_GRANTEE, scopes = setOf(ConsentScope.MARKETING_COMMS_EMAIL)))
+
+        val granted = service.hasActiveConsent(
+            CheckConsentCommand(partyId, MARKETING_GRANTEE, ConsentScope.MARKETING_COMMS_EMAIL),
+        )
+
+        assertThat(granted).isTrue()
+    }
+
+    @Test
+    fun `hasActiveConsent - consent to email is not consent to push`(): Unit = runBlocking {
+        // Anything coarser than per-scope would leave notification_preference's channel columns as
+        // the only thing separating them — and those are a mute WITHIN a granted consent, not the
+        // GDPR Art. 6(1)(a) basis for sending at all.
+        coEvery { consentRepository.findActiveByGranteeAndParty(MARKETING_GRANTEE, partyId) } returns
+            listOf(consent(granteeId = MARKETING_GRANTEE, scopes = setOf(ConsentScope.MARKETING_COMMS_EMAIL)))
+
+        val granted = service.hasActiveConsent(
+            CheckConsentCommand(partyId, MARKETING_GRANTEE, ConsentScope.MARKETING_COMMS_PUSH),
+        )
+
+        assertThat(granted).isFalse()
+    }
+
+    @Test
+    fun `hasActiveConsent - a REVOKED consent does not grant, even though the repository returned it`(): Unit =
+        runBlocking {
+            // The repository query is named findActive*, so it is tempting to trust its filter and
+            // skip the domain check. This asserts the use case does NOT: `status = ACTIVE` and
+            // "active right now" are different claims, and a yes/no about a send is exactly where
+            // the difference decides whether a message goes out.
+            coEvery { consentRepository.findActiveByGranteeAndParty(MARKETING_GRANTEE, partyId) } returns
+                listOf(
+                    consent(
+                        granteeId = MARKETING_GRANTEE,
+                        status = ConsentStatus.REVOKED,
+                        scopes = setOf(ConsentScope.MARKETING_COMMS_EMAIL),
+                    ),
+                )
+
+            val granted = service.hasActiveConsent(
+                CheckConsentCommand(partyId, MARKETING_GRANTEE, ConsentScope.MARKETING_COMMS_EMAIL),
+            )
+
+            assertThat(granted).isFalse()
+        }
+
+    @Test
+    fun `hasActiveConsent - no consent at all is a refusal, not an error`(): Unit = runBlocking {
+        // Fail closed and quietly: suppressing the send is the normal outcome for most parties,
+        // not an exceptional one, so this must not throw.
+        coEvery { consentRepository.findActiveByGranteeAndParty(MARKETING_GRANTEE, partyId) } returns emptyList()
+
+        val granted = service.hasActiveConsent(
+            CheckConsentCommand(partyId, MARKETING_GRANTEE, ConsentScope.MARKETING_COMMS_EMAIL),
+        )
+
+        assertThat(granted).isFalse()
+    }
+
+    @Test
+    fun `hasActiveConsent - one matching consent among several grants the send`(): Unit = runBlocking {
+        coEvery { consentRepository.findActiveByGranteeAndParty(MARKETING_GRANTEE, partyId) } returns listOf(
+            consent(granteeId = MARKETING_GRANTEE, scopes = setOf(ConsentScope.MARKETING_COMMS_PUSH)),
+            consent(granteeId = MARKETING_GRANTEE, scopes = setOf(ConsentScope.MARKETING_COMMS_EMAIL)),
+        )
+
+        val granted = service.hasActiveConsent(
+            CheckConsentCommand(partyId, MARKETING_GRANTEE, ConsentScope.MARKETING_COMMS_EMAIL),
+        )
+
+        assertThat(granted).isTrue()
+    }
+
+    private companion object {
+        /** ADR-0205 D3's fixed internal grantee. */
+        const val MARKETING_GRANTEE = "party-service:marketing-comms"
+    }
 }
