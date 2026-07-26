@@ -120,6 +120,38 @@ def config_api_major(service_dir: Path) -> int | None:
     return int(m.group(2)) if m else None
 
 
+# ── D2's external-contract exemption, DECLARED rather than inferred (issue #2276) ───────────
+#
+# A service that serves no own `/api/v{N}` cannot have its URL major compared to
+# `info.version`, so D2 has to be skipped for it. The question is WHY it serves none.
+#
+# Two very different answers look identical to the gate:
+#   (a) it follows an external spec that dictates its URL shape — psd2 on Berlin Group
+#       NextGenPSD2 serves `/v1/consents`, and its info.version tracks THAT spec;
+#   (b) it simply never adopted this repo's convention — in which case its openapi.yaml major
+#       is free to drift with nothing to compare it against, the precise failure ADR-0048 was
+#       written to prevent.
+#
+# Inferring (a) from "no /api/v{N}" silently grants (b) the same exemption, with a reassuring
+# green line in the log. So the exemption is a list you have to join, with a reason attached.
+# A service with no own `/api/v{N}` that is NOT listed here is a FINDING.
+#
+# Same shape as check-pact-provider-replay.py's KNOWN_UNCOVERED: an entry that stops being
+# true fails as stale, so the list cannot quietly outlive its justification.
+#
+# Keyed by the module directory name, which is what `service` holds in main() (OPENAPI_GLOB).
+EXTERNAL_CONTRACT_SERVICES: dict[str, str] = {
+    "openbank-psd2-service": (
+        "Berlin Group NextGenPSD2 mandates the URL shape (/v1/consents, ...); info.version "
+        "tracks that external spec, not a URL segment this repo owns."
+    ),
+    "openbank-mcp-service": (
+        "Model Context Protocol: a single conventional /mcp JSON-RPC endpoint, no versioned "
+        "URL segment to compare against."
+    ),
+}
+
+
 # JAX-RS REST *client* stubs carry the CALLEE's URL major (e.g. an Alertmanager client at
 # /api/v2), not this service's own contract — they must not drive the D2 URL-major check.
 _CLIENT_HINT = re.compile(r"@RegisterRestClient|RestClient\b")
@@ -330,16 +362,38 @@ def main() -> int:
         # D2 API invariant on HEAD. Only meaningful for a stable (>=1.0) contract that the
         # service actually serves under its own /api/v{N}. Skip when:
         #  - doc_major == 0: a pre-1.0 spec (semver major 0 is explicitly unstable; product-catalog)
-        #  - the service serves no own /api/v{N} path: external-contract services (e.g. psd2 on
-        #    the Berlin Group scheme serve /v1/consents, not /api/v{N}); their info.version major
-        #    tracks the external spec, not a URL segment / api.version this repo owns.
+        #  - the service serves no own /api/v{N} path AND is DECLARED external-contract in
+        #    EXTERNAL_CONTRACT_SERVICES above. Serving no /api/v{N} is not itself evidence of an
+        #    external contract — it is equally true of a service that just skipped the convention,
+        #    and that one must not inherit the exemption silently (issue #2276).
         cfg_major = config_api_major(service_dir)
         majors = url_majors(service_dir)
         doc_major = new_v[0]
+        external_reason = EXTERNAL_CONTRACT_SERVICES.get(service)
+        if majors and external_reason:
+            # The declaration has stopped being true: it now serves its own /api/v{N}, so D2 is
+            # assertable and the exemption is stale. Fail rather than let the list outlive its
+            # justification (KNOWN_UNCOVERED shape).
+            findings.append(
+                f"{service}: listed in EXTERNAL_CONTRACT_SERVICES but now serves its own "
+                f"/api/v{max(majors)} — the exemption is stale. Drop the entry from "
+                f".github/scripts/check-api-contract.py so D2 is asserted again (issue #2276)."
+            )
         if doc_major == 0:
             print(f"api-contract gate: {service}: info.version {new_raw} is pre-1.0 — D2 invariant not asserted.")
+        elif not majors and external_reason:
+            print(
+                f"api-contract gate: {service}: declared external contract — D2 not asserted. "
+                f"Reason: {external_reason}"
+            )
         elif not majors:
-            print(f"api-contract gate: {service}: serves no own /api/v{{N}} path — external contract, D2 not asserted.")
+            findings.append(
+                f"{service}: serves no own /api/v{{N}} path, so ADR-0048 D2 cannot be asserted and "
+                f"info.version {new_raw} has nothing to drift against. Either adopt /api/v{{N}} or "
+                f"add the service to EXTERNAL_CONTRACT_SERVICES in "
+                f".github/scripts/check-api-contract.py with the external spec it follows "
+                f"(issue #2276)."
+            )
         else:
             if cfg_major is not None and cfg_major != doc_major:
                 findings.append(
