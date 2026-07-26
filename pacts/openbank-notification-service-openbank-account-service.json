@@ -28,14 +28,6 @@
       },
       "matchingRules": {
         "body": {
-          "$.channel": {
-            "combine": "AND",
-            "matchers": [
-              {
-                "match": "type"
-              }
-            ]
-          },
           "$.partyId": {
             "combine": "AND",
             "matchers": [
@@ -46,14 +38,6 @@
             ]
           },
           "$.recipient": {
-            "combine": "AND",
-            "matchers": [
-              {
-                "match": "type"
-              }
-            ]
-          },
-          "$.template": {
             "combine": "AND",
             "matchers": [
               {
