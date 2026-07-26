@@ -799,6 +799,20 @@ jobs:
       - name: "no dead-code SERVICE-principal rego rule (enforced)"
         run: bash .github/scripts/check-no-service-principal-type.sh .
 
+      # psd2's ANONYMOUS OPA grant rests on upstream eIDAS mTLS authentication
+      # (issue #2169, rules.yaml: authz_policy). psd2_rest_ext.rego grants
+      # psd2.list/read/create/initiate/delete to an ANONYMOUS principal because a
+      # TPP presents an eIDAS QWAC and no bearer; that is safe ONLY while every
+      # annotated endpoint sits behind EidasMtlsFilter's gated path prefixes. The
+      # guard derives the action set from the rego and the prefixes (with their
+      # negated exclusions) from the filter source — it keeps no copy of either, so
+      # its scope cannot drift from what it checks. Falsified in both directions
+      # before merge: an @Authorize on an ungated path and on the excluded
+      # `open-banking/sandbox/` prefix are both flagged; the same annotation quoted
+      # in a KDoc is not. 0 violations on origin/main at introduction. ENFORCED.
+      - name: "psd2 anonymous grant stays behind eIDAS mTLS (issue #2169, enforced)"
+        run: python3 .github/scripts/check-psd2-anonymous-grant-paths.py --enforce
+
       # openbank-mcp-service caller-auth ordering guard (BLOCKER #2206). The MCP
       # threat model (#2200) established the service authenticates nobody today —
       # resolveContext() hardcodes the "agent:mcp-anonymous" placeholder and the OPA

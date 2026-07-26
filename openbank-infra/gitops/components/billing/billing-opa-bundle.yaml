@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: billing-service
     app.kubernetes.io/part-of: billing
   annotations:
-    openbank.tech/policy-checksum: "b41a03ec7fd0cd7a"
+    openbank.tech/policy-checksum: "f294f4810474b590"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2525,6 +2525,25 @@ data:
       # edge-service-notification rule and rest_test.rego's
       # test_deny_operator_read_any_does_not_cover_write).
       ci_producer: ".github/scripts/check-no-service-principal-type.sh"
+
+      # psd2_rest_ext.rego grants five actions — psd2.list/read/create/initiate/delete — to an
+      # ANONYMOUS principal, because a TPP authenticates by eIDAS QWAC (mTLS) and carries no
+      # bearer, so it reaches OPA as ANONYMOUS. That grant is safe ONLY because EidasMtlsFilter
+      # (@Priority(AUTHENTICATION)) has already 401'd a missing or unauthorized TPP on the path
+      # prefixes it gates. Until issue #2169 that invariant lived in a rego comment: an
+      # @Authorize(action = "psd2.initiate") added on a path the filter does NOT gate — a new
+      # admin route, a debug endpoint, anything under `open-banking/sandbox/` — would hand
+      # payment initiation to a genuinely unauthenticated caller with every CI gate green.
+      #
+      # The guard derives BOTH sides from source: the action set out of the rego rule, the gated
+      # prefixes (and their negated exclusions) out of EidasMtlsFilter's `gated` predicate. It
+      # keeps no copy of either — a guard whose scope is a hand-kept list of the thing it checks
+      # reads as passing when the list is short. Kotlin comments are stripped (block comments
+      # NEST) so an @Authorize quoted in a KDoc is never reported as an endpoint, and a run that
+      # matches zero endpoints FAILS rather than passing vacuously.
+      # 0 violations on origin/main at introduction — a regression guard. ENFORCED.
+      anonymous_grants_require_upstream_authn: true
+      anonymous_grant_ci_producer: ".github/scripts/check-psd2-anonymous-grant-paths.py"
 
     # ---------------------------------------------------------------------------------------
     # Scheduled-method invariants (issue #2148, fleet sweep #2187).
