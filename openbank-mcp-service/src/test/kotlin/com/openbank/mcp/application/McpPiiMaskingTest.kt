@@ -88,6 +88,32 @@ class McpPiiMaskingTest {
         assertEquals("****5399", masked.path("free").path(0).asText())
     }
 
+    /**
+     * Guards the object-recursion path itself: masking walks an object's properties and rebuilds
+     * it, so a nested object must be descended into and every sibling key preserved. A recursion
+     * that silently visited only the top level would still pass the flat-payload assertions above.
+     */
+    @Test
+    fun `masking descends into a nested object and preserves every key`() {
+        val node = mapper.readTree(
+            """
+            {
+              "status": "ACTIVE",
+              "owner": {"holderName": "Jan Novak", "iban": "CZ6508000000192000145399", "currency": "CZK"}
+            }
+            """.trimIndent(),
+        )
+
+        val masked = masker.mask(node)
+
+        assertEquals("***", masked.path("owner").path("holderName").asText())
+        assertEquals("****5399", masked.path("owner").path("iban").asText())
+        assertEquals("CZK", masked.path("owner").path("currency").asText())
+        assertEquals("ACTIVE", masked.path("status").asText())
+        assertEquals(2, masked.size(), "a key was dropped while rebuilding the object: $masked")
+        assertEquals(3, masked.path("owner").size(), "a nested key was dropped: $masked")
+    }
+
     private class FixedReadPort(private val payload: JsonNode) : AccountReadPort {
         override fun listAccounts(consentContext: ConsentContext): JsonNode = payload
         override fun getBalance(consentContext: ConsentContext, accountId: String): JsonNode = payload

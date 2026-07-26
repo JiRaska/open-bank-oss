@@ -50,7 +50,7 @@ class McpPiiMasker(private val mapper: ObjectMapper) {
     }
 
     private fun maskObject(node: JsonNode): ObjectNode = mapper.createObjectNode().apply {
-        node.fields().forEach { (name, value) -> set<JsonNode>(name, maskNode(value, name)) }
+        node.properties().forEach { (name, value) -> set<JsonNode>(name, maskNode(value, name)) }
     }
 
     private fun maskText(value: String, fieldName: String?): JsonNode {
