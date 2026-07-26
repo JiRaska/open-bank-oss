@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
 import com.openbank.mcp.application.port.out.ProposalPort
+import com.openbank.mcp.infrastructure.read.StubMarketingReachPort
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -51,6 +52,7 @@ class McpPiiMaskingTest {
     private fun registry(payload: String) = McpToolRegistry(
         accounts = FixedReadPort(mapper.readTree(payload)),
         proposals = DenyingProposalPort,
+        marketingReach = StubMarketingReachPort(mapper),
         masker = masker,
         mapper = mapper,
     )
