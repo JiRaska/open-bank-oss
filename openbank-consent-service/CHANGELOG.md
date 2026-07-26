@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.14.0...consent-service-v0.15.0) (2026-07-26)
+
+
+### Features
+
+* **consent:** scope M2M consent.grant/consent.revoke to marketing grantee (ADR-0206 D2) ([#2469](https://github.com/JiRaska/open-bank-oss/issues/2469)) ([90f97e2](https://github.com/JiRaska/open-bank-oss/commit/90f97e272bf0b8eec18cf23d75c553e7950ee41e))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.13.0...consent-service-v0.14.0) (2026-07-25)
 
 
