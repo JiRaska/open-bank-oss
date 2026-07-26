@@ -88,7 +88,7 @@
             "cardType": "DEBIT",
             "currency": "CZK",
             "expiryDate": "2029-12-31",
-            "id": "1cc6f93f-9407-47c8-a4ac-10c7240b047e",
+            "id": "11111111-2222-4333-8444-555555555501",
             "maskedPan": "**** **** **** 1234",
             "network": "VISA",
             "status": "ACTIVE"
@@ -192,7 +192,7 @@
             "creditorName": "Elektr\u00E1rna a.s.",
             "currency": "CZK",
             "frequency": "MONTHLY",
-            "id": "59195df9-7b37-4053-b89d-f4736de73b46",
+            "id": "11111111-2222-4333-8444-555555555503",
             "nextExecutionDate": "2026-08-01",
             "remittanceInfo": "Elekt\u0159ina",
             "status": "ACTIVE"
@@ -451,7 +451,7 @@
           {
             "closingBalance": 1000.00,
             "entryCount": 12,
-            "id": "1761c48d-4290-4e0d-8c26-4eac4e3146ba",
+            "id": "11111111-2222-4333-8444-555555555502",
             "legalSequenceNumber": 7,
             "openingBalance": 900.00,
             "periodFrom": "2026-06-01",
