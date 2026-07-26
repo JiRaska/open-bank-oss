@@ -5,6 +5,7 @@
 package com.openbank.consent.application.usecase
 
 import com.openbank.consent.application.port.`in`.ActivateConsentUseCase
+import com.openbank.consent.application.port.`in`.CheckConsentCommand
 import com.openbank.consent.application.port.`in`.CreateConsentCommand
 import com.openbank.consent.application.port.`in`.CreateConsentUseCase
 import com.openbank.consent.application.port.`in`.GetConsentUseCase
@@ -214,6 +215,25 @@ class ConsentService(
 
     override suspend fun listConsentsForGrantee(granteeId: String): List<Consent> =
         consentRepository.findByGranteeId(granteeId)
+
+    /**
+     * ADR-0198 D4's per-send marketing check, answered without disclosing the consent.
+     *
+     * Uses [ConsentRepository.findActiveByGranteeAndParty], which has existed since the repository
+     * was written and had **no caller at all** — the query for this question was already here; only
+     * a way to ask it was missing.
+     *
+     * `isActive` is re-checked in the domain rather than trusted from the repository's ACTIVE
+     * filter, because "status = ACTIVE" and "active right now" are different claims: a consent with
+     * `validTo` in the past still carries status ACTIVE until something transitions it. Asking a
+     * yes/no question is exactly where that difference decides a send.
+     */
+    override suspend fun hasActiveConsent(command: CheckConsentCommand): Boolean {
+        val now = OffsetDateTime.now(clock)
+        return consentRepository
+            .findActiveByGranteeAndParty(command.granteeId, command.partyId)
+            .any { it.isActive(now) && it.hasScope(command.requiredScope) }
+    }
 
     override suspend fun validateConsent(command: ValidateConsentCommand): ConsentValidationResult {
         val consent = consentRepository.findById(command.consentId)

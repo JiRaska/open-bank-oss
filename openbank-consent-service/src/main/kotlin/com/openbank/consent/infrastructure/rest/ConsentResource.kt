@@ -6,6 +6,7 @@ package com.openbank.consent.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.consent.application.port.`in`.ActivateConsentUseCase
+import com.openbank.consent.application.port.`in`.CheckConsentCommand
 import com.openbank.consent.application.port.`in`.CreateConsentCommand
 import com.openbank.consent.application.port.`in`.CreateConsentUseCase
 import com.openbank.consent.application.port.`in`.GetConsentUseCase
@@ -13,6 +14,7 @@ import com.openbank.consent.application.port.`in`.RevokeConsentCommand
 import com.openbank.consent.application.port.`in`.RevokeConsentUseCase
 import com.openbank.consent.application.port.`in`.ValidateConsentCommand
 import com.openbank.consent.application.port.`in`.ValidateConsentUseCase
+import com.openbank.consent.domain.model.ConsentScope
 import com.openbank.consent.infrastructure.rest.dto.ConsentResponse
 import com.openbank.consent.infrastructure.rest.dto.ConsentValidationResponse
 import com.openbank.consent.infrastructure.rest.dto.CreateConsentRequest
@@ -180,6 +182,45 @@ class ConsentResource(
         return ConsentValidationResponse.from(result)
     }
 
+    /**
+     * Does this party hold an ACTIVE marketing (or any) consent for this grantee and scope?
+     * ADR-0198 D4 requires a check per send; this is the call that makes it possible.
+     *
+     * Exists because `POST /{id}/validate` cannot be reached with what a sender holds. A service
+     * deciding whether to send has a partyId and a channel, never a consent id, so it would have to
+     * `GET /party/{partyId}` first — receiving EVERY consent that party holds, PSD2 account access
+     * included, to answer a yes/no about marketing. This returns the yes/no and nothing else.
+     *
+     * Same `consent.validate` action as [validate] on purpose: it is the same question with a
+     * different key, so it needs no new OPA action and no rego change. Authorized on the partyId,
+     * which is the resource the caller actually names.
+     */
+    @GET
+    @Path("/party/{partyId}/grantee/{granteeId}/active")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
+    @Authorize(action = "consent.validate", resource = "#partyId")
+    @Operation(
+        summary = "Whether a party has an ACTIVE consent for a grantee covering a scope (ADR-0198 D4)",
+    )
+    suspend fun hasActiveConsent(
+        @PathParam("partyId") partyId: UUID,
+        @PathParam("granteeId") granteeId: String,
+        @QueryParam("scope") scope: String,
+    ): ConsentCheckResponse {
+        val required = runCatching { ConsentScope.valueOf(scope) }.getOrNull()
+        requireNotNull(required) { "unknown scope: $scope" }
+        val granted = validateConsent.hasActiveConsent(
+            CheckConsentCommand(partyId = partyId, granteeId = granteeId, requiredScope = required),
+        )
+        return ConsentCheckResponse(granted = granted)
+    }
+
     private fun consentCreateKey(granteeId: String, partyId: UUID, requestId: String) =
         "consent:create:$granteeId:$partyId:$requestId"
 }
+
+/**
+ * The whole answer: a boolean. No consent id, no scopes, no validity window — a caller that
+ * received those could cache them, and ADR-0198 requires a check per send rather than a copy.
+ */
+data class ConsentCheckResponse(val granted: Boolean)
