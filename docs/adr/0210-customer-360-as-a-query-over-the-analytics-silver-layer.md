@@ -116,6 +116,19 @@ analytics events". The same correction applies to `consent-service` lookups by p
 Generalise: an empty-state message asserts a fact about the data source, so it is wrong to reuse the
 source-level message for a key-level miss.
 
+**D10 — On a lookup page, clearing state is not the same as invalidating a request.** Both pages
+reset their results when the query changes, and both were still wrong: an already in-flight request
+settles afterwards and repopulates what was just cleared. Measured with a 1.5 s-delayed
+`consent-service` party lookup interrupted by a lens switch — the selector read "By grantee" while
+`MARKETING_COMMS_EMAIL` rows from the *party* query sat on screen, i.e. one customer's consents
+presented as the global marketing view. Every request now carries a generation number and commits
+only if it is still the current one; a lens switch bumps that number, which is what actually cancels
+the flight. The parameter a request was built from (here the lens) is read ONCE at request time, never
+from the closure after the `await`. No unit test can see this — `e2e/party-lookup.spec.ts` holds the
+assertion, and it was verified red against the unguarded code. Generalise: any view whose content is
+keyed by a user-changeable selector needs a last-write-wins guard keyed to the selector, not to
+arrival order.
+
 ## Alternatives considered
 
 - **Build `crm-service` as ADR-0199 specifies.** Rejected on evidence, not principle: it

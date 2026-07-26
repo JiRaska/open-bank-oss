@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -31,7 +31,14 @@ export default function Customer360Page() {
   const [failure, setFailure] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(false)
 
+  // Only the newest selection may commit. Today the Select buttons are disabled while a load is in
+  // flight, which happens to serialise clicks — but that is a UI accident, not a guarantee, and the
+  // failure it would hide is the worst one this page has: another party's data under this party's
+  // name. Guard it at the source instead of relying on the button state.
+  const generation = useRef(0)
+
   const load360 = async (party: PartyHit) => {
+    const gen = ++generation.current
     setSelected(party)
     setLoading(true)
     setFailure(null)
@@ -39,6 +46,7 @@ export default function Customer360Page() {
     try {
       const res = await fetch(`/api/customer-360/${encodeURIComponent(party.id)}`, { cache: 'no-store' })
       const body = (await res.json()) as Customer360
+      if (gen !== generation.current) return // a newer selection won; this answer is about someone else
       if (res.status === 400) {
         setFailure('error')
         return
@@ -51,9 +59,9 @@ export default function Customer360Page() {
       }
       setData(body)
     } catch {
-      setFailure('unreachable')
+      if (gen === generation.current) setFailure('unreachable')
     } finally {
-      setLoading(false)
+      if (gen === generation.current) setLoading(false)
     }
   }
 
@@ -141,7 +149,7 @@ export default function Customer360Page() {
             </div>
           )}
 
-          <div className="card" style={{ marginBottom: '20px', overflowX: 'auto' }}>
+          <div className="card" style={{ marginBottom: '20px', overflowX: 'auto', padding: '20px' }}>
             <h2 className="section-title" style={{ marginBottom: '12px' }}>
               {t('Domény a aktuálnost', 'Domains and recency')}
             </h2>
@@ -168,7 +176,7 @@ export default function Customer360Page() {
           </div>
 
           {data.consents.length > 0 && (
-            <div className="card" style={{ overflowX: 'auto' }}>
+            <div className="card" style={{ overflowX: 'auto', padding: '20px' }}>
               <h2 className="section-title" style={{ marginBottom: '12px' }}>
                 {t('Souhlasy (consent-service zůstává autoritativní)', 'Consents (consent-service stays authoritative)')}
               </h2>
