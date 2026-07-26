@@ -50,24 +50,6 @@ dependencies {
     compileOnly("io.quarkus:quarkus-security:3.33.2")
     compileOnly("io.quarkus:quarkus-arc:3.33.2")
 
-    // TemporalClientProducer / TemporalConfig (ADR-0209 D1, issue #2572). compileOnly, matching the
-    // convention above: only the 14 Temporal consumers should carry the SDK at runtime, and each of
-    // them already declares io.temporal:temporal-sdk itself.
-    //
-    // isTransitive = false on purpose. This module imports no Quarkus platform BOM, so a transitive
-    // resolve would drag in temporal-sdk's OWN grpc/guava/protobuf versions (grpc 1.54.1, guava
-    // 31.1-jre) — coordinates the fleet never resolves anywhere else and which are therefore absent
-    // from gradle/verification-metadata.xml, failing the build on dependency verification. All three
-    // coordinates below are ALREADY pinned there (the 14 services resolve them), so this adds no new
-    // verification entries at all. We only need the type signatures.
-    compileOnly("io.temporal:temporal-sdk:1.25.1") { isTransitive = false }
-    compileOnly("io.temporal:temporal-serviceclient:1.25.1") { isTransitive = false }
-    compileOnly("com.uber.m3:tally-core:0.13.0") { isTransitive = false }
-    // NOTE: @ConfigMapping/@WithDefault (io.smallrye.config) need no declaration here — they arrive
-    // on the compile classpath transitively from the quarkus-arc compileOnly above, at the version
-    // quarkus-bom:3.33.2 pins. Declaring smallrye-config-core explicitly pulls in four
-    // io.smallrye.common parent POMs that are absent from gradle/verification-metadata.xml.
-
     // S3ObjectStore (ADR-0161 D2) compiles against the real AWS SDK v2 `s3` module
     // (S3Presigner ships in the same artifact — no separate presigner dependency).
     // compileOnly, matching the convention above: this is NOT part of the Quarkus
@@ -93,12 +75,6 @@ dependencies {
     // rendering that the sentinel's PromQL depends on. The registry itself is never used at runtime
     // here — each service brings quarkus-micrometer-registry-prometheus itself.
     testImplementation("io.micrometer:micrometer-registry-prometheus:1.14.5")
-    // TemporalClientProducerLazinessTest constructs the producer; its `by lazy` delegate is a
-    // synthetic class referencing io.temporal.client.WorkflowClient, which must be LOADABLE (not
-    // connectable) at construction. Same isTransitive = false rationale as the compileOnly block.
-    testImplementation("io.temporal:temporal-sdk:1.25.1") { isTransitive = false }
-    testImplementation("io.temporal:temporal-serviceclient:1.25.1") { isTransitive = false }
-    testImplementation("com.uber.m3:tally-core:0.13.0") { isTransitive = false }
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

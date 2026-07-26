@@ -39,6 +39,8 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // Shared TemporalConfig + TemporalClientProducer (ADR-0209 D1, #2572).
+    implementation(project(":openbank-libs-temporal"))
     implementation("io.temporal:temporal-sdk:1.25.1")
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.65.1")

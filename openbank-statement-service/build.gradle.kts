@@ -30,6 +30,8 @@ dependencies {
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
+    // Shared TemporalConfig + TemporalClientProducer (ADR-0209 D1, #2572).
+    implementation(project(":openbank-libs-temporal"))
     implementation("io.temporal:temporal-sdk:1.25.1")
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
