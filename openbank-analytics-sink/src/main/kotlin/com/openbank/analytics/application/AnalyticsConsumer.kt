@@ -100,12 +100,14 @@ class AnalyticsConsumer {
             eventId = node["eventId"]?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
                 ?: UUID.randomUUID(),
             aggregateType = aggregateType,
+            // The id MUST agree with aggregateType — bronze_events is keyed (aggregate_type,
+            // aggregate_id) and silver_current_state reduces per that key. An independent precedence
+            // chain here (it used to prefer accountId over transactionId) would pair
+            // aggregate_type=TRANSACTION with an ACCOUNT id, collapsing every transaction on one
+            // account into a single aggregate in silver — a corrupted read model that no test over
+            // one event can see. Resolve the id FROM the resolved type instead.
             aggregateId = node["aggregateId"]?.asText()
-                ?: node["accountId"]?.asText()
-                ?: node["partyId"]?.asText()
-                ?: node["transactionId"]?.asText()
-                ?: node["consentId"]?.asText()
-                ?: node["kycCaseId"]?.asText()
+                ?: idForType(aggregateType, node)
                 ?: "unknown",
             aggregateVersion = node["aggregateVersion"]?.asLong()
                 ?: node["version"]?.asLong()
@@ -124,12 +126,54 @@ class AnalyticsConsumer {
         )
     }
 
+    /**
+     * The identifying field for a resolved aggregate type — the counterpart to [inferAggregateType],
+     * kept adjacent so the two cannot drift. A type added to one without the other yields
+     * `aggregate_id = "unknown"`, which is visible in bronze rather than silently wrong.
+     */
+    private fun idForType(type: String, node: JsonNode): String? = when (type) {
+        "TRANSACTION" -> node["transactionId"]?.asText()
+        "CONSENT" -> node["consentId"]?.asText()
+        "KYC_CASE" -> node["kycCaseId"]?.asText()
+        "DOCUMENT" -> node["documentId"]?.asText()
+        "PASSKEY" -> node["credentialId"]?.asText()
+        "ACCOUNT" -> node["accountId"]?.asText()
+        "PARTY" -> node["partyId"]?.asText()
+        else -> null
+    } ?: node["accountId"]?.asText() ?: node["partyId"]?.asText()
+
+    /**
+     * Last-resort domain inference for an event whose envelope omits `aggregateType`.
+     *
+     * ORDER IS LOAD-BEARING, most specific first. A transaction event carries BOTH `transactionId`
+     * and `accountId`; with `accountId` tested first — as it was — every transaction landed in bronze
+     * as `ACCOUNT`. That went unnoticed only because the sink was subscribed to
+     * `openbank.transaction.events`, a topic that has never existed, so no transaction event had ever
+     * arrived to be misclassified. Correcting the topic name (same commit) is what would have made
+     * the latent bug live, which is why both changes belong together: the fix and the thing the fix
+     * would otherwise have broken.
+     *
+     * Same reason `documentId` precedes `accountId`/`partyId`: a signing-ceremony payload carries
+     * `ceremonyId` + `documentId`, and a generated-document payload carries `documentId` +
+     * `templateCode`. Both were landing as `UNKNOWN/UNKNOWN` in the sandbox — identifiable events
+     * with three columns of attribution silently blank (#2598).
+     *
+     * This remains a HEURISTIC and should not be the mechanism. The topic name states the domain
+     * authoritatively (`openbank.documents.document.event` is a document event whatever its keys),
+     * but reading it requires the `@Incoming` method to take `Message<String>` and handle ack/nack
+     * explicitly rather than a bare `String`. That refactor is deferred deliberately, not forgotten:
+     * it changes the failure semantics of a working consumer, and it is not needed to fix the
+     * misclassification. Tracked separately — until it lands, EVERY new event shape whose keys are
+     * not listed here silently becomes UNKNOWN, and nothing goes red.
+     */
     private fun inferAggregateType(node: JsonNode): String = when {
-        node.has("accountId") -> "ACCOUNT"
-        node.has("partyId") -> "PARTY"
         node.has("transactionId") -> "TRANSACTION"
         node.has("consentId") -> "CONSENT"
         node.has("kycCaseId") -> "KYC_CASE"
+        node.has("documentId") -> "DOCUMENT"
+        node.has("credentialId") -> "PASSKEY"
+        node.has("accountId") -> "ACCOUNT"
+        node.has("partyId") -> "PARTY"
         else -> "UNKNOWN"
     }
 }

@@ -121,4 +121,89 @@ class AnalyticsConsumerTest {
         val contact = consumer.toEnvelope(node).payload["contact"] as Map<String, Any?>
         assertThat(contact["phone"]).isEqualTo(PiiMask.phone("+420123456789"))
     }
+
+    // ── Domain inference (#2598) ───────────────────────────────────────────────────────────────
+    //
+    // The sink was subscribed to `openbank.account.events` and `openbank.transaction.events`, and
+    // NEITHER topic has ever existed (the real ones are `openbank.accounts.account.created` and
+    // `openbank.transactions.transaction.initiated`). A consumer subscribed to a nonexistent topic
+    // just receives nothing, so nothing went red — for as long as the sink ran, no ACCOUNT_OPENED and
+    // no TRANSACTION row ever reached bronze, and ADR-0210 D2's account->party resolution was dead
+    // code in practice.
+    //
+    // These tests cover what correcting the topic names EXPOSES, which is the reason both changes
+    // ship together.
+
+    @Test
+    fun `a transaction event is a TRANSACTION even though it also carries an accountId`() {
+        // The latent bug the topic fix would have made live: `accountId` was tested first, so every
+        // transaction would have landed in bronze as ACCOUNT the moment the real topic was consumed.
+        val node = mapper.readTree(
+            """
+            {"transactionId":"txn-1","accountId":"acc-9","amount":100,"eventType":"TRANSACTION_POSTED"}
+            """.trimIndent(),
+        )
+        val env = consumer.toEnvelope(node)
+        assertThat(env.aggregateType).isEqualTo("TRANSACTION")
+        // And the id must AGREE with the type: bronze_events is keyed (aggregate_type, aggregate_id)
+        // and silver reduces per that key, so pairing TRANSACTION with an account id would collapse
+        // every transaction on one account into a single aggregate.
+        assertThat(env.aggregateId).isEqualTo("txn-1")
+    }
+
+    @Test
+    fun `an account event is still an ACCOUNT`() {
+        val node = mapper.readTree("""{"accountId":"acc-9","eventType":"ACCOUNT_OPENED"}""")
+        val env = consumer.toEnvelope(node)
+        assertThat(env.aggregateType).isEqualTo("ACCOUNT")
+        assertThat(env.aggregateId).isEqualTo("acc-9")
+    }
+
+    @Test
+    fun `a generated-document event is a DOCUMENT, not UNKNOWN`() {
+        // Measured in the sandbox: this exact shape landed as UNKNOWN/UNKNOWN/unknown — three columns
+        // of attribution blank on an event whose payload names the template it produced.
+        val node = mapper.readTree(
+            """
+            {"documentId":"doc-1","templateCode":"RAMCOVA_SMLOUVA_CS","templateVersion":"1.1.0"}
+            """.trimIndent(),
+        )
+        val env = consumer.toEnvelope(node)
+        assertThat(env.aggregateType).isEqualTo("DOCUMENT")
+        assertThat(env.aggregateId).isEqualTo("doc-1")
+    }
+
+    @Test
+    fun `a signing-ceremony event resolves to the document it is about`() {
+        val node = mapper.readTree("""{"ceremonyId":"cer-1","documentId":"doc-1"}""")
+        assertThat(consumer.toEnvelope(node).aggregateType).isEqualTo("DOCUMENT")
+    }
+
+    @Test
+    fun `a passkey registration is a PASSKEY, not a bare PARTY`() {
+        // Also seen in the sandbox as PARTY/UNKNOWN: correct domain, no event type, and the
+        // credential it registered indistinguishable from any other party change.
+        val node = mapper.readTree(
+            """
+            {"credentialId":"cred-1","deviceId":"dev-1","partyId":"pty-1"}
+            """.trimIndent(),
+        )
+        val env = consumer.toEnvelope(node)
+        assertThat(env.aggregateType).isEqualTo("PASSKEY")
+        assertThat(env.aggregateId).isEqualTo("cred-1")
+    }
+
+    @Test
+    fun `an explicit aggregateType always wins over inference`() {
+        // Inference is the fallback, never an override — an envelope that states its type must be
+        // taken at its word even when the payload keys suggest otherwise.
+        val node = mapper.readTree(
+            """
+            {"aggregateType":"LEDGER","aggregateId":"led-1","transactionId":"txn-1"}
+            """.trimIndent(),
+        )
+        val env = consumer.toEnvelope(node)
+        assertThat(env.aggregateType).isEqualTo("LEDGER")
+        assertThat(env.aggregateId).isEqualTo("led-1")
+    }
 }

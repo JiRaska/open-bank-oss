@@ -649,6 +649,20 @@ jobs:
       - name: "Pact provider-replay coverage (issue #2338, enforced)"
         run: python3 .github/scripts/check-pact-provider-replay.py
 
+      # issue #2598. openbank-analytics-sink consumed `openbank.account.events` and
+      # `openbank.transaction.events` — neither topic has ever existed. A Kafka consumer subscribed
+      # to a nonexistent topic receives nothing and reports healthy, so the sink ran for weeks green
+      # while no ACCOUNT_OPENED and no TRANSACTION row ever reached bronze_events. That silently made
+      # ADR-0210 D2's account->party resolution dead code. Same shape as a client pointed at a REST
+      # path that does not exist (finrep's /api/v1/ledger/trial-balance); the fix is the same in kind
+      # — compare the name asked for against the set declared to exist. Enforced from the start, not
+      # advisory: the fleet is at ZERO unresolved topics, so there is no judgement to exercise and an
+      # advisory verdict would only make the next one mergeable.
+      - name: "Kafka topic existence self-test (issue #2598)"
+        run: python3 .github/scripts/check-kafka-topics-exist.py --selftest
+      - name: "Kafka topic existence (issue #2598, enforced)"
+        run: python3 .github/scripts/check-kafka-topics-exist.py --enforce
+
       # issue #2412 (third residual). openbank-mcp-service masks PII on every tool result
       # UNCONDITIONALLY — deliberately, since a switch that can turn a declared control off is how
       # the declaration became fiction to begin with. The cost of that choice is that the charter
