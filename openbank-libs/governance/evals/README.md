@@ -82,6 +82,30 @@ assertion key, …) — and exits non-zero if any behaves the other way round. I
 **enforced** step *ahead of* the advisory replay, so a runner that has quietly lost the ability to
 fail takes the build down with it rather than reporting green.
 
+## Which charters count as coverage backlog
+
+`check-evals-registry.py` scores coverage against the **status vocabulary in
+[`../prompts/registry.yaml`](../prompts/registry.yaml)**, not against the raw `agents.yaml` charter
+list (issue #2381). Only `registered` and `pending` charters are backlog. Two statuses are out of
+scope, and the exclusion is about what the harness can physically do — not about priority:
+
+| status | why it can never have a suite |
+|---|---|
+| `not-applicable` | the charter causes no model call at all (`mcp-anonymous`, `ap2-anonymous` are identity-only principals) — there is no output for a scenario to assert on |
+| `external` | a real model runs, but this repo neither authors the prompt nor makes the call (`rca-investigator` → HolmesGPT's own image; `ledger-domain-engineer` → an operator's coding-agent session). `--record` records *our* prompt against *our* call; here there is nothing to record, and asserting on someone else's output would measure their prompt while reading as coverage of ours |
+
+Before this the warning listed all 10 uncovered charters, 4 of which could never be closed — and a
+permanently-unclosable backlog item trains readers to skim the whole warning. It is also the exact
+absent-vs-not-applicable conflation `registry.yaml` was introduced to end (#1918): the prompt half
+honoured that vocabulary from the start, the evals half never learned it.
+
+The reverse is a hard error: a suite for a charter declared `not-applicable` fails the gate, because
+a suite that can never run is a coverage claim with nothing behind it.
+
+**If a charter's status changes, the coverage number moves with it** — that is the point. Do not
+re-add a hand-maintained exclusion list here; the status in `registry.yaml` is the single place the
+decision lives.
+
 ## Rules
 
 - **A charter's eval suite is immutable once a model/prompt has been promoted against it** — like a
