@@ -20,6 +20,7 @@ import com.openbank.mcp.infrastructure.mcp.CallerContextResolver
 import com.openbank.mcp.infrastructure.mcp.McpEndpoint
 import com.openbank.mcp.infrastructure.observability.McpMetricsAdapter
 import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
+import com.openbank.mcp.infrastructure.read.StubMarketingReachPort
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -45,7 +46,7 @@ class McpEndpointTest {
     // below builds its own endpoint with an anonymous JWT to cover that (now denying) path instead.
     private fun endpoint(pdp: PolicyDecisionPoint, jwt: TestJsonWebToken = testAgentJwt()): McpEndpoint {
         val stub = StubReads(mapper)
-        val toolRegistry = McpToolRegistry(stub, stub, McpPiiMasker(mapper), mapper)
+        val toolRegistry = McpToolRegistry(stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper)
         val caller = CallerContextResolver(jwt)
         return McpEndpoint(
             registry = toolRegistry,

@@ -10,6 +10,7 @@ import com.openbank.mcp.application.ProposedOnly
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
 import com.openbank.mcp.application.port.out.ProposalPort
+import com.openbank.mcp.infrastructure.read.StubMarketingReachPort
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -154,6 +155,7 @@ class ProposedOnlyTest {
             override fun proposePayment(consentContext: ConsentContext, request: JsonNode): JsonNode =
                 mapper.readTree(json)
         },
+        marketingReach = StubMarketingReachPort(mapper),
         masker = McpPiiMasker(mapper),
         mapper = mapper,
     )

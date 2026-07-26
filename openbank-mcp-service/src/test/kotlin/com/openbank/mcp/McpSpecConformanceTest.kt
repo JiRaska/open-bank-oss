@@ -20,6 +20,7 @@ import com.openbank.mcp.infrastructure.mcp.CallerContextResolver
 import com.openbank.mcp.infrastructure.mcp.McpEndpoint
 import com.openbank.mcp.infrastructure.observability.McpMetricsAdapter
 import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
+import com.openbank.mcp.infrastructure.read.StubMarketingReachPort
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
@@ -56,7 +57,7 @@ class McpSpecConformanceTest {
     private fun endpoint(): McpEndpoint {
         val stub = ConformanceReads(mapper)
         return McpEndpoint(
-            registry = McpToolRegistry(stub, stub, McpPiiMasker(mapper), mapper),
+            registry = McpToolRegistry(stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper),
             pdp = AllowAll,
             auditor = McpCallAuditor(SinkPublisher),
             callerResolver = CallerContextResolver(

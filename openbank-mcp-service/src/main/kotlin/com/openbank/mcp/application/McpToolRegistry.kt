@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
+import com.openbank.mcp.application.port.out.MarketingReachPort
 import com.openbank.mcp.application.port.out.ProposalPort
 import com.openbank.mcp.application.protocol.ToolCallResult
 import com.openbank.mcp.application.protocol.ToolContent
@@ -25,6 +26,7 @@ import jakarta.enterprise.context.ApplicationScoped
 class McpToolRegistry(
     private val accounts: AccountReadPort,
     private val proposals: ProposalPort,
+    private val marketingReach: MarketingReachPort,
     private val masker: McpPiiMasker,
     private val mapper: ObjectMapper,
 ) {
@@ -36,6 +38,13 @@ class McpToolRegistry(
         "list_transactions" to "query.transaction.readonly",
         "list_consents" to "query.consent.readonly",
         "propose_payment" to "propose.payment",
+        // ADR-0209 D5. No charter carries this capability yet, so the PDP denies every call — that is
+        // the intended state, not an omission: the grant is a separate change (agents.yaml charter +
+        // tool_tiers + rego), and `McpToolRegistryTest` asserts the denial rather than assuming it.
+        // Registering the capability here is what lets the call REACH the PDP at all; without the
+        // entry McpEndpoint refuses earlier, with "no capability mapping", and the policy would never
+        // be exercised.
+        "count_marketing_consents" to "query.marketing.readonly",
     )
 
     val tools: List<ToolDefinition> = listOf(
@@ -77,6 +86,16 @@ class McpToolRegistry(
             domain = "consent",
         ),
         ToolDefinition(
+            name = "count_marketing_consents",
+            description =
+            "Count ACTIVE marketing consents per scope (campaign reach). Returns COUNTS ONLY — " +
+                "never party ids, names or contact details. Who receives anything is decided by " +
+                "campaign-service under consent-gated delivery, not here.",
+            inputSchema = obj(mapOf<String, Any>(), required = emptyList()),
+            service = "openbank-consent-service",
+            domain = "consent",
+        ),
+        ToolDefinition(
             name = "propose_payment",
             description = "Create a REVIEWABLE payment proposal (never a debit; a human + SCA disposes).",
             inputSchema = obj(
@@ -105,6 +124,10 @@ class McpToolRegistry(
                     arguments.path("limit").asInt(DEFAULT_TX_LIMIT),
                 )
             "list_consents" -> accounts.listConsents(ctx)
+            // `ctx` is deliberately NOT passed: this is an operator-plane aggregate with no consent to
+            // intersect against, and MarketingReachPort's signature says so. See its kdoc before
+            // "fixing" the inconsistency.
+            "count_marketing_consents" -> marketingReach.countMarketingConsents()
             // The PROPOSED-only invariant is enforced HERE, on the call path, not left to whichever
             // ProposalPort is bound (T-E4, #2414). See ProposedOnly for why it is a whitelist of one.
             "propose_payment" -> ProposedOnly.enforce(proposals.proposePayment(ctx, arguments))
