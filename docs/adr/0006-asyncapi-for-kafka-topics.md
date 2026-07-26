@@ -12,11 +12,31 @@ summary: "Every Kafka topic is documented in AsyncAPI 3.0 under openbank-contrac
 
 # 6. AsyncAPI 3.0 for all Kafka topics
 
-**Delivery note (updated 2026-07-01):**
+**Delivery note (updated 2026-07-26):**
 - **CI linting gate** — ✅ Shipped: AsyncAPI specs linted in CI; missing or malformed specs block release.
 - **Per-service specs** (`openbank-contracts/<service>/asyncapi.yaml`) — ⬜ Pending: specs exist for documented topics; full fleet coverage is the outstanding work.
-- **Schema Registry** (Apicurio or Confluent, runtime enforcement) — ⬜ Pending: not yet deployed; consumer-driven contract tests (ADR-0063) provide schema compatibility checks in the interim.
+- **Schema Registry** (Apicurio or Confluent) — 🟡 Partial. **Deployed**, not yet enforcing.
+  Apicurio runs in-cluster (`openbank-infra/gitops/apps/apicurio.yaml` plus
+  `components/apicurio/{namespace,registry,postgres,network-policies}.yaml`), and
+  `openbank-analytics-sink` reads it via `ApicurioSchemaCatalogSource` (unit test + IT).
+  What is NOT delivered is the part this ADR actually decides: **runtime enforcement**.
+  No topic has a registered message schema — there are zero `.avsc` and zero registered
+  JSON Schemas fleet-wide — so no producer fails fast on a schema violation, and the
+  registry currently holds no contract to enforce. Compatibility is still signalled only
+  by `check-event-schema-compat.py` (a Kotlin constructor diff) and the ADR-0063
+  consumer-driven contract tests.
+  *(Corrected 2026-07-26: this line previously read "not yet deployed", which was false
+  and made the remaining work look larger and differently shaped than it is — the gap is
+  registration + enforcement, not provisioning.)*
 - **Consumer SDK generation** from specs — ⬜ Pending.
+
+**Open question, not yet decided by this ADR.** The Decision below says message schemas
+may be "Avro or JSON Schema" and deliberately does not pick one. Choosing between them —
+and choosing how an existing live topic migrates from hand-built JSON to a registered,
+enforced schema without breaking in-flight consumers on a rolling deploy — is a decision
+this ADR still owes, not an implementation detail. It should be settled here (or in a
+successor ADR) before the first schema is registered, because the first one registered
+sets the fleet pattern. Tracked in #1916.
 
 ## Context
 
