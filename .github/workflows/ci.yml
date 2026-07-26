@@ -923,8 +923,14 @@ jobs:
           sudo install -m 0755 /tmp/oasdiff /usr/local/bin/oasdiff
           python3 .github/scripts/check-api-contract.py --base "${PR_DIFF_BASE}" --enforce
 
-      # ADVISORY — 114 findings on main the day this landed, so it cannot enforce yet; the
-      # backlog is tracked in rules.yaml: openapi_route_conformance. Add --enforce to flip.
+      # ENFORCED against a declared baseline (#2314). It landed advisory because 104 findings
+      # cannot be a merge blocker on day one — but an advisory check over a GENERATED comparison
+      # is a contradiction (#2216): there is no judgement left to exercise, advisory just makes
+      # the drift mergeable. So it now runs with --enforce against a file that declares those 104
+      # findings verbatim. A finding absent from the baseline fails the build; a baseline line
+      # with no matching finding ALSO fails, so the declaration cannot outlive the debt. The
+      # baseline does not narrow what is compared — every service is compared every run.
+      # Falsified before merge on all three paths (new finding / stale line / debt paid).
       #
       # The gate above classifies a spec's version bump against the previous revision of the
       # same document. Nothing asked whether the document is TRUE, which is how aml-service
@@ -935,8 +941,10 @@ jobs:
       #
       # Route SET only — it does not read schemas or status codes. Do not read a green here as
       # "this spec is true"; see the script header for the precise limits.
-      - name: "openapi-route-conformance — published contract vs served routes (advisory)"
-        run: python3 .github/scripts/check-openapi-route-conformance.py
+      - name: "openapi-route-conformance — published contract vs served routes (enforced)"
+        run: |
+          python3 .github/scripts/check-openapi-route-conformance.py --enforce \
+            --baseline .github/openapi-route-conformance-baseline.txt
 
       # ADVISORY until rules.yaml change_classes.db_change flips to enforced
       # (target 2026-08-15, ADR-0144) — add --enforce to the invocation to flip.

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: anacredit-service
     app.kubernetes.io/part-of: anacredit
   annotations:
-    openbank.tech/policy-checksum: "fafaf7d72f82aab7"
+    openbank.tech/policy-checksum: "be32b09731a5fa9e"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1530,9 +1530,9 @@ data:
           - "every route a resource class answers is published in that service's openapi.yaml"
           - "every route openapi.yaml promises is declared by a resource class"
         gate: openapi-route-conformance
-        enforced: advisory
-        target_enforce_date: "2026-09-30"
+        enforced: enforce                 # ADR-0144 graduation, ahead of the 2026-09-30 target (#2314)
         ci_producer: ".github/scripts/check-openapi-route-conformance.py"
+        baseline: ".github/openapi-route-conformance-baseline.txt"
         # api_contract (above) classifies a spec's version bump against the PREVIOUS REVISION of the
         # same document. Nothing asked whether the document is TRUE. ADR-0005 says "CI lints it with
         # Spectral so docs cannot drift from runtime" — there is no Spectral config in this repo and
@@ -1558,8 +1558,17 @@ data:
         # is a MISSING pair across two trees, so a PR touching only Kotlin never touches the spec and
         # a diff-scoped gate would see nothing.
         #
-        # Advisory because 114 pre-existing findings cannot be a merge blocker on day one. Flipping
-        # to enforced = add --enforce in ci.yml, once the backlog is cleared.
+        # ENFORCED AGAINST A DECLARED BASELINE (#2314). 104 pre-existing findings could not be a
+        # merge blocker on day one, and correcting a spec is blocked on the unsatisfiable-bump gap
+        # (#2313) — but leaving it advisory is the shape this repo has already ruled against: an
+        # advisory check over a GENERATED comparison has no judgement left to exercise, it just makes
+        # the drift mergeable (#2216). So the gate runs with --enforce against
+        # .github/openapi-route-conformance-baseline.txt, which declares those 104 findings verbatim.
+        # A finding NOT in that file fails the build (new drift, the thing the gate is for); a
+        # baseline line with no matching finding ALSO fails (the debt was paid — delete the line), so
+        # the declaration cannot outlive the debt. The baseline does not narrow what the gate LOOKS
+        # AT — every service is compared every run — which is what separates it from the
+        # pact-drift-check scope bug (#2284). #2314 closes when the file is empty.
       openapi_request_schema_conformance:
         detect: ["openbank-*/src/main/resources/openapi.yaml", "the JAX-RS request-body DTO the resource actually deserializes into"]
         require:

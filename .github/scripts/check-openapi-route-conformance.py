@@ -40,10 +40,30 @@ working tree, so it runs identically in CI and locally.
 
 Usage:
     check-openapi-route-conformance.py [--enforce] [--service <name>]
+                                       [--baseline <file>] [--write-baseline <file>]
 
 Modes (ADR-0144 gate graduation):
     default    advisory — findings are ::warning annotations, exit 0
     --enforce  findings are ::error annotations, exit 1
+
+THE BASELINE, and why it is not a hand-kept scope list. Enforcing on day one was impossible:
+104 pre-existing route-level findings across 21 services, and correcting a spec is blocked on
+the unsatisfiable-bump problem (#2313), so the backlog cannot be drained in one PR. The
+alternative — leaving the gate advisory — is the shape this repo has already ruled against: an
+advisory check over a GENERATED comparison has no judgement left to exercise, it just makes the
+drift mergeable (#2216).
+
+So the gate is ENFORCED against a declared baseline of the exact findings that existed on the
+day it flipped. Two directions, both hard failures:
+
+    a finding NOT in the baseline   NEW drift — the thing the gate exists to stop. Fails.
+    a baseline entry with NO finding  STALE — the debt was paid. Fails, telling you to delete
+                                    the line, so the list cannot outlive the debt it declares.
+
+That is deliberately the `KNOWN_UNCOVERED` shape of check-pact-provider-replay.py, and it is
+NOT the failure mode of pact-drift-check.yml (#2284): the baseline does not narrow what the
+gate *looks at* — every service is still compared every run — it only declares which of the
+findings it produces are already-known debt. The exclusions are the thing a human justifies.
 """
 
 from __future__ import annotations
@@ -55,6 +75,23 @@ from pathlib import Path
 
 HTTP_VERBS = ("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS")
 SPEC_METHODS = tuple(v.lower() for v in HTTP_VERBS)
+
+BASELINE_HEADER = """\
+# openapi-route-conformance — DECLARED BACKLOG (see the script's module docstring).
+#
+# Every line is a route-level finding that already existed when the gate flipped to --enforce
+# on 2026-07-26 (issue #2314). The gate still compares every service on every run; this file
+# only declares which of its findings are known debt.
+#
+#   a finding not listed here  => NEW drift, the build fails
+#   a line here with no finding => the debt was paid, the build fails until the line is deleted
+#
+# So: to correct a spec, delete its line(s) here in the same PR. Never add a line to silence a
+# new finding — publishing the route (or deleting it) is the fix. Draining this file to empty
+# closes #2314; the per-service corrections are blocked on the unsatisfiable-bump gap (#2313).
+#
+# Format: <service> <served-not-published|published-not-served> <VERB> <absolute path>
+"""
 
 # A JAX-RS *client* stub carries the CALLEE's routes, not this service's served contract.
 CLIENT_HINT = re.compile(r"@RegisterRestClient")
@@ -171,10 +208,22 @@ def code_routes(service_dir: Path) -> set[str]:
     return routes
 
 
+def load_baseline(path: Path) -> set[str]:
+    """Declared, already-known findings — one `<service> <direction> <VERB> <path>` per line."""
+    entries: set[str] = set()
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line:
+            entries.add(" ".join(line.split()))
+    return entries
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--enforce", action="store_true")
     ap.add_argument("--service", help="check a single openbank-* module (default: the whole fleet)")
+    ap.add_argument("--baseline", help="file of declared, already-known findings (see module docstring)")
+    ap.add_argument("--write-baseline", help="rewrite the baseline file from the current findings")
     args = ap.parse_args()
 
     level = "error" if args.enforce else "warning"
@@ -185,7 +234,7 @@ def main() -> int:
             print(f"::error::openapi-route-conformance: no openapi.yaml for service {args.service!r}")
             return 1
 
-    findings = 0
+    found: dict[str, str] = {}   # "<service> <direction> <VERB> <path>" -> human sentence
     checked = 0
     no_resources: list[str] = []
 
@@ -204,24 +253,46 @@ def main() -> int:
 
         checked += 1
         for route in sorted(served - declared):
-            findings += 1
-            print(f"::{level}::openapi-route-conformance: {service}: served-not-published — "
-                  f"{route} is answered by a resource class and absent from openapi.yaml")
+            found[f"{service} served-not-published {route}"] = (
+                f"{service}: served-not-published — {route} is answered by a resource class "
+                f"and absent from openapi.yaml")
         for route in sorted(declared - served):
-            findings += 1
-            print(f"::{level}::openapi-route-conformance: {service}: published-not-served — "
-                  f"{route} is promised by openapi.yaml and no resource class declares it")
+            found[f"{service} published-not-served {route}"] = (
+                f"{service}: published-not-served — {route} is promised by openapi.yaml "
+                f"and no resource class declares it")
+
+    if args.write_baseline:
+        Path(args.write_baseline).write_text(
+            BASELINE_HEADER + "".join(f"{k}\n" for k in sorted(found)), encoding="utf-8")
+        print(f"check-openapi-route-conformance: wrote {len(found)} entr(ies) to {args.write_baseline}")
+        return 0
+
+    baseline = load_baseline(Path(args.baseline)) if args.baseline else set()
+    # `--service` compares one module, so the rest of the baseline is legitimately unmatched.
+    scoped = {e for e in baseline if not args.service or e.split(" ", 1)[0] == args.service}
+
+    new = sorted(k for k in found if k not in baseline)
+    stale = sorted(scoped - set(found))
+
+    for key in new:
+        print(f"::{level}::openapi-route-conformance: {found[key]}")
+    for key in sorted(k for k in found if k in baseline):
+        print(f"::notice::openapi-route-conformance: declared backlog — {found[key]}")
+    for key in stale:
+        print(f"::{level}::openapi-route-conformance: STALE baseline entry — {key!r} is no longer "
+              f"a finding. Delete the line from {args.baseline}; the declared backlog must not "
+              f"outlive the debt.")
 
     print(
         f"check-openapi-route-conformance: {checked} service(s) compared, "
         f"{len(no_resources)} skipped with no annotated resource class"
         + (f" ({', '.join(no_resources)})" if no_resources else "")
-        + f", {findings} route-level finding(s)."
+        + f", {len(found)} route-level finding(s), {len(baseline)} declared in the baseline, "
+        f"{len(new)} NEW, {len(stale)} stale."
     )
-    if findings and not args.enforce:
-        print("check-openapi-route-conformance: advisory — will become a hard gate "
-              "once the backlog is cleared (see rules.yaml: openapi_route_conformance).")
-    return 1 if (findings and args.enforce) else 0
+    if (new or stale) and not args.enforce:
+        print("check-openapi-route-conformance: advisory — no --enforce, so this is a warning.")
+    return 1 if ((new or stale) and args.enforce) else 0
 
 
 if __name__ == "__main__":
