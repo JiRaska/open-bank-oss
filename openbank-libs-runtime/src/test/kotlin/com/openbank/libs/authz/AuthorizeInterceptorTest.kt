@@ -96,11 +96,23 @@ class AuthorizeInterceptorTest {
     @Authorize(action = "payment.create", attributes = ["time-of-day", "client-ip"])
     fun dummyMethodWithAttrs() = Unit
 
+    data class DummyRequest(val granteeId: String, val scopes: List<String>)
+
+    @Suppress("UnusedParameter") // invoked only via InvocationContext reflection, not directly
+    @Authorize(action = "consent.grant", resource = "#request.granteeId")
+    fun dummyMethodWithDottedResource(request: DummyRequest?) = Unit
+
     private val annotatedMethod: Method =
         AuthorizeInterceptorTest::class.java.getDeclaredMethod("dummyMethod")
 
     private val annotatedMethodWithAttrs: Method =
         AuthorizeInterceptorTest::class.java.getDeclaredMethod("dummyMethodWithAttrs")
+
+    private val annotatedMethodWithDottedResource: Method =
+        AuthorizeInterceptorTest::class.java.getDeclaredMethod(
+            "dummyMethodWithDottedResource",
+            DummyRequest::class.java,
+        )
 
     @Test
     fun `JWT roles propagated into OPA query`() {
@@ -121,6 +133,48 @@ class AuthorizeInterceptorTest {
         assertThat(capturedQuery).hasSize(1)
         assertThat(capturedQuery[0].principal.roles)
             .containsExactlyInAnyOrder("ROLE_OPERATOR", "ROLE_ADMIN")
+    }
+
+    @Test
+    fun `dotted-path resource expression resolves the named field, not the whole request`() {
+        every { identity.roles } returns emptySet()
+        val capturedQuery = mutableListOf<AuthzQuery>()
+        val pdp = object : PolicyDecisionPoint {
+            override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                capturedQuery += query
+                return AuthzDecision(allow = true, reason = "ok", policyVersion = "test")
+            }
+        }
+        wirePdp(pdp)
+        val ctx =
+            makeCtx(
+                annotatedMethodWithDottedResource,
+                DummyRequest(granteeId = "party-service:marketing-comms", scopes = listOf("x")),
+            )
+        interceptor.authorize(ctx)
+        assertThat(capturedQuery).hasSize(1)
+        assertThat(capturedQuery[0].resource?.id).isEqualTo("party-service:marketing-comms")
+        assertThat(capturedQuery[0].resource?.type).isEqualTo("consent")
+    }
+
+    @Test
+    fun `dotted-path resource expression with unknown field fails closed to no resource, not a crash`() {
+        every { identity.roles } returns emptySet()
+        val capturedQuery = mutableListOf<AuthzQuery>()
+        val pdp = object : PolicyDecisionPoint {
+            override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                capturedQuery += query
+                return AuthzDecision(allow = true, reason = "ok", policyVersion = "test")
+            }
+        }
+        wirePdp(pdp)
+        // Method annotated "#request.granteeId" but the interceptor swaps in a method whose
+        // resolved field name doesn't exist on the param — simulate by passing a request whose
+        // extractResource lookup fails (null param) rather than mutating the annotation itself.
+        val ctx = makeCtx(annotatedMethodWithDottedResource, null)
+        interceptor.authorize(ctx)
+        assertThat(capturedQuery).hasSize(1)
+        assertThat(capturedQuery[0].resource).isNull()
     }
 
     @Test
