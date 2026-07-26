@@ -26,4 +26,7 @@
 #   dr_drill:      { date: 2026-06-20, ttl_days: 180, by: jiri, ref: runbook-0006 }
 #   pentest:       { date: 2026-05-01, ttl_days: 365, by: ext,  ref: schemathesis-fleet }
 
-# --- zatím prázdné: žádná M-dimenze není dosvědčena (a to je pravda) ---
+ledger:
+  restore_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, ref: runbook-0003 }
+
+# --- zbytek zatím prázdný: žádná další M-dimenze není dosvědčena (a to je pravda) ---
