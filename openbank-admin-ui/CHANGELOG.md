@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.61.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.61.0...admin-ui-v0.61.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **admin-ui:** Customer 360 matched no accounts — wrong casing, wrong table ([#2593](https://github.com/JiRaska/open-bank-oss/issues/2593)) ([bad9836](https://github.com/JiRaska/open-bank-oss/commit/bad983670dcb0749969eb6a4c97beaa89a9d3d56))
+
 ## [0.61.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.60.0...admin-ui-v0.61.0) (2026-07-26)
 
 
