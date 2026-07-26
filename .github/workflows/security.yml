@@ -155,7 +155,7 @@ jobs:
         with:
           node-version: "20"
 
-      - uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+      - uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -181,7 +181,7 @@ jobs:
         if: matrix.language == 'java-kotlin'
         run: .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- ./gradlew testClasses --no-build-cache --no-daemon
 
-      - uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+      - uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
         with:
           category: "/language:${{ matrix.language }}"
 
@@ -308,14 +308,14 @@ jobs:
       # this repo went public failed here). Distinct categories per file fixes it.
       - name: Upload Trivy fs SARIF
         if: always() && steps.verify-trivy.outcome == 'success' && github.event.repository.private == false
-        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
 
       - name: Upload Trivy config SARIF
         if: always() && steps.verify-trivy.outcome == 'success' && github.event.repository.private == false
-        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
         with:
           sarif_file: trivy-config.sarif
           category: trivy-config
