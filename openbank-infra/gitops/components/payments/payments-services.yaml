@@ -42,7 +42,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-transaction-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "abb92bc7665154d9" # transaction-opa-bundle
+        openbank.tech/policy-checksum: "f881bb1f3833df31" # transaction-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -375,7 +375,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-payment-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "3216cf5c741f34a6"
+        openbank.tech/policy-checksum: "59a4ed6d83ead5a6"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -729,7 +729,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-domestic-payment-opa-bundle.sh via the trailing marker
         # comment (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "d1e8dea12f5b5ef9" # domestic-payment-opa-bundle
+        openbank.tech/policy-checksum: "6b5b674af135d7d6" # domestic-payment-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1053,7 +1053,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-instant-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "ce182ff135871ad0"
+        openbank.tech/policy-checksum: "d2589f8c417ec426"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1369,7 +1369,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-clearing-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "5a2d83fcbbd768a2" # clearing-opa-bundle
+        openbank.tech/policy-checksum: "3fdc20ffca424152" # clearing-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1658,7 +1658,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (ADR-0034). Value is stamped by
         # gen-standing-order-opa-bundle.sh — do not hand-edit.
-        openbank.tech/policy-checksum: "a86bb9a75f728d6b" # standing-order-opa-bundle
+        openbank.tech/policy-checksum: "156ca771dd3aa0a0" # standing-order-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1911,7 +1911,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-issuance-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "b6b93078b1e93703"
+        openbank.tech/policy-checksum: "965e3c96faa63c57"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2178,7 +2178,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-settlement-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "e031d21c8afa6a7d" # settlement-opa-bundle
+        openbank.tech/policy-checksum: "84be04106d7e1817" # settlement-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2579,7 +2579,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-swift-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "c0e200d7c7d6aa86"
+        openbank.tech/policy-checksum: "314f09ec705d2363"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2893,7 +2893,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-vop-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "d84a5ad1e82faf4d"
+        openbank.tech/policy-checksum: "2d588b32c3fc5a4b"
     spec:
       securityContext:
         runAsNonRoot: true

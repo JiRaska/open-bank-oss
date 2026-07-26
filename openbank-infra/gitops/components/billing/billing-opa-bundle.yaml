@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: billing-service
     app.kubernetes.io/part-of: billing
   annotations:
-    openbank.tech/policy-checksum: "5008956e59bcd427"
+    openbank.tech/policy-checksum: "b41a03ec7fd0cd7a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2230,12 +2230,36 @@ data:
         # fx + sepa-payment, sepa-instant, domestic-payment, fraud (SSDLC-audit rollout 2026-07-06) +
         # sanctions (2026-07-11: 3 domain files — screening/matching decision logic — matches the
         # "substantive domain math" criterion, not the thin-domain one; 67% local baseline).
-        # The remaining 7 (sca, consent, billing, clearing, swift, lending, settlement) stay excluded:
-        # each has only 1-2 domain files, and those files are plain data models (no branching
-        # money-movement logic), so mutation testing there is noise, not signal — re-confirmed by
-        # file count on 2026-07-11 (settlement and sanctions were both added to money_path_services
-        # after the 2026-07-07 note above; settlement re-confirmed thin, sanctions was the one that
-        # wasn't). Revisit if any of the remaining 7 grows real decision logic in its domain layer.
+        # The remaining 7 (sca, consent, billing, clearing, swift, lending, settlement) stay excluded.
+        #
+        # This list used to be justified by one blanket claim — "each has only 1-2 domain files, and
+        # those files are plain data models (no branching money-movement logic)". The file count was
+        # re-confirmed; the NO-BRANCHING half was never measured, and it is FALSE for three of the
+        # seven (#2395). Measured on 2026-07-26, counting `if (` / `when (` / `require(` / `check(`
+        # over every `src/main/kotlin/**/domain/**.kt` in each module — a deliberately narrow matcher,
+        # so these are lower bounds:
+        #
+        #     service     domain files   branch sites
+        #     sca                    2             11
+        #     consent                2              6
+        #     swift                  1              5
+        #     clearing               3              1
+        #     billing                2              0
+        #     lending                1              0
+        #     settlement             1              0
+        #
+        # So the exclusion rests on a DIFFERENT judgement, and it is stated here rather than hidden
+        # behind an inaccurate blanket: what sca, consent and swift branch on is input VALIDATION and
+        # state-transition legality, not money-movement arithmetic — pitest's value is in the
+        # arithmetic, and no pitest plugin is wired for any of the 7. billing needs its own reason:
+        # its domain layer genuinely does not branch, but its real fee-waiver logic (ADR-0143 phase 2)
+        # lives in `application/usecase/FeeAssessmentService`, OUTSIDE pitest's `domain.*`
+        # targetClasses — so widening the target would be the fix there, not adding the module.
+        #
+        # Revisit if any of the 7 grows money-movement ARITHMETIC in its domain layer; a rising branch
+        # count alone is not the trigger, and re-measure before repeating any claim in this block.
+        # (Historical note: settlement and sanctions were both added to money_path_services after the
+        # 2026-07-07 note above; settlement re-confirmed thin, sanctions was the one that wasn't.)
         # True baselines at rollout (after fixing the KILLED-quote parsing bug): account 49%,
         # transaction 46%, balance 55%, ledger 65%, fx 73%.
         blocked_on: "blocking flip requires each service to sustain >=70% mutation kill score on the weekly run; account/transaction/balance/ledger are below it today (see baselines above)"
