@@ -24,7 +24,7 @@
   "openbank-finops-agent": "0.3.1",
   "openbank-finrep-service": "0.6.3",
   "openbank-flaky-test-hunter": "0.3.1",
-  "openbank-fraud-service": "0.9.0",
+  "openbank-fraud-service": "0.9.1",
   "openbank-fx-service": "0.8.2",
   "openbank-governance-auditor": "0.3.1",
   "openbank-interest-service": "0.14.2",
