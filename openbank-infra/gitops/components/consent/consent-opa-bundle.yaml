@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: consent-service
     app.kubernetes.io/part-of: consent
   annotations:
-    openbank.tech/policy-checksum: "a193c92d1fc9809d"
+    openbank.tech/policy-checksum: "8dfa8672122b8cad"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -408,8 +408,20 @@ data:
 
     # Operators and admins may perform ANY consent lifecycle operation — the ops
     # console path (create on behalf of a party, revoke, resolve a stuck PENDING_SCA).
+    #
+    # EXCLUDES the shared M2M identity (found during ADR-0206 D5): every backend service on the
+    # `openbank-services` Keycloak client authenticates as `service-account-openbank-services`, and
+    # that service-account carries ROLE_OPERATOR in the realm (openbank-realm.json) — a role-only
+    # check here would let ANY such caller perform ANY consent.* write, unconditionally, the exact
+    # blanket-M2M-allow rules.yaml's own guardrail note (dependencies.principal_type_service_unreachable)
+    # already warns against ("ROLE_OPERATOR is shared with real human staff, so a role-only check
+    # over-grants"). This rule's header comment and the "service-consent-m2m" rule below both claimed
+    # consent.grant/consent.revoke were M2M-unreachable — false the whole time this exclusion was
+    # missing. M2M access to consent.grant/consent.revoke is scoped exclusively through
+    # "service-consent-m2m-marketing" below now.
     allowed_reasons contains "operator-consent-write" if {
     	input.principal.type == "HUMAN"
+    	not input.principal.id == "service-account-openbank-services"
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	startswith(input.action, "consent.")
