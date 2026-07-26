@@ -146,6 +146,14 @@ def code_routes(service_dir: Path) -> set[str]:
 
     Annotations are collected as the contiguous cluster preceding a `fun`, so the gate does not
     care whether @Path sits before or after @GET — only that both decorate the same method.
+
+    A method-level @Path may be written WITHOUT a leading slash — JAX-RS inserts the separator
+    (JSR-370 §3.4: the class and method templates are concatenated "with a '/' between them if
+    necessary"), so `@Path("/api/v1/parties/eudi")` + `@Path("credential")` serves
+    `/api/v1/parties/eudi/credential`. Concatenating the two strings raw invents
+    `/api/v1/parties/eudicredential` — a route no client can call and no spec can publish, so
+    the SAME endpoint is reported twice, once in each direction. That was 10 of the 104 declared
+    baseline entries, all of pid-service's EUDI issuance surface (#2314).
     """
     routes: set[str] = set()
     src = service_dir / "src/main/kotlin"
@@ -203,9 +211,34 @@ def code_routes(service_dir: Path) -> set[str]:
                             sub = m.group(1)
                             break
                     for verb in verbs:
-                        routes.add(f"{verb} {normalize(base + sub)}")
+                        routes.add(f"{verb} {normalize(base + '/' + sub)}")
             cluster = []
     return routes
+
+
+SHARED_RUNTIME = Path("openbank-libs-runtime")
+
+# Quarkus serves its management surface (health, metrics, the generated spec) from extensions,
+# never from a resource class in the service tree — `/q/**` is structurally invisible here.
+QUARKUS_MANAGEMENT = re.compile(r"^/q(/|$)")
+
+
+def externally_served(route: str, shared: set[str]) -> bool:
+    """True when a PUBLISHED route is served by something outside the service's own resources.
+
+    Two such servers exist and the JAX-RS scan can see neither:
+
+      * Quarkus extensions — `/q/health/live` etc. are answered by quarkus-smallrye-health.
+      * openbank-libs-runtime — `ServiceInfoResource` declares `@Path("/api/v1/info")` and is on
+        every service's classpath, so a service that publishes it is telling the truth.
+
+    Only the published-not-served direction consults this. It deliberately does NOT add these
+    routes to the served set: `/api/v1/info` is answered by all 44 services and published by one,
+    and scoring the other 43 as served-not-published would be reporting a documentation choice
+    as drift — the confident-nonsense failure this gate's docstring warns about (#2314).
+    """
+    path = route.split(" ", 1)[1]
+    return bool(QUARKUS_MANAGEMENT.match(path)) or route in shared
 
 
 def load_baseline(path: Path) -> set[str]:
@@ -234,6 +267,8 @@ def main() -> int:
             print(f"::error::openapi-route-conformance: no openapi.yaml for service {args.service!r}")
             return 1
 
+    shared = code_routes(SHARED_RUNTIME)
+
     found: dict[str, str] = {}   # "<service> <direction> <VERB> <path>" -> human sentence
     checked = 0
     no_resources: list[str] = []
@@ -257,6 +292,8 @@ def main() -> int:
                 f"{service}: served-not-published — {route} is answered by a resource class "
                 f"and absent from openapi.yaml")
         for route in sorted(declared - served):
+            if externally_served(route, shared):
+                continue
             found[f"{service} published-not-served {route}"] = (
                 f"{service}: published-not-served — {route} is promised by openapi.yaml "
                 f"and no resource class declares it")
