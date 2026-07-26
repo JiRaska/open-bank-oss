@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "e6a34baab0f939ce"
+    openbank.tech/policy-checksum: "22e5a931a0facdf9"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -410,12 +410,25 @@ data:
     	input.principal.id == "service-account-openbank-services"
     }
 
-    # `operator-<domain>-write` is the established name for "granted by ROLE_OPERATOR/ROLE_ADMIN
-    # alone". Enforced as a naming convention by .github/scripts/check-operator-write-naming.py
-    # so a differently-named role-only write rule cannot silently escape this guard.
+    # Which role-only write reasons this prohibition applies to — DATA, not a name pattern.
+    #
+    # An earlier revision matched every reason named `operator-*-write`. Review found that would
+    # have 403'd `transaction.create` from six live callers (account-service's welcome-bonus
+    # credit, sepa-instant, domestic-payment, swift, interest, sdd) and `settlement.create` —
+    # both on AUTHZ_ENFORCE=true money paths, because those services have NO identity-scoped rule
+    # for the shared client to fall back on. transaction-service's own rego says so: "RESIDUAL
+    # RISK — shared identity, no per-caller narrowing".
+    #
+    # So the set is opt-in and evidence-based: a reason is listed only once its service carries a
+    # rule that names the caller and enumerates the actions, so denying the role-only path removes
+    # an over-grant instead of removing the only path. Deny-where-an-alternative-exists, never
+    # deny-and-hope. rules.yaml: shared_m2m_write_prohibition.reasons is the register; the rest
+    # are tracked there with the work each needs.
+    #
+    # Membership over an undefined collection simply does not fire, so a bundle whose rules.yaml
+    # predates this key sees no behaviour change.
     role_only_write_reason(r) if {
-    	startswith(r, "operator-")
-    	endswith(r, "-write")
+    	r in data.rules.shared_m2m_write_prohibition.reasons
     }
 
     prohibited if {
@@ -2015,6 +2028,52 @@ data:
         # all, so check-gate-graduation.sh could not see it and it had no deadline. That class is now
         # itself gated by .github/scripts/check-advisory-gate-registration.py.
         ci_producer: ".github/scripts/check-dotted-mp-messaging-keys.sh"
+      shared_m2m_write_prohibition:
+        # GHSA-58jq-9hq3-66jr. rest.rego denies the shared M2M identity
+        # (`service-account-openbank-services`, which carries ROLE_OPERATOR in the realm) when the
+        # ONLY reasons admitting it are the role-only write reasons listed here.
+        #
+        # OPT-IN, and the reason a name pattern was rejected: matching every `operator-*-write`
+        # would have 403'd transaction.create from six live callers (account-service's
+        # welcome-bonus credit, sepa-instant, domestic-payment, swift, interest, sdd) and
+        # settlement.create — both AUTHZ_ENFORCE=true money paths whose services have no
+        # identity-scoped rule to fall back on. transaction-service's rego states the exposure
+        # itself ("RESIDUAL RISK — shared identity, no per-caller narrowing"), which is precisely
+        # why removing its only path is not the fix.
+        #
+        # A reason joins this list once its service carries a rule that NAMES the caller and
+        # enumerates its actions, so denying the role-only path removes an over-grant rather than
+        # the only path. Each entry below was verified to have such a rule.
+        reasons:
+          - operator-consent-write        # service-consent-m2m + service-consent-m2m-marketing
+          - operator-ledger-write         # service-ledger-post / service-ledger-reverse
+          - operator-balance-write        # service-balance-m2m
+          - operator-fraud-write          # service-fraud-scoring
+          - operator-sca-write            # service-sca-edge-m2m + service-sca-shared-client-m2m
+          - operator-sepa-payment-write   # service-sepa-payment-shared-client-m2m
+        # NOT listed, and why. Each needs an identity-scoped rule for its real callers FIRST;
+        # adding it here before that is a money-path outage, not a test failure.
+        deferred:
+          operator-transaction-write: "6 verified callers of transaction.create via the shared client; no identity-scoped rule exists"
+          operator-settlement-write: "settlement.create is resourceless with no alternative rule"
+          operator-swift-write: "no identity-scoped rule; callers unverified"
+          operator-sepa-instant-write: "no identity-scoped rule; callers unverified"
+          operator-billing-write: "no identity-scoped rule; callers unverified"
+          operator-interest-write: "no identity-scoped rule; callers unverified"
+          operator-lending-write: "no identity-scoped rule; callers unverified"
+          operator-sanctions-write: "no identity-scoped rule; m2m-sanctions-screening covers create only"
+          operator-identity-write: "no identity-scoped rule; callers unverified"
+          operator-card-write: "no identity-scoped rule; callers unverified"
+          # These DO carry an identity-pinned rule, but "a rule exists" is not "the rule covers the
+          # actions the role-only path was serving". Listing them on that basis would repeat, one
+          # level down, the guess that made the first revision break transaction.create. Each needs
+          # its identity-scoped rule read against its real callers before it moves up.
+          operator-fx-write: "2 identity-pinned rules; action coverage vs real callers unverified"
+          operator-account-write: "2 identity-pinned rules; action coverage unverified"
+          operator-clearing-write: "1 identity-pinned rule; action coverage unverified"
+          operator-domestic-payment-write: "1 identity-pinned rule; action coverage unverified"
+          operator-party-write: "1 identity-pinned rule, but onboarding-service PUTs party.kyc-status via the shared client (latent: AUTHZ_ENFORCE=false there today)"
+        adr: ADR-0034
       role_only_write_rule_naming:
         # GHSA-58jq-9hq3-66jr. `service-account-openbank-services` — the identity nearly every
         # backend service authenticates as — carries ROLE_OPERATOR in the realm, and

@@ -396,12 +396,25 @@ shared_m2m_identity if {
 	input.principal.id == "service-account-openbank-services"
 }
 
-# `operator-<domain>-write` is the established name for "granted by ROLE_OPERATOR/ROLE_ADMIN
-# alone". Enforced as a naming convention by .github/scripts/check-operator-write-naming.py
-# so a differently-named role-only write rule cannot silently escape this guard.
+# Which role-only write reasons this prohibition applies to — DATA, not a name pattern.
+#
+# An earlier revision matched every reason named `operator-*-write`. Review found that would
+# have 403'd `transaction.create` from six live callers (account-service's welcome-bonus
+# credit, sepa-instant, domestic-payment, swift, interest, sdd) and `settlement.create` —
+# both on AUTHZ_ENFORCE=true money paths, because those services have NO identity-scoped rule
+# for the shared client to fall back on. transaction-service's own rego says so: "RESIDUAL
+# RISK — shared identity, no per-caller narrowing".
+#
+# So the set is opt-in and evidence-based: a reason is listed only once its service carries a
+# rule that names the caller and enumerates the actions, so denying the role-only path removes
+# an over-grant instead of removing the only path. Deny-where-an-alternative-exists, never
+# deny-and-hope. rules.yaml: shared_m2m_write_prohibition.reasons is the register; the rest
+# are tracked there with the work each needs.
+#
+# Membership over an undefined collection simply does not fire, so a bundle whose rules.yaml
+# predates this key sees no behaviour change.
 role_only_write_reason(r) if {
-	startswith(r, "operator-")
-	endswith(r, "-write")
+	r in data.rules.shared_m2m_write_prohibition.reasons
 }
 
 prohibited if {

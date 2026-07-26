@@ -5,15 +5,17 @@
 GHSA-58jq-9hq3-66jr: `service-account-openbank-services` — the identity nearly every backend
 service authenticates as — carries ROLE_OPERATOR in the realm. Every rego rule that grants a
 write on `type == "HUMAN"` plus that role therefore admitted ANY backend service to ANY write
-in that domain. rest.rego now blocks that at the `allow` head, but it identifies such rules by
-their NAME: `operator-<domain>-write`.
+in that domain. rest.rego blocks that at the `allow` head for the reasons registered in
+`rules.yaml: shared_m2m_write_prohibition.reasons` — an OPT-IN set, because matching every
+`operator-*-write` by name would have 403'd transaction.create and settlement.create on
+AUTHZ_ENFORCE=true money paths whose services have no identity-scoped fallback.
 
-That makes the naming convention load-bearing. A role-only write rule named anything else —
-`operator-ledger-mutate`, `staff-party-write`, `operator-fx-convert` — is invisible to the
-guard and silently reopens the hole. This script is what stops that: any `allowed_reasons`
-rule whose body grants on ROLE_OPERATOR/ROLE_ADMIN without pinning `input.principal.id` must
-either be named `operator-*-write` (so the prohibition covers it) or be a read/declared
-exception.
+This script is the discovery half. The register can only ever list rules someone has FOUND, so
+its coverage depends on every role-only write rule being findable — and the convention that
+makes them findable, `operator-<domain>-write`, was never actually followed: 18 such rules use
+other names. Any `allowed_reasons` rule granting on ROLE_OPERATOR/ROLE_ADMIN without pinning
+`input.principal.id` must therefore either be named `operator-*-write` (so it is visible as a
+candidate for the register) or be a read/declared exception.
 
 Scope: rest.rego plus every per-service extension, whether it lives in a standalone
 `*_rest_ext.rego` or inside a `gen-*-opa-bundle.sh` heredoc — both shapes exist in this repo,
@@ -56,7 +58,7 @@ DECLARED_EXCEPTIONS = {
 }
 
 # The 18 role-only WRITE rules that do not follow the operator-*-write convention, and so are
-# NOT covered by rest.rego's prohibition. This is a DEBT LIST, not an exemption list: each of
+# invisible as candidates for rules.yaml: shared_m2m_write_prohibition.reasons. This is a DEBT LIST, not an exemption list: each of
 # these is reachable today by the shared openbank-services service-account. Discovered while
 # fixing GHSA-58jq-9hq3-66jr, whose scope was only the ~19 conforming operator-*-write rules.
 #
@@ -152,11 +154,12 @@ def main() -> int:
             violations.append(
                 f"{path.relative_to(REPO)}: rule '{reason}' grants on ROLE_OPERATOR/ROLE_ADMIN "
                 f"without pinning input.principal.id, and is not named 'operator-*-write'. "
-                f"rest.rego's shared-M2M write prohibition (GHSA-58jq-9hq3-66jr) identifies "
-                f"role-only write rules BY NAME, so this rule escapes it — the shared "
-                f"openbank-services service-account (which carries ROLE_OPERATOR) would reach "
-                f"this action. Either rename it 'operator-<domain>-write', pin the caller with "
-                f"input.principal.id, or add it to DECLARED_EXCEPTIONS with a reason."
+                f"so it is invisible as a candidate for rules.yaml: "
+                f"shared_m2m_write_prohibition.reasons (GHSA-58jq-9hq3-66jr) — the shared "
+                f"openbank-services service-account, which carries ROLE_OPERATOR, reaches this "
+                f"action and nothing will ever propose closing it. Either rename it "
+                f"'operator-<domain>-write', pin the caller with input.principal.id, or add it "
+                f"to DECLARED_EXCEPTIONS with a reason."
             )
 
     # Ratchet in the other direction too: a baseline entry that no longer exists must be
