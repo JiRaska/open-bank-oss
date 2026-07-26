@@ -46,6 +46,8 @@ workdir="$(mktemp -d)" || workdir=""
 [ -n "$workdir" ] && [ -d "$workdir" ] || { echo "gradle-heap-headroom: cannot create a temp dir" >&2; exit 2; }
 samples="$workdir/samples.tsv"   # pid <TAB> name <TAB> used_mb <TAB> max_mb
 freefile="$workdir/free.txt"
+xmxdir="$workdir/xmx"          # one file per pid, caching that JVM's fixed -Xmx
+mkdir -p "$xmxdir"
 : > "$samples"
 : > "$freefile"
 
@@ -80,8 +82,17 @@ sample_once() {
     # ceiling, since a JVM that exceeded its max heap would have thrown OutOfMemoryError
     # rather than finished. `-XX:MaxHeapSize` is unambiguous, always present, and always
     # exactly the effective -Xmx, in bytes.
-    max_kb="$(jcmd "$pid" VM.flags 2>/dev/null | tr ' ' '\n' \
-      | awk -F= '/^-XX:MaxHeapSize=/ {printf "%d", $2/1024; exit}')"
+    # Cached per pid: -Xmx is fixed for a JVM's lifetime, and `jcmd` is not free — it
+    # attaches to the target over a socket. Re-asking every JVM every five seconds would
+    # add load to the very job whose memory pressure this script exists to measure, which
+    # would be a self-defeating way to instrument it.
+    if [ -s "$xmxdir/$pid" ]; then
+      max_kb="$(cat "$xmxdir/$pid")"
+    else
+      max_kb="$(jcmd "$pid" VM.flags 2>/dev/null | tr ' ' '\n' \
+        | awk -F= '/^-XX:MaxHeapSize=/ {printf "%d", $2/1024; exit}')"
+      [ -n "$max_kb" ] && printf '%s' "$max_kb" > "$xmxdir/$pid"
+    fi
 
     # No parse => say so. Never substitute 0, which would read as "used nothing".
     [ -n "$used_kb" ] || continue
