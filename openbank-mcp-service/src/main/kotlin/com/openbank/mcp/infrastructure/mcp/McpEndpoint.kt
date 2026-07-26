@@ -13,6 +13,7 @@ import com.openbank.libs.authz.PolicyDecisionPoint
 import com.openbank.libs.authz.Principal
 import com.openbank.mcp.application.McpCallAuditor
 import com.openbank.mcp.application.McpToolRegistry
+import com.openbank.mcp.application.McpUntrustedData
 import com.openbank.mcp.application.port.out.CallerIdentitySource
 import com.openbank.mcp.application.port.out.ConsentContext
 import com.openbank.mcp.application.port.out.McpMetricsPort
@@ -117,6 +118,10 @@ class McpEndpoint(
                 protocolVersion,
                 ServerCapabilities(),
                 ServerInfo(serverName, serverVersion),
+                // Ships the untrusted-data marker contract to the client's model before it ever
+                // sees a marker (#2412). Deliberately part of the handshake and not documentation:
+                // a client that never reads the docs still gets it.
+                instructions = McpUntrustedData.PREAMBLE,
             )
             "notifications/initialized" -> return Response.noContent().build()
             "ping" -> mapOf("pong" to true)

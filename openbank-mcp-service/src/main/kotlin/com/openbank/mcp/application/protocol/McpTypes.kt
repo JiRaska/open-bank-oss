@@ -39,10 +39,20 @@ data class ServerCapabilities(
 data class ToolsCapability(val listChanged: Boolean = false)
 data class ResourcesCapability(val subscribe: Boolean = false, val listChanged: Boolean = false)
 
+/**
+ * `instructions` is the MCP handshake's optional server-guidance field, and it is where this
+ * server declares its untrusted-data marker convention (see
+ * [com.openbank.mcp.application.McpUntrustedData.PREAMBLE], issue #2412). A marker whose
+ * meaning is never stated is decoration — this server does not own the calling model's system
+ * prompt, so the handshake is the only channel the protocol gives it to say what the markers
+ * around every tool result mean. Non-null always; the field is declared nullable only so the
+ * type can express a client-facing optional per the spec.
+ */
 data class InitializeResult(
     val protocolVersion: String,
     val capabilities: ServerCapabilities,
     val serverInfo: ServerInfo,
+    val instructions: String? = null,
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)

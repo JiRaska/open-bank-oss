@@ -643,6 +643,17 @@ jobs:
       - name: "Pact provider-replay coverage (issue #2338, enforced)"
         run: python3 .github/scripts/check-pact-provider-replay.py
 
+      # issue #2412 (third residual). openbank-mcp-service masks PII on every tool result
+      # UNCONDITIONALLY — deliberately, since a switch that can turn a declared control off is how
+      # the declaration became fiction to begin with. The cost of that choice is that the charter
+      # in agents.yaml and the code are two unbound sources agreeing by coincidence: flip
+      # `mcp-anonymous`'s data_scope.pii to `full` and nothing anywhere goes red, so the charter
+      # can silently start under-promising what the server does. This pins the declaration to the
+      # implementation at build time instead of reading it at runtime. Enforced: there is no
+      # judgement to exercise — either the two agree or one of them is wrong.
+      - name: "MCP charter data_scope binding (issue #2412, enforced)"
+        run: python3 .github/scripts/check-mcp-charter-data-scope.py --enforce
+
       # CLAUDE.md rule 3 / ADR-0029: a module is a released component iff it has
       # a version.txt, and must be registered in release-please-config.json AND
       # .release-please-manifest.json. stdlib-only gate; catches a new service
