@@ -1,8 +1,8 @@
 # -----------------------------------------------------------------------------
 # EU AI Act inventory drift gate (ADR-0148 rule #7; issue #1918).
 #
-# Runs `.github/scripts/check-eu-ai-act.sh` on every PR that touches the source
-# (openbank-libs/governance/agents.yaml), the DERIVED compliance doc
+# Runs `.github/scripts/check-eu-ai-act.sh` on every PR that touches either source
+# (openbank-libs/governance/agents.yaml, ml-systems.yaml), the DERIVED compliance doc
 # (docs/compliance/eu-ai-act.md), or the generator/guard themselves. The doc is
 # generated from agents.yaml and must never be hand-edited or drift from a fresh
 # generator run — a stale AI Act inventory is worse than none, because auditors
@@ -11,6 +11,19 @@
 # The guard existed but nothing ran it, so the compliance doc could silently
 # drift from agents.yaml. Mirrors adr-registry.yml / agent-charter-registry.yml:
 # small, named, its own workflow rather than a step buried in the services-ci matrix.
+#
+# WHERE THE TEETH ACTUALLY ARE (2026-07-25): this workflow is NOT — and cannot be —
+# in the main-protection ruleset's required-status-checks list. It is path-filtered,
+# and GitHub reports a required context that never runs as permanently "Expected",
+# which would block every PR that touches none of the paths below. So a red run here
+# is advisory in practice: PR #2156 added the `ap2-anonymous` charter without
+# regenerating the doc, reddened this workflow TWICE, and merged anyway, leaving the
+# AI Act inventory on main missing an AI system (regenerated later in #2211).
+# The binding gate is now the `EU AI Act inventory drift` step inside the REQUIRED
+# `Validate manifests` job in ci.yml, which runs this same script unconditionally —
+# the pattern adr-registry.yml already documents. This workflow stays as the fast,
+# path-filtered echo (seconds on a governance-only PR). Do not delete either without
+# moving the other into `Validate manifests`.
 # -----------------------------------------------------------------------------
 name: EU AI Act registry
 
@@ -19,6 +32,9 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - 'openbank-libs/governance/agents.yaml'
+      # gen-eu-ai-act.py reads BOTH registries; ml-systems.yaml was missing here, so a
+      # PR editing only the non-agent ML inventory did not even trigger this echo.
+      - 'openbank-libs/governance/ml-systems.yaml'
       - 'docs/compliance/eu-ai-act.md'
       - '.github/scripts/gen-eu-ai-act.py'
       - '.github/scripts/check-eu-ai-act.sh'
@@ -27,6 +43,9 @@ on:
     branches: [main]
     paths:
       - 'openbank-libs/governance/agents.yaml'
+      # gen-eu-ai-act.py reads BOTH registries; ml-systems.yaml was missing here, so a
+      # PR editing only the non-agent ML inventory did not even trigger this echo.
+      - 'openbank-libs/governance/ml-systems.yaml'
       - 'docs/compliance/eu-ai-act.md'
       - '.github/scripts/gen-eu-ai-act.py'
       - '.github/scripts/check-eu-ai-act.sh'

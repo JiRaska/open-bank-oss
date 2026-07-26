@@ -1049,6 +1049,39 @@ jobs:
       - name: ADR registry integrity check
         run: bash .github/scripts/check-adr-registry.sh
 
+      # Agent charter parity (ADR-0031 / ADR-0156): every openbank-libs/governance/agents.yaml
+      # id has a docs/agents/<id>.md and vice versa.
+      #
+      # Runs here as well as in the `agent-charter-registry` workflow for the same reason the
+      # ADR gate above does — and, unlike that one, for a reason that has already bitten. That
+      # workflow is path-filtered, and a path-filtered workflow CANNOT be a required status
+      # check: GitHub reports a required context that never runs as permanently "Expected", so
+      # requiring it would block every unrelated PR. So a red run on it is advisory in practice,
+      # and PR #2156 merged over exactly that (see the eu-ai-act step below). This job is
+      # unconditional (`on: pull_request`, no paths filter) and IS required as
+      # `Validate manifests`, so putting the binding copy here is what actually gates the merge.
+      # ENFORCED. Pure bash, ~1 s — no measurable runner cost on a job that already runs.
+      - name: "agent charter registry parity (ADR-0031/0156, enforced)"
+        run: bash .github/scripts/check-agent-charter-registry.sh
+
+      # EU AI Act inventory drift (ADR-0148 rule #7, issue #1918).
+      #
+      # docs/compliance/eu-ai-act.md is DERIVED from openbank-libs/governance/agents.yaml +
+      # ml-systems.yaml by gen-eu-ai-act.py. A stale inventory is worse than none: auditors read
+      # it as a live claim, and Annex III applies from 2026-08-02.
+      #
+      # WHY IT MOVED HERE (2026-07-25). The guard existed and the `eu-ai-act-registry` workflow
+      # ran it, but that workflow is path-filtered and therefore un-requireable (above), so its
+      # verdict was advisory. PR #2156 added the `ap2-anonymous` charter without regenerating the
+      # doc, went red on `eu-ai-act-registry` TWICE, and merged anyway — main then carried an AI
+      # system inventory missing an AI system until #2211 regenerated it. An advisory check over
+      # a GENERATED artifact is a contradiction: red does not mean "someone should look", it means
+      # "the committed document does not match reality", and there is no judgement left to
+      # exercise. ENFORCED, and the pyyaml the generator needs is installed by the
+      # gen-network-policies step above.
+      - name: "EU AI Act inventory drift (ADR-0148 rule #7, enforced)"
+        run: bash .github/scripts/check-eu-ai-act.sh
+
   # ---------------------------------------------------------------------------
   # Customer-app dossier content check (ADR-0074 invariant 5).
   #
