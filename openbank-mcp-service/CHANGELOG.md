@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.9.2...mcp-service-v0.10.0) (2026-07-26)
+
+
+### Features
+
+* **mcp:** register the campaign-copilot's read-only reach tool, denied until granted ([#2639](https://github.com/JiRaska/open-bank-oss/issues/2639)) ([d405124](https://github.com/JiRaska/open-bank-oss/commit/d4051244b1f00729c2aa7746feb4d1dca3e49175)), closes [#2574](https://github.com/JiRaska/open-bank-oss/issues/2574)
+
 ## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.9.1...mcp-service-v0.9.2) (2026-07-26)
 
 
