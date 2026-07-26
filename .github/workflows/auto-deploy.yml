@@ -674,7 +674,7 @@ jobs:
       # worse than today.
       - name: Cache pact standalone CLI
         id: pact-cli-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /tmp/pact
           key: pact-standalone-${{ env.PACT_STANDALONE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
