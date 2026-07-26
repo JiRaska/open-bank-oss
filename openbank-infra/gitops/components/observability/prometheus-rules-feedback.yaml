@@ -1,0 +1,88 @@
+# In-app screen feedback alerts (ADR-0192).
+#
+# ADR-0192 deliberately ships feedback as fire-and-forget telemetry: the customer gets a
+# support-quotable reference and nothing notifies anyone. That is fine for "this screen is
+# confusing", and wrong for a bug report — nobody watches a ClickHouse table at 22:00.
+#
+# These rules alert on the COUNTER, never on the content. customer-edge increments
+#   feedback_submissions_total{category, screenshot_status}
+# and both labels are closed allow-lists (BUG|IDEA|CONFUSING, NONE|STORED|STORE_FAILED), so the
+# alert payload carries no free text, no screenshot and no party — the comment is personal data
+# and must not travel into Alertmanager/Slack/GoAlert. To read what a customer actually wrote,
+# go to openbank_analytics.gold_screen_feedback.
+#
+# On the expression shape: Micrometer creates a counter lazily, on its FIRST increment, so the
+# series appears already at 1 with no preceding 0 sample. increase() needs two samples and
+# therefore returns 0 for that first report — exactly the one worth waking up for, and it
+# recurs after every pod restart. Each rule below is therefore `increase(...) OR series-just-
+# appeared`, verified against live Prometheus rather than assumed.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: screen-feedback
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: feedback.screen
+      interval: 1m
+      rules:
+        # A customer reported something broken. Deliberately sensitive (any single report) and
+        # deliberately only for BUG: ideas and confusion are product input, not an incident.
+        - alert: ScreenFeedbackBugReported
+          expr: |
+            increase(feedback_submissions_total{category="BUG"}[15m]) > 0
+            or (feedback_submissions_total{category="BUG"}
+                unless feedback_submissions_total{category="BUG"} offset 15m)
+          for: 0m
+          labels:
+            severity: info
+            component: customer-app
+          annotations:
+            summary: "A customer reported a bug from the app (ADR-0192)"
+            description: >
+              {{ $value | printf "%.0f" }} BUG feedback submission(s) in the last 15 minutes.
+              The report text and screenshot are NOT in this alert — query
+              openbank_analytics.gold_screen_feedback (newest first) to see the screen, comment,
+              OS version, locale and theme it was filed from.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/adr/0192-screen-feedback.md"
+
+        # Volume spike: one unhappy customer is signal, a burst usually means a release broke a
+        # screen for everyone. Distinct from the per-report alert so it can be routed louder.
+        - alert: ScreenFeedbackSpike
+          expr: |
+            sum(increase(feedback_submissions_total[1h])) > 10
+          for: 5m
+          labels:
+            severity: warning
+            component: customer-app
+          annotations:
+            summary: "Unusual volume of in-app feedback (ADR-0192)"
+            description: >
+              {{ $value | printf "%.0f" }} feedback submissions in the last hour across all
+              categories. Check gold_screen_feedback_by_screen for which screen dominates and
+              gold_screen_feedback_context for the OS/theme/locale combination — a spike confined
+              to one combination is a rendering regression, not a product problem.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/adr/0192-screen-feedback.md"
+
+        # The customer was promised their screenshot was attached and it was not. Silent data
+        # loss from the customer's point of view, and a sign the bucket or Pod Identity binding
+        # is broken — the submission survives, the evidence does not.
+        - alert: ScreenFeedbackScreenshotStoreFailing
+          expr: |
+            increase(feedback_submissions_total{screenshot_status="STORE_FAILED"}[30m]) > 0
+            or (feedback_submissions_total{screenshot_status="STORE_FAILED"}
+                unless feedback_submissions_total{screenshot_status="STORE_FAILED"} offset 30m)
+          for: 0m
+          labels:
+            severity: warning
+            component: customer-edge
+          annotations:
+            summary: "Feedback screenshots are not reaching object storage (ADR-0192)"
+            description: >
+              {{ $value | printf "%.0f" }} submission(s) in the last 30 minutes had a screenshot
+              that failed to store. The customer previewed and confirmed an image that was then
+              dropped. Check the customer-edge S3 credentials / Pod Identity association for the
+              openbank-sandbox-feedback bucket.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/adr/0192-screen-feedback.md"
