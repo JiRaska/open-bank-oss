@@ -93,7 +93,7 @@ const COMPLIANCE_AREAS: ComplianceArea[] = [
     id: 'cnb',
     title: ['Regulace ČNB (CZ)', 'CNB Regulation (CZ)'],
     authority: ['Česká národní banka', 'Czech National Bank'],
-    status: 'compliant',
+    status: 'partial',
     items: [
       { req: ['Konstantní symbol (platební styk)', 'Constant symbol (payment system)'], status: 'ok', note: ['constant_symbol s regex constraint V2', 'constant_symbol with regex constraint V2'] },
       { req: ['Specifický symbol', 'Specific symbol'], status: 'ok', note: ['specific_symbol v domestic_payments V2', 'specific_symbol in domestic_payments V2'] },
@@ -101,7 +101,7 @@ const COMPLIANCE_AREAS: ComplianceArea[] = [
       { req: ['Monitoring dormance', 'Dormancy monitoring'], status: 'ok', note: ['dormancy_date + idx_accounts_dormancy V2', 'dormancy_date + idx_accounts_dormancy V2'] },
       { req: ['Přidělení IBAN', 'IBAN allocation'], status: 'ok', note: ['sloupec iban + unique index v accounts V2', 'iban column + unique index in accounts V2'] },
       { req: ['Regulatorní výkaznický kód', 'Regulatory reporting code'], status: 'ok', note: ['regulatory_reporting_code v transactions V2, výkaznictví AnaCredit přes anacredit-service', 'regulatory_reporting_code in transactions V2, AnaCredit reporting via anacredit-service'] },
-      { req: ['Záznamy 10 let po uzavření', 'Records for 10 years after closure'], status: 'ok', note: ['data_retention_until v accounts V2', 'data_retention_until in accounts V2'] },
+      { req: ['Záznamy 10 let po uzavření', 'Records for 10 years after closure'], status: 'warn', note: ['data_retention_until (accounts V2) — sloupec bez čtenáře v kódu, stejný jako řádek „Politika uchovávání dat“, issue #2370', 'data_retention_until (accounts V2) — column has no code reader, same as the "Data retention policy" row, issue #2370'] },
     ],
   },
   {
