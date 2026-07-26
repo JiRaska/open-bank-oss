@@ -19,7 +19,7 @@
 // Shared deliberately (ADR-0208): two callers need it (Customer 360, Consents), and a copy in each
 // would be two divergent search behaviours over one endpoint.
 
-import { useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { Search } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -43,6 +43,9 @@ export function partyDisplayName(p: PartyHit): string {
 }
 
 interface Props {
+  /** Rendered inside the search row, before the input — e.g. a lens selector, so the caller does not
+      need a second card holding one control. */
+  leading?: ReactNode
   /** Called with the chosen party. A pasted UUID is passed through as `{ id }` with no name. */
   onSelect: (party: PartyHit) => void
   /** Highlighted row, so the caller's current selection stays visible in the result list. */
@@ -52,18 +55,22 @@ interface Props {
   placeholder?: string
 }
 
-export function PartySearch({ onSelect, selectedId, busy = false, placeholder }: Props) {
+export function PartySearch({ onSelect, selectedId, busy = false, placeholder, leading }: Props) {
   const { t, language } = useLanguage()
   const [term, setTerm] = useState('')
   const [hits, setHits] = useState<PartyHit[] | null>(null)
   const [failure, setFailure] = useState<UnavailableKind | null>(null)
   const [searching, setSearching] = useState(false)
+  // Only the newest search may commit its hits — otherwise a slow query for "Nov" lands after a fast
+  // one for "Svoboda" and the operator picks from a list that does not match what they typed.
+  const generation = useRef(0)
 
   const run = async () => {
     const q = term.trim()
     if (!q) return
     // A pasted party id is not a name — skip the trigram search entirely, so an operator who already
     // has an id keeps the direct path instead of being forced through a result list of one.
+    const gen = ++generation.current
     if (PARTY_UUID_RE.test(q)) {
       setHits(null)
       setFailure(null)
@@ -78,23 +85,26 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder }:
         `${PARTY_SERVICE}/api/v1/parties/search?q=${encodeURIComponent(q)}&limit=20`,
         { cache: 'no-store' },
       )
+      if (gen !== generation.current) return // superseded by a newer search
       if (!res.ok) {
         setFailure(res.status === 401 || res.status === 403 ? 'unauthorized' : 'unreachable')
         return
       }
       const body = (await res.json()) as { data?: PartyHit[] }
+      if (gen !== generation.current) return
       setHits(body.data ?? [])
     } catch {
-      setFailure('unreachable')
+      if (gen === generation.current) setFailure('unreachable')
     } finally {
-      setSearching(false)
+      if (gen === generation.current) setSearching(false)
     }
   }
 
   return (
     <>
-      <div className="card" style={{ marginBottom: '20px' }}>
+      <div className="card" style={{ marginBottom: '20px', padding: '20px' }}>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {leading}
           <input
             value={term}
             onChange={e => setTerm(e.target.value)}
@@ -155,7 +165,7 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder }:
       )}
 
       {!searching && hits && hits.length > 0 && (
-        <div className="card" style={{ marginBottom: '20px', overflowX: 'auto' }}>
+        <div className="card" style={{ marginBottom: '20px', overflowX: 'auto', padding: '20px' }}>
           <h2 className="section-title" style={{ marginBottom: '12px' }}>
             {t('Nalezené party', 'Matching parties')} ({hits.length})
           </h2>

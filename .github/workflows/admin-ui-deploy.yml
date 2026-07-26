@@ -480,6 +480,21 @@ jobs:
             chore
             gitops
 
+      # Close every OLDER open deploy PR now that this one exists. A deploy PR rewrites an image tag
+      # to the newest build, so two are never additive and both edit the same manifest line — left
+      # open, whichever merges first leaves the rest conflicting while still reading as healthy
+      # (green checks, auto-merge armed). branch-cleanup.yml already assumed this close happened
+      # ("a superseded deploy PR is CLOSED-unmerged"); nothing ever performed it, and the backlog
+      # reached 7 of the repo's 23 open PRs. Runs BEFORE the signature guard so a run that later
+      # fails the guard still leaves exactly one current deploy PR behind, not a growing pile.
+      - name: Close superseded deploy PRs
+        if: steps.gitops_pr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          bash .github/scripts/supersede-deploy-prs.sh \
+            'chore/admin-ui-deploy-' '${{ steps.gitops_pr.outputs.pull-request-number }}'
       # Enable auto-merge so ArgoCD gets the new tag without a manual PR merge.
       # Uses the same retry pattern as auto-deploy.yml (required checks register with
       # a small lag after PR creation → keep retrying until enablePullRequestAutoMerge

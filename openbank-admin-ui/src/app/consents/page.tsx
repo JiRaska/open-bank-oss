@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { FileSignature, Search } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -50,28 +50,41 @@ export default function ConsentsPage() {
   const [failure, setFailure] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(false)
 
+  // Only the NEWEST lookup may commit its result. Clearing state when the lens changes is not
+  // enough: an in-flight request settles afterwards and repopulates it, so a party lookup's rows
+  // render under the grantee lens's label — one party's consents read as the grantee's global view.
+  // Measured, not theorised: with a 1.5s-delayed party response and a mid-flight lens switch, the
+  // select read "By grantee" while MARKETING_COMMS_EMAIL rows from the party query were on screen.
+  const generation = useRef(0)
+
   const lookup = async (override?: string) => {
     const q = (override ?? term).trim()
     if (!q) return
+    const gen = ++generation.current
+    const lensAtRequest = lens
     setLoading(true)
     setFailure(null)
     setRows(null)
     try {
-      const path = lens === 'party' ? `party/${encodeURIComponent(q)}` : `grantee/${encodeURIComponent(q)}`
+      // The lens is read ONCE, at request time — never from the closure after the await, where it
+      // may already describe a different query.
+      const path = lensAtRequest === 'party' ? `party/${encodeURIComponent(q)}` : `grantee/${encodeURIComponent(q)}`
       const res = await fetch(`/api/svc/consent-service/api/v1/consents/${path}`, { cache: 'no-store' })
+      if (gen !== generation.current) return // superseded — a newer lookup or a lens switch won
       if (!res.ok) {
         setFailure(await classifyBffFailure(res))
         return
       }
       const data = (await res.json()) as Consent[]
+      if (gen !== generation.current) return
       setRows(data)
       // NOT `no_data`: consent-service answered, it just holds no consent for this key. The old copy
       // said "the data source contains no records yet", which an operator cannot tell apart from a
       // broken page — and was false whenever any other party had a consent. Rendered below instead.
     } catch {
-      setFailure('unreachable')
+      if (gen === generation.current) setFailure('unreachable')
     } finally {
-      setLoading(false)
+      if (gen === generation.current) setLoading(false)
     }
   }
 
@@ -80,6 +93,34 @@ export default function ConsentsPage() {
     setTerm(p.id)
     void lookup(p.id)
   }
+
+  const lensSelect = (
+            <select
+              value={lens}
+              onChange={e => {
+                const next = e.target.value as Lens
+                setLens(next)
+                setTerm(next === 'grantee' ? MARKETING_GRANTEE : '')
+                // Results belong to the lens that produced them. Clearing them is only half of it:
+                // an ALREADY IN-FLIGHT lookup settles afterwards and puts them straight back, so the
+                // generation counter is bumped here too — that is what actually invalidates it. With
+                // the clear alone, a 1.5s party lookup interrupted by a lens switch left
+                // MARKETING_COMMS_EMAIL rows on screen while the select read "By grantee".
+                generation.current += 1
+                setRows(null)
+                setFailure(null)
+                setParty(null)
+                setLoading(false)
+              }}
+              style={{
+                padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)',
+                background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '13px', fontWeight: 600,
+              }}
+            >
+              <option value="party">{t('Podle party', 'By party')}</option>
+              <option value="grantee">{t('Podle grantee', 'By grantee')}</option>
+            </select>
+  )
 
   const active = rows?.filter(c => c.status === 'ACTIVE').length ?? 0
   const marketing = rows?.filter(c => c.scopes.some(s => s.startsWith('MARKETING_COMMS_'))).length ?? 0
@@ -97,69 +138,53 @@ export default function ConsentsPage() {
         )}
       />
 
-      <div className="card" style={{ marginBottom: '20px' }}>
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <select
-            value={lens}
-            onChange={e => {
-              const next = e.target.value as Lens
-              setLens(next)
-              setTerm(next === 'grantee' ? MARKETING_GRANTEE : '')
-            }}
-            style={{
-              padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)',
-              background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '13px', fontWeight: 600,
-            }}
-          >
-            <option value="party">{t('Podle party', 'By party')}</option>
-            <option value="grantee">{t('Podle grantee', 'By grantee')}</option>
-          </select>
-          {/* The party lens searches by NAME (party-service owns names, ADR-0055) and resolves to the
-              id consent-service is keyed by. The grantee lens stays a literal id field: a grantee is
-              a system identifier like party-service:marketing-comms, not a person to search for. */}
-          {lens === 'grantee' && (
-            <>
-              <input
-                value={term}
-                onChange={e => setTerm(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') lookup() }}
-                placeholder={t('ID grantee', 'Grantee id')}
-                style={{
-                  flex: '1 1 320px', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)',
-                  background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '13px',
-                }}
-              />
-              <button
-                onClick={() => lookup()}
-                disabled={loading || !term.trim()}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px',
-                  cursor: loading || !term.trim() ? 'not-allowed' : 'pointer', borderRadius: '8px',
-                  border: '1px solid var(--border)', background: 'var(--surface)',
-                  color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600,
-                  opacity: loading || !term.trim() ? 0.6 : 1,
-                }}
-              >
-                <Search size={15} /> {t('Vyhledat', 'Look up')}
-              </button>
-              <button
-                onClick={() => { setTerm(MARKETING_GRANTEE); void lookup(MARKETING_GRANTEE) }}
-                disabled={loading}
-                style={{
-                  padding: '8px 14px', borderRadius: '8px', border: '1px solid var(--border)',
-                  background: 'var(--surface)', color: 'var(--text-secondary)', fontSize: '12px',
-                  fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {t('Marketingové souhlasy', 'Marketing consents')}
-              </button>
-            </>
-          )}
+      {/* One card per lens, never an extra card holding a single control: the party lens puts the
+          selector inside PartySearch's own row (its `leading` slot), the grantee lens keeps the
+          literal-id field it needs. */}
+      {lens === 'grantee' && (
+        <div className="card" style={{ marginBottom: '20px', padding: '20px' }}>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {lensSelect}
+            <input
+              value={term}
+              onChange={e => setTerm(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') lookup() }}
+              placeholder={t('ID grantee', 'Grantee id')}
+              style={{
+                flex: '1 1 320px', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)',
+                background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '13px',
+              }}
+            />
+            <button
+              onClick={() => lookup()}
+              disabled={loading || !term.trim()}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px',
+                cursor: loading || !term.trim() ? 'not-allowed' : 'pointer', borderRadius: '8px',
+                border: '1px solid var(--border)', background: 'var(--surface)',
+                color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600,
+                opacity: loading || !term.trim() ? 0.6 : 1,
+              }}
+            >
+              <Search size={15} /> {t('Vyhledat', 'Look up')}
+            </button>
+            <button
+              onClick={() => { setTerm(MARKETING_GRANTEE); void lookup(MARKETING_GRANTEE) }}
+              disabled={loading}
+              style={{
+                padding: '8px 14px', borderRadius: '8px', border: '1px solid var(--border)',
+                background: 'var(--surface)', color: 'var(--text-secondary)', fontSize: '12px',
+                fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {t('Marketingové souhlasy', 'Marketing consents')}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {lens === 'party' && (
-        <PartySearch onSelect={onPartySelected} selectedId={party?.id} busy={loading} />
+        <PartySearch onSelect={onPartySelected} selectedId={party?.id} busy={loading} leading={lensSelect} />
       )}
 
       {rows && rows.length > 0 && (
