@@ -205,3 +205,31 @@ npx eslint .            # lint
   dependencies must commit the regenerated lockfile in the same PR. Existing PRs cut before the fix
   stay red on their own stale lockfile until rebased/`gh pr update-branch`d — a re-run alone won't
   clear it.
+- **Run `npm test`, never `npx vitest run` — the latter skips `pretest` and manufactures failures.**
+  `pretest: node scripts/generate-governance.mjs && node scripts/generate-catalog.mjs` produces
+  `catalog.json` and the governance fixtures that `finops-taxonomy`, `finops-allocation` and
+  `service-registry.guard` read. Bypass it and those 4–5 tests fail with `ENOENT: … catalog.json`,
+  which looks exactly like a pre-existing broken suite. Measured 2026-07-26: `npx vitest run` → 5
+  failed; `npm test` → **781 passed, exit 0**. The trap is the second half: "confirming" the
+  failures are pre-existing by stashing your branch and re-running **the same wrong command** proves
+  nothing, because the probe carries the defect it is meant to rule out. That mistake got as far as
+  two PR descriptions before it was caught.
+- **A CSS or layout regression passes `tsc`, `eslint` AND the mount-only `render-smoke` suite.**
+  jsdom applies no stylesheet, so geometry is never measured. PR #2556 shipped three that way: a
+  swatch that reused `.badge` and overrode `width`/`height` inline — but `.badge` sets
+  `padding: 4px 10px; border-radius: 20px` and `globals.css` sets a global
+  `box-sizing: border-box`, so an 18px box had 20px of horizontal padding (**zero** content width)
+  and a 26px tile rendered as a circle; a header icon silently dropped in a migration; and a
+  `StatCard` that tinted its label but not its value. For anything visual, measure it in a browser —
+  either an `e2e/` spec asserting `getComputedStyle` / `boundingBox` (see
+  `e2e/ui-primitives.spec.ts`), or render the page to static HTML from a throwaway vitest dump with
+  `globals.css` inlined, serve it over HTTP and look. **Never override `.badge`'s geometry** — use
+  `.tone-swatch` / `SWATCH_CLASS`, which composes the colour-only `.badge-*` rule with its own
+  padding and radius.
+- **`BpmnView`'s `viewBox` is hardcoded `0 0 1120 300`** (`components/docs/BpmnView.tsx`). A node
+  placed beyond that is **silently clipped** and `bpmn-manifest.test.ts` stays green — it validates
+  the manifest against the Zod schema, which knows nothing about the canvas. Keep `x ≤ 1080` (the
+  widest existing diagrams, `dispute` and `lending`, stop there) and confirm against the rendered
+  SVG that no node box exceeds 1120. Also: every `kind: async` edge **must** carry a `topic` — the
+  manifest test enforces it, so a colliding topic caption is fixed by shortening the node label, not
+  by dropping the topic.

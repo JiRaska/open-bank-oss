@@ -84,6 +84,17 @@ topic set, D3's exclusions and D4's erasure reasoning all stand; only "in a new 
 not. ADR-0200's campaign-service, if funded, reads this view — nothing in ADR-0200 depended on the
 360 being its own service.
 
+**D7 — `silver_as_of` does NOT satisfy ADR-0140 phase 2, and must not be read as unblocking the
+NBA model.** This needs saying explicitly because the two look alike and the mistake would be
+expensive. `silver_as_of` is an as-of view over **raw domain events**, reduced per aggregate.
+ADR-0140 phase 2 requires a materialised point-in-time snapshot of **feature values**, keyed
+`feature:<name>:<entity-id>`, produced by the *same* `compute` function that serves the online
+store — the shared computation is the whole mechanism, because it is what makes training/serving
+parity a property rather than a convention. An as-of view over events provides neither the feature
+values nor that parity. So ADR-0209 D4 stands unchanged: ADR-0201 D5 does not start until ADR-0140
+phase 2 exists. Building segment training on `silver_as_of` would reintroduce precisely the skew
+ADR-0140 was written to prevent, while looking like it had satisfied the prerequisite.
+
 ## Alternatives considered
 
 - **Build `crm-service` as ADR-0199 specifies.** Rejected on evidence, not principle: it
