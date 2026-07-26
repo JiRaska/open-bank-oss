@@ -349,6 +349,13 @@ jobs:
 
       - name: Build fast-jars (parallel)
         id: build
+        # analytics-sink selects its AnalyticsSink binding with @IfBuildProperty, which Quarkus
+        # resolves at AUGMENTATION time — the runtime env var the gitops manifest sets cannot
+        # reach it. Without this the image ships the @Default LoggingAnalyticsSink, which logs
+        # every event and writes none, so ClickHouse silently stays empty while the consumer
+        # looks perfectly healthy. Harmless for the other services: only this module reads it.
+        env:
+          ANALYTICS_SINK_TYPE: clickhouse
         run: |
           set -euo pipefail
           SERVICES='${{ needs.changes.outputs.services }}'
