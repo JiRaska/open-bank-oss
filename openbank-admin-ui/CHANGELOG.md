@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.62.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.61.1...admin-ui-v0.62.0) (2026-07-26)
+
+
+### Features
+
+* **admin-ui:** search Customer 360 and Consents by name, not by party UUID ([#2604](https://github.com/JiRaska/open-bank-oss/issues/2604)) ([eab0ff5](https://github.com/JiRaska/open-bank-oss/commit/eab0ff5430fb9c965878fe96295a6fe8f071767b)), closes [#2598](https://github.com/JiRaska/open-bank-oss/issues/2598)
+
 ## [0.61.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.61.0...admin-ui-v0.61.1) (2026-07-26)
 
 
