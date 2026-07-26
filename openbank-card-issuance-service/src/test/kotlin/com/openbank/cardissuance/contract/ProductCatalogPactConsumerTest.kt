@@ -98,7 +98,13 @@ class ProductCatalogPactConsumerTest {
                 // The seeder rewrites `id` to the canonical derived UUID (ADR-0105), so only the
                 // type is contractual; the consumer never parses it as a UUID.
                 o.stringType("id", "prod-003")
-                o.stringType("code", CARD_ENABLED_CODE)
+                // stringValue, NOT stringType (issue #2425): `code` is echoed from the request
+                // path this interaction pins by literal, and the provider state is named after
+                // it. A product-catalog that answered the by-code lookup with a DIFFERENT
+                // product is precisely the defect this interaction exists to rule out, and a
+                // type matcher accepted any string at all. `id` above stays type-matched — it is
+                // a seed-data surrogate key with no meaning to the consumer.
+                o.stringValue("code", CARD_ENABLED_CODE)
                 o.`object`("cardConfig") { c ->
                     c.booleanType("enabled", true)
                     c.integerType("maxCards", 3)

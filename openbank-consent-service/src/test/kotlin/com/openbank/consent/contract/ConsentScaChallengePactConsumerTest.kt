@@ -44,8 +44,15 @@ class ConsentScaChallengePactConsumerTest {
             newJsonBody { o ->
                 o.uuid("id")
                 o.uuid("partyId")
-                o.stringType("purpose", "CONSENT_GRANT")
-                o.stringType("status", "PENDING")
+                // stringValue, NOT stringType (issue #2425): both are closed vocabularies fixed
+                // by the provider state — "a PENDING SCA challenge exists" names the status
+                // outright, and sca-service's @State handler seeds purpose = CONSENT_GRANT.
+                // consent-service branches on both: `status` decides whether the consent may be
+                // activated at all, and `purpose` is what stops an SCA challenge raised for a
+                // PAYMENT from being spent to grant a consent. A type matcher accepted any
+                // string for either, so the replay was asked nothing about the values.
+                o.stringValue("purpose", "CONSENT_GRANT")
+                o.stringValue("status", "PENDING")
             }.build(),
         )
         .toPact()

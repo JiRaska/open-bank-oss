@@ -51,6 +51,28 @@ import java.util.UUID
  * (`./gradlew :openbank-copilot-service:test --tests "*CustomerEdgePactConsumerTest*"`) and
  * commit the updated pact JSON in the same PR.
  */
+/**
+ * MATCHER POLICY (issue #2425) — why nothing here is pinned by value.
+ *
+ * The #2425 sweep pins enum-like strings with `stringValue` wherever a `type` matcher made the
+ * assertion vacuous. Every interaction in THIS file was reviewed and every string was deliberately
+ * left type-matched, because they share one property: they are elements of a heterogeneous LIST,
+ * and none of them is echoed from the request.
+ *
+ * A customer legitimately holds a CURRENT and a SAVINGS account, in CZK and in EUR; a DEBIT and a
+ * CREDIT card, on VISA and on Mastercard; transactions of many types and statuses; and the FX
+ * endpoint returns every pair the bank quotes. Pinning `accountType` to "CURRENT" would not assert
+ * "the type is spelled correctly" — it would assert "the customer's only account is a current
+ * account", a claim this contract does not make and the first customer with a savings account
+ * falsifies. The seeded provider state happens to contain one element of each; that is a property
+ * of the fixture, not of the contract.
+ *
+ * The line the sweep draws is echo-or-lifecycle vs list-element: pin a value that the request
+ * determines (a currency in the path, an `asOf` query parameter, a product code) or that the
+ * provider's own lifecycle fixes (a freshly posted journal is POSTED). Leave a list element alone.
+ * The sibling pins under #2533 — fx-service's currency pair, ledger-service's `asOf` and journal
+ * status — are all the former; nothing here is.
+ */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(providerName = "openbank-customer-edge", pactVersion = PactSpecVersion.V3)
 class CustomerEdgePactConsumerTest {
