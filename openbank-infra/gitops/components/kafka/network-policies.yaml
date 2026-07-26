@@ -53,6 +53,9 @@ spec:
               kubernetes.io/metadata.name: anacredit
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: analytics
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: audit
         - namespaceSelector:
             matchLabels:

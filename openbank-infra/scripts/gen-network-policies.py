@@ -190,6 +190,33 @@ def main():
                 if kns == MESSAGING_NS:
                     kafka_clients.add(ns)
 
+        elif kind == "ConfigMap" and ns:
+            # A Kafka client edge is NOT always visible in Deployment env (issue #2163).
+            # analytics-sink supplies its bootstrap URL through an `override.properties`
+            # ConfigMap mounted via QUARKUS_CONFIG_LOCATIONS, precisely because SmallRye's
+            # env-var reverse-mapping is ambiguous for its hyphenated channel name (#686) —
+            # so scanning env alone made a live consumer structurally invisible and left
+            # `analytics` out of the derived broker allow-list.
+            #
+            # It is not an outage today only because Strimzi's own
+            # openbank-cluster-network-policy-kafka opens 9092/9093 with no `from` selector
+            # and NetworkPolicies union. The defect is that the derived file reads as an
+            # exhaustive inventory of Kafka clients and is not one — so the day that blanket
+            # policy is tightened (a reasonable hardening step) the missing edges become a
+            # silent outage with no warning from the generator.
+            #
+            # ConfigMaps are namespaced, so the client namespace is the ConfigMap's own — no
+            # mount-tracing needed. A ConfigMap naming the broker in a namespace that does not
+            # actually talk to it would over-admit by one namespace; an unmounted ConfigMap
+            # naming the broker is not a shape this tree has, and over-admitting is the safe
+            # direction for an allow-list compared with silently omitting a live consumer.
+            for v in (doc.get("data") or {}).values():
+                if not isinstance(v, str):
+                    continue
+                for _, kns, _kport in KAFKA_RE.findall(v):
+                    if kns == MESSAGING_NS:
+                        kafka_clients.add(ns)
+
         elif kind == "Kafka" and ns == MESSAGING_NS:
             kafka_dir = os.path.dirname(path)
 
