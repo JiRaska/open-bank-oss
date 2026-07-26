@@ -16,8 +16,8 @@ Všechny endpointy vyžadují **Keycloak Bearer token** (realm `openbank`). Role
 
 | Třída operace | Povolené role |
 |---|---|
-| Čtení (`GET` accrualy, souhrn, kapitalizace, sazby, odvody) | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_SERVICE` (odvody navíc `ROLE_AUDITOR`) |
-| Mutace (`POST` accrue, capitalize, rates, remittances; `DELETE` rate) | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_SERVICE` |
+| Čtení (`GET` accrualy, souhrn, kapitalizace, sazby, odvody) | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API` (odvody navíc `ROLE_AUDITOR`) |
+| Mutace (`POST` accrue, capitalize, rates, remittances; `DELETE` rate) | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API` |
 
 ## Idempotence
 

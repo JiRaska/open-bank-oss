@@ -23,4 +23,4 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 - **Perzistence:** dedikovaná PostgreSQL databáze `openbank_ledger`, Flyway migrace V1..V8; `journal_entries` je RANGE-partitionováno podle `entry_date` (po letech)
 - **Outbox:** `ledger_outbox` → Kafka topic `openbank.ledger.journal.posted` (regulatorní dispatch, ADR-0050)
 - **Idempotence:** pole `idempotencyKey` v požadavku na zaúčtování → tabulka `ledger_idempotency` (v DB, ne Redis)
-- **Auth:** Keycloak OIDC (RS256 JWT). Čtení omezeno na `ROLE_SERVICE`/`ROLE_AUDITOR`/`ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`; účtování/storno/FX revalvace jen `ROLE_OPERATOR`. Žádný endpoint není neautentizovaný (ADR-0018).
+- **Auth:** Keycloak OIDC (RS256 JWT). Čtení omezeno na `ROLE_API`/`ROLE_AUDITOR`/`ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`; účtování/storno/FX revalvace jen `ROLE_OPERATOR`. Žádný endpoint není neautentizovaný (ADR-0018).

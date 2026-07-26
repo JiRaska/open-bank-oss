@@ -200,7 +200,7 @@ class ScaResource(
 
     @POST
     @Path("/challenges")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "scaChallenge.initiate")
     suspend fun initiate(
         request: InitiateScaRequest,
@@ -241,7 +241,7 @@ class ScaResource(
 
     @POST
     @Path("/challenges/{id}/verify")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "scaChallenge.verify", resource = "#id")
     suspend fun verify(@PathParam("id") id: UUID, request: VerifyScaRequest): ScaChallengeResponse {
         val challenge = verifySca.verify(VerifyScaCommand(id, request.partyId, request.otp))
@@ -250,7 +250,7 @@ class ScaResource(
 
     @GET
     @Path("/challenges/{id}")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "scaChallenge.read", resource = "#id")
     suspend fun get(@PathParam("id") id: UUID): ScaChallengeResponse =
         ScaChallengeResponse.from(getSca.getChallenge(id))
@@ -263,7 +263,7 @@ class ScaResource(
      */
     @GET
     @Path("/parties/{partyId}/challenges/pending")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "scaChallenge.read", resource = "#partyId")
     suspend fun listPending(@PathParam("partyId") partyId: UUID): List<PendingScaResponse> =
         getSca.listPendingByParty(partyId).map { PendingScaResponse.from(it) }
@@ -275,7 +275,7 @@ class ScaResource(
      */
     @GET
     @Path("/parties/{partyId}/devices")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "device.list", resource = "#partyId")
     suspend fun listDevices(@PathParam("partyId") partyId: UUID): List<EnrolledDeviceResponse> {
         val principalName = identity.principal?.name
@@ -294,7 +294,7 @@ class ScaResource(
      */
     @POST
     @Path("/parties/{partyId}/devices")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "device.enroll", resource = "#partyId")
     suspend fun enroll(@PathParam("partyId") partyId: UUID, request: EnrollDeviceRequest): Response {
         // P1 ownership enforcement (defense-in-depth over OPA advisory mode, ADR-0021 security review):
@@ -330,7 +330,7 @@ class ScaResource(
      */
     @POST
     @Path("/challenges/{id}/decision")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "scaChallenge.decide", resource = "#id")
     suspend fun decide(@PathParam("id") id: UUID, request: RecordDecisionRequest): ScaChallengeResponse {
         val challenge = recordDecision.recordDecision(
@@ -358,7 +358,7 @@ class ScaResource(
      */
     @POST
     @Path("/challenges/{id}/consume")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_SERVICE", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_API", "ROLE_ADMIN")
     @Authorize(action = "scaChallenge.consume", resource = "#id")
     suspend fun consume(@PathParam("id") id: UUID, request: ConsumeScaRequest): ScaChallengeResponse {
         val challenge = consumeSca.consume(

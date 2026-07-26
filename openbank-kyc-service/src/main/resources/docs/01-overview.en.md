@@ -54,7 +54,7 @@ A case is opened either by an operator (`POST /api/v1/kyc/cases`) or automatical
 - **admin-ui** (via Keycloak token) — KYC officers, compliance ops, the onboarding cockpit funnel (ADR-0068)
 - **party-service** (events) — upstream producer of `PARTY_CREATED`; downstream consumer of approval for activation
 - **aml-service / sanctions-service** — consume KYC events to trigger or correlate screening
-- **service-to-service readers** (`ROLE_SERVICE`) — read a party's KYC status during onboarding
+- **service-to-service readers** (`ROLE_API`) — read a party's KYC status during onboarding
 
 ## Dependencies
 

@@ -6,8 +6,8 @@ The REST contract is formalised in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.
 
 Keycloak OIDC (RS256 bearer). The resources are role-gated with `@RolesAllowed`:
 
-- **Reads** (list, render, export, close-run queries): `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_AUDITOR`, `ROLE_SERVICE`.
-- **Mutations** (period-close, manual close-run trigger): `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_SERVICE`.
+- **Reads** (list, render, export, close-run queries): `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_AUDITOR`, `ROLE_API`.
+- **Mutations** (period-close, manual close-run trigger): `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API`.
 
 Outbound calls to transaction / balance / account / party services carry a separate **client-credentials** M2M token (`openbank-services`, `ROLE_OPERATOR`), attached by `OidcClientRequestReactiveFilter`.
 

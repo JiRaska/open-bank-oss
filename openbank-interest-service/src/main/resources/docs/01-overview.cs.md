@@ -53,7 +53,7 @@
 
 - **admin-ui** (přes Keycloak token) — operátoři konfigurují sazby, spouští accrual/kapitalizaci a sestavují odvody.
 - **scheduler** (interní Quarkus `@Scheduled`) — denní accrual cron `0 0 1 * * ?` a měsíční kapitalizační cron `0 0 2 1 * ?`.
-- **servisní volající** (`ROLE_SERVICE`) — dávkové / orchestrační spouštěče.
+- **servisní volající** (`ROLE_API`) — dávkové / orchestrační spouštěče.
 
 ## Závislosti
 

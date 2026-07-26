@@ -52,7 +52,7 @@ class DeviceResource {
     )
 
     @POST
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_SERVICE", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_API", "ROLE_ADMIN")
     @Authorize(action = "device.create", resource = "")
     @Operation(summary = "Register (upsert) a push device token for a party")
     suspend fun register(req: RegisterDeviceRequest): Response {
@@ -77,7 +77,7 @@ class DeviceResource {
     }
 
     @GET
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "device.list", resource = "")
     @Operation(summary = "List a party's registered devices (no tokens returned)")
     suspend fun list(@QueryParam("partyId") partyId: UUID?): Response {
@@ -88,11 +88,11 @@ class DeviceResource {
 
     @DELETE
     @Path("/{deviceId}")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_SERVICE", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_API", "ROLE_ADMIN")
     @Authorize(action = "device.delete", resource = "")
     @Operation(summary = "Deactivate a push device token (logout / uninstall)")
     suspend fun deactivate(@PathParam("deviceId") deviceId: UUID, @QueryParam("partyId") partyId: UUID?): Response {
-        // customer-edge translates the mobile app JWT to ROLE_SERVICE and injects the
+        // customer-edge translates the mobile app JWT to ROLE_API and injects the
         // authoritative partyId — no direct ROLE_CUSTOMER access (prevents IDOR at the edge).
         // When partyId is supplied the UPDATE is scoped to that party's tokens only.
         val deactivated = repo.deactivate(deviceId, partyId)

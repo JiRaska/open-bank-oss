@@ -52,7 +52,7 @@
 - **admin-ui / platbu iniciující kanály** (přes Keycloak token) — operátoři s `ROLE_PAYMENTS` / `ROLE_OPERATOR` iniciují převody.
 - **clearing / ledger pipeline** — konzumují emitované Kafka události (ne přímí REST volající).
 - **provoz / clearing back-office** — řídí stavové přechody (`PROCESSING` → `COMPLETED` / `RETURNED`).
-- **service volající** — `ROLE_SERVICE` smí vypisovat platby.
+- **service volající** — `ROLE_API` smí vypisovat platby.
 
 ## Závislosti
 

@@ -8,7 +8,7 @@ REST kontrakt je popsán v [`openapi.yaml`](../openapi.yaml) (OpenAPI **3.1.0**,
 
 - **Base path:** `/api/v1/disputes`
 - **Media type:** `application/json` (consumes & produces)
-- **Autentizace:** Bearer JWT (Keycloak OIDC). Na úrovni třídy `@RolesAllowed("ROLE_VIEWER","ROLE_OPERATOR","ROLE_ADMIN","ROLE_SERVICE")`; čtení povolují `ROLE_VIEWER`, zápisy vyžadují `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_SERVICE`.
+- **Autentizace:** Bearer JWT (Keycloak OIDC). Na úrovni třídy `@RolesAllowed("ROLE_VIEWER","ROLE_OPERATOR","ROLE_ADMIN","ROLE_API")`; čtení povolují `ROLE_VIEWER`, zápisy vyžadují `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API`.
 
 ## Endpointy
 

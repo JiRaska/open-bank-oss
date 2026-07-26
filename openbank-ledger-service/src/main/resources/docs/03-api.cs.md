@@ -16,7 +16,7 @@ Keycloak OIDC, RS256 bearer JWT. Žádný endpoint není `@PermitAll` — hlavn�
 
 | Operace | Vyžadované role |
 |---|---|
-| Všechna čtení (list/get/trial-balance/sub-ledger/by-transaction) | `ROLE_SERVICE`, `ROLE_AUDITOR`, `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN` |
+| Všechna čtení (list/get/trial-balance/sub-ledger/by-transaction) | `ROLE_API`, `ROLE_AUDITOR`, `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN` |
 | `POST /journals` (zaúčtování) | `ROLE_OPERATOR` |
 | `POST /journals/{id}/reverse` | `ROLE_OPERATOR` |
 | `POST /ledger/fx-revaluation` | `ROLE_OPERATOR` |

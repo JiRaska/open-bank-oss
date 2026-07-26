@@ -39,7 +39,7 @@ class ControlAccountResource(private val clock: Clock, private val ledgerUseCase
      */
     @GET
     @Path("/{controlAccountId}/tie-out")
-    @RolesAllowed(Roles.SERVICE, Roles.AUDITOR, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "ledger.read", resource = "#controlAccountId")
     @Operation(summary = "Sub-ledger tie-out for a deposit-control GL account (ADR-0039 Phase B)")
     suspend fun controlAccountTieOut(

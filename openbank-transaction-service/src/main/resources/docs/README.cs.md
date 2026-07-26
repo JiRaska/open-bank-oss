@@ -23,5 +23,5 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 - **Outbox:** `transaction_outbox` → Kafka topic `openbank.transactions.transaction.initiated` (a typy událostí `.completed` / `.failed`)
 - **Idempotence:** `idempotencyKey` od volajícího na iniciačním příkazu → unique constraint na `(idempotency_key, booking_date)` a na platební sáze
 - **Orchestrace:** synchronní platební sága (hold → zaúčtování → debet/kredit → dokončení, s kompenzací)
-- **Auth:** Keycloak OIDC; čtení vyžaduje `ROLE_SERVICE`/`ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`, iniciace vyžaduje `ROLE_OPERATOR`
+- **Auth:** Keycloak OIDC; čtení vyžaduje `ROLE_API`/`ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`, iniciace vyžaduje `ROLE_OPERATOR`
 - **Money-path služba** (viz `rules.yaml: money_path_services`) — 2 schválení + threat model u každé změny

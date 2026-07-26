@@ -30,7 +30,7 @@ class FraudApiIT {
     }
 
     @Test
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `POST score returns the baseline ALLOW verdict`() {
         val payload = """
             {

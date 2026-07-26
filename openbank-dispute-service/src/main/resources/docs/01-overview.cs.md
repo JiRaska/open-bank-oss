@@ -52,7 +52,7 @@ Reklamace nese SLA: `resolutionDeadline = filingDate + resolution-sla-days` (vý
 
 - **admin-ui** (přes Keycloak token) — operátoři a compliance pracovníci spravující reklamace
 - **zákaznická app / API** — otevírání reklamace a nahrávání referencí na důkazy jménem držitele karty
-- **servisní volající** (`ROLE_SERVICE`) — automatizované toky otevírající nebo aktualizující reklamace
+- **servisní volající** (`ROLE_API`) — automatizované toky otevírající nebo aktualizující reklamace
 
 ## Závislosti
 

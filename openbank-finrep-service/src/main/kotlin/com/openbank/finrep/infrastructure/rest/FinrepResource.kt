@@ -28,10 +28,12 @@ import java.time.LocalDate
  * Roles come from [Roles], never string literals: this class shipped with
  * `@RolesAllowed("SERVICE", "ADMIN", "OPERATOR")` and the Keycloak realm issues no role by any of
  * those three names (it issues `ROLE_ADMIN`, `ROLE_OPERATOR`, …), so every authenticated request
- * to this resource was rejected 403 for every caller. `ROLE_SERVICE` is deliberately NOT in the
- * replacement set: it exists as a [Roles] constant but is granted to no realm client, so listing
- * it would re-add a dead entry that reads like an M2M grant. The only caller is the admin-UI BFF
- * (see the finrep-service ingress allow-list), whose operators carry ROLE_ADMIN / ROLE_OPERATOR.
+ * to this resource was rejected 403 for every caller (#2403).
+ *
+ * No M2M grant here on purpose. [Roles.API] is now a real, granted role (#2442), so adding it
+ * would genuinely open FINREP/COREP to every service-account token — the only caller is the
+ * admin-UI BFF (see the finrep-service ingress allow-list), whose operators carry ROLE_ADMIN /
+ * ROLE_OPERATOR. Widening this is a decision, not a rename.
  */
 @ApplicationScoped
 @Path("/api/v1/finrep")

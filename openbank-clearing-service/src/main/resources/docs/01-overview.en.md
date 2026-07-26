@@ -53,7 +53,7 @@ Supported payment rails: `SEPA_SCT`, `SEPA_SCT_INST`, `SWIFT`, `DOMESTIC`, `INTE
 
 ## Callers
 
-- **payment services** (`sepa-payment`, `sepa-instant`, `domestic-payment`, `swift-service`) — submit payments for clearing (`ROLE_SERVICE` / `ROLE_PAYMENTS`).
+- **payment services** (`sepa-payment`, `sepa-instant`, `domestic-payment`, `swift-service`) — submit payments for clearing (`ROLE_API` / `ROLE_PAYMENTS`).
 - **operations / payment-ops** (via admin UI, Keycloak token) — trigger cycles and settle batches (`ROLE_PAYMENTS` / `ROLE_ADMIN`).
 - **admin-ui / viewers / operators** — read-only views of batches, items and positions.
 

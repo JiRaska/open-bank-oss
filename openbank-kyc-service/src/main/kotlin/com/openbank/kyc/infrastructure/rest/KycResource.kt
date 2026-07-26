@@ -59,7 +59,7 @@ class KycResource {
         Roles.KYC_OPENER,
         Roles.KYC_REVIEWER,
         Roles.COMPLIANCE,
-        Roles.SERVICE,
+        Roles.API,
     )
     @Operation(
         summary = "List KYC cases. Optional ?status= filter for the onboarding cockpit funnel (ADR-0068).",
@@ -102,7 +102,7 @@ class KycResource {
         Roles.KYC_OPENER,
         Roles.KYC_REVIEWER,
         Roles.COMPLIANCE,
-        Roles.SERVICE,
+        Roles.API,
     )
     @Operation(summary = "Get KYC case by ID")
     suspend fun getCase(@PathParam("id") id: UUID): Response = Response.ok(kycService.getCase(id)).build()
@@ -117,7 +117,7 @@ class KycResource {
         Roles.KYC_OPENER,
         Roles.KYC_REVIEWER,
         Roles.COMPLIANCE,
-        Roles.SERVICE,
+        Roles.API,
     )
     @Operation(summary = "Get latest KYC case for a party")
     suspend fun getCaseByParty(@PathParam("partyId") partyId: UUID): Response {

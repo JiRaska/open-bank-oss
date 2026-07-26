@@ -67,7 +67,7 @@ import java.util.concurrent.TimeUnit
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.balance.it.PostgresRedpandaTestResource::class)
-@TestSecurity(user = "pact-verifier", roles = ["ROLE_SERVICE", "ROLE_OPERATOR"])
+@TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-balance-service")
 @PactFolder("../pacts")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")

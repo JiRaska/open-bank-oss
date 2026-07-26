@@ -52,9 +52,9 @@ Když je transakce iniciována, ságu spustí synchronně: vloží hold na zdroj
 
 ## Volající
 
-- **platební služby** (`sepa-payment`, `sepa-instant`, `domestic-payment`, `swift-service`, `standing-order-service`, `clearing-service`) — iniciují transakce (`ROLE_SERVICE`/`ROLE_OPERATOR`).
+- **platební služby** (`sepa-payment`, `sepa-instant`, `domestic-payment`, `swift-service`, `standing-order-service`, `clearing-service`) — iniciují transakce (`ROLE_API`/`ROLE_OPERATOR`).
 - **fx-service** — upstream zdroj kurzů pro zúčtování v jiné měně (tato služba volá *směrem ven* k němu).
-- **agent-service** — read-only MCP nástroj nad historií transakcí (`ROLE_SERVICE`).
+- **agent-service** — read-only MCP nástroj nad historií transakcí (`ROLE_API`).
 - **admin-ui** — operátoři / compliance čtou historii transakcí a vyhledávají.
 
 ## Závislosti

@@ -43,7 +43,7 @@ class FraudResourceAuthzTest {
     }
 
     @Test
-    @TestSecurity(user = "fx-service", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "fx-service", roles = ["ROLE_API"])
     fun `advisory mode does not block the M2M scoring path`() {
         // The fx-service shadow-scoring shape (FraudScoreClient) — the exact M2M call the
         // service-fraud-scoring ext-policy rule grants once AUTHZ_ENFORCE flips.

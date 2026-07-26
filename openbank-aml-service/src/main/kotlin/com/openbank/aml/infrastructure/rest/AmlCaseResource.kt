@@ -70,14 +70,14 @@ class AmlCaseResource(
 
     @GET
     @Path("/{caseId}")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_API")
     @Authorize(action = "amlCase.read", resource = "#caseId")
     @Operation(summary = "Get AML case by ID")
     suspend fun getCase(@PathParam("caseId") caseId: UUID): Response =
         Response.ok(amlCaseUseCase.getCase(caseId).toResponse()).build()
 
     @GET
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_API")
     @Authorize(action = "amlCase.list")
     @Operation(summary = "List AML screening cases")
     suspend fun listCases(

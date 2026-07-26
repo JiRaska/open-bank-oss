@@ -26,13 +26,13 @@ import java.util.UUID
 class SanctionsResource(private val useCase: SanctionsUseCase) {
 
     @GET
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.list", resource = "")
     suspend fun listAll() = useCase.listChecks()
 
     @POST
     @Path("/screen")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.create", resource = "")
     suspend fun screen(cmd: ScreenEntityCommand) = Response.status(201).entity(useCase.screen(cmd)).build()
 
@@ -42,25 +42,25 @@ class SanctionsResource(private val useCase: SanctionsUseCase) {
     // Renamed from sanctions.review (issue #938 follow-up): "clear" is a distinctive four-eyes
     // verb, kept apart from `release` (payment-hold release elsewhere in the fleet) for clean
     // audit separation — a wrongly-cleared true positive here is a real sanctions violation.
-    // No ROLE_SERVICE on this endpoint, confirmed no M2M caller — safe to four-eyes gate.
+    // No ROLE_API on this endpoint, confirmed no M2M caller — safe to four-eyes gate.
     @Authorize(action = "sanctions.clear", resource = "")
     suspend fun review(cmd: ReviewCommand) = useCase.review(cmd)
 
     @GET
     @Path("/{id}")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.read", resource = "#id")
     suspend fun get(@PathParam("id") id: UUID) = useCase.getById(id) ?: throw NotFoundException()
 
     @GET
     @Path("/hits")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.list", resource = "")
     suspend fun hits() = useCase.listHits()
 
     @GET
     @Path("/pending")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.list", resource = "")
     suspend fun pending() = useCase.listPending()
 }

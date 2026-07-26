@@ -23,5 +23,5 @@ This documentation is published directly by the service at the management endpoi
 - **Outbox:** `party_outbox` → Kafka topic `openbank.party.events` (dispatcher polls every 5 s with fault-tolerance: circuit breaker + retry + bulkhead + timeout)
 - **Inbound events:** consumes `openbank.kyc.events` and `openbank.aml.events` to drive the two-key KYC+AML activation gate
 - **Idempotency:** `Idempotency-Key` header is required on `POST /api/v1/parties`; the email uniqueness constraint additionally de-duplicates parties (409 on replay)
-- **Auth:** Keycloak OIDC, roles `ROLE_VIEWER` / `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_KYC` / `ROLE_SERVICE`; OPA authz in advisory mode (ADR-0034)
+- **Auth:** Keycloak OIDC, roles `ROLE_VIEWER` / `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_KYC` / `ROLE_API`; OPA authz in advisory mode (ADR-0034)
 - **Data classification:** `restricted` — this service holds PII (legal name, e-mail, phone, address, nationality, tax id). Not a money-path service.

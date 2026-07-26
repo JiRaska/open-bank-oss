@@ -32,7 +32,7 @@ import java.util.UUID
 class AuthorizationResource(private val authorizationUseCase: AuthorizationUseCase) {
 
     @GET
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.read", resource = "#accountId")
     suspend fun list(@PathParam("accountId") accountId: UUID): List<AuthorizationResponse> =
         authorizationUseCase.listAuthorizations(ListAuthorizationsQuery(accountId))
@@ -79,7 +79,7 @@ class AuthorizationResource(private val authorizationUseCase: AuthorizationUseCa
 
     @GET
     @Path("/check")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.read", resource = "#accountId")
     suspend fun check(
         @PathParam("accountId") accountId: UUID,

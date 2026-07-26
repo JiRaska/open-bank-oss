@@ -46,7 +46,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.ledger.it.PostgresRedpandaTestResource::class)
-@TestSecurity(user = "pact-verifier", roles = ["ROLE_SERVICE", "ROLE_OPERATOR"])
+@TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-ledger-service")
 @PactBroker
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")

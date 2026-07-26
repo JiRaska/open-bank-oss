@@ -37,7 +37,7 @@ class NotificationPreferenceResource {
 
     @GET
     @Path("/party/{partyId}")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "notification.preferences.read", resource = "#partyId")
     @Operation(summary = "Get a party's push preferences (all-on when never set)")
     suspend fun get(@PathParam("partyId") partyId: UUID): NotificationPreferenceDto {
@@ -47,7 +47,7 @@ class NotificationPreferenceResource {
 
     @PUT
     @Path("/party/{partyId}")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "notification.preferences.update", resource = "#partyId")
     @Operation(summary = "Set a party's push preferences")
     suspend fun set(@PathParam("partyId") partyId: UUID, req: NotificationPreferenceDto): NotificationPreferenceDto {

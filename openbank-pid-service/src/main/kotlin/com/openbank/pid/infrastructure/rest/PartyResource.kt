@@ -101,7 +101,7 @@ class PartyResource(
      */
     @POST
     @Path("/register-identity")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "identity.register")
     @Operation(summary = "Register an onboarded identity into the pid resolver index (issue #1294)")
     suspend fun registerIdentity(request: RegisterIdentityRequest): Response {
@@ -138,7 +138,7 @@ class PartyResource(
      */
     @POST
     @Path("/resolve")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "identity.resolve")
     @Operation(summary = "Resolve applicant identity before party creation (ADR-0072, issue #699)")
     suspend fun resolve(request: ResolvePartyRequest): Response {
@@ -233,7 +233,7 @@ class PartyResource(
      */
     @POST
     @Path("/{id}/external-ids")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "identity.link")
     @Operation(summary = "Link an external identifier to an existing party (ADR-0072 §5)")
     suspend fun linkExternalId(@PathParam("id") id: UUID, request: LinkExternalIdRequest): Response {

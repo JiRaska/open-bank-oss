@@ -23,5 +23,5 @@ This documentation is published directly by the service at the management endpoi
 - **Outbox:** `transaction_outbox` → Kafka topic `openbank.transactions.transaction.initiated` (also `.completed` / `.failed` event types)
 - **Idempotency:** caller-supplied `idempotencyKey` on the initiate command → unique constraint on `(idempotency_key, booking_date)` and on the payment saga
 - **Orchestration:** synchronous payment saga (hold → ledger post → debit/credit → complete, with compensation)
-- **Auth:** Keycloak OIDC; reads require `ROLE_SERVICE`/`ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`, initiation requires `ROLE_OPERATOR`
+- **Auth:** Keycloak OIDC; reads require `ROLE_API`/`ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`, initiation requires `ROLE_OPERATOR`
 - **Money-path service** (see `rules.yaml: money_path_services`) — 2 approvals + threat model on every change

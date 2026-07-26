@@ -85,7 +85,7 @@ class PartyResource {
     lateinit var securityIdentity: SecurityIdentity
 
     @GET
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_API")
     @Operation(
         summary = "List parties (paginated). Optional ?status= filter for onboarding cockpit funnel views (ADR-0068).",
     )
@@ -106,7 +106,7 @@ class PartyResource {
 
     @GET
     @Path("/search")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_API")
     @FeatureFlag(flag = "party-search")
     @Operation(
         summary = "Search parties by name (trigram), cursor-paginated (ADR-0055). Gated by feature flag party-search.",
@@ -132,7 +132,7 @@ class PartyResource {
 
     @GET
     @Path("/{id}")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_API")
     @Operation(summary = "Get party by ID")
     suspend fun getParty(@PathParam("id") id: UUID): Response =
         Response.ok(partyUseCase.getParty(id).toResponse()).build()
@@ -207,7 +207,7 @@ class PartyResource {
 
     @GET
     @Path("/{id}/documents")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_API")
     @Operation(summary = "List party documents")
     suspend fun listDocuments(@PathParam("id") id: UUID): Response = Response.ok(partyUseCase.listDocuments(id)).build()
 
@@ -419,12 +419,12 @@ class PartyResource {
      * to the response. Returns 200 + party summary when found, 404 when no match, 503 when
      * pepper is unconfigured (dedup is off and callers must not assume uniqueness).
      *
-     * Internal-only endpoint — requires ROLE_SERVICE so only trusted back-end callers
+     * Internal-only endpoint — requires ROLE_API so only trusted back-end callers
      * (customer-edge, onboarding service) can use it during the self-registration flow.
      */
     @POST
     @Path("/resolve")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_ADMIN")
     @Authorize(action = "party:resolve")
     @Operation(summary = "Resolve a party by RČ blind index (ADR-0072 dedup gate, internal only)")
     suspend fun resolveParty(req: ResolvePartyRequest): Response {

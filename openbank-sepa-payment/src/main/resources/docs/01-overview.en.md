@@ -52,7 +52,7 @@
 - **admin-ui / payment-initiating channels** (via Keycloak token) — operators with `ROLE_PAYMENTS` / `ROLE_OPERATOR` initiate transfers.
 - **clearing / ledger pipeline** — consume the emitted Kafka events (not direct REST callers).
 - **operations / clearing back-office** — drive status transitions (`PROCESSING` → `COMPLETED` / `RETURNED`).
-- **service callers** — `ROLE_SERVICE` may list payments.
+- **service callers** — `ROLE_API` may list payments.
 
 ## Dependencies
 

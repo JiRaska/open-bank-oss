@@ -51,7 +51,7 @@
 
 - **platební kanály / operátoři** (přes Keycloak token, role `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_PAYMENTS`) — zakládají a řídí platby.
 - **admin-ui / compliance ops** — čtou detail a seznamy plateb, ruční přechody stavu, kontrola držených plateb.
-- **další služby** (`ROLE_SERVICE`) — read-only přístup k výpisu.
+- **další služby** (`ROLE_API`) — read-only přístup k výpisu.
 
 ## Závislosti
 

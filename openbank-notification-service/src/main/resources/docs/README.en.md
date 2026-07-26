@@ -24,4 +24,4 @@ This documentation is published directly by the service at the management endpoi
 - **Outbox:** table `notification_outbox` → dispatcher channel `notification-events-out` (a generic outbox-relay; the outgoing Kafka topic binding is **TBD** — not yet wired in `application.yaml`).
 - **Push:** FCM / APNs adapters, **off by default** (Vault-injected credentials); a disabled adapter records a successful no-op. PUSH fans out to every ACTIVE device token registered for the party.
 - **Idempotency:** none on the inbound path by design — delivery is at-least-once and a redelivery re-persists a fresh row (acceptable because no money path).
-- **Auth:** Keycloak OIDC. Read APIs require `ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_SERVICE`; dispatch-control (break-glass) requires `ROLE_OPERATOR`/`ROLE_ADMIN` with four-eyes on resume.
+- **Auth:** Keycloak OIDC. Read APIs require `ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API`; dispatch-control (break-glass) requires `ROLE_OPERATOR`/`ROLE_ADMIN` with four-eyes on resume.

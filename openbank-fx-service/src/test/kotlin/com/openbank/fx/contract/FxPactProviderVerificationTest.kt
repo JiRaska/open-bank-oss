@@ -42,11 +42,13 @@ import java.util.concurrent.TimeUnit
  * (ADR-0063 P2 Batch B). Seeds an EUR/CZK SPOT rate so that GET /api/v1/fx/rates/EUR/CZK
  * returns 200 with the expected shape. `@TestSecurity` must grant a role the endpoint's
  * `@RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")` actually
- * accepts — `ROLE_SERVICE` is not in that list and, per the Keycloak realm config
- * (`openbank-realm.json` / `realm-template.json`), isn't even a realm role any real client
- * is ever granted. The real M2M caller (transaction-service, via the shared
- * `openbank-services` client) authenticates as `service-account-openbank-services`, whose
- * realmRoles is `["ROLE_OPERATOR"]` — that's the role this test must present too, or every
+ * accepts — the M2M role is not in that list. Since #2442 that role is `ROLE_API`, granted to
+ * `service-account-openbank-services` in both realms; before it, the name in use here was
+ * `ROLE_SERVICE`, which no realm declared at all. Either way this endpoint does not admit the
+ * M2M principal, so the test must present an operator-grade role: the real M2M caller
+ * (transaction-service, via the shared `openbank-services` client) authenticates as
+ * `service-account-openbank-services`, which also carries `ROLE_OPERATOR` in the dev realm —
+ * that's the role this test presents, or every
  * verification 403s before reaching the resource method (confirmed live: verification result
  * #2247, 2026-07-11, and broken since this test was added on 2026-07-02 without ever being
  * noticed locally, since it's `@EnabledIfSystemProperty(pactbroker.url)`-skipped without a

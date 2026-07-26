@@ -24,4 +24,4 @@ Tuto dokumentaci publikuje sama služba na management endpointu `/q/openbank/doc
 - **Outbox:** tabulka `notification_outbox` → kanál dispatcheru `notification-events-out` (obecné outbox-relay; navázání odchozího Kafka topicu je **TBD** — zatím není v `application.yaml`).
 - **Push:** adaptéry FCM / APNs, **ve výchozím stavu vypnuté** (přihlašovací údaje injektované z Vaultu); vypnutý adaptér zaznamená úspěšný no-op. PUSH se rozesílá na každý ACTIVE device token registrovaný pro party.
 - **Idempotence:** na vstupní cestě záměrně žádná — doručení je at-least-once a redelivery uloží nový řádek (přijatelné, protože nejde o peněžní cestu).
-- **Auth:** Keycloak OIDC. Čtecí API vyžadují `ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_SERVICE`; řízení výpravy (break-glass) vyžaduje `ROLE_OPERATOR`/`ROLE_ADMIN` s four-eyes při resume.
+- **Auth:** Keycloak OIDC. Čtecí API vyžadují `ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API`; řízení výpravy (break-glass) vyžaduje `ROLE_OPERATOR`/`ROLE_ADMIN` s four-eyes při resume.

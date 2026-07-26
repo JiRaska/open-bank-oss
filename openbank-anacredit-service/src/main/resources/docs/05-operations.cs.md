@@ -90,7 +90,7 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 
 ### 403 na každém volání
 
-Resource vyžaduje jednu z rolí `ROLE_OPERATOR / ROLE_ADMIN / ROLE_AUDITOR / ROLE_COMPLIANCE / ROLE_SERVICE`. Zkontroluj realm role tokenu.
+Resource vyžaduje jednu z rolí `ROLE_OPERATOR / ROLE_ADMIN / ROLE_AUDITOR / ROLE_COMPLIANCE / ROLE_API`. Zkontroluj realm role tokenu.
 
 ## Matice verzí tech stacku
 

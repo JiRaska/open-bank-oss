@@ -28,12 +28,12 @@ import org.junit.jupiter.api.extension.ExtendWith
  * Git-pact (`@PactFolder`, resolved relative to this module's working directory at `../pacts` =
  * the monorepo-root `pacts/` dir), matching `LedgerPactProviderVerificationTest`'s pattern — always
  * runs, no broker, no CI secret required. `@TestSecurity` matches the endpoint's
- * `@RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")`, mirroring how every real rail
+ * `@RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")`, mirroring how every real rail
  * authenticates (`ClearingSimulatorApiIT`'s own `@TestSecurity(user = "rail", roles =
- * ["ROLE_SERVICE"])`).
+ * ["ROLE_API"])`).
  */
 @QuarkusTest
-@TestSecurity(user = "rail", roles = ["ROLE_SERVICE"])
+@TestSecurity(user = "rail", roles = ["ROLE_API"])
 @Provider("openbank-clearing-simulator")
 @PactFolder("../pacts")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")

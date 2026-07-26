@@ -8,7 +8,7 @@ The REST contract is described in [`openapi.yaml`](../openapi.yaml) (OpenAPI **3
 
 - **Base path:** `/api/v1/disputes`
 - **Media type:** `application/json` (consumes & produces)
-- **Auth:** Bearer JWT (Keycloak OIDC). Class-level `@RolesAllowed("ROLE_VIEWER","ROLE_OPERATOR","ROLE_ADMIN","ROLE_SERVICE")`; reads allow `ROLE_VIEWER`, mutations require `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_SERVICE`.
+- **Auth:** Bearer JWT (Keycloak OIDC). Class-level `@RolesAllowed("ROLE_VIEWER","ROLE_OPERATOR","ROLE_ADMIN","ROLE_API")`; reads allow `ROLE_VIEWER`, mutations require `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_API`.
 
 ## Endpoints
 

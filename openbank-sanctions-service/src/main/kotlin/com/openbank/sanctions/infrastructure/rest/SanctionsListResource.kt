@@ -25,13 +25,13 @@ import java.util.UUID
 class SanctionsListResource(private val service: SanctionsListService) {
 
     @GET
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.list", resource = "")
     suspend fun listAll(): Response = Response.ok(service.listAll()).build()
 
     @GET
     @Path("/{id}")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "sanctions.read", resource = "#id")
     suspend fun getById(@PathParam("id") id: UUID): Response =
         service.getById(id)?.let { Response.ok(it).build() } ?: Response.status(404).build()

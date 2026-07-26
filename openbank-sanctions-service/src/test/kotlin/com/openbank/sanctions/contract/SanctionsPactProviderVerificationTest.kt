@@ -49,7 +49,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  * failure — relevant if the folder is ever emptied ahead of a broker migration.
  *
  * Authentication: `POST /api/v1/sanctions/screen` is
- * `@RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")`. `@TestSecurity` cannot annotate a
+ * `@RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")`. `@TestSecurity` cannot annotate a
  * `@TestTemplate` method, so it is applied at class level and Pact replays every interaction as that
  * principal. The endpoint additionally carries `@Authorize(action = "sanctions.create")`; with
  * `authz.enforce` at its production default of `true` and no OPA sidecar in a test JVM the

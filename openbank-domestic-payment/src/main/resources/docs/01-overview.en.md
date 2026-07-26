@@ -51,7 +51,7 @@
 
 - **payment channels / operators** (via Keycloak token, roles `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_PAYMENTS`) — create and drive payments.
 - **admin-ui / compliance ops** — read payment detail and lists, manual status transitions, review held payments.
-- **other services** (`ROLE_SERVICE`) — read-only list access.
+- **other services** (`ROLE_API`) — read-only list access.
 
 ## Dependencies
 

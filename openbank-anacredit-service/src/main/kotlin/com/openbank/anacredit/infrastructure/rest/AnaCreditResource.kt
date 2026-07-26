@@ -29,7 +29,7 @@ import java.time.LocalDate
 @ApplicationScoped
 @Path("/api/v1/anacredit")
 @Produces(MediaType.APPLICATION_JSON)
-@RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_COMPLIANCE", "ROLE_SERVICE")
+@RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_COMPLIANCE", "ROLE_API")
 class AnaCreditResource(
     private val register: RegisterExposureUseCase,
     private val listExposures: ListExposuresUseCase,

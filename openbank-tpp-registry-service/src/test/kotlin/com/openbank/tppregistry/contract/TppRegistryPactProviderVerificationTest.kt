@@ -48,7 +48,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  * `V1__init.sql` already seeds `CZ-CNB-TEST-AISP` ACTIVE/AISP with no QWAC expiry, so the state
  * handler below needs no setup either.
  *
- * `@TestSecurity` matches `checkAuthorization`'s `@RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR",
+ * `@TestSecurity` matches `checkAuthorization`'s `@RolesAllowed("ROLE_API", "ROLE_OPERATOR",
  * "ROLE_ADMIN")` — psd2 calls it with an M2M client-credentials token in production (ADR-0018).
  * `@TestSecurity` cannot annotate a `@TestTemplate`, hence the class-level annotation. The lone
  * `tpp-events-out` Kafka emitter is swapped to the in-memory connector so no broker is needed to
@@ -61,7 +61,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 @QuarkusTest
 @QuarkusTestResource(TppRegistryPactProviderVerificationTest.InMemoryKafkaResource::class)
 @QuarkusTestResource(com.openbank.tppregistry.it.PostgresRedisTestResource::class)
-@TestSecurity(user = "pact-verifier", roles = ["ROLE_SERVICE", "ROLE_OPERATOR"])
+@TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-tpp-registry-service")
 @PactFolder("../pacts")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")

@@ -53,7 +53,7 @@
 
 - **admin-ui** (via Keycloak token) — operators configure rates, trigger accrual/capitalization, and assemble remittances.
 - **scheduler** (internal Quarkus `@Scheduled`) — daily accrual cron `0 0 1 * * ?` and monthly capitalization cron `0 0 2 1 * ?`.
-- **service callers** (`ROLE_SERVICE`) — batch / orchestration triggers.
+- **service callers** (`ROLE_API`) — batch / orchestration triggers.
 
 ## Dependencies
 

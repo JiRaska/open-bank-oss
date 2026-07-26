@@ -33,7 +33,7 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Complaints", description = "Regulatory complaints handling with statutory deadline clock (ADR-0085)")
-@RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+@RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
 class ComplaintResource(
     private val fileUseCase: FileComplaintUseCase,
     private val handleUseCase: HandleComplaintUseCase,
@@ -41,7 +41,7 @@ class ComplaintResource(
 ) {
     @POST
     @Operation(summary = "File a new complaint")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     fun file(request: FileComplaintRequest): Uni<Response> =
         fileUseCase.file(request).map { Response.status(HTTP_CREATED).entity(it).build() }
             .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
@@ -63,7 +63,7 @@ class ComplaintResource(
 
     @POST
     @Path("/{id}/interim-reply")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "complaint.update", resource = "#id")
     @Operation(summary = "Record an interim reply (extends the statutory deadline to 35 business days)")
     fun interimReply(@PathParam("id") id: UUID, request: InterimReplyRequest): Uni<Response> =
@@ -74,7 +74,7 @@ class ComplaintResource(
 
     @POST
     @Path("/{id}/resolve")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "complaint.update", resource = "#id")
     @Operation(summary = "Resolve a complaint (records an outcome + optional redress flag)")
     fun resolve(@PathParam("id") id: UUID, request: ResolveComplaintRequest): Uni<Response> =
@@ -85,7 +85,7 @@ class ComplaintResource(
 
     @POST
     @Path("/{id}/close")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "complaint.update", resource = "#id")
     @Operation(summary = "Close a complaint (records outcome + root-cause code + optional redress flag)")
     fun close(@PathParam("id") id: UUID, request: CloseComplaintRequest): Uni<Response> =

@@ -109,5 +109,5 @@ Mandate faults are mapped by `MandateNotFoundMapper` (404) and `IllegalMandateTr
 ## Authentication & authorisation
 
 - **AuthN:** Keycloak OIDC, RS256 JWT bearer token (`auth-server-url .../realms/openbank`, client `openbank-services`).
-- **AuthZ:** Quarkus `@RolesAllowed`. Mutations require one of `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS`, `ROLE_SERVICE`; read endpoints (`GET` list/fetch, `GET refund-assessment`) additionally allow `ROLE_VIEWER`.
+- **AuthZ:** Quarkus `@RolesAllowed`. Mutations require one of `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS`, `ROLE_API`; read endpoints (`GET` list/fetch, `GET refund-assessment`) additionally allow `ROLE_VIEWER`.
 - CORS is restricted to `http://localhost:3000` in the shipped config; security headers (CSP, HSTS, X-Frame-Options DENY, nosniff) are set on every response.

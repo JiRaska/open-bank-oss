@@ -47,7 +47,7 @@ import java.util.UUID
     name = "SEPA Direct Debit",
     description = "Debtor-side SDD mandate vault, authorisation and refund assessment (ADR-0036)",
 )
-@RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_SERVICE")
+@RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
 class SddResource(
     private val register: RegisterMandateUseCase,
     private val confirm: ConfirmMandateUseCase,
@@ -82,7 +82,7 @@ class SddResource(
 
     @GET
     @Path("/mandates")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
     @Authorize(action = "sdd.list")
     @Operation(summary = "List an account's mandates")
     fun listMandates(@QueryParam("accountId") accountId: UUID): Uni<Response> =
@@ -90,7 +90,7 @@ class SddResource(
 
     @GET
     @Path("/mandates/{id}")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
     @Authorize(action = "sdd.read", resource = "#id")
     @Operation(summary = "Fetch a single mandate")
     fun getMandate(@PathParam("id") id: UUID): Uni<Response> =
@@ -161,7 +161,7 @@ class SddResource(
 
     @GET
     @Path("/mandates/{id}/refund-assessment")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_SERVICE")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
     @Authorize(action = "sdd.read", resource = "#id")
     @Operation(summary = "Assess a post-settlement refund claim (8-week unconditional / B2B none)")
     fun assessRefund(

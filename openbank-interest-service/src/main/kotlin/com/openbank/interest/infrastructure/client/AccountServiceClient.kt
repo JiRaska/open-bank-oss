@@ -22,7 +22,7 @@ import java.util.UUID
 /**
  * REST client for `openbank-account-service`, used by the daily accrual run to discover accounts
  * and read balances. OIDC service-to-service auth is attached by [OidcClientRequestReactiveFilter]
- * (the `openbank-services` M2M token, ROLE_SERVICE — the same principal billing-service uses for
+ * (the `openbank-services` M2M token, ROLE_API — the same principal billing-service uses for
  * these exact endpoints, so no new OPA policy is required).
  */
 @RegisterRestClient(configKey = "account-service")

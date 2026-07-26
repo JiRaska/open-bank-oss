@@ -155,7 +155,7 @@ class AccountResource(
 
     @GET
     @Path("/{accountId}")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.read", resource = "#accountId")
     @Operation(summary = "Get account by ID")
     suspend fun getAccount(
@@ -169,7 +169,7 @@ class AccountResource(
 
     @GET
     @Path("/iban/{iban}")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.read", resource = "#iban")
     @Operation(summary = "Get account by IBAN")
     suspend fun getAccountByIban(
@@ -182,7 +182,7 @@ class AccountResource(
     }
 
     @GET
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.list")
     @Operation(summary = "List accounts for a party")
     suspend fun listAccounts(
@@ -197,7 +197,7 @@ class AccountResource(
 
     @GET
     @Path("/search")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.search")
     @Operation(summary = "Search accounts by IBAN fragment (trigram), cursor-paginated")
     suspend fun searchAccounts(
@@ -218,7 +218,7 @@ class AccountResource(
     // segment wins over the /{accountId} template per JAX-RS matching, so no route ambiguity.
     @GET
     @Path("/active")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.list")
     @Operation(summary = "List all ACTIVE accounts fleet-wide, cursor-paginated (billing discovery)")
     suspend fun listActiveAccounts(
@@ -231,7 +231,7 @@ class AccountResource(
 
     @GET
     @Path("/{accountId}/balance")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.read", resource = "#accountId")
     @Operation(summary = "Get account balance")
     suspend fun getBalance(
@@ -258,7 +258,7 @@ class AccountResource(
 
     @GET
     @Path("/{accountId}/pockets")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.read", resource = "#accountId")
     @Operation(summary = "List currency pockets of an account")
     suspend fun listPockets(
@@ -370,7 +370,7 @@ class AccountResource(
 
     @GET
     @Path("/{accountId}/pockets/resolve")
-    @RolesAllowed(Roles.SERVICE, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.read", resource = "#accountId")
     @Operation(summary = "Resolve which pocket settles a payment in a given currency")
     suspend fun resolvePocket(

@@ -94,7 +94,7 @@ paths:
       summary: Handle inbound pacs.004 payment return from clearing
       operationId: handleSepaPaymentReturn
       security:
-        - bearerAuth: [ROLE_SERVICE, ROLE_ADMIN]
+        - bearerAuth: [ROLE_API, ROLE_ADMIN]
       requestBody:
         required: true
         content:

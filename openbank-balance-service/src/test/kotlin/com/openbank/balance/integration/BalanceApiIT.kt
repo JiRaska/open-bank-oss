@@ -64,7 +64,7 @@ class BalanceApiIT {
 
     @Test
     @Order(4)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `POST initialize creates a CZK pocket with opening balance`() {
         Given {
             contentType("application/json")
@@ -81,7 +81,7 @@ class BalanceApiIT {
 
     @Test
     @Order(5)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `POST initialize is idempotent - replay returns the existing pocket unchanged`() {
         // Second initialize for the same (account, currency) must NOT reset the balance.
         val replay = (
@@ -101,7 +101,7 @@ class BalanceApiIT {
 
     @Test
     @Order(6)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `POST initialize creates a second currency pocket (EUR) on the same account`() {
         Given {
             contentType("application/json")
@@ -176,7 +176,7 @@ class BalanceApiIT {
 
     @Test
     @Order(11)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `POST hold reserves funds and reduces available, not booked`() {
         val response = (
             Given {
@@ -207,7 +207,7 @@ class BalanceApiIT {
 
     @Test
     @Order(12)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `POST hold beyond available funds returns 422 INSUFFICIENT_FUNDS`() {
         Given {
             contentType("application/json")
@@ -222,7 +222,7 @@ class BalanceApiIT {
 
     @Test
     @Order(13)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `DELETE hold releases the reservation and restores available`() {
         val id = holdId ?: return
         Given { this } When {
@@ -243,7 +243,7 @@ class BalanceApiIT {
 
     @Test
     @Order(14)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_SERVICE"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_API"])
     fun `DELETE unknown hold returns 404`() {
         Given { this } When {
             delete("/api/v1/balances/holds/${UUID.randomUUID()}")

@@ -35,7 +35,7 @@ class EudiPresentationResource(private val eudiVerify: EudiVerifyPresentationUse
 
     @POST
     @Path("/verify-presentation")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "identity.eudi.verify")
     @Operation(summary = "Verify an EUDI wallet PID presentation and resolve the identity (ADR-0094 tier-0)")
     suspend fun verifyPresentation(request: VerifyPresentationRequest): Response {
@@ -51,7 +51,7 @@ class EudiPresentationResource(private val eudiVerify: EudiVerifyPresentationUse
 
     @POST
     @Path("/verify-mdoc")
-    @RolesAllowed("ROLE_SERVICE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "identity.eudi.verify")
     @Operation(summary = "Verify an ISO 18013-5 mdoc PID (CBOR/COSE) and resolve the identity (ADR-0094 tier-0)")
     suspend fun verifyMdoc(request: VerifyMdocRequest): Response {

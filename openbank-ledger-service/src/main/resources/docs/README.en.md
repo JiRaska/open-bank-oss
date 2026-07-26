@@ -23,4 +23,4 @@ This documentation is published directly by the service at the management endpoi
 - **Persistence:** dedicated PostgreSQL database `openbank_ledger`, Flyway migrations V1..V8; `journal_entries` is RANGE-partitioned by `entry_date` (per-year)
 - **Outbox:** `ledger_outbox` → Kafka topic `openbank.ledger.journal.posted` (regulatory-grade dispatch, ADR-0050)
 - **Idempotency:** `idempotencyKey` field on the post-journal request → `ledger_idempotency` table (DB-backed, not Redis)
-- **Auth:** Keycloak OIDC (RS256 JWT). Reads gated to `ROLE_SERVICE`/`ROLE_AUDITOR`/`ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`; posting/reversing/FX-revaluation are `ROLE_OPERATOR` only. No endpoint is unauthenticated (ADR-0018).
+- **Auth:** Keycloak OIDC (RS256 JWT). Reads gated to `ROLE_API`/`ROLE_AUDITOR`/`ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`; posting/reversing/FX-revaluation are `ROLE_OPERATOR` only. No endpoint is unauthenticated (ADR-0018).
