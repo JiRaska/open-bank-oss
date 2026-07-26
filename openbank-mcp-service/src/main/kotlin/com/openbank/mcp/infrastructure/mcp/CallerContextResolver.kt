@@ -14,9 +14,12 @@ import org.eclipse.microprofile.jwt.JsonWebToken
  * PDP must be asked about the *real* agent and the *real* consent, not the phase-1 placeholder.
  *
  * Returns `null` when no agent token is present — OIDC is still tenant-disabled, or the call is
- * anonymous — so [McpEndpoint] can fall back to the phase-1 placeholder identity WITHOUT this class
- * carrying that constant. That keeps the fallback (and the #2206 CI guard's `agent:mcp-anonymous`
- * anchor) in one place, `McpEndpoint`.
+ * anonymous. There is no longer any fallback identity behind that `null`: [McpEndpoint] audits the
+ * failure as `unknown`/DENIED and answers "Authorization unavailable". The phase-1
+ * `agent:mcp-anonymous` placeholder this KDoc used to describe as the fallback was removed by the
+ * cutover itself, and a shared fallback must not come back — reintroducing one would collapse every
+ * caller onto a single charter's grant, so `check-mcp-stub-ports-vs-caller-auth.sh` now fails on the
+ * constant appearing anywhere in this service's code (#2401).
  *
  * The token's `sub` (shape `agent:<id>`, which the shared `AuthorizeInterceptor` classifies as
  * `AI_AGENT`) is the OPA principal id; the `consent_id` claim names the presented consent.

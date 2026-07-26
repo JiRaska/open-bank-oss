@@ -31,8 +31,15 @@
 #   those, only a class that is actually reachable.
 #
 #   This guard fails if a non-Stub, non-@Vetoed port implementation exists in the service
-#   while McpEndpoint still carries the `agent:mcp-anonymous` placeholder constant. It is a
-#   REGRESSION guard: 0 violations today (StubReadPorts wired; RealAccountReadPort @Vetoed).
+#   while McpEndpoint still carries the `agent:mcp-anonymous` placeholder constant.
+#
+# POST-CUTOVER (#2401) — the invariant above is now UNREACHABLE, and that is why there is a
+# second one. ADR-0195 step 4 completed the cutover: the placeholder is gone from McpEndpoint,
+# RealAccountReadPort is wired, and `placeholder_present` is therefore permanently 0, so the
+# pre-cutover rule can never fire again. A guard whose trigger was deleted by the fix it guarded
+# still reads as coverage while checking nothing. Section 3 inverts it: after the cutover the
+# SHARED FALLBACK IDENTITY is the violation, because every caller now presents its own `sub` and
+# reintroducing one id would silently collapse them all onto one charter's grant.
 #
 # Kotlin class headers routinely span multiple lines, so the scan uses python3 (this repo's
 # existing convention for structural guards, e.g. check-threat-models.py) rather than a
@@ -57,10 +64,85 @@ if [[ ! -f "$ENDPOINT" ]]; then
   exit 1
 fi
 
-# 1. Is resolveContext still the phase-1 placeholder? The load-bearing signal is
-#    the literal placeholder principal id; a real OAuth/consent resolution removes it.
+# Does a Kotlin file contain the forbidden id as CODE (not in a comment)? Prints the path when it
+# does, nothing when it does not. Kotlin block comments NEST, so the stripper mirrors that; a KDoc
+# containing "/*" must not close the comment early and leak the rest of the file back into scope.
+kotlin_code_mentions() {
+  python3 - "$@" <<'PYSTRIP'
+import sys
+from pathlib import Path
+
+FORBIDDEN = "agent:mcp-anonymous"
+
+
+def strip_comments(text: str) -> str:
+    """Kotlin source with // and (NESTING) /* */ comments removed, string literals preserved."""
+    out = []
+    i, n, depth = 0, len(text), 0
+    while i < n:
+        two = text[i:i + 2]
+        if depth:
+            if two == "/*":
+                depth += 1
+                i += 2
+            elif two == "*/":
+                depth -= 1
+                i += 2
+            else:
+                i += 1
+            continue
+        if two == "/*":
+            depth = 1
+            i += 2
+        elif two == "//":
+            j = text.find("\n", i)
+            i = n if j == -1 else j
+        elif text[i] == '"':
+            if text[i:i + 3] == '"""':
+                j = text.find('"""', i + 3)
+                j = n if j == -1 else j + 3
+                out.append(text[i:j])
+                i = j
+            else:
+                j = i + 1
+                while j < n and text[j] != '"':
+                    j += 2 if text[j] == "\\" else 1
+                out.append(text[i:j + 1])
+                i = j + 1
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
+targets = []
+for arg in sys.argv[1:]:
+    path = Path(arg)
+    targets.extend(sorted(path.rglob("*.kt")) if path.is_dir() else [path])
+print("\n".join(str(p) for p in targets if FORBIDDEN in strip_comments(p.read_text())))
+PYSTRIP
+}
+
+# 0. Has the ADR-0195 step-4 cutover happened? McpEndpoint resolving the caller through
+#    CallerContextResolver is the structural signal — it is the class that reads the token's real
+#    `sub`. This selects WHICH invariant applies below, so that neither one is silently vacuous:
+#    pre-cutover the placeholder is expected and a real port is the violation; post-cutover the
+#    placeholder is itself the violation. Without this split the pre-cutover rule survives the fix
+#    that made it unreachable and keeps reporting a green about nothing.
+cutover_done=0
+if grep -q 'CallerContextResolver' "$ENDPOINT"; then
+  cutover_done=1
+fi
+
+# 1. Is resolveContext still the phase-1 placeholder? The load-bearing signal is the literal
+#    placeholder principal id, IN CODE. Deliberately not a raw grep: this repo has been bitten
+#    three times by a text guard flagging the prose that explains the bug it exists to catch, and
+#    that is not hypothetical here — with a raw grep, adding a KDoc that merely mentions the
+#    retired `agent:mcp-anonymous` made this guard fire and announce an "UNAUTHENTICATED read of
+#    any account" that did not exist. Comments are stripped (Kotlin block comments NEST) so only a
+#    real constant counts.
 placeholder_present=0
-if grep -qE 'agent:mcp-anonymous' "$ENDPOINT"; then
+if [[ -n "$(kotlin_code_mentions "$ENDPOINT")" ]]; then
   placeholder_present=1
 fi
 
@@ -140,13 +222,39 @@ print("\n".join(offenders))
 PY
 )
 
-if [[ "$placeholder_present" -eq 1 && -n "$non_stub" ]]; then
+if [[ "$cutover_done" -eq 0 && "$placeholder_present" -eq 1 && -n "$non_stub" ]]; then
   echo "::error title=MCP caller-auth guard (BLOCKER #2206)::A non-stub, non-@Vetoed read/proposal port is wired while McpEndpoint.resolveContext() still returns the hardcoded 'agent:mcp-anonymous' placeholder. This turns get_balance/list_accounts into an UNAUTHENTICATED read of any account. Land real caller identity + PSD2 consent binding (resolveContext) BEFORE or ATOMICALLY WITH the real port — or mark the class @Vetoed if it is intentionally not yet reachable. Offending impl(s): $(echo "$non_stub" | tr '\n' '; ')" >&2
   exit 1
 fi
 
-if [[ "$placeholder_present" -eq 1 ]]; then
-  echo "check-mcp-stub-ports-vs-caller-auth: OK — placeholder identity still in place, only stub (or @Vetoed) ports wired (phase 1)."
-else
-  echo "check-mcp-stub-ports-vs-caller-auth: OK — placeholder identity removed; real caller auth landed, real ports permitted."
+if [[ "$cutover_done" -eq 0 ]]; then
+  echo "check-mcp-stub-ports-vs-caller-auth: OK — pre-cutover; placeholder identity in place, only stub (or @Vetoed) ports wired (phase 1)."
+  exit 0
 fi
+
+# 3. POST-CUTOVER (#2401). Everything above is a pre-cutover guard, and ADR-0195 step 4 finished
+#    the cutover: `agent:mcp-anonymous` no longer appears in McpEndpoint, so `placeholder_present`
+#    is now permanently 0 and section 1 can never fire again. A guard whose trigger condition was
+#    deleted by the fix it was guarding does not become harmless — it becomes a green that asserts
+#    nothing, which is worse than no guard because it still reads as coverage.
+#
+#    So the invariant inverts. Before the cutover the placeholder was the accepted state and a real
+#    port was the danger. After it, the placeholder itself is the danger: every MCP caller now
+#    presents its own `sub`, and reintroducing a shared fallback id would silently collapse all of
+#    them back onto the single `mcp-anonymous` charter's five-tool grant — a second caller
+#    inheriting the first's authorization by construction, while per-caller identity still looks
+#    correct in the audit trail. That is exactly the widening #2401 is open about, and no other
+#    gate can see it.
+#
+#    Checked against CODE, not prose: Kotlin comments are stripped first (block comments NEST in
+#    Kotlin, so a KDoc containing "/*" must not close the comment early), because this guard's own
+#    documentation quotes the forbidden id and a naive text match would flag the explanation of the
+#    bug instead of the bug.
+fallback_reintroduced="$(kotlin_code_mentions "$SVC")"
+
+if [[ -n "$fallback_reintroduced" ]]; then
+  echo "::error title=MCP shared-fallback identity reintroduced (#2401)::Caller authentication has landed (ADR-0195 step 4): every MCP caller presents its own token 'sub' and the PDP is asked about that caller. A source file now hardcodes 'agent:mcp-anonymous' again, which collapses every caller back onto that single charter's five-tool grant — a new caller silently inherits the previous one's authorization while the audit trail still shows per-caller identity. Give the caller its own charter in openbank-libs/governance/agents.yaml instead. Offending file(s): $(echo "$fallback_reintroduced" | tr '\n' '; ')" >&2
+  exit 1
+fi
+
+echo "check-mcp-stub-ports-vs-caller-auth: OK — caller auth landed, real ports permitted, and no shared fallback identity reintroduced."
