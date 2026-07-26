@@ -8,6 +8,28 @@ out of it (they are path-scoped, not less important — several are live-inciden
 ## Engineering notes (common pitfalls)
 
 ### GitOps / Kubernetes
+- **`realm-template.json` is read ONLY on Keycloak's cold start (`--import-realm`), so editing it
+  changes nothing on a running realm — and ArgoCD reports `Synced/Healthy` throughout.** ArgoCD
+  manages the ConfigMap, and the ConfigMap does match the repo; the drift is one layer below what it
+  can see. Measured 2026-07-26 (#2540): the live sandbox realm was missing `ROLE_KYC`,
+  `ROLE_KYC_OPENER`, `ROLE_KYC_REVIEWER` and `ROLE_SUPERVISOR` that the template declared, and
+  carried `ROLE_DEMO` that it did not. Nothing 403'd — every `@RolesAllowed` also listed a role that
+  did exist — but the ADR-0116 KYC four-eyes split cannot be enforced by roles that are absent, so
+  opener and reviewer both fell through to ROLE_ADMIN/ROLE_OPERATOR and one identity could do both.
+  `check-roles-allowed-realm.py` was green the whole time: it compares the code to the TEMPLATE.
+  Verify against the realm that actually runs (`kcadm.sh get roles -r openbank`) before believing any
+  claim about which roles exist, and apply additions with `kcadm` — the file alone will not.
+- **A change under `openbank-libs-*/src/main/**` rebuilds the WHOLE fleet, and the deploy that
+  follows fails on pacts that do not exist yet.** `Detect changed services` returned 58 modules for
+  the #2475 role sweep; at `max-parallel: 4` and ~45 min a service that is ~11 h of queue. Auto-deploy
+  fires on `push`, runs immediately, and `can-i-deploy` answers `NOT deployable` — not because a
+  contract regressed but because the build has not published anything yet ("no pacts or verifications
+  have been published for version X"). Both readings print identically. Auto-deploy has no
+  `workflow_run` trigger and no schedule, so it never retries: the services stay on the old image
+  until some later commit happens to touch them (issue #2549). After any libs-level change, expect to
+  re-dispatch `auto-deploy.yml` per service once Services CI finishes, and check
+  `GET /pacticipants/openbank-<svc>/versions/<sha>` on the broker before concluding anything from a
+  `can-i-deploy` verdict.
 - **A no-swap node under memory pressure can hang whole-guest instead of OOM-killing.** Kernel
   reclaim livelocks; kubelet and the SSM agent starve together while EC2 status checks stay `ok`,
   so the node lingers NotReady and singleton pods (e.g. the ArgoCD application-controller) strand
