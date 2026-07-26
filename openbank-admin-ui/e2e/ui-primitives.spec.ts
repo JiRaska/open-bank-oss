@@ -128,7 +128,20 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
       route.fulfill({ status: 200, body: JSON.stringify(CONSENTS) }),
     )
     await page.goto('/consents')
-    await page.getByRole('button', { name: /Vyhledat|Look up/ }).click()
+
+    // The grantee lens has to be selected first. #2568 wrote this test when /consents had a
+    // single grantee-id field; #2604 added the party/grantee lens selector and made `party` the
+    // default, so the "Look up" button this test clicks is no longer rendered on load — the
+    // click waited 30 s for a locator that never resolves and every admin-ui PR went red.
+    // Selecting the lens is not a workaround: the mocked route below IS the grantee endpoint,
+    // so this is the flow the test was always asserting about.
+    await page.getByRole('combobox').selectOption('grantee')
+    // Selecting `grantee` seeds the input with MARKETING_GRANTEE, so the button is enabled;
+    // asserting that before clicking keeps a future `disabled` regression from re-reading as
+    // this same 30 s timeout.
+    const lookUp = page.getByRole('button', { name: /Vyhledat|Look up/ })
+    await expect(lookUp).toBeEnabled()
+    await lookUp.click()
 
     const active = page.locator('.badge', { hasText: /^ACTIVE$/ })
     const revoked = page.locator('.badge', { hasText: /^REVOKED$/ })
