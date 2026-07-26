@@ -77,6 +77,10 @@
       {
         "name": "ROLE_LENDING_OFFICER",
         "description": "Lending officer: opens and services loan applications, cannot take the credit decision (four-eyes with ROLE_CREDIT_RISK). Declared in @RolesAllowed since the service shipped; created here by issue #2442"
+      },
+      {
+        "name": "ROLE_DEMO",
+        "description": "Demo/guided-tour badge shown by the admin-UI (src/lib/auth/roles.ts). Existed in the live sandbox realm and in the docker dev realm but was missing here, so a cold-started cluster would not have it — added by the #2442 drift reconciliation"
       }
     ]
   },
