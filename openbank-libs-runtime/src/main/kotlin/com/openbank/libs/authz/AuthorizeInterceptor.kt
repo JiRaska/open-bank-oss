@@ -26,6 +26,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
+import kotlin.reflect.full.memberProperties
 import kotlin.reflect.jvm.kotlinFunction
 
 /**
@@ -381,7 +382,11 @@ class AuthorizeInterceptor {
 
     private fun extractResource(ctx: InvocationContext, annotation: Authorize, expr: String): ResourceRef? {
         if (!expr.startsWith("#")) return null
-        val paramName = expr.substring(1)
+        // "#param" -> whole parameter; "#param.field" -> one property of that parameter
+        // (ADR-0206), resolved via the parameter's own primary-constructor properties —
+        // one level deep only, no nested paths.
+        val (paramName, fieldName) = expr.substring(1).split('.', limit = 2)
+            .let { it[0] to it.getOrNull(1) }
         val kFunction = ctx.method.kotlinFunction ?: return null
         // First parameter on instance functions is the receiver; skip it.
         val paramIndex = kFunction.parameters
@@ -390,7 +395,12 @@ class AuthorizeInterceptor {
         if (paramIndex < 0 || paramIndex >= ctx.parameters.size) return null
         val argValue = ctx.parameters[paramIndex] ?: return null
         val type = annotation.action.substringBefore('.')
-        return ResourceRef(type = type, id = argValue.toString())
+        val resolvedValue = if (fieldName == null) {
+            argValue
+        } else {
+            resolveResourceField(argValue, fieldName, log) ?: return null
+        }
+        return ResourceRef(type = type, id = resolvedValue.toString())
     }
 
     private fun principalType(sc: SecurityContext): String {
@@ -405,4 +415,25 @@ class AuthorizeInterceptor {
         const val APPROVAL_ID_HEADER = "X-Approval-Id"
         const val PENDING_APPROVAL_STATUS = 202
     }
+}
+
+/**
+ * Resolves one property off [target] by name (ADR-0206 dotted-path resource extraction).
+ * Wrapped in a broad catch — a Java-only or proxied parameter type can make
+ * `memberProperties`/`getter.call` throw (e.g. `KotlinReflectionInternalError`) rather than
+ * simply not find the property, and this must fail closed the same way an unrecognized field
+ * name does, not abort the whole authorization decision with an unrelated reflection exception.
+ */
+@Suppress("TooGenericExceptionCaught")
+private fun resolveResourceField(target: Any, fieldName: String, log: Logger): Any? = try {
+    target::class.memberProperties
+        .firstOrNull { it.name == fieldName }
+        ?.getter?.call(target)
+} catch (ex: Exception) {
+    log.warnf(
+        "resource field extraction failed for '%s': %s — falling back to no resource",
+        fieldName,
+        ex.message,
+    )
+    null
 }
