@@ -5,6 +5,7 @@
 package com.openbank.party.application.usecase
 
 import com.openbank.party.application.port.`in`.UpdateMarketingConsentCommand
+import com.openbank.party.application.port.out.MarketingConsentForwardingException
 import com.openbank.party.application.port.out.MarketingConsentTracking
 import com.openbank.party.domain.model.Address
 import com.openbank.party.domain.model.AmlStatus
@@ -110,6 +111,23 @@ class PartyServiceMarketingConsentTest {
         assertThat(result.consentMarketingUpdatedAt).isEqualTo(now)
         coVerify(exactly = 1) { service.marketingConsentForwarding.revoke(partyId, trackedConsentId, any()) }
         coVerify(exactly = 0) { service.partyRepo.update(any()) }
+    }
+
+    @Test
+    fun `updateMarketingConsent propagates a forwarding failure on revoke instead of swallowing it`() {
+        val service = newService()
+        val trackedConsentId = UUID.randomUUID()
+        coEvery { service.partyRepo.findById(partyId) } returns existingParty(consentMarketing = true)
+        coEvery { service.marketingConsentTracking.findByPartyId(partyId) } returns
+            MarketingConsentTracking(partyId, trackedConsentId, now)
+        coEvery { service.marketingConsentForwarding.revoke(partyId, trackedConsentId, any()) } throws
+            MarketingConsentForwardingException("consent-service unreachable")
+
+        assertThatThrownBy {
+            runBlocking {
+                service.updateMarketingConsent(UpdateMarketingConsentCommand(partyId, marketingConsent = false))
+            }
+        }.isInstanceOf(MarketingConsentForwardingException::class.java)
     }
 
     @Test
