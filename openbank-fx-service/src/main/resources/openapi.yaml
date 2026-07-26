@@ -5,7 +5,7 @@ info:
   title: FX Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.2 -> 1.3): additive
   # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
-  version: 1.3.0
+  version: 1.4.0
   description: >-
     Foreign exchange rates and currency conversion. On convert, the converting party's name is
     synchronously screened against the sanctions lists (ADR-0032): a clean party settles the
@@ -144,6 +144,52 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/v1/fx/cnb/ingest:
+    post:
+      tags: [FX]
+      summary: Ingest the ČNB fixing for a given day (idempotent)
+      description: >-
+        Pulls the ČNB central-bank fixing (kurz devizového trhu) and stores it. Idempotent — a
+        repeated call for the same day does not double-book. Requires ROLE_OPERATOR or ROLE_ADMIN
+        (authorize action `fx.trigger`). The same work runs on a scheduler; this is the operator
+        re-drive.
+      operationId: ingestCnbFixing
+      parameters:
+        - name: date
+          in: query
+          description: Fixing day to ingest. Omit for the latest published fixing.
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: The ingestion result
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/fx/cnb/rates/{base}:
+    get:
+      tags: [FX]
+      summary: The latest ingested ČNB fixing for {base}/CZK
+      description: >-
+        The quote currency is always CZK — this is the central-bank fixing, not the tradable
+        rate served by `/api/v1/fx/rates/{base}/{quote}`. Requires ROLE_VIEWER, ROLE_OPERATOR,
+        ROLE_ADMIN or ROLE_PAYMENTS (authorize action `fx.read`).
+      operationId: getCnbRate
+      parameters:
+        - name: base
+          in: path
+          required: true
+          description: Base currency, case-insensitive.
+          schema:
+            type: string
+            example: EUR
+      responses:
+        '200':
+          description: The stored ČNB fixing for {base}/CZK
+        '404':
+          description: No ČNB rate has been ingested for that pair
 
   /api/v1/fx/conversions/{id}:
     get:

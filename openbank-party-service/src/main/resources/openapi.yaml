@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.8 -> 1.9): additive
   # only — a new PATCH /api/v1/parties/approvals/{id} endpoint and an additional 202 response
   # on POST /{id}/merge (ADR-0155 four-eyes). No existing response or schema changed.
-  version: 1.9.0
+  version: 1.10.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -132,6 +132,21 @@ paths:
       responses:
         '200':
           description: Updated
+    delete:
+      tags: [Parties]
+      summary: Erase party — GDPR Art. 17 right to erasure
+      description: >-
+        Anonymises all PII held for the party. Requires ROLE_ADMIN. The erasure itself is recorded
+        for the Art. 30 records-of-processing trail (who erased which subject), so the action is
+        auditable after the data is gone.
+      operationId: eraseParty
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '204':
+          description: Party erased
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/parties/{id}/merge:
     post:
@@ -286,6 +301,34 @@ paths:
           description: Existing party returned (resumed)
         '403':
           description: Email not verified
+  /api/v1/parties/{id}/documents/{fileId}/content:
+    get:
+      tags: [Parties]
+      summary: Download KYC document content (operators only)
+      description: >-
+        The document bytes themselves, as opposed to the metadata listing at
+        `/api/v1/parties/{id}/documents`. Requires ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN or
+        ROLE_KYC.
+      operationId: getPartyDocumentContent
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The stored document content
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/parties/{id}/documents/upload:
     post:
       summary: Upload KYC document binary (mobile)

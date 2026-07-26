@@ -23,7 +23,6 @@ openbank-account-service served-not-published POST /api/v1/accounts/{accountId}/
 openbank-agent-service served-not-published GET /api/v1/admin/agents/halts
 openbank-agent-service served-not-published POST /api/v1/admin/agents/halt
 openbank-agent-service served-not-published POST /api/v1/admin/agents/resume
-openbank-balance-service served-not-published PUT /api/v1/balances/{accountId}/{currency}/overdraft-limit
 openbank-customer-edge served-not-published DELETE /customer/v1/accounts/{accountId}/pockets/{currency}
 openbank-customer-edge served-not-published DELETE /customer/v1/consents/{id}
 openbank-customer-edge served-not-published DELETE /customer/v1/devices/{id}
@@ -71,13 +70,8 @@ openbank-customer-edge served-not-published POST /customer/v1/vop/verify
 openbank-customer-edge served-not-published POST /customer/v1/webauthn/session/refresh
 openbank-customer-edge served-not-published POST /customer/v1/webauthn/session/revoke
 openbank-customer-edge served-not-published PUT /customer/v1/notification-preferences
-openbank-fx-service served-not-published GET /api/v1/fx/cnb/rates/{base}
-openbank-fx-service served-not-published POST /api/v1/fx/cnb/ingest
-openbank-ledger-service served-not-published POST /api/v1/ledger/fx-revaluation
 openbank-notification-service served-not-published GET /api/v1/preferences/party/{partyId}
 openbank-notification-service served-not-published PUT /api/v1/preferences/party/{partyId}
-openbank-party-service served-not-published DELETE /api/v1/parties/{id}
-openbank-party-service served-not-published GET /api/v1/parties/{id}/documents/{fileId}/content
 openbank-psd2-service served-not-published DELETE /open-banking/v2/consents/{consentId}
 openbank-psd2-service served-not-published GET /open-banking/sandbox/v2/accounts
 openbank-psd2-service served-not-published GET /open-banking/sandbox/v2/accounts/{accountId}/balances
