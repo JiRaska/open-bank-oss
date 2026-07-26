@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.9.0...mcp-service-v0.9.1) (2026-07-26)
+
+
+### Security
+
+* **mcp:** enforce PROPOSED-only on the call path, not in whichever ProposalPort is bound ([#2498](https://github.com/JiRaska/open-bank-oss/issues/2498)) ([dc941f5](https://github.com/JiRaska/open-bank-oss/commit/dc941f5654c0b81ded3bca6d29534ae523cc70f7))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.8.0...mcp-service-v0.9.0) (2026-07-26)
 
 
