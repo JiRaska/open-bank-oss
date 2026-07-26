@@ -205,15 +205,15 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0194](0194-card-lifecycle-synthetic-pan-vault-and-sca-gated-card-operations.md) | Card lifecycle, synthetic PAN vault and SCA-gated card operations | Accepted | Partial | cards,sca,customer-edge,product-catalog | openbank-app |
 | [0195](0195-mcp-server-caller-authentication-and-psd2-consent-binding.md) | MCP server caller authentication and PSD2 consent binding | Proposed | Planned | ai-agents,psd2-api,authz,sca | — |
 | [0197](0197-agpl-open-core-boundary-covers-the-whole-agent-plane.md) | AGPL open-core boundary covers the whole agent plane, enumerated in rules.yaml | Accepted | Shipped | licensing,ai-agents,governance | — |
-| [0198](0198-marketing-consent-as-a-first-class-consent-service-scope.md) | Marketing consent as a first-class consent-service scope | Proposed | Planned | privacy-gdpr,notifications,compliance | — |
+| [0198](0198-marketing-consent-as-a-first-class-consent-service-scope.md) | Marketing consent as a first-class consent-service scope | Accepted | Partial | privacy-gdpr,notifications,compliance | — |
 | [0199](0199-customer-360-read-model-in-a-new-crm-service.md) | Customer 360 read model in a new crm-service | Proposed | Planned | analytics,privacy-gdpr,architecture,admin-ui | — |
 | [0200](0200-campaign-journeys-as-temporal-workflows-with-consent-gated-delivery.md) | Campaign journeys as Temporal workflows with consent-gated delivery | Proposed | Planned | notifications,privacy-gdpr,compliance,mobile-app | — |
 | [0201](0201-customer-segmentation-and-next-best-action-on-the-ml-decisioning-platform.md) | Customer segmentation and next-best-action on the ML decisioning platform | Proposed | Planned | ml,analytics,compliance,product-catalog | — |
 | [0202](0202-agent-to-agent-collaboration-over-proposal-events-mcp-and-temporal.md) | Agent-to-agent collaboration over proposal events, MCP and Temporal | Proposed | Planned | ai-agents,authz,kafka,governance | — |
 | [0203](0203-business-plane-ai-agents.md) | Business-plane AI agents | Proposed | Planned | ai-agents,governance,fraud,compliance | — |
 | [0204](0204-gdpr-article-20-data-portability-scope-format-and-direct-transmission-decision.md) | GDPR Article 20 data portability — scope, format and direct-transmission decision | Proposed | Planned | privacy-gdpr,compliance,psd2-api | — |
-| [0205](0205-marketing-consent-forwarder-and-sca-exempt-activation.md) | Marketing consent forwarder shape and SCA-exempt activation | Proposed | Planned | privacy-gdpr,sca,accounts | — |
-| [0206](0206-scope-m2m-consent-grant-revoke-by-grantee-resource.md) | Scope M2M consent grant/revoke by grantee resource | Accepted | Planned | authz,security-ops | — |
+| [0205](0205-marketing-consent-forwarder-and-sca-exempt-activation.md) | Marketing consent forwarder shape and SCA-exempt activation | Accepted | Shipped | privacy-gdpr,sca,accounts | — |
+| [0206](0206-scope-m2m-consent-grant-revoke-by-grantee-resource.md) | Scope M2M consent grant/revoke by grantee resource | Accepted | Shipped | authz,security-ops | — |
 | [0207](0207-business-date-authority-and-the-accounting-day-state-machine.md) | Business date authority and the accounting day state machine | Proposed | Planned | accounting-close,ledger,statements | — |
 
 ## By tag
