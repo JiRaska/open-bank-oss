@@ -39,6 +39,24 @@ quarkus:
   hibernate-orm:
     database:
       generation: none
+  # Four-eyes ApprovalStore backing store (ADR-0155). party-service has no other Redis
+  # usage. The cluster value comes from QUARKUS_REDIS_HOSTS on the Deployment, pointing at
+  # gitops/components/party/redis.yaml — without a reachable Redis the ApprovalConfig bean
+  # still resolves (so the interceptor believes four-eyes is wired) and every gated merge
+  # fails on a connection error instead: issue #1354.
+  redis:
+    hosts: redis://localhost:6379
+    # Kept OUT of the readiness probe, deliberately — a deviation from the other
+    # ApprovalStore-wired services, and the reason matters. The Quarkus Redis extension
+    # registers a readiness check by default, so a dead Redis would flip party-service to
+    # NotReady and stop ALL party traffic: the registry reads and POST /parties that every
+    # onboarding depends on, plus the GDPR export. Trading a whole service outage for a
+    # four-eyes store that today gates exactly one operator action (and is not even enforced
+    # yet) is the wrong bargain. A Redis failure still surfaces loudly and precisely — the
+    # merge call errors — instead of silently amputating the service. The other services
+    # leave this on because their Redis is on the money path itself; party-service's is not.
+    health:
+      enabled: false
   oidc:
     auth-server-url: http://localhost:8080/realms/openbank
     client-id: openbank-services
@@ -220,3 +238,14 @@ opa:
 # policy is rejecting the right calls.
 authz:
   enforce: "${AUTHZ_ENFORCE:true}"
+  # ADR-0155: four-eyes ENFORCEMENT (pausing a maker's `party.merge` pending a second
+  # approver), independent of the base allow/deny enforce toggle above — the interceptor
+  # reaches the four-eyes branch on an ALLOW regardless of `authz.enforce`. Stays false by
+  # default, the same deliberate separate rollout decision every other service wiring an
+  # ApprovalStore makes (billing/sepa-payment/consent/notification carry the identical
+  # comment): flipping AUTHZ_FOUR_EYES_ENFORCE is a runbook-gated follow-up, not bundled
+  # with the ApprovalStore wiring itself. Until it is flipped in
+  # gitops/components/party/party-service.yaml, the gate is WIRED BUT INERT — the
+  # interceptor records authz_four_eyes{outcome="required_not_enforced"} and proceeds.
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"

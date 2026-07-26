@@ -3,7 +3,10 @@
 openapi: 3.1.0
 info:
   title: Party Service API
-  version: 1.8.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.8 -> 1.9): additive
+  # only — a new PATCH /api/v1/parties/approvals/{id} endpoint and an additional 202 response
+  # on POST /{id}/merge (ADR-0155 four-eyes). No existing response or schema changed.
+  version: 1.9.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -152,12 +155,67 @@ paths:
       responses:
         '200':
           description: The retired party, carrying status MERGED and mergedIntoPartyId
+        '202':
+          description: >-
+            Four-eyes gate (ADR-0155): the merge is paused pending a second approver. The body
+            carries `{"status":"PENDING_APPROVAL","approvalId":"<id>"}`. A DIFFERENT operator
+            decides it via PATCH /api/v1/parties/approvals/{approvalId}; the maker then retries
+            this same request with an `X-Approval-Id` header, which unlocks it exactly once.
+            Only returned when four-eyes enforcement is enabled for this deployment
+            (`AUTHZ_FOUR_EYES_ENFORCE`); off by default.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [PENDING_APPROVAL] }
+                  approvalId: { type: string }
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
           description: >-
             A merge precondition failed — already merged, the target is itself merged (chains are
             refused), a party is erased, or the duplicate still owns an open account.
+
+  /api/v1/parties/approvals/{id}:
+    patch:
+      tags: [Parties]
+      summary: >-
+        Approve or reject a pending four-eyes approval for a gated party action
+        (party.merge, ADR-0155/ADR-0179)
+      description: >-
+        The checker half of the maker-checker gate. The decider must be a DIFFERENT identity from
+        the maker — enforced in the shared ApprovalStore, not just here — and an approval can be
+        decided once and consumed once.
+      operationId: decideApproval
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approve: { type: boolean }
+              required: [approve]
+      responses:
+        '200':
+          description: The decided approval
+        '403':
+          description: >-
+            The decider is the original maker — segregation of duties (SelfApprovalNotAllowedMapper
+            in openbank-libs-runtime).
+        '404':
+          description: No pending approval with that id
+        '409':
+          description: >-
+            The approval is not PENDING — already decided, or already consumed
+            (InvalidApprovalStateMapper in openbank-libs-runtime).
 
   /api/v1/parties/{id}/consent:
     patch:

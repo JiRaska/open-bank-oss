@@ -22,7 +22,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-party-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "4e92d775828e88fa"
+        openbank.tech/policy-checksum: "868fac54901567d3"
       labels:
         app.kubernetes.io/name: party-service
         app.kubernetes.io/part-of: party
@@ -137,6 +137,24 @@ spec:
             # explicit `false` is load-bearing.
             - name: AUTHZ_ENFORCE
               value: "false"
+            # Redis for the four-eyes ApprovalStore (ADR-0155), backing the `party.merge`
+            # gate. Load-bearing: the ApprovalConfig bean resolves with or without this, so
+            # a missing Redis does not make the interceptor fall back to its documented
+            # no-ApprovalStore log line — it makes every gated merge fail on a connection
+            # error instead (issue #1354).
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.party.svc:6379
+            # ADR-0155 four-eyes ENFORCEMENT for party.merge. Deliberately LEFT AT THE APP
+            # DEFAULT (false) by this change: the gate is wired end to end but inert until
+            # this is set to "true", exactly as every other ApprovalStore-wired service in
+            # the fleet ships it. Flipping it is a separate operational decision with two
+            # preconditions — (1) a second ROLE_OPERATOR/ROLE_ADMIN identity must exist in
+            # the running realm, since segregation of duties here is by identity and a
+            # single-operator sandbox would deadlock every merge; (2) the admin-UI merge
+            # action (issue #1984 item 4) must handle the 202 + X-Approval-Id retry, or the
+            # console will read the pause as a failure.
+            # - name: AUTHZ_FOUR_EYES_ENFORCE
+            #   value: "true"
             # ADR-0179 merge account guard: party-service calls account-service to refuse a merge
             # while the retired party still owns an open account. The `.svc`-qualified URL is what
             # the network-policy generator's URL_RE scans to derive the party→accounts:8100 edge —
