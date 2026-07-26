@@ -66,6 +66,9 @@ async function render(id: string, config: object): Promise<string> {
   return svg
 }
 
+/** See the note on the render below — this is a correctness test, not a latency one. */
+const RENDER_TIMEOUT_MS = 30_000
+
 describe('mermaid diagram labels survive DOMPurify', () => {
   beforeAll(() => stubSvgTextMetrics())
 
@@ -81,7 +84,11 @@ describe('mermaid diagram labels survive DOMPurify', () => {
     expect(nodeLabelText(clean)).toContain('Customer Edge')
     expect(nodeLabelText(clean)).toContain('Ledger Service')
     expect(nodeLabelText(clean)).toContain('Outbox Dispatcher')
-  })
+    // A real mermaid render, not a stub — the slowest case in this file, and it
+    // shares the vitest pool with 38 other files. It flaked on the 5 s default
+    // for the same reason render-smoke's page mounts did (#2235); nothing here
+    // asserts latency, so the timeout is generous on purpose.
+  }, RENDER_TIMEOUT_MS)
 
   it('pins htmlLabels at the top level, where mermaid actually reads it', () => {
     // flowchart.htmlLabels is deprecated in mermaid 11 and is NOT a substitute:
