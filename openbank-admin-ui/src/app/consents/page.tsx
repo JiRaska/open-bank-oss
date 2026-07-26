@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { FileSignature, Search } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { PageHeader, StatCard, StatusBadge, statusTone } from '@/components/ui'
 
@@ -39,14 +40,18 @@ type Lens = 'party' | 'grantee'
 
 export default function ConsentsPage() {
   const { t, language } = useLanguage()
-  const [lens, setLens] = useState<Lens>('grantee')
-  const [term, setTerm] = useState(MARKETING_GRANTEE)
+  // Party is the default lens: an operator arrives with a customer in mind, not a grantee id. The
+  // grantee lens stays because it is the one genuinely global view (see MARKETING_GRANTEE above),
+  // but it is the specialist path, not the landing state.
+  const [lens, setLens] = useState<Lens>('party')
+  const [term, setTerm] = useState('')
+  const [party, setParty] = useState<PartyHit | null>(null)
   const [rows, setRows] = useState<Consent[] | null>(null)
   const [failure, setFailure] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(false)
 
-  const lookup = async () => {
-    const q = term.trim()
+  const lookup = async (override?: string) => {
+    const q = (override ?? term).trim()
     if (!q) return
     setLoading(true)
     setFailure(null)
@@ -60,12 +65,20 @@ export default function ConsentsPage() {
       }
       const data = (await res.json()) as Consent[]
       setRows(data)
-      if (data.length === 0) setFailure('no_data')
+      // NOT `no_data`: consent-service answered, it just holds no consent for this key. The old copy
+      // said "the data source contains no records yet", which an operator cannot tell apart from a
+      // broken page — and was false whenever any other party had a consent. Rendered below instead.
     } catch {
       setFailure('unreachable')
     } finally {
       setLoading(false)
     }
+  }
+
+  const onPartySelected = (p: PartyHit) => {
+    setParty(p)
+    setTerm(p.id)
+    void lookup(p.id)
   }
 
   const active = rows?.filter(c => c.status === 'ACTIVE').length ?? 0
@@ -98,34 +111,56 @@ export default function ConsentsPage() {
               background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '13px', fontWeight: 600,
             }}
           >
+            <option value="party">{t('Podle party', 'By party')}</option>
             <option value="grantee">{t('Podle grantee', 'By grantee')}</option>
-            <option value="party">{t('Podle party ID', 'By party ID')}</option>
           </select>
-          <input
-            value={term}
-            onChange={e => setTerm(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') lookup() }}
-            placeholder={lens === 'party' ? t('UUID party', 'Party UUID') : t('ID grantee', 'Grantee id')}
-            style={{
-              flex: '1 1 320px', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)',
-              background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '13px',
-            }}
-          />
-          <button
-            onClick={lookup}
-            disabled={loading || !term.trim()}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px',
-              cursor: loading || !term.trim() ? 'not-allowed' : 'pointer', borderRadius: '8px',
-              border: '1px solid var(--border)', background: 'var(--surface)',
-              color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600,
-              opacity: loading || !term.trim() ? 0.6 : 1,
-            }}
-          >
-            <Search size={15} /> {t('Vyhledat', 'Look up')}
-          </button>
+          {/* The party lens searches by NAME (party-service owns names, ADR-0055) and resolves to the
+              id consent-service is keyed by. The grantee lens stays a literal id field: a grantee is
+              a system identifier like party-service:marketing-comms, not a person to search for. */}
+          {lens === 'grantee' && (
+            <>
+              <input
+                value={term}
+                onChange={e => setTerm(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') lookup() }}
+                placeholder={t('ID grantee', 'Grantee id')}
+                style={{
+                  flex: '1 1 320px', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)',
+                  background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '13px',
+                }}
+              />
+              <button
+                onClick={() => lookup()}
+                disabled={loading || !term.trim()}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px',
+                  cursor: loading || !term.trim() ? 'not-allowed' : 'pointer', borderRadius: '8px',
+                  border: '1px solid var(--border)', background: 'var(--surface)',
+                  color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600,
+                  opacity: loading || !term.trim() ? 0.6 : 1,
+                }}
+              >
+                <Search size={15} /> {t('Vyhledat', 'Look up')}
+              </button>
+              <button
+                onClick={() => { setTerm(MARKETING_GRANTEE); void lookup(MARKETING_GRANTEE) }}
+                disabled={loading}
+                style={{
+                  padding: '8px 14px', borderRadius: '8px', border: '1px solid var(--border)',
+                  background: 'var(--surface)', color: 'var(--text-secondary)', fontSize: '12px',
+                  fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {t('Marketingové souhlasy', 'Marketing consents')}
+              </button>
+            </>
+          )}
         </div>
       </div>
+
+      {lens === 'party' && (
+        <PartySearch onSelect={onPartySelected} selectedId={party?.id} busy={loading} />
+      )}
 
       {rows && rows.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px' }}>
@@ -148,6 +183,29 @@ export default function ConsentsPage() {
           feature={t('Souhlasy', 'Consents')}
           lang={language === 'cs' ? 'cs' : 'en'}
         />
+      )}
+
+      {/* Answered, but empty for this key. Distinct from an unavailable service (above): the earlier
+          copy claimed the source held no records at all, while it held consents for other parties. */}
+      {!loading && !failure && rows && rows.length === 0 && (
+        <div className="card" style={{ padding: '32px', textAlign: 'center' }}>
+          <p style={{ margin: '0 0 6px', fontWeight: 600, color: 'var(--text-primary)' }}>
+            {lens === 'party'
+              ? t('Tato party nemá žádný souhlas', 'This party has no consent')
+              : t('Tento grantee nemá žádný souhlas', 'This grantee has no consent')}
+          </p>
+          <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-secondary)' }}>
+            {t(
+              'consent-service je dostupná a odpověděla — pro tento dotaz nemá žádný záznam. Nejde o chybu ani o prázdnou databázi.',
+              'consent-service is available and answered — it has no record for this query. This is not an error, nor an empty database.',
+            )}
+          </p>
+          {lens === 'party' && party && (
+            <p style={{ margin: '10px 0 0', fontSize: '11px', fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-tertiary)' }}>
+              {partyDisplayName(party)} · {party.id}
+            </p>
+          )}
+        </div>
       )}
 
       {!loading && rows && rows.length > 0 && (

@@ -116,4 +116,31 @@ describe('Customer 360 isolation (ADR-0210 D2)', () => {
       expect(iface.toLowerCase(), forbidden).not.toContain(forbidden)
     }
   })
+  // The distinction this asserts was a real defect: a party with no events came back
+  // `available: false`, which the page rendered as "the data source contains no records yet" — while
+  // the source held events for other parties. An operator cannot tell that copy apart from a broken
+  // page, so `available` must mean one thing only: ClickHouse answered.
+  it('reports a party with no events as available, not as an empty data source', async () => {
+    stubClickHouse([])
+    const { GET } = await import('@/app/api/customer-360/[partyId]/route')
+    const res = await GET({} as never, { params: Promise.resolve({ partyId: PARTY }) })
+
+    const body = await res.json()
+    expect(res.status).toBe(200)
+    expect(body.available).toBe(true) // the source answered
+    expect(body.domains).toEqual([]) // this party simply has nothing in it
+    expect(body.error).toBeUndefined() // and nothing went wrong
+  })
+
+  it('still reports an unreachable source as unavailable', async () => {
+    // The other side of the same boundary: `available: false` must remain reachable, or the page
+    // loses its only signal that ClickHouse is down.
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ETIMEDOUT') }))
+    const { GET } = await import('@/app/api/customer-360/[partyId]/route')
+    const res = await GET({} as never, { params: Promise.resolve({ partyId: OTHER }) })
+
+    const body = await res.json()
+    expect(body.available).toBe(false)
+    expect(body.error).toContain('ETIMEDOUT')
+  })
 })

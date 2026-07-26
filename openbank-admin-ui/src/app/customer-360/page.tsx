@@ -5,14 +5,20 @@
 'use client'
 
 import { useState } from 'react'
-import { Users, Search } from 'lucide-react'
+import { Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
 import type { Customer360 } from '@/app/api/customer-360/[partyId]/route'
+import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 
 // ADR-0210: a lookup over the analytics silver layer, not a customer list. There is no
 // crm-service and no "list all customers" surface here — party-service owns that.
+//
+// The lookup is keyed by party id because the silver layer is keyed by aggregate id. That key is NOT
+// the search box: PartySearch resolves a name to an id against party-service (ADR-0055), because an
+// operator has a name in hand, not a UUID. The first version exposed the raw id and was unusable
+// without a second tab open on the Parties page — the data model had been allowed to dictate the UX.
 //
 // Everything shown is DERIVED from an event projection and is deliberately non-authoritative
 // (ADR-0210 D3 / ADR-0089): counts, recency and lifecycle state, never balances or transaction
@@ -20,26 +26,27 @@ import type { Customer360 } from '@/app/api/customer-360/[partyId]/route'
 // instead of assuming it is live.
 export default function Customer360Page() {
   const { t, language } = useLanguage()
-  const [term, setTerm] = useState('')
+  const [selected, setSelected] = useState<PartyHit | null>(null)
   const [data, setData] = useState<Customer360 | null>(null)
   const [failure, setFailure] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(false)
 
-  const lookup = async () => {
-    const q = term.trim()
-    if (!q) return
+  const load360 = async (party: PartyHit) => {
+    setSelected(party)
     setLoading(true)
     setFailure(null)
     setData(null)
     try {
-      const res = await fetch(`/api/customer-360/${encodeURIComponent(q)}`, { cache: 'no-store' })
+      const res = await fetch(`/api/customer-360/${encodeURIComponent(party.id)}`, { cache: 'no-store' })
       const body = (await res.json()) as Customer360
       if (res.status === 400) {
         setFailure('error')
         return
       }
+      // `available: false` means one thing only: ClickHouse did not answer. A party that simply has
+      // no projected events comes back available with empty domains, and is rendered as such below.
       if (!body.available) {
-        setFailure(body.error ? 'unreachable' : 'no_data')
+        setFailure(body.error === 'unauthorized' ? 'unauthorized' : 'unreachable')
         return
       }
       setData(body)
@@ -67,34 +74,7 @@ export default function Customer360Page() {
         )}
       />
 
-      <div className="card" style={{ marginBottom: '20px' }}>
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <input
-            value={term}
-            onChange={e => setTerm(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') lookup() }}
-            placeholder={t('UUID party', 'Party UUID')}
-            style={{
-              flex: '1 1 340px', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)',
-              background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '13px',
-              fontFamily: 'var(--font-mono, monospace)',
-            }}
-          />
-          <button
-            onClick={lookup}
-            disabled={loading || !term.trim()}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px',
-              cursor: loading || !term.trim() ? 'not-allowed' : 'pointer', borderRadius: '8px',
-              border: '1px solid var(--border)', background: 'var(--surface)',
-              color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600,
-              opacity: loading || !term.trim() ? 0.6 : 1,
-            }}
-          >
-            <Search size={15} /> {t('Vyhledat', 'Look up')}
-          </button>
-        </div>
-      </div>
+      <PartySearch onSelect={load360} selectedId={selected?.id} busy={loading} />
 
       {loading && (
         <div style={{ color: 'var(--text-secondary)', padding: '40px', textAlign: 'center' }}>
@@ -111,8 +91,36 @@ export default function Customer360Page() {
         />
       )}
 
-      {!loading && data && (
+      {/* A party that exists but has no projected events. Stated as exactly that — the source is up,
+          this party simply has no analytics history yet. The earlier copy said the source held no
+          records at all, which an operator cannot distinguish from a broken page. */}
+      {!loading && data && data.domains.length === 0 && (
+        <div className="card" style={{ padding: '32px', textAlign: 'center' }}>
+          <p style={{ margin: '0 0 6px', fontWeight: 600, color: 'var(--text-primary)' }}>
+            {t('Tato party nemá žádné analytické události', 'This party has no analytics events')}
+          </p>
+          <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-secondary)' }}>
+            {t(
+              'Silver vrstva je dostupná a odpověděla — pro tuto party v ní zatím není žádná událost. Nejde o chybu stránky ani o prázdný zdroj.',
+              'The silver layer is available and answered — it holds no event for this party yet. This is not a page error, nor an empty source.',
+            )}
+          </p>
+          {selected && (
+            <p style={{ margin: '10px 0 0', fontSize: '11px', fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-tertiary)' }}>
+              {partyDisplayName(selected)} · {selected.id}
+            </p>
+          )}
+        </div>
+      )}
+
+      {!loading && data && data.domains.length > 0 && (
         <>
+          {selected && (
+            <h2 className="section-title" style={{ marginBottom: '12px' }}>
+              {partyDisplayName(selected)}
+            </h2>
+          )}
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px' }}>
             <StatCard label={t('Domén', 'Domains')} value={data.domains.length} />
             <StatCard label={t('Událostí', 'Events')} value={totalEvents} />

@@ -95,6 +95,27 @@ values nor that parity. So ADR-0209 D4 stands unchanged: ADR-0201 D5 does not st
 phase 2 exists. Building segment training on `silver_as_of` would reintroduce precisely the skew
 ADR-0140 was written to prevent, while looking like it had satisfied the prerequisite.
 
+**D8 — The lookup key is not the search surface.** The 360 is keyed by partyId because the silver
+layer is keyed by aggregate id — but that key must never be what the operator types. The first
+implementation exposed a raw `Party UUID` field, which made the page unusable without a second tab
+open on the Parties page, and was reported as "it does not work" the first time it was seen on the
+sandbox. Names are resolved by `party-service`'s existing trigram `/search` (ADR-0055) through the
+BFF, in a shared `PartySearch` component (ADR-0208), which hands back an id; a pasted UUID
+short-circuits straight through, so the direct path survives. `party-service` stays the only owner of
+a name index — this adds none. Generalise: when a page's backing store is keyed by a synthetic id,
+the id is an implementation detail of the query, and letting it become the input is the data model
+dictating the UX.
+
+**D9 — "The source is empty" and "this key has no rows" are different answers and must read
+differently.** Both this route and the Consents page collapsed a zero-row result into the generic
+`no_data` state, whose copy reads *"the data source is available but does not contain any records
+yet"* — false whenever any other party had rows, and indistinguishable from a broken page for the
+operator who hits it. `available: false` now means only that ClickHouse did not answer; a party with
+no projected events returns `available: true` with empty domains and renders as "this party has no
+analytics events". The same correction applies to `consent-service` lookups by party and by grantee.
+Generalise: an empty-state message asserts a fact about the data source, so it is wrong to reuse the
+source-level message for a key-level miss.
+
 ## Alternatives considered
 
 - **Build `crm-service` as ADR-0199 specifies.** Rejected on evidence, not principle: it
