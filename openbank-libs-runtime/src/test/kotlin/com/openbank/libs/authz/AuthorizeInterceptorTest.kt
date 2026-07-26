@@ -98,9 +98,19 @@ class AuthorizeInterceptorTest {
 
     data class DummyRequest(val granteeId: String, val scopes: List<String>)
 
+    data class DummyRequestWithNullableField(val granteeId: String?)
+
     @Suppress("UnusedParameter") // invoked only via InvocationContext reflection, not directly
     @Authorize(action = "consent.grant", resource = "#request.granteeId")
     fun dummyMethodWithDottedResource(request: DummyRequest?) = Unit
+
+    @Suppress("UnusedParameter") // invoked only via InvocationContext reflection, not directly
+    @Authorize(action = "consent.grant", resource = "#request.doesNotExist")
+    fun dummyMethodWithUnknownField(request: DummyRequest?) = Unit
+
+    @Suppress("UnusedParameter") // invoked only via InvocationContext reflection, not directly
+    @Authorize(action = "consent.grant", resource = "#request.granteeId")
+    fun dummyMethodWithNullableFieldResource(request: DummyRequestWithNullableField?) = Unit
 
     private val annotatedMethod: Method =
         AuthorizeInterceptorTest::class.java.getDeclaredMethod("dummyMethod")
@@ -112,6 +122,18 @@ class AuthorizeInterceptorTest {
         AuthorizeInterceptorTest::class.java.getDeclaredMethod(
             "dummyMethodWithDottedResource",
             DummyRequest::class.java,
+        )
+
+    private val annotatedMethodWithUnknownField: Method =
+        AuthorizeInterceptorTest::class.java.getDeclaredMethod(
+            "dummyMethodWithUnknownField",
+            DummyRequest::class.java,
+        )
+
+    private val annotatedMethodWithNullableFieldResource: Method =
+        AuthorizeInterceptorTest::class.java.getDeclaredMethod(
+            "dummyMethodWithNullableFieldResource",
+            DummyRequestWithNullableField::class.java,
         )
 
     @Test
@@ -168,10 +190,46 @@ class AuthorizeInterceptorTest {
             }
         }
         wirePdp(pdp)
-        // Method annotated "#request.granteeId" but the interceptor swaps in a method whose
-        // resolved field name doesn't exist on the param — simulate by passing a request whose
-        // extractResource lookup fails (null param) rather than mutating the annotation itself.
+        val ctx = makeCtx(
+            annotatedMethodWithUnknownField,
+            DummyRequest(granteeId = "party-service:marketing-comms", scopes = listOf("x")),
+        )
+        interceptor.authorize(ctx)
+        assertThat(capturedQuery).hasSize(1)
+        assertThat(capturedQuery[0].resource).isNull()
+    }
+
+    @Test
+    fun `dotted-path resource expression with a null param fails closed to no resource`() {
+        every { identity.roles } returns emptySet()
+        val capturedQuery = mutableListOf<AuthzQuery>()
+        wirePdp(
+            object : PolicyDecisionPoint {
+                override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                    capturedQuery += query
+                    return AuthzDecision(allow = true, reason = "ok", policyVersion = "test")
+                }
+            },
+        )
         val ctx = makeCtx(annotatedMethodWithDottedResource, null)
+        interceptor.authorize(ctx)
+        assertThat(capturedQuery).hasSize(1)
+        assertThat(capturedQuery[0].resource).isNull()
+    }
+
+    @Test
+    fun `dotted-path resource expression whose field resolves to null fails closed to no resource`() {
+        every { identity.roles } returns emptySet()
+        val capturedQuery = mutableListOf<AuthzQuery>()
+        wirePdp(
+            object : PolicyDecisionPoint {
+                override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                    capturedQuery += query
+                    return AuthzDecision(allow = true, reason = "ok", policyVersion = "test")
+                }
+            },
+        )
+        val ctx = makeCtx(annotatedMethodWithNullableFieldResource, DummyRequestWithNullableField(granteeId = null))
         interceptor.authorize(ctx)
         assertThat(capturedQuery).hasSize(1)
         assertThat(capturedQuery[0].resource).isNull()
