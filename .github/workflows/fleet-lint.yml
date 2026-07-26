@@ -187,8 +187,16 @@ jobs:
           set -o pipefail
           log="$RUNNER_TEMP/fleet-lint.log"
           rc=0
-          ./gradlew testClasses detekt ktlintCheck \
-            --continue --build-cache --console=plain --stacktrace 2>&1 | tee "$log" || rc=$?
+          # Wrapped in the heap sampler (#2177 problem 1). The classifier below makes an OOM
+          # legible AFTER it happens; this records how close each healthy run came, so the next
+          # -Xmx raise can be anticipated instead of discovered by going red. The pipeline runs
+          # inside the wrapper (not the wrapper inside the pipeline) so the sampler observes the
+          # whole build, and `pipefail` is re-set in the inner shell so `tee` cannot mask Gradle's
+          # exit code — the failure this repo has already been burnt by twice.
+          # shellcheck disable=SC2016  # $1 is the INNER bash's positional, deliberately unexpanded
+          .github/scripts/gradle-heap-headroom.sh fleet-lint -- \
+            bash -c 'set -o pipefail; ./gradlew testClasses detekt ktlintCheck \
+              --continue --build-cache --console=plain --stacktrace 2>&1 | tee "$1"' _ "$log" || rc=$?
 
           # "N actionable tasks" is Gradle's own count of what it actually got through, so a
           # number well below the healthy fleet total is itself evidence of an early abort.

@@ -170,9 +170,16 @@ jobs:
       # the empty result then sits as the default branch's "current" CodeQL state
       # until the next code-touching main push, showing as a code-scanning
       # configuration error. --no-build-cache forces a real compile every run.
+      # Wrapped in the heap sampler (#2177 problem 1, #2330). This job is the one that keeps
+      # coming back `cancelled` with no failing step while every other job in the same run
+      # succeeds — the signature of a runner killed rather than a build that failed. It compiles
+      # the whole fleet with `--no-build-cache` at `-Xmx6g` alongside the Kotlin daemon and the
+      # per-task worker JVMs, and nothing has ever recorded what that actually costs. Now it does,
+      # in the job summary, whether or not the run is healthy. Advisory only: the sampler exits
+      # with Gradle's exit code and never its own.
       - name: Build (java-kotlin) for CodeQL tracing
         if: matrix.language == 'java-kotlin'
-        run: ./gradlew testClasses --no-build-cache --no-daemon
+        run: .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- ./gradlew testClasses --no-build-cache --no-daemon
 
       - uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a # v4
         with:
