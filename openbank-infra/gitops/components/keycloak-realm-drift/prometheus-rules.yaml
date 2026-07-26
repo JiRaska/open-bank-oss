@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Alerts for the keycloak-realm-drift CronJob (issue #2540).
+#
+# SEVERITY MUST BE `critical` OR `warning` — nothing else. Alertmanager routes only those two
+# (kube-prometheus-stack.yaml); the top-level route's default receiver is `null`, so any other
+# value is silently BLACK-HOLED. An alert that routes nowhere is indistinguishable from no alert,
+# which is the exact failure class this detector exists to close.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-keycloak-realm-drift-alerts
+  namespace: iam
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: keycloak-realm-drift
+spec:
+  groups:
+    - name: openbank.iam.realmdrift
+      rules:
+        # Fires when the realm template and the running realm disagree in either direction — a
+        # declared role the realm never got, or a live role no template declares.
+        - alert: KeycloakRealmDrift
+          expr: kube_job_failed{namespace="iam", job_name=~"keycloak-realm-drift-.*"} > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: iam
+          annotations:
+            summary: "Keycloak realm template and the running realm disagree"
+            description: >-
+              The daily realm parity scan failed. Either a role declared in
+              gitops/components/keycloak/*realm-template*.json is not issued by the live realm
+              (the grant never applied — --import-realm runs on cold start only, so the file
+              change reached nothing), or a role exists live that no template declares (it works
+              today and a cold-started cluster loses it). If the missing role is named by an
+              @RolesAllowed, the endpoints that name it are degraded right now: they fall through
+              to whatever other role the annotation lists, which is how ADR-0116's KYC four-eyes
+              became unenforceable while every gate was green (#2540). Read the
+              `keycloak-realm-drift` ConfigMap in the `iam` namespace for the per-role detail.
+
+        # A detector that quietly stops running is indistinguishable from a clean realm.
+        - alert: KeycloakRealmDriftScanStale
+          # 26h: the schedule is daily (03:40 UTC); allow one missed run plus slack.
+          expr: >-
+            time() - kube_cronjob_status_last_successful_time{namespace="iam",
+            cronjob="keycloak-realm-drift"} > 93600
+          for: 30m
+          labels:
+            severity: warning
+            component: iam
+          annotations:
+            summary: "keycloak-realm-drift has not completed successfully in >26h"
+            description: >-
+              The realm parity scan has not had a successful run in over 26 hours. Treat the
+              realm's conformance to its template as UNKNOWN, not healthy — an absent signal
+              reads exactly like a clean one.

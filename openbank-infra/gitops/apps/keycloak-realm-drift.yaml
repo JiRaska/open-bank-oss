@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Issue #2540: nothing compared the Keycloak realm template to the realm that actually runs.
+# Its own Application rather than folding into the keycloak component, so the detector can be
+# synced, suspended or rolled back without touching the identity provider itself.
+# See gitops/components/keycloak-realm-drift/ for the design rationale.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keycloak-realm-drift
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/keycloak-realm-drift
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: iam
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
