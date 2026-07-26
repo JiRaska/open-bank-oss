@@ -4,13 +4,13 @@
 
 package com.openbank.settlement.application.usecase
 
+import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.settlement.application.port.`in`.OriginateSettlementCommand
 import com.openbank.settlement.application.port.`in`.SettlementUseCase
 import com.openbank.settlement.application.port.out.SettlementRepository
 import com.openbank.settlement.application.workflow.SettlementWorkflow
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
-import com.openbank.settlement.infrastructure.temporal.TemporalConfig
 import io.temporal.api.enums.v1.WorkflowIdReusePolicy
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowExecutionAlreadyStarted

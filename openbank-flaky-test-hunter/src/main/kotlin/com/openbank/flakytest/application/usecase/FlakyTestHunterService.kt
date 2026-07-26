@@ -12,7 +12,7 @@ import com.openbank.flakytest.application.workflow.FlakyTestHunterWorkflow
 import com.openbank.flakytest.domain.model.FlakyTestFinding
 import com.openbank.flakytest.domain.model.FlakyTestReport
 import com.openbank.flakytest.domain.model.RunTrigger
-import com.openbank.flakytest.infrastructure.temporal.TemporalConfig
+import com.openbank.libs.temporal.TemporalConfig
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped

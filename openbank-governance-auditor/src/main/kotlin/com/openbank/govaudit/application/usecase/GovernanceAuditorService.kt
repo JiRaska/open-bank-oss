@@ -12,7 +12,7 @@ import com.openbank.govaudit.application.workflow.GovernanceAuditWorkflow
 import com.openbank.govaudit.domain.model.GovernanceAuditReport
 import com.openbank.govaudit.domain.model.GovernanceFinding
 import com.openbank.govaudit.domain.model.RunTrigger
-import com.openbank.govaudit.infrastructure.temporal.TemporalConfig
+import com.openbank.libs.temporal.TemporalConfig
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped

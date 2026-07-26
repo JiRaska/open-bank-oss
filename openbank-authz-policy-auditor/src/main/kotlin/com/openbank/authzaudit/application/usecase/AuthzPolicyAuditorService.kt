@@ -12,7 +12,7 @@ import com.openbank.authzaudit.application.workflow.AuthzPolicyAuditorWorkflow
 import com.openbank.authzaudit.domain.model.AuthzPolicyFinding
 import com.openbank.authzaudit.domain.model.AuthzPolicyReport
 import com.openbank.authzaudit.domain.model.RunTrigger
-import com.openbank.authzaudit.infrastructure.temporal.TemporalConfig
+import com.openbank.libs.temporal.TemporalConfig
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped

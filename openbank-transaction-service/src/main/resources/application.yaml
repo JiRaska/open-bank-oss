@@ -154,12 +154,16 @@ openbank:
     enabled: true
     max-concurrent-requests: 150
   # ADR-0120 Phase 5: Temporal is the sole payment orchestrator (saga retired).
-  transaction:
-    orchestration:
-      temporal:
-        server-url: ${TEMPORAL_SERVER_URL:localhost:7233}
-        namespace: ${TEMPORAL_NAMESPACE:openbank-payments}
-        task-queue: ${TEMPORAL_TASK_QUEUE:openbank-payment-execution}
+  #
+  # ADR-0209 D1 (#2572): these keys used to sit under `openbank.transaction.orchestration.temporal`,
+  # a prefix NOTHING read — TemporalConfig has always been @ConfigMapping(prefix="openbank.temporal"),
+  # so every value here was inert and the service ran on the Kotlin @WithDefault values instead
+  # (prod is unaffected either way: the GitOps manifests set OPENBANK_TEMPORAL_* env vars, which win
+  # over both). Moved to the prefix that is actually bound, with the values the defaults supplied.
+  temporal:
+    server-url: ${TEMPORAL_SERVER_URL:localhost:7233}
+    namespace: ${TEMPORAL_NAMESPACE:openbank-payments}
+    task-queue: ${TEMPORAL_TASK_QUEUE:openbank-payment-execution}
   api:
     version: "1"
   build:
@@ -192,9 +196,8 @@ openbank:
         # The in-process TestWorkflowEnvironment registers its own deterministic no-op worker;
         # a second (real) worker on the same queue makes dispatch a lottery (#465).
         enabled: false
-      orchestration:
-        temporal:
-          server-url: localhost:7233
+    temporal:
+      server-url: localhost:7233
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"

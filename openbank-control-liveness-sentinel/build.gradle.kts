@@ -34,6 +34,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.reactive)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
+    // Shared TemporalConfig + TemporalClientProducer (ADR-0209 D1, #2572).
+    implementation(project(":openbank-libs-temporal"))
     implementation("io.temporal:temporal-sdk:1.25.1")
     implementation(project(":openbank-libs"))
     testImplementation("io.temporal:temporal-testing:1.25.1")

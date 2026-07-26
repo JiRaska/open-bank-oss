@@ -4,7 +4,7 @@
 
 package com.openbank.settlement.application.workflow
 
-import com.openbank.settlement.infrastructure.temporal.TemporalConfig
+import com.openbank.libs.temporal.TemporalConfig
 import io.quarkus.runtime.StartupEvent
 import io.temporal.client.WorkflowClient
 import io.temporal.worker.WorkerFactory

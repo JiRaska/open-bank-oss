@@ -12,7 +12,7 @@ import com.openbank.finops.application.workflow.FinOpsAnalysisWorkflow
 import com.openbank.finops.domain.model.CostAnomaly
 import com.openbank.finops.domain.model.FinOpsRunReport
 import com.openbank.finops.domain.model.RunTrigger
-import com.openbank.finops.infrastructure.temporal.TemporalConfig
+import com.openbank.libs.temporal.TemporalConfig
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped

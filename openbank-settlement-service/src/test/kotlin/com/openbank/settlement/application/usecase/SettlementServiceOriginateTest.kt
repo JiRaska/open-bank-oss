@@ -4,13 +4,13 @@
 
 package com.openbank.settlement.application.usecase
 
+import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.settlement.application.port.`in`.OriginateSettlementCommand
 import com.openbank.settlement.application.port.out.SettlementRepository
 import com.openbank.settlement.application.workflow.SettlementActivities
 import com.openbank.settlement.application.workflow.SettlementWorkflowImpl
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
-import com.openbank.settlement.infrastructure.temporal.TemporalConfig
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every

@@ -12,7 +12,7 @@ import com.openbank.docstruth.application.workflow.DocsTruthWorkflow
 import com.openbank.docstruth.domain.model.DocsTruthFinding
 import com.openbank.docstruth.domain.model.DocsTruthReport
 import com.openbank.docstruth.domain.model.RunTrigger
-import com.openbank.docstruth.infrastructure.temporal.TemporalConfig
+import com.openbank.libs.temporal.TemporalConfig
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped

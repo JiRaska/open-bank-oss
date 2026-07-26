@@ -5,7 +5,7 @@
 
 package com.openbank.docstruth.application.workflow
 
-import com.openbank.docstruth.infrastructure.temporal.TemporalConfig
+import com.openbank.libs.temporal.TemporalConfig
 import io.quarkus.runtime.StartupEvent
 import io.temporal.client.WorkflowClient
 import io.temporal.worker.WorkerFactory

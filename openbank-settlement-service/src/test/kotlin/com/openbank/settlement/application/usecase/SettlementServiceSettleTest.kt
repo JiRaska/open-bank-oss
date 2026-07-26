@@ -4,8 +4,8 @@
 
 package com.openbank.settlement.application.usecase
 
+import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.settlement.application.port.out.SettlementRepository
-import com.openbank.settlement.infrastructure.temporal.TemporalConfig
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.temporal.client.WorkflowClient
