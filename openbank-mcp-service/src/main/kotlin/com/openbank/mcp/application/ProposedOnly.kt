@@ -60,7 +60,7 @@ object ProposedOnly {
     // rather than skipped, so a numeric or object status cannot slip through unexamined).
     private fun collectStatuses(node: JsonNode, into: MutableList<String>): List<String> {
         if (node.isObject) {
-            node.fields().forEach { (name, value) ->
+            node.properties().forEach { (name, value) ->
                 if (name == STATUS_FIELD) {
                     into.add(if (value.isTextual) value.asText() else "<non-textual:${value.nodeType}>")
                 } else {
