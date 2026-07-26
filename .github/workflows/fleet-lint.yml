@@ -168,10 +168,53 @@ jobs:
       #  - ktlintCheck  → formatting/import drift (the latent-wildcard class).
       # --continue: don't stop at the first red module — report ALL drift in one run so a
       # fleet-wide ruleset bump surfaces the full list, not one-module-at-a-time.
+      #
+      # An OOM here is a VACUOUS RED, not just a failure (issue #2177). The heap dies
+      # part-way through the task graph, so every module after the abort is never linted at
+      # all — measured on run 30142905147: 455 actionable tasks executed against a true 920
+      # once the heap was raised. Roughly half the fleet was unchecked while the check
+      # reported a plain red, indistinguishable from a real lint violation. On the one gate
+      # whose purpose is to be un-dismissable, that is the mirror of a vacuous green: the
+      # reader cannot tell "your code is bad" from "the runner ran out of memory before
+      # reaching your code".
+      #
+      # So classify the failure instead of letting both land in the same bucket. The step
+      # still fails either way — an OOM'd run has NOT linted the fleet and must not read as
+      # a pass — but it says which kind it was, and the alert issue says so too.
       - name: Fleet compile + detekt + ktlint
+        id: lint
         run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/fleet-lint.log"
+          rc=0
           ./gradlew testClasses detekt ktlintCheck \
-            --continue --build-cache --console=plain --stacktrace
+            --continue --build-cache --console=plain --stacktrace 2>&1 | tee "$log" || rc=$?
+
+          # "N actionable tasks" is Gradle's own count of what it actually got through, so a
+          # number well below the healthy fleet total is itself evidence of an early abort.
+          tasks=$(grep -oE '[0-9]+ actionable tasks' "$log" | tail -1 || true)
+
+          if [ "$rc" -eq 0 ]; then
+            echo "fleet-lint: clean (${tasks:-task count not reported})."
+            exit 0
+          fi
+
+          # Infrastructure aborts, not findings: the JVM died, so the task graph stopped
+          # early and the modules after it were never examined.
+          # Deliberately narrow: each pattern is unambiguous about the JVM dying. In
+          # particular do NOT match a bare "Daemon will be stopped at the end of the build" —
+          # Gradle prints that for ordinary reasons too, and a pattern that also fires on a
+          # healthy build would relabel real lint findings as infrastructure, which is the
+          # same mislabelling in the other direction.
+          if grep -qE 'OutOfMemoryError|GC overhead limit exceeded|Gradle build daemon disappeared|out of JVM memory' "$log"; then
+            echo "kind=infra" >> "$GITHUB_OUTPUT"
+            echo "::error title=fleet-lint ABORTED (infrastructure, not a lint finding)::The Gradle daemon ran out of memory, so the task graph stopped part-way and the modules after the abort were NEVER LINTED. This red does not mean the fleet is broken and it does not mean it is clean — it means the gate did not run. Raise -Xmx in this workflow's GRADLE_OPTS (a ratchet; see the comment there) and re-run. Reached: ${tasks:-unknown}."
+            exit 1
+          fi
+
+          echo "kind=lint" >> "$GITHUB_OUTPUT"
+          echo "::error title=fleet-lint findings::A module no longer compiles or violates the current detekt/ktlint ruleset. This is a real finding — see the per-module list above. Reached: ${tasks:-unknown}."
+          exit "$rc"
 
       # Same lesson as the nightly build alert: a scheduled/push failure that only shows
       # as a red check in the Actions tab goes unwatched. Turn it into the SAME
@@ -180,6 +223,8 @@ jobs:
       - name: Alert on fleet-lint failure
         if: failure()
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          FAILURE_KIND: ${{ steps.lint.outputs.kind }}
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -193,7 +238,16 @@ jobs:
             const { data: open } = await github.rest.issues.listForRepo({
               owner, repo, state: 'open', labels: 'fleet-health-lint',
             });
-            const note = `The fast fleet-lint gate (compile + detekt + ktlint, no tests) failed on \`${trigger}\` — a module no longer compiles or violates the current detekt/ktlint ruleset, even though path-scoped PR CI was green. See the run for the full per-module list.\n\nRun: ${runUrl}\nDetected: ${detected}`;
+            // Say WHICH failure this was. An OOM'd run and a real lint violation used to
+            // produce the identical note, so the issue could not be triaged from its own
+            // body — the exact indistinguishability #2177 is about.
+            const kind = process.env.FAILURE_KIND || 'unknown';
+            const cause = kind === 'infra'
+              ? 'ABORTED on infrastructure, **not** a lint finding: the Gradle daemon ran out of memory, so the task graph stopped part-way and every module after the abort was never linted. This run is not evidence that the fleet is broken, nor that it is clean — the gate did not run. Raise `-Xmx` in `fleet-lint.yml`\'s `GRADLE_OPTS` (a ratchet — see the comment there) and re-run.'
+              : kind === 'lint'
+                ? 'a module no longer compiles or violates the current detekt/ktlint ruleset, even though path-scoped PR CI was green. See the run for the full per-module list.'
+                : 'failed before the classification step could run (setup, checkout, or toolchain) — read the run log directly.';
+            const note = `The fast fleet-lint gate (compile + detekt + ktlint, no tests) failed on \`${trigger}\` — ${cause}\n\nRun: ${runUrl}\nDetected: ${detected}`;
             if (open.length > 0) {
               const n = open[0].number;
               await github.rest.issues.createComment({
