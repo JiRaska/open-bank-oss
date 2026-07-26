@@ -1,7 +1,9 @@
 # openbank-copilot-service
 
 Customer-facing AI assistant (mobile copilot) for the KMP app (ADR-0064/0065). **ADR-0089** is the
-source of truth; **money-path** service (action tools propose state changes). Threat model:
+source of truth; **money-path adjacent**: action tools *propose* state changes that other services
+execute — this service never moves funds and never completes SCA, and it is deliberately NOT in
+`rules.yaml: money_path_services` (#2352). Threat model:
 [`docs/threat-models/openbank-copilot-service.md`](../docs/threat-models/openbank-copilot-service.md).
 
 ## The one principle
