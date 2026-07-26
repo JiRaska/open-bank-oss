@@ -88,6 +88,33 @@ KEDA_NS = "keda"
 # unconditionally treated as an admin-ui-reachable HTTP port.
 INTERNAL_ONLY_PORT_NAMES = {"redis", "postgres", "postgresql"}
 
+# Container ports belonging to a SIDECAR the app container reaches over the pod's
+# own loopback — never a cross-namespace edge. Keyed by `ports[].name`, same
+# convention as INTERNAL_ONLY_PORT_NAMES above.
+#
+# The OPA PDP sidecar (ADR-0034 Phase 5 / issue #1797) is the case that forced
+# this: `OpaSidecarPolicyDecisionPoint.DEFAULT_BASE_URL` is
+# `http://localhost:8181`, so the only client of :8181 is the app container
+# sharing the pod's network namespace — which NetworkPolicy does not police at
+# all. But the generator derives ingress ports mechanically from every container's
+# containerPorts, so 8181 landed in the SAME rule as the app's HTTP port: on
+# kyc-service that admitted customer-edge, party, admin-ui and security-scanner
+# straight to a PDP that runs `opa run --server` with no `--authentication` and no
+# `--authorization`. Any pod in those namespaces could POST /v1/data/openbank/rest/allow
+# to probe the policy as an oracle, GET /v1/policies to read the whole rego +
+# `data.agents` / `data.rules` governance data, POST /v1/query to evaluate arbitrary
+# rego (a CPU-burn DoS against a money-path pod), and PUT /v1/data under any root the
+# mounted bundle's .manifest does not own. Decision INTEGRITY held (a bundle root is
+# write-protected, so `openbank/rest/allow` itself could not be overwritten) — the
+# exposure is disclosure, oracle and DoS, on ~29 components fleet-wide.
+#
+# A port whose name lands here is excluded from http_ports, so it gets neither the
+# derived-caller rule nor the admin-ui / ingress-nginx / KEDA rules. It stays
+# reachable via the unconditional same-namespace rule (co-tenant pods of the same
+# namespace) — NetworkPolicy cannot express "loopback only", and tightening the
+# same-namespace rule to a port list is a separate, larger change.
+SIDECAR_LOCAL_ONLY_PORT_NAMES = {"opa"}
+
 HEADER = """\
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
@@ -336,7 +363,8 @@ def main():
         if mgmt_port is None and MGMT_PORT in wl["ports"].values():
             mgmt_port = MGMT_PORT
         internal_only_ports = {
-            p for n, p in wl["ports"].items() if n in INTERNAL_ONLY_PORT_NAMES
+            p for n, p in wl["ports"].items()
+            if n in INTERNAL_ONLY_PORT_NAMES or n in SIDECAR_LOCAL_ONLY_PORT_NAMES
         }
         http_ports = sorted(
             p for n, p in wl["ports"].items()
