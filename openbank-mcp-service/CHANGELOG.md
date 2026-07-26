@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.10.0...mcp-service-v0.11.0) (2026-07-26)
+
+
+### Features
+
+* **mcp:** validate propose_payment's arguments server-side (T-T2) ([#2649](https://github.com/JiRaska/open-bank-oss/issues/2649)) ([08814c0](https://github.com/JiRaska/open-bank-oss/commit/08814c0511754a38a1a3e1ba4a545f5d5c8fe9f7)), closes [#2414](https://github.com/JiRaska/open-bank-oss/issues/2414)
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.9.2...mcp-service-v0.10.0) (2026-07-26)
 
 
