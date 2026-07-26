@@ -161,9 +161,18 @@ class NotificationConsumer {
         }
         return Panache.withTransaction { notificationRepo.persist(entity) }
             .chain { _ ->
-                when (req.channel) {
-                    NotificationChannel.EMAIL -> maybeSendEmail(req, subject, body, entity)
-                    NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
+                // Consent gate BEFORE the channel dispatch (ADR-0198 D4, issue #2369). Deliberately
+                // NOT a per-channel check: the defect the issue names is precisely that gating lived
+                // inside the channel branches, so PUSH got a (default-true) check and EMAIL got none,
+                // and any channel added later would inherit whichever the author remembered. One gate
+                // ahead of the `when` cannot be forgotten by a new branch.
+                if (req.template.category == NotificationCategory.MARKETING) {
+                    suppressUnconsentedMarketing(req, entity)
+                } else {
+                    when (req.channel) {
+                        NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
+                        NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
+                    }
                 }
             }
             // Oversight side-channel (ADR-0059): for allow-listed risk templates, also
@@ -252,37 +261,63 @@ class NotificationConsumer {
     // customer actually received, and the "stub mode" log message conflated the two failure
     // cases into one line.
     /**
-     * Refuses to send a MARKETING-category EMAIL, and otherwise sends (ADR-0198 D4, issue #2369).
+     * Records a marketing send as SUPPRESSED and emits an audit event (ADR-0198 §"A marketing send
+     * with no ACTIVE consent for the target channel records SUPPRESSED and emits an audit event").
      *
-     * EMAIL previously had NO gate of any kind — unlike PUSH it never consulted even the local
-     * preference row, so a marketing email would have gone out unconditionally. That asymmetry is
-     * not fixable by reading `notification_preference`: its columns (`payments_push`,
-     * `product_push`, `marketing_push`) are push-specific, and none of them is the GDPR Art. 6(1)(a)
-     * consent record anyway — consent-service owns that (`party-service:marketing-comms`,
-     * ADR-0205 D3).
+     * This fails CLOSED on every channel rather than pretending to check consent. The real record
+     * is consent-service's, under grantee `party-service:marketing-comms` (ADR-0205 D3, shipped);
+     * `notification_preference`'s columns (`payments_push` / `product_push` / `marketing_push`) are
+     * a per-channel mute *within* a granted consent — a different and legitimate control, but not
+     * the GDPR Art. 6(1)(a) basis.
      *
-     * So this fails CLOSED rather than pretending to check: consent-gated email is SUPPRESSED until
-     * a real consent check exists. PAYMENTS / PRODUCT / SECURITY email is unchanged (contract and
-     * legitimate-interest bases, no opt-in required), so no live traffic changes. No template maps
-     * to MARKETING today (`NotificationTemplateCategoryTest` guards that), which is why declining
-     * here is correct rather than a feature regression — there is nothing to decline yet.
+     * Not wiring a consent-service call yet is deliberate: no template maps to MARKETING
+     * ([NotificationTemplateCategoryTest] guards that), so an HTTP client here would be a
+     * money-path dependency for a caller that does not exist. When the first MARKETING template
+     * lands, that guard goes red and this method is where the live check
+     * (`POST /api/v1/consents/{id}/validate`, scope `MARKETING_COMMS_EMAIL` / `_PUSH`) replaces the
+     * unconditional suppression — ADR-0198 requires a call per send, not a cached copy.
      */
-    private fun maybeSendEmail(
-        req: NotificationRequest,
-        subject: String,
-        body: String,
-        entity: NotificationEntity,
-    ): Uni<Void> {
-        if (req.template.category == NotificationCategory.MARKETING) {
-            log.warnf(
-                "EMAIL suppressed: template=%s is MARKETING-category and no consent check is wired " +
-                    "(ADR-0198 D4). Wire consent-service validate (scope MARKETING_COMMS_EMAIL) before " +
-                    "sending consent-gated email.",
-                req.template,
-            )
-            return markStatus(entity, "SUPPRESSED")
+    private fun suppressUnconsentedMarketing(req: NotificationRequest, entity: NotificationEntity): Uni<Void> {
+        log.warnf(
+            "MARKETING %s suppressed: template=%s party=%s — no consent check is wired yet " +
+                "(ADR-0198 D4, #2369)",
+            req.channel,
+            req.template,
+            req.partyId,
+        )
+        return markStatus(entity, "SUPPRESSED").invoke { _ -> auditMarketingSuppressed(req) }
+    }
+
+    /**
+     * Audit trail for a suppressed marketing send. Same `runBlocking` trade-off, and the same
+     * constraint, as [auditWebhookSent] — safe only while the wired publisher is the synchronous
+     * [com.openbank.libs.audit.LoggingAuditEventPublisher].
+     */
+    private fun auditMarketingSuppressed(req: NotificationRequest) {
+        try {
+            runBlocking {
+                audit.publish(
+                    AuditEvent(
+                        actorId = "system",
+                        actorType = "SYSTEM",
+                        operation = "notification.marketing.suppressed",
+                        resourceType = "notification",
+                        resourceId = req.template.name,
+                        result = AuditResult.DENIED,
+                        payload = mapOf(
+                            "template" to req.template.name,
+                            "channel" to req.channel.name,
+                            "partyId" to req.partyId.toString(),
+                            "reason" to "no_consent_check_wired",
+                        ),
+                    ),
+                )
+            }
+        } catch (e: Exception) {
+            // An audit failure must not swallow the suppression itself — the notification stays
+            // SUPPRESSED either way, which is the safe outcome. Logged so the gap is visible.
+            log.warnf(e, "Failed to audit marketing suppression for template=%s", req.template)
         }
-        return sendEmail(req, subject, body, entity)
     }
 
     private fun sendEmail(
@@ -333,20 +368,13 @@ class NotificationConsumer {
      * account freeze) always send. For a togglable category, a missing preference row means "on";
      * a muted category records the notification as SUPPRESSED and skips egress.
      *
-     * MARKETING is the exception and is fail-CLOSED (ADR-0198 D4, issue #2369). PAYMENTS/PRODUCT
-     * ride contract / legitimate-interest bases, so "no preference row yet" legitimately means
-     * "send". Marketing does not: under GDPR Art. 6(1)(a) it needs an affirmative opt-in, and
-     * `notification_preference.marketing_push` is a LOCAL toggle, not that consent record —
-     * consent-service owns it (`party-service:marketing-comms`, ADR-0205 D3). Defaulting to `true`
-     * here meant an absent preference row would have sent marketing to a party who never consented.
-     *
-     * No template maps to MARKETING today ([NotificationTemplate.category] is exhaustive and never
-     * yields it), so this branch is currently unreachable — deliberately NOT wired to a
-     * consent-service HTTP call, which would add a money-path dependency for a caller that does not
-     * exist. `NotificationTemplateCategoryTest` asserts that unreachability, so the day a MARKETING
-     * template IS added the test goes red and whoever adds it has to wire the real consent check
-     * (consent-service `POST /api/v1/consents/{id}/validate`, scope MARKETING_COMMS_PUSH) rather
-     * than inheriting a silent local-toggle default.
+     * MARKETING never reaches here — [suppressUnconsentedMarketing] catches it ahead of the channel
+     * dispatch. The branch below stays for `when` exhaustiveness and is deliberately fail-CLOSED
+     * (`?: false`) as defence in depth: `marketing_push` is a per-channel mute *within* a granted
+     * consent, not the GDPR Art. 6(1)(a) record (consent-service owns that,
+     * `party-service:marketing-comms`, ADR-0205 D3), so it must never be the thing that decides a
+     * marketing send. It previously defaulted to `true`, which would have sent marketing to a party
+     * with no preference row at all.
      */
     private fun maybeSendPush(req: NotificationRequest, subject: String, entity: NotificationEntity): Uni<Void> {
         val category = req.template.category
