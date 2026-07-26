@@ -5,6 +5,7 @@
 
 package com.openbank.liveness.application.usecase
 
+import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.liveness.application.port.incoming.GetFindingsUseCase
 import com.openbank.liveness.application.port.incoming.RunLivenessCheckUseCase
 import com.openbank.liveness.application.port.out.FindingRepository
@@ -12,7 +13,6 @@ import com.openbank.liveness.application.workflow.LivenessCheckWorkflow
 import com.openbank.liveness.domain.model.LivenessFinding
 import com.openbank.liveness.domain.model.LivenessRunReport
 import com.openbank.liveness.domain.model.RunTrigger
-import com.openbank.liveness.infrastructure.temporal.TemporalConfig
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped

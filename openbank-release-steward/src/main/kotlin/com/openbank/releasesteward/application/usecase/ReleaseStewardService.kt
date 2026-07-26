@@ -5,6 +5,7 @@
 
 package com.openbank.releasesteward.application.usecase
 
+import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.releasesteward.application.port.incoming.GetFindingsUseCase
 import com.openbank.releasesteward.application.port.incoming.RunReleaseStewardCheckUseCase
 import com.openbank.releasesteward.application.port.out.FindingRepository
@@ -12,7 +13,6 @@ import com.openbank.releasesteward.application.workflow.ReleaseStewardWorkflow
 import com.openbank.releasesteward.domain.model.ReleaseStewardFinding
 import com.openbank.releasesteward.domain.model.ReleaseStewardReport
 import com.openbank.releasesteward.domain.model.RunTrigger
-import com.openbank.releasesteward.infrastructure.temporal.TemporalConfig
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped

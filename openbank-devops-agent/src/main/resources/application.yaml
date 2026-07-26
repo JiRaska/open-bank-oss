@@ -84,6 +84,11 @@ openbank:
     server-url: ${TEMPORAL_HOST:temporal-frontend.temporal:7233}
     namespace: ${TEMPORAL_NAMESPACE:openbank}
     task-queue: devops-agent
+    # ADR-0209 D1 (#2572): this service's now-deleted TemporalClientProducer copy was the ONE of the
+    # 14 that built its service stubs with no Micrometer metrics scope. Extracting to the shared
+    # producer would have silently started emitting Temporal gRPC client metrics here, so the
+    # divergence is preserved as config rather than flattened. Flip to true to adopt the fleet norm.
+    metrics-enabled: false
   devops:
     prometheus-url: ${PROMETHEUS_URL:http://prometheus-operated.observability:9090}
     alertmanager-url: ${ALERTMANAGER_URL:http://alertmanager-operated.observability:9093}

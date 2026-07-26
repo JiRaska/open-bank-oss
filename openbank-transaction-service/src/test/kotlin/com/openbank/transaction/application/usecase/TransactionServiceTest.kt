@@ -9,6 +9,7 @@ import com.openbank.libs.domain.money.Money
 import com.openbank.libs.domain.payment.InstructionType
 import com.openbank.libs.domain.payment.PaymentRail
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.transaction.application.port.`in`.InitiateTransactionCommand
 import com.openbank.transaction.application.port.`in`.ListTransactionsQuery
 import com.openbank.transaction.application.port.`in`.ReverseTransactionCommand
@@ -21,7 +22,6 @@ import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.model.TransactionType
 import com.openbank.transaction.domain.saga.SagaState
-import com.openbank.transaction.infrastructure.temporal.TemporalConfig
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every

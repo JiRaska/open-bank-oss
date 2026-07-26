@@ -10,6 +10,7 @@ import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.transaction.application.port.`in`.GetTransactionQuery
 import com.openbank.transaction.application.port.`in`.InitiateTransactionCommand
 import com.openbank.transaction.application.port.`in`.ListTransactionsQuery
@@ -23,7 +24,6 @@ import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.saga.SagaState
 import com.openbank.transaction.domain.settlement.SettlementDateResolver
-import com.openbank.transaction.infrastructure.temporal.TemporalConfig
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import io.vertx.pgclient.PgException

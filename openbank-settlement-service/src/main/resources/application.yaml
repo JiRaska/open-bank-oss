@@ -32,6 +32,12 @@ quarkus:
 
 openbank:
   temporal:
+    # ADR-0209 D1 (#2572): server-url and namespace were previously carried as this service's own
+    # @WithDefault values in a per-service TemporalConfig copy. The shared contract in
+    # openbank-libs-runtime cannot hold 14 different defaults, so the effective values are written
+    # here explicitly — behaviour-preserving, and now visible rather than buried in a Kotlin default.
+    server-url: localhost:7233
+    namespace: openbank-settlement
     task-queue: openbank-settlement
   api:
     version: "1"

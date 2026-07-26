@@ -14,7 +14,7 @@ import com.openbank.devops.domain.model.DevOpsFinding
 import com.openbank.devops.domain.model.DevOpsRunReport
 import com.openbank.devops.domain.model.FindingStatus
 import com.openbank.devops.domain.model.RunTrigger
-import com.openbank.devops.infrastructure.temporal.TemporalConfig
+import com.openbank.libs.temporal.TemporalConfig
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped

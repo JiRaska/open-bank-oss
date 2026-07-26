@@ -5,7 +5,7 @@
 
 package com.openbank.flakytest.application.workflow
 
-import com.openbank.flakytest.infrastructure.temporal.TemporalConfig
+import com.openbank.libs.temporal.TemporalConfig
 import io.quarkus.runtime.StartupEvent
 import io.temporal.client.WorkflowClient
 import io.temporal.worker.WorkerFactory

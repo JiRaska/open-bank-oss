@@ -5,7 +5,7 @@
 
 package com.openbank.finops.application.workflow
 
-import com.openbank.finops.infrastructure.temporal.TemporalConfig
+import com.openbank.libs.temporal.TemporalConfig
 import io.quarkus.runtime.StartupEvent
 import io.temporal.client.WorkflowClient
 import io.temporal.worker.WorkerFactory
