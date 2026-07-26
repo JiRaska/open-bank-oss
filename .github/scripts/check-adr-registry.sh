@@ -153,12 +153,18 @@ for f in "${adrs[@]}"; do
   base=$(basename "$f")
   num=${base%%-*}
 
+  # Capture fm_extract's OWN status. `if ! fm=$(...); then case "$?"` cannot: inside
+  # the branch `$?` is the status of the negated condition, i.e. always 0, so every
+  # parse failure fell through to the generic `*` arm and the 3-vs-4 distinction the
+  # library goes to the trouble of returning was thrown away.
   fm=""
-  if ! fm=$(fm_extract "$f" 2>/dev/null); then
-    case "$?" in
+  fm_rc=0
+  fm=$(fm_extract "$f" 2>/dev/null) || fm_rc=$?
+  if (( fm_rc != 0 )); then
+    case "$fm_rc" in
       3) err "$base: no YAML front-matter block — the file must start with '---'. See docs/adr/SCHEMA.md." ;;
       4) err "$base: front-matter block is never closed by a '---' line. See docs/adr/SCHEMA.md." ;;
-      *) err "$base: front-matter could not be parsed. See docs/adr/SCHEMA.md." ;;
+      *) err "$base: front-matter could not be READ (fm_extract exited $fm_rc) — this is a tool failure, not a schema violation." ;;
     esac
     continue
   fi
@@ -171,8 +177,19 @@ for f in "${adrs[@]}"; do
   # 4b. every required key present; no unknown keys ----------------------------
   # An unknown key is almost always a typo'd required one, which would otherwise
   # read as "field simply absent" and be silently defaulted by every consumer.
+  # A read failure and an absent key are DIFFERENT verdicts and must print
+  # differently: "missing required key 'authors'" names a file and a field and reads
+  # as a genuine finding, so emitting it for a tool failure gets a correct ADR
+  # "fixed" or gets the whole gate ignored. See lib-frontmatter.sh's
+  # NEVER PIPE INTO AN EARLY-EXIT CONSUMER note for how that shipped once already.
   for k in $SCHEMA_KEYS; do
-    fm_has "$fm" "$k" || err "$base: front-matter is missing required key '$k'."
+    fm_has "$fm" "$k" && continue
+    key_rc=$?
+    if (( key_rc > 1 )); then
+      err "$base: front-matter READ FAILED while checking key '$k' (fm_has exited $key_rc) — the key was NOT determined to be missing."
+    else
+      err "$base: front-matter is missing required key '$k'."
+    fi
   done
   while IFS=$'\t' read -r k v; do
     [[ -z "$k" || "$k" == "!malformed" ]] && continue
