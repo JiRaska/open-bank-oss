@@ -62,6 +62,17 @@ on:
         description: "Space-separated module(s) to rebuild, e.g. 'openbank-party-service'. Blank = full deployable fleet."
         required: false
         default: ""
+      codeploy:
+        description: >-
+          Treat `services` as ONE co-deploy set (issue #1985). The contract gate then asks the
+          broker a single question about all of them together — are these versions mutually
+          compatible — instead of asking per service whether each is compatible with the
+          currently-deployed counterpart. Use ONLY with the exact set the gate named as a
+          CO-DEPLOY SET; on any other input it is a strictly weaker check, because it stops
+          asking about the services deployed alongside them.
+        type: boolean
+        required: false
+        default: false
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); each job below declares its own override for the access it needs.
@@ -730,6 +741,46 @@ jobs:
           # summary and by the scheduled-tick silencing rule.
           declare -A block_class=()
           declare -A block_reason=()
+          # Verbatim CLI output of every service that ends up blocked, in the record format
+          # derive-codeploy-set.py reads. Written only in the block branch, so a clean run
+          # leaves it empty and the derivation prints nothing (#1985).
+          BLOCKS_FILE="$(mktemp)"
+
+          # ── #1985: co-deploy mode ───────────────────────────────────────────────────────
+          # A set of services that block EACH OTHER cannot converge one deploy at a time:
+          # each is blocked by the other's not-yet-deployed version. `--to-environment
+          # sandbox` has no answer for that, so the set was being hand-driven past the gate
+          # (#1979, #2057, #2059 — all money-path, one week). This asks the broker the
+          # question the humans were asking by hand: are THESE versions mutually compatible.
+          # It is a gate, not a bypass — a red verdict deploys nothing — but it is a
+          # DIFFERENT question from the per-service one, so it is opt-in on workflow_dispatch
+          # and never reachable from a push or a scheduled tick.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
+             && [ "${{ github.event.inputs.codeploy }}" = "true" ]; then
+            CODEPLOY_ARGS=()
+            for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+              CODEPLOY_ARGS+=(--pacticipant "$svc" --latest main)
+            done
+            echo "==> can-i-deploy CO-DEPLOY SET (#1985): $(echo "$SERVICES" | jq -r 'join(" ")')"
+            if "$CLI" can-i-deploy "${CODEPLOY_ARGS[@]}" \
+                 --broker-base-url "$PACT_BROKER_URL" \
+                 --broker-username "$PACT_BROKER_USERNAME" \
+                 --broker-password "$PACT_BROKER_PASSWORD" \
+                 --retry-while-unknown 3 --retry-interval 5; then
+              echo "  ✓ the whole set is mutually deployable — deploying it as one unit"
+              echo "deployable=${SERVICES}" >> "$GITHUB_OUTPUT"
+              echo "blocked=[]" >> "$GITHUB_OUTPUT"
+              {
+                echo "### can-i-deploy: co-deploy set verified (#1985)"
+                echo "Asked as ONE question, not per service: \`$(echo "$SERVICES" | jq -r 'join(" ")')\`"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "::error::can-i-deploy: the requested co-deploy set is NOT mutually deployable — this is a real contract break, not an ordering problem, and no co-deploy can resolve it (#1985)"
+            echo "deployable=[]" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             # A service that has never published a contract is not a Pacticipant in the
             # broker; `can-i-deploy` then errors with "Pacticipant <svc> not found" (matrix
@@ -808,6 +859,7 @@ jobs:
                 block_class["$svc"]="$cls"
                 block_reason["$svc"]="$cls_why"
                 echo "::error::can-i-deploy: ${svc} NOT deployable [${cls}] — ${cls_why} (ADR-0092, #2549)"
+                printf '===SERVICE %s\n%s\n' "$svc" "$cid_out" >> "$BLOCKS_FILE"
                 rc=1
               fi
             fi
@@ -860,6 +912,37 @@ jobs:
                 echo "- \`${svc}\` — blocked — \`${svc_cls}\`: ${svc_why}" >> "$GITHUB_STEP_SUMMARY"
               fi
             done
+            # ── #1985: name the SET, not just the members ────────────────────────────────
+            # #1420 names who is blocked and #2549 names what kind of block it is; neither
+            # answers "can this be deployed at all, one at a time?". When two blocked
+            # services name each other, the answer is no — and until now that was worked out
+            # by hand from the broker matrix and then hand-dispatched past the gate. Derive
+            # it instead, and print the exact supported command (unit-tested, no network:
+            # .github/scripts/test-derive-codeploy-set.sh).
+            mapfile -t CHANGED_LIST < <(echo "$SERVICES" | jq -r '.[]')
+            CODEPLOY_OUT="$(python3 .github/scripts/derive-codeploy-set.py "${CHANGED_LIST[@]}" < "$BLOCKS_FILE" || true)"
+            if [ -n "$CODEPLOY_OUT" ]; then
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              while IFS=$'\t' read -r kind a b; do
+                case "$kind" in
+                  CODEPLOY)
+                    echo "::error::CO-DEPLOY SET — [${a}] block each other; no per-service deploy order converges. Re-run: gh workflow run auto-deploy.yml -f services='${a}' -f codeploy=true (issue #1985)"
+                    {
+                      echo "#### Co-deploy set (#1985)"
+                      echo "\`${a}\` block **each other** — none of them can converge one deploy at a time."
+                      echo ""
+                      echo "\`\`\`"
+                      echo "gh workflow run auto-deploy.yml -f services='${a}' -f codeploy=true"
+                      echo "\`\`\`"
+                    } >> "$GITHUB_STEP_SUMMARY"
+                    ;;
+                  EXTERNAL)
+                    echo "::warning::[${a}] is blocked on ${b}, which is NOT part of this run — a co-deploy cannot help; ${b} has to deploy first (issue #1985)"
+                    echo "- \`${a}\` waits on \`${b}\`, outside this run — co-deploy does not apply" >> "$GITHUB_STEP_SUMMARY"
+                    ;;
+                esac
+              done <<< "$CODEPLOY_OUT"
+            fi
             {
               echo ""
               echo "\`PENDING_BUILD\`/\`UNVERIFIED\` clear themselves — the every-3h reconcile tick"
