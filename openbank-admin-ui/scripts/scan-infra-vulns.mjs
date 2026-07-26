@@ -16,6 +16,7 @@ import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from '
 import path from 'path'
 import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
+import { sourceDate } from './lib/source-date.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const arg = (flag, def) => {
@@ -26,6 +27,13 @@ const REPO = path.resolve(arg('--repo', path.resolve(__dirname, '..', '..')))
 const OUT = path.resolve(arg('--out', path.resolve(__dirname, '..', 'infra-vulns.json')))
 const REGISTRY = path.resolve(__dirname, '..', 'src', 'lib', 'infra-lifecycle', 'registry.json')
 const GITOPS = path.join(REPO, 'openbank-infra', 'gitops')
+// Repo inputs whose newest commit time becomes `scannedAt` (issue #2621). A grype DB
+// refresh that changes the findings changes `images` too — a genuine diff. A rescan that
+// finds nothing new must not rewrite the file, or every deploy PR conflicts by construction.
+const INPUTS = [
+  'openbank-infra/gitops',
+  'openbank-admin-ui/src/lib/infra-lifecycle/registry.json',
+]
 
 function walkFiles(dir, acc = []) {
   let entries = []
@@ -107,7 +115,7 @@ function main() {
   const out = {
     schema: 'openbank.infra-vulns/v1',
     source: 'grype (ADR-0079)',
-    scannedAt: new Date().toISOString(),
+    scannedAt: sourceDate(REPO, INPUTS),
     scanned: Object.keys(images),
     skipped,
     images,
