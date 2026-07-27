@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.62.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.62.2...admin-ui-v0.62.3) (2026-07-27)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop claiming compliance on database columns nothing reads ([#2667](https://github.com/JiRaska/open-bank-oss/issues/2667)) ([81be804](https://github.com/JiRaska/open-bank-oss/commit/81be8044751d5407f4965a0250e94988009ff2ad)), closes [#2370](https://github.com/JiRaska/open-bank-oss/issues/2370)
+
 ## [0.62.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.62.1...admin-ui-v0.62.2) (2026-07-26)
 
 
