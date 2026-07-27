@@ -667,6 +667,18 @@ jobs:
       - name: "Kafka topic existence (issue #2598, enforced)"
         run: python3 .github/scripts/check-kafka-topics-exist.py --enforce
 
+      # issue #2370. The admin-ui compliance matrix is a hardcoded literal and nothing verified any
+      # of its rows. 16 of 39 `ok` rows cited a database column that exists only in a Flyway
+      # migration — evidence of a schema, not of a control, on AML/KYC/FATCA rows (SAR filing, MLRO
+      # escalation, PEP screening, risk rating, FATCA/CRS status). Those are corrected to `warn`;
+      # this keeps them corrected. Only the column-citing rows are checkable — the 8 that rest on a
+      # judgement are listed, never counted as verified, so the page's real verified fraction is
+      # visible rather than implied.
+      - name: "Compliance-page evidence self-test (issue #2370)"
+        run: python3 .github/scripts/check-compliance-evidence.py --selftest
+      - name: "Compliance-page evidence (issue #2370, enforced)"
+        run: python3 .github/scripts/check-compliance-evidence.py --enforce
+
       # issue #2204 (the structural gap #2187 closed with). `quarkus.scheduler.enabled: false` under
       # %test leaves only DIRECT method calls, and a direct call supplies the very Vert.x context the
       # real scheduler does not — so it passes against a @Scheduled body that can never work as a
