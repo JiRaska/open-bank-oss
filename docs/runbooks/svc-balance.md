@@ -32,13 +32,13 @@ triaging an incident that starts on `balance`.
 
 - Readiness: `GET :8103/q/health/ready` · Liveness: `GET :8103/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `balances`); dashboards in Grafana.
-- Logs: `kubectl logs -n balances deploy/balance-service -f`, or Loki
+- Logs: `kubectl logs -n balances -l app.kubernetes.io/name=balance-service -f`, or Loki
   `{namespace="balances"}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl rollout restart deploy/balance-service -n balances` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/balance-service -n balances --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Restart:** `kubectl argo rollouts restart balance-service -n balances` (Argo Rollout — plain `kubectl rollout restart` does NOT work on the CRD). Without the plugin: `kubectl patch rollout balance-service -n balances --type merge -p '{"spec":{"restartAt":"<RFC3339-now>"}}'`.
+- **Scale:** `kubectl scale rollout/balance-service -n balances --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

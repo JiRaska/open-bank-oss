@@ -38,7 +38,7 @@ triaging an incident that starts on `standing-order`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/standing-order-service -n payments` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/standing-order-service -n payments --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/standing-order-service -n payments --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes
