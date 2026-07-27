@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.12.0...party-service-v0.12.1) (2026-07-27)
+
+
+### Security
+
+* **party:** gate the ADR-0179 identity merge behind four-eyes (maker/checker) ([#2608](https://github.com/JiRaska/open-bank-oss/issues/2608)) ([d8164ac](https://github.com/JiRaska/open-bank-oss/commit/d8164ac793c70daeb0b8c03999bcbee76ffd4b07)), closes [#1984](https://github.com/JiRaska/open-bank-oss/issues/1984)
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.11.0...party-service-v0.12.0) (2026-07-26)
 
 
