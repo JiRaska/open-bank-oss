@@ -38,7 +38,7 @@ triaging an incident that starts on `psd2`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/psd2-service -n psd2` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/psd2-service -n psd2 --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/psd2-service -n psd2 --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

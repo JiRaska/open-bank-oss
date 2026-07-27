@@ -214,13 +214,13 @@ triaging an incident that starts on `{short}`.
 
 - Readiness: `GET :{port}/q/health/ready` · Liveness: `GET :{port}/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `{ns}`); dashboards in Grafana.
-- Logs: `kubectl logs -n {ns} deploy/{short}-service -f`, or Loki
+- Logs: {logs_cmd}, or Loki
   `{{namespace="{ns}"}}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl rollout restart deploy/{short}-service -n {ns}` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/{short}-service -n {ns} --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Restart:** {restart_cmd}
+- **Scale:** {scale_cmd} (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes
@@ -245,6 +245,46 @@ triaging an incident that starts on `{short}`.
 - Break-glass cluster access is audited; use it only for a declared incident and
   record the justification.
 """
+
+
+def ops_commands(short: str, ns: str) -> dict[str, str]:
+    """The three incident commands, correct for the kind that actually carries this service.
+
+    21 of the fleet's workloads are Argo Rollouts — essentially the whole money path — and kubectl
+    does not treat them as Deployments. Every runbook used to say `deploy/<svc>`, so `logs`,
+    `restart` and `scale` all answered `Error from server (NotFound)` for ledger, consent,
+    sepa-payment, transaction, settlement, fraud, sanctions, kyc and twelve more (issue #2662).
+
+    Swapping in `rollout/` fixes only ONE of the three, which is why each form below was run against
+    the live cluster before being written here:
+
+      | command | deploy/ | rollout/ | works |
+      |---------|---------|----------|-------|
+      | logs    | no      | **no**   | `-l app.kubernetes.io/name=<svc>` |
+      | scale   | no      | yes      | `scale rollout/<svc>` |
+      | restart | no      | **no**   | `kubectl argo rollouts restart` |
+
+    `kubectl logs` and `kubectl rollout restart` do not understand the Rollout CRD at all. The
+    plugin-free restart is offered alongside the plugin form on purpose: a runbook that assumes a
+    kubectl plugin on the reader's laptop fails in exactly the situation it exists for.
+    """
+    svc = f"{short}-service"
+    if gitops_facts.workload_kind(short, GITOPS) == "Rollout":
+        return {
+            "logs_cmd": f"`kubectl logs -n {ns} -l app.kubernetes.io/name={svc} -f`",
+            "restart_cmd": (
+                f"`kubectl argo rollouts restart {svc} -n {ns}` (Argo Rollout — plain "
+                f"`kubectl rollout restart` does NOT work on the CRD). Without the plugin: "
+                f"`kubectl patch rollout {svc} -n {ns} --type merge "
+                f'-p \'{{"spec":{{"restartAt":"<RFC3339-now>"}}}}\'`.'
+            ),
+            "scale_cmd": f"`kubectl scale rollout/{svc} -n {ns} --replicas=<n>`",
+        }
+    return {
+        "logs_cmd": f"`kubectl logs -n {ns} deploy/{svc} -f`",
+        "restart_cmd": f"`kubectl rollout restart deploy/{svc} -n {ns}` (rolling, zero-downtime at >1 replica).",
+        "scale_cmd": f"`kubectl scale deploy/{svc} -n {ns} --replicas=<n>`",
+    }
 
 
 def render(short: str) -> str:
@@ -309,6 +349,7 @@ def render(short: str) -> str:
         downstream=down,
         rpo=rpo,
         dr=dr_for(datastore, has_backup, owns_none),
+        **ops_commands(short, service_namespace(short)),
     )
 
 

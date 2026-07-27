@@ -38,7 +38,7 @@ triaging an incident that starts on `sdd`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/sdd-service -n sdd` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/sdd-service -n sdd --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/sdd-service -n sdd --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

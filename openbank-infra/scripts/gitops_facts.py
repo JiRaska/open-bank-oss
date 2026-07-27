@@ -160,6 +160,38 @@ def workload_namespaces(short: str, gitops: Path) -> set[str]:
     return found
 
 
+def workload_kind(short: str, gitops: Path) -> str:
+    """`Rollout` or `Deployment` — which kind actually carries this service.
+
+    They are NOT interchangeable to kubectl, and the fleet is split: 21 Rollouts (essentially the
+    whole money path — ledger, consent, sepa-payment, transaction, settlement, fraud, sanctions, kyc)
+    against 121 Deployments. A runbook that names the wrong one hands an operator
+    `Error from server (NotFound)` during the incident it was written for (issue #2662).
+
+    Same matching discipline as [workload_namespaces]: a manifest that merely MENTIONS the service
+    does not count — a NetworkPolicy naming it as a peer or an env var holding its URL would
+    otherwise decide the kind. The workload's own `metadata.name` must be the service.
+
+    Defaults to `Deployment` when nothing matches, because that is what an unmanaged or not-yet-
+    declared service will be, and because the wrong default is the one that fails loudly rather
+    than the one that silently addresses a resource that happens to exist.
+    """
+    names = module_names(short)
+    haystacks = (f"openbank-{short}-service", f"openbank-{short}")
+    for f in sorted(gitops.rglob("*.yaml")):
+        text = read(f)
+        if not any(h in text for h in haystacks):
+            continue
+        for doc in text.split("\n---"):
+            kind = re.search(r"^kind:\s*(\S+)", doc, re.M)
+            if not kind or kind.group(1) not in ("Deployment", "Rollout"):
+                continue
+            name = re.search(r"^\s{2}name:\s*(\S+)", doc, re.M)
+            if name and name.group(1) in names:
+                return kind.group(1)
+    return "Deployment"
+
+
 def service_namespace(short: str, gitops: Path) -> str | None:
     """The single namespace this service runs in, or None if it is not deployed.
 

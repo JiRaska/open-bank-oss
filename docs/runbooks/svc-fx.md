@@ -32,13 +32,13 @@ triaging an incident that starts on `fx`.
 
 - Readiness: `GET :8119/q/health/ready` · Liveness: `GET :8119/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `fx`); dashboards in Grafana.
-- Logs: `kubectl logs -n fx deploy/fx-service -f`, or Loki
+- Logs: `kubectl logs -n fx -l app.kubernetes.io/name=fx-service -f`, or Loki
   `{namespace="fx"}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl rollout restart deploy/fx-service -n fx` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/fx-service -n fx --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Restart:** `kubectl argo rollouts restart fx-service -n fx` (Argo Rollout — plain `kubectl rollout restart` does NOT work on the CRD). Without the plugin: `kubectl patch rollout fx-service -n fx --type merge -p '{"spec":{"restartAt":"<RFC3339-now>"}}'`.
+- **Scale:** `kubectl scale rollout/fx-service -n fx --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

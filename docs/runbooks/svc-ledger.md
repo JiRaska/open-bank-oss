@@ -32,13 +32,13 @@ triaging an incident that starts on `ledger`.
 
 - Readiness: `GET :8101/q/health/ready` · Liveness: `GET :8101/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `ledger`); dashboards in Grafana.
-- Logs: `kubectl logs -n ledger deploy/ledger-service -f`, or Loki
+- Logs: `kubectl logs -n ledger -l app.kubernetes.io/name=ledger-service -f`, or Loki
   `{namespace="ledger"}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl rollout restart deploy/ledger-service -n ledger` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/ledger-service -n ledger --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Restart:** `kubectl argo rollouts restart ledger-service -n ledger` (Argo Rollout — plain `kubectl rollout restart` does NOT work on the CRD). Without the plugin: `kubectl patch rollout ledger-service -n ledger --type merge -p '{"spec":{"restartAt":"<RFC3339-now>"}}'`.
+- **Scale:** `kubectl scale rollout/ledger-service -n ledger --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

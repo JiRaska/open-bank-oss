@@ -32,13 +32,13 @@ triaging an incident that starts on `party`.
 
 - Readiness: `GET :8111/q/health/ready` · Liveness: `GET :8111/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `party`); dashboards in Grafana.
-- Logs: `kubectl logs -n party deploy/party-service -f`, or Loki
+- Logs: `kubectl logs -n party -l app.kubernetes.io/name=party-service -f`, or Loki
   `{namespace="party"}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl rollout restart deploy/party-service -n party` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/party-service -n party --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Restart:** `kubectl argo rollouts restart party-service -n party` (Argo Rollout — plain `kubectl rollout restart` does NOT work on the CRD). Without the plugin: `kubectl patch rollout party-service -n party --type merge -p '{"spec":{"restartAt":"<RFC3339-now>"}}'`.
+- **Scale:** `kubectl scale rollout/party-service -n party --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

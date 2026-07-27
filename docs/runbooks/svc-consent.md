@@ -32,13 +32,13 @@ triaging an incident that starts on `consent`.
 
 - Readiness: `GET :8106/q/health/ready` · Liveness: `GET :8106/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `consent`); dashboards in Grafana.
-- Logs: `kubectl logs -n consent deploy/consent-service -f`, or Loki
+- Logs: `kubectl logs -n consent -l app.kubernetes.io/name=consent-service -f`, or Loki
   `{namespace="consent"}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl rollout restart deploy/consent-service -n consent` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/consent-service -n consent --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Restart:** `kubectl argo rollouts restart consent-service -n consent` (Argo Rollout — plain `kubectl rollout restart` does NOT work on the CRD). Without the plugin: `kubectl patch rollout consent-service -n consent --type merge -p '{"spec":{"restartAt":"<RFC3339-now>"}}'`.
+- **Scale:** `kubectl scale rollout/consent-service -n consent --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

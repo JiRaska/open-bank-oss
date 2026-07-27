@@ -32,13 +32,13 @@ triaging an incident that starts on `vop`.
 
 - Readiness: `GET :8149/q/health/ready` · Liveness: `GET :8149/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `payments`); dashboards in Grafana.
-- Logs: `kubectl logs -n payments deploy/vop-service -f`, or Loki
+- Logs: `kubectl logs -n payments -l app.kubernetes.io/name=vop-service -f`, or Loki
   `{namespace="payments"}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl rollout restart deploy/vop-service -n payments` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/vop-service -n payments --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Restart:** `kubectl argo rollouts restart vop-service -n payments` (Argo Rollout — plain `kubectl rollout restart` does NOT work on the CRD). Without the plugin: `kubectl patch rollout vop-service -n payments --type merge -p '{"spec":{"restartAt":"<RFC3339-now>"}}'`.
+- **Scale:** `kubectl scale rollout/vop-service -n payments --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

@@ -32,13 +32,13 @@ triaging an incident that starts on `account`.
 
 - Readiness: `GET :8100/q/health/ready` · Liveness: `GET :8100/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `accounts`); dashboards in Grafana.
-- Logs: `kubectl logs -n accounts deploy/account-service -f`, or Loki
+- Logs: `kubectl logs -n accounts -l app.kubernetes.io/name=account-service -f`, or Loki
   `{namespace="accounts"}`.
 
 ## Routine operations
 
-- **Restart:** `kubectl rollout restart deploy/account-service -n accounts` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/account-service -n accounts --replicas=<n>` (or edit the GitOps Deployment — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Restart:** `kubectl argo rollouts restart account-service -n accounts` (Argo Rollout — plain `kubectl rollout restart` does NOT work on the CRD). Without the plugin: `kubectl patch rollout account-service -n accounts --type merge -p '{"spec":{"restartAt":"<RFC3339-now>"}}'`.
+- **Scale:** `kubectl scale rollout/account-service -n accounts --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes
