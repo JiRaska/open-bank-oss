@@ -86,31 +86,31 @@ spec:
         cleanupJobs:
           admissionReports:
             image:
-              repository: bitnamilegacy/kubectl
+              repository: docker.io/bitnamilegacy/kubectl
               tag: 1.28.5
           clusterAdmissionReports:
             image:
-              repository: bitnamilegacy/kubectl
+              repository: docker.io/bitnamilegacy/kubectl
               tag: 1.28.5
           ephemeralReports:
             image:
-              repository: bitnamilegacy/kubectl
+              repository: docker.io/bitnamilegacy/kubectl
               tag: 1.28.5
           clusterEphemeralReports:
             image:
-              repository: bitnamilegacy/kubectl
+              repository: docker.io/bitnamilegacy/kubectl
               tag: 1.28.5
           updateRequests:
             image:
-              repository: bitnamilegacy/kubectl
+              repository: docker.io/bitnamilegacy/kubectl
               tag: 1.28.5
         policyReportsCleanup:
           image:
-            repository: bitnamilegacy/kubectl
+            repository: docker.io/bitnamilegacy/kubectl
             tag: 1.28.5
         webhooksCleanup:
           image:
-            repository: bitnamilegacy/kubectl
+            repository: docker.io/bitnamilegacy/kubectl
             tag: 1.28.5
         # Never let the policy webhook take down the cluster: if Kyverno is down,
         # fail OPEN (admit) rather than block every pod. Tighten to Fail for the

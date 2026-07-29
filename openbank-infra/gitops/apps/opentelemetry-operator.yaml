@@ -25,7 +25,7 @@ spec:
           # The default collector image the operator stamps into injected
           # workloads; pin to the contrib agent line used elsewhere in the stack.
           collectorImage:
-            repository: otel/opentelemetry-collector-contrib
+            repository: docker.io/otel/opentelemetry-collector-contrib
           resources:
             requests:
               cpu: 50m

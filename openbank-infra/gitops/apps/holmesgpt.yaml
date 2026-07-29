@@ -29,6 +29,10 @@ spec:
     targetRevision: 0.32.0
     helm:
       valuesObject:
+        # Chart renders the image as `<registry>/<image>`; the chart default
+        # `registry: robustadev` is a bare docker.io ref that bypasses the Kyverno
+        # rewrite-docker-hub rule (matches `^docker\.io/` only) and pulls via NAT.
+        registry: docker.io/robustadev
         # NVIDIA NIM (OpenAI-compatible) via litellm. Key projected from the
         # holmes-llm-secrets ExternalSecret (components/external-secrets/
         # es-holmes-llm.yaml) which reuses the copilot-service NIM key.

@@ -52,7 +52,7 @@ spec:
             hostnames:
               - kc.open-bank.tech
         image:
-          repository: otel/opentelemetry-collector-contrib
+          repository: docker.io/otel/opentelemetry-collector-contrib
         # PSS restricted (threat E2): non-root, read-only rootfs, no caps.
         securityContext:
           runAsNonRoot: true

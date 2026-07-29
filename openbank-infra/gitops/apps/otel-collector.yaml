@@ -23,7 +23,7 @@ spec:
         mode: deployment
         replicaCount: 1
         image:
-          repository: otel/opentelemetry-collector-contrib
+          repository: docker.io/otel/opentelemetry-collector-contrib
         resources:
           requests:
             cpu: 100m
