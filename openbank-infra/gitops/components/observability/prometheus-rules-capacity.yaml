@@ -1,0 +1,105 @@
+# Capacity cap alerting (ADR-0173 D1).
+#
+# The gap this closes: the Karpenter NodePool `limits` are the deliberate fleet
+# capacity ceiling (a FinOps control), and when the cap BINDS, pods go Pending —
+# silently. That is the #809 failure mode: right-sized requests pinned the pool at
+# its cap, Karpenter refused to provision ("all available instance types exceed
+# limits for nodepool"), and nothing paged — the fleet found out from Pending pods
+# during a drift roll, not from an alert. These rules make the cap audible BEFORE
+# it binds (85%), AT the bind (usage >= limit), and on the symptom (pods Pending).
+#
+# Signals (verified present in-cluster 2026-07-29):
+#   karpenter_nodepools_limit  — the declared cap per NodePool (cpu / memory)
+#   karpenter_nodepools_usage  — what the pool currently consumes
+#   kube_pod_status_phase      — Pending symptom per pod
+#
+# Routing follows the FinOps detectors (prometheus-rules-finops.yaml): warning to
+# GoAlert → finops-agent, critical pages the platform channel. The runbook URL is
+# the repo's own ADR-0173 until a dedicated runbook lands.
+#
+# Tuning note (measured 2026-07-29): a per-node requested-saturation rule was
+# considered and dropped — Karpenter bin-packs nodes to >90% requested by design,
+# so it alerts on normal operation. The pool-level rules carry the signal.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-capacity-cap-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.capacity.nodepool
+      interval: 1m
+      rules:
+        # Approaching the cap: >85% of the declared NodePool limit on either
+        # resource. This is the cheap warning — the moment to right-size requests,
+        # prune, or raise the cap deliberately (an ADR-0173 decision), not in a
+        # hurry during an incident.
+        - alert: KarpenterNodePoolNearLimit
+          expr: |
+            (
+              karpenter_nodepools_usage{resource_type="cpu"}
+              / on(nodepool) group_left()
+              karpenter_nodepools_limit{resource_type="cpu"} > 0.85
+            )
+            or
+            (
+              karpenter_nodepools_usage{resource_type="memory"}
+              / on(nodepool) group_left()
+              karpenter_nodepools_limit{resource_type="memory"} > 0.85
+            )
+          for: 15m
+          labels:
+            severity: warning
+            detector: capacity
+            team: platform
+          annotations:
+            summary: "NodePool {{ $labels.nodepool }} at {{ $value | humanizePercentage }} of its declared limit"
+            description: "The pool is approaching its ADR-0173 capacity ceiling. When it binds, new pods go Pending and Karpenter cannot provision. Right-size requests or raise the cap deliberately (docs/adr/0173-capacity-management-and-headroom.md)."
+
+        # The cap is binding NOW: usage has reached the declared limit. The next
+        # scale-up or node-drain stalls. Critical — this is the #809 state.
+        - alert: KarpenterNodePoolAtLimit
+          expr: |
+            (
+              karpenter_nodepools_usage{resource_type="cpu"}
+              >= on(nodepool) group_left()
+              karpenter_nodepools_limit{resource_type="cpu"}
+            )
+            or
+            (
+              karpenter_nodepools_usage{resource_type="memory"}
+              >= on(nodepool) group_left()
+              karpenter_nodepools_limit{resource_type="memory"}
+            )
+          for: 5m
+          labels:
+            severity: critical
+            detector: capacity
+            team: platform
+          annotations:
+            summary: "NodePool {{ $labels.nodepool }} is AT its declared {{ $labels.resource_type }} limit — provisioning is blocked"
+            description: "Karpenter cannot provision new nodes for this pool (usage >= limit). Pods will go Pending. This is the exact #809 failure mode, now audible (ADR-0173 D1)."
+
+        # The symptom: any pod Pending for >15m. A pod that cannot schedule for a
+        # quarter of an hour in a pool with Karpenter available is either a cap
+        # bind (above), a taint/toleration bug, or an image pull wedge — all three
+        # are operator-actionable and none should be discovered by accident.
+        - alert: PodPendingUnschedulable
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_phase{phase="Pending"} == 1
+            )
+            and on(namespace, pod)
+            (
+              time() - kube_pod_created > 900
+            )
+          for: 15m
+          labels:
+            severity: critical
+            detector: capacity
+            team: platform
+          annotations:
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} Pending for >15m"
+            description: "Unschedulable for 15+ minutes. Check KarpenterNodePoolAtLimit first (cap bind), then taints/tolerations, then image pull. kubectl describe pod for the scheduler event."
