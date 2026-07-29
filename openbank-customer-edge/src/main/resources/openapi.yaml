@@ -1367,11 +1367,19 @@ components:
       type: object
       description: Cursor pagination envelope shared by the account and transaction list pages.
       properties:
+        limit:
+          type: integer
+        hasNextPage:
+          type: boolean
         nextCursor:
           type: string
           nullable: true
-        hasMore:
-          type: boolean
+        previousCursor:
+          type: string
+          nullable: true
+        totalCount:
+          type: integer
+          nullable: true
 
     # Mirrors openbank-account-service AccountResponse.
     Account:
@@ -1435,15 +1443,17 @@ components:
           format: uuid
         currency:
           type: string
-        availableBalance:
+        bookedAmount:
           type: number
-        currentBalance:
+        availableAmount:
           type: number
-        reservedBalance:
+        reservedAmount:
           type: number
-        pendingBalance:
+        pendingAmount:
           type: number
-        lastUpdatedAt:
+        arrangedOverdraftLimit:
+          type: number
+        updatedAt:
           type: string
           format: date-time
 
