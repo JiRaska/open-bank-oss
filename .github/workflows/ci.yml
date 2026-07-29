@@ -1039,6 +1039,13 @@ jobs:
           python3 .github/scripts/check-openapi-route-conformance.py --enforce \
             --baseline .github/openapi-route-conformance-baseline.txt
 
+      # Compliance-matrix evidence gate (#2370): every snake_case column cited on the
+      # admin-ui compliance page must have a code reader (a migration is DDL, not a
+      # control), and an ok-marked row with dead evidence fails. The page's 46 claims
+      # were hand-corrected in #2667; this is what stops the next silent drift.
+      - name: "compliance-matrix — cited columns have code readers (enforced)"
+        run: python3 .github/scripts/check-compliance-matrix.py --enforce
+
       # ADVISORY until rules.yaml change_classes.db_change flips to enforced
       # (target 2026-08-15, ADR-0144) — add --enforce to the invocation to flip.
       # Covers BOTH halves of db_change.require: an added migration carries a
