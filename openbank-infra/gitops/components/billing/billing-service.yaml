@@ -59,7 +59,11 @@ spec:
                   key: OIDC_CLIENT_SECRET
                   optional: true
             - name: PRODUCT_CATALOG_SERVICE_URL
-              value: http://product-catalog.accounts.svc:8104
+              value: http://keda-add-ons-http-interceptor-proxy.keda:8080
+            # ADR-0083 T1 re-entry: the interceptor dispatches on Host; fee reads must wake
+            # a scaled-to-zero catalog, not fail into a no-fees assessment (money path).
+            - name: PRODUCT_CATALOG_HOST_OVERRIDE
+              value: product-catalog.accounts.svc
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
             - name: BALANCE_SERVICE_URL
