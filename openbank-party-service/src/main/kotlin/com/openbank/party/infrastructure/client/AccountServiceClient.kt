@@ -57,9 +57,17 @@ data class AccountPageBody(val data: List<AccountSummaryBody> = emptyList(), val
  * Subset of account-service's `AccountResponse` — the identifier is `accountNumber`, not `iban`.
  * `ignoreUnknown` is deliberate: this guard needs three fields, and account-service adding a
  * fourth (it carries productId, goal fields, timestamps…) must not start throwing here.
+ * currencyCode/productId joined later for the GDPR Art. 20 portability export (ADR-0204 D2) —
+ * the merge guard ignores them, the export reads them.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class AccountSummaryBody(val id: UUID? = null, val accountNumber: String? = null, val status: String? = null)
+data class AccountSummaryBody(
+    val id: UUID? = null,
+    val accountNumber: String? = null,
+    val status: String? = null,
+    val currencyCode: String? = null,
+    val productId: UUID? = null,
+)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class PageInfoBody(val nextCursor: String? = null, val hasNextPage: Boolean = false)

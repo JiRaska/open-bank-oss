@@ -113,6 +113,14 @@ interface PartyUseCase {
 
     /** GDPR Art. 15 (Right of Access): all party-service-direct PII for the subject (ADR-0118 §6). */
     suspend fun exportPartyData(id: UUID): PartyGdprExport
+
+    /**
+     * GDPR Art. 20 (Right to Data Portability): the scoped, filtered projection of the Art. 15
+     * export (ADR-0204). Consent/contract-basis data only — no Art. 6(1)(c) legal-obligation
+     * fields (KYC/AML), counterparty IBANs redacted to their bank-code prefix (Art. 20(4)),
+     * transaction history included as the primary portable dataset.
+     */
+    suspend fun exportPartyPortabilityData(id: UUID): PartyPortabilityExport
     suspend fun updateKycStatus(partyId: UUID, status: KycStatus): Party
 
     /** Record the AML screening outcome; re-evaluates the KYC+AML activation gate. */

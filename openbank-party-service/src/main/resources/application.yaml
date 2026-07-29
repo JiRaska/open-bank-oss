@@ -84,6 +84,9 @@ quarkus:
       # components/accounts/account-service.yaml). 8102 is transaction-service — this repo has
       # already been bitten once by a copy-pasted neighbouring port.
       url: ${ACCOUNT_SERVICE_URL:http://account-service.accounts:8100}
+    transaction-service:
+      # GDPR Art. 20 portability export (ADR-0204 D2): transaction history per account.
+      url: ${TRANSACTION_SERVICE_URL:http://transaction-service.payments:8102}
     kyc-service:
       url: ${OPENBANK_KYC_SERVICE_URL:http://localhost:8114}
       scope: jakarta.inject.Singleton
