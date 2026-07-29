@@ -9,7 +9,7 @@ info:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
 servers:
-  - url: http://localhost:8117
+  - url: http://localhost:8113
     description: Local development
 tags:
   - name: Audit

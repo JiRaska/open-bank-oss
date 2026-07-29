@@ -12,7 +12,7 @@ info:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
 servers:
-  - url: http://localhost:8113
+  - url: http://localhost:8135
     description: Local development
 tags:
   - name: Disputes

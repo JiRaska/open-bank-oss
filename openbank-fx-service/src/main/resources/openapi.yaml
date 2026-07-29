@@ -17,7 +17,7 @@ info:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
 servers:
-  - url: http://localhost:8118
+  - url: http://localhost:8119
     description: Local development
 tags:
   - name: FX
