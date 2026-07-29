@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: PSD2 Open Banking API
-  version: 2.4.0
+  version: 2.5.0
   description: |
     PSD2-compliant open banking — Account Information Service (AIS) and
     Payment Initiation Service (PIS) for Third Party Providers.

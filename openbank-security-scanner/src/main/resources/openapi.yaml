@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Security Scanner Service API
-  version: 1.0.0
+  version: 1.1.0
   description: Internal security vulnerability scanner — trigger scans, retrieve reports per service.
   license:
     name: Apache-2.0
