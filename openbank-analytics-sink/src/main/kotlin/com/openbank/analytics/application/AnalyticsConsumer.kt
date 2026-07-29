@@ -165,17 +165,7 @@ class AnalyticsConsumer {
                     // ADR-0106: a synthesised dedupe key is a durable, indexed identifier -> UUIDv7.
                 ?: Ids.newId(),
             aggregateType = aggregateType,
-            // The id MUST agree with aggregateType — bronze_events is keyed (aggregate_type,
-            // aggregate_id) and silver_current_state reduces per that key. An independent precedence
-            // chain here (it used to prefer accountId over transactionId) would pair
-            // aggregate_type=TRANSACTION with an ACCOUNT id, collapsing every transaction on one
-            // account into a single aggregate in silver — a corrupted read model that no test over
-            // one event can see. Resolve the id FROM the resolved type instead.
-            aggregateId = node["aggregateId"]?.asText()
-                ?: idForType(aggregateType, node)
-                // The outbox partition key IS the aggregate id (OutboxKafkaHeaders.partitionKey).
-                ?: address.key
-                ?: UNKNOWN_SERVICE,
+            aggregateId = resolveAggregateId(node, aggregateType, address),
             aggregateVersion = resolveAggregateVersion(node),
             // `ce-type` is the outbox event type; a bare payload has no eventType field at all.
             eventType = node["eventType"]?.asText() ?: address.ceType ?: UNKNOWN,
@@ -192,6 +182,21 @@ class AnalyticsConsumer {
             payload = PayloadMasker.maskToMap(node["payload"] ?: node),
         )
     }
+
+    /**
+     * The id MUST agree with aggregateType — bronze_events is keyed (aggregate_type,
+     * aggregate_id) and silver_current_state reduces per that key. An independent precedence
+     * chain here (it used to prefer accountId over transactionId) would pair
+     * aggregate_type=TRANSACTION with an ACCOUNT id, collapsing every transaction on one
+     * account into a single aggregate in silver — a corrupted read model that no test over
+     * one event can see. Resolve the id FROM the resolved type instead.
+     */
+    private fun resolveAggregateId(node: JsonNode, aggregateType: String, address: EventAddress): String =
+        node["aggregateId"]?.asText()
+            ?: idForType(aggregateType, node)
+            // The outbox partition key IS the aggregate id (OutboxKafkaHeaders.partitionKey).
+            ?: address.key
+            ?: UNKNOWN_SERVICE
 
 
     private fun resolveAggregateType(node: JsonNode, address: EventAddress): String = node["aggregateType"]?.asText()
