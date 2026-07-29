@@ -16,6 +16,18 @@ summary: "Any pinned managed-service version must be on standard support with at
 - **Phase 1 (EKS version lifecycle)** — ✅ Shipped: N-1 + 6-month runway selection policy live; CI gate (`check-version-lifecycle.py`) and weekly audit automation in place.
 - **Phase 2 (cost breadth)** — ⬜ Deferred: RDS and other consumed-service equivalents not yet added to `rules.yaml`; tracked separately.
 
+**Delivery note (updated 2026-07-29) — Phase 2 closed as a no-op by architecture:**
+An inventory of every `aws_*` resource in `openbank-infra/aws/` shows the platform consumes
+**exactly one versioned managed service: EKS** — already covered by Phase 1. There is no RDS,
+ElastiCache, OpenSearch, MSK, MQ, or DocumentDB anywhere in the estate; stateful dependencies
+run in-cluster per ADR-0027 (CNPG, Valkey, Redpanda), so there is no second managed-service
+lifecycle to gate. EKS **addons** (vpc-cni, kube-proxy, coredns, pod-identity, ebs-csi) resolve
+via `data.aws_eks_addon_version` against the cluster version and track the AWS-recommended
+default on every apply — they carry no independent extended-support exposure. Phase 2's premise
+("RDS and other consumed-service equivalents") names services this architecture deliberately
+does not consume; if one is ever introduced, the gate extends to it at that point (the
+`check-version-lifecycle.py` table+pattern is reusable verbatim).
+
 ## Context
 
 On 2026-05-30 the sandbox EKS cluster `openbank-sandbox` was provisioned
