@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.10](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.5.9...statement-service-v0.5.10) (2026-07-29)
+
+
+### Bug Fixes
+
+* **statement:** pin the period close to the injected clock and an explicit cron zone ([#1302](https://github.com/JiRaska/open-bank-oss/issues/1302)) ([#2703](https://github.com/JiRaska/open-bank-oss/issues/2703)) ([e5edf0c](https://github.com/JiRaska/open-bank-oss/commit/e5edf0ce6b833c30cd31f8ca011db80d21f808e7))
+
 ## [0.5.9](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.5.8...statement-service-v0.5.9) (2026-07-26)
 
 
