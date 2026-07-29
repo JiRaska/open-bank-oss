@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.63.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.62.3...admin-ui-v0.63.0) (2026-07-29)
+
+
+### Features
+
+* **finops:** run the ADR-0057 tier classifier daily and surface it in the admin-ui ([#2701](https://github.com/JiRaska/open-bank-oss/issues/2701)) ([de43838](https://github.com/JiRaska/open-bank-oss/commit/de438382f4b4d720608530a83a70dba252b8c289))
+
 ## [0.62.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.62.2...admin-ui-v0.62.3) (2026-07-27)
 
 
