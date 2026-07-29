@@ -99,4 +99,15 @@ jobs:
           # which otherwise flags a BOM-management-only entry as if it were an in-use
           # dependency. Re-verify against verification-metadata.xml before ever removing —
           # if a future dependency starts resolving 2.5.0 for real, this must be dropped.
-          allow-ghsas: GHSA-pq2g-wx69-c263
+          #
+          # GHSA-3qp7-7mw8-wx86 / GHSA-x4gw-5cx5-pgmh / GHSA-c653-97m9-rcg9 (io.netty:
+          # netty-handler 4.2.1, issue #1446): the 4.2.x netty line resolves ONLY on the
+          # Gradle dependency-graph-extraction tooling classpath
+          # (org.gradle:github-dependency-graph-gradle-plugin, per #1385), never on any
+          # shipped service classpath — no project-level graph pulls netty-handler at 4.2.x,
+          # and the runtime line is force()-pinned to 4.1.136.Final in
+          # openbank.dependency-vulnerability-pins.gradle.kts. A force() cannot reach the
+          # plugin classpath, and forcing 4.2.x would override the 4.1.136 the runtime needs
+          # — trading a real regression for an alert on a classpath that never ships. If a
+          # service ever resolves netty 4.2.x for real, these three must be dropped.
+          allow-ghsas: GHSA-pq2g-wx69-c263, GHSA-3qp7-7mw8-wx86, GHSA-x4gw-5cx5-pgmh, GHSA-c653-97m9-rcg9
