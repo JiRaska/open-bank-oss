@@ -10,7 +10,7 @@ tags: [admin-ui, notifications, governance]
 summary: "Campaign authoring lives in the admin-ui as a wizard that composes versioned segments and catalogue templates, shows the consent funnel live, and submits to the existing four-eyes queue — free-text copy and ad-hoc SQL stay forbidden."
 ---
 
-# ADR-0213 — Campaign Studio: the campaign authoring operator experience
+# ADR-0221 — Campaign Studio: the campaign authoring operator experience
 
 ## Context
 
@@ -19,7 +19,7 @@ authored — an admin-ui section versus its own console — is not decided here.
 decision, and it matters more than its size suggests: for a bank, the authoring surface *is* the
 capability. If creating a campaign needs a Jira ticket to engineering, ADR-0200 ships a workflow
 engine nobody runs; if authoring is a free-for-all, every discipline the estate just built (ADR-0176's
-catalogue, ADR-0201's versioned segments, ADR-0198's consent, ADR-0211's contact policy) is one
+catalogue, ADR-0201's versioned segments, ADR-0198's consent, ADR-0219's contact policy) is one
 convenient UI shortcut away from being bypassed by the people it protects against.
 
 The constraints the Studio must express — not re-decide — are already fixed:
@@ -51,11 +51,11 @@ a separate console — structured as a guided wizard that can only produce ADR-0
 (1) **Goal** — objective and success metric; the campaign-copilot (ADR-0203 D4) can pre-fill from a
 plain-language brief, badged as an AI draft requiring acceptance. (2) **Audience** — a picker over
 *versioned* segment artifacts (ADR-0201 D1) with a live count and the **consent funnel** (total →
-after ADR-0198 consent → after ADR-0211 caps → after suppression) computed from the ADR-0210 silver
+after ADR-0198 consent → after ADR-0219 caps → after suppression) computed from the ADR-0210 silver
 query; new segments are proposed as code (a PR authored by the copilot, reviewed like any code) —
 never typed as SQL into the UI. (3) **Steps** — composition from the template catalogue with declared
 variables; channel per step (EMAIL first, per ADR-0200 D7); there is no free-text field anywhere in
-this step. (4) **Contact rules** — the ADR-0211 caps, quiet period and suppression shown read-only;
+this step. (4) **Contact rules** — the ADR-0219 caps, quiet period and suppression shown read-only;
 changing them is a platform-admin action outside the wizard. (5) **Schedule** — one-shot or journey
 skeleton (the Temporal shape ADR-0200 D1 executes). (6) **Summary** — estimated reach, the funnel
 snapshot, and submit to the existing approvals queue.
@@ -66,14 +66,14 @@ funnel snapshot, step/template references with variables, the copilot's pre-chec
 the submitter identity (the self-approval guard makes maker ≠ checker structural, per ADR-0176).
 
 **D3 — Live campaigns are observable in the same section.** A dashboard per campaign built from
-notification terminal statuses and ADR-0212's `engagement.events`: delivered / opened / clicked /
+notification terminal statuses and ADR-0220's `engagement.events`: delivered / opened / clicked /
 converted per step and variant, journey state from Temporal, and a pause control that maps to the
 engine's stop mechanism. No metrics pipeline of its own — the dashboard is a consumer of streams that
-already exist once ADR-0212 lands; before it lands, delivery metrics alone suffice.
+already exist once ADR-0220 lands; before it lands, delivery metrics alone suffice.
 
 **D4 — Roles follow the estate's maker/checker culture.** `campaign-maker` (create/edit drafts),
 `campaign-approver` (the four-eyes checker), `campaign-admin` (contact-policy configuration,
-suppression administration per ADR-0211 D3), `campaign-auditor` (read-all). Enforced by the existing
+suppression administration per ADR-0219 D3), `campaign-auditor` (read-all). Enforced by the existing
 OPA sidecar (ADR-0034), exactly as the engine enforces `campaign.activate` — the UI renders
 capability, the policy decides it.
 
@@ -81,7 +81,7 @@ capability, the policy decides it.
 40-node canvas is where campaign tools go to die; the wizard's step list covers the honest use
 cases). No WYSIWYG/HTML editor (ADR-0176 D4). No CSV audience upload or export (ADR-0201's
 reproducibility; an export is a separate, audit-logged action with a reason code, not a button on a
-list). No per-campaign overrides of platform contact policy (ADR-0211 D4's single enforcement point
+list). No per-campaign overrides of platform contact policy (ADR-0219 D4's single enforcement point
 would be decorative if a wizard could route around it).
 
 ## Alternatives considered
@@ -126,7 +126,7 @@ would be decorative if a wizard could route around it).
 - PCI DSS: not applicable — the Studio handles definitions, templates and counts, no cardholder data.
 - DORA: not applicable — an operator UI over existing ICT services; no new third party.
 - GDPR: Art. 25 — data protection by design: counts-only audience preview, consent funnel visible at
-  design time, no ad-hoc export; Art. 7/21 surface through the ADR-0211 rules the wizard displays but
+  design time, no ad-hoc export; Art. 7/21 surface through the ADR-0219 rules the wizard displays but
   cannot override.
 - PSD2: not applicable.
 - CNB: Act No. 480/2004 Coll. exposure is unchanged from ADR-0200 — the Studio is the authoring
@@ -142,10 +142,10 @@ would be decorative if a wizard could route around it).
 - [ADR-0176](0176-operator-initiated-customer-messaging.md) — the catalogue discipline and the
   approvals mechanism; [ADR-0203](0203-business-plane-ai-agents.md) — the campaign-copilot's bounded
   role in D1.
-- [ADR-0211](0211-platform-contact-policy-gate-contact-classes-durable-counters-suppression.md) —
+- [ADR-0219](0219-platform-contact-policy-gate-contact-classes-durable-counters-suppression.md) —
   the contact rules the wizard shows and cannot override.
 - [ADR-0210](0210-customer-360-as-a-query-over-the-analytics-silver-layer.md) — the funnel's data
   source; [ADR-0208](0208-admin-ui-consolidation-a-primitive-layer-one-status-vocabulary-and-an-interactive-flow-explainer.md)
   — the primitives the Studio builds on.
-- [ADR-0212](0212-in-app-engagement-surfaces-gamification-and-pre-approved-offers.md) — the metrics
+- [ADR-0220](0220-in-app-engagement-surfaces-gamification-and-pre-approved-offers.md) — the metrics
   stream D3 consumes.

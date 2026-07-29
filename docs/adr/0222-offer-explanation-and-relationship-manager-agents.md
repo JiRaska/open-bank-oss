@@ -10,7 +10,7 @@ tags: [ai-agents, privacy-gdpr, compliance]
 summary: "Two business-plane agents fill ADR-0203's gaps: an offer-explanation tool on customer-copilot rendering decision reason codes to customers, and an rm-copilot briefing relationship managers, sending only via the contact gate."
 ---
 
-# ADR-0214 — Offer-explanation and relationship-manager agents
+# ADR-0222 — Offer-explanation and relationship-manager agents
 
 ## Context
 
@@ -18,7 +18,7 @@ ADR-0203 fields six business-plane agents and leaves two customer-adjacent gaps 
 commercial stack (ADR-0200/0201/0212) exists:
 
 **Gap 1 — nobody can tell the customer *why*.** The estate produces decisions with reasons attached:
-ADR-0201's NBA ranks with a model card, ADR-0212 D4 renders pre-approved offers carrying reason codes
+ADR-0201's NBA ranks with a model card, ADR-0220 D4 renders pre-approved offers carrying reason codes
 from a standing ADR-0142 decision, and 0201's own compliance note commits to *"Art. 13/14 transparency
 for profiling"*. Transparency duties are discharged by *telling the customer*, not by recording the
 reason internally. Today the only customer-facing assistant (customer-copilot, ADR-0089) can narrate
@@ -32,7 +32,7 @@ precisely: reading the ADR-0210 360 view, recent events and open cases before a 
 then writing follow-ups. That is manual today, and it is the lowest-risk agent shape there is
 (read-only, human disposition, no customer contact). Note the RM's outbound messages are a real
 contact class: ADR-0176 covers operator-initiated messaging with its own four-eyes and template
-catalogue, and ADR-0211 makes every such send pass the contact-policy gate — an agent that drafts for
+catalogue, and ADR-0219 makes every such send pass the contact-policy gate — an agent that drafts for
 an RM must produce output that flows *into* that governed path, never around it.
 
 The constraints are inherited and non-negotiable: ADR-0203 D7's common constraints (no write/execute
@@ -50,9 +50,9 @@ We will add two agents on the ADR-0031 stack, adopting ADR-0203's D7/D8 constrai
 **D1 — `offer-explanation` as a tool extension of customer-copilot, not a new agent.** Following the
 ADR-0203 D5 finance-coach precedent (same principal, no new charter): a new read tool,
 `explain_offer(offerId | notificationId)`, which loads the governed record behind the artefact — the
-standing decision's reason codes for a pre-approved offer (ADR-0212 D4), the campaign step's
+standing decision's reason codes for a pre-approved offer (ADR-0220 D4), the campaign step's
 template id and segment version for a marketing message (ADR-0200/0201) — and renders it in plain,
-localised language, including how to object or withdraw consent (the ADR-0211 D3 suppression and
+localised language, including how to object or withdraw consent (the ADR-0219 D3 suppression and
 ADR-0198 revocation paths). Hard invariants: the tool answers **only** from the record (no record ⇒
 "I can't verify that, here's how to reach a human"); it never quotes amounts, rates or terms beyond
 what the record carries; it never collects data beyond the session. An `ml-systems.yaml` entry is
@@ -61,22 +61,22 @@ as its basis.
 
 **D2 — `rm-copilot` as a new business-plane agent.** Read-only over the ADR-0210 360 query,
 interaction history and open cases; per client or per meeting it produces a briefing (holdings,
-recent events, NBA list with reason codes, vulnerability flags per ADR-0212 D3.5 — an RM must see
+recent events, NBA list with reason codes, vulnerability flags per ADR-0220 D3.5 — an RM must see
 what the targeting engine already respects) and drafts follow-up communications. Drafts are sent
 **only** through ADR-0176's operator-initiated path — template catalogue, four-eyes where required,
-and the ADR-0211 gate on send — never from a personal mail client or a new send capability in the
+and the ADR-0219 gate on send — never from a personal mail client or a new send capability in the
 agent. `requires_human: every output`; no write/execute tools; charter under `docs/agents/` with
 id-parity per the charter-registry gate.
 
 **D3 — Neither agent relaxes a boundary.** The explanation tool changes nothing about what may be
-decided (ADR-0201 D5) or shown (ADR-0212 D4); the RM agent changes nothing about how customers are
+decided (ADR-0201 D5) or shown (ADR-0220 D4); the RM agent changes nothing about how customers are
 contacted (ADR-0176/0211). Both are presentation and preparation layers over governed records —
 which is also why they are safe to build on the same stack ADR-0203 already proved.
 
 **D4 — Sequencing.** Both behind ADR-0203 D8's gates (MCP authz fallback metric at zero; LiteLLM
 gateway deployed). `rm-copilot` additionally behind ADR-0210 being exercised by real RM usage — an
 agent briefing over a view nobody trusts yet automates distrust. The explanation tool ships with the
-first artefact that needs explaining (ADR-0212's first pre-approved surface, or the first ADR-0200
+first artefact that needs explaining (ADR-0220's first pre-approved surface, or the first ADR-0200
 campaign, whichever lands first).
 
 ## Alternatives considered
@@ -91,7 +91,7 @@ campaign, whichever lands first).
   tool's no-record behaviour (D1) degrades to it deliberately.
 - **Let the RM agent email the customer directly with the draft.** Rejected: it bypasses the
   catalogue, the four-eyes and the contact gate in one step — the exact defect ADR-0176 and
-  ADR-0211 exist to close.
+  ADR-0219 exist to close.
 
 ## Consequences
 
@@ -134,12 +134,12 @@ campaign, whichever lands first).
 - [ADR-0201](0201-customer-segmentation-and-next-best-action-on-the-ml-decisioning-platform.md) — the
   Art. 22/Annex III boundary the explanation tool renders but never crosses; Art. 13/14 commitment it
   discharges.
-- [ADR-0212](0212-in-app-engagement-surfaces-gamification-and-pre-approved-offers.md) — the artefacts
+- [ADR-0220](0220-in-app-engagement-surfaces-gamification-and-pre-approved-offers.md) — the artefacts
   to explain (standing decisions, reason codes).
 - [ADR-0210](0210-customer-360-as-a-query-over-the-analytics-silver-layer.md) — the rm-copilot's read
   surface.
 - [ADR-0176](0176-operator-initiated-customer-messaging.md) and
-  [ADR-0211](0211-platform-contact-policy-gate-contact-classes-durable-counters-suppression.md) —
+  [ADR-0219](0219-platform-contact-policy-gate-contact-classes-durable-counters-suppression.md) —
   the only send paths an RM draft may take.
 - [ADR-0089](0089-customer-facing-ai-assistant.md) — the customer-copilot being extended;
   [ADR-0148](0148-ai-assurance-prompt-registry-evals-gate-and-eu-ai-act-mapping.md) — the prompt

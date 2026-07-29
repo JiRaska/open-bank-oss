@@ -10,7 +10,7 @@ tags: [privacy-gdpr, notifications, compliance]
 summary: "One ContactPolicyGate in libs-runtime wraps consent, frequency caps, quiet hours and suppression behind three contact classes; cap counters are rebuilt from the event log, so a cache flush can never cause a contact burst."
 ---
 
-# ADR-0211 — Platform contact-policy gate: contact classes, durable counters, suppression
+# ADR-0219 — Platform contact-policy gate: contact classes, durable counters, suppression
 
 ## Context
 
@@ -22,7 +22,7 @@ and they widen with every sender type the estate adds:
 **Gap 1 — the suppression logic is scoped to one sender, but the senders are multiplying.** ADR-0200
 D6's caps live in the campaign concept. Yet ADR-0176 already sends operator-initiated messages, ADR-0203
 D5's finance-coach produces proactive insights *"gated by ADR-0198's consent and ADR-0200's suppression
-rules"* — a rule that exists only inside campaign-service today — and ADR-0212 adds in-app surfaces and
+rules"* — a rule that exists only inside campaign-service today — and ADR-0220 adds in-app surfaces and
 RM-initiated contact. "ADR-0200's suppression rules" is currently a citation, not a callable thing.
 Three senders re-implementing "2 per week" is the fleet's duplicate-config defect class (#1170/#1193)
 applied to the one control a customer feels directly.
@@ -34,7 +34,7 @@ campaign batch re-sends to people already at cap. Fail-closed covers *unavailabi
 for a *silent reset*. The consent state itself is Postgres-backed in consent-service; the cap state is
 exactly as load-bearing and currently has no durability story at all.
 
-**Gap 3 — "impression" and "send" are different things, and nothing distinguishes them.** ADR-0212's
+**Gap 3 — "impression" and "send" are different things, and nothing distinguishes them.** ADR-0220's
 surfaces render promotional content on every app open. If a surface render consumes the weekly send
 cap, a real user exhausts their protection in a day and every subsequent open is either degraded or
 uncounted — the cap either breaks the product or becomes a fiction. A customer-initiated impression is
@@ -60,7 +60,7 @@ not replace their mechanisms.
 **D1 — Three contact classes, decided once.** (1) **OUTBOUND_SEND** — bank-initiated delivery (email,
 push, SMS, operator message, finance-coach insight): counted against the per-party cap and the quiet
 period (defaults as ADR-0200 D6, configurable only by a platform admin). (2) **PROMOTIONAL_IMPRESSION** —
-rendering personalised promotional content on a customer-initiated surface (ADR-0212): counted against
+rendering personalised promotional content on a customer-initiated surface (ADR-0220): counted against
 a *separate, higher* impression budget (default 1 promotional surface/day), never against the send cap;
 budget exhaustion degrades the surface to default content, never blocks app functionality. (3)
 **SERVICE_EXEMPT** — transactional/security/service content and non-personalised default surfaces:
@@ -68,7 +68,7 @@ never counted, never gated, exactly as ADR-0198 D4 leaves the SECURITY category 
 
 **D2 — Counters are cache-backed but log-derived.** Cap and budget counters live in Valkey for
 latency, but every gate decision that results in a counted contact is reflected in the sender's
-outbox-published event (notification send records, ADR-0212's `engagement.events`). On cold start or
+outbox-published event (notification send records, ADR-0220's `engagement.events`). On cold start or
 detected flush, the gate **rebuilds counters by replaying the trailing cap window of those events
 before reopening** — and fails closed while rebuilding. A silent cache reset can therefore never
 produce a contact burst: the anti-spam control is derivable from the log we already keep, not
@@ -77,14 +77,14 @@ dependent on cache survival.
 **D3 — A suppression list with reason codes, distinct from consent.** A platform-level do-not-contact
 entry carries `(partyId, scope|topic|ALL, reasonCode, source)` — reason codes: customer opt-out,
 complaint (ADR-0085), RM-managed, legal hold, deceased. Sources: the customer preference centre, the
-complaints flow, the RM workbench (ADR-0213/0214). The gate evaluates suppression *before* consent, on
+complaints flow, the RM workbench (ADR-0221/0214). The gate evaluates suppression *before* consent, on
 the ADR-0200 D6 ordering principle: a customer who consented to email marketing can still be someone
 the bank must not contact about a specific topic today.
 
 **D4 — Mandatory call sites, CI-enforced.** The gate is invoked by: notification-service (the ADR-0198
 D4 choke point — its consent call becomes this gate call), campaign journeys (ADR-0200 D2's per-step
 check), finance-coach and any agent-proposed contact (ADR-0203/0214 — an agent's output becomes a
-customer touch only through this gate), engagement surfaces (ADR-0212), and RM-initiated sends (ADR-0214).
+customer touch only through this gate), engagement surfaces (ADR-0220), and RM-initiated sends (ADR-0222).
 Adherence is enforced by a **contract test in `openbank-libs`** that fails a service build when a
 marketing-class touch path bypasses the gate — the same governance-as-code style as the fleet's other
 cross-cutting invariants, because gap 1 showed "every sender checks" is a convention, not a control.
@@ -102,7 +102,7 @@ class (3).
   three senders named in accepted ADRs and the finance-coach citation shows the drift has started —
   a rule that lives in one service but is cited by three is a copy waiting to diverge.
 - **Extend notification-service into the policy owner.** It is the choke point for *sends*. Rejected:
-  it cannot see impressions (ADR-0212 surfaces never pass through it) or agent/RM proposals, and
+  it cannot see impressions (ADR-0220 surfaces never pass through it) or agent/RM proposals, and
   ADR-0200's alternatives already rejected loading cohort/policy logic into the service every sender
   depends on for delivery.
 - **Counters in Postgres only.** Durable by default, no rebuild path needed. Rejected: a synchronous
@@ -120,7 +120,7 @@ class (3).
   reviewed component — adding a sender type stops being a compliance review of its politeness logic.
 - The silent-reset burst scenario (gap 2) is eliminated by construction: counters are derivable, and
   the gate refuses to open until they are.
-- The impression/send split lets ADR-0212 build surfaces without either spamming customers or
+- The impression/send split lets ADR-0220 build surfaces without either spamming customers or
   degrading the app — the two failure modes of not deciding gap 3.
 - Customers get granular stop ("not about loans") without all-or-nothing consent loss — measurable as
   retained consent coverage instead of revocations.
@@ -161,8 +161,8 @@ class (3).
 - [ADR-0085](0085-complaints-handling.md) — complaint-linked suppression reason codes.
 - [ADR-0203](0203-business-plane-ai-agents.md) — finance-coach's "gated by ADR-0200's suppression
   rules" citation, made callable.
-- [ADR-0212](0212-in-app-engagement-surfaces-gamification-and-pre-approved-offers.md) — the impression
+- [ADR-0220](0220-in-app-engagement-surfaces-gamification-and-pre-approved-offers.md) — the impression
   class's producer.
-- [ADR-0213](0213-campaign-studio-the-campaign-authoring-operator-experience.md) and
-  [ADR-0214](0214-offer-explanation-and-relationship-manager-agents.md) — suppression administration
+- [ADR-0221](0221-campaign-studio-the-campaign-authoring-operator-experience.md) and
+  [ADR-0222](0222-offer-explanation-and-relationship-manager-agents.md) — suppression administration
   and RM-path call sites.

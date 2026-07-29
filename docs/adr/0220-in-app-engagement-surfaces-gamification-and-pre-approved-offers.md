@@ -10,7 +10,7 @@ tags: [mobile-app, customer-edge, privacy-gdpr, lending]
 summary: "Server-driven typed engagement surfaces with an impression budget and a feedback event loop; gamification with safety rules in domain code; pre-approved offers rendered only from standing ADR-0142 decisions with RPSN disclosure."
 ---
 
-# ADR-0212 — In-app engagement surfaces, gamification and pre-approved offers
+# ADR-0220 — In-app engagement surfaces, gamification and pre-approved offers
 
 ## Context
 
@@ -47,12 +47,12 @@ What must not happen is equally explicit in the estate:
 
 We will add **`openbank-engagement-service`** owning three capabilities — server-driven engagement
 surfaces, a gamification engine, and pre-approved offer presentation — sequenced **after** the
-ADR-0209 prerequisites (libs Temporal extraction, campaign-service first slice) and gated on ADR-0211's
+ADR-0209 prerequisites (libs Temporal extraction, campaign-service first slice) and gated on ADR-0219's
 contact-policy gate.
 
 **D1 — Typed surfaces, server-decided, app-rendered.** The app registers named slots (`home_banner`,
 `home_carousel`, `stories`, `product_feed`, `rewards_hub`). On render it queries the service through
-the customer edge; resolution runs ContactPolicyGate (ADR-0211 — `MARKETING_COMMS_INAPP` consent plus
+the customer edge; resolution runs ContactPolicyGate (ADR-0219 — `MARKETING_COMMS_INAPP` consent plus
 the PROMOTIONAL_IMPRESSION budget) → deterministic eligibility → ADR-0201 NBA ranking → a **typed
 payload** (`banner | card | story | carousel | offer`) whose content references the ADR-0176-style
 catalogue, never free-form markup. The KMP client owns theme, accessibility (ADR-0149) and motion.
@@ -61,9 +61,9 @@ engagement never blocks banking.
 
 **D2 — The feedback loop is the product.** The app posts `impression | click | dismiss | conversion`
 to the service, which publishes `engagement.events` via outbox. This stream feeds the analytics
-layer (ADR-0022), campaign measurement (ADR-0213's dashboards) and the ADR-0140 feature catalogue as
+layer (ADR-0022), campaign measurement (ADR-0221's dashboards) and the ADR-0140 feature catalogue as
 NBA training labels. Dismissal is a first-class negative signal: repeated dismissal of a content
-class writes a topic-level suppression entry (ADR-0211 D3) rather than merely hiding one card.
+class writes a topic-level suppression entry (ADR-0219 D3) rather than merely hiding one card.
 
 **D3 — Gamification with safety rules in domain code.** Aggregates: `Challenge`, `Streak`, `Badge`,
 `Points`, evaluated event-driven from existing domain events (savings deposits per ADR-0153's goal
@@ -91,10 +91,10 @@ carries the **mandatory RPSN/APR representative example** (Act No. 257/2016 Coll
 decision record; a payload without it is invalid and not rendered. NBA never touches these payloads
 (ADR-0201 D5's type boundary applies). One-tap acceptance does not bypass origination: it enters the
 credit flow, which re-verifies binding conditions at acceptance time. The offer-explanation agent
-(ADR-0214) explains from the same reason codes.
+(ADR-0222) explains from the same reason codes.
 
 **D5 — Honest dependency statement.** Surface infrastructure (D1/D2) and gamification (D3) depend on
-ADR-0211 and on `MARKETING_COMMS_INAPP` consent (ADR-0198/0205 — shipped). Personalised ranking
+ADR-0219 and on `MARKETING_COMMS_INAPP` consent (ADR-0198/0205 — shipped). Personalised ranking
 depends on ADR-0201's NBA graduating from shadow. Pre-approved offers depend on ADR-0142 being built
 at all — that slice cannot start as a demo with fabricated "pre-approvals", which is precisely the
 mis-selling this ADR forbids; an inauthentic placeholder is worse than a missing feature.
@@ -120,7 +120,7 @@ mis-selling this ADR forbids; an inauthentic placeholder is worse than a missing
 
 **Positive**
 - ADR-0201's NBA and ADR-0203's coach gain a lawful, measured place to reach customers — the feedback
-  loop that also trains the ranker and proves campaign attribution (ADR-0213).
+  loop that also trains the ranker and proves campaign attribution (ADR-0221).
 - Gamification becomes a demonstrable conduct control (invariants in tested domain code) instead of a
   marketing claim — the difference a ČNB review can actually verify.
 - Pre-approved offers convert a regulatory risk (advertising credit without a decision behind it)
@@ -146,8 +146,8 @@ mis-selling this ADR forbids; an inauthentic placeholder is worse than a missing
 - DORA: a customer-facing ICT service added to the register; graceful-degradation design (default
   content) is its resilience note.
 - GDPR: Art. 7 — `MARKETING_COMMS_INAPP` gates personalised surfaces; dismissal-as-objection feeds
-  Art. 21(2) through ADR-0211 D3. Art. 13/14 — reason codes accompany personalised content (see
-  ADR-0214 for the customer-facing rendering). Retention of `engagement.events` per ADR-0118.
+  Art. 21(2) through ADR-0219 D3. Art. 13/14 — reason codes accompany personalised content (see
+  ADR-0222 for the customer-facing rendering). Retention of `engagement.events` per ADR-0118.
 - PSD2: not applicable — no account access, no initiation.
 - CNB: Act No. 257/2016 Coll. — RPSN/APR representative example mandatory on every rendered credit
   offer (D4); Act No. 634/1992 Coll. / UCPD — dark-pattern prohibitions encoded as D3 invariants;
@@ -161,7 +161,7 @@ mis-selling this ADR forbids; an inauthentic placeholder is worse than a missing
   ranking consumed here; D5's credit boundary enforced by payload contract.
 - [ADR-0198](0198-marketing-consent-as-a-first-class-consent-service-scope.md) and
   [ADR-0205](0205-marketing-consent-forwarder-and-sca-exempt-activation.md) — the INAPP consent basis.
-- [ADR-0211](0211-platform-contact-policy-gate-contact-classes-durable-counters-suppression.md) — the
+- [ADR-0219](0219-platform-contact-policy-gate-contact-classes-durable-counters-suppression.md) — the
   gate and the impression budget; dismissal-to-suppression path.
 - [ADR-0210](0210-customer-360-as-a-query-over-the-analytics-silver-layer.md) — eligibility inputs.
 - [ADR-0142](0142-credit-decisioning-engine.md) — standing decisions behind D4; blocking dependency.
@@ -170,6 +170,6 @@ mis-selling this ADR forbids; an inauthentic placeholder is worse than a missing
 - [ADR-0143](0143-runtime-product-fee-posting-via-a-dedicated-billing-service.md) — reward
   provisioning; [ADR-0149](0149-digital-accessibility-standard-wcag-2-2-aa-en-301-549.md) —
   surface accessibility.
-- [ADR-0213](0213-campaign-studio-the-campaign-authoring-operator-experience.md) — the metrics
-  consumer; [ADR-0214](0214-offer-explanation-and-relationship-manager-agents.md) — explanation of
+- [ADR-0221](0221-campaign-studio-the-campaign-authoring-operator-experience.md) — the metrics
+  consumer; [ADR-0222](0222-offer-explanation-and-relationship-manager-agents.md) — explanation of
   what D4 renders.
