@@ -20,6 +20,7 @@ import com.openbank.notification.domain.model.NotificationStatus
 import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushPlatform
 import com.openbank.notification.domain.model.TemplateSensitivity
+import com.openbank.notification.infrastructure.client.ConsentServiceClient
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationPreferenceRepository
@@ -34,6 +35,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.reactive.messaging.Incoming
+import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
@@ -52,6 +54,21 @@ class NotificationConsumer {
          * party-scoped GET /api/v1/notifications/{id}/self.
          */
         const val GENERIC_PUSH_BODY = "Open the OpenBank app to view details."
+
+        /**
+         * The fixed internal marketing grantee every MARKETING consent is checked against
+         * (ADR-0205 D3). A constant so the gate cannot drift per call site.
+         */
+        const val MARKETING_GRANTEE = "party-service:marketing-comms"
+
+        /**
+         * The consent scope a MARKETING send is checked against, per target channel (ADR-0198 D4).
+         * Visible for tests — the gate's correctness is this mapping never drifting per channel.
+         */
+        fun marketingScopeFor(channel: NotificationChannel): String = when (channel) {
+            NotificationChannel.EMAIL -> "MARKETING_COMMS_EMAIL"
+            NotificationChannel.PUSH -> "MARKETING_COMMS_PUSH"
+        }
     }
 
     @Inject lateinit var mailer: ReactiveMailer
@@ -69,6 +86,10 @@ class NotificationConsumer {
     @Inject lateinit var clock: Clock
 
     @Inject lateinit var audit: AuditEventPublisher
+
+    @Inject
+    @RestClient
+    lateinit var consentServiceClient: ConsentServiceClient
 
     private val log = Logger.getLogger(NotificationConsumer::class.java)
 
@@ -167,7 +188,7 @@ class NotificationConsumer {
                 // and any channel added later would inherit whichever the author remembered. One gate
                 // ahead of the `when` cannot be forgotten by a new branch.
                 if (req.template.category == NotificationCategory.MARKETING) {
-                    suppressUnconsentedMarketing(req, entity)
+                    gateMarketingOnConsent(req, subject, body, entity)
                 } else {
                     when (req.channel) {
                         NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
@@ -257,35 +278,60 @@ class NotificationConsumer {
     // predates and was the uncorrected model for). A single trailing handler cannot tell "the
     // mail never went out" from "the mail went out, but recording SENT failed" — Mutiny's
     // Uni#chain composes onto ONE failure channel, so it would catch both: a transient Postgres
-    // error AFTER a successful send would silently mark the row FAILED for a message the
-    // customer actually received, and the "stub mode" log message conflated the two failure
-    // cases into one line.
     /**
-     * Records a marketing send as SUPPRESSED and emits an audit event (ADR-0198 §"A marketing send
-     * with no ACTIVE consent for the target channel records SUPPRESSED and emits an audit event").
+     * The ADR-0198 D4 consent gate (#2660): every MARKETING send asks consent-service for the
+     * party's ACTIVE consent under grantee `party-service:marketing-comms` (ADR-0205 D3), scoped
+     * to the target channel. A send with no ACTIVE consent records SUPPRESSED and audits it.
      *
-     * This fails CLOSED on every channel rather than pretending to check consent. The real record
-     * is consent-service's, under grantee `party-service:marketing-comms` (ADR-0205 D3, shipped);
-     * `notification_preference`'s columns (`payments_push` / `product_push` / `marketing_push`) are
-     * a per-channel mute *within* a granted consent — a different and legitimate control, but not
-     * the GDPR Art. 6(1)(a) basis.
+     * Fail-closed in BOTH failure modes, deliberately distinguishable in the audit (#2660 §3):
+     *  - `granted == false`  → SUPPRESSED with reason `no_active_consent` (a genuine refusal)
+     *  - client error/timeout → SUPPRESSED with reason `consent_check_unavailable` (an outage)
+     * A consent-service outage must never read as a grant, and the two numbers must never merge
+     * into one — the first is a GDPR control working, the second is an availability problem.
      *
-     * Not wiring a consent-service call yet is deliberate: no template maps to MARKETING
-     * ([NotificationTemplateCategoryTest] guards that), so an HTTP client here would be a
-     * money-path dependency for a caller that does not exist. When the first MARKETING template
-     * lands, that guard goes red and this method is where the live check
-     * (`POST /api/v1/consents/{id}/validate`, scope `MARKETING_COMMS_EMAIL` / `_PUSH`) replaces the
-     * unconditional suppression — ADR-0198 requires a call per send, not a cached copy.
+     * The check is per send, never cached (ADR-0198). `notification_preference`'s columns
+     * (`payments_push` / `product_push` / `marketing_push`) remain a per-channel mute *within* a
+     * granted consent — a different and legitimate control, not the Art. 6(1)(a) basis.
      */
-    private fun suppressUnconsentedMarketing(req: NotificationRequest, entity: NotificationEntity): Uni<Void> {
-        log.warnf(
-            "MARKETING %s suppressed: template=%s party=%s — no consent check is wired yet " +
-                "(ADR-0198 D4, #2369)",
-            req.channel,
-            req.template,
-            req.partyId,
-        )
-        return markStatus(entity, "SUPPRESSED").invoke { _ -> auditMarketingSuppressed(req) }
+    private fun gateMarketingOnConsent(
+        req: NotificationRequest,
+        subject: String,
+        body: String,
+        entity: NotificationEntity,
+    ): Uni<Void> {
+        val scope = marketingScopeFor(req.channel)
+        return consentServiceClient.hasActiveConsent(req.partyId, MARKETING_GRANTEE, scope)
+            .onItemOrFailure().transformToUni { check, failure ->
+                when {
+                    failure != null -> {
+                        log.warnf(
+                            failure,
+                            "MARKETING %s suppressed: consent-service unreachable (template=%s party=%s) — " +
+                                "failing closed (ADR-0198 D4, #2660)",
+                            req.channel,
+                            req.template,
+                            req.partyId,
+                        )
+                        markStatus(entity, "SUPPRESSED")
+                            .invoke { _ -> auditMarketingSuppressed(req, "consent_check_unavailable") }
+                    }
+                    check.granted ->
+                        when (req.channel) {
+                            NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
+                            NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
+                        }
+                    else -> {
+                        log.infof(
+                            "MARKETING %s suppressed: no ACTIVE consent (template=%s party=%s, ADR-0198 D4)",
+                            req.channel,
+                            req.template,
+                            req.partyId,
+                        )
+                        markStatus(entity, "SUPPRESSED")
+                            .invoke { _ -> auditMarketingSuppressed(req, "no_active_consent") }
+                    }
+                }
+            }
     }
 
     /**
@@ -293,7 +339,7 @@ class NotificationConsumer {
      * constraint, as [auditWebhookSent] — safe only while the wired publisher is the synchronous
      * [com.openbank.libs.audit.LoggingAuditEventPublisher].
      */
-    private fun auditMarketingSuppressed(req: NotificationRequest) {
+    private fun auditMarketingSuppressed(req: NotificationRequest, reason: String) {
         try {
             runBlocking {
                 audit.publish(
@@ -308,7 +354,7 @@ class NotificationConsumer {
                             "template" to req.template.name,
                             "channel" to req.channel.name,
                             "partyId" to req.partyId.toString(),
-                            "reason" to "no_consent_check_wired",
+                            "reason" to reason,
                         ),
                     ),
                 )

@@ -109,6 +109,11 @@ spec:
               value: "true"
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
+            # ADR-0198 D4 consent gate (#2660): MARKETING sends check consent-service per send.
+            # The M2M client_credentials grant rides the shared openbank-services client
+            # (OIDC_CLIENT_SECRET is already projected for the OIDC resource-server config).
+            - name: CONSENT_SERVICE_URL
+              value: http://consent-service.consent.svc:8106
             # No SMTP in the sandbox — mock the mailer so dispatch logs instead of
             # opening a dead localhost:1025 connection.
             - name: QUARKUS_MAILER_MOCK
