@@ -17,6 +17,9 @@ lineage:
     - serviceName: kyc-service
       relationType: topic
       description: events
+    - serviceName: consent-service
+      relationType: api
+      description: marketing consent check (ADR-0198 D4)
 databaseLineage:
   ownedDatabases:
     - openbank_notifications

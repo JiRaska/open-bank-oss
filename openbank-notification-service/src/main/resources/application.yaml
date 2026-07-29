@@ -46,6 +46,23 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     tls:
       verification: none
+  # M2M client for the ADR-0198 D4 consent gate (#2660): the MARKETING consent check fires from
+  # a Kafka consumer with no inbound user token, so it needs its own client_credentials grant on
+  # openbank-services (carries ROLE_OPERATOR, which consent-service's consent.validate accepts).
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+    tls:
+      verification: none
+  rest-client:
+    consent-service:
+      url: ${CONSENT_SERVICE_URL:http://localhost:8106}
+      connect-timeout: 2000
+      read-timeout: 2000
   smallrye-reactive-messaging:
     kafka:
       bootstrap-servers: localhost:29092
