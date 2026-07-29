@@ -1,0 +1,158 @@
+# ---------------------------------------------------------------------------
+# FinOps tier classifier — the MEASURED side of ADR-0057 (rules.yaml:
+# finops_tiers.classifier). check-finops-tiers.py validates the declared side in
+# CI; this CronJob reads the measured signals (http rate/idle, kafka lag/active,
+# cpu, replicas) from the in-cluster Prometheus, derives a recommended tier per
+# service by the policy's own axes, and publishes the report as the
+# admin-ui-tier-classifier ConfigMap, which the admin-ui mounts read-only (same
+# live > baked precedence as the cost report — ADR-0062).
+#
+# The ConfigMap is collector-owned (created/updated by this CronJob, not
+# declared in git) so ArgoCD selfHeal never reverts the daily data. The job
+# NEVER fails on drift: `finops-tier-drift` is `enforced: advisory` until
+# 2026-09-30 (rules.yaml) — drift lands in the report, not in an alert, until
+# the policy flips. Failing the job only when the report itself could not be
+# produced (Prometheus unreachable, clone failed) — the sbom-drift-scanner
+# lesson: a report that silently never lands reads as coverage.
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: finops-tier-classifier
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: finops-tier-classifier
+    app.kubernetes.io/part-of: admin-ui
+---
+# Least-privilege RBAC: write the single report ConfigMap, nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: finops-tier-classifier
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: finops-tier-classifier
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["admin-ui-tier-classifier"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: finops-tier-classifier
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: finops-tier-classifier
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: finops-tier-classifier
+subjects:
+  - kind: ServiceAccount
+    name: finops-tier-classifier
+    namespace: admin-ui
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: finops-tier-classifier
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: finops-tier-classifier
+    app.kubernetes.io/part-of: admin-ui
+spec:
+  # Daily, offset off the hour — the signal window is 24h, so a daily run keeps
+  # the report one window fresh without burning Prometheus queries.
+  schedule: "37 4 * * *"
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 900
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: finops-tier-classifier
+        spec:
+          serviceAccountName: finops-tier-classifier
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            - name: classify
+              image: docker.io/alpine/k8s:1.34.1
+              command: ["/bin/sh", "-ec"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: false
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: PROMETHEUS_URL
+                  value: http://kube-prometheus-stack-prometheus.observability.svc:9090
+              args:
+                - |
+                  set -eu
+                  echo "Cloning openbank-oss (public repo, unauthenticated, depth=1)..."
+                  git clone --depth 1 --quiet \
+                    https://github.com/JiRaska/open-bank-oss.git /tmp/repo
+
+                  echo "Running the tier classifier against $PROMETHEUS_URL ..."
+                  python3 /tmp/repo/openbank-infra/scripts/finops-tier-classifier.py \
+                    --prometheus-url "$PROMETHEUS_URL" \
+                    --window 24h --report > /work/finops-tier-classifier.md
+
+                  echo "Publishing admin-ui-tier-classifier ConfigMap..."
+                  kubectl create configmap admin-ui-tier-classifier \
+                    --namespace admin-ui \
+                    --from-file=finops-tier-classifier.md=/work/finops-tier-classifier.md \
+                    --dry-run=client -o yaml | kubectl apply -f -
+                  echo "Published."
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
+          containers:
+            - name: verify
+              image: docker.io/alpine/k8s:1.34.1
+              command: ["/bin/sh", "-ec"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: HOME
+                  value: /tmp
+              args:
+                - |
+                  set -eu
+                  # The report must exist and carry content; drift itself never fails the
+                  # job (advisory until 2026-09-30), a missing report does.
+                  kubectl get configmap admin-ui-tier-classifier -n admin-ui \
+                    -o jsonpath='{.data.finops-tier-classifier\.md}' | head -5
+                  LINES=$(kubectl get configmap admin-ui-tier-classifier -n admin-ui \
+                    -o jsonpath='{.data.finops-tier-classifier\.md}' | wc -l)
+                  [ "$LINES" -gt 3 ] || { echo "ERROR: report has $LINES lines — treat as not produced" >&2; exit 1; }
+          volumes:
+            - name: work
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}
