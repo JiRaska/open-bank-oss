@@ -28,5 +28,14 @@
 
 ledger:
   restore_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, ref: runbook-0003 }
+  pentest:       { date: 2026-07-26, ttl_days: 21, by: ci-zap-baseline, ref: https://github.com/JiRaska/open-bank-oss/actions/runs/30192274904 }
+
+consent-service:
+  pentest:       { date: 2026-07-28, ttl_days: 21, by: ci-schemathesis, ref: https://github.com/JiRaska/open-bank-oss/actions/runs/30340495749 }
 
 # --- zbytek zatím prázdný: žádná další M-dimenze není dosvědčena (a to je pravda) ---
+# Pozn. k `by:` u automatizovaných běhů — atestant je scheduled CI lane, ne člověk:
+#   ci-schemathesis = api-fuzz.yml (weekly Tue+Thu; consent-service je v default fuzz setu)
+#   ci-zap-baseline = dast-zap-baseline.yml (weekly; target = ledger-service v docker-compose)
+# TTL 21 dní je záměrně krátké: když lane umře, atestace vyprší a dimenze spadne zpět
+# na derived skóre — zelená přežije jen živou lane.
