@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.15.3...notification-service-v0.16.0) (2026-07-29)
+
+
+### Features
+
+* **notification:** wire the real marketing consent check per send (ADR-0198 D4) ([#2692](https://github.com/JiRaska/open-bank-oss/issues/2692)) ([f74662a](https://github.com/JiRaska/open-bank-oss/commit/f74662a6f95ad1139c2493cb586d3d7a621239f0)), closes [#2660](https://github.com/JiRaska/open-bank-oss/issues/2660)
+
 ## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.15.2...notification-service-v0.15.3) (2026-07-26)
 
 
