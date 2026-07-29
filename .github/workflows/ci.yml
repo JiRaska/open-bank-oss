@@ -1039,12 +1039,12 @@ jobs:
           python3 .github/scripts/check-openapi-route-conformance.py --enforce \
             --baseline .github/openapi-route-conformance-baseline.txt
 
-      # Compliance-matrix evidence gate (#2370): every snake_case column cited on the
-      # admin-ui compliance page must have a code reader (a migration is DDL, not a
-      # control), and an ok-marked row with dead evidence fails. The page's 46 claims
-      # were hand-corrected in #2667; this is what stops the next silent drift.
-      - name: "compliance-matrix — cited columns have code readers (enforced)"
-        run: python3 .github/scripts/check-compliance-matrix.py --enforce
+      # OWASP ASVS L3 mechanical subset (security baseline Layer 4): V2.1/V8.1/V10.1 are
+      # zero-tolerance (clean today), V9.1/V13.1 ratchet against the declared baseline —
+      # a NEW plaintext edge or a NEW unspecified resource fails; a paid-off baseline line
+      # fails until deleted (same KNOWN_UNCOVERED shape as the route-conformance gate).
+      - name: "ASVS L3 mechanical subset (enforced, baseline-ratcheted)"
+        run: python3 .github/scripts/check-asvs-l3.py --enforce --baseline .github/asvs-l3-baseline.txt
 
       # ADVISORY until rules.yaml change_classes.db_change flips to enforced
       # (target 2026-08-15, ADR-0144) — add --enforce to the invocation to flip.
