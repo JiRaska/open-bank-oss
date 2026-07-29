@@ -20,6 +20,14 @@ summary: "Period-end close is modelled as completeness rather than atomicity, se
 - **Operational closes** — ✅ Shipped: End-of-Day, End-of-Month, End-of-Year closes live with period lock + re-verify endpoint, four-eyes maker≠checker attestation, statement-close hardening, and trial-balance attestation.
 - **Statutory close** — ⬜ Deferred: entity-level statutory close (rozvaha/VZZ/EoY) explicitly deferred to ADR-0096; completeness alerting partial (runs but alert routing off).
 
+**Correction (2026-07-29, closing audit #1302):** the "period lock" claim above is true only at
+**fiscal-year** granularity — `LedgerService.postJournal` guards `requireOpenPeriod(entryDate.year)`
+against ATTESTED years. **No day- or month-granularity lock exists in code**: `entryDate` is
+caller-supplied and freely backdatable into days already tied out and statement-closed, and
+reversals inherit the original `entryDate`, so a July reversal rewrites March. The month lock +
+late-entry routing is the #1302 backlog (ADR-0096, delivery-status Planned). Read every "period
+lock" mention in this ADR as "year lock" until that lands.
+
 ## Context
 
 "Závěrka" (close) is an overloaded word in this platform. A single operational question —

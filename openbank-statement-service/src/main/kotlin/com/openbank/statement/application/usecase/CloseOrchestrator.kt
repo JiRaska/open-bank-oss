@@ -23,6 +23,7 @@ import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
+import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -46,14 +47,19 @@ class CloseOrchestrator(
     private val runs: CloseRunRepository,
     private val outbox: StatementOutbox,
     private val metrics: CloseMetricsPort,
+    private val wallClock: Clock,
 ) : RunCloseUseCase,
     CloseRunQueryUseCase {
 
     private val log = Logger.getLogger(CloseOrchestrator::class.java)
 
-    /** Clock seam (overridable in tests); CDI uses the default. */
-    internal var clock: () -> Instant = Instant::now
-    internal var today: () -> LocalDate = LocalDate::now
+    // Clock seam (overridable in tests); CDI defaults to the injected fleet Clock — the
+    // #1302 fix. `LocalDate::now` (JVM-default zone) was the third clock regime in the
+    // closing audit: a pod whose default zone is not the fleet's closes a different
+    // accounting day than the cron intended. `LocalDate.now(wallClock)` pins the day to
+    // the same authority every other service reads (ADR-0100's injected Clock).
+    internal var clock: () -> Instant = { Instant.now(wallClock) }
+    internal var today: () -> LocalDate = { LocalDate.now(wallClock) }
 
     override fun runClose(trigger: CloseTrigger): Uni<CloseRun> {
         val (from, to) = CloseCalendar.priorMonthBounds(today())

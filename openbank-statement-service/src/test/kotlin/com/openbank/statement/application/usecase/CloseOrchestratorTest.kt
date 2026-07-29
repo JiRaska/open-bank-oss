@@ -20,6 +20,7 @@ import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -38,7 +39,17 @@ class CloseOrchestratorTest {
 
     @BeforeEach
     fun setUp() {
-        orchestrator = CloseOrchestrator(accountRegistry, accountInfo, periods, closePocket, runs, outbox, metrics)
+        orchestrator =
+            CloseOrchestrator(
+                accountRegistry,
+                accountInfo,
+                periods,
+                closePocket,
+                runs,
+                outbox,
+                metrics,
+                Clock.systemUTC(),
+            )
         orchestrator.clock = { Instant.parse("2026-06-20T10:00:00Z") }
         orchestrator.today = { LocalDate.parse("2026-06-20") }
 

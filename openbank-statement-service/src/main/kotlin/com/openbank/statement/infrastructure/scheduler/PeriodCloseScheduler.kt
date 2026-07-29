@@ -30,7 +30,15 @@ class PeriodCloseScheduler(
 ) {
     private val log = Logger.getLogger(PeriodCloseScheduler::class.java)
 
-    @Scheduled(cron = "{openbank.statement.close-cron}", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    // Europe/Prague is explicit, not incidental (#1302): an unset @Scheduled timeZone means
+    // JVM-default, so the close fires on the pod's zone, not the bank's accounting day —
+    // the third clock regime from the closing audit. Prague matches ledger's BANK_TIME, so
+    // the month-end close runs on the same day the ledger closed.
+    @Scheduled(
+        cron = "{openbank.statement.close-cron}",
+        timeZone = "Europe/Prague",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
+    )
     fun monthlyClose(): Uni<Void> {
         if (!enabled) {
             log.debug("Scheduled period-close disabled; use POST /{accountId}/close or the operator retry")
