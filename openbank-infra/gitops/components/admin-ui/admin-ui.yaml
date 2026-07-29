@@ -96,6 +96,11 @@ spec:
             # the file is absent (before the first CronJob run).
             - name: OPENBANK_COST_REPORT_LIVE
               value: /config/cost/cost-report.json
+            # FinOps tier classifier (ADR-0057 measured side): live ConfigMap written
+            # daily by the finops-tier-classifier CronJob (tier-classifier.yaml).
+            # Falls back to available:false until the first run lands.
+            - name: OPENBANK_TIER_CLASSIFIER
+              value: /config/tier-classifier/finops-tier-classifier.md
             # Infra CVE scan: point the lifecycle route at the live ConfigMap written
             # daily by the infra-vuln-scanner CronJob (infra-vuln-scanner.yaml).
             # Falls back to the baked infra-vulns.json snapshot if the file is absent
@@ -150,6 +155,9 @@ spec:
             - name: cost-report
               mountPath: /config/cost
               readOnly: true
+            - name: tier-classifier
+              mountPath: /config/tier-classifier
+              readOnly: true
             - name: infra-vulns
               mountPath: /config/infra-vulns
               readOnly: true
@@ -183,6 +191,12 @@ spec:
         - name: cost-report
           configMap:
             name: admin-ui-cost-report
+            optional: true
+        # Daily FinOps tier-classifier report written by the finops-tier-classifier
+        # CronJob (tier-classifier.yaml). optional before the first run.
+        - name: tier-classifier
+          configMap:
+            name: admin-ui-tier-classifier
             optional: true
         # Daily Grype CVE scan written by the infra-vuln-scanner CronJob
         # (infra-vuln-scanner.yaml). optional=true so the pod starts before the
