@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: clearing-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "a4c9cd2e9cd4241d"
+    openbank.tech/policy-checksum: "5534408d151427b0"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -3135,6 +3135,20 @@ data:
       # t0_baseline and need no explicit entry.
       declared:
         openbank-notification-service: T2     # proven pilot, live in sandbox (ADR-0057 best-first target, #228)
+        # ADR-0173 D3 reconciliation (2026-07-29): card-issuance carries a live HTTPScaledObject
+        # with an openbank.io/finops-tier: T1 label and was missing here. Not money-path, so T1
+        # is declarable on the evidence of the live scaled object + classifier-measured idle —
+        # HELD AT min:1 (warm floor) pending a cold-start SLO re-measurement on the current path,
+        # the same hold product-catalog carries below.
+        openbank-card-issuance-service: T1      # live HTTPScaledObject (payments/card-issuance-http), held at min:1 — see ADR-0173 D3
+        # sdd-service and interest-service ALSO carry T1-labeled HTTPScaledObjects (sdd/ and
+        # interest/ namespaces) — but both are money_path_services, so they inherit T0 via
+        # t0_baseline and a T1 label on the deployment is the drift ADR-0173 D3 describes:
+        # demoting either below T0 requires an ADR-0030 threat-model update + 2 approvals, and
+        # neither has happened. Their scaled objects run min:1 (= T0 behaviour today); the label
+        # means nothing until the demotion process runs. NOT declared here on purpose — an
+        # explicit T1 entry would silently demote a money-path service, exactly what
+        # money_path_sacred exists to block (check-finops-tiers.py flags it).
         # openbank-product-catalog was WRONGLY declared T1 here (#2800), citing a
         # non-existent issue (#2083), while only Enabler 2 (HTTPScaledObject) existed —
         # no commit ever added a native build (Enabler 1), so the claimed "native
@@ -3200,7 +3214,7 @@ data:
       gate: finops-tier-drift
       enforced: advisory                      # ADR-0057; -> block when the classifier lands
       target_enforce_date: "2026-09-30"   # ADR-0144
-      blocked_on: "the measured-signal classifier (http_request_rate, kafka_consumer_lag, cpu/replica utilisation) has not shipped yet — only 2 services have a declared tier today (notification-service, product-catalog)"
+      blocked_on: "the measured-signal classifier shipped 2026-07-29 (finops-tier-classifier CronJob, daily report in the admin-ui) — the advisory gate now reads its findings; 3 services have a declared tier today (notification-service T2, product-catalog T0, card-issuance T1-held-at-min:1)"
       # Added by issue #2392: the rule carried `enforced`/`target_enforce_date` but never named the
       # script that produces the finding, so nothing tied the advisory CI step to this deadline.
       ci_producer: "openbank-infra/scripts/check-finops-tiers.py"
