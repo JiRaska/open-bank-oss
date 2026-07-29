@@ -1,6 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
+# STALE TEMPLATE — DO NOT APPLY (tracked in #1914, measured 2026-07-29).
+# This file predates the fleet's per-service namespace layout: it targets a namespace
+# called `openbank` that does not exist (~30 per-service namespaces do), no ArgoCD
+# application references it, and no Istio control plane is installed in the cluster
+# (no istio-system namespace, zero PeerAuthentication objects). Applying it would
+# silently do nothing; treating it as "mTLS is wired" would be a false security claim.
+# The mTLS program is sequenced in issue #1914: capacity first (the default NodePool
+# sits at ~92% of its declared CPU limit), then istiod, a one-namespace pilot, then a
+# per-namespace rollout — with these manifests rewritten against the fleet as it
+# actually is. Until then, east-west traffic is plaintext behind L3/L4 NetworkPolicies,
+# and any threat model claiming mesh mTLS as a mitigating control is aspirational.
+#
 # Istio service mesh wiring for the openbank namespace. Provides:
 #   - mTLS for every east-west call (PeerAuthentication STRICT)
 #   - JWT validation at the mesh edge (RequestAuthentication against Keycloak)
