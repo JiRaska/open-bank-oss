@@ -10,6 +10,111 @@
       },
       "status": "affected",
       "action_statement": "Resolved org.hibernate.reactive:hibernate-reactive-core is 3.4.1.Final (bundled by the Quarkus platform BOM io.quarkus.platform:quarkus-bom:3.37.2). The connection-leak DoS is fixed in 4.2.1.Final, a major-version jump that cannot be forced independently of the Quarkus platform (a bare force desyncs from the Quarkus-tested Vert.x/Hibernate-Reactive combination), so remediation is tracked as the Quarkus platform bump in issue #1446. Compensating controls in place: the reactive PostgreSQL pool is bounded with idle-connection eviction (shared openbank-libs default, PRs #1682/#1894), so a leaked-connection condition self-heals rather than permanently exhausting the pool, and every service is reachable only in-mesh (Istio STRICT mTLS) and via the authenticated BFF, not directly by an external client. Residual risk: medium-severity DoS only, no data exposure."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-59921"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line.",
+      "timestamp": "2026-07-29T13:07:22Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-59919"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line.",
+      "timestamp": "2026-07-29T13:07:22Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-59901"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line.",
+      "timestamp": "2026-07-29T13:07:22Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-59900"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line.",
+      "timestamp": "2026-07-29T13:07:22Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-59899"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line.",
+      "timestamp": "2026-07-29T13:07:22Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-59898"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line.",
+      "timestamp": "2026-07-29T13:07:22Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56746"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line.",
+      "timestamp": "2026-07-29T13:07:22Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-56745"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line.",
+      "timestamp": "2026-07-29T13:07:22Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-55851"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line.",
+      "timestamp": "2026-07-29T13:07:22Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-55833"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line.",
+      "timestamp": "2026-07-29T13:07:22Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-55831"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved io.netty components are pinned to 4.1.136.Final fleet-wide (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts), the 4.1.x line's patched version for this advisory. Same-line patch bump on the Quarkus 3.37.2 BOM's netty line (4.1.135.Final -> 4.1.136.Final); the advisory's 4.2.x range (>=4.2.0, <4.2.16) does not apply to the resolved 4.1.x line.",
+      "timestamp": "2026-07-29T13:07:22Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-59949"
+      },
+      "status": "fixed",
+      "action_statement": "Resolved at.yawk.lz4:lz4-java is pinned to 1.11.1 fleet-wide (openbank.dependency-vulnerability-pins.gradle.kts), the advisory's patched version; same-minor patch on the transitive kafka-clients compression dependency.",
+      "timestamp": "2026-07-29T13:07:22Z"
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-mfg7-5gfp-c4w3"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The advisory's affected range is io.netty:netty-codec-dns >=4.2.0.Final and <=4.2.15.Final (4.2.x line only). The fleet resolves netty on the 4.1.x line (4.1.136.Final, pinned in openbank.dependency-vulnerability-pins.gradle.kts), which the advisory does not list as affected; the 4.2.x sighting in the dependency graph is the Gradle dependency-graph tooling classpath, not any service's runtime classpath.",
+      "timestamp": "2026-07-29T13:07:57Z"
     }
   ]
 }
