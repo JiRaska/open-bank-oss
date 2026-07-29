@@ -1,0 +1,60 @@
+# Auto-retry spot-killed CI runs (issue #2330).
+#
+# WHY THIS EXISTS
+# The ARC runners burst pool (`runners` NodePool) is spot-only — ADR-0053's FinOps thesis is
+# scale-to-zero on Karpenter's Graviton spot pool, and that is the right cost model. Its price
+# is the spot reclaim: AWS reclaims in capacity blocks with a 2-minute warning, and a ~45-min
+# CI job cannot finish in 2 minutes, so a reclaim lands mid-build as
+#   "##[error]The runner has received a shutdown signal ... The operation was canceled."
+# Because the reclaim hits every spot node in the block at once, several unrelated PRs die
+# within seconds of each other (measured 2026-07-25, 12:25:14-12:25:15 UTC: four jobs on
+# unrelated services, unrelated PRs, same second). Until now every one of those needed a human
+# to notice and `gh run rerun` — and `gh run rerun --failed` is a no-op against `cancelled`
+# conclusions, so the rerun is always the full one.
+#
+# WHAT THIS DOES
+# When one of the watched workflows completes `cancelled`, this re-runs it automatically,
+# bounded to one retry (run_attempt 1 only — see LOOP SAFETY below). A spot reclaim then costs
+# one queued re-run instead of a human round-trip; the job lands on a fresh spot node (or the
+# on-demand warm pool) and proceeds.
+#
+# LOOP SAFETY
+# github.event.workflow_run.run_attempt is 1 for the original run and 2 for the first rerun,
+# so gating on run_attempt == 1 gives exactly one automatic retry per run — a cancelled retry
+# (run_attempt 2) never re-triggers, and a run cancelled for a real reason (superseded by a
+# newer push to the same PR — the concurrency group's normal operation) is only retried once,
+# where it fails fast if the branch has moved. Deliberately NOT retried: `action_required`
+# (approval gates are a human's job) and runs cancelled by anything other than the runner
+# dying — indistinguishable from the outside, so we accept one wasted retry on a manually
+# cancelled run over a more clever heuristic that can misfire.
+#
+# WATCH LIST
+# Only the lanes that run on the spot pool and hurt when killed mid-flight: the PR services CI
+# and the two slow security lanes. Do NOT add auto-deploy here — it has its own reconcile tick.
+name: Auto-retry spot-killed CI runs
+
+on:
+  workflow_run:
+    workflows: ["Services CI", "Security scan", "Dependency submission"]
+    types: [completed]
+
+permissions:
+  actions: write   # re-run the cancelled workflow
+
+jobs:
+  retry:
+    name: Re-run cancelled run (once)
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.workflow_run.conclusion == 'cancelled' &&
+      github.event.workflow_run.run_attempt == 1
+    steps:
+      - name: Re-run the cancelled workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          echo "Re-running cancelled run $RUN_URL (spot-kill retry, issue #2330)"
+          gh run rerun "$RUN_ID"
+          echo "::notice title=spot-kill auto-retry::Re-ran cancelled run $RUN_URL (attempt 2 of max 2; a second kill stays for a human)"
