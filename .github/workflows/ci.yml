@@ -1046,6 +1046,12 @@ jobs:
       - name: "compliance-matrix — cited columns have code readers (enforced)"
         run: python3 .github/scripts/check-compliance-matrix.py --enforce
 
+      # The cheapest drift proxy from #2314: the spec's declared dev port must equal the
+      # service's quarkus.http.port. The 21 mismatches measured on 2026-07-29 were corrected
+      # in the same PR that lands this gate, so it enforces from day one with no baseline.
+      - name: "openapi-server-port — spec dev port vs quarkus.http.port (enforced)"
+        run: python3 .github/scripts/check-openapi-server-port.py --enforce
+
       # ADVISORY until rules.yaml change_classes.db_change flips to enforced
       # (target 2026-08-15, ADR-0144) — add --enforce to the invocation to flip.
       # Covers BOTH halves of db_change.require: an added migration carries a

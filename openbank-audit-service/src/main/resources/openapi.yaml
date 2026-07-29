@@ -3,13 +3,13 @@
 openapi: 3.1.0
 info:
   title: Audit Service API
-  version: 1.2.0
+  version: 1.3.0
   description: Immutable audit trail — retrieve event history per aggregate; verify hash-chain integrity (ADR-0086) and externally-signed anchors (ADR-0031 D5).
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
 servers:
-  - url: http://localhost:8117
+  - url: http://localhost:8113
     description: Local development
 tags:
   - name: Audit

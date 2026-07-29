@@ -6,13 +6,13 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.8 -> 1.9): additive
   # only — a new PATCH /api/v1/parties/approvals/{id} endpoint and an additional 202 response
   # on POST /{id}/merge (ADR-0155 four-eyes). No existing response or schema changed.
-  version: 1.10.0
+  version: 1.11.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
 servers:
-  - url: http://localhost:8126
+  - url: http://localhost:8111
     description: Local development
 tags:
   - name: Parties

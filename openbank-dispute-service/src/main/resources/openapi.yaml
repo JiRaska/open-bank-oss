@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Dispute Service API
-  version: 1.2.0
+  version: 1.3.0
   description: >-
     Payment dispute management — open, evidence, escalate, withdraw, resolve, timeline — plus
     regulatory complaints handling with a statutory deadline clock (ADR-0085). Evidence is a
@@ -12,7 +12,7 @@ info:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
 servers:
-  - url: http://localhost:8113
+  - url: http://localhost:8135
     description: Local development
 tags:
   - name: Disputes

@@ -3,13 +3,13 @@
 openapi: 3.1.0
 info:
   title: PID Service API (Party Identity)
-  version: 1.12.0
+  version: 1.13.0
   description: Party identity data management — create, update, KYC linking, BankID/ROB sync, identity resolution and four-eyes verification cases (ADR-0072).
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
 servers:
-  - url: http://localhost:8128
+  - url: http://localhost:8105
     description: Local development
 tags:
   - name: Parties

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: PSD2 Open Banking API
-  version: 2.4.0
+  version: 2.5.0
   description: |
     PSD2-compliant open banking — Account Information Service (AIS) and
     Payment Initiation Service (PIS) for Third Party Providers.
@@ -21,7 +21,7 @@ info:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
 servers:
-  - url: http://localhost:8122
+  - url: http://localhost:8107
     description: Local development
 tags:
   - name: AIS
