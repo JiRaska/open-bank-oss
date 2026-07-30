@@ -535,7 +535,7 @@ class NotificationConsumer {
      * Every `vars[...]` key read here must be declared in that constant's [NotificationTemplate.variables];
      * anything else is rejected upstream and can never arrive.
      */
-    @Suppress("CyclomaticComplexMethod") // one branch per template — grows with the template catalogue
+    @Suppress("CyclomaticComplexMethod", "LongMethod") // one branch per template — grows with the catalogue; each branch stays a two-line render
     private fun renderTemplate(template: NotificationTemplate, vars: Map<String, String>): Pair<String, String> =
         when (template) {
             NotificationTemplate.ACCOUNT_OPENED ->
@@ -593,6 +593,12 @@ class NotificationConsumer {
             NotificationTemplate.SCA_APPROVAL ->
                 "Approve your payment" to
                     "<p>${vars.v("detail").ifBlank { "You have a payment waiting for your approval." }}</p>"
+            NotificationTemplate.MARKETING_PRODUCT_OFFER ->
+                vars.v("offerTitle") to
+                    "<h2>${vars.v("offerTitle")}</h2><p>${vars.v("offerText")}</p>" +
+                    "<p><b>${vars.v("ctaText")}</b></p>" +
+                    "<p style=\"font-size:small;color:#666\">You are receiving this because you opted in to " +
+                    "marketing emails. Manage your preferences in the app.</p>"
         }
 }
 
