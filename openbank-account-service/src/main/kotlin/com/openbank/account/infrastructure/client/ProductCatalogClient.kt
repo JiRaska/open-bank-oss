@@ -23,6 +23,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 // design, so this was never a crash, just a silent bypass of ADR-0158's whole point).
 @RegisterRestClient(configKey = "product-catalog-api")
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
+@RegisterProvider(ProductCatalogHostHeaderFilter::class)
 @Path("/api/v1/products")
 @Produces(MediaType.APPLICATION_JSON)
 interface ProductCatalogClient {

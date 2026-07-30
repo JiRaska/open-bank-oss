@@ -23,6 +23,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  */
 @RegisterRestClient(configKey = "product-catalog-api")
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
+@RegisterProvider(ProductCatalogHostHeaderFilter::class)
 @Produces(MediaType.APPLICATION_JSON)
 interface ProductCatalogClient {
     @GET

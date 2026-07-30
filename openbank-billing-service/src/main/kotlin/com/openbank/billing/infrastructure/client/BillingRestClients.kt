@@ -58,6 +58,7 @@ data class AccountPageDto(
  */
 @RegisterRestClient(configKey = "product-catalog")
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
+@RegisterProvider(ProductCatalogHostHeaderFilter::class)
 @Path("/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
