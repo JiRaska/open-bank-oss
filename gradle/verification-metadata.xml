@@ -17740,30 +17740,48 @@
          <artifact name="netty-buffer-4.1.136.Final.pom">
             <sha256 value="5b4ddbc5f43c63a4498a66e355714730697c00b8986ed63d484d8a4f2a77ca8b" origin="Maven Central"/>
          </artifact>
+                     <artifact name="netty-buffer-4.1.136.Final.jar">
+            <sha256 value="c88f13fc41156fde5df918c7b240038dfbe97ac57576163f208630391789b5d5" origin="Maven Central"/>
+         </artifact>
       </component>
       <component group="io.netty" name="netty-codec-dns" version="4.1.136.Final">
          <artifact name="netty-codec-dns-4.1.136.Final.pom">
             <sha256 value="5382dbdb318b94af2cf22289a421a7c5708350145242dac69822f569947eaebc" origin="Maven Central"/>
+         </artifact>
+                     <artifact name="netty-codec-dns-4.1.136.Final.jar">
+            <sha256 value="89bddc4ec42756c41a0195a50a1323a324836162b6712a843c3de5c29096c93b" origin="Maven Central"/>
          </artifact>
       </component>
       <component group="io.netty" name="netty-codec-socks" version="4.1.136.Final">
          <artifact name="netty-codec-socks-4.1.136.Final.pom">
             <sha256 value="f80928b898e99b9006e144d0e1092721c79ea518a3d24e2425e3e8abffe7c716" origin="Maven Central"/>
          </artifact>
+                     <artifact name="netty-codec-socks-4.1.136.Final.jar">
+            <sha256 value="341f47dbaac667a6e7e6cad4114218025f9755ced641bb0740fb69e34d29b421" origin="Maven Central"/>
+         </artifact>
       </component>
       <component group="io.netty" name="netty-resolver" version="4.1.136.Final">
          <artifact name="netty-resolver-4.1.136.Final.pom">
             <sha256 value="0b3e27eadb478a0c0de5ad42d84d3749e629c1d7e96b1b5dca6827c2d1cf25a2" origin="Maven Central"/>
+         </artifact>
+                     <artifact name="netty-resolver-4.1.136.Final.jar">
+            <sha256 value="e64972fec474f5b9bd086b738154d190a923e82c4923ac550aff4f5ea9e98600" origin="Maven Central"/>
          </artifact>
       </component>
       <component group="io.netty" name="netty-transport" version="4.1.136.Final">
          <artifact name="netty-transport-4.1.136.Final.pom">
             <sha256 value="2b0587688ec63e13684e5dd985ae4665126f4b5cf64bf27052fabaea135f691a" origin="Maven Central"/>
          </artifact>
+                     <artifact name="netty-transport-4.1.136.Final.jar">
+            <sha256 value="b92881ea925721ed42fee5122a42b8bce4b84da737dbc3ca2d84dfaca52c28b6" origin="Maven Central"/>
+         </artifact>
       </component>
       <component group="io.netty" name="netty-transport-native-unix-common" version="4.1.136.Final">
          <artifact name="netty-transport-native-unix-common-4.1.136.Final.pom">
             <sha256 value="943574b27adfa0de2303e8b94f86b486ac1b97fbf1caa73bdc8cfacf43af2131" origin="Maven Central"/>
+         </artifact>
+                     <artifact name="netty-transport-native-unix-common-4.1.136.Final.jar">
+            <sha256 value="7e014c9b13defd9d254d4e5a5edd8ab6dde17533e1152f99699a6b28b2967a8a" origin="Maven Central"/>
          </artifact>
       </component>
    </components>
