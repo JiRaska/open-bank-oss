@@ -13,6 +13,7 @@ import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Instant
@@ -27,7 +28,8 @@ import java.util.UUID
  * request onto `openbank.notification.requests` — this service holds no delivery credentials (D3).
  */
 @ApplicationScoped
-@Suppress("LongParameterList") // activity wiring: repos + ports + policy config in one place, per the worker-registrar pattern
+// activity wiring: repos + ports + policy config in one place, per the worker-registrar pattern
+@Suppress("LongParameterList")
 class CampaignJourneyActivitiesImpl(
     private val campaigns: CampaignRepository,
     private val enrolments: EnrolmentRepository,
@@ -102,7 +104,7 @@ class CampaignJourneyActivitiesImpl(
     }
 
     private suspend fun record(campaignId: UUID, partyId: UUID, stepOrder: Int, outcome: SendOutcome) {
-        sendLog.record(SendRecord(UUID.randomUUID(), campaignId, partyId, stepOrder, outcome, Instant.now()))
+        sendLog.record(SendRecord(Ids.newId(), campaignId, partyId, stepOrder, outcome, Instant.now()))
     }
 
     /** Quiet hours wrap midnight: 21→8 means "hour >= 21 OR hour < 8" in the platform zone. */

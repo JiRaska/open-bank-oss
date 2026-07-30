@@ -20,6 +20,7 @@ import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SegmentRule
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import io.quarkus.hibernate.reactive.panache.PanacheRepository
@@ -267,7 +268,7 @@ class PanacheSegmentRegistry(private val mapper: ObjectMapper) :
         Panache.withTransaction {
             persist(
                 SegmentEntity().apply {
-                    id = UUID.randomUUID()
+                    id = Ids.newId()
                     name = segment.name
                     version = segment.version
                     rulesJson = mapper.writeValueAsString(segment.rules)

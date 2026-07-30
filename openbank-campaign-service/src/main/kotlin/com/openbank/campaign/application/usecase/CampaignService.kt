@@ -15,6 +15,7 @@ import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.SegmentRef
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Instant
 import java.util.UUID
@@ -44,7 +45,7 @@ class CampaignService(
         val segment = segments.load(segmentRef.name, segmentRef.version)
             ?: throw NoSuchElementException("segment ${segmentRef.name}@${segmentRef.version} not found")
         val campaign = Campaign(
-            id = UUID.randomUUID(),
+            id = Ids.newId(),
             name = name,
             goal = goal,
             segmentRef = SegmentRef(segment.name, segment.version),
@@ -104,7 +105,7 @@ class CampaignService(
             if (enrolments.findByCampaignAndParty(id, partyId) != null) continue
             enrolments.save(
                 Enrolment(
-                    id = UUID.randomUUID(),
+                    id = Ids.newId(),
                     campaignId = id,
                     partyId = partyId,
                     state = EnrolmentState.ACTIVE,
