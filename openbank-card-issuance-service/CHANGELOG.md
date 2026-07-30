@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.13.1...card-issuance-service-v0.14.0) (2026-07-30)
+
+
+### Features
+
+* **finops:** route all four product-catalog callers through the KEDA interceptor ([#2699](https://github.com/JiRaska/open-bank-oss/issues/2699)) ([f603f4d](https://github.com/JiRaska/open-bank-oss/commit/f603f4d7d590200bb03bf97d83e36880ac74c862))
+
+
+### Bug Fixes
+
+* **governance:** correct 21 specs' dev port and gate it against quarkus.http.port ([#2697](https://github.com/JiRaska/open-bank-oss/issues/2697)) ([1d2f830](https://github.com/JiRaska/open-bank-oss/commit/1d2f8301d8b55664eed36860a0ec78717375a66b))
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.13.0...card-issuance-service-v0.13.1) (2026-07-25)
 
 
