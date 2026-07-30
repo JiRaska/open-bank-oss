@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.9...document-service-v0.9.0) (2026-07-30)
+
+
+### Features
+
+* **finops:** route all four product-catalog callers through the KEDA interceptor ([#2699](https://github.com/JiRaska/open-bank-oss/issues/2699)) ([f603f4d](https://github.com/JiRaska/open-bank-oss/commit/f603f4d7d590200bb03bf97d83e36880ac74c862))
+
 ## [0.8.9](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.8.8...document-service-v0.8.9) (2026-07-26)
 
 
