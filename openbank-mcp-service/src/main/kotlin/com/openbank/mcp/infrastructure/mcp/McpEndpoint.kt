@@ -186,6 +186,8 @@ class McpEndpoint(
                     toolsReturned = filtered.tools.size,
                     toolsTotal = filtered.total,
                     pdpErrors = filtered.pdpErrors,
+                    actChain = ctx.actChain,
+                    sessionId = ctx.sessionId,
                 ),
             )
             metrics.toolsListCompleted(
@@ -236,6 +238,8 @@ class McpEndpoint(
                     result = result,
                     reason = reason,
                     argumentKeys = argumentKeys,
+                    actChain = ctx.actChain,
+                    sessionId = ctx.sessionId,
                 ),
             )
             metrics.toolCallCompleted(toolTag, decision, result, Duration.ofNanos(System.nanoTime() - startedAt))

@@ -4,6 +4,7 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.mcp.application
 
+import com.openbank.libs.audit.AuditChannel
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
@@ -44,6 +45,10 @@ class McpCallAuditor(private val publisher: AuditEventPublisher) {
         val reason: String? = null,
         /** Argument KEY names only — never the values (see the class KDoc). */
         val argumentKeys: List<String> = emptyList(),
+        /** RFC 8693 delegation chain of the calling token (ADR-0224); empty = direct caller. */
+        val actChain: List<String> = emptyList(),
+        /** Agent/browser session id from the token's `sid` claim; null when absent. */
+        val sessionId: String? = null,
     )
 
     /** The PDP outcome as recorded in the payload — `UNAVAILABLE` is a deny, but a distinct one. */
@@ -60,6 +65,10 @@ class McpCallAuditor(private val publisher: AuditEventPublisher) {
         val pdpErrors: Int,
         /** Why discovery was denied outright (e.g. "caller authentication failed"); null on success. */
         val reason: String? = null,
+        /** RFC 8693 delegation chain of the calling token (ADR-0224); empty = direct caller. */
+        val actChain: List<String> = emptyList(),
+        /** Agent/browser session id from the token's `sid` claim; null when absent. */
+        val sessionId: String? = null,
     )
 
     suspend fun toolCallCompleted(call: ToolCall) {
@@ -72,6 +81,9 @@ class McpCallAuditor(private val publisher: AuditEventPublisher) {
                 resourceId = call.tool,
                 timestamp = Instant.now(),
                 result = call.result,
+                channel = AuditChannel.MCP,
+                actChain = call.actChain,
+                sessionId = call.sessionId,
                 payload = buildMap {
                     put("tool", call.tool)
                     put("capability", call.capability)
@@ -99,6 +111,9 @@ class McpCallAuditor(private val publisher: AuditEventPublisher) {
                 } else {
                     AuditResult.SUCCESS
                 },
+                channel = AuditChannel.MCP,
+                actChain = list.actChain,
+                sessionId = list.sessionId,
                 payload = buildMap {
                     put("charter", list.agentId.removePrefix(AGENT_ID_PREFIX))
                     put("consent_id", list.consentId)

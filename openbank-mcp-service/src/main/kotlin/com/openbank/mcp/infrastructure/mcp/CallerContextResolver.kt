@@ -40,11 +40,35 @@ class CallerContextResolver(private val jwt: JsonWebToken) {
         val subject = jwt.subject?.takeIf { it.startsWith(AGENT_PREFIX) } ?: return null
         val consentId = jwt.getClaim<String?>(CLAIM_CONSENT_ID)?.takeIf { it.isNotBlank() }
             ?: error("agent token '$subject' carries no '$CLAIM_CONSENT_ID' claim")
-        return ConsentContext(agentId = subject, consentId = consentId, grantedAccounts = emptyList())
+        return ConsentContext(
+            agentId = subject,
+            consentId = consentId,
+            grantedAccounts = emptyList(),
+            actChain = actChain(jwt.getClaim(CLAIM_ACT)),
+            sessionId = jwt.getClaim<String?>(CLAIM_SESSION_ID)?.takeIf { it.isNotBlank() },
+        )
     }
+
+    /**
+     * RFC 8693 `act` nesting → the ordered delegation chain (ADR-0224/0226). The claim is a JSON
+     * object whose `sub` is the immediate actor and whose own `act` nests the next one; a bare
+     * array of objects is tolerated for issuers that flatten. The walk stops at the first
+     * malformed link and at [MAX_ACT_DEPTH]; anything unparseable yields an empty chain (a direct
+     * action) rather than failing the call — audit enrichment must not deny.
+     */
+    private fun actChain(claim: Any?): List<String> = generateSequence(claim as? Map<*, *>) { it["act"] as? Map<*, *> }
+        .take(MAX_ACT_DEPTH)
+        .takeWhile { it["sub"]?.toString()?.isNotBlank() == true }
+        .map { it["sub"].toString() }
+        .toList()
 
     private companion object {
         const val AGENT_PREFIX = "agent:"
         const val CLAIM_CONSENT_ID = "consent_id"
+        const val CLAIM_ACT = "act"
+        const val CLAIM_SESSION_ID = "sid"
+
+        /** Delegation beyond this depth is an issuer bug, not a real chain — stop walking. */
+        const val MAX_ACT_DEPTH = 8
     }
 }

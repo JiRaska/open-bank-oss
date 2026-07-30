@@ -71,5 +71,16 @@ interface ProposalPort {
 /**
  * The presented PSD2 consent + the acting agent identity, resolved from the caller's OAuth token
  * (phase 2). `agentId` is the OPA principal id; `grantedAccounts` bounds the reachable scope.
+ *
+ * [actChain] and [sessionId] are the ADR-0226 audit-correlation dimensions, parsed from the
+ * token's RFC 8693 `act` nesting and `sid` claim (ADR-0224): empty/null for a direct caller,
+ * populated once OBO sessions exist — the audit trail carries them from day one so a mediated
+ * action is attributable to the identity that opened the session.
  */
-data class ConsentContext(val agentId: String, val consentId: String, val grantedAccounts: List<String>)
+data class ConsentContext(
+    val agentId: String,
+    val consentId: String,
+    val grantedAccounts: List<String>,
+    val actChain: List<String> = emptyList(),
+    val sessionId: String? = null,
+)
