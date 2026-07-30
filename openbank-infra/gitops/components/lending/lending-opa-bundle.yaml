@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: lending-service
     app.kubernetes.io/part-of: lending
   annotations:
-    openbank.tech/policy-checksum: "28dbc221777723ac"
+    openbank.tech/policy-checksum: "19304e19ff799776"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -265,28 +265,6 @@ data:
     	input.action in {"consent.list", "consent.revoke"}
     }
 
-    # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log
-    # (P2-27). Same edge principal and same guard as edge-service-consent — the edge injects the
-    # caller's authoritative partyId from the JWT, so a client-supplied id never reaches
-    # audit-service.
-    #
-    # Deliberately a DISTINCT action from `audit.read`, not the `audit.` family: `audit.read` is the
-    # auditor/compliance surface over the whole trail (GET /entries/{aggregateId},
-    # /entries/by-actor/{actorId}) and granting it to the edge principal would put regulated evidence
-    # behind a service account. `audit.customerRead` reaches only the metadata projection.
-    #
-    # This rule is what actually narrows the endpoint. Its @RolesAllowed had to widen to
-    # ROLE_API/ROLE_OPERATOR/ROLE_ADMIN — the edge's service account carries ROLE_OPERATOR, so
-    # @RolesAllowed(ROLE_API) alone 403'd every call before the PDP was consulted (same shape as
-    # document-service's SignatureCeremonyResource) — and ROLE_OPERATOR is held by real staff too.
-    # The identity match below is therefore the load-bearing half: staff sessions authenticate
-    # through a different client, so their preferred_username is never "service-account-*".
-    allowed_reasons contains "edge-service-audit-customer" if {
-    	input.principal.type == "HUMAN"
-    	input.principal.id == "service-account-openbank-edge"
-    	input.action == "audit.customerRead"
-    }
-
     # Any M2M service-account caller (e.g. account-service) may trigger a sanctions screen
     # (issue #746, found via issue #669's load benchmark). sanctions.create is called with
     # resource = "" — a resourceless system action — so operator-on-own-tenant (which requires
@@ -518,7 +496,6 @@ data:
     		"lending.repay",
     		"lending.disburse",
     		"lending.collateralRegister",
-    		"lending.approval.read",
     	}
     }
 
@@ -538,8 +515,6 @@ data:
     		"lending.writeoff",
     		"lending.collateralRegister",
     		"lending.collateralDecide",
-    		"lending.approval.read",
-    		"lending.approval.decide",
     	}
     }
 
@@ -2425,6 +2400,10 @@ data:
                                              # action requires HUMAN + (ROLE_OPERATOR or ROLE_ADMIN) and
                                              # explicitly excludes any service-account-* principal id
                                              # (rest.rego operator-compose-message), the same exclusion
+        - campaign.activate                 # ADR-0200 D5: marketing campaign activation reaches a cohort,
+                                             # so its blast radius exceeds a single operator message —
+                                             # four-eyes with the self-approval guard, human-only
+                                             # (maker != checker), same mechanism as opsmessage.compose.
                                              # m2m-sanctions-screening uses for the opposite carve-out.
         - party.merge                       # ADR-0179: retire a duplicate identity into a survivor
                                              # (POST /api/v1/parties/{id}/merge). Gated HERE and not via
