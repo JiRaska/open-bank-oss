@@ -174,7 +174,7 @@ class McpEndpoint(
 
         val filtered = runBlocking {
             toolsCatalog.visibleTools(
-                principal = Principal(id = ctx.agentId, type = "AI_AGENT"),
+                principal = Principal(id = ctx.agentId, type = ctx.principalType, roles = ctx.roles),
                 cacheKey = "${ctx.agentId}|${ctx.consentId}",
             )
         }
@@ -252,12 +252,14 @@ class McpEndpoint(
             return toolError(id, "Tool not permitted: $toolName")
         }
 
-        // Gate on the SHARED ADR-0034 PDP as an AI_AGENT principal (input.action = the capability).
+        // Gate on the SHARED ADR-0034 PDP (input.action = the capability). The principal class
+        // follows the token: AI_AGENT for consent-bound agent tokens, HUMAN with its bounded realm
+        // roles for an OBO staff token (ADR-0224) — the same role vocabulary a REST call presents.
         val decision = try {
             runBlocking {
                 pdp.allow(
                     AuthzQuery(
-                        principal = Principal(id = ctx.agentId, type = "AI_AGENT"),
+                        principal = Principal(id = ctx.agentId, type = ctx.principalType, roles = ctx.roles),
                         action = capability,
                         resource = null,
                         attributes = mapOf("tool" to toolName, "consentId" to ctx.consentId),
