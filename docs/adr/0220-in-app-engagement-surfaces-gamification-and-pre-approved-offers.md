@@ -55,9 +55,16 @@ contact-policy gate.
 the customer edge; resolution runs ContactPolicyGate (ADR-0219 — `MARKETING_COMMS_INAPP` consent plus
 the PROMOTIONAL_IMPRESSION budget) → deterministic eligibility → ADR-0201 NBA ranking → a **typed
 payload** (`banner | card | story | carousel | offer`) whose content references the ADR-0176-style
-catalogue, never free-form markup. The KMP client owns theme, accessibility (ADR-0149) and motion.
-Service outage or gate timeout ⇒ the app renders bundled default content (SERVICE_EXEMPT) —
-engagement never blocks banking.
+catalogue, never free-form markup. **Eligibility is pre-computed, not queried per render**: an
+eligibility snapshot per party (product holdings, adverse-state flags, segment membership) is
+materialised event-driven into the service's own store (Valkey/Postgres) from the same domain events
+that feed the ADR-0210 silver layer — ClickHouse is used for backfill, audit and the ADR-0221 funnel,
+never for a point query on the app-open hot path. **Adverse-state changes invalidate near-real-time**:
+fraud-hold, arrears, dispute-opened and erasure events evict the party's snapshot immediately (the
+same event-driven invalidation ADR-0219 uses for consent), because a vulnerable-customer exclusion
+that lags by a snapshot interval is a compliance defect, not a freshness metric. The KMP client owns
+theme, accessibility (ADR-0149) and motion. Service outage or gate timeout ⇒ the app renders bundled
+default content (SERVICE_EXEMPT) — engagement never blocks banking.
 
 **D2 — The feedback loop is the product.** The app posts `impression | click | dismiss | conversion`
 to the service, which publishes `engagement.events` via outbox. This stream feeds the analytics
@@ -81,7 +88,9 @@ domain rules, not stated as content policy:
 5. **Vulnerable customers are excluded from targeting** (arrears/collections contact, an open
    dispute, a fraud hold — the ADR-0200 D6 adverse-state set): excluded from challenge *targeting*
    and promotional surfaces at the eligibility stage, while remaining free to use the hub on their
-   own initiative.
+   own initiative. The exclusion reads the D1 eligibility snapshot with its near-real-time
+   invalidation — an adverse-state change takes effect at event speed, not at the next materialisation
+   interval.
 
 **D4 — Pre-approved offers are standing decisions, rendered — never invented, never ranked.** A
 scheduled batch asks ADR-0142's engine for standing decisions per eligible party (amount, price,

@@ -64,7 +64,14 @@ rendering personalised promotional content on a customer-initiated surface (ADR-
 a *separate, higher* impression budget (default 1 promotional surface/day), never against the send cap;
 budget exhaustion degrades the surface to default content, never blocks app functionality. (3)
 **SERVICE_EXEMPT** — transactional/security/service content and non-personalised default surfaces:
-never counted, never gated, exactly as ADR-0198 D4 leaves the SECURITY category untouched.
+never counted, never gated, exactly as ADR-0198 D4 leaves the SECURITY category untouched. All
+windows are **rolling** (per-party rolling 7 days for the send cap, rolling 24 hours for the
+impression budget) — never calendar days: a midnight boundary must not reset protection, and the
+semantics are decided here, not rediscovered in code review. Where several campaigns or NBA items are
+simultaneously eligible for one slot or one cap unit, the winner is chosen by a single **deterministic
+arbitration order** — SERVICE_EXEMPT first, then a non-expired standing decision (ADR-0220 D4), then
+NBA-ranked content, then plain campaign steps, ties broken by the item's priority field and id — so
+the tie-break is a reviewed decision, not an accident of iteration order.
 
 **D2 — Counters are cache-backed but log-derived.** Cap and budget counters live in Valkey for
 latency, but every gate decision that results in a counted contact is reflected in the sender's
@@ -72,7 +79,13 @@ outbox-published event (notification send records, ADR-0220's `engagement.events
 detected flush, the gate **rebuilds counters by replaying the trailing cap window of those events
 before reopening** — and fails closed while rebuilding. A silent cache reset can therefore never
 produce a contact burst: the anti-spam control is derivable from the log we already keep, not
-dependent on cache survival.
+dependent on cache survival. Two integrity rules make the rebuild sound: (a) the **rebuild window is
+bounded by topic retention** — the maximum configurable cap window must never exceed the send/
+impression topics' `retention.ms` (a 30-day window over a 7-day topic would rebuild a partial history
+and reopen under-counted, re-creating the burst this section exists to kill); this is asserted by a
+CI check comparing the configured maximum against topic retention, and the gate fails closed on
+violation; (b) replay uses the events' business timestamps (`occurred_at`), never ingestion time, so
+a delayed event cannot escape its true window.
 
 **D3 — A suppression list with reason codes, distinct from consent.** A platform-level do-not-contact
 entry carries `(partyId, scope|topic|ALL, reasonCode, source)` — reason codes: customer opt-out,
@@ -83,11 +96,17 @@ the bank must not contact about a specific topic today.
 
 **D4 — Mandatory call sites, CI-enforced.** The gate is invoked by: notification-service (the ADR-0198
 D4 choke point — its consent call becomes this gate call), campaign journeys (ADR-0200 D2's per-step
-check), finance-coach and any agent-proposed contact (ADR-0203/0214 — an agent's output becomes a
+check), finance-coach and any agent-proposed contact (ADR-0203/0222 — an agent's output becomes a
 customer touch only through this gate), engagement surfaces (ADR-0220), and RM-initiated sends (ADR-0222).
 Adherence is enforced by a **contract test in `openbank-libs`** that fails a service build when a
-marketing-class touch path bypasses the gate — the same governance-as-code style as the fleet's other
-cross-cutting invariants, because gap 1 showed "every sender checks" is a convention, not a control.
+marketing-class touch path bypasses the gate. The detection mechanism is stated explicitly, because a
+text-match guard produces vacuous greens: a **compile-time wiring assertion** — every service that
+declares a marketing-class capability (a notification category, a surface slot, a campaign step type,
+an agent tool that originates contact) must inject the `ContactPolicyGate` port via the shared
+convention plugin, and a detekt/AST rule (not a grep) fails the build when a marketing-class call site
+references the delivery/surface layer without the gate in its call graph. The same governance-as-code
+style as the fleet's other cross-cutting invariants, because gap 1 showed "every sender checks" is a
+convention, not a control.
 
 **D5 — The gate stays a library, not a service.** An in-process component over consent-service (live
 per-call validation, per ADR-0195's rule that a cached consent survives its own revocation) and the
