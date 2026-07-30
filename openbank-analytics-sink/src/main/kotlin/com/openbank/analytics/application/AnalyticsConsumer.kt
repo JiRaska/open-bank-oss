@@ -162,7 +162,7 @@ class AnalyticsConsumer {
         val aggregateType = resolveAggregateType(node, address)
         return AnalyticsEnvelope(
             eventId = node["eventId"]?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
-                    // ADR-0106: a synthesised dedupe key is a durable, indexed identifier -> UUIDv7.
+                // ADR-0106: a synthesised dedupe key is a durable, indexed identifier -> UUIDv7.
                 ?: Ids.newId(),
             aggregateType = aggregateType,
             aggregateId = resolveAggregateId(node, aggregateType, address),
@@ -197,7 +197,6 @@ class AnalyticsConsumer {
             // The outbox partition key IS the aggregate id (OutboxKafkaHeaders.partitionKey).
             ?: address.key
             ?: UNKNOWN_SERVICE
-
 
     private fun resolveAggregateType(node: JsonNode, address: EventAddress): String = node["aggregateType"]?.asText()
         ?: inferAggregateType(node).takeIf { it != UNKNOWN }
