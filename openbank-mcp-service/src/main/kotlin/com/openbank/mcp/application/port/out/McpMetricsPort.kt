@@ -47,6 +47,21 @@ interface McpMetricsPort {
     /** Record how the acting agent's identity was established for one `tools/call`. */
     fun callerIdentityResolved(source: CallerIdentitySource)
 
+    /** Record one `tools/list` discovery, by outcome (ADR-0225 D4 — discovery recon is countable). */
+    fun toolsListCompleted(outcome: ToolsListOutcome)
+
+    /** Bounded `tools/list` outcome set — a closed enum, so it is safe as a metric tag. */
+    enum class ToolsListOutcome {
+        /** Discovery completed (possibly filtered to a subset, or empty on a policy deny). */
+        OK,
+
+        /** No/malformed caller token — empty list returned, fail-closed like the call path. */
+        ANONYMOUS_DENIED,
+
+        /** Every capability evaluation failed on PDP transport error — empty list, fail-closed. */
+        PDP_UNAVAILABLE,
+    }
+
     companion object {
         /** Tag value for a JSON-RPC method this server does not implement. */
         const val UNKNOWN_METHOD = "unknown"

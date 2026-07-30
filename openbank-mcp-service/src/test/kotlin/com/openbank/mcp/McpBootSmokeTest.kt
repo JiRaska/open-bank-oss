@@ -5,7 +5,6 @@ package com.openbank.mcp
 import io.quarkus.test.junit.QuarkusTest
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
-import org.hamcrest.Matchers.containsInAnyOrder
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
 
@@ -38,22 +37,10 @@ class McpBootSmokeTest {
             .post("/mcp")
             .then()
             .statusCode(200)
-            // The NAMES, not just the count. A count pins how many tools are served but cannot tell a
-            // swap from a no-op: replace one tool with another and `size() == 6` still passes, on a
-            // surface whose whole security model is a curated allowlist. `count_marketing_consents`
-            // (ADR-0209 D5) is read-only and denied by the PDP until a charter grants
-            // `query.marketing.readonly` — it is advertised here, not callable.
-            .body("result.tools.size()", equalTo(6))
-            .body(
-                "result.tools.name",
-                containsInAnyOrder(
-                    "list_accounts",
-                    "get_balance",
-                    "list_transactions",
-                    "list_consents",
-                    "propose_payment",
-                    "count_marketing_consents",
-                ),
-            )
+            // ADR-0225: discovery is capability-shaped — an anonymous caller (this smoke test
+            // presents no agent token) sees an EMPTY list, fail-closed exactly like an anonymous
+            // tools/call. The curated catalog is only revealed to a caller the shared PDP
+            // authorizes; unit coverage in McpEndpointTest pins the per-capability filtering.
+            .body("result.tools.size()", equalTo(0))
     }
 }

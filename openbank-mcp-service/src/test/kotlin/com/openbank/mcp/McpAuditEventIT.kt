@@ -106,7 +106,7 @@ class McpAuditEventIT {
     }
 
     @Test
-    fun `tools list is not audited - no customer data is touched`() {
+    fun `tools list is audited - discovery reconnaissance leaves a trace (ADR-0225 D4)`() {
         given()
             .contentType(ContentType.JSON)
             .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
@@ -114,7 +114,13 @@ class McpAuditEventIT {
             .then()
             .statusCode(200)
 
-        assertThat(recorder.events).isEmpty()
+        // Anonymous discovery is fail-closed (empty list) AND on the record: before ADR-0225 a
+        // caller could enumerate the whole operations vocabulary without a single audit event.
+        val event = singleEvent()
+        assertThat(event.operation).isEqualTo("mcp.tools.list")
+        assertThat(event.result).isEqualTo(AuditResult.DENIED)
+        assertThat(event.payload["reason"]).isEqualTo("caller authentication failed")
+        assertThat(event.payload["tools_total"]).isEqualTo(6)
     }
 
     // ADR-0195 step 4 (BLOCKER #2206): a tools/call with NO agent token must be denied, never

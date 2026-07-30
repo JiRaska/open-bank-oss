@@ -14,6 +14,7 @@ import com.openbank.libs.authz.Principal
 import com.openbank.mcp.application.McpCallAuditor
 import com.openbank.mcp.application.McpToolRegistry
 import com.openbank.mcp.application.McpUntrustedData
+import com.openbank.mcp.application.PolicyFilteredToolCatalog
 import com.openbank.mcp.application.port.out.CallerIdentitySource
 import com.openbank.mcp.application.port.out.ConsentContext
 import com.openbank.mcp.application.port.out.McpMetricsPort
@@ -48,8 +49,11 @@ import java.time.Duration
  *
  * Every `tools/call` — allowed, denied, unmapped, or denied by a PDP outage — emits one
  * AI-attributed [McpCallAuditor] audit event (ADR-0031 D5 / ADR-0086), so an AI-initiated action
- * against the bank is reconstructable. `tools/list`, `initialize` and `ping` do not: they touch no
- * customer data and expose only the static tool catalogue.
+ * against the bank is reconstructable. `tools/list` is audited too (ADR-0225 D4) and its result is
+ * policy-filtered per caller: a caller sees only the tools the shared PDP would let it call, an
+ * anonymous caller or a full PDP outage sees an empty list — discovery is capability-shaped, so
+ * the operations vocabulary is no longer a reconnaissance map. `initialize` and `ping` touch no
+ * customer data and stay unaudited.
  *
  * The same terminal branches also report to [McpMetricsPort] — audit and meter are emitted from one
  * place so the aggregate can never disagree with the per-call trail. The audit event answers "what
@@ -100,6 +104,10 @@ class McpEndpoint(
     @Inject
     lateinit var rateLimiter: McpRateLimiter
 
+    /** Field-injected for the same reason as [metrics] — the policy-filtered tools/list (ADR-0225). */
+    @Inject
+    lateinit var toolsCatalog: PolicyFilteredToolCatalog
+
     private val log = Logger.getLogger(McpEndpoint::class.java)
 
     @POST
@@ -125,11 +133,70 @@ class McpEndpoint(
             )
             "notifications/initialized" -> return Response.noContent().build()
             "ping" -> mapOf("pong" to true)
-            "tools/list" -> ToolsListResult(registry.tools)
+            "tools/list" -> return handleToolsList(id)
             "tools/call" -> return handleToolCall(id, params)
             else -> return error(id, McpErrorCode.METHOD_NOT_FOUND, "Method not found: $method")
         }
         return Response.ok(McpResponse(id = id, result = result)).build()
+    }
+
+    /**
+     * ADR-0225: discovery is capability-shaped — the caller sees only the tools the shared PDP
+     * would let it call, evaluated as the same (principal, capability) pair the call gate uses.
+     * Anonymous/malformed-token callers and a full PDP outage both get an empty list, fail-closed
+     * like the call path; every list is audited and metered (D4). Schemas are never mutated per
+     * caller (D2) — only set membership is filtered.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun handleToolsList(id: JsonNode): Response {
+        val ctx = try {
+            callerResolver.resolveOrNull()
+        } catch (ex: Exception) {
+            log.warnf("caller context resolution failed for tools/list: %s — denying", ex.message)
+            null
+        }
+        if (ctx == null) {
+            runBlocking {
+                auditor.toolsListCompleted(
+                    McpCallAuditor.ToolsList(
+                        agentId = "unknown",
+                        consentId = "none",
+                        toolsReturned = 0,
+                        toolsTotal = registry.tools.size,
+                        pdpErrors = 0,
+                        reason = "caller authentication failed",
+                    ),
+                )
+                metrics.toolsListCompleted(McpMetricsPort.ToolsListOutcome.ANONYMOUS_DENIED)
+            }
+            return Response.ok(McpResponse(id = id, result = ToolsListResult(emptyList()))).build()
+        }
+
+        val filtered = runBlocking {
+            toolsCatalog.visibleTools(
+                principal = Principal(id = ctx.agentId, type = "AI_AGENT"),
+                cacheKey = "${ctx.agentId}|${ctx.consentId}",
+            )
+        }
+        runBlocking {
+            auditor.toolsListCompleted(
+                McpCallAuditor.ToolsList(
+                    agentId = ctx.agentId,
+                    consentId = ctx.consentId,
+                    toolsReturned = filtered.tools.size,
+                    toolsTotal = filtered.total,
+                    pdpErrors = filtered.pdpErrors,
+                ),
+            )
+            metrics.toolsListCompleted(
+                if (filtered.tools.isEmpty() && filtered.pdpErrors > 0) {
+                    McpMetricsPort.ToolsListOutcome.PDP_UNAVAILABLE
+                } else {
+                    McpMetricsPort.ToolsListOutcome.OK
+                },
+            )
+        }
+        return Response.ok(McpResponse(id = id, result = ToolsListResult(filtered.tools))).build()
     }
 
     @Suppress("ReturnCount", "TooGenericExceptionCaught")

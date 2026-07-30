@@ -49,6 +49,19 @@ class McpCallAuditor(private val publisher: AuditEventPublisher) {
     /** The PDP outcome as recorded in the payload — `UNAVAILABLE` is a deny, but a distinct one. */
     enum class Decision { ALLOW, DENY, UNAVAILABLE }
 
+    /** One `tools/list` discovery attempt and its filter outcome (ADR-0225 D4). */
+    data class ToolsList(
+        val agentId: String,
+        val consentId: String,
+        /** Tools returned after the policy filter; 0 for anonymous discovery or a full PDP outage. */
+        val toolsReturned: Int,
+        val toolsTotal: Int,
+        /** Capability evaluations lost to PDP transport errors (each excluded its tool, fail-closed). */
+        val pdpErrors: Int,
+        /** Why discovery was denied outright (e.g. "caller authentication failed"); null on success. */
+        val reason: String? = null,
+    )
+
     suspend fun toolCallCompleted(call: ToolCall) {
         publisher.publish(
             AuditEvent(
@@ -72,12 +85,42 @@ class McpCallAuditor(private val publisher: AuditEventPublisher) {
         )
     }
 
+    suspend fun toolsListCompleted(list: ToolsList) {
+        publisher.publish(
+            AuditEvent(
+                actorId = list.agentId,
+                actorType = ACTOR_TYPE,
+                operation = OPERATION_TOOLS_LIST,
+                resourceType = RESOURCE_TYPE,
+                resourceId = TOOLS_LIST_RESOURCE_ID,
+                timestamp = Instant.now(),
+                result = if (list.reason != null || (list.toolsReturned == 0 && list.pdpErrors > 0)) {
+                    AuditResult.DENIED
+                } else {
+                    AuditResult.SUCCESS
+                },
+                payload = buildMap {
+                    put("charter", list.agentId.removePrefix(AGENT_ID_PREFIX))
+                    put("consent_id", list.consentId)
+                    put("tools_returned", list.toolsReturned)
+                    put("tools_total", list.toolsTotal)
+                    if (list.pdpErrors > 0) put("pdp_errors", list.pdpErrors)
+                    list.reason?.let { put("reason", it) }
+                },
+            ),
+        )
+    }
+
     private companion object {
         const val ACTOR_TYPE = "AI_AGENT"
 
         /** `<service>.<aggregate>.<verb>` (AuditEvent KDoc); agent-service's twin is `agent.mcp.tool_call`. */
         const val OPERATION = "mcp.tool.call"
+
+        /** Discovery (ADR-0225 D4) gets its own operation so call and reconnaissance trails filter apart. */
+        const val OPERATION_TOOLS_LIST = "mcp.tools.list"
         const val RESOURCE_TYPE = "mcp.tool"
+        const val TOOLS_LIST_RESOURCE_ID = "tools/list"
 
         /** The `agent:` prefix the shared rego strips to match a charter id in `agents.yaml`. */
         const val AGENT_ID_PREFIX = "agent:"
