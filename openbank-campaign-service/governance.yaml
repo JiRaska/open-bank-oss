@@ -10,14 +10,14 @@ evidenceExported: true
 lineage:
   downstream:
     - serviceName: notification-service
-      relationType: kafka
+      relationType: topic
       description: delivery via openbank.notification.requests (ADR-0200 D3)
     - serviceName: consent-service
       relationType: api
       description: per-send marketing consent check (ADR-0198)
   upstream:
     - serviceName: consent-service
-      relationType: kafka
+      relationType: topic
       description: openbank.consent.events — revocation signals journeys (ADR-0200 D2)
     - serviceName: analytics-sink
       relationType: api
