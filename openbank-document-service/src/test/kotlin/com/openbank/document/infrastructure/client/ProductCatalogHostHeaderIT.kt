@@ -51,7 +51,6 @@ class ProductCatalogHostHeaderIT {
         assertThat(hosts).contains(EXPECTED_HOST)
     }
 
-
     class CatalogStub : QuarkusTestResourceLifecycleManager {
         companion object {
             private val hosts = CopyOnWriteArrayList<String>()
@@ -73,8 +72,10 @@ class ProductCatalogHostHeaderIT {
             // for why a single-id stub is a trap in a suite whose config map leaks).
             http.createContext("/api/v1/products") { ex ->
                 hosts += ex.requestHeaders.getFirst("Host") ?: ""
-                val body =
-                    """{"id":"$PRODUCT_ID","code":"RAMCOVA_SMLOUVA_CS","name":"R","termsAndConditions":[]}""".toByteArray()
+                val requestedId = ex.requestURI.path.substringAfterLast('/')
+                val body = (
+                    """{"id":"$requestedId","code":"RAMCOVA_SMLOUVA_CS","name":"R","termsAndConditions":[]}"""
+                    ).toByteArray()
                 ex.responseHeaders.add("Content-Type", "application/json")
                 ex.sendResponseHeaders(200, body.size.toLong())
                 ex.responseBody.use { it.write(body) }
