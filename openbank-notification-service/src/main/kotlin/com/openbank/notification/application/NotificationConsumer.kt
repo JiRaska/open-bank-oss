@@ -535,7 +535,8 @@ class NotificationConsumer {
      * Every `vars[...]` key read here must be declared in that constant's [NotificationTemplate.variables];
      * anything else is rejected upstream and can never arrive.
      */
-    @Suppress("CyclomaticComplexMethod", "LongMethod") // one branch per template — grows with the catalogue; each branch stays a two-line render
+    // one branch per template — grows with the catalogue; each branch stays a two-line render
+@Suppress("CyclomaticComplexMethod", "LongMethod")
     private fun renderTemplate(template: NotificationTemplate, vars: Map<String, String>): Pair<String, String> =
         when (template) {
             NotificationTemplate.ACCOUNT_OPENED ->

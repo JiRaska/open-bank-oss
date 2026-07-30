@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-campaign-service
 
-> Operational runbook for the `campaign` service. Data domain **marketing**,
+> Operational runbook for the `campaign` service. Data domain **platform**,
 > classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-campaign-service` |
 | HTTP port | `8128` |
-| Data domain | marketing |
+| Data domain | platform |
 | Datastore | PostgreSQL (database `openbank_campaigns`) |
 | Classification | confidential |
 | Retention | 5 years |
