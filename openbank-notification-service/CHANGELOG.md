@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.16.1...notification-service-v0.16.2) (2026-07-30)
+
+
+### Bug Fixes
+
+* **notification:** disable OIDC discovery in the test profile too ([#2765](https://github.com/JiRaska/open-bank-oss/issues/2765)) ([cb666a6](https://github.com/JiRaska/open-bank-oss/commit/cb666a6ef7e57330c73e2288ebd187938070a0c2))
+
 ## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.16.0...notification-service-v0.16.1) (2026-07-30)
 
 
