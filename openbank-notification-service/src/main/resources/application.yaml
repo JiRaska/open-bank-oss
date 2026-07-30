@@ -203,10 +203,13 @@ authz:
     # No eager token fetch at test boot: the ADR-0198 D4 consent gate's M2M client
     # (oidc-client, client_credentials) otherwise creates OidcClientImpl eagerly at
     # startup and fails the boot with "OIDC Server is not available" on the CI
-    # runners, which have no Keycloak on localhost:8080. Lazy acquisition matches
-    # account-service's M2M clients in tests.
+    # runners, which have no Keycloak on localhost:8080. Discovery must ALSO be off —
+    # NotificationConsumer is a boot-time Kafka consumer, so its @RestClient injection
+    # creates OidcClientImpl at startup, and discovery is the call that connects.
     oidc-client:
       early-tokens-acquisition: false
+      discovery-enabled: false
+      token-path: /realms/openbank/protocol/openid-connect/token
     mailer:
       mock: true
     # Disable the @Scheduled outbox tick under test so the consumer IT never races
