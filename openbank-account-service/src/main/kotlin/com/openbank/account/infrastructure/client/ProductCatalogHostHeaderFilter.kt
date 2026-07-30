@@ -14,18 +14,13 @@ import java.util.Optional
 /**
  * Routes product-catalog reads through the KEDA HTTP interceptor (ADR-0083 T1 re-entry).
  *
- * The interceptor dispatches on the `Host` header — its HTTPScaledObject lists
- * `product-catalog.accounts.svc` — but the client's connection URL must point at the shared
- * proxy (`keda-add-ons-http-interceptor-proxy.keda:8080`), so the URL's own host can never be
- * the one the interceptor matches. This filter sets `Host` explicitly from
- * `product-catalog-api.host-override`. It is unset by default, so local dev (direct
- * `localhost:8104`) is unaffected: the filter only engages where gitops sets the override.
- *
- * This is the precondition the reverted T1 declared in `rules.yaml: finops_tiers.declared`
- * demands before product-catalog may leave min:1 — every in-cluster caller must reach the
- * service through the interceptor, so a scaled-to-zero pod wakes instead of answering
- * `Connection refused` on the onboarding path (#668 account-open validation here,
- * ADR-0162 D7 template resolution in document-service).
+ * Same mechanism as account-service's identically-named filter: the interceptor dispatches on
+ * the `Host` header (`product-catalog.accounts.svc` in its HTTPScaledObject), the connection
+ * URL points at the shared proxy, so `Host` must be set explicitly from
+ * `product-catalog-api.host-override`. Unset by default — local dev dials `localhost:8104`
+ * directly and this filter stays inert. This service's onboarding-document resolution
+ * (ADR-0162 D7) is the caller whose silent degradation (no template -> no document -> no
+ * signature ceremony) took onboarding down the last time product-catalog was at min:0.
  */
 @ApplicationScoped
 class ProductCatalogHostHeaderFilter : ClientRequestFilter {

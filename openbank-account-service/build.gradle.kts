@@ -51,7 +51,6 @@ dependencies {
     testImplementation(libs.pact.provider)
     // Consumer-driven message contract for the PARTY_CREATED event account consumes (ADR-0063 P1).
     testImplementation(libs.pact.consumer)
-    testImplementation(libs.wiremock.standalone)
     // CI infra sweep (#578): isolated PostgreSQL + Redpanda + Valkey per test JVM.
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
