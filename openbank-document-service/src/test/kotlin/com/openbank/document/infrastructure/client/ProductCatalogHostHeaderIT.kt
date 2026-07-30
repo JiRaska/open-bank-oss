@@ -8,6 +8,8 @@ import com.sun.net.httpserver.HttpServer
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
@@ -26,14 +28,15 @@ import java.util.concurrent.Executors
  * header, this test goes red instead of the onboarding path silently degrading again — the
  * interceptor would see the proxy's own host, match no HTTPScaledObject, and 404 every read.
  *
- * Two deliberate choices, both learned the hard way in CI:
- *  - Boots the SHARED document-service stack (PostgresRedisTestResource) so the app
- *    starts exactly like every other IT here — an earlier no-resource boot hung on Flyway
- *    against a nonexistent localhost:5432 and poisoned the shared test JVM.
- *  - The stub is the JDK's built-in HttpServer, NOT WireMock: pulling wiremock-standalone into
- *    this module's test classpath is a needless dependency for a two-route stub.
+ * The config overrides live in a @TestProfile, NOT the stub resource's return map: a resource
+ * map leaks into the shared test-JVM config, and in CI every later product-catalog call
+ * (AccountApiIT's) was redirected to this stub, which 404s any product id but this test's one —
+ * 'product does not exist' failures in a suite that expects the unreachable-catalog fail-open.
+ * A profile scopes the override to this class's app context, so it cannot leak. Boot shares the
+ * account-service stack (PostgresRedpandaRedisTestResource) like every other IT here.
  */
 @QuarkusTest
+@TestProfile(ProductCatalogHostHeaderIT.StubConfig::class)
 @QuarkusTestResource(com.openbank.document.it.PostgresRedisTestResource::class)
 @QuarkusTestResource(ProductCatalogHostHeaderIT.CatalogStub::class)
 class ProductCatalogHostHeaderIT {
@@ -51,6 +54,17 @@ class ProductCatalogHostHeaderIT {
         assertThat(hosts).contains(EXPECTED_HOST)
     }
 
+    class StubConfig : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> = mapOf(
+            "quarkus.rest-client.product-catalog-api.url" to "http://127.0.0.1:$STUB_PORT",
+            "product-catalog-api.host-override" to EXPECTED_HOST,
+            "quarkus.oidc-client.auth-server-url" to "http://127.0.0.1:$STUB_PORT",
+            "quarkus.oidc-client.discovery-enabled" to "false",
+            "quarkus.oidc-client.token-path" to "/token",
+            "quarkus.oidc.auth-server-url" to "http://127.0.0.1:$STUB_PORT",
+        )
+    }
+
     class CatalogStub : QuarkusTestResourceLifecycleManager {
         companion object {
             private val hosts = CopyOnWriteArrayList<String>()
@@ -61,7 +75,7 @@ class ProductCatalogHostHeaderIT {
 
         override fun start(): Map<String, String> {
             hosts.clear()
-            http = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+            http = HttpServer.create(InetSocketAddress("127.0.0.1", STUB_PORT), 0)
             http.createContext("/token") { ex ->
                 val body = """{"access_token":"t","token_type":"Bearer","expires_in":300}""".toByteArray()
                 ex.responseHeaders.add("Content-Type", "application/json")
@@ -70,23 +84,15 @@ class ProductCatalogHostHeaderIT {
             }
             http.createContext("/api/v1/products/$PRODUCT_ID") { ex ->
                 hosts += ex.requestHeaders.getFirst("Host") ?: ""
-                val body = (
-                    """{"id":"$PRODUCT_ID","code":"RAMCOVA_SMLOUVA_CS","name":"R","termsAndConditions":[]}"""
-                    ).toByteArray()
+                val body =
+                    """{"id":"$PRODUCT_ID","code":"RAMCOVA_SMLOUVA_CS","name":"R","termsAndConditions":[]}""".toByteArray()
                 ex.responseHeaders.add("Content-Type", "application/json")
                 ex.sendResponseHeaders(200, body.size.toLong())
                 ex.responseBody.use { it.write(body) }
             }
             http.executor = Executors.newSingleThreadExecutor()
             http.start()
-            return mapOf(
-                "quarkus.rest-client.product-catalog-api.url" to "http://127.0.0.1:${http.address.port}",
-                "product-catalog-api.host-override" to EXPECTED_HOST,
-                "quarkus.oidc-client.auth-server-url" to "http://127.0.0.1:${http.address.port}",
-                "quarkus.oidc-client.discovery-enabled" to "false",
-                "quarkus.oidc-client.token-path" to "/token",
-                "quarkus.oidc.auth-server-url" to "http://127.0.0.1:${http.address.port}",
-            )
+            return emptyMap()
         }
 
         override fun stop() {
@@ -96,6 +102,7 @@ class ProductCatalogHostHeaderIT {
 
     companion object {
         private const val EXPECTED_HOST = "product-catalog.accounts.svc"
+        private const val STUB_PORT = 18107
         private const val PRODUCT_ID = "11111111-1111-1111-1111-111111111111"
     }
 }
