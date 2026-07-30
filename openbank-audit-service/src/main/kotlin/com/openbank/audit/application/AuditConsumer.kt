@@ -48,6 +48,11 @@ class AuditConsumer {
                 correlationId = node["correlationId"]?.asText(),
                 occurredAt = node["occurredAt"]?.asText()?.let { Instant.parse(it) } ?: Instant.now(clock),
                 recordedAt = Instant.now(clock),
+                // ADR-0226: cross-channel dimensions, additive — producers adopt them channel by
+                // channel, so absence stays null (unknown), never a guessed default.
+                channel = node["channel"]?.asText(),
+                actChain = node["actChain"]?.takeIf { it.isArray }?.map { it.asText() } ?: emptyList(),
+                sessionId = node["sessionId"]?.asText(),
             )
             repo.save(entry)
         } catch (e: Exception) {

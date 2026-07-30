@@ -67,6 +67,53 @@ class AuditConsumerTest {
     }
 
     @Test
+    fun `consume records the cross-channel dimensions when the producer sends them (ADR-0226)`(): Unit = runBlocking {
+        val payload = """
+            {
+              "eventType": "mcp.tool.call",
+              "actorId": "agent:test-agent",
+              "actorType": "AI_AGENT",
+              "accountId": "${UUID.randomUUID()}",
+              "sourceService": "mcp-service",
+              "channel": "mcp",
+              "actChain": ["agent-session:7f3a", "mcp-cli"],
+              "sessionId": "sess-123"
+            }
+        """.trimIndent()
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(
+                match {
+                    it.channel == "mcp" &&
+                        it.actChain == listOf("agent-session:7f3a", "mcp-cli") &&
+                        it.sessionId == "sess-123"
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `consume leaves the cross-channel dimensions unknown when the producer omits them`(): Unit = runBlocking {
+        val payload = """
+            {"eventType":"TRANSACTION_FAILED","transactionId":"${UUID.randomUUID()}","requestedBy":"operator-7"}
+        """.trimIndent()
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(
+                match { it.channel == null && it.actChain.isEmpty() && it.sessionId == null },
+            )
+        }
+    }
+
+    @Test
     fun `consume extracts batchId as aggregateId for a clearing batch-settled event`(): Unit = runBlocking {
         val batchId = UUID.randomUUID()
         val payload = """

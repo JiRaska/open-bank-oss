@@ -59,6 +59,19 @@ class AuditEntryEntity : PanacheEntity() {
 
     @Column(name = "record_hash")
     var recordHash: String? = null
+
+    // ── Cross-channel correlation (ADR-0226): query indexes, NOT part of the chain hash — the
+    // producer's raw event JSON (already hashed via `payload`) carries these fields verbatim, so
+    // tamper-evidence covers them without recomputing every pre-V9 row.
+    @Column(name = "channel", length = 16)
+    var channel: String? = null
+
+    /** JSON array string (e.g. `["agent-session:7f3…","mcp-cli"]`); null when the action was direct. */
+    @Column(name = "act_chain", columnDefinition = "TEXT")
+    var actChain: String? = null
+
+    @Column(name = "session_id", length = 100)
+    var sessionId: String? = null
 }
 
 @ApplicationScoped
@@ -88,6 +101,10 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
                 it.correlationId = entry.correlationId
                 it.occurredAt = entry.occurredAt
                 it.recordedAt = entry.recordedAt
+                it.channel = entry.channel
+                it.actChain = entry.actChain.takeIf { chain -> chain.isNotEmpty() }
+                    ?.let { chain -> actChainJson.writeValueAsString(chain) }
+                it.sessionId = entry.sessionId
                 it.prevHash = prevHash
                 it.recordHash = chainHash(prevHash, entry)
             }
@@ -164,6 +181,19 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
         find("aggregateId = ?1 ORDER BY occurredAt DESC", aggregateId).page(0, limit).list()
     }.awaitSuspending().map { it.toDomain() }
 
+    /**
+     * Person-across-channels query (ADR-0226 D3): every entry an actor produced, optionally
+     * narrowed to one ingress channel. The V1 partial actor_id index carries the lookup.
+     */
+    suspend fun findByActorId(actorId: String, channel: String? = null, limit: Int = 100): List<AuditEntry> =
+        Panache.withSession {
+            if (channel == null) {
+                find("actorId = ?1 ORDER BY occurredAt DESC", actorId).page(0, limit).list()
+            } else {
+                find("actorId = ?1 AND channel = ?2 ORDER BY occurredAt DESC", actorId, channel).page(0, limit).list()
+            }
+        }.awaitSuspending().map { it.toDomain() }
+
     /** Current chain head (most-recently-inserted row) plus the total row count, for anchoring. */
     suspend fun chainHead(): ChainHead? {
         val head = Panache.withSession {
@@ -181,6 +211,9 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
     private fun AuditEntryEntity.toDomain() = AuditEntry(
         entryId, eventType, aggregateType, aggregateId, actorId, actorType,
         payload, sourceService, correlationId, occurredAt, recordedAt,
+        channel = channel,
+        actChain = actChain?.let { actChainJson.readValue(it, stringListType) } ?: emptyList(),
+        sessionId = sessionId,
     )
 
     private fun chainLinkBroken(prevHash: String?, expectedPrev: String, recordHash: String, recomputed: String) =
@@ -191,6 +224,9 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
     companion object {
         private const val GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000"
         private const val CHAIN_PAGE_SIZE = 500
+
+        private val actChainJson = com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
+        private val stringListType = object : com.fasterxml.jackson.core.type.TypeReference<List<String>>() {}
 
         /**
          * SHA-256 over the previous link + every evidential field. The payload is hashed
