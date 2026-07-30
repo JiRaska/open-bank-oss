@@ -8,8 +8,6 @@ import com.sun.net.httpserver.HttpServer
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.junit.QuarkusTestProfile
-import io.quarkus.test.junit.TestProfile
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
@@ -36,7 +34,6 @@ import java.util.concurrent.Executors
  * account-service stack (PostgresRedpandaRedisTestResource) like every other IT here.
  */
 @QuarkusTest
-@TestProfile(ProductCatalogHostHeaderIT.StubConfig::class)
 @QuarkusTestResource(com.openbank.document.it.PostgresRedisTestResource::class)
 @QuarkusTestResource(ProductCatalogHostHeaderIT.CatalogStub::class)
 class ProductCatalogHostHeaderIT {
@@ -54,16 +51,6 @@ class ProductCatalogHostHeaderIT {
         assertThat(hosts).contains(EXPECTED_HOST)
     }
 
-    class StubConfig : QuarkusTestProfile {
-        override fun getConfigOverrides(): Map<String, String> = mapOf(
-            "quarkus.rest-client.product-catalog-api.url" to "http://127.0.0.1:$STUB_PORT",
-            "product-catalog-api.host-override" to EXPECTED_HOST,
-            "quarkus.oidc-client.auth-server-url" to "http://127.0.0.1:$STUB_PORT",
-            "quarkus.oidc-client.discovery-enabled" to "false",
-            "quarkus.oidc-client.token-path" to "/token",
-            "quarkus.oidc.auth-server-url" to "http://127.0.0.1:$STUB_PORT",
-        )
-    }
 
     class CatalogStub : QuarkusTestResourceLifecycleManager {
         companion object {
@@ -82,7 +69,9 @@ class ProductCatalogHostHeaderIT {
                 ex.sendResponseHeaders(200, body.size.toLong())
                 ex.responseBody.use { it.write(body) }
             }
-            http.createContext("/api/v1/products/$PRODUCT_ID") { ex ->
+            // Wildcard route: ANY product id gets a valid ACTIVE product (see the account-service twin
+            // for why a single-id stub is a trap in a suite whose config map leaks).
+            http.createContext("/api/v1/products") { ex ->
                 hosts += ex.requestHeaders.getFirst("Host") ?: ""
                 val body =
                     """{"id":"$PRODUCT_ID","code":"RAMCOVA_SMLOUVA_CS","name":"R","termsAndConditions":[]}""".toByteArray()
@@ -92,7 +81,14 @@ class ProductCatalogHostHeaderIT {
             }
             http.executor = Executors.newSingleThreadExecutor()
             http.start()
-            return emptyMap()
+            return mapOf(
+                "quarkus.rest-client.product-catalog-api.url" to "http://127.0.0.1:$STUB_PORT",
+                "product-catalog-api.host-override" to EXPECTED_HOST,
+                "quarkus.oidc-client.auth-server-url" to "http://127.0.0.1:$STUB_PORT",
+                "quarkus.oidc-client.discovery-enabled" to "false",
+                "quarkus.oidc-client.token-path" to "/token",
+                "quarkus.oidc.auth-server-url" to "http://127.0.0.1:$STUB_PORT",
+            )
         }
 
         override fun stop() {

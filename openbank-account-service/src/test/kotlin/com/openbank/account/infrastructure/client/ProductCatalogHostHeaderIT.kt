@@ -8,8 +8,6 @@ import com.sun.net.httpserver.HttpServer
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.junit.QuarkusTestProfile
-import io.quarkus.test.junit.TestProfile
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
@@ -28,15 +26,14 @@ import java.util.concurrent.Executors
  * header, this test goes red instead of the onboarding path silently degrading again — the
  * interceptor would see the proxy's own host, match no HTTPScaledObject, and 404 every read.
  *
- * The config overrides live in a @TestProfile, NOT the stub resource's return map: a resource
- * map leaks into the shared test-JVM config, and in CI every later product-catalog call
- * (AccountApiIT's) was redirected to this stub, which 404s any product id but this test's one —
- * 'product does not exist' failures in a suite that expects the unreachable-catalog fail-open.
- * A profile scopes the override to this class's app context, so it cannot leak. Boot shares the
- * account-service stack (PostgresRedpandaRedisTestResource) like every other IT here.
+ * The stub answers EVERY product id with a valid ACTIVE product, not just this test's one: its
+ * config map leaks `quarkus.rest-client.product-catalog-api.url` into the shared test-JVM
+ * config (no per-class isolation exists without a @TestProfile, and a profile boots a second
+ * full app context — which OOM'd the CI runner's test JVM), so every later catalog call in the
+ * suite lands here, and it must read as a working catalog, not a 404 — the earlier single-id
+ * stub produced deterministic 'product does not exist' failures in AccountApiIT.
  */
 @QuarkusTest
-@TestProfile(ProductCatalogHostHeaderIT.StubConfig::class)
 @QuarkusTestResource(com.openbank.account.it.PostgresRedpandaRedisTestResource::class)
 @QuarkusTestResource(ProductCatalogHostHeaderIT.CatalogStub::class)
 class ProductCatalogHostHeaderIT {
@@ -52,17 +49,6 @@ class ProductCatalogHostHeaderIT {
 
         val hosts = CatalogStub.receivedHosts()
         assertThat(hosts).contains(EXPECTED_HOST)
-    }
-
-    class StubConfig : QuarkusTestProfile {
-        override fun getConfigOverrides(): Map<String, String> = mapOf(
-            "quarkus.rest-client.product-catalog-api.url" to "http://127.0.0.1:$STUB_PORT",
-            "product-catalog-api.host-override" to EXPECTED_HOST,
-            "quarkus.oidc-client.auth-server-url" to "http://127.0.0.1:$STUB_PORT",
-            "quarkus.oidc-client.discovery-enabled" to "false",
-            "quarkus.oidc-client.token-path" to "/token",
-            "quarkus.oidc.auth-server-url" to "http://127.0.0.1:$STUB_PORT",
-        )
     }
 
     class CatalogStub : QuarkusTestResourceLifecycleManager {
@@ -82,17 +68,28 @@ class ProductCatalogHostHeaderIT {
                 ex.sendResponseHeaders(200, body.size.toLong())
                 ex.responseBody.use { it.write(body) }
             }
-            http.createContext("/api/v1/products/$PRODUCT_ID") { ex ->
+            // Wildcard route: ANY product id gets a valid ACTIVE product. The class doc explains
+            // why a single-id stub is a trap here — this is the only shape that is safe against
+            // the config-map leak that redirects the rest of the suite to this stub.
+            http.createContext("/api/v1/products") { ex ->
                 hosts += ex.requestHeaders.getFirst("Host") ?: ""
+                val requestedId = ex.requestURI.path.substringAfterLast('/')
                 val body =
-                    """{"id":"$PRODUCT_ID","code":"BEZNY_UCET","status":"ACTIVE"}""".toByteArray()
+                    """{"id":"$requestedId","code":"BEZNY_UCET","status":"ACTIVE"}""".toByteArray()
                 ex.responseHeaders.add("Content-Type", "application/json")
                 ex.sendResponseHeaders(200, body.size.toLong())
                 ex.responseBody.use { it.write(body) }
             }
             http.executor = Executors.newSingleThreadExecutor()
             http.start()
-            return emptyMap()
+            return mapOf(
+                "quarkus.rest-client.product-catalog-api.url" to "http://127.0.0.1:$STUB_PORT",
+                "product-catalog-api.host-override" to EXPECTED_HOST,
+                "quarkus.oidc-client.auth-server-url" to "http://127.0.0.1:$STUB_PORT",
+                "quarkus.oidc-client.discovery-enabled" to "false",
+                "quarkus.oidc-client.token-path" to "/token",
+                "quarkus.oidc.auth-server-url" to "http://127.0.0.1:$STUB_PORT",
+            )
         }
 
         override fun stop() {
