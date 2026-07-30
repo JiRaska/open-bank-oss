@@ -70,8 +70,9 @@ class ProductCatalogHostHeaderIT {
             }
             http.createContext("/api/v1/products/$PRODUCT_ID") { ex ->
                 hosts += ex.requestHeaders.getFirst("Host") ?: ""
-                val body =
-                    """{"id":"$PRODUCT_ID","code":"RAMCOVA_SMLOUVA_CS","name":"R","termsAndConditions":[]}""".toByteArray()
+                val body = (
+                    """{"id":"$PRODUCT_ID","code":"RAMCOVA_SMLOUVA_CS","name":"R","termsAndConditions":[]}"""
+                    ).toByteArray()
                 ex.responseHeaders.add("Content-Type", "application/json")
                 ex.sendResponseHeaders(200, body.size.toLong())
                 ex.responseBody.use { it.write(body) }
