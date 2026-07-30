@@ -57,7 +57,10 @@ ADR-0198 revocation paths). Hard invariants: the tool answers **only** from the 
 "I can't verify that, here's how to reach a human"); it never quotes amounts, rates or terms beyond
 what the record carries; it never collects data beyond the session. An `ml-systems.yaml` entry is
 generated in the same PR (ADR-0203 D7's registry rule), with the ADR-0201 Art. 22 analysis carried
-as its basis.
+as its basis — and the ADR-0148 evals gate gains a **named eval suite for the no-re-derivation
+invariant** (adversarial prompts asking for terms, amounts or reasons absent from the record must
+produce the no-record fallback, never a completion), because this tool's entire safety case is that
+single behaviour and a generic gate does not prove it.
 
 **D2 — `rm-copilot` as a new business-plane agent.** Read-only over the ADR-0210 360 query,
 interaction history and open cases; per client or per meeting it produces a briefing (holdings,
@@ -66,7 +69,12 @@ what the targeting engine already respects) and drafts follow-up communications.
 **only** through ADR-0176's operator-initiated path — template catalogue, four-eyes where required,
 and the ADR-0219 gate on send — never from a personal mail client or a new send capability in the
 agent. `requires_human: every output`; no write/execute tools; charter under `docs/agents/` with
-id-parity per the charter-registry gate.
+id-parity per the charter-registry gate. On cost, stated plainly rather than inherited silently:
+ADR-0203 flags that the model gateway is not yet deployed and per-agent token accounting does not
+exist — `rm-copilot` therefore ships **after** the gateway (ADR-0203 D8's gate, restated), and its
+deployment shape is decided at implementation time against the measured marginal cost of a new
+agent service versus colocating on an existing business-plane deployment; the charter, tools and
+constraints in this ADR are invariant under either shape.
 
 **D3 — Neither agent relaxes a boundary.** The explanation tool changes nothing about what may be
 decided (ADR-0201 D5) or shown (ADR-0220 D4); the RM agent changes nothing about how customers are
