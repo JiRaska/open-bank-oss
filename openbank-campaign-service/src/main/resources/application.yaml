@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: Apache-2.0
+quarkus:
+  application:
+    name: openbank-campaign-service
+  http:
+    port: 8128
+    test-port: 0
+  datasource:
+    db-kind: postgresql
+    reactive:
+      url: postgresql://localhost:5432/openbank_campaigns
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_campaigns
+    username: ${DB_USER:campaign}
+    password: ${DB_PASSWORD:campaign}
+  flyway:
+    migrate-at-start: true
+  oidc:
+    auth-server-url: ${KEYCLOAK_URL:http://localhost:8080}/realms/openbank
+    client-id: openbank-campaign-service
+  log:
+    level: INFO
+
+openbank:
+  temporal:
+    enabled: ${OPENBANK_TEMPORAL_ENABLED:false}
+    server-url: ${OPENBANK_TEMPORAL_SERVER_URL:localhost:7233}
+    namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank}
+    task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-campaign}
+  campaign:
+    worker:
+      enabled: ${CAMPAIGN_WORKER_ENABLED:true}
+    # ADR-0200 D6: suppression defaults. Evaluated before consent, per party per window.
+    max-sends-per-party-per-week: ${CAMPAIGN_MAX_SENDS_PER_WEEK:2}
+    quiet-hours-start: ${CAMPAIGN_QUIET_HOURS_START:21}
+    quiet-hours-end: ${CAMPAIGN_QUIET_HOURS_END:8}
+    consent-grantee: party-service:marketing-comms
+    marketing-scope: MARKETING_COMMS_EMAIL
+
+consent-service:
+  url: http://localhost:8106
+
+analytics:
+  clickhouse-url: ${CLICKHOUSE_URL:http://localhost:8123}
+  clickhouse-user: ${CLICKHOUSE_USER:}
+  clickhouse-password: ${CLICKHOUSE_PASSWORD:}
+  clickhouse-database: ${CLICKHOUSE_DB:openbank_analytics}
+
+mp:
+  messaging:
+    connector:
+      smallrye-kafka:
+        bootstrap:
+          servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    outgoing:
+      notification-requests-out:
+        connector: smallrye-kafka
+        topic: openbank.notification.requests
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      consent-events-in:
+        connector: smallrye-kafka
+        topic: openbank.consent.events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto:
+          offset:
+            reset: earliest
