@@ -17,6 +17,7 @@ import com.openbank.libs.analytics.BackfillWindow
 import com.openbank.libs.analytics.IngestSource
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.reactive.messaging.Message
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Duration
@@ -69,7 +70,7 @@ class RecoveryFlowsTest {
             clock = Clock.systemUTC()
         }
 
-        consumer.consume("{ this is not valid json")
+        consumer.consume(Message.of("{ this is not valid json"))
 
         assertThat(sink.written).isEmpty()
         assertThat(dlq.records).hasSize(1)
@@ -87,8 +88,8 @@ class RecoveryFlowsTest {
             clock = Clock.systemUTC()
         }
 
-        consumer.consume("broken")
-        consumer.consume("broken")
+        consumer.consume(Message.of("broken"))
+        consumer.consume(Message.of("broken"))
 
         assertThat(dlq.records.map { it.contentHash }.distinct()).hasSize(1)
     }
