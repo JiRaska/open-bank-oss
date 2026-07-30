@@ -185,7 +185,8 @@ V9.1 openbank-infra/gitops/components/security-scanner/security-scanner-service.
 V9.1 openbank-infra/gitops/components/security-scanner/security-scanner-service.yaml:133: plaintext http:// env value http://sepa-instant.payments.svc:8127
 V9.1 openbank-infra/gitops/components/docs-truth-agent/docs-truth-agent.yaml:58: plaintext http:// env value http://litellm.ai-platform.svc:4000
 V9.1 openbank-infra/gitops/components/fraud-service/fraud-service.yaml:114: plaintext http:// env value http://tempo.observability.svc:4317
-V9.1 openbank-infra/gitops/components/notifications/notification-service.yaml:117: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/notifications/notification-service.yaml:116: plaintext http:// env value http://consent-service.consent.svc:8106
+V9.1 openbank-infra/gitops/components/notifications/notification-service.yaml:122: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/document-service/document-service-service.yaml:87: plaintext http:// env value http://sca-service.sca.svc:8110
 V9.1 openbank-infra/gitops/components/document-service/document-service-service.yaml:93: plaintext http:// env value http://product-catalog.accounts.svc:8104
 V9.1 openbank-infra/gitops/components/document-service/document-service-service.yaml:100: plaintext http:// env value http://party-service.party.svc:8111
