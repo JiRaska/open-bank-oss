@@ -1,0 +1,246 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+openapi: 3.1.0
+info:
+  title: Campaign Service API
+  # major == openbank.api.version == URL /api/v1 (ADR-0048).
+  version: 1.0.0
+  description: >-
+    Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
+    per-enrolment Temporal journeys; consent-gated delivery through notification-service.
+    Activation is four-eyes (`campaign.activate`, rules.yaml four_eyes.actions) with a domain
+    maker/checker invariant.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: http://localhost:8128
+    description: Local development
+tags:
+  - name: Campaigns
+
+paths:
+  /api/v1/campaigns:
+    get:
+      tags: [Campaigns]
+      summary: List campaigns
+      operationId: listCampaigns
+      responses:
+        '200':
+          description: All campaigns
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Campaign'
+    post:
+      tags: [Campaigns]
+      summary: Create a campaign draft
+      operationId: createCampaign
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCampaignRequest'
+      responses:
+        '201':
+          description: Campaign draft created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+  /api/v1/campaigns/{id}:
+    get:
+      tags: [Campaigns]
+      summary: Get a campaign
+      operationId: getCampaign
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: The campaign
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '404':
+          description: Not found
+  /api/v1/campaigns/{id}/submit:
+    post:
+      tags: [Campaigns]
+      summary: Submit a draft for four-eyes approval
+      operationId: submitCampaign
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Submitted (PENDING_APPROVAL)
+        '409':
+          description: Invalid state transition
+  /api/v1/campaigns/{id}/activate:
+    post:
+      tags: [Campaigns]
+      summary: Activate after four-eyes approval (approver != creator)
+      operationId: activateCampaign
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+      responses:
+        '200':
+          description: Activated
+        '409':
+          description: Invalid state transition or maker/checker violation
+  /api/v1/campaigns/{id}/pause:
+    post:
+      tags: [Campaigns]
+      summary: Pause an active campaign
+      operationId: pauseCampaign
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Paused
+        '409':
+          description: Invalid state transition
+  /api/v1/campaigns/{id}/resume:
+    post:
+      tags: [Campaigns]
+      summary: Resume a paused campaign
+      operationId: resumeCampaign
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Resumed
+        '409':
+          description: Invalid state transition
+  /api/v1/campaigns/{id}/close:
+    post:
+      tags: [Campaigns]
+      summary: Close a campaign (terminal)
+      operationId: closeCampaign
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Closed
+        '409':
+          description: Invalid state transition
+  /api/v1/campaigns/{id}/enrol:
+    post:
+      tags: [Campaigns]
+      summary: Enrol the segment membership (starts one journey per party)
+      operationId: enrolCampaign
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Number of journeys started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enrolled:
+                    type: integer
+        '409':
+          description: Campaign not ACTIVE
+  /api/v1/campaigns/{id}/enrolments:
+    get:
+      tags: [Campaigns]
+      summary: List enrolments of a campaign
+      operationId: listEnrolments
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Enrolments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Enrolment'
+
+components:
+  parameters:
+    CampaignId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    Campaign:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        goal: { type: string }
+        segmentRef:
+          $ref: '#/components/schemas/SegmentRef'
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/CampaignStep'
+        state:
+          type: string
+          enum: [DRAFT, PENDING_APPROVAL, ACTIVE, PAUSED, CLOSED]
+        createdBy: { type: string }
+        approvedBy: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    SegmentRef:
+      type: object
+      properties:
+        name: { type: string }
+        version: { type: integer, minimum: 1 }
+    CampaignStep:
+      type: object
+      properties:
+        order: { type: integer, minimum: 0 }
+        template: { type: string, description: notification-service catalogue template id }
+        channel:
+          type: string
+          enum: [EMAIL]
+        variables:
+          type: object
+          additionalProperties: { type: string }
+        delaySeconds: { type: integer, minimum: 0 }
+    CreateCampaignRequest:
+      type: object
+      required: [name, goal, segmentName, segmentVersion, steps]
+      properties:
+        name: { type: string }
+        goal: { type: string }
+        segmentName: { type: string }
+        segmentVersion: { type: integer, minimum: 1 }
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/CampaignStep'
+    ApprovalRequest:
+      type: object
+      required: [approver]
+      properties:
+        approver: { type: string }
+    Enrolment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        campaignId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        state:
+          type: string
+          enum: [ACTIVE, COMPLETED, TERMINATED_CONSENT_REVOKED, TERMINATED_SUPPRESSED]
+        currentStep: { type: integer }
+        startedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
