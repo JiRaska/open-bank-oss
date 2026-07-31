@@ -667,6 +667,17 @@ components:
           nullable: true
           enum: [CONSUMER_CREDIT, MORTGAGE, OVERDRAFT, SME_CREDIT, null]
           description: Credit product type resolved against the compliance pack registry (ADR-0212).
+        verifiedIncomeMonthly:
+          $ref: '#/components/schemas/Money'
+          description: >-
+            Verified net monthly income — feeds DSTI/DTI at the ASSESSMENT evaluation (ADR-0213);
+            absent input fails closed to REFER.
+        existingDebtServiceMonthly:
+          $ref: '#/components/schemas/Money'
+          description: Existing monthly debt service, if any (nullable).
+        ageYears: { type: integer, nullable: true, description: Applicant age in years (majority floor) }
+        residency: { type: string, nullable: true, description: Residency country code (e.g. CZ) }
+        employmentTenureMonths: { type: integer, nullable: true }
     DecisionRequest:
       type: object
       required: [approve]

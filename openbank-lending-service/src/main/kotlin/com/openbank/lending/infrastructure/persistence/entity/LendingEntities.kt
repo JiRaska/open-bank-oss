@@ -70,6 +70,42 @@ class LoanApplicationEntity : PanacheEntityBase() {
     @Column(name = "pack_version")
     var packVersion: Int? = null
 
+    @Column(name = "verified_income_monthly", precision = 20, scale = 2)
+    var verifiedIncomeMonthly: BigDecimal? = null
+
+    @Column(name = "existing_debt_service_monthly", precision = 20, scale = 2)
+    var existingDebtServiceMonthly: BigDecimal? = null
+
+    @Column(name = "age_years")
+    var ageYears: Int? = null
+
+    @Column(name = "residency", length = 8)
+    var residency: String? = null
+
+    @Column(name = "employment_tenure_months")
+    var employmentTenureMonths: Int? = null
+
+    @Column(name = "decision_outcome", length = 16)
+    var decisionOutcome: String? = null
+
+    @Column(name = "decision_price_band", length = 32)
+    var decisionPriceBand: String? = null
+
+    @Column(name = "decision_reasons", columnDefinition = "text")
+    var decisionReasons: String? = null
+
+    @Column(name = "decision_matched_rules", columnDefinition = "text")
+    var decisionMatchedRules: String? = null
+
+    @Column(name = "policy_versions", columnDefinition = "text")
+    var policyVersions: String? = null
+
+    @Column(name = "decision_input_hash", length = 64)
+    var decisionInputHash: String? = null
+
+    @Column(name = "decided_engine_at")
+    var decidedEngineAt: OffsetDateTime? = null
+
     @Column(name = "proposed_by")
     var proposedBy: String = ""
 

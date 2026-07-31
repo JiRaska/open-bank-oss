@@ -121,6 +121,18 @@ data class LoanApplication(
     val jurisdiction: String? = null,
     val productType: String? = null,
     val packVersion: Int? = null,
+    val verifiedIncomeMonthly: Money? = null,
+    val existingDebtServiceMonthly: Money? = null,
+    val ageYears: Int? = null,
+    val residency: String? = null,
+    val employmentTenureMonths: Int? = null,
+    val decisionOutcome: String? = null,
+    val decisionPriceBand: String? = null,
+    val decisionReasons: String? = null,
+    val decisionMatchedRules: String? = null,
+    val policyVersions: String? = null,
+    val decisionInputHash: String? = null,
+    val decidedEngineAt: OffsetDateTime? = null,
 )
 
 /** A live loan booked from an approved, disbursed application. */
@@ -208,6 +220,11 @@ data class LoanApplicationRequest(
     val firstDueDate: LocalDate,
     val jurisdiction: String? = null,
     val productType: String? = null,
+    val verifiedIncomeMonthly: Money? = null,
+    val existingDebtServiceMonthly: Money? = null,
+    val ageYears: Int? = null,
+    val residency: String? = null,
+    val employmentTenureMonths: Int? = null,
 )
 
 /**

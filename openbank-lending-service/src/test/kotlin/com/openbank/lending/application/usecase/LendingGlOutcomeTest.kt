@@ -15,11 +15,13 @@ import com.openbank.lending.application.port.out.LoanEventEmitter
 import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
+import com.openbank.lending.application.port.out.StarterCreditPolicy
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
+import com.openbank.lending.infrastructure.adapter.NoOpCreditBureauPort
 import com.openbank.lending.infrastructure.adapter.NoOpOriginationWorkflowPort
 import com.openbank.lending.infrastructure.client.LendingGlAccounts
 import com.openbank.lending.infrastructure.client.LendingJournalFactory
@@ -83,6 +85,12 @@ class LendingGlOutcomeTest {
         CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
         OriginationConfig(false),
         NoOpOriginationWorkflowPort(),
+        OriginationDecisionService(
+            NoOpCreditBureauPort(),
+            StarterCreditPolicy(),
+            CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
+            clock,
+        ),
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")

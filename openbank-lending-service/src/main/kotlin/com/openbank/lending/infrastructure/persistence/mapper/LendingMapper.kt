@@ -42,6 +42,18 @@ class LendingMapper {
         it.jurisdiction = a.jurisdiction
         it.productType = a.productType
         it.packVersion = a.packVersion
+        it.verifiedIncomeMonthly = a.verifiedIncomeMonthly?.amount
+        it.existingDebtServiceMonthly = a.existingDebtServiceMonthly?.amount
+        it.ageYears = a.ageYears
+        it.residency = a.residency
+        it.employmentTenureMonths = a.employmentTenureMonths
+        it.decisionOutcome = a.decisionOutcome
+        it.decisionPriceBand = a.decisionPriceBand
+        it.decisionReasons = a.decisionReasons
+        it.decisionMatchedRules = a.decisionMatchedRules
+        it.policyVersions = a.policyVersions
+        it.decisionInputHash = a.decisionInputHash
+        it.decidedEngineAt = a.decidedEngineAt
     }
 
     fun toDomain(e: LoanApplicationEntity) = LoanApplication(
@@ -52,6 +64,13 @@ class LendingMapper {
         status = e.status, proposedBy = e.proposedBy, decidedBy = e.decidedBy,
         decisionReason = e.decisionReason, createdAt = e.createdAt, decidedAt = e.decidedAt,
         jurisdiction = e.jurisdiction, productType = e.productType, packVersion = e.packVersion,
+        verifiedIncomeMonthly = e.verifiedIncomeMonthly?.let { Money.of(it, e.currency) },
+        existingDebtServiceMonthly = e.existingDebtServiceMonthly?.let { Money.of(it, e.currency) },
+        ageYears = e.ageYears, residency = e.residency, employmentTenureMonths = e.employmentTenureMonths,
+        decisionOutcome = e.decisionOutcome, decisionPriceBand = e.decisionPriceBand,
+        decisionReasons = e.decisionReasons, decisionMatchedRules = e.decisionMatchedRules,
+        policyVersions = e.policyVersions, decisionInputHash = e.decisionInputHash,
+        decidedEngineAt = e.decidedEngineAt,
     )
 
     fun toEntity(l: Loan) = LoanEntity().also {
