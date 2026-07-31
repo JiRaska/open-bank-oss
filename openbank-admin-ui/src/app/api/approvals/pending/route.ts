@@ -15,6 +15,8 @@ import { svcUrl } from '@/lib/services/bff'
 
 export const dynamic = 'force-dynamic'
 
+type SourceState = 'ok' | 'forbidden' | 'unavailable'
+
 type InboxItem = {
   id: string
   domain: 'lending' | 'agent'
@@ -39,16 +41,32 @@ type AgentProposal = {
   proposedAt: string
 }
 
-async function lendingPending(headers: HeadersInit): Promise<InboxItem[]> {
+type SourceResult = { items: InboxItem[]; state: SourceState }
+
+/**
+ * A refused read must never render as an empty queue. lending's list is
+ * @RolesAllowed(LENDING_OFFICER, CREDIT_RISK, ADMIN) while /approvals itself is open to any
+ * authenticated operator, so 403 is the ORDINARY outcome for a supervisor or viewer - and
+ * "no approvals pending" is the most dangerous thing an approvals screen can say wrongly.
+ * The per-source state travels to the client, which shows it.
+ */
+function stateFor(status: number): SourceState {
+  return status === 401 || status === 403 ? 'forbidden' : 'unavailable'
+}
+
+async function lendingPending(headers: HeadersInit): Promise<SourceResult> {
   const res = await fetch(svcUrl('lending-service', '/api/v1/lending/approvals', { limit: '50' }), {
     headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
   })
-  if (!res.ok) return []
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
   const rows = (await res.json()) as LendingApproval[]
-  return rows.map(r => ({
-    id: r.id, domain: 'lending' as const, action: r.action,
-    resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-  }))
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'lending' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
 }
 
 function agentBase(): string {
@@ -56,16 +74,19 @@ function agentBase(): string {
   return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
 }
 
-async function agentPending(headers: HeadersInit): Promise<InboxItem[]> {
+async function agentPending(headers: HeadersInit): Promise<SourceResult> {
   const res = await fetch(`${agentBase()}/api/v1/proposals?state=proposed`, {
     headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
   })
-  if (!res.ok) return []
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
   const rows = (await res.json()) as AgentProposal[]
-  return rows.map(r => ({
-    id: r.id, domain: 'agent' as const, action: r.suggestedAction,
-    resourceId: null, maker: r.proposedBy, proposedAt: r.proposedAt,
-  }))
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'agent' as const, action: r.suggestedAction,
+      resourceId: null, maker: r.proposedBy, proposedAt: r.proposedAt,
+    })),
+  }
 }
 
 export async function GET() {
@@ -74,10 +95,12 @@ export async function GET() {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
+  const unavailable: SourceResult = { items: [], state: 'unavailable' }
   const [lending, agent] = await Promise.all([
-    lendingPending(headers).catch(() => []),
-    agentPending(headers).catch(() => []),
+    lendingPending(headers).catch(() => unavailable),
+    agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending, ...agent].sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
-  return NextResponse.json({ items })
+  const items = [...lending.items, ...agent.items]
+    .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
+  return NextResponse.json({ items, sources: { lending: lending.state, agent: agent.state } })
 }

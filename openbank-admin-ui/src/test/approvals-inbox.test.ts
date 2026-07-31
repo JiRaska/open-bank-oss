@@ -69,4 +69,38 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.items).toHaveLength(1)
     expect(body.items[0].domain).toBe('agent')
   })
+
+
+  it('reports a refused source instead of an empty queue — 403 is ordinary for a non-desk role', async () => {
+    const mock = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(
+        String(url).includes('lending')
+          ? new Response('{}', { status: 403 })
+          : new Response(JSON.stringify([]), { status: 200 }),
+      ),
+    )
+    vi.stubGlobal('fetch', mock)
+
+    const res = await (await route()).GET()
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.items).toEqual([])
+    expect(body.sources.lending).toBe('forbidden')
+    expect(body.sources.agent).toBe('ok')
+  })
+
+  it('marks an unreachable source unavailable, distinct from refused', async () => {
+    const mock = vi.fn().mockImplementation((url: string) =>
+      String(url).includes('lending')
+        ? Promise.reject(new Error('ECONNREFUSED'))
+        : Promise.resolve(new Response('{}', { status: 500 })),
+    )
+    vi.stubGlobal('fetch', mock)
+
+    const body = await (await (await route()).GET()).json()
+
+    expect(body.sources.lending).toBe('unavailable')
+    expect(body.sources.agent).toBe('unavailable')
+  })
 })
