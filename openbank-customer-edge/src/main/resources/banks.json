@@ -1,54 +1,267 @@
-[
-  {"code": "0100", "name": "Komerční banka, a.s.", "bic": "KOMBCZPP"},
-  {"code": "0300", "name": "Československá obchodní banka, a.s.", "bic": "CEKOCZPP"},
-  {"code": "0600", "name": "MONETA Money Bank, a.s.", "bic": "AGBACZPP"},
-  {"code": "0710", "name": "Česká národní banka", "bic": "CNBACZPP"},
-  {"code": "0800", "name": "Česká spořitelna, a.s.", "bic": "GIBACZPX"},
-  {"code": "2010", "name": "Fio banka, a.s.", "bic": "FIOBCZPP"},
-  {"code": "2020", "name": "MUFG Bank (Europe) N.V. Prague Branch", "bic": "BOTKCZBP"},
-  {"code": "2060", "name": "Citfin, spořitelní družstvo", "bic": "CITFCZPP"},
-  {"code": "2070", "name": "TRINITY BANK a.s.", "bic": "TRIYCZPP"},
-  {"code": "2100", "name": "Hypoteční banka, a.s.", "bic": "HYPVCZPP"},
-  {"code": "2200", "name": "Peněžní dům, spořitelní družstvo", "bic": "PNBPCZPP"},
-  {"code": "2220", "name": "Artesa, spořitelní družstvo", "bic": "ARTTCZPP"},
-  {"code": "2250", "name": "CREDITAS spořitelní družstvo", "bic": "CTASCZ22"},
-  {"code": "2260", "name": "NEY spořitelní družstvo", "bic": "NEYCZPP"},
-  {"code": "2600", "name": "Citibank Europe plc, organizační složka", "bic": "CITICZPX"},
-  {"code": "2700", "name": "UniCredit Bank Czech Republic and Slovakia, a.s.", "bic": "BACXCZPP"},
-  {"code": "3010", "name": "Air Bank a.s.", "bic": "AIRACZPP"},
-  {"code": "3050", "name": "BNP Paribas Personal Finance SA, odštěpný závod", "bic": "BNPACZPP"},
-  {"code": "3060", "name": "PKO BP S.A., Czech Branch", "bic": "BPKOCZPP"},
-  {"code": "4000", "name": "Expobank CZ a.s.", "bic": "EXIMCZ22"},
-  {"code": "4300", "name": "Českomoravská záruční a rozvojová banka, a.s.", "bic": "CMZRCZP1"},
-  {"code": "5500", "name": "Raiffeisenbank a.s.", "bic": "RZBCCZPP"},
-  {"code": "5800", "name": "J&T BANKA, a.s.", "bic": "JTBPCZPP"},
-  {"code": "6000", "name": "PPF banka a.s.", "bic": "PMBPCZPP"},
-  {"code": "6200", "name": "AKCENTA CZ a.s.", "bic": "AKCZCZP1"},
-  {"code": "6210", "name": "mBank S.A., organizační složka", "bic": "BREXCZPP"},
-  {"code": "6300", "name": "BH Securities a.s.", "bic": "BHSECZPP"},
-  {"code": "6700", "name": "Všeobecná úverová banka a.s., pobočka Praha", "bic": "SUBACZPP"},
-  {"code": "6800", "name": "Sberbank CZ, a.s. — v likvidaci", "bic": null},
-  {"code": "7910", "name": "Deutsche Bank AG Filiale Prag, odštěpný závod", "bic": "DEUTCZPX"},
-  {"code": "7940", "name": "Waldviertler Sparkasse Bank AG", "bic": "SPBACZPP"},
-  {"code": "7950", "name": "ING Bank N.V.", "bic": "INGBCZPP"},
-  {"code": "7960", "name": "Volksbank Raiffeisen AG Praag", "bic": null},
-  {"code": "7970", "name": "Wüstenrot hypoteční banka a.s.", "bic": "WUHYCZPP"},
-  {"code": "7980", "name": "Wüstenrot stavební spořitelna a.s.", "bic": "WUSTCZ21"},
-  {"code": "7990", "name": "Modrá pyramida stavební spořitelna, a.s.", "bic": "MODRCZ21"},
-  {"code": "8040", "name": "Oberbank AG pobočka Česká republika", "bic": "OBKLCZ2B"},
-  {"code": "8060", "name": "Citibank Europe plc, organizační složka", "bic": "CITICZPX"},
-  {"code": "8090", "name": "Česká exportní banka, a.s.", "bic": "CZEECZPP"},
-  {"code": "8150", "name": "HSBC Continental Europe, Czech Republic", "bic": "MIDLCZPP"},
-  {"code": "8190", "name": "Sparkasse Oberösterreich Bank AG", "bic": "SPBACZPP"},
-  {"code": "8198", "name": "FAS finance company s.r.o.", "bic": null},
-  {"code": "8200", "name": "PRIVAT BANK der Raiffeisenlandesbank Oberösterreich Aktiengesellschaft, pobočka Česká republika", "bic": "PRIVCZ22"},
-  {"code": "8215", "name": "PLATEBNÍ INSTITUCE ROGER a.s.", "bic": null},
-  {"code": "8220", "name": "Payment execution s.r.o.", "bic": null},
-  {"code": "8230", "name": "ABAPAY s.r.o.", "bic": null},
-  {"code": "8240", "name": "Pay2me EU a.s.", "bic": null},
-  {"code": "8250", "name": "Bank of China (Hungary) Close Ltd. Prague branch, odštěpný závod", "bic": "BKCHCZPP"},
-  {"code": "8260", "name": "ista Czech s.r.o.", "bic": null},
-  {"code": "8265", "name": "Industrial and Commercial Bank of China Limited, Prague Branch, odštěpný závod", "bic": "ICBKCZPP"},
-  {"code": "8270", "name": "Fairplay Pay s.r.o.", "bic": null},
-  {"code": "8280", "name": "ČSOB Stavební spořitelna a.s.", "bic": "CSASCZ21"}
-]
+{
+  "_comment": "Committed snapshot of the Czech bank-code registry. This is the SOURCE OF TRUTH for GET /banks, not a fallback: CNB's JERR XML feed is gone and its replacement (WS JERRS, SOAP over registered access) is not publicly callable. See issue #2918. To refresh: update `banks`, bump `snapshotDate`, open a PR.",
+  "snapshotDate": "2026-07-31",
+  "source": "CNB JERRS registry (https://www.cnb.cz/cs/dohled-financni-trh/seznamy/jerrs)",
+  "banks": [
+    {
+      "code": "0100",
+      "name": "Komerční banka, a.s.",
+      "bic": "KOMBCZPP"
+    },
+    {
+      "code": "0300",
+      "name": "Československá obchodní banka, a.s.",
+      "bic": "CEKOCZPP"
+    },
+    {
+      "code": "0600",
+      "name": "MONETA Money Bank, a.s.",
+      "bic": "AGBACZPP"
+    },
+    {
+      "code": "0710",
+      "name": "Česká národní banka",
+      "bic": "CNBACZPP"
+    },
+    {
+      "code": "0800",
+      "name": "Česká spořitelna, a.s.",
+      "bic": "GIBACZPX"
+    },
+    {
+      "code": "2010",
+      "name": "Fio banka, a.s.",
+      "bic": "FIOBCZPP"
+    },
+    {
+      "code": "2020",
+      "name": "MUFG Bank (Europe) N.V. Prague Branch",
+      "bic": "BOTKCZBP"
+    },
+    {
+      "code": "2060",
+      "name": "Citfin, spořitelní družstvo",
+      "bic": "CITFCZPP"
+    },
+    {
+      "code": "2070",
+      "name": "TRINITY BANK a.s.",
+      "bic": "TRIYCZPP"
+    },
+    {
+      "code": "2100",
+      "name": "Hypoteční banka, a.s.",
+      "bic": "HYPVCZPP"
+    },
+    {
+      "code": "2200",
+      "name": "Peněžní dům, spořitelní družstvo",
+      "bic": "PNBPCZPP"
+    },
+    {
+      "code": "2220",
+      "name": "Artesa, spořitelní družstvo",
+      "bic": "ARTTCZPP"
+    },
+    {
+      "code": "2250",
+      "name": "CREDITAS spořitelní družstvo",
+      "bic": "CTASCZ22"
+    },
+    {
+      "code": "2260",
+      "name": "NEY spořitelní družstvo",
+      "bic": "NEYCZPP"
+    },
+    {
+      "code": "2600",
+      "name": "Citibank Europe plc, organizační složka",
+      "bic": "CITICZPX"
+    },
+    {
+      "code": "2700",
+      "name": "UniCredit Bank Czech Republic and Slovakia, a.s.",
+      "bic": "BACXCZPP"
+    },
+    {
+      "code": "3010",
+      "name": "Air Bank a.s.",
+      "bic": "AIRACZPP"
+    },
+    {
+      "code": "3050",
+      "name": "BNP Paribas Personal Finance SA, odštěpný závod",
+      "bic": "BNPACZPP"
+    },
+    {
+      "code": "3060",
+      "name": "PKO BP S.A., Czech Branch",
+      "bic": "BPKOCZPP"
+    },
+    {
+      "code": "4000",
+      "name": "Expobank CZ a.s.",
+      "bic": "EXIMCZ22"
+    },
+    {
+      "code": "4300",
+      "name": "Českomoravská záruční a rozvojová banka, a.s.",
+      "bic": "CMZRCZP1"
+    },
+    {
+      "code": "5500",
+      "name": "Raiffeisenbank a.s.",
+      "bic": "RZBCCZPP"
+    },
+    {
+      "code": "5800",
+      "name": "J&T BANKA, a.s.",
+      "bic": "JTBPCZPP"
+    },
+    {
+      "code": "6000",
+      "name": "PPF banka a.s.",
+      "bic": "PMBPCZPP"
+    },
+    {
+      "code": "6200",
+      "name": "AKCENTA CZ a.s.",
+      "bic": "AKCZCZP1"
+    },
+    {
+      "code": "6210",
+      "name": "mBank S.A., organizační složka",
+      "bic": "BREXCZPP"
+    },
+    {
+      "code": "6300",
+      "name": "BH Securities a.s.",
+      "bic": "BHSECZPP"
+    },
+    {
+      "code": "6700",
+      "name": "Všeobecná úverová banka a.s., pobočka Praha",
+      "bic": "SUBACZPP"
+    },
+    {
+      "code": "6800",
+      "name": "Sberbank CZ, a.s. — v likvidaci",
+      "bic": null
+    },
+    {
+      "code": "7910",
+      "name": "Deutsche Bank AG Filiale Prag, odštěpný závod",
+      "bic": "DEUTCZPX"
+    },
+    {
+      "code": "7940",
+      "name": "Waldviertler Sparkasse Bank AG",
+      "bic": "SPBACZPP"
+    },
+    {
+      "code": "7950",
+      "name": "ING Bank N.V.",
+      "bic": "INGBCZPP"
+    },
+    {
+      "code": "7960",
+      "name": "Volksbank Raiffeisen AG Praag",
+      "bic": null
+    },
+    {
+      "code": "7970",
+      "name": "Wüstenrot hypoteční banka a.s.",
+      "bic": "WUHYCZPP"
+    },
+    {
+      "code": "7980",
+      "name": "Wüstenrot stavební spořitelna a.s.",
+      "bic": "WUSTCZ21"
+    },
+    {
+      "code": "7990",
+      "name": "Modrá pyramida stavební spořitelna, a.s.",
+      "bic": "MODRCZ21"
+    },
+    {
+      "code": "8040",
+      "name": "Oberbank AG pobočka Česká republika",
+      "bic": "OBKLCZ2B"
+    },
+    {
+      "code": "8060",
+      "name": "Citibank Europe plc, organizační složka",
+      "bic": "CITICZPX"
+    },
+    {
+      "code": "8090",
+      "name": "Česká exportní banka, a.s.",
+      "bic": "CZEECZPP"
+    },
+    {
+      "code": "8150",
+      "name": "HSBC Continental Europe, Czech Republic",
+      "bic": "MIDLCZPP"
+    },
+    {
+      "code": "8190",
+      "name": "Sparkasse Oberösterreich Bank AG",
+      "bic": "SPBACZPP"
+    },
+    {
+      "code": "8198",
+      "name": "FAS finance company s.r.o.",
+      "bic": null
+    },
+    {
+      "code": "8200",
+      "name": "PRIVAT BANK der Raiffeisenlandesbank Oberösterreich Aktiengesellschaft, pobočka Česká republika",
+      "bic": "PRIVCZ22"
+    },
+    {
+      "code": "8215",
+      "name": "PLATEBNÍ INSTITUCE ROGER a.s.",
+      "bic": null
+    },
+    {
+      "code": "8220",
+      "name": "Payment execution s.r.o.",
+      "bic": null
+    },
+    {
+      "code": "8230",
+      "name": "ABAPAY s.r.o.",
+      "bic": null
+    },
+    {
+      "code": "8240",
+      "name": "Pay2me EU a.s.",
+      "bic": null
+    },
+    {
+      "code": "8250",
+      "name": "Bank of China (Hungary) Close Ltd. Prague branch, odštěpný závod",
+      "bic": "BKCHCZPP"
+    },
+    {
+      "code": "8260",
+      "name": "ista Czech s.r.o.",
+      "bic": null
+    },
+    {
+      "code": "8265",
+      "name": "Industrial and Commercial Bank of China Limited, Prague Branch, odštěpný závod",
+      "bic": "ICBKCZPP"
+    },
+    {
+      "code": "8270",
+      "name": "Fairplay Pay s.r.o.",
+      "bic": null
+    },
+    {
+      "code": "8280",
+      "name": "ČSOB Stavební spořitelna a.s.",
+      "bic": "CSASCZ21"
+    }
+  ]
+}

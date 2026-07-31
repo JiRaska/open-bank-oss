@@ -142,7 +142,6 @@ openbank:
     document-service-url: ${DOCUMENT_SERVICE_URL:http://document-service.documents.svc:8143}
     # CNB JERR registry XML — bank code list, refreshed every 24 h (CnbBanksClient).
     # Override with CNB_BANKS_URL env var if the CNB endpoint changes.
-    cnb-banks-url: ${CNB_BANKS_URL:https://apl.cnb.cz/apljerrpp/jerr_banky.xml}
   upstream:
     connect-timeout-ms: 5000
     request-timeout-ms: 10000

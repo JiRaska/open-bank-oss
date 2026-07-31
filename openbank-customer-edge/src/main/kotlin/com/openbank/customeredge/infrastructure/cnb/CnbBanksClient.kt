@@ -2,140 +2,99 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 package com.openbank.customeredge.infrastructure.cnb
 
-import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.quarkus.runtime.StartupEvent
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
 import jakarta.inject.Inject
-import org.eclipse.microprofile.config.inject.ConfigProperty
-import org.w3c.dom.Element
 import java.io.IOException
-import java.io.InputStream
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
+import java.time.LocalDate
 import java.util.logging.Logger
-import javax.xml.parsers.DocumentBuilderFactory
 
 data class BankDto(val code: String, val name: String, val bic: String? = null)
 
 /**
- * In-process cache of Czech bank codes.
+ * The Czech bank-code list, served from a **committed snapshot** — `/banks.json`.
  *
- * Data source:  CNB JERR XML at [cnbBanksUrl] (configurable via CNB_BANKS_URL env var).
- * Fallback:     embedded /banks.json is loaded on startup and used when CNB is unreachable.
- * Refresh:      background thread fetches from CNB on startup + every 24 hours.
- * Thread-safety: [cache] is an AtomicReference; all updates are done via set().
+ * ## Why this no longer fetches anything (issue #2918)
+ *
+ * It used to GET ČNB's JERR registry at `apl.cnb.cz/apljerrpp/jerr_banky.xml` every 24 h and fall
+ * back to the embedded file when that was "unreachable". That URL has been a **404 for the whole
+ * life of the service**, so the fallback was not a fallback: it was the only code path that ever
+ * ran, and the fetch existed solely to make the list look live. A failing refresh is invisible by
+ * construction here — it logs a warning and keeps serving, which is indistinguishable from success.
+ *
+ * There is no replacement URL. ČNB moved JERRS's machine-readable interface to a SOAP service
+ * (`aplc.cnb.cz/jerrsws/ws`, WSDL published) whose endpoint **refuses anonymous TLS at the host
+ * level** — it is registered-access, gated behind an application form, and would need a client
+ * certificate plus a SOAP/XSD client. The payment-system pages publish no static bank-code file
+ * either. Measurements are on #2918.
+ *
+ * So the snapshot is now the declared source of truth rather than an accident. That is a smaller
+ * claim than "live registry data", and it is a true one — which is the entire point of the change.
+ *
+ * ## What that costs, stated plainly
+ *
+ * A bank code registered after [snapshotDate] is unknown to this service. The list moves on the
+ * order of once or twice a year, so the exposure is small but not zero, and refreshing it is a
+ * deliberate human act: edit `/banks.json`, bump `snapshotDate`, open a PR.
+ * `BankRegistrySnapshotTest` fails if the file is missing, empty, malformed, or undated, so the
+ * registry can never silently degrade to the empty list the old code would happily serve.
  */
 @ApplicationScoped
 class CnbBanksClient {
 
     companion object {
         private val LOG = Logger.getLogger(CnbBanksClient::class.java.name)
-        private const val CONNECT_TIMEOUT_SECONDS = 10L
-        private const val FETCH_TIMEOUT_SECONDS = 15L
-        private const val REFRESH_PERIOD_HOURS = 24L
-        private const val HTTP_OK = 200
-        private const val BANK_CODE_LENGTH = 4
+        internal const val RESOURCE = "/banks.json"
     }
-
-    @ConfigProperty(name = "openbank.edge.cnb-banks-url")
-    lateinit var cnbBanksUrl: String
 
     @Inject
     lateinit var objectMapper: ObjectMapper
 
-    private val cache = AtomicReference<List<BankDto>>(emptyList())
+    // Private backing fields + read-only accessors, NOT `var … private set`: Quarkus's all-open
+    // plugin opens every @ApplicationScoped class for proxying, and Kotlin rejects a private
+    // setter on an open property ("Private setters for open properties are prohibited").
+    private lateinit var loadedBanks: List<BankDto>
+    private lateinit var loadedSnapshotDate: LocalDate
 
-    private val http: HttpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SECONDS))
-        .followRedirects(HttpClient.Redirect.NORMAL)
-        .build()
+    /**
+     * The committed snapshot, ordered by bank code. Never empty — startup fails first.
+     *
+     * This property IS the accessor: Kotlin compiles it to `getBanks()`, so a separate
+     * `fun getBanks()` alongside it is a JVM signature clash, not a convenience.
+     */
+    val banks: List<BankDto> get() = loadedBanks
 
-    private val scheduler = Executors.newSingleThreadScheduledExecutor { r ->
-        Thread(r, "cnb-banks-refresh").also { it.isDaemon = true }
-    }
+    /** The day the committed list was taken from ČNB. */
+    val snapshotDate: LocalDate get() = loadedSnapshotDate
 
-    fun onStart(@Observes @Suppress("UNUSED_PARAMETER") e: StartupEvent) {
-        loadEmbedded()
-        scheduler.scheduleAtFixedRate(::refreshFromCnb, 0L, REFRESH_PERIOD_HOURS, TimeUnit.HOURS)
-    }
+    fun onStart(@Observes @Suppress("UNUSED_PARAMETER") e: StartupEvent) = load()
 
-    fun getBanks(): List<BankDto> = cache.get()
-
-    // --- private -----------------------------------------------------------------
-
-    private fun loadEmbedded() {
-        val stream = CnbBanksClient::class.java.getResourceAsStream("/banks.json") ?: run {
-            LOG.warning("CNB banks: /banks.json not found on classpath")
-            return
-        }
-        try {
-            val banks: List<BankDto> = objectMapper.readValue(stream, object : TypeReference<List<BankDto>>() {})
-            if (banks.isNotEmpty()) cache.set(banks)
-            LOG.info("CNB banks: seeded ${banks.size} banks from embedded JSON")
+    /**
+     * Loads the snapshot, and **throws** if it cannot. Deliberate: the file is now the only source,
+     * so a parse failure is a broken deployment, not a degraded one. The old code logged a warning
+     * and left the cache empty, which surfaced as `GET /banks` returning `[]` — a valid, successful
+     * and entirely wrong response.
+     */
+    internal fun load() {
+        val stream = CnbBanksClient::class.java.getResourceAsStream(RESOURCE)
+            ?: error("Bank registry snapshot $RESOURCE is not on the classpath")
+        val snapshot = try {
+            objectMapper.readValue(stream, BankSnapshot::class.java)
         } catch (ex: IOException) {
-            LOG.warning("CNB banks: could not parse embedded JSON — ${ex.message}")
+            throw IllegalStateException("Bank registry snapshot $RESOURCE is not parseable", ex)
         }
+        check(snapshot.banks.isNotEmpty()) { "Bank registry snapshot $RESOURCE contains no banks" }
+        loadedBanks = snapshot.banks.sortedBy { it.code }
+        loadedSnapshotDate = LocalDate.parse(snapshot.snapshotDate)
+        LOG.info(
+            "Bank registry: ${banks.size} banks from the committed snapshot of $snapshotDate " +
+                "(source: ${snapshot.source}). Not fetched — see #2918.",
+        )
     }
 
-    @Suppress("TooGenericExceptionCaught") // CNB XML fetch can fail in many ways; log and keep cache
-    internal fun refreshFromCnb() {
-        try {
-            val req = HttpRequest.newBuilder(URI.create(cnbBanksUrl))
-                .GET()
-                .timeout(Duration.ofSeconds(FETCH_TIMEOUT_SECONDS))
-                .header("Accept", "application/xml, text/xml, */*")
-                .build()
-            val resp = http.send(req, HttpResponse.BodyHandlers.ofInputStream())
-            if (resp.statusCode() != HTTP_OK) {
-                LOG.warning("CNB banks: HTTP ${resp.statusCode()} — keeping current cache")
-                return
-            }
-            val contentType = resp.headers().firstValue("Content-Type").orElse("")
-            val banks = if ("json" in contentType) parseCnbJson(resp.body()) else parseCnbXml(resp.body())
-            if (banks.isNotEmpty()) {
-                cache.set(banks.sortedBy { it.code })
-                LOG.info("CNB banks: refreshed ${banks.size} banks from $cnbBanksUrl")
-            } else {
-                LOG.warning("CNB banks: parsed 0 entries — keeping current cache")
-            }
-        } catch (ex: Exception) {
-            LOG.warning("CNB banks: refresh failed (${ex.message}) — using current cache")
-        }
-    }
-
-    /** Parse CNB JERR-style XML: <Banky><Banka><Kod>…</Kod><Nazev>…</Nazev><BIC>…</BIC><Stav>A</Stav> */
-    @Suppress("TooGenericExceptionCaught") // XML parser throws SAXException + IOException + more
-    private fun parseCnbXml(input: InputStream): List<BankDto> = try {
-        val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(input)
-        val nodes = doc.getElementsByTagName("Banka")
-        (0 until nodes.length)
-            .mapNotNull { i -> parseBankaElement(nodes.item(i) as? Element ?: return@mapNotNull null) }
-            .sortedBy { it.code }
-    } catch (ex: Exception) {
-        LOG.warning("CNB banks: XML parse error (${ex.message}) — returning empty list")
-        emptyList()
-    }
-
-    private fun parseBankaElement(el: Element): BankDto? {
-        val code = el.text("Kod") ?: return null
-        val name = el.text("Nazev") ?: return null
-        val bic = el.text("BIC")?.takeIf { it.isNotBlank() }
-        val stav = el.text("Stav")
-        if (stav != null && stav != "A") return null
-        return BankDto(code = code.trim().padStart(BANK_CODE_LENGTH, '0'), name = name.trim(), bic = bic)
-    }
-
-    private fun parseCnbJson(input: InputStream): List<BankDto> =
-        objectMapper.readValue(input, object : TypeReference<List<BankDto>>() {})
-
-    private fun Element.text(tag: String): String? =
-        getElementsByTagName(tag).item(0)?.textContent?.trim()?.takeIf { it.isNotBlank() }
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    internal data class BankSnapshot(val snapshotDate: String, val source: String, val banks: List<BankDto>)
 }

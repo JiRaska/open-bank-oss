@@ -197,15 +197,18 @@ class CustomerEdgeResource(
     // --- Reference data (public, no auth required) ---
 
     /**
-     * Czech bank code list sourced from the CNB JERR registry (cached in-process, refreshed every 24 h).
-     * Returns the embedded fallback list on startup before the first CNB fetch completes.
+     * Czech bank code list, served from the committed `/banks.json` snapshot.
+     *
+     * This used to say "refreshed every 24 h from the CNB JERR registry". It never was: that URL
+     * has been a 404 for the whole life of the service, and no public replacement exists (#2918).
+     * The snapshot is now the declared source of truth, dated in the file itself.
      * @PermitAll — the bank list is public reference data; no customer identity required.
      */
     @GET
     @Path("/banks")
     @PermitAll
     @Blocking
-    fun listBanks(): Response = Response.ok(banksClient.getBanks()).build()
+    fun listBanks(): Response = Response.ok(banksClient.banks).build()
 
     // --- Accounts ---
 

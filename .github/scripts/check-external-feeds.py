@@ -143,17 +143,6 @@ FEEDS = [
             "(ADR-0046); with no rate the revaluation skips the leg and posts nothing."
         ),
     },
-    {
-        "name": "cnb-bank-registry",
-        "file": "openbank-customer-edge/src/main/resources/application.yaml",
-        "yaml_path": "openbank.edge.cnb-banks-url",
-        "shape": "xml_document",
-        "why": (
-            "Czech bank-code registry behind IBAN/account validation in customer-edge. "
-            "`CnbBanksClient` falls back to an embedded /banks.json, so a dead URL degrades to a "
-            "frozen list rather than an outage — which is exactly why nothing notices it."
-        ),
-    },
 ]
 
 # External URLs that exist in a scanned YAML but cannot be probed by an unauthenticated CI job.
