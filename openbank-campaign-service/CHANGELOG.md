@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/JiRaska/open-bank-oss/compare/v0.3.2...v0.3.3) (2026-07-31)
+
+
+### Bug Fixes
+
+* **campaign:** snake_case column naming + the Temporal namespace the worker polls ([#2881](https://github.com/JiRaska/open-bank-oss/issues/2881)) ([71125c0](https://github.com/JiRaska/open-bank-oss/commit/71125c072ee347c5d0afccbd5964a6c57ddda235)), closes [#2749](https://github.com/JiRaska/open-bank-oss/issues/2749)
+
 ## [0.3.2](https://github.com/JiRaska/open-bank-oss/compare/v0.3.1...v0.3.2) (2026-07-31)
 
 
