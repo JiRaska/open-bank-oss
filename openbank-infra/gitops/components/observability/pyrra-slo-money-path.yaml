@@ -901,3 +901,47 @@ spec:
         metric: traces_spanmetrics_latency_bucket{service="openbank-interest-service",le="1"}
       total:
         metric: traces_spanmetrics_calls_total{service="openbank-interest-service"}
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-delegation-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-delegation-service
+spec:
+  target: "99.9"
+  window: 30d
+  description: "openbank-delegation-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-delegation-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-delegation-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-delegation-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-delegation-service
+spec:
+  target: "99"
+  window: 30d
+  description: "openbank-delegation-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-delegation-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-delegation-service"}
+---

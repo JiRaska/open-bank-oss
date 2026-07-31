@@ -145,6 +145,12 @@
         "openbank-consent-service/src/test"
       ]
     },
+    "openbank-delegation-service": {
+      "component": "delegation-service",
+      "exclude-paths": [
+        "openbank-delegation-service/src/test"
+      ]
+    },
     "openbank-control-liveness-sentinel": {
       "component": "control-liveness-sentinel",
       "exclude-paths": [

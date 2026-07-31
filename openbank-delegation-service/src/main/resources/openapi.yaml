@@ -1,0 +1,291 @@
+openapi: 3.1.0
+info:
+  title: OpenBank Delegation Service API
+  description: |
+    Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
+    products (accounts, savings goals, cards) and single objects (payment, statement,
+    document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8126
+tags:
+  - name: Delegations
+paths:
+  /api/v1/delegations:
+    post:
+      tags: [Delegations]
+      summary: Offer a delegation grant (OFFERED); idempotent via X-Request-ID
+      parameters:
+        - name: X-Request-ID
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OfferDelegationRequest' }
+      responses:
+        '201':
+          description: Grant offered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationResponse' }
+        '400': { description: Validation or SCA failure }
+        '422': { description: Eligibility gate rejection (ADR-0232 D5) }
+  /api/v1/delegations/{id}:
+    get:
+      tags: [Delegations]
+      summary: Get delegation grant by ID
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+      responses:
+        '200':
+          description: The grant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationResponse' }
+        '404': { description: Not found }
+    delete:
+      tags: [Delegations]
+      summary: Revoke a grant (grantor or bank)
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - name: revokedBy
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RevokeDelegationRequest' }
+      responses:
+        '200':
+          description: Grant revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationResponse' }
+  /api/v1/delegations/grantor/{partyId}:
+    get:
+      tags: [Delegations]
+      summary: List grants offered BY a party (Shared by me)
+      parameters:
+        - $ref: '#/components/parameters/PartyId'
+      responses:
+        '200':
+          description: Grants
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DelegationResponse' }
+  /api/v1/delegations/grantee/{partyId}:
+    get:
+      tags: [Delegations]
+      summary: List grants offered TO a party (Shared with me)
+      parameters:
+        - $ref: '#/components/parameters/PartyId'
+      responses:
+        '200':
+          description: Grants
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DelegationResponse' }
+  /api/v1/delegations/{id}/accept:
+    post:
+      tags: [Delegations]
+      summary: Accept an OFFERED grant after the grantee's SCA completes
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - name: granteePartyId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: scaSessionId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Grant activated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationResponse' }
+  /api/v1/delegations/{id}/decline:
+    post:
+      tags: [Delegations]
+      summary: Decline an OFFERED grant (grantee)
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - name: granteePartyId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Grant declined
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationResponse' }
+  /api/v1/delegations/{id}/renounce:
+    post:
+      tags: [Delegations]
+      summary: Renounce an ACTIVE grant (grantee)
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - name: granteePartyId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Grant renounced
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationResponse' }
+  /api/v1/delegations/{id}/suspend:
+    post:
+      tags: [Delegations]
+      summary: Suspend an ACTIVE grant (bank / fraud-AML signal)
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SuspendDelegationRequest' }
+      responses:
+        '200':
+          description: Grant suspended
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationResponse' }
+  /api/v1/delegations/{id}/reinstate:
+    post:
+      tags: [Delegations]
+      summary: Reinstate a SUSPENDED grant
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+      responses:
+        '200':
+          description: Grant reinstated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationResponse' }
+  /api/v1/delegations/check:
+    post:
+      tags: [Delegations]
+      summary: Whether an active grant covers a capability on a resource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CheckDelegationRequest' }
+      responses:
+        '200':
+          description: Decision (never the grant itself)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationCheckResponse' }
+components:
+  parameters:
+    DelegationId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PartyId:
+      name: partyId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    MoneyDto:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount: { type: string }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+    ExposureDto:
+      type: object
+      properties:
+        redactionRules: { type: array, items: { type: string } }
+        maxViews: { type: integer }
+        watermark: { type: boolean }
+        allowDownload: { type: boolean }
+    OfferDelegationRequest:
+      type: object
+      required: [grantorPartyId, granteePartyId, resourceType, resourceId, capabilities, grantScaSessionId]
+      properties:
+        grantorPartyId: { type: string, format: uuid }
+        granteePartyId: { type: string, format: uuid }
+        resourceType: { type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT] }
+        resourceId: { type: string, format: uuid }
+        capabilities:
+          type: array
+          items:
+            type: string
+            enum: [ACCOUNT_READ_BALANCES, ACCOUNT_READ_TRANSACTIONS, ACCOUNT_INITIATE_PAYMENT,
+                   ACCOUNT_PROPOSE_PAYMENT, CARD_VIEW, CARD_MANAGE_LIMITS, SAVINGS_DEPOSIT,
+                   SAVINGS_WITHDRAW, SAVINGS_PROPOSE_WITHDRAW, OBJECT_READ, DELEGATION_MANAGE]
+        approvalPolicy: { type: string, enum: [SOLO, ANY_ONE, ALL, N_OF_M] }
+        requiredApprovals: { type: integer }
+        perTransactionLimit: { $ref: '#/components/schemas/MoneyDto' }
+        dailyLimit: { $ref: '#/components/schemas/MoneyDto' }
+        monthlyLimit: { $ref: '#/components/schemas/MoneyDto' }
+        exposure: { $ref: '#/components/schemas/ExposureDto' }
+        validTo: { type: string, format: date-time }
+        grantScaSessionId: { type: string, format: uuid }
+        note: { type: string }
+    RevokeDelegationRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string }
+    SuspendDelegationRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string }
+    CheckDelegationRequest:
+      type: object
+      required: [granteePartyId, resourceType, resourceId, capability]
+      properties:
+        granteePartyId: { type: string, format: uuid }
+        resourceType: { type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT] }
+        resourceId: { type: string, format: uuid }
+        capability: { type: string }
+        amount: { $ref: '#/components/schemas/MoneyDto' }
+    DelegationResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        grantorPartyId: { type: string, format: uuid }
+        granteePartyId: { type: string, format: uuid }
+        resourceType: { type: string }
+        resourceId: { type: string, format: uuid }
+        capabilities: { type: array, items: { type: string } }
+        approvalPolicy: { type: string }
+        requiredApprovals: { type: integer }
+        perTransactionLimit: { $ref: '#/components/schemas/MoneyDto' }
+        dailyLimit: { $ref: '#/components/schemas/MoneyDto' }
+        monthlyLimit: { $ref: '#/components/schemas/MoneyDto' }
+        exposure: { $ref: '#/components/schemas/ExposureDto' }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: string, format: date-time }
+        status:
+          type: string
+          enum: [OFFERED, ACTIVE, SUSPENDED, REVOKED, DECLINED, EXPIRED, RENOUNCED]
+        note: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        closedAt: { type: string, format: date-time }
+        closedReason: { type: string }
+    DelegationCheckResponse:
+      type: object
+      properties:
+        granted: { type: boolean }
+        reason: { type: string }
+        code: { type: string }

@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: open-banking
+primaryDatastore: PostgreSQL
+databaseName: openbank_delegations
+dataLineageRole: source
+dataClassification: confidential
+retentionPolicy: 5 years
+evidenceExported: true
+lineage:
+  upstream:
+    - serviceName: sca-service
+      relationType: api
+      description: verifies grant/accept SCA challenges
+    - serviceName: pid-service
+      relationType: api
+      description: grantor/grantee eligibility (party status, KYC level)
+databaseLineage:
+  ownedDatabases:
+    - openbank_delegations
+  dependentDatabases: []
