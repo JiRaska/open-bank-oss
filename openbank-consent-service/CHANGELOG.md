@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.3](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.16.2...consent-service-v0.16.3) (2026-07-31)
+
+
+### Bug Fixes
+
+* **consent:** carry scopes on ConsentRevoked so a revocation can be acted on ([#2923](https://github.com/JiRaska/open-bank-oss/issues/2923)) ([0690396](https://github.com/JiRaska/open-bank-oss/commit/069039649bcd8340f3760f98d21d20a68feacfb1))
+
 ## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.16.1...consent-service-v0.16.2) (2026-07-31)
 
 
