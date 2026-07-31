@@ -62,6 +62,18 @@ dependencies {
     // services resolve them), so this adds no new verification entries. Only the type
     // signatures are needed here; each consumer brings the real temporal-sdk itself.
     compileOnly("io.temporal:temporal-sdk:1.25.1") { isTransitive = false }
+    // Kotlin data classes as workflow payloads need the Kotlin module on the Temporal
+    // JSON converter; consumers already ship it via quarkus-rest-jackson (#2749).
+    compileOnly("com.fasterxml.jackson.module:jackson-module-kotlin:2.18.2")
+
+    // grpc excluded: temporal-sdk brings its own 1.54.1, which carries GHSA-cfgp-2977-2fmm
+    // (high) and fails dependency-review. The converter test needs the payload/converter types,
+    // not the service client, so this stays a test-only classpath without grpc.
+    testImplementation("io.temporal:temporal-sdk:1.25.1") { exclude(group = "io.grpc") }
+    // protobuf reached the test classpath via grpc; excluding grpc means naming it directly.
+    // Version matches the fleet pin in openbank.dependency-vulnerability-pins.
+    testImplementation("com.google.protobuf:protobuf-java:4.35.0")
+    testImplementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.18.2")
     compileOnly("io.temporal:temporal-serviceclient:1.25.1") { isTransitive = false }
     compileOnly("com.uber.m3:tally-core:0.13.0") { isTransitive = false }
 
