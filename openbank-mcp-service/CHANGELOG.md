@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.12.0...mcp-service-v0.13.0) (2026-07-31)
+
+
+### Features
+
+* **mcp:** accept staff OBO tokens behind mcp.obo.enabled (ADR-0224 phase 1b) ([#2763](https://github.com/JiRaska/open-bank-oss/issues/2763)) ([64c2d5e](https://github.com/JiRaska/open-bank-oss/commit/64c2d5e78b687a5ae707ae8dbc15fae90c69533d))
+* **mcp:** stamp every MCP audit event with channel, act chain and session id (ADR-0226 D2) ([#2760](https://github.com/JiRaska/open-bank-oss/issues/2760)) ([020ac77](https://github.com/JiRaska/open-bank-oss/commit/020ac773a1ccf8ac021f18aed4eb42a2ed8c89b7))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.11.0...mcp-service-v0.12.0) (2026-07-31)
 
 
