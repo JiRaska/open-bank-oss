@@ -18,6 +18,7 @@ import {
   ClipboardCheck, Activity, Boxes, Bluetooth, Fingerprint, FileSignature, Network, Waypoints, Workflow,
 } from 'lucide-react'
 import { hasPermission, Permission } from '@/lib/auth/roles'
+import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 type NavItem = { nameCs: string; nameEn: string; href: string; icon: React.ElementType; permission?: Permission; lockedPermission?: Permission; badge?: string }
@@ -115,13 +116,34 @@ const sysNav: NavItem[] = [
 
 const SCROLL_KEY = 'ob.sidebar.scroll'
 
+const ALL_NAV: NavItem[] = [
+  ...coreNav, ...revenueNav, ...customerNav, ...paymentsNav,
+  ...complianceNav, ...opsNav, ...docsNav, ...platformNav, ...sysNav,
+]
+
 export function Sidebar() {
   const pathname = usePathname()
   const { data: session } = useSession()
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const roles: string[] = session?.user?.roles ?? []
   const filter = (items: NavItem[]) => items.filter(i => !i.permission || hasPermission(roles, i.permission))
   const isLocked = (item: NavItem) => !!item.lockedPermission && !hasPermission(roles, item.lockedPermission)
+
+  // ADR-0229 D4 (first cut): the persona's quick links pinned at the top — the full menu below
+  // is untouched. Each link inherits its permission from the same destination's nav entry.
+  const persona = personaForRoles(roles)
+  // A workspace link inherits its permission from the nav entry with the same href. A link with
+  // NO matching entry would inherit `permission: undefined` and so render for every role — so a
+  // renamed or removed destination drops out of the workspace instead of becoming an ungated
+  // shortcut. `filter` below only removes items that HAVE a permission the operator lacks.
+  const workspace = workspaceFor(persona).flatMap(link => {
+    const nav = ALL_NAV.find(n => n.href === link.href)
+    if (!nav) return []
+    return [{
+      nameCs: link.nameCs, nameEn: link.nameEn, href: link.href,
+      icon: nav.icon, permission: nav.permission,
+    }]
+  })
 
   // Persist the nav scroll position across route changes. App-Router keeps this
   // component mounted, but a hard reload or a remount would otherwise snap the
@@ -171,6 +193,8 @@ export function Sidebar() {
 
       {/* Nav — the only scrollable region; brand + footer stay pinned. */}
       <nav ref={navRef} className="ob-sidebar-nav" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <SectionLabel>{t('Můj přehled', 'My workspace')} · {personaLabel(persona, language === 'cs' ? 'cs' : 'en')}</SectionLabel>
+        <NavSection items={filter(workspace)} pathname={pathname} />
         <NavSection items={filter(coreNav)} pathname={pathname} />
         <SectionLabel>{t('Výnosy', 'Revenue')}</SectionLabel>
         <NavSection items={filter(revenueNav)} pathname={pathname} />
