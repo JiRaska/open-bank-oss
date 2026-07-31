@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/JiRaska/open-bank-oss/compare/v0.3.4...v0.3.5) (2026-07-31)
+
+
+### Bug Fixes
+
+* **campaign:** store the JSON documents as text so reads stop throwing ([#2902](https://github.com/JiRaska/open-bank-oss/issues/2902)) ([80b7ccb](https://github.com/JiRaska/open-bank-oss/commit/80b7ccb57afb60cf09680ca1126903f7a995663a)), closes [#2749](https://github.com/JiRaska/open-bank-oss/issues/2749)
+
 ## [0.3.4](https://github.com/JiRaska/open-bank-oss/compare/v0.3.3...v0.3.4) (2026-07-31)
 
 
