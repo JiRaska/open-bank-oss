@@ -46,18 +46,7 @@ const DETAIL = {
 }
 
 function Providers({ children }: { children: React.ReactNode }) {
-  // Suspense is required, not decorative: the detail page unwraps its `params` Promise with
-  // React `use()`, which suspends on first render. Without a boundary the tree renders empty and
-  // every assertion below fails for a reason that has nothing to do with the page.
-  return React.createElement(
-    SessionProvider,
-    null,
-    React.createElement(
-      LanguageProvider,
-      null,
-      React.createElement(React.Suspense, { fallback: null }, children),
-    ),
-  )
+  return React.createElement(SessionProvider, null, React.createElement(LanguageProvider, null, children))
 }
 
 function mockFetch(list: unknown, detail: unknown) {
@@ -68,7 +57,7 @@ function mockFetch(list: unknown, detail: unknown) {
     if (url.includes('/api/auth/session')) {
       return new Response('null', { status: 200, headers: { 'content-type': 'application/json' } })
     }
-    if (url.includes(`/api/campaigns/${CAMPAIGN_ID}`)) return json(detail)
+    if (/\/api\/campaigns\/[0-9a-f-]{36}/.test(url)) return json(detail)
     if (url.includes('/api/campaigns')) return json(list)
     return json({})
   })

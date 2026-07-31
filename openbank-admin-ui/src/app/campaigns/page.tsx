@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Megaphone } from 'lucide-react'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatusBadge } from '@/components/ui'
 
@@ -26,6 +27,7 @@ interface Campaign {
 }
 
 export default function CampaignsPage() {
+  const { t } = useLanguage()
   const [items, setItems] = useState<Campaign[]>([])
   const [unavailable, setUnavailable] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
@@ -47,17 +49,17 @@ export default function CampaignsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Campaigns"
-        subtitle="What is running, who was enrolled, and what actually reached them"
+        title={t('Kampaně', 'Campaigns')}
+        subtitle={t('Co běží, kdo byl zařazen a co k lidem opravdu dorazilo', 'What is running, who was enrolled, and what actually reached them')}
         icon={<Megaphone className="h-6 w-6" />}
       />
 
-      {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {loading && <p className="text-sm text-muted-foreground">{t('Načítám…', 'Loading…')}</p>}
 
-      {!loading && unavailable && <DataUnavailable kind={unavailable} service="Campaign-service" feature="Campaigns" />}
+      {!loading && unavailable && <DataUnavailable kind={unavailable} service="Campaign-service" feature={t('Kampaně', 'Campaigns')} />}
 
       {!loading && !unavailable && items.length === 0 && (
-        <p className="text-sm text-muted-foreground">No campaigns yet.</p>
+        <p className="text-sm text-muted-foreground">{t('Zatím žádné kampaně.', 'No campaigns yet.')}</p>
       )}
 
       {!loading && !unavailable && items.length > 0 && (
@@ -65,11 +67,11 @@ export default function CampaignsPage() {
           <table className="w-full text-sm">
             <thead className="bg-muted/50 text-left">
               <tr>
-                <th className="px-4 py-2 font-medium">Name</th>
-                <th className="px-4 py-2 font-medium">State</th>
-                <th className="px-4 py-2 font-medium">Segment</th>
-                <th className="px-4 py-2 font-medium">Created by</th>
-                <th className="px-4 py-2 font-medium">Approved by</th>
+                <th className="px-4 py-2 font-medium">{t('Název', 'Name')}</th>
+                <th className="px-4 py-2 font-medium">{t('Stav', 'State')}</th>
+                <th className="px-4 py-2 font-medium">{t('Segment', 'Segment')}</th>
+                <th className="px-4 py-2 font-medium">{t('Vytvořil', 'Created by')}</th>
+                <th className="px-4 py-2 font-medium">{t('Schválil', 'Approved by')}</th>
               </tr>
             </thead>
             <tbody>

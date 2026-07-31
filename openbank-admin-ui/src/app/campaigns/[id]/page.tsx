@@ -4,9 +4,10 @@
 
 'use client'
 
-import { use, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, Megaphone } from 'lucide-react'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 
@@ -59,12 +60,21 @@ function outcomeTone(outcome: string): Tone {
 }
 
 export default function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params)
+  const { t } = useLanguage()
+  // Params are unwrapped in an effect rather than with React `use()`. `use()` suspends until the
+  // promise settles, which forces every caller — including tests — to provide a Suspense boundary
+  // and, in jsdom, leaves the tree on the fallback indefinitely. An effect keeps the page mountable
+  // anywhere and costs one render.
+  const [id, setId] = useState<string | null>(null)
+  useEffect(() => {
+    params.then(p => setId(p.id))
+  }, [params])
   const [detail, setDetail] = useState<Detail | null>(null)
   const [unavailable, setUnavailable] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (!id) return
     fetch(`/api/campaigns/${id}`)
       .then(r => r.json())
       .then((d: Detail) => {
@@ -85,46 +95,46 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   return (
     <div className="space-y-6">
       <Link href="/campaigns" className="inline-flex items-center gap-1 text-sm hover:underline">
-        <ArrowLeft className="h-4 w-4" /> Campaigns
+        <ArrowLeft className="h-4 w-4" /> {t('Kampaně', 'Campaigns')}
       </Link>
 
       <PageHeader
-        title={c?.name ?? 'Campaign'}
+        title={c?.name ?? t('Kampaň', 'Campaign')}
         subtitle={c?.goal}
         icon={<Megaphone className="h-6 w-6" />}
       />
 
-      {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {loading && <p className="text-sm text-muted-foreground">{t('Načítám…', 'Loading…')}</p>}
       {!loading && unavailable && (
-        <DataUnavailable kind={unavailable} service="Campaign-service" feature="Campaign detail" />
+        <DataUnavailable kind={unavailable} service="Campaign-service" feature={t('Detail kampaně', 'Campaign detail')} />
       )}
 
       {!loading && !unavailable && c && (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="State" value={c.state} />
-            <StatCard label="Segment" value={`${c.segmentRef?.name}@${c.segmentRef?.version}`} />
-            <StatCard label="Enrolled" value={String(detail?.enrolments.length ?? 0)} />
+            <StatCard label={t('Stav', 'State')} value={c.state} />
+            <StatCard label={t('Segment', 'Segment')} value={`${c.segmentRef?.name}@${c.segmentRef?.version}`} />
+            <StatCard label={t('Zařazeno', 'Enrolled')} value={String(detail?.enrolments.length ?? 0)} />
             {/* Surfaced as a headline number on purpose: "how many were deliberately not
                 contacted" is the question the send log exists to answer (#2895). */}
-            <StatCard label="Suppressed sends" value={String(suppressed)} />
+            <StatCard label={t('Potlačených odeslání', 'Suppressed sends')} value={String(suppressed)} />
           </div>
 
           <section className="space-y-2">
-            <h2 className="text-sm font-semibold">Four-eyes</h2>
+            <h2 className="text-sm font-semibold">{t('Čtyři oči', 'Four-eyes')}</h2>
             <p className="text-sm text-muted-foreground">
-              Created by <span className="font-mono">{c.createdBy}</span>, approved by{' '}
-              <span className="font-mono">{c.approvedBy ?? '— not yet approved'}</span>
+              {t('Vytvořil', 'Created by')} <span className="font-mono">{c.createdBy}</span>{t(', schválil ', ', approved by ')}
+              <span className="font-mono">{c.approvedBy ?? t('— zatím neschváleno', '— not yet approved')}</span>
             </p>
           </section>
 
           <section className="space-y-2">
-            <h2 className="text-sm font-semibold">Enrolments</h2>
+            <h2 className="text-sm font-semibold">{t('Zařazení', 'Enrolments')}</h2>
             {detail?.sources.enrolments !== 'ok' ? (
               <DataUnavailable
                 kind={detail?.sources.enrolments === 'unauthorized' ? 'unauthorized' : 'unreachable'}
                 service="Campaign-service"
-                feature="Enrolments"
+                feature={t('Zařazení', 'Enrolments')}
                 dense
               />
             ) : (
@@ -132,9 +142,9 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50 text-left">
                     <tr>
-                      <th className="px-4 py-2 font-medium">Party</th>
-                      <th className="px-4 py-2 font-medium">State</th>
-                      <th className="px-4 py-2 font-medium">Step</th>
+                      <th className="px-4 py-2 font-medium">{t('Party', 'Party')}</th>
+                      <th className="px-4 py-2 font-medium">{t('Stav', 'State')}</th>
+                      <th className="px-4 py-2 font-medium">{t('Krok', 'Step')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -152,29 +162,31 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           </section>
 
           <section className="space-y-2">
-            <h2 className="text-sm font-semibold">Send log</h2>
+            <h2 className="text-sm font-semibold">{t('Log odeslání', 'Send log')}</h2>
             <p className="text-xs text-muted-foreground">
-              Includes suppressed attempts — the outcome is the only place a consent withdrawal,
-              frequency cap or quiet-hours skip is visible.
+              {t(
+                'Včetně potlačených pokusů — výsledek je jediné místo, kde je vidět odvolaný souhlas, limit četnosti nebo tiché hodiny.',
+                'Includes suppressed attempts — the outcome is the only place a consent withdrawal, frequency cap or quiet-hours skip is visible.',
+              )}
             </p>
             {detail?.sources.sends !== 'ok' ? (
               <DataUnavailable
                 kind={detail?.sources.sends === 'unauthorized' ? 'unauthorized' : 'unreachable'}
                 service="Campaign-service"
-                feature="Send log"
+                feature={t('Log odeslání', 'Send log')}
                 dense
               />
             ) : sends.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nothing sent or attempted yet.</p>
+              <p className="text-sm text-muted-foreground">{t('Zatím nic odesláno ani pokusem.', 'Nothing sent or attempted yet.')}</p>
             ) : (
               <div className="overflow-x-auto rounded-lg border">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50 text-left">
                     <tr>
-                      <th className="px-4 py-2 font-medium">Party</th>
-                      <th className="px-4 py-2 font-medium">Step</th>
-                      <th className="px-4 py-2 font-medium">Outcome</th>
-                      <th className="px-4 py-2 font-medium">When</th>
+                      <th className="px-4 py-2 font-medium">{t('Party', 'Party')}</th>
+                      <th className="px-4 py-2 font-medium">{t('Krok', 'Step')}</th>
+                      <th className="px-4 py-2 font-medium">{t('Výsledek', 'Outcome')}</th>
+                      <th className="px-4 py-2 font-medium">{t('Kdy', 'When')}</th>
                     </tr>
                   </thead>
                   <tbody>
