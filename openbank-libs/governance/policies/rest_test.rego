@@ -1173,7 +1173,6 @@ test_allow_when_the_register_key_is_absent if {
 	decision.allow == true
 }
 
-<<<<<<< HEAD
 # ADR-0224 D2: the session lifecycle grant is operator/admin-only and only reaches mcp.session.*.
 test_operator_mcp_session_grants_operator if {
 	rest.allowed_reasons["operator-mcp-session"] with input as {
@@ -1194,7 +1193,8 @@ test_operator_mcp_session_does_not_leak_to_other_domains if {
 		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "account.freeze",
 	}
-=======
+}
+
 # ADR-0223 D2 phase 1 (shadow): the matrix grants a seeded read for a staff role — and the
 # reason surfaces, so the retirement triage can count matrix-carried calls.
 test_matrix_allows_grants_a_seeded_read if {
@@ -1238,7 +1238,6 @@ test_matrix_allows_absent_role_and_absent_key_are_silent if {
 		"action": "account.read",
 	}
 		with data.rules as {}
->>>>>>> 97928e45c (feat(governance): role→action matrix as data + shadow matrix-allows reason (ADR-0223 phase 1))
 }
 
 # ADR-0223 phase 1.5: one-level inheritance — ADMIN inherits OPERATOR's full matrix; a role
