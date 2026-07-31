@@ -51,3 +51,21 @@ describe('workspaceFor / personaLabel', () => {
     expect(personaLabel('payments', 'en')).toBe('Payments Ops')
   })
 })
+
+// The Sidebar looks each workspace link up in its nav by href and inherits that entry's
+// permission; a link with no match would inherit `undefined` and render ungated. Assert the
+// hrefs against the Sidebar source so a renamed destination fails here, not in production.
+describe('workspace links resolve to a real nav destination', () => {
+  it('every persona href appears in the sidebar nav', async () => {
+    const { readFileSync } = await import('node:fs')
+    const nav = readFileSync('src/components/layout/Sidebar.tsx', 'utf8')
+    const navHrefs = new Set([...nav.matchAll(/href: '([^']+)'/g)].map(m => m[1]))
+    expect(navHrefs.size).toBeGreaterThan(10)
+    for (const persona of ['backoffice', 'payments', 'compliance', 'supervisor', 'platform'] as const) {
+      for (const link of workspaceFor(persona)) {
+        expect(navHrefs.has(link.href), `${persona} -> ${link.href} is not a sidebar destination`).toBe(true)
+      }
+    }
+  })
+})
+

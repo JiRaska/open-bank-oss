@@ -132,12 +132,17 @@ export function Sidebar() {
   // ADR-0229 D4 (first cut): the persona's quick links pinned at the top — the full menu below
   // is untouched. Each link inherits its permission from the same destination's nav entry.
   const persona = personaForRoles(roles)
-  const workspace = workspaceFor(persona).map(link => {
+  // A workspace link inherits its permission from the nav entry with the same href. A link with
+  // NO matching entry would inherit `permission: undefined` and so render for every role — so a
+  // renamed or removed destination drops out of the workspace instead of becoming an ungated
+  // shortcut. `filter` below only removes items that HAVE a permission the operator lacks.
+  const workspace = workspaceFor(persona).flatMap(link => {
     const nav = ALL_NAV.find(n => n.href === link.href)
-    return {
+    if (!nav) return []
+    return [{
       nameCs: link.nameCs, nameEn: link.nameEn, href: link.href,
-      icon: nav?.icon ?? LayoutDashboard, permission: nav?.permission,
-    }
+      icon: nav.icon, permission: nav.permission,
+    }]
   })
 
   // Persist the nav scroll position across route changes. App-Router keeps this
