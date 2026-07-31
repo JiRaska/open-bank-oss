@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.70.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.69.0...admin-ui-v0.70.0) (2026-07-31)
+
+
+### Features
+
+* **feedback:** alert on bug reports and add the screen-feedback board (ADR-0192) ([#2657](https://github.com/JiRaska/open-bank-oss/issues/2657)) ([619195c](https://github.com/JiRaska/open-bank-oss/commit/619195c3b58aca8626e33ed26e053dbd6ecc4c97))
+
 ## [0.69.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.68.0...admin-ui-v0.69.0) (2026-07-31)
 
 
