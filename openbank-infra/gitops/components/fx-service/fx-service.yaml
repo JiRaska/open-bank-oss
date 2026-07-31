@@ -80,12 +80,18 @@ spec:
               value: http://sanctions-service.sanctions.svc:8123
             - name: AML_SERVICE_URL
               value: http://aml-service.aml.svc:8117
+            # NOT optional (#2929). The three rest-clients behind the ADR-0032 screening gate
+            # (sanctions, aml, fraud) carry OidcClientRequestReactiveFilter; without this value
+            # the default oidc-client is "not initialized" and they send no Authorization header
+            # at all. `optional: true` did not buy graceful degradation — it turned an
+            # unprovisioned credential into a silent boot, and the failure would have surfaced on
+            # the first FX conversion anyone performed. oidc-externalsecret.yaml provisions it.
             - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: fx-service-oidc
                   key: OIDC_CLIENT_SECRET
-                  optional: true
+                  optional: false
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG

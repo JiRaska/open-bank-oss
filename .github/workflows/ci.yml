@@ -682,6 +682,16 @@ jobs:
       - name: "Kafka topic existence (issue #2598, enforced)"
         run: python3 .github/scripts/check-kafka-topics-exist.py --enforce
 
+      # #2929. Four workloads referenced a `<service>-oidc` Secret nothing creates, all with
+      # `optional: true` — so the pod booted clean, the credential was unset, and the rest-clients
+      # carrying OidcClientRequestReactiveFilter sent no Authorization header. For fx-service that
+      # is the ADR-0032 screening gate; nothing had logged it because no FX conversion has ever
+      # run. All three halves are derivable from committed artifacts, so no cluster access needed.
+      - name: "OIDC client secret wiring self-test (issue #2929)"
+        run: python3 .github/scripts/check-oidc-client-secret-wiring.py --selftest
+      - name: "OIDC client secret wiring (issue #2929, enforced)"
+        run: python3 .github/scripts/check-oidc-client-secret-wiring.py --enforce
+
       # issue #2370. The admin-ui compliance matrix is a hardcoded literal and nothing verified any
       # of its rows. 16 of 39 `ok` rows cited a database column that exists only in a Flyway
       # migration — evidence of a schema, not of a control, on AML/KYC/FATCA rows (SAR filing, MLRO
