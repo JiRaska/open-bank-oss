@@ -133,6 +133,21 @@ allowed_reasons contains "party-self-service" if {
 	endswith(input.action, sprintf(".%v", [verb]))
 }
 
+# ---------------------------------------------------------------------------------------
+# ADR-0223 D2 phase 1 (shadow): the role->action matrix as data (rules.yaml: authz.
+# role_action_matrix), granting ALONGSIDE the legacy reasons. The seed is derived as a
+# strict subset of today's effective grants (operator-read-any's and compliance-read-any's
+# read verbs, verbatim), so this rule changes no decision; what it changes is the
+# decision_reason mix, which the D2(b) retirement triage reads to find where the matrix
+# already carries the call. A role absent from the matrix yields an undefined lookup and
+# the rule simply does not fire — fail-closed by construction.
+# ---------------------------------------------------------------------------------------
+allowed_reasons contains "matrix-allows" if {
+	input.principal.type == "HUMAN"
+	some role in input.principal.roles
+	input.action in data.rules.authz.role_action_matrix[role].grant
+}
+
 # Operators and admins may list or read any resource on behalf of any party (support-desk
 # and onboarding cockpit paths, ADR-0068).
 allowed_reasons contains "operator-read-any" if {

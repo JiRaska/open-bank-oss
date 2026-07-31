@@ -29,7 +29,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-mcp-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "e802ef1f169a8399"
+        openbank.tech/policy-checksum: "0f90c6185389439d"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -40,7 +40,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: mcp-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-mcp-service:sandbox-64c2d5e7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-mcp-service:sandbox-e8458d94
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -50,22 +50,6 @@ spec:
           env:
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
-            # ADR-0224 D2: the agent-session store — CNPG `mcp-db` cluster (postgres.yaml here),
-            # its operator-generated mcp-db-app secret carries username/password.
-            - name: QUARKUS_DATASOURCE_JDBC_URL
-              value: jdbc:postgresql://mcp-db-rw.platform.svc:5432/openbank_mcp
-            - name: QUARKUS_DATASOURCE_REACTIVE_URL
-              value: vertx-reactive:postgresql://mcp-db-rw.platform.svc:5432/openbank_mcp
-            - name: QUARKUS_DATASOURCE_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: mcp-db-app
-                  key: username
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: mcp-db-app
-                  key: password
             # ADR-0034 PDP: the OPA sidecar in this pod (localhost:8181), serving
             # data.openbank.rest.allow (mcp-opa-bundle ConfigMap). A PDP connectivity error
             # still fails CLOSED in McpEndpoint (money-adjacent surface — never fail-open).

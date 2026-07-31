@@ -27,7 +27,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-billing-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "ec56179894498a20"
+        openbank.tech/policy-checksum: "99f6146d101ae3c4"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -59,11 +59,7 @@ spec:
                   key: OIDC_CLIENT_SECRET
                   optional: true
             - name: PRODUCT_CATALOG_SERVICE_URL
-              value: http://keda-add-ons-http-interceptor-proxy.keda:8080
-            # ADR-0083 T1 re-entry: the interceptor dispatches on Host; fee reads must wake
-            # a scaled-to-zero catalog, not fail into a no-fees assessment (money path).
-            - name: PRODUCT_CATALOG_HOST_OVERRIDE
-              value: product-catalog.accounts.svc
+              value: http://product-catalog.accounts.svc:8104
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
             - name: BALANCE_SERVICE_URL
