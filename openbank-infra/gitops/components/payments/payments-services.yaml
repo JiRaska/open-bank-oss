@@ -1990,7 +1990,10 @@ spec:
                   name: card-issuance-pan-key
                   key: CARD_PAN_ENCRYPTION_KEY
             - name: PRODUCT_CATALOG_SERVICE_URL
-              value: http://product-catalog.accounts.svc:8104
+              value: http://keda-add-ons-http-interceptor-proxy.keda:8080
+            # ADR-0083 T1 re-entry: the interceptor dispatches on Host (see account-service).
+            - name: PRODUCT_CATALOG_API_HOST_OVERRIDE
+              value: product-catalog.accounts.svc
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
