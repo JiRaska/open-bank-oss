@@ -78,6 +78,17 @@ describe('CommandPalette (ADR-0228 D3)', () => {
     expect(recents[0].id).toBe('a-9')
   })
 
+  it('highlights the active row with a balanced var() — an unclosed one is dropped by real CSS parsers', async () => {
+    const user = userEvent.setup()
+    renderPalette()
+    await user.type(screen.getByRole('textbox'), 'nov')
+    await waitFor(() => expect(screen.getByText('Jan Novák')).toBeTruthy(), { timeout: 2000 })
+    const rows = screen.getAllByRole('option')
+    expect(rows[0].getAttribute('aria-selected')).toBe('true')
+    expect((rows[0] as HTMLElement).style.background).toBe('var(--sidebar-active-bg)')
+    expect((rows[1] as HTMLElement).style.background).toBe('transparent')
+  })
+
   it('closes on Escape', async () => {
     const onClose = vi.fn()
     renderPalette(true, onClose)

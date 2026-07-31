@@ -167,7 +167,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                     style={{
                       display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px',
                       borderRadius: '8px', cursor: 'pointer',
-                      background: isActive ? 'var(--sidebar-active-bg, var(--surface-3)' : 'transparent',
+                      background: isActive ? 'var(--sidebar-active-bg)' : 'transparent',
                     }}
                   >
                     <Icon size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
