@@ -79,6 +79,17 @@ class LendingResource(
         .onFailure().recoverWithItem { e -> Response.status(400).entity(mapOf("error" to e.message)).build() }
 
     @POST
+    @Path("/applications/{id}/advance")
+    @Operation(summary = "Advance an application one step along the origination graph (ADR-0211)")
+    @Authorize(action = "lending.advance", resource = "#id")
+    fun advanceApplication(@PathParam("id") id: UUID): Uni<Response> = apply.advance(LoanApplicationId(id), actor())
+        .map { Response.ok(it).build() }
+        .onFailure(IllegalArgumentException::class.java)
+        .recoverWithItem { e -> Response.status(HTTP_NOT_FOUND).entity(mapOf("error" to e.message)).build() }
+        .onFailure(IllegalStateException::class.java)
+        .recoverWithItem { e -> Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build() }
+
+    @POST
     @Path("/applications/{id}/decision")
     @Operation(summary = "Approve or reject an application (checker; must differ from maker)")
     @RolesAllowed("ROLE_CREDIT_RISK", "ROLE_ADMIN")
@@ -249,4 +260,9 @@ class LendingResource(
         provisioning.assess(LoanId(id), asOf?.let { LocalDate.parse(it) } ?: LocalDate.now(clock))
             .map { Response.ok(it).build() }
             .onFailure().recoverWithItem { e -> Response.status(404).entity(mapOf("error" to e.message)).build() }
+
+    private companion object {
+        const val HTTP_NOT_FOUND = 404
+        const val HTTP_UNPROCESSABLE = 422
+    }
 }

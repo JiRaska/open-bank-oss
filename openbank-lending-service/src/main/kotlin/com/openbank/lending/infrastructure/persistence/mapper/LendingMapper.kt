@@ -39,6 +39,9 @@ class LendingMapper {
         it.decisionReason = a.decisionReason
         it.createdAt = a.createdAt
         it.decidedAt = a.decidedAt
+        it.jurisdiction = a.jurisdiction
+        it.productType = a.productType
+        it.packVersion = a.packVersion
     }
 
     fun toDomain(e: LoanApplicationEntity) = LoanApplication(
@@ -48,6 +51,7 @@ class LendingMapper {
         periodsPerYear = e.periodsPerYear, method = e.method, firstDueDate = e.firstDueDate,
         status = e.status, proposedBy = e.proposedBy, decidedBy = e.decidedBy,
         decisionReason = e.decisionReason, createdAt = e.createdAt, decidedAt = e.decidedAt,
+        jurisdiction = e.jurisdiction, productType = e.productType, packVersion = e.packVersion,
     )
 
     fun toEntity(l: Loan) = LoanEntity().also {

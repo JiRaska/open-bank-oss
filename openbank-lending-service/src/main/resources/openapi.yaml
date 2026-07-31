@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.6.0
+  version: 1.7.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -77,7 +77,9 @@ paths:
           in: query
           schema:
             type: string
-            enum: [PROPOSED, APPROVED, REJECTED, DISBURSED]
+            enum: [PROPOSED, APPROVED, REJECTED, DISBURSED, DRAFT, SUBMITTED, KYC_PENDING,
+              DOCS_REQUIRED, ASSESSMENT, DECISION_PENDING, FOUR_EYES, OFFERED, AWAITING_SIGNATURE,
+              SIGNED, REFLECTION_PERIOD, READY_TO_DISBURSE, WITHDRAWN, DECLINED, EXPIRED]
         - name: limit
           in: query
           description: Clamped server-side into 1..100.
@@ -85,6 +87,25 @@ paths:
       responses:
         '200': { description: Recent applications }
         '400': { description: Unknown status value }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/applications/{id}/advance:
+    post:
+      tags: [Lending]
+      operationId: advanceApplication
+      summary: Advance an application one step along the canonical origination graph (ADR-0211)
+      description: >-
+        Moves the application to the next forward state, validated by the state machine; optional
+        states (DOCS_REQUIRED, REFLECTION_PERIOD) are skipped unless the pinned compliance pack
+        makes them mandatory. Advancement stops at READY_TO_DISBURSE — booking is the disburse
+        endpoint. Legacy status names (PROPOSED/APPROVED/REJECTED) remain accepted by the
+        listRecentApplications filter for compatibility; retired rows were migrated by V9.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: Application advanced to the next state }
+        '404': { description: Application not found }
+        '422': { description: No forward transition from the current state }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/applications/{id}/decision:

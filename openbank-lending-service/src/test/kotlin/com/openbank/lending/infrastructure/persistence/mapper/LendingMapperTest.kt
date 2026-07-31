@@ -4,7 +4,6 @@
 
 package com.openbank.lending.infrastructure.persistence.mapper
 
-import com.openbank.lending.domain.model.ApplicationStatus
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.CollateralStatus
 import com.openbank.lending.domain.model.CollateralType
@@ -20,6 +19,7 @@ import com.openbank.libs.domain.money.Money
 import com.openbank.libs.lending.AmortizationMethod
 import com.openbank.libs.lending.DelinquencyBucket
 import com.openbank.libs.lending.Ifrs9Stage
+import com.openbank.libs.lending.origination.OriginationState
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -51,7 +51,7 @@ class LendingMapperTest {
             periodsPerYear = 12,
             method = AmortizationMethod.ANNUITY,
             firstDueDate = firstDue,
-            status = ApplicationStatus.REJECTED,
+            status = OriginationState.DECLINED,
             proposedBy = "alice",
             decidedBy = "bob",
             decisionReason = "affordability",

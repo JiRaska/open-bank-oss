@@ -7,6 +7,7 @@ package com.openbank.lending.infrastructure.compliance
 import com.openbank.lending.application.port.out.CompliancePackActivationRepository
 import com.openbank.libs.governance.Proposal
 import com.openbank.libs.governance.ProposalState
+import com.openbank.libs.lending.compliance.CompiledCompliancePack
 import com.openbank.libs.lending.compliance.CompliancePackCompiler
 import com.openbank.libs.lending.compliance.CompliancePackParser
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
@@ -95,5 +96,11 @@ class CompliancePackGuard(
             ?: throw IllegalArgumentException(
                 "no active compliance pack for $jurisdiction/$type — origination refused (ADR-0212 D2)",
             )
+    }
+
+    /** The active pack for the pair, or null — no enforcement, plain lookup (pinning, mandatory steps). */
+    fun resolveOriginationPack(jurisdiction: String?, productType: String?): CompiledCompliancePack? {
+        val type = PackProductType.entries.firstOrNull { it.name == productType } ?: return null
+        return jurisdiction?.let { registry.activePack(it, type, LocalDate.now(clock)) }
     }
 }

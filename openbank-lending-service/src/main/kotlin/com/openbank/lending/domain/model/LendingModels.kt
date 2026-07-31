@@ -13,13 +13,11 @@ import com.openbank.libs.lending.AmortizationMethod
 import com.openbank.libs.lending.DelinquencyBucket
 import com.openbank.libs.lending.EclHorizon
 import com.openbank.libs.lending.Ifrs9Stage
+import com.openbank.libs.lending.origination.OriginationState
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
-
-/** Origination decision state (EBA/GL/2020/06 four-eyes flow). */
-enum class ApplicationStatus { PROPOSED, APPROVED, REJECTED, DISBURSED }
 
 /** Servicing lifecycle of a booked loan. */
 enum class LoanStatus { ACTIVE, CLOSED, WRITTEN_OFF }
@@ -51,12 +49,15 @@ data class LoanApplication(
     val periodsPerYear: Int = 12,
     val method: AmortizationMethod = AmortizationMethod.ANNUITY,
     val firstDueDate: LocalDate,
-    val status: ApplicationStatus = ApplicationStatus.PROPOSED,
+    val status: OriginationState = OriginationState.SUBMITTED,
     val proposedBy: String,
     val decidedBy: String? = null,
     val decisionReason: String? = null,
     val createdAt: OffsetDateTime,
     val decidedAt: OffsetDateTime? = null,
+    val jurisdiction: String? = null,
+    val productType: String? = null,
+    val packVersion: Int? = null,
 )
 
 /** A live loan booked from an approved, disbursed application. */

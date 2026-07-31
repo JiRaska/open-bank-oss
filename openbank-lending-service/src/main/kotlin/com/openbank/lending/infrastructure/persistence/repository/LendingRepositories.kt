@@ -9,7 +9,6 @@ import com.openbank.lending.application.port.out.InstallmentRepository
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.ProvisioningRepository
-import com.openbank.lending.domain.model.ApplicationStatus
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
@@ -24,6 +23,8 @@ import com.openbank.lending.infrastructure.persistence.mapper.LendingMapper
 import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
+import com.openbank.libs.lending.origination.LegacyOriginationMigration
+import com.openbank.libs.lending.origination.OriginationState
 import io.quarkus.hibernate.reactive.panache.common.WithSession
 import io.quarkus.hibernate.reactive.panache.common.WithTransaction
 import io.smallrye.mutiny.Uni
@@ -54,13 +55,18 @@ class LoanApplicationRepositoryImpl @Inject constructor(
             .setParameter("p", partyId).resultList
     }.map { it.map(mapper::toDomain) }
 
+    private fun mapStatusFilter(status: String): OriginationState =
+        OriginationState.entries.firstOrNull { it.name == status }
+            ?: LegacyOriginationMigration.mapLegacyStatus(status, wasSubmitted = true)
+            ?: throw IllegalArgumentException("Unknown application status: $status")
+
     @WithSession
     override fun findRecent(status: String?, limit: Int): Uni<List<LoanApplication>> = sf.withSession { s ->
         val query = if (status != null) {
             s.createQuery(
                 "FROM LoanApplicationEntity WHERE status = :st ORDER BY createdAt DESC",
                 LoanApplicationEntity::class.java,
-            ).setParameter("st", ApplicationStatus.valueOf(status))
+            ).setParameter("st", mapStatusFilter(status))
         } else {
             s.createQuery(
                 "FROM LoanApplicationEntity ORDER BY createdAt DESC",

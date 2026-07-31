@@ -23,6 +23,7 @@ import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.lending.infrastructure.client.LendingGlAccounts
 import com.openbank.lending.infrastructure.client.LendingJournalFactory
 import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
+import com.openbank.lending.infrastructure.compliance.OriginationConfig
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.domain.money.Money
@@ -74,6 +75,7 @@ class LendingGlOutcomeTest {
         applications, loans, installments, collateral, ledger,
         valuation, riskParameters, events, clock, provisioning,
         CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
+        OriginationConfig(false),
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")

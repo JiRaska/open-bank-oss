@@ -13,7 +13,6 @@ import com.openbank.lending.application.port.out.LoanEventEmitter
 import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
-import com.openbank.lending.domain.model.ApplicationStatus
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.CollateralRequest
 import com.openbank.lending.domain.model.CollateralStatus
@@ -26,6 +25,7 @@ import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
+import com.openbank.lending.infrastructure.compliance.OriginationConfig
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.domain.money.Money
@@ -35,6 +35,7 @@ import com.openbank.libs.lending.EclHorizon
 import com.openbank.libs.lending.EclInputs
 import com.openbank.libs.lending.Ifrs9Stage
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
+import com.openbank.libs.lending.origination.OriginationState
 import io.mockk.CapturingSlot
 import io.mockk.every
 import io.mockk.mockk
@@ -82,6 +83,7 @@ class LendingServiceEdgeCasesTest {
         clock,
         provisioning,
         CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
+        OriginationConfig(false),
     )
 
     private val partyId = UUID.fromString("22222222-2222-2222-2222-222222222222")
@@ -105,7 +107,7 @@ class LendingServiceEdgeCasesTest {
         termPeriods = 12,
         firstDueDate = firstDue,
         proposedBy = proposer,
-        status = ApplicationStatus.PROPOSED,
+        status = OriginationState.FOUR_EYES,
         createdAt = fixedNow,
     )
 
@@ -189,13 +191,13 @@ class LendingServiceEdgeCasesTest {
 
     @Test
     fun `decide refuses an application that is already decided`() {
-        val app = proposedApplication().copy(status = ApplicationStatus.APPROVED, decidedBy = "bob")
+        val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)
 
         assertThatThrownBy {
             service.decide(app.id, DecisionRequest(approve = false), "carol").await().indefinitely()
         }.isInstanceOf(IllegalStateException::class.java)
-            .hasMessageContaining("not awaiting a decision")
+            .hasMessageContaining("not awaiting a four-eyes decision")
 
         verify(exactly = 0) { applications.update(any()) }
     }
@@ -226,7 +228,7 @@ class LendingServiceEdgeCasesTest {
             "bob",
         ).await().indefinitely()
 
-        assertThat(result.status).isEqualTo(ApplicationStatus.REJECTED)
+        assertThat(result.status).isEqualTo(OriginationState.DECLINED)
         assertThat(result.decidedBy).isEqualTo("bob")
         assertThat(result.decisionReason).isEqualTo("affordability")
         assertThat(result.decidedAt).isEqualTo(fixedNow)
@@ -258,7 +260,7 @@ class LendingServiceEdgeCasesTest {
 
     @Test
     fun `disburse refuses a blank disburser identity`() {
-        val app = proposedApplication().copy(status = ApplicationStatus.APPROVED, decidedBy = "bob")
+        val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)
 
         assertThatThrownBy { service.disburse(app.id, "").await().indefinitely() }

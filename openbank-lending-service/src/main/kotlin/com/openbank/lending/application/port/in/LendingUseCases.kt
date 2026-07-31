@@ -34,6 +34,12 @@ interface ApplyForLoanUseCase {
     fun getApplication(id: LoanApplicationId): Uni<LoanApplication?>
     fun listApplications(partyId: UUID): Uni<List<LoanApplication>>
 
+    /**
+     * Drive an application one step forward along the canonical origination graph
+     * (ADR-0211 D1), validated by the state machine; [actor] is the trusted JWT subject.
+     */
+    fun advance(id: LoanApplicationId, actor: String): Uni<LoanApplication>
+
     /** Backoffice queue (ADR-0230 D1): newest applications fleet-wide, optionally one status. */
     fun listRecentApplications(status: String?, limit: Int): Uni<List<LoanApplication>>
 }
