@@ -14,26 +14,38 @@
 # context — the worst of both worlds (silent Dependabot, noisy unopinionated Scorecard).
 #
 # This wires `gradle/actions/setup-gradle`'s built-in dependency-graph extractor so the graph
-# gets submitted from a real build on every relevant main push. Once populated, Dependabot
+# gets submitted from a real build on every main push. Once populated, Dependabot
 # alerts become the authoritative, actionable, per-service view (exact vulnerable version +
 # suggested fix), and Scorecard's Vulnerabilities check should stop flying blind.
 name: Dependency submission
 
 on:
+  # DELIBERATELY UNFILTERED (issue #2833). This trigger used to carry the same
+  # manifest `paths:` filter as the pull_request one below. That filter is correct for
+  # a PR head and wrong for a main commit, because dependency-review looks snapshots up
+  # by EXACT SHA and the two sides are selected by different rules: a PR only reaches
+  # the gate with a manifest change (so its head is always snapshot-bearing), but its
+  # `pull_request.base.sha` is an arbitrary main commit. Measured 2026-07-31: 1 of the
+  # last 50 main commits touched any filtered path, so ~98% of base SHAs could never
+  # have a snapshot, and dependency-review silently fell back to diffing the ENTIRE head
+  # graph as additions — 1235 packages, 30 of them carrying advisories, none of which
+  # the PR introduced. That is how the netty/protobuf entries in dependency-review.yml's
+  # allow-ghsas were accreted: pre-existing findings surfaced as if new, each silenced by
+  # a permanent fleet-wide suppression.
+  #
+  # The cost of dropping the filter is a ~11 min run on every main push, which is $0 —
+  # public repo, hosted runners, free and unlimited. Do not "optimize" it back: a
+  # docs-only main commit produces a graph identical to its parent's, but exact-SHA
+  # lookup means an identical graph and a MISSING graph are not the same thing.
   push:
     branches: [main]
-    paths:
-      - "**/build.gradle.kts"
-      - "openbank-libs/gradle/libs.versions.toml"
-      - "settings.gradle.kts"
-      - "gradle/wrapper/**"
   # PRs too, so dependency-review.yml has a head-SHA graph to diff against main's
   # (issue #1419): without a per-PR submission the Gradle graph is main-only, and
   # dependency-review — which only ever compares submitted graphs — silently had
   # nothing to say about the fleet's primary language. This is the integration
-  # documented by gradle/actions (docs/dependency-submission.md). Same path filter
-  # as the push trigger: only a PR that can change resolution pays the ~11 min, which
-  # is 3 of the last 40 PRs.
+  # documented by gradle/actions (docs/dependency-submission.md). The path filter is
+  # kept HERE and only here: a PR that changes no manifest cannot change resolution, so
+  # its head needs no snapshot of its own — the gate has nothing to diff either way.
   pull_request:
     branches: [main]
     paths:
@@ -50,9 +62,26 @@ on:
 permissions:
   contents: read
 
+# Keyed per-SHA on push, per-ref everywhere else — and push runs are never cancelled.
+#
+# This is load-bearing for the unfiltered push trigger above, not a style preference.
+# The old rule grouped every main push under `refs/heads/main` with
+# `cancel-in-progress: true`, so a second merge killed the first merge's submission.
+# Measured 2026-07-31: 70 of the last 80 main commits landed within 11 minutes of the
+# previous one (tightest gaps: 2 seconds), i.e. under the old rule dropping the paths
+# filter would still have produced a snapshot for roughly 9 commits in 80 — the fix
+# would have looked applied while leaving the gap almost entirely open.
+#
+# Cancelling is still right for a PR: only the head SHA is ever compared, so a
+# superseded push has nothing to contribute. On main every commit is a potential
+# `pull_request.base.sha` for some future PR, so every one has to finish.
+#
+# Cost: a merge burst (a release-please batch drain) starts one ~11 min job per commit
+# in parallel. $0 on hosted runners for a public repo; the exposure is queue depth, and
+# a queued snapshot arriving late still beats a cancelled one never arriving.
 concurrency:
-  group: dependency-submission-${{ github.ref }}
-  cancel-in-progress: true
+  group: dependency-submission-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   submit:
