@@ -1282,11 +1282,6 @@ jobs:
     if: always() && needs.changes.outputs.any == 'true' && needs.build-push.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    # This job has no actions/checkout, so `gh` has nothing to infer the target repo from
-    # and every subcommand dies with `failed to determine base repo: fatal: not a git
-    # repository`. Set it explicitly (same fix, same reason as record-deployment-on-merge.yml).
-    env:
-      GH_REPO: ${{ github.repository }}
     steps:
       - name: Report undelivered deploy
         env:
