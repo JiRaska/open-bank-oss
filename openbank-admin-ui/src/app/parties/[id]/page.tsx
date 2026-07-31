@@ -13,6 +13,7 @@ import { useAuth } from '@/lib/auth/useAuth'
 import { hasPermission } from '@/lib/auth/roles'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
+import { EntityChip } from '@/components/entities/EntityChip'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { opsMessageApi, OPERATOR_MESSAGE_TEMPLATE_VARS, type OperatorMessageTemplate, type ComposeMessageRequest } from '@/lib/api'
 
@@ -229,10 +230,57 @@ function PartyDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Related entities (ADR-0231 D3) — the party → accounts walk is chips, not UUID copying. */}
+          <RelatedAccounts partyId={party.id} />
         </div>
       )}
 
       {tab === 'messages' && <MessagesTab partyId={party.id} partyEmail={party.email} roles={roles} />}
+    </div>
+  )
+}
+
+type AccountRef = { id: string; accountNumber: string; currencyCode?: string; status?: string }
+
+function RelatedAccounts({ partyId }: { partyId: string }) {
+  const { t } = useLanguage()
+  const [accounts, setAccounts] = useState<AccountRef[] | null>(null)
+
+  useEffect(() => {
+    const ctrl = new AbortController()
+    fetch(svcUrl('account-service', '/api/v1/accounts', { partyId, limit: '20' }), {
+      signal: ctrl.signal, cache: 'no-store',
+    })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => setAccounts(d ? (d.data ?? []) : []))
+      .catch(() => setAccounts([]))
+    return () => ctrl.abort()
+  }, [partyId])
+
+  return (
+    <div className="card" style={{ padding: '20px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+        <Users size={15} style={{ color: 'var(--accent)' }} />
+        <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Související účty', 'Related accounts')}</span>
+      </div>
+      {accounts === null ? (
+        <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Načítám…', 'Loading…')}</div>
+      ) : accounts.length === 0 ? (
+        <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Žádné účty', 'No accounts')}</div>
+      ) : (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+          {accounts.map(a => (
+            <EntityChip
+              key={a.id}
+              type="account"
+              id={a.id}
+              label={a.accountNumber}
+              sublabel={[a.currencyCode, a.status].filter(Boolean).join(' · ') || undefined}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
