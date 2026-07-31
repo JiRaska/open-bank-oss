@@ -6,7 +6,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 # Runbook — openbank-mcp-service
 
 > Operational runbook for the `mcp` service. Data domain **payments**,
-> classification **confidential**, datastore **postgres**.
+> classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
 
@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-mcp-service` |
 | HTTP port | `8150` |
 | Data domain | payments |
-| Datastore | postgres (database `openbank_mcp`) |
+| Datastore | PostgreSQL (database `openbank_mcp`) |
 | Classification | confidential |
 | Retention | 13-months |
 | Lineage role | consumer |
@@ -46,7 +46,7 @@ triaging an incident that starts on `mcp`.
 - **Pod CrashLoopBackOff at boot:** usually a missing/invalid config or secret
   (`ExternalSecret` not synced) or a Flyway checksum mismatch. Check
   `kubectl describe pod` events and the first 50 log lines.
-- **Readiness flapping:** datastore (postgres) unreachable or saturated — check the
+- **Readiness flapping:** datastore (PostgreSQL) unreachable or saturated — check the
   datastore pod/cluster health and connection-pool metrics.
 - **Downstream errors:** verify the upstream dependencies above are healthy before
   assuming the fault is local.
