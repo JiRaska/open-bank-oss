@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.49.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.49.0...customer-edge-v0.49.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **edge:** let a customer issue a virtual card again after the old one dies ([#2832](https://github.com/JiRaska/open-bank-oss/issues/2832)) ([b075316](https://github.com/JiRaska/open-bank-oss/commit/b0753164e428a70aab794e633eae14b6787b17d7))
+
 ## [0.49.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.48.0...customer-edge-v0.49.0) (2026-07-31)
 
 

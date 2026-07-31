@@ -15,7 +15,7 @@
   "openbank-consent-service": "0.16.1",
   "openbank-control-liveness-sentinel": "0.5.2",
   "openbank-copilot-service": "0.7.4",
-  "openbank-customer-edge": "0.49.0",
+  "openbank-customer-edge": "0.49.1",
   "openbank-devops-agent": "0.5.1",
   "openbank-dispute-service": "0.8.3",
   "openbank-docs-truth-agent": "0.3.2",
