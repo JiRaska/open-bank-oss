@@ -29,6 +29,21 @@ describe('hasPermission', () => {
   it('returns true when at least one role matches', () => {
     expect(hasPermission([ROLES.VIEWER, ROLES.PAYMENTS], 'payments:approve')).toBe(true)
   })
+
+  it('admits both halves of the KYC four-eyes split to the case queue, but only the reviewer to approve', () => {
+    expect(hasPermission([ROLES.KYC_OPENER], 'kyc:view')).toBe(true)
+    expect(hasPermission([ROLES.KYC_REVIEWER], 'kyc:view')).toBe(true)
+    expect(hasPermission([ROLES.KYC_REVIEWER], 'kyc:approve')).toBe(true)
+    // ADR-0116: the opener must never self-approve — the UI hides the action exactly as the
+    // backend refuses it.
+    expect(hasPermission([ROLES.KYC_OPENER], 'kyc:approve')).toBe(false)
+  })
+
+  it('admits the supervisor to payment approval and audit reading, not to creation', () => {
+    expect(hasPermission([ROLES.SUPERVISOR], 'payments:approve')).toBe(true)
+    expect(hasPermission([ROLES.SUPERVISOR], 'audit:view')).toBe(true)
+    expect(hasPermission([ROLES.SUPERVISOR], 'payments:create')).toBe(false)
+  })
 })
 
 describe('hasRole', () => {

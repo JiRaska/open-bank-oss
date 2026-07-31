@@ -13,6 +13,10 @@ export const ROLES = {
   PAYMENTS:   "ROLE_PAYMENTS",
   AUDITOR:    "ROLE_AUDITOR",
   API:        "ROLE_API",
+  SUPERVISOR: "ROLE_SUPERVISOR",
+  KYC:        "ROLE_KYC",
+  KYC_OPENER: "ROLE_KYC_OPENER",
+  KYC_REVIEWER: "ROLE_KYC_REVIEWER",
   DEMO:       "ROLE_DEMO",
 } as const
 
@@ -35,19 +39,21 @@ export const PERMISSIONS = {
   // mirrors statement-service's CloseRunResource POST gate (ROLE_OPERATOR/ADMIN)
   "closings:run":             [ROLES.ADMIN, ROLES.OPERATOR],
   // Payments
-  "payments:view":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS],
-  "payments:create":          [ROLES.ADMIN, ROLES.OPERATOR, ROLES.PAYMENTS],
-  "payments:approve":         [ROLES.ADMIN, ROLES.PAYMENTS],
-  // Parties / KYC / Onboarding
-  "parties:view":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE],
-  "parties:edit":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
-  "kyc:view":                 [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
-  "kyc:approve":              [ROLES.ADMIN, ROLES.COMPLIANCE],
-  "onboarding:view":          [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  "payments:view":        [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS, ROLES.SUPERVISOR],
+  "payments:create":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.PAYMENTS],
+  "payments:approve":     [ROLES.ADMIN, ROLES.PAYMENTS, ROLES.SUPERVISOR],
+  // Parties / KYC / Onboarding — KYC_OPENER may NOT approve (four-eyes, ADR-0116);
+  // KYC_REVIEWER may NOT open. The UI mirrors the backend @RolesAllowed split so a
+  // holder of only one KYC role gets exactly their half of the workflow.
+  "parties:view":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
+  "parties:edit":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  "kyc:view":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
+  "kyc:approve":          [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.KYC_REVIEWER],
+  "onboarding:view":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
   // Audit
-  "audit:view":               [ROLES.ADMIN, ROLES.AUDITOR, ROLES.COMPLIANCE],
+  "audit:view":           [ROLES.ADMIN, ROLES.AUDITOR, ROLES.COMPLIANCE, ROLES.SUPERVISOR],
   // Compliance / Regulatory
-  "compliance:view":          [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.AUDITOR],
+  "compliance:view":      [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.AUDITOR, ROLES.SUPERVISOR],
   "regulatory:view":          [ROLES.ADMIN, ROLES.COMPLIANCE],
   "regulatory:submit":        [ROLES.ADMIN, ROLES.COMPLIANCE],
   // Technical accounts
@@ -111,5 +117,9 @@ export const ROLE_LABELS: Record<string, { label: string; color: string; bg: str
   ROLE_PAYMENTS:   { label: "Payments",   color: "#059669", bg: "#f0fdf4" },
   ROLE_AUDITOR:    { label: "Auditor",    color: "#d97706", bg: "#fffbeb" },
   ROLE_API:        { label: "API",        color: "#0891b2", bg: "#ecfeff" },
+  ROLE_SUPERVISOR: { label: "Supervisor", color: "#be185d", bg: "#fdf2f8" },
+  ROLE_KYC:        { label: "KYC",        color: "#0d9488", bg: "#f0fdfa" },
+  ROLE_KYC_OPENER: { label: "KYC Opener", color: "#0d9488", bg: "#f0fdfa" },
+  ROLE_KYC_REVIEWER: { label: "KYC Reviewer", color: "#115e59", bg: "#ccfbf1" },
   ROLE_DEMO:       { label: "Demo",       color: "#64748b", bg: "#f8fafc" },
 }
