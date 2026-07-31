@@ -76,6 +76,62 @@ class McpEndpointTest {
      */
     private val limiter = McpRateLimiter()
 
+    // ── ADR-0226: every MCP event is stamped with its channel and delegation chain ──────────
+
+    @Test
+    fun `a tool call carries the cross-channel audit dimensions from the token`() {
+        endpoint(allowAll(), jwt = oboJwt()).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        val event = audit.events.single()
+        assertThat(event.channel).isEqualTo("mcp")
+        assertThat(event.actChain).containsExactly("agent-session:7f3a", "mcp-cli")
+        assertThat(event.sessionId).isEqualTo("sess-123")
+    }
+
+    @Test
+    fun `a tool call without delegation claims audits as a direct caller on the mcp channel`() {
+        endpoint(allowAll()).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        val event = audit.events.single()
+        assertThat(event.channel).isEqualTo("mcp")
+        assertThat(event.actChain).isEmpty()
+        assertThat(event.sessionId).isNull()
+    }
+
+    @Test
+    fun `tools list audit carries the channel and delegation chain too`() {
+        endpoint(allowAll(), jwt = oboJwt()).handle(rpc("tools/list"))
+        val event = audit.events.single()
+        assertThat(event.channel).isEqualTo("mcp")
+        assertThat(event.actChain).containsExactly("agent-session:7f3a", "mcp-cli")
+        assertThat(event.sessionId).isEqualTo("sess-123")
+    }
+
+    @Test
+    fun `an unparseable act claim degrades to a direct caller, never a denied call`() {
+        val weirdJwt = TestJsonWebToken(
+            mapOf("sub" to "agent:test-agent", "consent_id" to TEST_CONSENT_ID, "act" to "not-a-map"),
+        )
+        val resp = body(
+            endpoint(allowAll(), jwt = weirdJwt).handle(
+                rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+            ).entity,
+        )
+        assertThat(resp.path("result").path("isError").asBoolean(false)).isFalse()
+        assertThat(audit.events.single().actChain).isEmpty()
+    }
+
+    private fun oboJwt() = TestJsonWebToken(
+        mapOf(
+            "sub" to "agent:test-agent",
+            "consent_id" to TEST_CONSENT_ID,
+            "act" to mapOf("sub" to "agent-session:7f3a", "act" to mapOf("sub" to "mcp-cli")),
+            "sid" to "sess-123",
+        ),
+    )
+
     @Test
     fun `tools call is throttled once the acting agent exhausts its per-minute window`() {
         val ep = endpoint(allowAll())
