@@ -15,6 +15,13 @@ quarkus:
     password: ${DB_PASSWORD:campaign}
   flyway:
     migrate-at-start: true
+  hibernate-orm:
+    # Flyway schema is snake_case (segment_name, created_by, approved_by, …) but the JPA
+    # entities use camelCase fields with no @Column(name). Without this strategy
+    # Hibernate's default physical naming lowercases the field as-is → `approvedby`, so
+    # every read threw "column ce1_0.approvedby does not exist (42703)" and
+    # GET /api/v1/campaigns was 500. Same fix, same reason, as fx-service.
+    physical-naming-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
   # Backs the four-eyes approval store (libs' RedisApprovalStore, produced by
   # ApprovalConfig). Without it the ReactiveRedisDataSource bean is inactive and the
   # app cannot start — the deployed pod died with InactiveBeanException. Overridden
