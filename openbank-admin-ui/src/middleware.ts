@@ -79,6 +79,8 @@ export default auth((req) => {
     { pattern: /^\/audit/,              required: ["ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_COMPLIANCE"] },
     { pattern: /^\/kyc/,               required: ["ROLE_ADMIN", "ROLE_OPERATOR", "ROLE_COMPLIANCE", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER"] },
     { pattern: /^\/regulatory/,        required: ["ROLE_ADMIN", "ROLE_COMPLIANCE"] },
+    // Screen feedback carries free-text comments and screenshot keys — personal data (ADR-0192).
+    { pattern: /^\/feedback/,          required: ["ROLE_ADMIN", "ROLE_OPERATOR", "ROLE_COMPLIANCE"] },
     { pattern: /^\/system\/config/,    required: ["ROLE_ADMIN"] },
     { pattern: /^\/payments/,          required: ["ROLE_ADMIN", "ROLE_OPERATOR", "ROLE_PAYMENTS", "ROLE_SUPERVISOR"] },
     { pattern: /^\/parties/,           required: ["ROLE_ADMIN", "ROLE_OPERATOR", "ROLE_COMPLIANCE", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER"] },
