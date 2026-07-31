@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.72.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.71.0...admin-ui-v0.72.0) (2026-07-31)
+
+
+### Features
+
+* **admin-ui:** read-only campaign console — what ran, who was enrolled, what was suppressed ([#2974](https://github.com/JiRaska/open-bank-oss/issues/2974)) ([02636cc](https://github.com/JiRaska/open-bank-oss/commit/02636cc547a87dc0c192cf4b43817b94e52243d4))
+
 ## [0.71.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.70.0...admin-ui-v0.71.0) (2026-07-31)
 
 
