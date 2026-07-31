@@ -49,10 +49,11 @@ class McpEndpointTest {
         pdp: PolicyDecisionPoint,
         jwt: TestJsonWebToken = testAgentJwt(),
         toolsListCacheTtlMs: Long = 0,
+        oboEnabled: Boolean = false,
     ): McpEndpoint {
         val stub = StubReads(mapper)
         val toolRegistry = McpToolRegistry(stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper)
-        val caller = CallerContextResolver(jwt)
+        val caller = CallerContextResolver(jwt, oboEnabled)
         return McpEndpoint(
             registry = toolRegistry,
             pdp = pdp,
@@ -131,6 +132,80 @@ class McpEndpointTest {
             "sid" to "sess-123",
         ),
     )
+
+    // ── ADR-0224 phase 1b: staff OBO tokens (flag-gated) ─────────────────────────────────────
+
+    @Test
+    fun `with the obo flag off a staff token is anonymous, fail-closed`() {
+        val resp = body(
+            endpoint(allowAll(), jwt = staffOboJwt(), oboEnabled = false).handle(
+                rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+            ).entity,
+        )
+        assertThat(resp.path("result").path("content").first().path("text").asText())
+            .isEqualTo("Authorization unavailable")
+    }
+
+    @Test
+    fun `with the obo flag on a staff token reaches the PDP as HUMAN with its bounded roles`() {
+        val pdp = RecordingPdp()
+        endpoint(pdp, jwt = staffOboJwt(), oboEnabled = true).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        val principal = pdp.queries.single().principal
+        assertThat(principal.type).isEqualTo("HUMAN")
+        assertThat(principal.id).isEqualTo("jane.operator")
+        assertThat(principal.roles).containsExactly("ROLE_OPERATOR")
+    }
+
+    @Test
+    fun `a staff token call audits the azp as the first act-chain link and the sid as session`() {
+        endpoint(allowAll(), jwt = staffOboJwt(), oboEnabled = true).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        val event = audit.events.single()
+        assertThat(event.channel).isEqualTo("mcp")
+        assertThat(event.actChain).startsWith("openbank-admin-ui")
+        assertThat(event.sessionId).isEqualTo("staff-sess-1")
+    }
+
+    @Test
+    fun `a staff token missing any of the four marks is anonymous even with the flag on`() {
+        val variants = listOf(
+            staffClaims - "azp",
+            staffClaims - "sid",
+            staffClaims - "aud",
+            staffClaims - "realm_access",
+            staffClaims + ("aud" to "some-other-service"),
+        )
+        variants.forEach { claims ->
+            val resp = body(
+                endpoint(allowAll(), jwt = TestJsonWebToken(claims), oboEnabled = true).handle(
+                    rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+                ).entity,
+            )
+            assertThat(resp.path("result").path("content").first().path("text").asText())
+                .isEqualTo("Authorization unavailable")
+        }
+    }
+
+    private val staffClaims = mapOf(
+        "sub" to "jane.operator",
+        "azp" to "openbank-admin-ui",
+        "sid" to "staff-sess-1",
+        "aud" to "openbank-mcp-service",
+        "realm_access" to mapOf("roles" to listOf("ROLE_OPERATOR", "default-roles-openbank")),
+    )
+
+    private fun staffOboJwt() = TestJsonWebToken(staffClaims)
+
+    private class RecordingPdp : PolicyDecisionPoint {
+        val queries = mutableListOf<AuthzQuery>()
+        override suspend fun allow(query: AuthzQuery): AuthzDecision {
+            queries += query
+            return AuthzDecision(allow = true)
+        }
+    }
 
     @Test
     fun `tools call is throttled once the acting agent exhausts its per-minute window`() {

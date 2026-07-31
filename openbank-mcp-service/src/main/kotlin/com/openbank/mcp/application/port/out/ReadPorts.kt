@@ -83,4 +83,13 @@ data class ConsentContext(
     val grantedAccounts: List<String>,
     val actChain: List<String> = emptyList(),
     val sessionId: String? = null,
+    /**
+     * OPA principal classification — `AI_AGENT` for `agent:` tokens (consent-bound, ADR-0195),
+     * `HUMAN` for OBO-exchanged staff tokens (ADR-0224). Drives which identity shape the PDP and
+     * the audit trail see; a HUMAN context carries no consent and its [roles] come from the
+     * exchanged token's realm_access, already bounded at issuance.
+     */
+    val principalType: String = "AI_AGENT",
+    /** Realm roles of the caller (empty for agent tokens — agents are charter-gated, not role-gated). */
+    val roles: List<String> = emptyList(),
 )
