@@ -56,4 +56,17 @@ class SddMandateRepositoryImpl @Inject constructor(
             SddMandateEntity::class.java,
         ).setParameter("statuses", listOf(MandateStatus.ACTIVE, MandateStatus.SUSPENDED)).resultList
     }.map { list -> list.map(mapper::toDomain) }
+
+    @WithSession
+    override fun findRecent(status: String?, limit: Int): Uni<List<SddMandate>> = sf.withSession { s ->
+        val query = if (status != null) {
+            s.createQuery(
+                "FROM SddMandateEntity WHERE status = :st ORDER BY createdAt DESC",
+                SddMandateEntity::class.java,
+            ).setParameter("st", MandateStatus.valueOf(status))
+        } else {
+            s.createQuery("FROM SddMandateEntity ORDER BY createdAt DESC", SddMandateEntity::class.java)
+        }
+        query.setMaxResults(limit).resultList
+    }.map { list -> list.map(mapper::toDomain) }
 }

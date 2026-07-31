@@ -18,6 +18,9 @@ interface SddMandateRepository {
 
     /** Live mandates (ACTIVE/SUSPENDED) — the candidates the idle-expiry sweep inspects. */
     fun listLive(): Uni<List<SddMandate>>
+
+    /** Backoffice queue (ADR-0230 D1): newest mandates fleet-wide, optionally one status. */
+    fun findRecent(status: String?, limit: Int): Uni<List<SddMandate>>
 }
 
 /** Transactional-outbox port (ADR-0045 plumbing): libs [OutboxRepository] + a reactive in-transaction write. */
