@@ -112,13 +112,11 @@ class AccountingDayResource(private val accountingDayUseCase: AccountingDayUseCa
         summary = "Advance an accounting day one step (OPEN → CUTOFF → TIED_OUT → LOCKED); " +
             "monotonic, never backwards",
     )
-    suspend fun transition(
-        @PathParam("businessDate") businessDate: String,
-        @PathParam("to") to: String,
-    ): Response {
+    suspend fun transition(@PathParam("businessDate") businessDate: String, @PathParam("to") to: String): Response {
+        val known = AccountingDayStatus.entries.joinToString(", ") { it.name }
         val target = runCatching { AccountingDayStatus.valueOf(to.uppercase()) }.getOrElse {
             throw WebApplicationException(
-                "Unknown accounting-day status '$to'; expected one of ${AccountingDayStatus.entries.map { s -> s.name }}",
+                "Unknown accounting-day status '$to'; expected one of $known",
                 Response.Status.BAD_REQUEST,
             )
         }

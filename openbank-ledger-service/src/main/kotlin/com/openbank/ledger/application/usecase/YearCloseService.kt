@@ -24,7 +24,6 @@ import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
 import java.time.Instant
-import java.time.LocalDate
 import java.time.Year
 
 /**

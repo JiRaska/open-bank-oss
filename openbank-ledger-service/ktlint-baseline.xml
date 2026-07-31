@@ -26,6 +26,9 @@
     <file name="src/main/kotlin/com/openbank/ledger/application/port/in/ReplayBookedChangesPorts.kt">
         <error line="5" column="9" source="standard:package-name" />
     </file>
+    <file name="src/main/kotlin/com/openbank/ledger/application/port/in/AccountingDayPorts.kt">
+        <error line="5" column="9" source="standard:package-name" />
+    </file>
     <file name="src/main/kotlin/com/openbank/ledger/application/port/in/YearClosePorts.kt">
         <error line="5" column="9" source="standard:package-name" />
     </file>
