@@ -4,6 +4,7 @@
 
 package com.openbank.ledger.domain.model
 
+import com.openbank.libs.domain.identifiers.Ids
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -94,7 +95,7 @@ data class AccountingDayRecord(
             businessDate: LocalDate,
             openedAt: Instant,
             openedBy: String,
-            id: UUID = UUID.randomUUID(),
+            id: UUID = Ids.newId(),
         ): AccountingDayRecord {
             requireValid(openedBy.isNotBlank()) { "Accounting day requires an opening actor" }
             return AccountingDayRecord(
