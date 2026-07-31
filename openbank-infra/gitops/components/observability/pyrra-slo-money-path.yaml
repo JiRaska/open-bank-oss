@@ -901,6 +901,7 @@ spec:
         metric: traces_spanmetrics_latency_bucket{service="openbank-interest-service",le="1"}
       total:
         metric: traces_spanmetrics_calls_total{service="openbank-interest-service"}
+---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
 metadata:
