@@ -35,12 +35,18 @@ class AuditResource {
 
     @GET
     @Path("/customer/{partyId}")
-    // Customer-facing privacy view (P2-27): the customer edge proxies a caller's OWN
-    // access trail here. ROLE_API is an authenticated M2M service account — never
-    // anonymous (K7) — and OPA scopes the resource to the requested party. The payload
-    // is deliberately NOT projected: the app gets event metadata, not event internals.
-    @RolesAllowed(Roles.API)
-    @Authorize(action = "audit.read", resource = "#partyId")
+    // Customer-facing privacy view (P2-27): the customer edge proxies a caller's OWN access
+    // trail here, injecting partyId from the JWT so a client-supplied id never reaches this
+    // path. Roles mirror the edge-proxied precedent (document-service SignatureCeremonyResource)
+    // because they have to: UpstreamClient authenticates as the `openbank-edge` client, whose
+    // service account carries ROLE_OPERATOR — @RolesAllowed(ROLE_API) alone 403'd every call
+    // before OPA was ever consulted. ROLE_OPERATOR is also held by real staff, so the narrowing
+    // is OPA's job: `audit.customerRead` is a DISTINCT action from the auditor-facing
+    // `audit.read`, granted by rest.rego's `edge-service-audit-customer` rule to exactly the
+    // `service-account-openbank-edge` principal id and nothing else. The payload is deliberately
+    // not projected: the app gets event metadata, not event internals.
+    @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "audit.customerRead", resource = "#partyId")
     @Operation(summary = "Get a party's own access log (customer privacy view)")
     suspend fun getCustomerAccessLog(
         @PathParam("partyId") partyId: String,
