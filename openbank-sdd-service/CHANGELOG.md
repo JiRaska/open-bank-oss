@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.8.3...sdd-service-v0.9.0) (2026-07-31)
+
+
+### Features
+
+* **sdd:** backoffice mandate queue — GET /api/v1/sdd/mandates/recent (ADR-0230 D3) ([#2803](https://github.com/JiRaska/open-bank-oss/issues/2803)) ([55dfdb9](https://github.com/JiRaska/open-bank-oss/commit/55dfdb9ea392d6e7c12c9cf7274d1ea7a1108cfc))
+
 ## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.8.2...sdd-service-v0.8.3) (2026-07-26)
 
 
