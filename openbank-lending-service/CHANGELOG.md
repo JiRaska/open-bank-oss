@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.12.0...lending-service-v0.13.0) (2026-07-31)
+
+
+### Features
+
+* **lending:** backoffice read queues — recent applications + active loans (ADR-0230 D1) ([#2793](https://github.com/JiRaska/open-bank-oss/issues/2793)) ([0544f37](https://github.com/JiRaska/open-bank-oss/commit/0544f3770312d222fee32594a61dc7e0661db9b1))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.11.5...lending-service-v0.12.0) (2026-07-31)
 
 
