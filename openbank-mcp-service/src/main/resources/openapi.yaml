@@ -32,6 +32,32 @@ paths:
           description: Session created
         "403":
           description: Role ceiling is not a non-empty subset of the caller's roles
+  /api/v1/mcp/sessions/{id}/bind:
+    patch:
+      summary: Bind a session to the jti of its exchanged token (ADR-0224 D2)
+      description: >-
+        One-time binding performed by the BFF after a successful Keycloak token exchange
+        (OPA action mcp.session.bind; owner or ROLE_ADMIN). 409 if the session is already
+        bound or the jti is taken.
+      operationId: bindSession
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jti]
+              properties:
+                jti: { type: string }
+      responses:
+        "200": { description: Session bound }
+        "404": { description: Not found }
+        "409": { description: Already bound or jti taken }
   /api/v1/mcp/sessions/{id}:
     get:
       summary: Session status

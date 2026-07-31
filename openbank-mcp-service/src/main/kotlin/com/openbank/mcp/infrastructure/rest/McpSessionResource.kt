@@ -91,7 +91,7 @@ class McpSessionResource(
     @PATCH
     @Path("/{id}/bind")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
-    @Authorize(action = "mcp.session.create", resource = "#id")
+    @Authorize(action = "mcp.session.bind", resource = "#id")
     @Operation(
         summary = "Bind a session to the jti of the token minted for it (ADR-0224 D2) — " +
             "called by the BFF right after a successful Keycloak token exchange",
