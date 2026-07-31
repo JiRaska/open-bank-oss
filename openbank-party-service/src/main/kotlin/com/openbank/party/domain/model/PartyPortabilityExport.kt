@@ -71,10 +71,13 @@ data class PortabilityTransaction(
     val currency: String?,
     val type: String?,
     val status: String?,
+    /** Null in v1 — transaction-service exposes account UUIDs, not counterparty identity. */
     val counterpartyName: String?,
+    /** Null in v1 for the same reason; Art. 20(4) redaction applies once an IBAN is available. */
     val counterpartyIbanRedacted: String?,
     val remittanceInfo: String?,
-    val endToEndId: String?,
+    /** The booking reference transaction-service assigns (its `referenceNumber`). */
+    val reference: String?,
 ) {
     fun toResponse(): Map<String, Any?> = mapOf(
         "transactionId" to transactionId,
@@ -86,7 +89,7 @@ data class PortabilityTransaction(
         "counterpartyName" to counterpartyName,
         "counterpartyIban" to counterpartyIbanRedacted,
         "remittanceInfo" to remittanceInfo,
-        "endToEndId" to endToEndId,
+        "reference" to reference,
     )
 }
 

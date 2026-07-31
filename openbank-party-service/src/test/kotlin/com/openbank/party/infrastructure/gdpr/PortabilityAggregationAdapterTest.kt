@@ -13,6 +13,7 @@ import com.openbank.party.infrastructure.client.CardServiceRestClient
 import com.openbank.party.infrastructure.client.TransactionItemResponse
 import com.openbank.party.infrastructure.client.TransactionPageResponse
 import com.openbank.party.infrastructure.client.TransactionServiceRestClient
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.mockk.every
 import io.mockk.mockk
 import io.smallrye.mutiny.Uni
@@ -42,7 +43,7 @@ class PortabilityAggregationAdapterTest {
     private fun <T> failing(status: Int): Uni<T> = Uni.createFrom().failure(WebApplicationException(status))
 
     @Test
-    fun `accounts are assembled with their transactions, counterparty IBAN redacted to the bank prefix`(): Unit =
+    fun `accounts are assembled with their transactions, counterparty identity absent in v1`(): Unit =
         runBlocking {
             every { accountClient.listByParty(partyId, any(), null) } returns Uni.createFrom().item(
                 AccountPageBody(
@@ -59,19 +60,16 @@ class PortabilityAggregationAdapterTest {
             )
             every { transactionClient.listByAccount(accountId, any()) } returns Uni.createFrom().item(
                 TransactionPageResponse(
-                    items = listOf(
+                    data = listOf(
                         TransactionItemResponse(
-                            id = accountId.toString(),
-                            transactionId = "tx-1",
+                            id = "tx-1",
+                            referenceNumber = "TRX-000001",
                             bookingDate = "2026-07-01",
                             amount = "1200.00",
-                            currency = "CZK",
-                            type = "SEPA_CREDIT",
-                            status = "BOOKED",
-                            counterpartyName = "Jan Novák",
-                            targetIban = "CZ0308000000000123456789",
-                            remittanceInfo = "Nájem",
-                            endToEndId = "e2e-1",
+                            currencyCode = "CZK",
+                            type = "DEBIT",
+                            status = "COMPLETED",
+                            description = "Nájem",
                         ),
                     ),
                 ),
@@ -85,10 +83,14 @@ class PortabilityAggregationAdapterTest {
             assertThat(account.currency).isEqualTo("CZK")
             assertThat(account.transactions).hasSize(1)
             val tx = account.transactions[0]
-            // Art. 20(4): the NAME is retained, the IBAN keeps only country+check+bank code.
-            assertThat(tx.counterpartyName).isEqualTo("Jan Novák")
-            assertThat(tx.counterpartyIbanRedacted).isEqualTo("CZ030800****************")
-            assertThat(tx.counterpartyIbanRedacted).doesNotContain("123456789")
+            assertThat(tx.transactionId).isEqualTo("tx-1")
+            assertThat(tx.currency).isEqualTo("CZK")
+            assertThat(tx.remittanceInfo).isEqualTo("Nájem")
+            assertThat(tx.reference).isEqualTo("TRX-000001")
+            // v1 gap: transaction-service carries no counterparty identity, so Art. 20(4) has
+            // no input. Asserted so the day it does, this test is the thing that goes red.
+            assertThat(tx.counterpartyName).isNull()
+            assertThat(tx.counterpartyIbanRedacted).isNull()
         }
 
     @Test
@@ -142,6 +144,52 @@ class PortabilityAggregationAdapterTest {
         assertThat(cards[0].expiryMonth).isEqualTo(3)
         assertThat(cards[0].expiryYear).isEqualTo(2028)
         assertThat(cards[0].toResponse().keys).doesNotContain("maskedPan", "dailyLimitMinorUnits")
+    }
+
+    /**
+     * The provider contract, not our own DTO: this payload is the literal shape
+     * transaction-service's `GET /api/v1/transactions` returns (CursorPage of
+     * TransactionResponse). Building [TransactionItemResponse] by hand elsewhere in this
+     * suite cannot catch a field-name mismatch — both sides move together. Written as a
+     * literal on purpose.
+     */
+    @Test
+    fun `the transaction client deserializes the shape transaction-service actually returns`() {
+        val providerJson = """
+            {
+              "data": [
+                {
+                  "id": "4f1d2a5e-0f7f-4c37-9a3c-1c7b1a2f9f01",
+                  "referenceNumber": "TRX-000123",
+                  "type": "DEBIT",
+                  "sourceAccountId": "0a3a1a2b-1111-2222-3333-444455556666",
+                  "targetAccountId": "0a3a1a2b-9999-8888-7777-666655554444",
+                  "amount": 149.50,
+                  "currencyCode": "CZK",
+                  "status": "COMPLETED",
+                  "description": "Invoice 2026/114",
+                  "valueDate": "2026-07-02",
+                  "bookingDate": "2026-07-02",
+                  "initiatedAt": "2026-07-02T10:15:30Z",
+                  "completedAt": "2026-07-02T10:15:31Z",
+                  "rail": "SEPA",
+                  "instructionType": "SCT",
+                  "merchantCategory": null
+                }
+              ],
+              "pagination": { "nextCursor": null, "limit": 200 }
+            }
+        """.trimIndent()
+
+        val page = jacksonObjectMapper().readValue(providerJson, TransactionPageResponse::class.java)
+        val item = page.data.single()
+
+        assertThat(item.id).isEqualTo("4f1d2a5e-0f7f-4c37-9a3c-1c7b1a2f9f01")
+        assertThat(item.referenceNumber).isEqualTo("TRX-000123")
+        assertThat(item.bookingDate).isEqualTo("2026-07-02")
+        assertThat(item.amount).isEqualTo("149.50")
+        assertThat(item.currencyCode).isEqualTo("CZK")
+        assertThat(item.description).isEqualTo("Invoice 2026/114")
     }
 }
 

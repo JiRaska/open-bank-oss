@@ -9,7 +9,6 @@ import com.openbank.party.application.port.out.PortabilityAggregationPort
 import com.openbank.party.domain.model.PortabilityAccount
 import com.openbank.party.domain.model.PortabilityCard
 import com.openbank.party.domain.model.PortabilityTransaction
-import com.openbank.party.domain.model.redactIban
 import com.openbank.party.infrastructure.client.AccountServiceRestClient
 import com.openbank.party.infrastructure.client.CardServiceRestClient
 import com.openbank.party.infrastructure.client.TransactionServiceRestClient
@@ -27,9 +26,9 @@ import java.util.UUID
  *
  * Failure handling mirrors [GdprAggregationAdapter] deliberately: 401/403 fails hard (a refused
  * read must never read as "no data"), everything else degrades to an empty slice with a log —
- * a downstream outage must not block the subject's request. The counterparty IBAN is redacted
- * HERE, at the boundary, so no un-redacted counterparty identifier ever reaches the export
- * model (Art. 20(4) — the retained identifier is the bank-code prefix, per ADR-0204 D2).
+ * a downstream outage must not block the subject's request. Counterparty identity is not part
+ * of the v1 payload: transaction-service exposes account UUIDs only, so the Art. 20(4)
+ * redaction (ADR-0204 D2) has no input yet and the two counterparty fields stay null.
  */
 @ApplicationScoped
 class PortabilityAggregationAdapter(
@@ -62,19 +61,23 @@ class PortabilityAggregationAdapter(
         transactionClient.listByAccount(accountId, TRANSACTION_PAGE_SIZE)
             .onFailure().recoverWithUni(recover(TRANSACTIONS, accountId, null))
             .awaitSuspending()
-            ?.let { page -> page.items.ifEmpty { page.data } }
+            ?.data
             ?.map { tx ->
                 PortabilityTransaction(
-                    transactionId = tx.transactionId ?: tx.id ?: "",
+                    transactionId = tx.id ?: "",
                     bookingDate = tx.bookingDate,
                     amount = tx.amount,
-                    currency = tx.currency,
+                    currency = tx.currencyCode,
                     type = tx.type,
                     status = tx.status,
-                    counterpartyName = tx.counterpartyName,
-                    counterpartyIbanRedacted = redactIban(tx.targetIban ?: tx.sourceIban),
-                    remittanceInfo = tx.remittanceInfo,
-                    endToEndId = tx.endToEndId,
+                    // v1 gap (ADR-0204 follow-up): transaction-service's list response carries
+                    // sourceAccountId/targetAccountId UUIDs and no counterparty identity at all,
+                    // so there is nothing to name and nothing for redactIban to redact yet. Left
+                    // explicitly null rather than mapped off a field that does not exist.
+                    counterpartyName = null,
+                    counterpartyIbanRedacted = null,
+                    remittanceInfo = tx.description,
+                    reference = tx.referenceNumber,
                 )
             }
             ?: emptyList()

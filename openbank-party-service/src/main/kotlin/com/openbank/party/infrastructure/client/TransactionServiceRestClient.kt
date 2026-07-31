@@ -38,24 +38,25 @@ interface TransactionServiceRestClient {
     ): Uni<TransactionPageResponse>
 }
 
+/**
+ * The page wrapper transaction-service returns is a `CursorPage`, i.e. the rows arrive under
+ * `data` — there is no `items` key. Field names below mirror its `TransactionResponse`
+ * one-for-one; do not rename them to match the export model, or every renamed field silently
+ * deserializes to null (`@JsonIgnoreProperties(ignoreUnknown = true)` makes that soundless).
+ */
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class TransactionPageResponse(
-    val items: List<TransactionItemResponse> = emptyList(),
     val data: List<TransactionItemResponse> = emptyList(),
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class TransactionItemResponse(
     val id: String? = null,
-    val transactionId: String? = null,
+    val referenceNumber: String? = null,
     val bookingDate: String? = null,
     val amount: String? = null,
-    val currency: String? = null,
+    val currencyCode: String? = null,
     val type: String? = null,
     val status: String? = null,
-    val counterpartyName: String? = null,
-    val targetIban: String? = null,
-    val sourceIban: String? = null,
-    val remittanceInfo: String? = null,
-    val endToEndId: String? = null,
+    val description: String? = null,
 )
