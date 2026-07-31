@@ -53,8 +53,19 @@ class SilverSegmentEvaluator(
 
         val response = http.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString())
         if (response.statusCode() != HTTP_OK) {
-            // Fail closed: an unreachable analytics layer means an empty cohort, never a guessed one.
             log.errorf("ClickHouse segment evaluation failed (%d): %s", response.statusCode(), response.body())
+            // A REJECTED QUERY IS A BUG, NOT AN EMPTY COHORT. ClickHouse answers 4xx for SQL it
+            // cannot execute; returning emptyList() there reports "nobody matched" for a query that
+            // never ran, which is exactly how a DSL naming non-existent columns survived to
+            // production (#2891). Surface it so enrol() fails loudly instead.
+            if (response.statusCode() in HTTP_CLIENT_ERROR_RANGE) {
+                throw IllegalStateException(
+                    "segment ${segment.name}@${segment.version} could not be evaluated: " +
+                        "ClickHouse rejected the query (${response.statusCode()}) — ${response.body().trim()}",
+                )
+            }
+            // Fail closed only for an unavailable analytics layer (5xx): an outage means an empty
+            // cohort, never a guessed one.
             return emptyList()
         }
         return response.body().lineSequence()
@@ -69,6 +80,7 @@ class SilverSegmentEvaluator(
 
     companion object {
         private const val HTTP_OK = 200
+        private val HTTP_CLIENT_ERROR_RANGE = 400..499
         private val AGGREGATE_ID = Regex("\"aggregate_id\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"")
     }
 }
