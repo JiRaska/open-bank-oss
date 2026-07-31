@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.4.0
+  version: 1.5.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -64,6 +64,25 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: Not found }
+  /api/v1/lending/applications/recent:
+    get:
+      tags: [Lending]
+      operationId: listRecentApplications
+      summary: Backoffice queue — newest applications fleet-wide (ADR-0230)
+      description: >-
+        Fleet-wide application list for the lending console (newest first, optional status
+        filter). Requires ROLE_OPERATOR, ROLE_ADMIN, ROLE_LENDING_OFFICER or ROLE_CREDIT_RISK.
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        '200': { description: Recent applications }
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/lending/applications/{id}/decision:
     post:
       tags: [Lending]
@@ -98,6 +117,22 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+  /api/v1/lending/loans/active:
+    get:
+      tags: [Lending]
+      operationId: listActiveLoans
+      summary: Backoffice portfolio — active loans fleet-wide (ADR-0230)
+      description: >-
+        Fleet-wide active-loan list for the lending console. Requires a lending desk role,
+        ROLE_OPERATOR or ROLE_ADMIN (viewer and compliance read-only).
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        '200': { description: Active loans }
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/lending/loans:
     get:
       tags: [Lending]

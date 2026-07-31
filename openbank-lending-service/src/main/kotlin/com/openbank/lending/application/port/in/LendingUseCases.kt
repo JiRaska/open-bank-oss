@@ -33,6 +33,9 @@ interface ApplyForLoanUseCase {
     fun decide(id: LoanApplicationId, decision: DecisionRequest, decidedBy: String): Uni<LoanApplication>
     fun getApplication(id: LoanApplicationId): Uni<LoanApplication?>
     fun listApplications(partyId: UUID): Uni<List<LoanApplication>>
+
+    /** Backoffice queue (ADR-0230 D1): newest applications fleet-wide, optionally one status. */
+    fun listRecentApplications(status: String?, limit: Int): Uni<List<LoanApplication>>
 }
 
 /**
@@ -49,6 +52,9 @@ interface ServicingUseCase {
     fun getLoan(id: LoanId): Uni<Loan?>
     fun getSchedule(id: LoanId): Uni<List<LoanInstallment>>
     fun listLoans(partyId: UUID): Uni<List<Loan>>
+
+    /** Backoffice portfolio view (ADR-0230 D1): active loans fleet-wide. */
+    fun listActiveLoans(limit: Int): Uni<List<Loan>>
     fun recordRepayment(loanId: LoanId, installmentId: UUID): Uni<LoanInstallment>
 }
 

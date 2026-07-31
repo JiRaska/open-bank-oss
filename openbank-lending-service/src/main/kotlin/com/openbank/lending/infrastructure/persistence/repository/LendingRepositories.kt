@@ -53,6 +53,22 @@ class LoanApplicationRepositoryImpl @Inject constructor(
             .setParameter("p", partyId).resultList
     }.map { it.map(mapper::toDomain) }
 
+    @WithSession
+    override fun findRecent(status: String?, limit: Int): Uni<List<LoanApplication>> = sf.withSession { s ->
+        val query = if (status != null) {
+            s.createQuery(
+                "FROM LoanApplicationEntity WHERE status = :st ORDER BY createdAt DESC",
+                LoanApplicationEntity::class.java,
+            ).setParameter("st", status)
+        } else {
+            s.createQuery(
+                "FROM LoanApplicationEntity ORDER BY createdAt DESC",
+                LoanApplicationEntity::class.java,
+            )
+        }
+        query.setMaxResults(limit).resultList
+    }.map { it.map(mapper::toDomain) }
+
     @WithTransaction override fun update(application: LoanApplication): Uni<LoanApplication> = sf.withTransaction { s ->
         s.find(LoanApplicationEntity::class.java, application.id.value).flatMap { e ->
             e!!.status = application.status
