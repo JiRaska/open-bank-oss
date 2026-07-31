@@ -83,6 +83,13 @@ spec:
             # at the in-cluster Service (agent-service lives in the platform ns).
             - name: AGENT_SERVICE_URL
               value: http://agent-service.platform.svc:8109/mcp
+            # ADR-0224 D4/D2: the staff OBO MCP channel (/api/agent/obo-mcp). The route
+            # 404s unless enabled; enabling requires the whole chain in place —
+            # realm permission (#2762), session store (#2843) and this flow (#2850).
+            - name: OBO_MCP_ENABLED
+              value: "true"
+            - name: MCP_SERVICE_URL
+              value: http://mcp-service.platform.svc:8150/mcp
             # Fees vertical (ADR-0051): the BFF /api/product-catalog/fees route
             # proxies the bank-wide fee schedule from product-catalog's in-cluster
             # Service rather than a hardcoded web-tier list. product-catalog is
