@@ -24,8 +24,25 @@ quarkus:
   oidc:
     auth-server-url: ${KEYCLOAK_URL:http://localhost:8080}/realms/openbank
     client-id: openbank-services
+  # Health probes and the Prometheus scrape live on the management interface, not the
+  # application port — the Deployment probes /q/health/{live,ready} on 8085 and the
+  # PodMonitor scrapes the same port. Without this block nothing listens there, so the
+  # pod never goes ready and the liveness probe restarts it forever.
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
   log:
     level: INFO
+
+"%test":
+  quarkus:
+    # Tests bind a random application port (http.test-port: 0); the management
+    # interface has no such randomisation, so leaving it on makes two concurrent
+    # test JVMs fight over 8085.
+    management:
+      enabled: false
 
 openbank:
   temporal:
