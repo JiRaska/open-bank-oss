@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.14.0...party-service-v0.15.0) (2026-07-31)
+
+
+### Features
+
+* **directory:** pay-to-phone lookup, opt-in and honest about what hashing buys ([#2840](https://github.com/JiRaska/open-bank-oss/issues/2840)) ([73c4827](https://github.com/JiRaska/open-bank-oss/commit/73c48273d5956259d7356be9cb4fa39b4d70e311))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.13.0...party-service-v0.14.0) (2026-07-31)
 
 
