@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.8 -> 1.9): additive
   # only — a new PATCH /api/v1/parties/approvals/{id} endpoint and an additional 202 response
   # on POST /{id}/merge (ADR-0155 four-eyes). No existing response or schema changed.
-  version: 1.13.0
+  version: 1.14.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -249,6 +249,53 @@ paths:
       responses:
         '200':
           description: Updated
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/parties/directory/lookup:
+    post:
+      tags: [Parties]
+      summary: Match phone-number hashes against parties who opted into pay-to-phone discoverability
+      description: >
+        Answers only about parties whose `discoverable` flag is set, and only for hashes the
+        caller supplied — it cannot be walked to enumerate customers. Hashes that match nothing
+        are not recorded. The hashing keeps plaintext numbers out of bodies and logs; it is not a
+        privacy guarantee against this service, which holds the numbers as well.
+      operationId: lookupDirectory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DirectoryLookupRequest'
+      responses:
+        '200':
+          description: The hashes that matched a discoverable party
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DirectoryLookupResponse'
+
+  /api/v1/parties/{id}/discoverable:
+    put:
+      tags: [Parties]
+      summary: Opt a party in or out of pay-to-phone discoverability
+      operationId: setDiscoverable
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoverableRequest'
+      responses:
+        '200':
+          description: The stored setting
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoverableRequest'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -608,6 +655,39 @@ components:
             The ledger approval that authorised the balance sweep, linking the ADJUSTMENT journal
             entries to this identity retirement.
 
+    DirectoryLookupRequest:
+      type: object
+      properties:
+        phoneHashes:
+          type: array
+          description: Lowercase hex SHA-256 of each phone number in E.164 form.
+          items:
+            type: string
+    DirectoryLookupResponse:
+      type: object
+      properties:
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/PhoneDirectoryMatch'
+    PhoneDirectoryMatch:
+      type: object
+      description: >
+        A hash belonging to a discoverable party. Party id and legal name only — no account,
+        email or address; the payment rail resolves the account from the party id.
+      properties:
+        phoneHash:
+          type: string
+        partyId:
+          type: string
+          format: uuid
+        legalName:
+          type: string
+    DiscoverableRequest:
+      type: object
+      properties:
+        discoverable:
+          type: boolean
     UpdateConsentRequest:
       type: object
       required: [marketingConsent]
