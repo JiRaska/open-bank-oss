@@ -22,7 +22,9 @@ import jakarta.enterprise.inject.Alternative
 @Alternative
 @Priority(1)
 class TestPolicyDecisionPoint : PolicyDecisionPoint {
-    override suspend fun allow(query: AuthzQuery): AuthzDecision = if (query.attributes["tool"] == ALLOWED_TOOL) {
+    override suspend fun allow(query: AuthzQuery): AuthzDecision = if (query.attributes["tool"] == ALLOWED_TOOL ||
+        query.action.startsWith(SESSION_ACTION_PREFIX)
+    ) {
         AuthzDecision(allow = true)
     } else {
         AuthzDecision(allow = false, reason = "no matching allow rule")
@@ -31,5 +33,6 @@ class TestPolicyDecisionPoint : PolicyDecisionPoint {
     companion object {
         const val ALLOWED_TOOL = "list_accounts"
         const val DENIED_TOOL = "list_consents"
+        const val SESSION_ACTION_PREFIX = "mcp.session."
     }
 }

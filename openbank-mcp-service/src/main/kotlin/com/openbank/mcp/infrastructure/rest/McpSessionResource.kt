@@ -23,6 +23,7 @@ import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -45,6 +46,8 @@ class McpSessionResource(
 
     @Inject
     lateinit var identity: SecurityIdentity
+
+    private val log = Logger.getLogger(McpSessionResource::class.java)
 
     @POST
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
@@ -102,8 +105,15 @@ class McpSessionResource(
                 .build()
         }
         session.jti = request.jti
-        sessions.merge(session)
-        return Response.ok(session.toResponse()).build()
+        return try {
+            sessions.merge(session)
+            Response.ok(session.toResponse()).build()
+        } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {
+            // The unique jti index rejects two sessions racing for the same token — a clean 409,
+            // not an unhandled 500.
+            log.warnf("session bind rejected for %s: %s", id, ex.message)
+            Response.status(Response.Status.CONFLICT).entity(mapOf("error" to "jti already bound")).build()
+        }
     }
 
     @DELETE
