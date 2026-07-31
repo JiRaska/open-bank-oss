@@ -153,8 +153,7 @@ class McpSessionResource(
      * The `principal.name` fallback covers a non-JWT identity (`@TestSecurity`); production always
      * takes the `sub` branch. Both writers and [owns] read through here so the two can't diverge.
      */
-    private fun callerSubject(): String =
-        (identity.principal as? JsonWebToken)?.subject ?: identity.principal.name
+    private fun callerSubject(): String = (identity.principal as? JsonWebToken)?.subject ?: identity.principal.name
 
     private fun forbidden(): Response =
         Response.status(Response.Status.FORBIDDEN).entity(mapOf("error" to "not your session")).build()

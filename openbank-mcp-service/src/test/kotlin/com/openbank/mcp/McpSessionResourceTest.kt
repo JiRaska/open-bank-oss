@@ -94,7 +94,9 @@ class McpSessionResourceTest {
         }
         val caller = McpSessionResource(repoWithBoth, clock, 15).apply {
             identity = QuarkusSecurityIdentity.builder()
-                .setPrincipal(TestJsonWebToken(mapOf("sub" to OPERATOR_SUB, "preferred_username" to "admin@openbank.local")))
+                .setPrincipal(
+                    TestJsonWebToken(mapOf("sub" to OPERATOR_SUB, "preferred_username" to "admin@openbank.local")),
+                )
                 .addRole("ROLE_OPERATOR")
                 .build() as SecurityIdentity
         }
