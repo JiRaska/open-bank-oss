@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: mcp-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "18ccfc432d1a6a37"
+    openbank.tech/policy-checksum: "44ce78c4ebb1cafa"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -263,6 +263,28 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
     	input.action in {"consent.list", "consent.revoke"}
+    }
+
+    # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log
+    # (P2-27). Same edge principal and same guard as edge-service-consent — the edge injects the
+    # caller's authoritative partyId from the JWT, so a client-supplied id never reaches
+    # audit-service.
+    #
+    # Deliberately a DISTINCT action from `audit.read`, not the `audit.` family: `audit.read` is the
+    # auditor/compliance surface over the whole trail (GET /entries/{aggregateId},
+    # /entries/by-actor/{actorId}) and granting it to the edge principal would put regulated evidence
+    # behind a service account. `audit.customerRead` reaches only the metadata projection.
+    #
+    # This rule is what actually narrows the endpoint. Its @RolesAllowed had to widen to
+    # ROLE_API/ROLE_OPERATOR/ROLE_ADMIN — the edge's service account carries ROLE_OPERATOR, so
+    # @RolesAllowed(ROLE_API) alone 403'd every call before the PDP was consulted (same shape as
+    # document-service's SignatureCeremonyResource) — and ROLE_OPERATOR is held by real staff too.
+    # The identity match below is therefore the load-bearing half: staff sessions authenticate
+    # through a different client, so their preferred_username is never "service-account-*".
+    allowed_reasons contains "edge-service-audit-customer" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action == "audit.customerRead"
     }
 
     # Any M2M service-account caller (e.g. account-service) may trigger a sanctions screen
