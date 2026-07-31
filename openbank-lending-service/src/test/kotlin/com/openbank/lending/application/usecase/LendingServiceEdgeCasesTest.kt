@@ -468,4 +468,28 @@ class LendingServiceEdgeCasesTest {
         assertThat(snapshot.outstandingBalance).isEqualTo(Money.zero("EUR"))
         assertThat(snapshot.expectedCreditLoss.isZero()).isTrue()
     }
+
+    @Test
+    fun `the backoffice queues clamp limit into 1_100 and pass the status filter through`() {
+        val appLimits = mutableListOf<Int>()
+        val loanLimits = mutableListOf<Int>()
+        every { applications.findRecent(any(), any()) } answers {
+            appLimits += secondArg<Int>()
+            Uni.createFrom().item(emptyList<LoanApplication>())
+        }
+        every { loans.findActive(any()) } answers {
+            loanLimits += firstArg<Int>()
+            Uni.createFrom().item(emptyList<Loan>())
+        }
+
+        service.listRecentApplications(null, 0).await().indefinitely()
+        service.listRecentApplications("PROPOSED", 10_000).await().indefinitely()
+        service.listActiveLoans(0).await().indefinitely()
+        service.listActiveLoans(10_000).await().indefinitely()
+
+        assertThat(appLimits).containsExactly(1, 100)
+        assertThat(loanLimits).containsExactly(1, 100)
+        verify(exactly = 1) { applications.findRecent("PROPOSED", 100) }
+        verify(exactly = 1) { applications.findRecent(null, 1) }
+    }
 }

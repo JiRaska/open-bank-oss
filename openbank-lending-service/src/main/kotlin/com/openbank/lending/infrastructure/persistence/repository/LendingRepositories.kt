@@ -9,6 +9,7 @@ import com.openbank.lending.application.port.out.InstallmentRepository
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.ProvisioningRepository
+import com.openbank.lending.domain.model.ApplicationStatus
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
@@ -59,7 +60,7 @@ class LoanApplicationRepositoryImpl @Inject constructor(
             s.createQuery(
                 "FROM LoanApplicationEntity WHERE status = :st ORDER BY createdAt DESC",
                 LoanApplicationEntity::class.java,
-            ).setParameter("st", status)
+            ).setParameter("st", ApplicationStatus.valueOf(status))
         } else {
             s.createQuery(
                 "FROM LoanApplicationEntity ORDER BY createdAt DESC",

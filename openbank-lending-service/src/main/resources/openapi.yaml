@@ -75,12 +75,16 @@ paths:
       parameters:
         - name: status
           in: query
-          schema: { type: string }
+          schema:
+            type: string
+            enum: [PROPOSED, APPROVED, REJECTED, DISBURSED]
         - name: limit
           in: query
-          schema: { type: integer, default: 50 }
+          description: Clamped server-side into 1..100.
+          schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
       responses:
         '200': { description: Recent applications }
+        '400': { description: Unknown status value }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/applications/{id}/decision:
@@ -128,7 +132,8 @@ paths:
       parameters:
         - name: limit
           in: query
-          schema: { type: integer, default: 50 }
+          description: Clamped server-side into 1..100.
+          schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
       responses:
         '200': { description: Active loans }
         '403':
