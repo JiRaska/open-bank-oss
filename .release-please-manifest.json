@@ -43,7 +43,7 @@
   "openbank-sca-service": "0.12.3",
   "openbank-sdd-service": "0.8.3",
   "openbank-security-scanner": "0.5.5",
-  "openbank-sepa-instant": "0.7.3",
+  "openbank-sepa-instant": "0.7.4",
   "openbank-sepa-payment": "0.8.7",
   "openbank-settlement-service": "0.4.9",
   "openbank-standing-order-service": "0.14.4",
