@@ -9,6 +9,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, RefreshCw, Lock, Unlock, XCircle, AlertCircle } from 'lucide-react'
 import { accountApi } from '@/lib/api'
+import { EntityChip } from '@/components/entities/EntityChip'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import type { Account, AccountBalance } from '@/types'
 
@@ -149,7 +150,7 @@ export default function AccountDetailPage() {
               { label: t('ID účtu', 'Account ID'),         value: account.id,            mono: true },
               { label: t('Číslo účtu (IBAN)', 'Account Number (IBAN)'), value: account.accountNumber, mono: true },
               { label: 'BBAN',                              value: account.accountNumber.length > 4 ? account.accountNumber.slice(4) : account.accountNumber, mono: true },
-              { label: 'Party ID',                          value: account.partyId,       mono: true },
+              { label: t('Vlastník (klient)', 'Owner (party)'), node: <EntityChip type="party" id={account.partyId} /> },
               { label: 'Product ID',                        value: account.productId,     mono: true },
               { label: t('Typ', 'Type'),                   value: account.accountType },
               { label: t('Měna', 'Currency'),              value: account.currencyCode },
@@ -163,13 +164,15 @@ export default function AccountDetailPage() {
                 borderBottom: i < arr.length - 1 ? '1px solid var(--border)' : 'none',
               }}>
                 <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{row.label}</span>
-                <span style={{
-                  fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)',
-                  fontFamily: row.mono ? 'JetBrains Mono, monospace' : 'inherit',
-                  maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {row.value}
-                </span>
+                {'node' in row ? row.node : (
+                  <span style={{
+                    fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)',
+                    fontFamily: row.mono ? 'JetBrains Mono, monospace' : 'inherit',
+                    maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {row.value}
+                  </span>
+                )}
               </div>
             ))}
           </div>
