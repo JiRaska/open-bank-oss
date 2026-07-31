@@ -1,0 +1,34 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+--
+-- Store the two JSON documents as text rather than jsonb.
+--
+-- WHY: the entities map these columns to a Kotlin String, and under Hibernate Reactive the Vert.x
+-- PG client hands back a typed io.vertx.core.json.JsonArray for a jsonb column holding an array.
+-- Hibernate cannot cast that to String, so EVERY read of a campaign or a segment failed with
+--
+--     java.lang.ClassCastException: Invalid String value type class io.vertx.core.json.JsonArray
+--
+-- which made POST /api/v1/campaigns a 500 (it loads the segment first) and would have done the same
+-- to every campaign read. A jsonb column holding an OBJECT is unaffected — product-catalog's `doc`
+-- maps jsonb to String on the same stack and reads fine — so this is specific to arrays.
+--
+-- WHY TEXT AND NOT A JSON TYPE MAPPING: both columns are only ever round-tripped whole, as strings
+-- (`mapper.writeValueAsString` on write, `mapper.readValue` on read). Nothing queries them with JSON
+-- operators and nothing indexes them, so jsonb bought validation we never used at the cost of a type
+-- the driver returns as something the entity cannot accept. text removes the ambiguity entirely
+-- instead of relying on driver-specific conversion behaviour.
+--
+-- Note the cast direction is lossless: jsonb -> text always succeeds. Existing rows keep their
+-- content, normalised by jsonb's own formatting (key order, whitespace), which the JSON parser on
+-- the read side does not care about.
+--
+-- ROLLBACK:
+--   ALTER TABLE campaigns ALTER COLUMN steps_json TYPE jsonb USING steps_json::jsonb;
+--   ALTER TABLE segments  ALTER COLUMN rules_json TYPE jsonb USING rules_json::jsonb;
+-- Safe as long as every stored value is valid JSON, which it is — it is written by Jackson. Rolling
+-- back reinstates the read failure above, so it is only useful together with reverting the entity
+-- change.
+
+ALTER TABLE campaigns ALTER COLUMN steps_json TYPE text USING steps_json::text;
+ALTER TABLE segments ALTER COLUMN rules_json TYPE text USING rules_json::text;

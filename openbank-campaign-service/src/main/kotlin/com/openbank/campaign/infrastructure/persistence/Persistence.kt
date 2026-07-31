@@ -52,7 +52,9 @@ class CampaignEntity : PanacheEntityBase() {
     @Column(nullable = false)
     var segmentVersion: Int = 1
 
-    @Column(nullable = false, columnDefinition = "jsonb")
+    // text, not jsonb (V2): under Hibernate Reactive the Vert.x PG client returns a JsonArray for a
+    // jsonb array column, which cannot be cast to String — every read threw ClassCastException.
+    @Column(nullable = false, columnDefinition = "text")
     lateinit var stepsJson: String
 
     @Column(nullable = false)
@@ -131,7 +133,8 @@ class SegmentEntity : PanacheEntityBase() {
     @Column(nullable = false)
     var version: Int = 1
 
-    @Column(nullable = false, columnDefinition = "jsonb")
+    // text, not jsonb — see the note on CampaignEntity.stepsJson and migration V2.
+    @Column(nullable = false, columnDefinition = "text")
     lateinit var rulesJson: String
 
     @Column(nullable = false)
