@@ -20,6 +20,8 @@ import com.openbank.mcp.application.port.out.ProposalPort
 import com.openbank.mcp.infrastructure.mcp.CallerContextResolver
 import com.openbank.mcp.infrastructure.mcp.McpEndpoint
 import com.openbank.mcp.infrastructure.observability.McpMetricsAdapter
+import com.openbank.mcp.infrastructure.persistence.AgentSessionEntity
+import com.openbank.mcp.infrastructure.persistence.AgentSessionRepository
 import com.openbank.mcp.infrastructure.ratelimit.McpRateLimiter
 import com.openbank.mcp.infrastructure.read.StubMarketingReachPort
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -53,7 +55,7 @@ class McpEndpointTest {
     ): McpEndpoint {
         val stub = StubReads(mapper)
         val toolRegistry = McpToolRegistry(stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper)
-        val caller = CallerContextResolver(jwt, oboEnabled)
+        val caller = CallerContextResolver(jwt, oboEnabled, fakeSessionRepo())
         return McpEndpoint(
             registry = toolRegistry,
             pdp = pdp,
@@ -166,7 +168,7 @@ class McpEndpointTest {
         val event = audit.events.single()
         assertThat(event.channel).isEqualTo("mcp")
         assertThat(event.actChain).startsWith("openbank-admin-ui")
-        assertThat(event.sessionId).isEqualTo("staff-sess-1")
+        assertThat(event.sessionId).isEqualTo(staffSessionId)
     }
 
     @Test
@@ -189,15 +191,33 @@ class McpEndpointTest {
         }
     }
 
+    private val staffSessionId = "3f2a9c41-7b5e-4c8d-9e0f-1a2b3c4d5e6f"
+
     private val staffClaims = mapOf(
         "sub" to "jane.operator",
         "azp" to "openbank-admin-ui",
-        "sid" to "staff-sess-1",
+        "sid" to staffSessionId,
         "aud" to "openbank-mcp-service",
         "realm_access" to mapOf("roles" to listOf("ROLE_OPERATOR", "default-roles-openbank")),
     )
 
     private fun staffOboJwt() = TestJsonWebToken(staffClaims)
+
+    // ADR-0224 D2 live check: a fake session store holding one ACTIVE session for the staff sid.
+    private fun fakeSessionRepo() = object : AgentSessionRepository() {
+        override suspend fun findActive(id: java.util.UUID, asOf: java.time.Instant) =
+            if (id.toString() == staffSessionId) {
+                AgentSessionEntity().also {
+                    it.subject = "jane.operator"
+                    it.roleCeiling = "[\"ROLE_OPERATOR\"]"
+                    it.clientId = "admin-ui"
+                    it.createdAt = asOf
+                    it.expiresAt = asOf.plusSeconds(3600)
+                }
+            } else {
+                null
+            }
+    }
 
     private class RecordingPdp : PolicyDecisionPoint {
         val queries = mutableListOf<AuthzQuery>()

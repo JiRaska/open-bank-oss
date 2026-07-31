@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: statement-service
     app.kubernetes.io/part-of: statements
   annotations:
-    openbank.tech/policy-checksum: "8de6229901d4eb37"
+    openbank.tech/policy-checksum: "ec277a1075f1b20e"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -155,6 +155,16 @@ data:
     	role in input.principal.roles
     	some verb in {"list", "read"}
     	endswith(input.action, sprintf(".%v", [verb]))
+    }
+
+    # ADR-0224 D2: staff agent-session lifecycle (issue/read/revoke). Operator/admin only — sessions
+    # are issued to the authenticated operator themselves (subject = principal), and revocation is
+    # live-checked by the OBO resolver, so this grant only ever reaches the caller's own sessions.
+    allowed_reasons contains "operator-mcp-session" if {
+    	input.principal.type == "HUMAN"
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	startswith(input.action, "mcp.session.")
     }
 
     # ADR-0176 D4: operator-initiated customer messaging is its own action namespace

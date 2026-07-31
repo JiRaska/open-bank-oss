@@ -5,10 +5,14 @@
 package com.openbank.mcp.infrastructure.mcp
 
 import com.openbank.mcp.application.port.out.ConsentContext
+import com.openbank.mcp.infrastructure.persistence.AgentSessionRepository
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
+import java.time.Clock
+import java.time.Instant
 
 /**
  * Resolves the acting agent + presented PSD2 consent from the caller's validated OAuth 2.1 access
@@ -35,6 +39,8 @@ class CallerContextResolver @Inject constructor(
     private val jwt: JsonWebToken,
     @ConfigProperty(name = "mcp.obo.enabled", defaultValue = "false")
     private val oboEnabled: Boolean = false,
+    private val sessions: AgentSessionRepository? = null,
+    private val clock: Clock = Clock.systemUTC(),
 ) {
 
     /**
@@ -74,6 +80,17 @@ class CallerContextResolver @Inject constructor(
         if (MCP_AUDIENCE !in audience()) return null
         val roles = realmRoles()
         if (roles.isEmpty()) return null
+
+        // ADR-0224 D2: the session must exist, be active (not revoked/expired), belong to this
+        // subject, and the effective roles are bounded by BOTH the token and the session ceiling.
+        // A missing store row or a mismatch is anonymous — revocation takes effect immediately.
+        val session = sid.toUuidOrNull()?.let { runBlocking { sessions?.findActive(it, Instant.now(clock)) } }
+            ?: return null
+        if (session.subject != subject) return null
+        val ceiling = parseCeiling(session.roleCeiling)
+        val bounded = roles.filter { it in ceiling }
+        if (bounded.isEmpty()) return null
+
         return ConsentContext(
             agentId = subject,
             consentId = "",
@@ -81,9 +98,17 @@ class CallerContextResolver @Inject constructor(
             actChain = listOf(azp) + actChain(jwt.getClaim(CLAIM_ACT)),
             sessionId = sid,
             principalType = "HUMAN",
-            roles = roles,
+            roles = bounded,
         )
     }
+
+    private fun parseCeiling(roleCeiling: String): Set<String> = roleCeiling.removePrefix("[").removeSuffix("]")
+        .split(",")
+        .map { it.trim().removeSurrounding("\"") }
+        .filter { it.isNotBlank() }
+        .toSet()
+
+    private fun String.toUuidOrNull(): java.util.UUID? = runCatching { java.util.UUID.fromString(this) }.getOrNull()
 
     /** The `aud` claim is a single string or an array depending on the grant — accept both. */
     private fun audience(): List<String> = when (val aud = jwt.getClaim<Any?>(CLAIM_AUD)) {

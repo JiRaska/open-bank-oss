@@ -4,6 +4,7 @@ package com.openbank.mcp
 
 import com.openbank.libs.authz.PolicyDecisionPoint
 import io.quarkus.arc.ClientProxy
+import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.Test
  * mystery timeout on whichever runner happens to be loaded.
  */
 @QuarkusTest
+@QuarkusTestResource(PostgresTestResource::class)
 class PdpBeanSelectionIT {
 
     @Inject

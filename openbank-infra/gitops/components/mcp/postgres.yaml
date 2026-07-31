@@ -1,0 +1,25 @@
+# Single-owner Postgres for mcp-service (ADR-0224 D2 agent-session store), reconciled by the
+# CNPG operator. CNPG generates the `mcp-db-app` secret and `mcp-db-rw` Service.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: mcp-db
+  namespace: platform
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"

@@ -143,6 +143,16 @@ allowed_reasons contains "operator-read-any" if {
 	endswith(input.action, sprintf(".%v", [verb]))
 }
 
+# ADR-0224 D2: staff agent-session lifecycle (issue/read/revoke). Operator/admin only — sessions
+# are issued to the authenticated operator themselves (subject = principal), and revocation is
+# live-checked by the OBO resolver, so this grant only ever reaches the caller's own sessions.
+allowed_reasons contains "operator-mcp-session" if {
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	startswith(input.action, "mcp.session.")
+}
+
 # ADR-0176 D4: operator-initiated customer messaging is its own action namespace
 # (opsmessage.*), deliberately NOT notification.* — the edge-service-notification rule below
 # grants every notification.* action to customer-edge's M2M identity via a plain prefix match,

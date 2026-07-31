@@ -4,6 +4,7 @@ package com.openbank.mcp
 
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditResult
+import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.Test
  * tests (see `openbank-agent-service`).
  */
 @QuarkusTest
+@QuarkusTestResource(PostgresTestResource::class)
 class McpAuditEventIT {
 
     @Inject

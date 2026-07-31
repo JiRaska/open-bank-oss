@@ -1172,3 +1172,25 @@ test_allow_when_the_register_key_is_absent if {
 
 	decision.allow == true
 }
+
+# ADR-0224 D2: the session lifecycle grant is operator/admin-only and only reaches mcp.session.*.
+test_operator_mcp_session_grants_operator if {
+	rest.allowed_reasons["operator-mcp-session"] with input as {
+		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "mcp.session.create",
+	}
+}
+
+test_operator_mcp_session_denies_a_viewer if {
+	not rest.allowed_reasons["operator-mcp-session"] with input as {
+		"principal": {"id": "v-1", "type": "HUMAN", "roles": ["ROLE_VIEWER"]},
+		"action": "mcp.session.create",
+	}
+}
+
+test_operator_mcp_session_does_not_leak_to_other_domains if {
+	not rest.allowed_reasons["operator-mcp-session"] with input as {
+		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "account.freeze",
+	}
+}
