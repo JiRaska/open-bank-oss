@@ -45,9 +45,7 @@ interface TransactionServiceRestClient {
  * deserializes to null (`@JsonIgnoreProperties(ignoreUnknown = true)` makes that soundless).
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class TransactionPageResponse(
-    val data: List<TransactionItemResponse> = emptyList(),
-)
+data class TransactionPageResponse(val data: List<TransactionItemResponse> = emptyList())
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class TransactionItemResponse(

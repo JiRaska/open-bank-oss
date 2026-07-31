@@ -4,6 +4,7 @@
 
 package com.openbank.party.infrastructure.gdpr
 
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.party.application.port.out.GdprAggregationAuthException
 import com.openbank.party.domain.model.redactIban
 import com.openbank.party.infrastructure.client.AccountPageBody
@@ -13,7 +14,6 @@ import com.openbank.party.infrastructure.client.CardServiceRestClient
 import com.openbank.party.infrastructure.client.TransactionItemResponse
 import com.openbank.party.infrastructure.client.TransactionPageResponse
 import com.openbank.party.infrastructure.client.TransactionServiceRestClient
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.mockk.every
 import io.mockk.mockk
 import io.smallrye.mutiny.Uni
@@ -43,55 +43,54 @@ class PortabilityAggregationAdapterTest {
     private fun <T> failing(status: Int): Uni<T> = Uni.createFrom().failure(WebApplicationException(status))
 
     @Test
-    fun `accounts are assembled with their transactions, counterparty identity absent in v1`(): Unit =
-        runBlocking {
-            every { accountClient.listByParty(partyId, any(), null) } returns Uni.createFrom().item(
-                AccountPageBody(
-                    data = listOf(
-                        AccountSummaryBody(
-                            id = accountId,
-                            accountNumber = "CZ6508000000192000145399",
-                            status = "ACTIVE",
-                            currencyCode = "CZK",
-                            productId = UUID.randomUUID(),
-                        ),
+    fun `accounts are assembled with their transactions, counterparty identity absent in v1`(): Unit = runBlocking {
+        every { accountClient.listByParty(partyId, any(), null) } returns Uni.createFrom().item(
+            AccountPageBody(
+                data = listOf(
+                    AccountSummaryBody(
+                        id = accountId,
+                        accountNumber = "CZ6508000000192000145399",
+                        status = "ACTIVE",
+                        currencyCode = "CZK",
+                        productId = UUID.randomUUID(),
                     ),
                 ),
-            )
-            every { transactionClient.listByAccount(accountId, any()) } returns Uni.createFrom().item(
-                TransactionPageResponse(
-                    data = listOf(
-                        TransactionItemResponse(
-                            id = "tx-1",
-                            referenceNumber = "TRX-000001",
-                            bookingDate = "2026-07-01",
-                            amount = "1200.00",
-                            currencyCode = "CZK",
-                            type = "DEBIT",
-                            status = "COMPLETED",
-                            description = "Nájem",
-                        ),
+            ),
+        )
+        every { transactionClient.listByAccount(accountId, any()) } returns Uni.createFrom().item(
+            TransactionPageResponse(
+                data = listOf(
+                    TransactionItemResponse(
+                        id = "tx-1",
+                        referenceNumber = "TRX-000001",
+                        bookingDate = "2026-07-01",
+                        amount = "1200.00",
+                        currencyCode = "CZK",
+                        type = "DEBIT",
+                        status = "COMPLETED",
+                        description = "Nájem",
                     ),
                 ),
-            )
+            ),
+        )
 
-            val accounts = adapter.fetchAccountsWithTransactions(partyId)
+        val accounts = adapter.fetchAccountsWithTransactions(partyId)
 
-            assertThat(accounts).hasSize(1)
-            val account = accounts[0]
-            assertThat(account.iban).isEqualTo("CZ6508000000192000145399")
-            assertThat(account.currency).isEqualTo("CZK")
-            assertThat(account.transactions).hasSize(1)
-            val tx = account.transactions[0]
-            assertThat(tx.transactionId).isEqualTo("tx-1")
-            assertThat(tx.currency).isEqualTo("CZK")
-            assertThat(tx.remittanceInfo).isEqualTo("Nájem")
-            assertThat(tx.reference).isEqualTo("TRX-000001")
-            // v1 gap: transaction-service carries no counterparty identity, so Art. 20(4) has
-            // no input. Asserted so the day it does, this test is the thing that goes red.
-            assertThat(tx.counterpartyName).isNull()
-            assertThat(tx.counterpartyIbanRedacted).isNull()
-        }
+        assertThat(accounts).hasSize(1)
+        val account = accounts[0]
+        assertThat(account.iban).isEqualTo("CZ6508000000192000145399")
+        assertThat(account.currency).isEqualTo("CZK")
+        assertThat(account.transactions).hasSize(1)
+        val tx = account.transactions[0]
+        assertThat(tx.transactionId).isEqualTo("tx-1")
+        assertThat(tx.currency).isEqualTo("CZK")
+        assertThat(tx.remittanceInfo).isEqualTo("Nájem")
+        assertThat(tx.reference).isEqualTo("TRX-000001")
+        // v1 gap: transaction-service carries no counterparty identity, so Art. 20(4) has
+        // no input. Asserted so the day it does, this test is the thing that goes red.
+        assertThat(tx.counterpartyName).isNull()
+        assertThat(tx.counterpartyIbanRedacted).isNull()
+    }
 
     @Test
     fun `a 401 from account-service fails hard - a refused read must never read as no data`(): Unit = runBlocking {
