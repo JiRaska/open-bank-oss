@@ -44,6 +44,8 @@ class PartyService : PartyUseCase {
 
     @Inject lateinit var gdprAggregation: GdprAggregationPort
 
+    @Inject lateinit var portabilityAggregation: PortabilityAggregationPort
+
     @Inject lateinit var accountGuard: PartyAccountGuardPort
 
     @Inject lateinit var marketingConsentForwarding: MarketingConsentForwardingPort
@@ -190,6 +192,16 @@ class PartyService : PartyUseCase {
         val kycData = gdprAggregation.fetchKycData(id)
         val cardData = gdprAggregation.fetchCardData(id)
         return PartyGdprExport(party, documents, clock.instant(), kycData, cardData)
+    }
+
+    override suspend fun exportPartyPortabilityData(id: UUID): PartyPortabilityExport {
+        val party = partyRepo.findById(id) ?: throw PartyNotFoundException(id)
+        val documents = documentRepo.findByPartyId(id)
+        // ADR-0204 D1: no kyc-service call at all — its data is Art. 6(1)(c) legal obligation,
+        // and the basis filter is only honest if it is structural (nothing to forget to filter).
+        val accounts = portabilityAggregation.fetchAccountsWithTransactions(id)
+        val cards = portabilityAggregation.fetchCards(id)
+        return PartyPortabilityExport(party, documents, accounts, cards, clock.instant())
     }
 
     override suspend fun listParties(page: Int, size: Int, status: PartyStatus?): Map<String, Any> {

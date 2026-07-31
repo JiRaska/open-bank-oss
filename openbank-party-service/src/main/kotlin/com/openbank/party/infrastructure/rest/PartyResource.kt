@@ -254,6 +254,28 @@ class PartyResource {
         return Response.ok(export.toResponse()).build()
     }
 
+    // Same @Authenticated three-shape access as exportPartyGdpr (ADR-0204 D5): ROLE_ADMIN,
+    // ROLE_DPO, or the subject's own JWT. The audit event carries gdprArticle="20" — distinct
+    // from "15" so the two rights stay separable in the Art. 30 record of processing.
+    @GET
+    @Path("/{id}/gdpr-portability-export")
+    @Authenticated
+    @Operation(
+        summary = "Export the subject's portable data — GDPR Art. 20 Right to Data Portability (ADR-0204)",
+        description = "Consent/contract-basis data only (no Art. 6(1)(c) legal-obligation fields). " +
+            "Includes transaction history with counterparty IBANs redacted to their bank-code " +
+            "prefix (Art. 20(4)). Art. 20(2) direct transmission is not offered (ADR-0204 D4).",
+    )
+    suspend fun exportPartyPortability(@PathParam("id") id: UUID): Response {
+        val isAdmin = securityIdentity.hasRole("ROLE_ADMIN")
+        val isDpo = securityIdentity.hasRole("ROLE_DPO")
+        val isSelf = jwt?.subject != null && jwt?.subject == partyUseCase.getPartyKeycloakSub(id)
+        if (!isAdmin && !isDpo && !isSelf) return Response.status(Response.Status.FORBIDDEN).build()
+        val export = partyUseCase.exportPartyPortabilityData(id)
+        auditGdpr(operation = "party.gdpr-portability-export", partyId = id, gdprArticle = "20")
+        return Response.ok(export.toResponse()).build()
+    }
+
     /**
      * Emit an [AuditEvent] for a GDPR operation onto the libs audit pipeline (ADR-0086 chain).
      * Actor is the authenticated operator (JWT subject); no raw PII is placed in the payload —

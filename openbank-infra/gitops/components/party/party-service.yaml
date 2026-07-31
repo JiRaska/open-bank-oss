@@ -163,6 +163,11 @@ spec:
             # default-deny NetworkPolicy. Resolves identically to the in-image default.
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
+            # GDPR Art. 20 portability export (ADR-0204 D2): transaction history per account.
+            # The URL env also feeds the network-policy generator's URL_RE scan for the
+            # party→payments:8102 edge (same derivation as the accounts edge above).
+            - name: TRANSACTION_SERVICE_URL
+              value: http://transaction-service.payments.svc:8102
           startupProbe:
             tcpSocket:
               port: management

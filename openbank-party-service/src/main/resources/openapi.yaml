@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.8 -> 1.9): additive
   # only — a new PATCH /api/v1/parties/approvals/{id} endpoint and an additional 202 response
   # on POST /{id}/merge (ADR-0155 four-eyes). No existing response or schema changed.
-  version: 1.12.0
+  version: 1.13.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -433,6 +433,41 @@ paths:
           description: >-
             A downstream aggregation hop (kyc-service or card-issuance-service) refused the
             call with 401/403. The export is NOT returned — retry once the M2M grant is fixed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/parties/{id}/gdpr-portability-export:
+    get:
+      tags: [Parties]
+      summary: Export the subject's portable data — GDPR Art. 20 Right to Data Portability
+      description: >-
+        Returns the Art. 20 portability projection (ADR-0204): consent (Art. 6(1)(a)) and
+        contract (Art. 6(1)(b)) data ONLY — no Art. 6(1)(c) legal-obligation fields (KYC/AML
+        due-diligence, risk ratings, PEP flags, sanctions state are excluded by construction).
+        Includes the party record, documents, accounts with transaction history (counterparty
+        names retained, counterparty IBANs redacted to their bank-code prefix per Art. 20(4)),
+        and card-product metadata (never PAN material). Art. 20(2) direct
+        controller-to-controller transmission is not offered (ADR-0204 D4).
+      operationId: exportPartyPortability
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '200':
+          description: GDPR Art. 20 portability export (ROLE_ADMIN / ROLE_DPO / subject self)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GdprExport'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          description: >-
+            A downstream aggregation hop (account/transaction/card service) refused the call
+            with 401/403. The export is NOT returned — retry once the M2M grant is fixed.
           content:
             application/json:
               schema:
