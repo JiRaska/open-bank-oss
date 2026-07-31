@@ -12,6 +12,24 @@ info:
 tags:
   - name: SEPA Direct Debit
 paths:
+  /api/v1/sdd/mandates/recent:
+    get:
+      tags: [SDD]
+      operationId: listRecentMandates
+      summary: Backoffice queue — newest mandates fleet-wide (ADR-0230)
+      description: >-
+        Fleet-wide mandate list for the SDD console (newest first, optional status filter).
+        Requires ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN or ROLE_PAYMENTS.
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        '200': { description: Recent mandates }
+        '403': { description: Forbidden }
   /api/v1/sdd/mandates:
     post:
       tags: [SEPA Direct Debit]

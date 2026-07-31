@@ -62,5 +62,8 @@ interface AssessRefundUseCase {
 
 interface ListMandatesUseCase {
     fun list(accountId: UUID): Uni<List<SddMandate>>
-    fun get(mandateId: UUID): Uni<SddMandate>
+    fun get(id: UUID): Uni<SddMandate>
+
+    /** Backoffice queue (ADR-0230 D1): newest mandates fleet-wide, optionally one status. */
+    fun listRecent(status: String?, limit: Int): Uni<List<SddMandate>>
 }

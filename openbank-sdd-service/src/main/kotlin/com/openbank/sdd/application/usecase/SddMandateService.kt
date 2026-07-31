@@ -40,10 +40,8 @@ import java.util.UUID
  * `sdd.collection.authorised` for the ledger/payment path to execute (§C).
  */
 @ApplicationScoped
-class SddMandateService(
-    private val mandates: SddMandateRepository,
-    private val outbox: SddOutbox,
-) : RegisterMandateUseCase,
+class SddMandateService(private val mandates: SddMandateRepository, private val outbox: SddOutbox) :
+    RegisterMandateUseCase,
     ConfirmMandateUseCase,
     ManageMandateUseCase,
     AmendMandateUseCase,
@@ -105,10 +103,7 @@ class SddMandateService(
             persist(applyField(amended, command), "sdd.mandate.amended.v1")
         }
 
-    override fun authorise(
-        instruction: CollectionInstruction,
-        controls: DebtorControls,
-    ): Uni<AuthorisationResult> =
+    override fun authorise(instruction: CollectionInstruction, controls: DebtorControls): Uni<AuthorisationResult> =
         mandates.findByReference(instruction.creditorIdentifier, instruction.umr).flatMap { mandate ->
             when (val result = CollectionAuthorisationPolicy.authorise(mandate, instruction, controls)) {
                 is AuthorisationResult.Accept -> {
@@ -131,20 +126,19 @@ class SddMandateService(
 
     override fun list(accountId: UUID): Uni<List<SddMandate>> = mandates.listForAccount(accountId)
 
+    override fun listRecent(status: String?, limit: Int): Uni<List<SddMandate>> =
+        mandates.findRecent(status, limit.coerceIn(1, MAX_LIST_LIMIT))
+
     override fun get(mandateId: UUID): Uni<SddMandate> = load(mandateId)
 
     // --- helpers -------------------------------------------------------------------------------
 
-    private fun transition(
-        mandateId: UUID,
-        eventType: String,
-        f: (SddMandate) -> SddMandate,
-    ): Uni<SddMandate> = load(mandateId).flatMap { persist(f(it), eventType) }
+    private fun transition(mandateId: UUID, eventType: String, f: (SddMandate) -> SddMandate): Uni<SddMandate> =
+        load(mandateId).flatMap { persist(f(it), eventType) }
 
-    private fun load(mandateId: UUID): Uni<SddMandate> =
-        mandates.findById(mandateId).flatMap { m ->
-            if (m == null) Uni.createFrom().failure(MandateNotFoundException(mandateId)) else Uni.createFrom().item(m)
-        }
+    private fun load(mandateId: UUID): Uni<SddMandate> = mandates.findById(mandateId).flatMap { m ->
+        if (m == null) Uni.createFrom().failure(MandateNotFoundException(mandateId)) else Uni.createFrom().item(m)
+    }
 
     private fun persist(mandate: SddMandate, eventType: String): Uni<SddMandate> =
         mandates.save(mandate).flatMap { saved ->
@@ -200,8 +194,11 @@ class SddMandateService(
         """.trimIndent().replace("\n", "")
         return OutboxMessage(UUID.randomUUID(), m.id, eventType, payload)
     }
+
+    private companion object {
+        const val MAX_LIST_LIMIT = 100
+    }
 }
 
 /** Raised when a mandate id does not resolve. */
-class MandateNotFoundException(val mandateId: UUID) :
-    RuntimeException("No SDD mandate $mandateId")
+class MandateNotFoundException(val mandateId: UUID) : RuntimeException("No SDD mandate $mandateId")
