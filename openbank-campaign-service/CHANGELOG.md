@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.6](https://github.com/JiRaska/open-bank-oss/compare/v0.3.5...v0.3.6) (2026-07-31)
+
+
+### Bug Fixes
+
+* **campaign:** give SegmentRule a persistence format it can be read back from ([#2908](https://github.com/JiRaska/open-bank-oss/issues/2908)) ([dde5f18](https://github.com/JiRaska/open-bank-oss/commit/dde5f188ad87698e79e17dd10133143e761a772b))
+
 ## [0.3.5](https://github.com/JiRaska/open-bank-oss/compare/v0.3.4...v0.3.5) (2026-07-31)
 
 
