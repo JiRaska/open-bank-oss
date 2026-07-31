@@ -26,6 +26,9 @@ interface EnrolmentRepository {
 interface SendLogRepository {
     suspend fun record(send: SendRecord)
     suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long): Int
+
+    /** Every recorded send attempt for a campaign, newest first — the operator view of what happened. */
+    suspend fun listByCampaign(campaignId: UUID): List<SendRecord>
 }
 
 /** ADR-0201 D1: segments are versioned artifacts loaded as code/data, never UI-typed SQL. */

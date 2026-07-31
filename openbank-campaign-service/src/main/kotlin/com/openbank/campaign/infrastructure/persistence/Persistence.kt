@@ -247,6 +247,19 @@ class PanacheSendLogRepository :
         }.awaitSuspending()
     }
 
+    override suspend fun listByCampaign(campaignId: UUID): List<SendRecord> = Panache.withSession {
+        find("campaignId = ?1 order by occurredAt desc", campaignId).list<SendLogEntity>()
+    }.awaitSuspending().map {
+        SendRecord(
+            id = it.id,
+            campaignId = it.campaignId,
+            partyId = it.partyId,
+            stepOrder = it.stepOrder,
+            outcome = SendOutcome.valueOf(it.outcome),
+            occurredAt = it.occurredAt,
+        )
+    }
+
     override suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long): Int = Panache.withSession {
         count(
             "partyId = ?1 and outcome = ?2 and occurredAt >= ?3",

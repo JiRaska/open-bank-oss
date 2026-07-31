@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.0.0
+  version: 1.1.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -169,6 +169,28 @@ paths:
                 items:
                   $ref: '#/components/schemas/Enrolment'
 
+  /api/v1/campaigns/{id}/sends:
+    get:
+      tags: [Campaigns]
+      summary: Send log of a campaign — what happened per party per step, newest first
+      description: >-
+        Includes suppressed attempts. `outcome` is the only place a suppression is visible: an
+        enrolment looks identical whether the party was contacted or deliberately skipped
+        (consent withdrawn, frequency cap, quiet hours — ADR-0200 D6).
+        Party identifiers only; no contact details.
+      operationId: listSends
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Send records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SendRecord'
+
 components:
   parameters:
     CampaignId:
@@ -232,6 +254,18 @@ components:
       required: [approver]
       properties:
         approver: { type: string }
+    SendRecord:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        campaignId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        stepOrder: { type: integer }
+        outcome:
+          type: string
+          enum: [SENT, SUPPRESSED_CAP, SUPPRESSED_QUIET_HOURS, SUPPRESSED_CONSENT, FAILED]
+        occurredAt: { type: string, format: date-time }
+
     Enrolment:
       type: object
       properties:
