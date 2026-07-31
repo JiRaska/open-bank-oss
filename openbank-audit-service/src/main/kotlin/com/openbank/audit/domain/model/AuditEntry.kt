@@ -19,4 +19,10 @@ data class AuditEntry(
     val correlationId: String?,
     val occurredAt: Instant,
     val recordedAt: Instant,
+    /** Ingress channel the event arrived through — ui|mcp|api (ADR-0226); null = unknown/legacy. */
+    val channel: String? = null,
+    /** Ordered on-behalf-of delegation chain from the RFC 8693 `act` claim (ADR-0224); empty = direct. */
+    val actChain: List<String> = emptyList(),
+    /** Browser or agent session the action belongs to; groups one sitting's events. */
+    val sessionId: String? = null,
 )

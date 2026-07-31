@@ -46,6 +46,22 @@ class AuditResource {
         @QueryParam("limit") @DefaultValue("100") limit: Int,
     ): Response = Response.ok(repo.findByAggregateId(aggregateId, limit.coerceIn(1, 500))).build()
 
+    @GET
+    @Path("/entries/by-actor/{actorId}")
+    // Same regulated-evidence gate as the aggregate trail above; JAX-RS prefers this literal
+    // "by-actor" segment over the {aggregateId} template, so the two routes never collide.
+    @RolesAllowed("ROLE_AUDITOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
+    @Authorize(action = "audit.read", resource = "#actorId")
+    @Operation(
+        summary = "Get audit entries for one actor across all ingress channels (ADR-0226) — " +
+            "the forensic 'what did person X do' query, optionally narrowed by ?channel=ui|mcp|api",
+    )
+    suspend fun getActorTrail(
+        @PathParam("actorId") actorId: String,
+        @QueryParam("channel") channel: String?,
+        @QueryParam("limit") @DefaultValue("100") limit: Int,
+    ): Response = Response.ok(repo.findByActorId(actorId, channel, limit.coerceIn(1, 500))).build()
+
     /**
      * Re-walk the hash chain and report whether it is intact (ADR-0086 / DORA Art. 17).
      *

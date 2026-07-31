@@ -25,6 +25,13 @@ import java.util.UUID
  * DORA Art. 17 requires that incident-relevant operations be reconstructible from this
  * trail within 24h, so `traceId` ties the audit entry back to log lines for the same
  * request.
+ *
+ * ADR-0226 adds the cross-channel dimensions: one identity acts through several ingress
+ * channels (admin UI, MCP, direct API), and the trail must answer "what did person X do"
+ * in one query. `channel` names the ingress, `actChain` records the RFC 8693 on-behalf-of
+ * delegation chain (ADR-0224) when the action was mediated, and `sessionId` groups one
+ * sitting's events. All three are additive and nullable — producers adopt them channel by
+ * channel, and an absent value means "unknown", never "ui".
  */
 data class AuditEvent(
     val eventId: UUID = UUID.randomUUID(),
@@ -38,10 +45,25 @@ data class AuditEvent(
     val userAgent: String? = null,
     val result: AuditResult = AuditResult.SUCCESS,
     val traceId: String? = null,
+    val channel: String? = null,
+    val actChain: List<String> = emptyList(),
+    val sessionId: String? = null,
     val payload: Map<String, Any?> = emptyMap(),
 )
 
 enum class AuditResult { SUCCESS, FAILURE, DENIED }
+
+/** Canonical values for [AuditEvent.channel] (ADR-0226 D1). */
+object AuditChannel {
+    /** Admin UI action relayed through the BFF proxy (ADR-0056). */
+    const val UI = "ui"
+
+    /** MCP tool call — AI agent or human operator via an MCP client (ADR-0181/0224). */
+    const val MCP = "mcp"
+
+    /** Direct REST call not relayed through the BFF (M2M, PSD2, service-to-service). */
+    const val API = "api"
+}
 
 /**
  * Marker for service code that emits an audit event. The interceptor in each service

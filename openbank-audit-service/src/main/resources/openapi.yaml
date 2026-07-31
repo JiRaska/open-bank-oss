@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Audit Service API
-  version: 1.3.0
+  version: 1.4.0
   description: Immutable audit trail — retrieve event history per aggregate; verify hash-chain integrity (ADR-0086) and externally-signed anchors (ADR-0031 D5).
   license:
     name: Apache-2.0
@@ -43,6 +43,38 @@ paths:
       responses:
         '200':
           description: Audit entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditEntryResponse'
+
+  /api/v1/audit/entries/by-actor/{actorId}:
+    get:
+      tags: [Audit]
+      summary: Get audit entries for one actor across all ingress channels (ADR-0226)
+      operationId: getActorTrail
+      parameters:
+        - name: actorId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: channel
+          in: query
+          description: Narrow to one ingress channel (ui|mcp|api); omit for all channels
+          schema:
+            type: string
+            enum: [ui, mcp, api]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Audit entries the actor produced, newest first
           content:
             application/json:
               schema:
@@ -269,3 +301,17 @@ components:
         correlationId:
           type: string
           nullable: true
+        channel:
+          type: string
+          enum: [ui, mcp, api]
+          nullable: true
+          description: Ingress channel the event arrived through (ADR-0226); null for pre-V9 rows.
+        actChain:
+          type: array
+          items:
+            type: string
+          description: Ordered RFC 8693 delegation chain (ADR-0224); empty for direct action.
+        sessionId:
+          type: string
+          nullable: true
+          description: Browser or agent session the action belongs to.

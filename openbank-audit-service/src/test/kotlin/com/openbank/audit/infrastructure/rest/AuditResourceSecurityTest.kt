@@ -25,6 +25,31 @@ class AuditResourceSecurityTest {
     private val verifyIntegrity =
         AuditResource::class.java.declaredMethods.single { it.name == "verifyIntegrity" }
 
+    private val getActorTrail =
+        AuditResource::class.java.declaredMethods.single { it.name == "getActorTrail" }
+
+    @Test
+    fun `by-actor endpoint is role-gated, never permit-all (ADR-0226 — the person query is the most sensitive one)`() {
+        assertThat(getActorTrail.getAnnotation(PermitAll::class.java))
+            .describedAs("by-actor trail must not be @PermitAll")
+            .isNull()
+
+        assertThat(getActorTrail.getAnnotation(RolesAllowed::class.java))
+            .describedAs("by-actor trail must be @RolesAllowed")
+            .isNotNull()
+    }
+
+    @Test
+    fun `by-actor endpoint is restricted to the audit-reading roles`() {
+        val roles = getActorTrail.getAnnotation(RolesAllowed::class.java).value.toList()
+
+        assertThat(roles).containsExactlyInAnyOrder(
+            "ROLE_AUDITOR",
+            "ROLE_ADMIN",
+            "ROLE_COMPLIANCE",
+        )
+    }
+
     @Test
     fun `audit trail endpoint is role-gated, never permit-all`() {
         assertThat(getAuditTrail.getAnnotation(PermitAll::class.java))
