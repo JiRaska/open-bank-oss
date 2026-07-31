@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.13.0...lending-service-v0.14.0) (2026-07-31)
+
+
+### Features
+
+* **lending:** compliance pack four-eyes activation + fail-closed origination guard (ADR-0212) ([d97b3c5](https://github.com/JiRaska/open-bank-oss/commit/d97b3c57a2376ceb5c1c5009fe49854b086722e5))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.12.0...lending-service-v0.13.0) (2026-07-31)
 
 
