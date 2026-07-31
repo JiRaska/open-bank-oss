@@ -53,13 +53,17 @@ class CnbBanksClient {
     @Inject
     lateinit var objectMapper: ObjectMapper
 
+    // Private backing fields + read-only accessors, NOT `var … private set`: Quarkus's all-open
+    // plugin opens every @ApplicationScoped class for proxying, and Kotlin rejects a private
+    // setter on an open property ("Private setters for open properties are prohibited").
+    private lateinit var loadedBanks: List<BankDto>
+    private lateinit var loadedSnapshotDate: LocalDate
+
     /** The committed snapshot, ordered by bank code. Never empty — startup fails first. */
-    lateinit var banks: List<BankDto>
-        private set
+    val banks: List<BankDto> get() = loadedBanks
 
     /** The day the committed list was taken from ČNB. */
-    lateinit var snapshotDate: LocalDate
-        private set
+    val snapshotDate: LocalDate get() = loadedSnapshotDate
 
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") e: StartupEvent) = load()
 
@@ -80,8 +84,8 @@ class CnbBanksClient {
             throw IllegalStateException("Bank registry snapshot $RESOURCE is not parseable", ex)
         }
         check(snapshot.banks.isNotEmpty()) { "Bank registry snapshot $RESOURCE contains no banks" }
-        banks = snapshot.banks.sortedBy { it.code }
-        snapshotDate = LocalDate.parse(snapshot.snapshotDate)
+        loadedBanks = snapshot.banks.sortedBy { it.code }
+        loadedSnapshotDate = LocalDate.parse(snapshot.snapshotDate)
         LOG.info(
             "Bank registry: ${banks.size} banks from the committed snapshot of $snapshotDate " +
                 "(source: ${snapshot.source}). Not fetched — see #2918.",
