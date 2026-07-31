@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.4](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.3...clearing-service-v0.7.4) (2026-07-31)
+
+
+### Bug Fixes
+
+* **governance:** correct 21 specs' dev port and gate it against quarkus.http.port ([#2697](https://github.com/JiRaska/open-bank-oss/issues/2697)) ([1d2f830](https://github.com/JiRaska/open-bank-oss/commit/1d2f8301d8b55664eed36860a0ec78717375a66b))
+
 ## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.2...clearing-service-v0.7.3) (2026-07-26)
 
 
