@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: card-issuance-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "5db7e2c207721dc1"
+    openbank.tech/policy-checksum: "d5bbdc1cefeca8b0"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2669,9 +2669,44 @@ data:
           gate keeps reporting green while checking nothing about Gradle -- a silent hole, not a
           visible failure.
         requires:
-          - ".github/workflows/dependency-submission.yml runs on pull_request with the same path filter"
+          - ".github/workflows/dependency-submission.yml runs on pull_request with a manifest path filter"
+          - "its push:[main] trigger is DELIBERATELY UNFILTERED -- see base_snapshot below (#2833)"
           - "dependency-review arms retry-on-snapshot-warnings ONLY on dependency-touching PRs"
           - "dependency-submission failures raise a tracking issue (a stale graph makes the gate vacuous)"
+        base_snapshot: >
+          Snapshots are looked up by EXACT SHA and the compare endpoint is three-dot, so the graph
+          the gate diffs against is the MERGE-BASE of the PR -- an arbitrary main commit. While the
+          push:[main] trigger carried the same manifest path filter as the pull_request one, only
+          ~2% of main commits produced a snapshot (measured: 1 of 50), so the merge-base almost
+          never had one and the action silently fell back to reporting the ENTIRE head graph as
+          additions. That is how the allowlist below was accreted. The push trigger is therefore
+          unfiltered: every main commit submits, so the merge-base always resolves. Ancestry of
+          pull_request.base.sha is NOT a factor -- three-dot compare resolves the merge-base itself.
+        scope: >
+          detachedConfiguration* and the root buildscript `classpath` are EXCLUDED from the
+          submitted graph (dependency-graph-exclude-configurations). `configurations.all {
+          resolutionStrategy { force(...) } }` -- how openbank.dependency-vulnerability-pins applies
+          the fleet patch floors -- cannot reach a detachedConfiguration, so those resolve their own
+          older versions of the same modules and submit coordinates no service can load. Measured:
+          105 of 1389 resolved coordinates came only from a detached configuration and carried 24 of
+          30 findings; filtering both took the graph 1235 -> 1091 and findings 30 -> 3.
+          Test coverage is NOT reduced -- testCompileClasspath / testRuntimeClasspath /
+          integrationTest* are all still submitted.
+          Excluding `classpath` IS a deliberate narrowing: a vulnerable BUILD plugin never ships but
+          does run on CI runners, and this gate is about what ships. Revisit if build-time supply
+          chain becomes an explicit goal.
+        allowlist: >
+          allow-ghsas is DELIBERATELY EMPTY. It held seven suppressions (json-smart 2.5.0,
+          netty-handler 4.2.1, netty-codec-http2 4.1.119), every one silencing a coordinate that
+          only ever existed via a detached/buildscript configuration -- removed at source by the
+          scope filter above instead. An allow-ghsas entry is a PERMANENT FLEET-WIDE suppression: it
+          hides the pre-existing false positive it was added for AND a future PR that genuinely
+          introduces the same GHSA on a real classpath, so each entry buys quiet with a hole.
+          Before adding one, run the extractor's own diagnostic
+          (:ForceDependencyResolutionPlugin_resolveAllDependencies + SimpleDependencyGraphPlugin)
+          and read `resolvedBy` in dependency-resolution.json: a single entry naming a detached or
+          buildscript configuration is a graph artifact -- widen the scope filter, do not allowlist.
+          Entries naming a real *Classpath are a genuine finding -- bump the pin.
         not_covered_by:
           trivy_fs: "Trivy's Java coverage is JAR / pom.xml / gradle.lockfile / *.sbt.lock only; this repo has zero lockfiles, so Trivy fs sees no Gradle dependency"
           codeql: "not a dependency scanner, and not a required check"
