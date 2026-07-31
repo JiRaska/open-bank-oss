@@ -156,7 +156,7 @@ class McpEndpointTest {
         )
         val principal = pdp.queries.single().principal
         assertThat(principal.type).isEqualTo("HUMAN")
-        assertThat(principal.id).isEqualTo("jane.operator")
+        assertThat(principal.id).isEqualTo(STAFF_SUB)
         assertThat(principal.roles).containsExactly("ROLE_OPERATOR")
     }
 
@@ -224,7 +224,12 @@ class McpEndpointTest {
     private val staffSessionId = "3f2a9c41-7b5e-4c8d-9e0f-1a2b3c4d5e6f"
 
     private val staffClaims = mapOf(
-        "sub" to "jane.operator",
+        // A realm token's `sub` is a UUID and its name claim is an email — they are NEVER the same
+        // string. The old fixture used "jane.operator" for both, which is exactly why #2938 (row
+        // keyed by the name claim, token validated against `sub`) passed every test while the
+        // staff channel was dead in every environment.
+        "sub" to STAFF_SUB,
+        "preferred_username" to "jane.operator@openbank.local",
         "azp" to "openbank-admin-ui",
         "jti" to staffSessionId,
         "aud" to "openbank-mcp-service",
@@ -237,7 +242,7 @@ class McpEndpointTest {
     private fun fakeSessionRepo() = object : AgentSessionRepository() {
         override suspend fun findActiveByJti(jti: String, asOf: java.time.Instant) = if (jti == staffSessionId) {
             AgentSessionEntity().also {
-                it.subject = "jane.operator"
+                it.subject = STAFF_SUB
                 it.roleCeiling = "[\"ROLE_OPERATOR\"]"
                 it.clientId = "admin-ui"
                 it.jti = staffSessionId
@@ -658,6 +663,9 @@ class McpEndpointTest {
     private companion object {
         const val SECRET = "CZ6508000000192000145399"
         const val TEST_CONSENT_ID = "11111111-1111-1111-1111-111111111111"
+
+        /** A staff `sub` as Keycloak actually mints it — a UUID, never the name claim (#2938). */
+        const val STAFF_SUB = "3a046823-5d47-4de1-9f3f-b1b2a953d2cc"
     }
 
     private class StubReads(private val m: com.fasterxml.jackson.databind.ObjectMapper) :

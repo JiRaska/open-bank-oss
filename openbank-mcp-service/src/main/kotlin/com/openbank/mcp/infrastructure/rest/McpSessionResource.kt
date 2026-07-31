@@ -22,6 +22,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import org.jboss.logging.Logger
@@ -67,7 +68,7 @@ class McpSessionResource(
         val now = Instant.now(clock)
         val session = AgentSessionEntity().also {
             it.id = Ids.newId()
-            it.subject = identity.principal.name
+            it.subject = callerSubject()
             it.roleCeiling = ceiling.joinToString(",", prefix = "[", postfix = "]") { r -> "\"$r\"" }
             it.clientId = request.clientId
             it.purpose = request.purpose
@@ -137,7 +138,23 @@ class McpSessionResource(
     // Broken-access-control guard: the role grant admits every operator, but a session row is
     // its owner's alone — reading or revoking another operator's session needs ROLE_ADMIN.
     private fun owns(session: AgentSessionEntity): Boolean =
-        identity.roles.contains("ROLE_ADMIN") || session.subject == identity.principal.name
+        identity.roles.contains("ROLE_ADMIN") || session.subject == callerSubject()
+
+    /**
+     * The identifier a session row is keyed by: the token's `sub`, never `principal.name`.
+     *
+     * [com.openbank.mcp.infrastructure.mcp.CallerContextResolver] validates an OBO token by
+     * comparing the row's subject to `jwt.subject`, so the row MUST hold the same claim. With
+     * `principal.name` it held Quarkus' name claim (`upn`/`preferred_username` — an email in this
+     * realm) while the resolver read the `sub` UUID: never equal, so every staff OBO call fell
+     * through to anonymous with no error anywhere (#2938). `sub` is also the stable choice —
+     * `preferred_username` is mutable in Keycloak and would strand a live session on rename.
+     *
+     * The `principal.name` fallback covers a non-JWT identity (`@TestSecurity`); production always
+     * takes the `sub` branch. Both writers and [owns] read through here so the two can't diverge.
+     */
+    private fun callerSubject(): String =
+        (identity.principal as? JsonWebToken)?.subject ?: identity.principal.name
 
     private fun forbidden(): Response =
         Response.status(Response.Status.FORBIDDEN).entity(mapOf("error" to "not your session")).build()
