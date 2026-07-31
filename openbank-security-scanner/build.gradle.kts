@@ -2,6 +2,11 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+// CI probe (#2833/#2848): comment-only, so the resolved graph is bit-identical to this
+// branch's parent. Cut from an OLDER main commit on purpose, so that pull_request.base.sha
+// (main's tip at PR-creation time) differs from the merge-base — the only state in which
+// the merge-base fix is distinguishable from the snapshot fix.
+
 plugins {
     id("openbank.quarkus-service")
 }
