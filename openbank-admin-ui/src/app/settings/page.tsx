@@ -6,8 +6,10 @@
 
 import { useState } from 'react'
 import { User, Bell, Shield, Globe, Key, Save, Eye, EyeOff } from 'lucide-react'
+import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { ROLE_LABELS } from '@/lib/auth/roles'
 
 type Tab = 'profile' | 'notifications' | 'security' | 'api' | 'regional'
 
@@ -85,13 +87,18 @@ export default function SettingsPage() {
 /* ── Profile ─────────────────────────────────────────────────────────────── */
 function ProfileTab() {
   const { t } = useLanguage()
+  const { data: session } = useSession()
+  const name = session?.user?.name ?? ''
+  const email = session?.user?.email ?? ''
+  const roles = session?.user?.roles ?? []
+  const initials = (name || email || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
+
   return (
     <div className="card">
       <div className="card-header">
         <span className="card-header-title">{t('Informace o profilu', 'Profile Information')}</span>
       </div>
       <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        {/* Avatar row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', paddingBottom: '16px', borderBottom: '1px solid var(--border)' }}>
           <div style={{
             width: '56px', height: '56px',
@@ -100,23 +107,35 @@ function ProfileTab() {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: '20px', fontWeight: 700, color: '#fff',
             flexShrink: 0,
-          }}>A</div>
+          }}>{initials}</div>
           <div>
-            <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{t('Administrátor', 'Admin User')}</div>
-            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '2px' }}>{t('Superuživatel · Všechna oprávnění', 'Superuser · All permissions')}</div>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{name || '—'}</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '2px' }}>{email || '—'}</div>
           </div>
-          <button className="btn btn-secondary" style={{ marginLeft: 'auto', fontSize: '12px' }}>{t('Změnit avatar', 'Change avatar')}</button>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-          <FieldGroup label={t('Jméno', 'First name')}    value="Admin"                  />
-          <FieldGroup label={t('Příjmení', 'Last name')}     value="User"                   />
-          <FieldGroup label={t('E-mailová adresa', 'Email address')} value="admin@openbank.local" type="email" />
-          <FieldGroup label={t('Telefon', 'Phone')}         value="+420 000 000 000"       />
-        </div>
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '4px' }}>
-          <button className="btn btn-primary"><Save size={13}/> {t('Uložit změny', 'Save changes')}</button>
+        <div>
+          <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
+            {t('Role (Keycloak)', 'Roles (Keycloak)')}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            {roles.length === 0 && <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>—</span>}
+            {roles.map(r => {
+              const meta = ROLE_LABELS[r]
+              return (
+                <span key={r} style={{
+                  fontSize: '11px', fontWeight: 600, padding: '3px 8px', borderRadius: '10px',
+                  color: meta?.color ?? 'var(--text-secondary)', background: meta?.bg ?? 'var(--surface-3)',
+                }}>
+                  {meta?.label ?? r}
+                </span>
+              )
+            })}
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '10px' }}>
+            {t('Profil se spravuje v Keycloaku; tato obrazovka zobrazuje skutečnou přihlášenou identitu.',
+               'Your profile is managed in Keycloak; this screen shows the real signed-in identity.')}
+          </div>
         </div>
       </div>
     </div>

@@ -79,7 +79,6 @@ export default auth((req) => {
     { pattern: /^\/audit/,              required: ["ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_COMPLIANCE"] },
     { pattern: /^\/kyc/,               required: ["ROLE_ADMIN", "ROLE_OPERATOR", "ROLE_COMPLIANCE", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER"] },
     { pattern: /^\/regulatory/,        required: ["ROLE_ADMIN", "ROLE_COMPLIANCE"] },
-    { pattern: /^\/technical-accounts/,required: ["ROLE_ADMIN", "ROLE_OPERATOR"] },
     { pattern: /^\/system\/config/,    required: ["ROLE_ADMIN"] },
     { pattern: /^\/payments/,          required: ["ROLE_ADMIN", "ROLE_OPERATOR", "ROLE_PAYMENTS", "ROLE_SUPERVISOR"] },
     { pattern: /^\/parties/,           required: ["ROLE_ADMIN", "ROLE_OPERATOR", "ROLE_COMPLIANCE", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER"] },
