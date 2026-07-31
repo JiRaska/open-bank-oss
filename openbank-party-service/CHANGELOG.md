@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.13.0...party-service-v0.14.0) (2026-07-31)
+
+
+### Features
+
+* **party:** add the GDPR Art. 20 portability export endpoint (ADR-0204) ([#2704](https://github.com/JiRaska/open-bank-oss/issues/2704)) ([2412a55](https://github.com/JiRaska/open-bank-oss/commit/2412a551c843adba60dd6cd119923f37476fec6b))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.12.1...party-service-v0.13.0) (2026-07-31)
 
 
