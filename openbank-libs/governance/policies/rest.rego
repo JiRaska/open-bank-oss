@@ -133,6 +133,33 @@ allowed_reasons contains "party-self-service" if {
 	endswith(input.action, sprintf(".%v", [verb]))
 }
 
+# ---------------------------------------------------------------------------------------
+# ADR-0223 D2 phase 1 (shadow): the role->action matrix as data (rules.yaml: authz.
+# role_action_matrix), granting ALONGSIDE the legacy reasons. The seed is derived as a
+# strict subset of today's effective grants (operator-read-any's and compliance-read-any's
+# read verbs, verbatim), so this rule changes no decision; what it changes is the
+# decision_reason mix, which the D2(b) retirement triage reads to find where the matrix
+# already carries the call. A role absent from the matrix yields an undefined lookup and
+# the rule simply does not fire — fail-closed by construction.
+# ---------------------------------------------------------------------------------------
+allowed_reasons contains "matrix-allows" if {
+	input.principal.type == "HUMAN"
+	some role in input.principal.roles
+	matrix_grants(input.action, role)
+}
+
+# Grants for a role = its own grant list plus ONE level of inheritance (e.g. ROLE_ADMIN
+# inherits ROLE_OPERATOR). Single level deliberately: rego forbids recursion, and one hop
+# covers the ADMIN-as-operator-superset case without a walkable chain to reason about.
+matrix_grants(action, role) if {
+	data.rules.authz.role_action_matrix[role].grant[_] == action
+}
+
+matrix_grants(action, role) if {
+	parent := data.rules.authz.role_action_matrix[role].inherits
+	data.rules.authz.role_action_matrix[parent].grant[_] == action
+}
+
 # Operators and admins may list or read any resource on behalf of any party (support-desk
 # and onboarding cockpit paths, ADR-0068).
 allowed_reasons contains "operator-read-any" if {

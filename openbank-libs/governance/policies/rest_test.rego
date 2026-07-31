@@ -1194,3 +1194,72 @@ test_operator_mcp_session_does_not_leak_to_other_domains if {
 		"action": "account.freeze",
 	}
 }
+
+# ADR-0223 D2 phase 1 (shadow): the matrix grants a seeded read for a staff role — and the
+# reason surfaces, so the retirement triage can count matrix-carried calls.
+test_matrix_allows_grants_a_seeded_read if {
+	decision := rest.allow with input as {
+		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "account.read",
+	}
+		with data.openbank.bundle as bundle
+		with data.rules.authz as {"role_action_matrix": {"ROLE_OPERATOR": {"grant": ["account.read"]}}}
+
+	decision.allow == true
+	"matrix-allows" in rest.allowed_reasons with input as {
+		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "account.read",
+	}
+		with data.rules.authz as {"role_action_matrix": {"ROLE_OPERATOR": {"grant": ["account.read"]}}}
+}
+
+# An action outside the seed is NOT granted by the matrix (and by nothing else here) —
+# the matrix is an exact-action gate, not a prefix one.
+test_matrix_allows_does_not_grant_an_unseeded_action if {
+	not rest.allow with input as {
+		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "account.freeze",
+	}
+		with data.openbank.bundle as bundle
+		with data.rules.authz as {"role_action_matrix": {"ROLE_OPERATOR": {"grant": ["account.read"]}}}
+}
+
+# A role absent from the matrix: the lookup is undefined, the rule does not fire, and a
+# bundle whose rules.yaml predates the key sees no behaviour change.
+test_matrix_allows_absent_role_and_absent_key_are_silent if {
+	not rest.allowed_reasons["matrix-allows"] with input as {
+		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_NOPE"]},
+		"action": "account.read",
+	}
+		with data.rules.authz as {"role_action_matrix": {"ROLE_OPERATOR": {"grant": ["account.read"]}}}
+
+	not rest.allowed_reasons["matrix-allows"] with input as {
+		"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "account.read",
+	}
+		with data.rules as {}
+}
+
+# ADR-0223 phase 1.5: one-level inheritance — ADMIN inherits OPERATOR's full matrix; a role
+# with an empty own grant list still resolves via the parent.
+test_matrix_inherits_one_level if {
+	rest.allowed_reasons["matrix-allows"] with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "account.freeze",
+	}
+		with data.rules.authz as {"role_action_matrix": {
+			"ROLE_OPERATOR": {"grant": ["account.freeze"]},
+			"ROLE_ADMIN": {"grant": [], "inherits": "ROLE_OPERATOR"},
+		}}
+}
+
+test_matrix_inheritance_does_not_grant_unlisted if {
+	not rest.allowed_reasons["matrix-allows"] with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "account.close",
+	}
+		with data.rules.authz as {"role_action_matrix": {
+			"ROLE_OPERATOR": {"grant": ["account.freeze"]},
+			"ROLE_ADMIN": {"grant": [], "inherits": "ROLE_OPERATOR"},
+		}}
+}
