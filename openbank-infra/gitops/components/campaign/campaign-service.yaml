@@ -99,8 +99,23 @@ spec:
             - name: CONSENT_SERVICE_URL
               value: http://consent-service.consent.svc:8106
             # ADR-0210: read-only segment evaluation against the silver layer.
+            # ClickHouse requires auth: the `analytics` user, password from the
+            # Vault-backed clickhouse-auth Secret projected into this namespace
+            # (clickhouse-auth-externalsecret.yaml) — same pattern as admin-ui and
+            # analytics-sink. Both vars are REQUIRED at boot: SilverSegmentEvaluator
+            # declares them as non-Optional String with `defaultValue = ""`, and
+            # SmallRye treats an empty default as no value, so the pod CrashLoops on
+            # `Failed to load config value of type class java.lang.String` when they
+            # are unset — as it did on the first sandbox rollout (#2749).
             - name: CLICKHOUSE_URL
               value: http://clickhouse.analytics.svc:8123
+            - name: CLICKHOUSE_USER
+              value: analytics
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-auth
+                  key: password
             - name: KEYCLOAK_URL
               value: http://keycloak.platform.svc:8080
             # ADR-0200 D6 suppression defaults; override per environment here, not in code.
