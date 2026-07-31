@@ -80,7 +80,7 @@ class TerminationService(
                         legalCompensationCap = cap,
                     )
                     val entity = SettlementQuoteEntity().apply {
-                        id = UUID.randomUUID()
+                        id = com.openbank.libs.domain.identifiers.Ids.newId()
                         this.loanId = loan.id.value
                         asOfDate = quote.asOfDate
                         validUntil = quote.validUntil

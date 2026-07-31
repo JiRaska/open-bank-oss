@@ -149,10 +149,10 @@ class LoanEntity : PanacheEntityBase() {
 class InstallmentEntity : PanacheEntityBase() {
     @Id
     @Column(columnDefinition = "uuid")
-    var id: UUID = UUID.randomUUID()
+    var id: UUID = Ids.newId()
 
     @Column(name = "loan_id", columnDefinition = "uuid")
-    var loanId: UUID = UUID.randomUUID()
+    var loanId: UUID = UUID(0, 0)
 
     @Column(name = "number")
     var number: Int = 0
@@ -196,10 +196,10 @@ class InstallmentEntity : PanacheEntityBase() {
 class CollateralEntity : PanacheEntityBase() {
     @Id
     @Column(columnDefinition = "uuid")
-    var id: UUID = UUID.randomUUID()
+    var id: UUID = Ids.newId()
 
     @Column(name = "loan_id", columnDefinition = "uuid")
-    var loanId: UUID = UUID.randomUUID()
+    var loanId: UUID = UUID(0, 0)
 
     @Column(name = "type")
     @Enumerated(EnumType.STRING)
@@ -296,10 +296,10 @@ class SettlementQuoteEntity : io.quarkus.hibernate.reactive.panache.kotlin.Panac
 
     @Id
     @Column(columnDefinition = "uuid")
-    var id: UUID = UUID.randomUUID()
+    var id: UUID = Ids.newId()
 
     @Column(name = "loan_id", columnDefinition = "uuid")
-    var loanId: UUID = UUID.randomUUID()
+    var loanId: UUID = UUID(0, 0)
 
     @Column(name = "as_of_date")
     var asOfDate: LocalDate = LocalDate.EPOCH
