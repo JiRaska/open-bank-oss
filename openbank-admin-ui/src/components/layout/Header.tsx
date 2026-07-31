@@ -10,12 +10,14 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { ROLE_LABELS } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { CommandPalette } from '@/components/search/CommandPalette'
 
 interface BuildInfo { version: string; gitSha: string; buildDate: string }
 
 export function Header() {
   const { data: session } = useSession()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const { language, setLanguage, t } = useLanguage()
   const [build, setBuild] = useState<BuildInfo | null>(null)
 
@@ -26,6 +28,18 @@ export function Header() {
       .then(d => { if (mounted && d) setBuild(d) })
       .catch(() => {})
     return () => { mounted = false }
+  }, [])
+
+  // ⌘K / Ctrl+K opens the palette anywhere in the app.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen(o => !o)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
 
   const user = session?.user
@@ -52,8 +66,18 @@ export function Header() {
       position: 'relative',
       zIndex: 10,
     }}>
-      {/* Search */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-tertiary)' }}>
+      {/* Search — ADR-0228 D3: the painted placeholder is now a real palette. */}
+      <button
+        onClick={() => setPaletteOpen(true)}
+        aria-label={t('Rychlé hledání (⌘K)', 'Quick search (⌘K)')}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-tertiary)',
+          background: 'none', border: 'none', cursor: 'pointer', padding: '6px 10px',
+          borderRadius: '8px', font: 'inherit',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-3)' }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+      >
         <Search size={14} />
         <span style={{ fontSize: '13px' }}>{t('Rychlé hledání…', 'Quick search…')}</span>
         <kbd style={{
@@ -61,7 +85,8 @@ export function Header() {
           background: 'var(--surface-3)', border: '1px solid var(--border)',
           borderRadius: '4px', color: 'var(--text-tertiary)', fontFamily: 'inherit',
         }}>⌘K</kbd>
-      </div>
+      </button>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
 
       {/* Actions */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
