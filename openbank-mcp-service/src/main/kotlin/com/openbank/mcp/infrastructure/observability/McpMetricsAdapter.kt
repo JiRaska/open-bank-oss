@@ -96,6 +96,17 @@ class McpMetricsAdapter(private val registry: MeterRegistry?) : McpMetricsPort {
         }
     }
 
+    override fun toolsListCompleted(outcome: McpMetricsPort.ToolsListOutcome) {
+        registry?.let { r ->
+            Counter.builder("openbank.mcp.tools_list")
+                .tag("service", SERVICE)
+                .tag("outcome", outcome.name.lowercase())
+                .description("MCP tools/list discovery by outcome (ADR-0225)")
+                .register(r)
+                .increment()
+        }
+    }
+
     companion object {
         private const val SERVICE = "mcp"
 

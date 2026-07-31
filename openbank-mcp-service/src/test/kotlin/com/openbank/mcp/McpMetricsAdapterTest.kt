@@ -47,6 +47,18 @@ class McpMetricsAdapterTest {
     }
 
     @Test
+    fun `every tools-list outcome gets a distinct lower-cased tag value`() {
+        McpMetricsPort.ToolsListOutcome.entries.forEach { adapter.toolsListCompleted(it) }
+
+        McpMetricsPort.ToolsListOutcome.entries.forEach { outcome ->
+            assertThat(
+                registry.get("openbank.mcp.tools_list")
+                    .tag("service", "mcp").tag("outcome", outcome.name.lowercase()).counter().count(),
+            ).isEqualTo(1.0)
+        }
+    }
+
+    @Test
     fun `the bounded tag constants are the values the endpoint is expected to pass`() {
         adapter.requestHandled(McpMetricsPort.UNKNOWN_METHOD)
         adapter.toolCallCompleted(
@@ -70,5 +82,6 @@ class McpMetricsAdapterTest {
         noRegistry.requestHandled("ping")
         noRegistry.toolCallCompleted("ping", McpCallAuditor.Decision.ALLOW, AuditResult.SUCCESS, Duration.ZERO)
         noRegistry.callerIdentityResolved(CallerIdentitySource.TOKEN)
+        noRegistry.toolsListCompleted(McpMetricsPort.ToolsListOutcome.OK)
     }
 }

@@ -13,6 +13,7 @@ import com.openbank.libs.authz.PolicyDecisionPoint
 import com.openbank.mcp.application.McpCallAuditor
 import com.openbank.mcp.application.McpPiiMasker
 import com.openbank.mcp.application.McpToolRegistry
+import com.openbank.mcp.application.PolicyFilteredToolCatalog
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
 import com.openbank.mcp.application.port.out.ProposalPort
@@ -56,8 +57,9 @@ class McpSpecConformanceTest {
 
     private fun endpoint(): McpEndpoint {
         val stub = ConformanceReads(mapper)
+        val toolRegistry = McpToolRegistry(stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper)
         return McpEndpoint(
-            registry = McpToolRegistry(stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper),
+            registry = toolRegistry,
             pdp = AllowAll,
             auditor = McpCallAuditor(SinkPublisher),
             callerResolver = CallerContextResolver(
@@ -72,6 +74,7 @@ class McpSpecConformanceTest {
         ).apply {
             metrics = McpMetricsAdapter(meters)
             rateLimiter = limiter
+            toolsCatalog = PolicyFilteredToolCatalog(toolRegistry, AllowAll, 0)
         }
     }
 

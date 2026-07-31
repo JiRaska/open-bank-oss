@@ -13,6 +13,7 @@ import com.openbank.libs.authz.PolicyDecisionPoint
 import com.openbank.mcp.application.McpCallAuditor
 import com.openbank.mcp.application.McpPiiMasker
 import com.openbank.mcp.application.McpToolRegistry
+import com.openbank.mcp.application.PolicyFilteredToolCatalog
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
 import com.openbank.mcp.application.port.out.ProposalPort
@@ -44,7 +45,11 @@ class McpEndpointTest {
     // fallback, so every test that exercises protocol dispatch / the PDP gate / audit / metering
     // needs a real-shaped identity to reach `handleToolCall` at all. The dedicated "no token" test
     // below builds its own endpoint with an anonymous JWT to cover that (now denying) path instead.
-    private fun endpoint(pdp: PolicyDecisionPoint, jwt: TestJsonWebToken = testAgentJwt()): McpEndpoint {
+    private fun endpoint(
+        pdp: PolicyDecisionPoint,
+        jwt: TestJsonWebToken = testAgentJwt(),
+        toolsListCacheTtlMs: Long = 0,
+    ): McpEndpoint {
         val stub = StubReads(mapper)
         val toolRegistry = McpToolRegistry(stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper)
         val caller = CallerContextResolver(jwt)
@@ -60,6 +65,7 @@ class McpEndpointTest {
         ).apply {
             metrics = McpMetricsAdapter(registry)
             rateLimiter = limiter
+            toolsCatalog = PolicyFilteredToolCatalog(toolRegistry, pdp, toolsListCacheTtlMs)
         }
     }
 
@@ -105,6 +111,110 @@ class McpEndpointTest {
         assertThat(
             names,
         ).contains("list_accounts", "get_balance", "list_transactions", "list_consents", "propose_payment")
+    }
+
+    // ── ADR-0225: discovery is capability-shaped, audited, fail-closed ───────────────────────
+
+    @Test
+    fun `tools list returns only the tools the PDP permits`() {
+        val resp = body(
+            endpoint(allowOnly("query.account.readonly", "query.balance.readonly")).handle(rpc("tools/list")).entity,
+        )
+        val names = resp.path("result").path("tools").map { it.path("name").asText() }
+        assertThat(names)
+            .containsExactlyInAnyOrder("list_accounts", "get_balance")
+            .doesNotContain("list_transactions", "propose_payment", "count_marketing_consents")
+    }
+
+    @Test
+    fun `tools list keeps schemas identical for every caller — only membership is filtered`() {
+        val filtered = body(
+            endpoint(allowOnly("query.account.readonly")).handle(rpc("tools/list")).entity,
+        )
+        val full = body(endpoint(allowAll()).handle(rpc("tools/list")).entity)
+        val filteredSchema = filtered.path("result").path("tools").single().path("inputSchema")
+        val fullSchema = full.path("result").path("tools")
+            .first { it.path("name").asText() == "list_accounts" }.path("inputSchema")
+        assertThat(filteredSchema).isEqualTo(fullSchema)
+    }
+
+    @Test
+    fun `tools list is empty but successful when the PDP denies everything`() {
+        val resp = body(endpoint(denyAll()).handle(rpc("tools/list")).entity)
+        assertThat(resp.path("result").path("tools").size()).isZero()
+        val event = audit.events.single()
+        assertThat(event.operation).isEqualTo("mcp.tools.list")
+        assertThat(event.result).isEqualTo(AuditResult.SUCCESS)
+        assertThat(event.payload)
+            .containsEntry("tools_returned", 0)
+            .containsEntry("tools_total", 6)
+    }
+
+    @Test
+    fun `tools list fails closed empty on a PDP outage and is audited as denied`() {
+        val resp = body(endpoint(exploding()).handle(rpc("tools/list")).entity)
+        assertThat(resp.path("result").path("tools").size()).isZero()
+        val event = audit.events.single()
+        assertThat(event.result).isEqualTo(AuditResult.DENIED)
+        assertThat(event.payload).containsEntry("pdp_errors", 6)
+        assertThat(
+            registry.get("openbank.mcp.tools_list")
+                .tag("service", "mcp").tag("outcome", "pdp_unavailable").counter().count(),
+        ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `tools list with no agent token is empty and audited as an auth failure`() {
+        val resp = body(
+            endpoint(allowAll(), jwt = TestJsonWebToken()).handle(rpc("tools/list")).entity,
+        )
+        assertThat(resp.path("result").path("tools").size()).isZero()
+        val event = audit.events.single()
+        assertThat(event.operation).isEqualTo("mcp.tools.list")
+        assertThat(event.result).isEqualTo(AuditResult.DENIED)
+        assertThat(event.payload).containsEntry("reason", "caller authentication failed")
+        assertThat(
+            registry.get("openbank.mcp.tools_list")
+                .tag("service", "mcp").tag("outcome", "anonymous_denied").counter().count(),
+        ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `tools list is audited with the filter counts on the happy path`() {
+        endpoint(allowAll()).handle(rpc("tools/list"))
+        val event = audit.events.single()
+        assertThat(event.operation).isEqualTo("mcp.tools.list")
+        assertThat(event.actorType).isEqualTo("AI_AGENT")
+        assertThat(event.result).isEqualTo(AuditResult.SUCCESS)
+        assertThat(event.payload)
+            .containsEntry("tools_returned", 6)
+            .containsEntry("tools_total", 6)
+            .containsEntry("charter", "test-agent")
+    }
+
+    @Test
+    fun `tools list is served from the per-principal cache within the TTL`() {
+        val counting = CountingPdp()
+        val ep = endpoint(counting, toolsListCacheTtlMs = 60_000)
+
+        ep.handle(rpc("tools/list"))
+        val afterFirst = counting.calls.get()
+        ep.handle(rpc("tools/list"))
+
+        assertThat(afterFirst).isEqualTo(6)
+        assertThat(counting.calls.get()).isEqualTo(6)
+        assertThat(audit.events).hasSize(2)
+    }
+
+    @Test
+    fun `tools list re-consults the PDP once the cache TTL lapses`() {
+        val counting = CountingPdp()
+        val ep = endpoint(counting, toolsListCacheTtlMs = 0)
+
+        ep.handle(rpc("tools/list"))
+        ep.handle(rpc("tools/list"))
+
+        assertThat(counting.calls.get()).isEqualTo(12)
     }
 
     @Test
@@ -345,6 +455,18 @@ class McpEndpointTest {
 
     private fun exploding() = object : PolicyDecisionPoint {
         override suspend fun allow(query: AuthzQuery): AuthzDecision = error("PDP down")
+    }
+
+    private fun allowOnly(vararg capabilities: String) = object : PolicyDecisionPoint {
+        override suspend fun allow(query: AuthzQuery) = AuthzDecision(allow = query.action in capabilities)
+    }
+
+    private class CountingPdp : PolicyDecisionPoint {
+        val calls = java.util.concurrent.atomic.AtomicInteger(0)
+        override suspend fun allow(query: AuthzQuery): AuthzDecision {
+            calls.incrementAndGet()
+            return AuthzDecision(allow = true)
+        }
     }
 
     // A validated agent token (ADR-0195): sub carries the `agent:` prefix the shared
