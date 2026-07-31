@@ -385,6 +385,17 @@ fire from *outside* it, so they stay here:
   a false positive here looks exactly like the success you were hoping for. Prefer structured
   data outright where it exists: step conclusions from
   `gh api .../actions/jobs/<id> --jq '.steps[]'` cannot be spoofed by the script listing.
+- **Validate the PROBE, not the command inside it — in zsh a `for x in $VAR` loop runs ONCE.**
+  zsh does not word-split an unquoted parameter (bash does), so a sweep written as
+  `LIST="a b c"; for b in $LIST; do git show-ref --verify --quiet "refs/heads/$b" …` tests one
+  ref literally named `a b c`, finds nothing, and reports the estate clean. Measured
+  2026-07-31 on a leftover-branch sweep: it printed `0 of 17` while five refs were sitting
+  there. Use `${=VAR}`, a real array `VAR=(a b c)`, or `while read` from a heredoc — the last
+  is safest since it also survives names with spaces.
+  The transferable half is the failure of the check on the check: `git show-ref` *was* validated
+  against a known-positive and passed, because the bug was in the LOOP, not the command. A
+  component test is not a probe test. Feed the whole construct a case it must flag — here, a
+  branch you know exists — and only then trust its silence.
 - **Test the script EXTRACTED from the workflow, not a retyped copy of it.** A transcription is
   a different program: the first harness for #2890 used `[ … ] && { … }` where the real step
   used `if` blocks, and under `set -e` those differ on exactly the passing case. Parse the YAML
