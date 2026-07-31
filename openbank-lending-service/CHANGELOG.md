@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.17.0...lending-service-v0.18.0) (2026-07-31)
+
+
+### Features
+
+* **lending:** credit evidence emission into the audit chain (ADR-0214) ([2759397](https://github.com/JiRaska/open-bank-oss/commit/2759397b629f42f9893f2d44724d488cfd34456a))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.16.0...lending-service-v0.17.0) (2026-07-31)
 
 
