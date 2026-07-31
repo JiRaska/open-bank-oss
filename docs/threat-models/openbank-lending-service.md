@@ -252,6 +252,10 @@ Tracked as the named bootstrap follow-up (ADR-0212 D4).
 
 ## 9. Change log
 
+- **2026-07-31** — Temporal durable origination timers (ADR-0211 D2): per-application
+  OriginationTimersWorkflow (document SLA with half-time reminder, offer expiry,
+  reflection/cooling-off wait), generation-counter invalidation, idempotent expire/advance
+  activities against the aggregate, build-gated Temporal adapter with offline no-op default.
 - **2026-07-31** — Canonical origination graph wired (ADR-0211): V8/V9 status migration
   (PROPOSED→SUBMITTED, APPROVED→OFFERED, REJECTED→DECLINED), state machine guards on
   apply/decide/disburse, `POST /applications/{id}/advance`, sandbox STP flag (never prod).

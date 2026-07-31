@@ -24,6 +24,7 @@ import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.WriteOffRequest
+import com.openbank.lending.infrastructure.adapter.NoOpOriginationWorkflowPort
 import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
 import com.openbank.lending.infrastructure.compliance.OriginationConfig
 import com.openbank.libs.domain.identifiers.LoanApplicationId
@@ -84,6 +85,7 @@ class LendingServiceEdgeCasesTest {
         provisioning,
         CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
         OriginationConfig(false),
+        NoOpOriginationWorkflowPort(),
     )
 
     private val partyId = UUID.fromString("22222222-2222-2222-2222-222222222222")

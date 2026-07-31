@@ -105,6 +105,12 @@ quarkus:
     # so the management interface (default :8086) must be folded back in (else /q/health/* 404s).
     management:
       enabled: false
+  lending:
+    origination:
+      # No real Temporal frontend in @QuarkusTest: don't register the timers worker (it would
+      # fail boot on Connection refused). Workflow tests drive their own TestWorkflowEnvironment.
+      worker:
+        enabled: false
 
 openbank:
   rate-limit:
@@ -114,6 +120,13 @@ openbank:
     poll-interval: 5s
     initial-delay: 5s
     dispatch-enabled: true
+  temporal:
+    # ADR-0211 D2 durable origination timers. OFF locally; sandbox/prod override via env
+    # (OPENBANK_TEMPORAL_ENABLED + the temporal-frontend NetworkPolicy edge).
+    enabled: ${OPENBANK_TEMPORAL_ENABLED:false}
+    server-url: ${TEMPORAL_FRONTEND_URL:temporal-frontend.temporal.svc.cluster.local:7233}
+    namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank-lending}
+    task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-lending-origination}
 
 # Ledger posting (ADR-0028 D3). `backend=rest` build-time-activates RestLedgerPostingAdapter against
 # ledger-service; left as `none` the @Default no-op stays bound and the service builds/boots offline.
@@ -135,6 +148,11 @@ lending:
     # READY_TO_DISBURSE by the 'sandbox-auto-approval' actor so sandbox e2e runs without an operator.
     # Restart-required. MUST stay false in production — it bypasses the four-eyes gate entirely.
     auto-approve: ${LENDING_ORIGINATION_AUTO_APPROVE:false}
+    worker:
+      enabled: ${LENDING_ORIGINATION_WORKER_ENABLED:true}
+    timers:
+      offer-validity-days: ${LENDING_OFFER_VALIDITY_DAYS:30}
+      docs-sla-days: ${LENDING_DOCS_SLA_DAYS:14}
   # Outbox event write (ADR-0003 transactional outbox). `backend=jpa` build-time-activates
   # JpaLoanEventEmitter, persisting each domain event to `lending_outbox` for LendingOutboxDispatcher
   # to publish. Defaults to `jpa` (unlike ledger.backend above) — the write targets this service's own

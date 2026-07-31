@@ -20,6 +20,7 @@ import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
+import com.openbank.lending.infrastructure.adapter.NoOpOriginationWorkflowPort
 import com.openbank.lending.infrastructure.client.LendingGlAccounts
 import com.openbank.lending.infrastructure.client.LendingJournalFactory
 import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
@@ -76,6 +77,7 @@ class LendingGlOutcomeTest {
         valuation, riskParameters, events, clock, provisioning,
         CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
         OriginationConfig(false),
+        NoOpOriginationWorkflowPort(),
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")

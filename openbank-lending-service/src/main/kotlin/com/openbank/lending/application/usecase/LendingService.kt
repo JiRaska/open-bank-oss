@@ -94,6 +94,7 @@ class LendingService(
     private val provisioning: ProvisioningRepository,
     private val complianceGuard: com.openbank.lending.infrastructure.compliance.CompliancePackGuard,
     private val originationConfig: OriginationConfig,
+    private val workflowPort: com.openbank.lending.application.port.out.OriginationWorkflowPort,
 ) : ApplyForLoanUseCase,
     DisburseLoanUseCase,
     ServicingUseCase,
@@ -123,6 +124,13 @@ class LendingService(
             ?.let { CompliancePackEvaluator.mandatorySteps(it) }
             ?: emptySet()
 
+    private fun reflectionDaysFor(application: LoanApplication): Int? =
+        complianceGuard.resolveOriginationPack(application.jurisdiction, application.productType)
+            ?.pack?.reflectionPeriodDays
+
+    private fun Uni<LoanApplication>.signalWorkflow(): Uni<LoanApplication> =
+        call { app -> workflowPort.stateEntered(app.id, app.status, reflectionDaysFor(app)) }
+
     // --- Origination --------------------------------------------------------------------------------
 
     override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> {
@@ -149,7 +157,10 @@ class LendingService(
             productType = request.productType,
             packVersion = pack?.pack?.version,
         )
-        return applications.save(application).map { saved ->
+        return applications.save(application).call { saved ->
+            val state = if (originationConfig.autoApprove) straightThrough(saved).status else saved.status
+            workflowPort.stateEntered(saved.id, state, reflectionDaysFor(saved))
+        }.map { saved ->
             if (originationConfig.autoApprove) straightThrough(saved) else saved
         }
     }
@@ -193,10 +204,44 @@ class LendingService(
                             is OriginationTransitionResult.Rejected ->
                                 Uni.createFrom().failure(IllegalStateException(result.reason))
                             is OriginationTransitionResult.Applied ->
-                                applications.update(existing.copy(status = result.newState))
+                                applications.update(existing.copy(status = result.newState)).signalWorkflow()
                         }
                     }
                 }
+            }
+        }
+
+    override fun expireIfInState(id: LoanApplicationId, expectedState: String, actor: String): Uni<LoanApplication> =
+        applications.findById(id).flatMap { existing ->
+            when {
+                existing == null ->
+                    Uni.createFrom().failure(IllegalArgumentException("Application not found: $id"))
+                existing.status.name != expectedState ->
+                    Uni.createFrom().item(existing)
+                else -> when (
+                    val result = machine.apply(
+                        transition(existing, existing.status, OriginationState.EXPIRED, actor).copy(
+                            actorKind = OriginationActorKind.SYSTEM,
+                            reason = "durable timer elapsed in $expectedState (ADR-0211 D2)",
+                        ),
+                    )
+                ) {
+                    is OriginationTransitionResult.Rejected ->
+                        Uni.createFrom().failure(IllegalStateException(result.reason))
+                    is OriginationTransitionResult.Applied ->
+                        applications.update(existing.copy(status = result.newState)).signalWorkflow()
+                }
+            }
+        }
+
+    override fun advanceIfInState(id: LoanApplicationId, expectedState: String, actor: String): Uni<LoanApplication> =
+        applications.findById(id).flatMap { existing ->
+            when {
+                existing == null ->
+                    Uni.createFrom().failure(IllegalArgumentException("Application not found: $id"))
+                existing.status.name != expectedState ->
+                    Uni.createFrom().item(existing)
+                else -> advance(id, actor)
             }
         }
 
@@ -229,7 +274,7 @@ class LendingService(
                                 decisionReason = decision.reason,
                                 decidedAt = OffsetDateTime.now(clock),
                             ),
-                        )
+                        ).signalWorkflow()
                     }
                 }
             }
