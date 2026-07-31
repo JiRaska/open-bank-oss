@@ -1,7 +1,7 @@
 ---
 date: 2026-07-30
 decision-status: proposed
-delivery-status: planned
+delivery-status: shipped
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
