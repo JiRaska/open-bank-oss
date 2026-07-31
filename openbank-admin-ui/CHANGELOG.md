@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.64.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.63.1...admin-ui-v0.64.0) (2026-07-31)
+
+
+### Features
+
+* **admin-ui:** entity-resolution facade /api/entities/resolve (ADR-0228 D2) ([#2782](https://github.com/JiRaska/open-bank-oss/issues/2782)) ([c6de1ba](https://github.com/JiRaska/open-bank-oss/commit/c6de1bac2ea3c19cacbb37ad4413c756840fc43c))
+
 ## [0.63.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.63.0...admin-ui-v0.63.1) (2026-07-31)
 
 
