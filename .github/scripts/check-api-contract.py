@@ -145,10 +145,6 @@ EXTERNAL_CONTRACT_SERVICES: dict[str, str] = {
         "Berlin Group NextGenPSD2 mandates the URL shape (/v1/consents, ...); info.version "
         "tracks that external spec, not a URL segment this repo owns."
     ),
-    "openbank-mcp-service": (
-        "Model Context Protocol: a single conventional /mcp JSON-RPC endpoint, no versioned "
-        "URL segment to compare against."
-    ),
 }
 
 
