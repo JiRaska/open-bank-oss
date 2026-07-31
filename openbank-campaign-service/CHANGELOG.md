@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/JiRaska/open-bank-oss/compare/v0.3.0...v0.3.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **campaign:** make the service actually boot — redis, OPA bundle mode, keycloak host ([#2865](https://github.com/JiRaska/open-bank-oss/issues/2865)) ([42d9d3e](https://github.com/JiRaska/open-bank-oss/commit/42d9d3e0ec9dc6ec0943bfcae513a47723c77ce1))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/v0.2.0...v0.3.0) (2026-07-31)
 
 
