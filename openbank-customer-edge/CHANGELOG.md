@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.52.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.51.0...customer-edge-v0.52.0) (2026-07-31)
+
+
+### Features
+
+* **governance:** write grants + one-level role inheritance in the authz matrix (ADR-0223 phase 1.5) ([#2864](https://github.com/JiRaska/open-bank-oss/issues/2864)) ([654e843](https://github.com/JiRaska/open-bank-oss/commit/654e84375f6b52853d9e33f15dbf4ba33cba9551))
+
 ## [0.51.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.50.0...customer-edge-v0.51.0) (2026-07-31)
 
 
