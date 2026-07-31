@@ -74,8 +74,9 @@ class AccountingClockTest {
         @Test
         fun `winter time shifts the rollover by an hour`() {
             // CET (UTC+1) in January: the day rolls at 23:00 UTC, not 22:00.
-            val beforeRollover = AccountingClock.bank(Clock.fixed(Instant.parse("2026-01-15T22:59:59Z"), ZoneOffset.UTC))
-            val afterRollover = AccountingClock.bank(Clock.fixed(Instant.parse("2026-01-15T23:00:00Z"), ZoneOffset.UTC))
+            fun at(instant: String) = AccountingClock.bank(Clock.fixed(Instant.parse(instant), ZoneOffset.UTC))
+            val beforeRollover = at("2026-01-15T22:59:59Z")
+            val afterRollover = at("2026-01-15T23:00:00Z")
 
             assertThat(beforeRollover.today()).isEqualTo(LocalDate.of(2026, 1, 15))
             assertThat(afterRollover.today()).isEqualTo(LocalDate.of(2026, 1, 16))

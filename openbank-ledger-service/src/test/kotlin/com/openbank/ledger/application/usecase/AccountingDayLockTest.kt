@@ -46,8 +46,7 @@ class AccountingDayLockTest {
         registry = SimpleMeterRegistry()
     }
 
-    private fun lock(mode: String) =
-        AccountingDayLock(repository, AccountingClock.bank(clock), registry, mode)
+    private fun lock(mode: String) = AccountingDayLock(repository, AccountingClock.bank(clock), registry, mode)
 
     private fun day(date: LocalDate, status: AccountingDayStatus): AccountingDayRecord {
         var record = AccountingDayRecord.open(date, Instant.parse("2026-07-30T06:00:00Z"), "op")
