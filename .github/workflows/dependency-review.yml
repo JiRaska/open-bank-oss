@@ -108,21 +108,51 @@ jobs:
           # and the runtime line is force()-pinned to 4.1.136.Final in
           # openbank.dependency-vulnerability-pins.gradle.kts. A force() cannot reach the
           # plugin classpath, and forcing 4.2.x would override the 4.1.136 the runtime needs
-          #
-          # GHSA-f6hv-jmp6-3vwv / GHSA-prj3-ccx8-p6x4 / GHSA-w9fj-cfpg-grvv (io.netty:
-          # netty-codec-http2 4.1.110 — MadeYouReset, CONTINUATION flood, decompression
-          # bomb): the same class as the #1446 entries above, one classpath over — 4.1.110
-          # resolves only on the settings/tooling classpath the graph-extraction plugin
-          # itself pulls (it surfaced the first time a PR added a brand-new module to the
-          # settings auto-include, #2751). Verified: every service runtime graph resolves
-          # netty-codec-http2 at the 4.1.136.Final force() floor
-          # (:openbank-campaign-service:dependencies --configuration testRuntimeClasspath
-          # shows 4.1.135 -> 4.1.136), so the flagged version never ships in a service artefact.
-          # GHSA-pwqr-wmgm-9rr8 / GHSA-jppx-w49h-x2qq / GHSA-57rv-r2g8-2cj3 /
-          # GHSA-6jqx-86gh-f27w / GHSA-mvh2-crg5-v77c (io.netty: netty-codec-http 4.1.119):
-          # identical class on the identical classpath — the graph-extraction plugin's own
-          # netty stack, flagged under `settings.gradle.kts »` in the same #2751 review.
-          # Same verification: service runtime graphs pin 4.1.136.Final via force().
           # — trading a real regression for an alert on a classpath that never ships. If a
           # service ever resolves netty 4.2.x for real, these three must be dropped.
-          allow-ghsas: GHSA-pq2g-wx69-c263, GHSA-3qp7-7mw8-wx86, GHSA-x4gw-5cx5-pgmh, GHSA-c653-97m9-rcg9, GHSA-f6hv-jmp6-3vwv, GHSA-prj3-ccx8-p6x4, GHSA-w9fj-cfpg-grvv, GHSA-pwqr-wmgm-9rr8, GHSA-jppx-w49h-x2qq, GHSA-57rv-r2g8-2cj3, GHSA-6jqx-86gh-f27w, GHSA-mvh2-crg5-v77c
+          #
+          # GHSA-prj3-ccx8-p6x4 / GHSA-w9fj-cfpg-grvv / GHSA-f6hv-jmp6-3vwv (io.netty:
+          # netty-codec-http2 4.1.119.Final — MadeYouReset, CONTINUATION-frame flood,
+          # HttpContentDecompressor maxAllocation bypass): 4.1.119 resolves ONLY on a
+          # BUILD-TIME classpath, never a shipped one — the Quarkus Gradle plugin's
+          # augmentation classpath (quarkusBuild/quarkusDev resolve their own Vert.x/Netty
+          # stack independently of any project's resolutionStrategy) and, since #2751 added a
+          # module to the settings auto-include, the graph-extraction plugin's own stack,
+          # which the run reports under `settings.gradle.kts »`. A fleet-wide force() cannot
+          # reach either — same shape as the netty 4.2.x case above. Neither is resolvable
+          # locally, so read the flagged coordinate off the failing run rather than trusting
+          # a version restated here. Every shipping graph is floored at 4.1.136.Final via
+          # openbank-dependency-vulnerability-pins, and 4.1.119 does not appear on one at
+          # all. Re-measured 2026-07-31 on :openbank-ledger-service after #2751 merged
+          # (`dependencies --configuration runtimeClasspath`): ZERO occurrences of 4.1.119 or
+          # 4.1.110, with netty-codec-http/-http2 resolving directly at 4.1.136.Final and NO
+          # `->` redirect. Two earlier revisions of this comment claimed those graphs show
+          # `4.1.119.Final -> 4.1.136.Final` and `4.1.135 -> 4.1.136`; neither is true —
+          # nothing requests those versions in the first place. Either way no module downloads the vulnerable jar
+          # (gradle/verification-metadata.xml records 4.1.119 on main already — pre-existing,
+          # not introduced by the Quarkus 3.38 bump this gate flagged it on). All three GHSAs
+          # need the vulnerable HTTP/2 codec exposed to untrusted traffic; a local
+          # build-augmentation classpath has none.
+          # DROP TRIGGER: a service's resolved graph containing 4.1.119 AT ALL, redirected or
+          # not. Grep the resolved graph for the version — never for the redirect arrow: a
+          # missing `-> 4.1.136` is the healthy state, so testing for it inverts the trigger.
+          # Validate any such grep against a known-positive first (the graphs do render
+          # redirects — e.g. `kotlin-stdlib:2.3.20 -> 2.4.0` in the ledger graph — so a silent
+          # grep is a real negative, not a broken probe).
+          #
+          # NOT allowlisted, deliberately — GHSA-pwqr-wmgm-9rr8, GHSA-jppx-w49h-x2qq,
+          # GHSA-57rv-r2g8-2cj3, GHSA-mvh2-crg5-v77c, GHSA-6jqx-86gh-f27w (io.netty:
+          # netty-codec-http, five highs). These failed this gate on PR #2751 against the same
+          # 4.1.119 tooling-classpath entry, but their 4.1.x fixes are 4.1.132 / 4.1.133 /
+          # 4.1.136 / 4.1.136 / 4.1.136 — all at or below the 4.1.136 fleet pin, so every
+          # shipping classpath is ALREADY remediated. An allowlist entry would therefore
+          # suppress a genuine regression the day the pin slipped below 4.1.136. They surfaced
+          # only because the base SHA had no submitted snapshot ("The number of snapshots
+          # compared for the base SHA (0) and the head SHA (1) do not match"), which makes the
+          # action diff the entire head graph as additions and re-evaluate pre-existing
+          # transitives as if the PR introduced them. Fix the snapshot, not the allowlist.
+          # Three of the five are patched at exactly 4.1.136, i.e. the pin sits on the floor
+          # with zero margin — as does build-logic/build.gradle.kts's own 4.2.16.Final. Expect
+          # the next netty advisory to re-fire this, and check whether it is a real finding
+          # before assuming it is another snapshot artifact.
+          allow-ghsas: GHSA-pq2g-wx69-c263, GHSA-3qp7-7mw8-wx86, GHSA-x4gw-5cx5-pgmh, GHSA-c653-97m9-rcg9, GHSA-prj3-ccx8-p6x4, GHSA-w9fj-cfpg-grvv, GHSA-f6hv-jmp6-3vwv
