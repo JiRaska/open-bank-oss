@@ -93,8 +93,11 @@ jobs:
             0) echo "Every declared feed is live and correctly shaped." ;;
             1) echo "::error::Declaration drift on the default branch — reconcile the script with the YAMLs."
                exit 1 ;;
-            2) echo "::warning::A declared external feed is dead or misshapen — escalating to #2204." ;;
-            *) echo "::error::The feed probe could not run. This is NOT a 'feeds are fine' verdict."
+            2) echo "::warning::A declared external feed is dead, misshapen or undeterminable — escalating to #2204." ;;
+            3) echo "::error::NO feed could be reached. That points at this runner's network, not"
+               echo "::error::at the feeds — and it is NOT a 'feeds are fine' verdict."
+               exit 3 ;;
+            *) echo "::error::Unexpected exit $code from the feed probe."
                exit "$code" ;;
           esac
 
@@ -109,7 +112,7 @@ jobs:
             const issue_number = 2204
             const body = [
               MARKER,
-              '## External feed watch — a declared feed is dead or misshapen',
+              '## External feed watch — a declared feed is dead, misshapen or undeterminable',
               '',
               'The daily probe fetched each declared third-party feed and checked its',
               'payload shape, not just its status code. Something is not answering with',

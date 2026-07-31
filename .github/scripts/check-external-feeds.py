@@ -54,11 +54,14 @@
 #   0  no drift, every declared feed live and correctly shaped
 #   1  DRIFT — an undeclared external URL, a declared feed whose YAML path no longer resolves, or
 #      a stale NOT_PROBED entry. Offline, deterministic, and a PR must not merge over it.
-#   2  a declared feed is DEAD or misshapen — actionable, but a property of the internet at this
-#      moment, so it escalates rather than blocking a merge.
-#   3  the probe itself could not run (no network, PyYAML missing). NEVER conflate with 0: a
-#      fetch that fails is not evidence the feed is fine, and this script exists precisely because
-#      a broken thing's silence read as health for 46 days.
+#   2  at least one declared feed is DEAD/misshapen, or could not be reached while others could.
+#      Actionable, but a property of the internet at this moment, so it escalates rather than
+#      blocking a merge. Every feed is still attempted and reported — one feed's timeout never
+#      suppresses another's verdict (see `triage`).
+#   3  nothing could be determined at all: PyYAML missing, or NO feed was reachable, which points
+#      at this runner's network rather than at any feed. NEVER conflate with 0 — a fetch that
+#      fails is not evidence the feed is fine, and this script exists precisely because a broken
+#      thing's silence read as health for 46 days.
 #
 # Run:  python3 .github/scripts/check-external-feeds.py [--root .] [--self-test] [--offline]
 
@@ -281,8 +284,13 @@ def fetch(url):
 
 
 def check_liveness(resolved):
-    """Fetch and shape-check. Returns (dead, unreachable) — kept apart on purpose."""
-    dead, unreachable = [], []
+    """Fetch and shape-check every feed. Returns (dead, unreachable, live).
+
+    All three are kept apart on purpose, and every feed is attempted regardless of what the
+    previous one did: "dead" is a verdict, "unreachable" is the absence of one, and conflating
+    them is how a probe's own failure gets reported as a statement about the thing probed.
+    """
+    dead, unreachable, live = [], [], []
     for feed in resolved:
         try:
             status, body = fetch(feed["url"])
@@ -303,7 +311,48 @@ def check_liveness(resolved):
             )
         else:
             print(f"OK   {feed['name']}: {feed['url']}")
-    return dead, unreachable
+            live.append(feed["name"])
+    return dead, unreachable, live
+
+
+
+def triage(dead, unreachable, live):
+    """Turn per-feed outcomes into (exit_code, report_lines). Pure, so it is self-testable.
+
+    Per-feed verdicts, not one verdict for the batch. The first version returned 3 the moment
+    ANY feed was unreachable, which had two consequences discovered on the very first scheduled
+    run (#2917, run 30653484527):
+
+      1. It suppressed the verdict on every other feed. `cnb-daily-fixing` had been fetched and
+         shape-checked successfully in that same run, and `cnb-bank-registry` timing out threw
+         that away. Had the FIXING been the dead one, its escalation would have been masked by an
+         unrelated timeout — the exact "a gate reports about something other than what it checked"
+         shape this script exists to prevent.
+      2. It made a daily job permanently red. `apl.cnb.cz` does not answer GitHub's runners at all
+         (it 404s from the cluster and from a laptop, so this is network-position specific, not an
+         outage). A scheduled workflow that is red every single day is a red addressed to nobody
+         and gets filtered within a week.
+
+    So unreachable is reported and escalated like any other actionable state, and exit 3 is
+    reserved for "nothing at all could be determined" — the probe being broken rather than a feed
+    being unhappy.
+    """
+    lines = list(dead)
+    if unreachable:
+        lines += unreachable
+        lines.append("")
+        lines.append("Unreachable is NOT a verdict about the feed — it is the absence of one.")
+    if unreachable and not live and not dead:
+        lines.append("")
+        lines.append("No feed could be reached at all. Suspect this runner's network, not the feeds.")
+        return 3, lines
+    if dead or unreachable:
+        lines.append("")
+        lines.append(
+            f"{len(dead)} dead/misshapen, {len(unreachable)} undeterminable, {len(live)} live.",
+        )
+        return 2, lines
+    return 0, lines
 
 
 CNB_GOOD = "31.07.2026 #146\nzemě|měna|množství|kód|kurz\nEMU|euro|1|EUR|24,915\n" + "".join(
@@ -352,7 +401,28 @@ def self_test():
         print(f"{'pass' if ok else 'FAIL'}  strip_config_default({raw!r})" + ("" if ok else f" -> {got!r}"))
         failures += 0 if ok else 1
 
-    print(f"\nself-test: {len(cases) + 2 - failures} passed, {failures} failed")
+    # Triage cases. The first two are the regression from run 30653484527: a dead feed must still
+    # be reported and escalated when a DIFFERENT feed is merely unreachable, and a lone timeout
+    # must not turn a daily job permanently red. Exit 3 survives only for "nothing determinable".
+    triage_cases = [
+        ("dead alone -> 2", (["DEAD a"], [], ["b"]), 2),
+        ("dead + unreachable -> 2, dead still reported", (["DEAD a"], ["UNREACHABLE b"], []), 2),
+        ("unreachable but something live -> 2, not 3", ([], ["UNREACHABLE b"], ["a"]), 2),
+        ("nothing reachable at all -> 3", ([], ["UNREACHABLE a", "UNREACHABLE b"], []), 3),
+        ("all live -> 0", ([], [], ["a", "b"]), 0),
+    ]
+    for name, args, want in triage_cases:
+        code, lines = triage(*args)
+        ok = code == want
+        # A dead feed that is not printed is the failure mode, not just a wrong exit code.
+        if args[0] and not any(ln.startswith("DEAD") for ln in lines):
+            ok = False
+            name += " [dead feed missing from the report]"
+        print(f"{'pass' if ok else 'FAIL'}  {name}" + ("" if ok else f"  (got {code}, want {want})"))
+        failures += 0 if ok else 1
+
+    total = len(cases) + 2 + len(triage_cases)
+    print(f"\nself-test: {total - failures} passed, {failures} failed")
     return 0 if failures == 0 else 3
 
 
@@ -383,16 +453,11 @@ def main():
     if args.offline:
         return 0
 
-    dead, unreachable = check_liveness(resolved)
-    if unreachable:
-        print("\n".join(unreachable))
-        print("\nThe probe could not reach a feed. That is NOT a verdict about the feed.")
-        return 3
-    if dead:
-        print("\n".join(dead))
-        print(f"\n{len(dead)} declared feed(s) are dead or misshapen.")
-        return 2
-    return 0
+    dead, unreachable, live = check_liveness(resolved)
+    code, lines = triage(dead, unreachable, live)
+    if lines:
+        print("\n".join(lines))
+    return code
 
 
 if __name__ == "__main__":
