@@ -10,10 +10,10 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
 import { RefreshCw, TrendingUp } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
+import { EntityChip } from '@/components/entities/EntityChip'
 
 type Application = {
   id: string
@@ -32,15 +32,6 @@ type Loan = {
 }
 
 const STATUSES = ['', 'PENDING_REVIEW', 'APPROVED', 'REJECTED'] as const
-
-// Party deep-link — adopt the shared EntityChip once #2789 lands fleet-wide.
-function PartyLink({ id }: { id: string }) {
-  return (
-    <Link href={`/parties/${id}`} style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontSize: 12, textDecoration: 'none' }}>
-      {id.slice(0, 8)}…
-    </Link>
-  )
-}
 
 export default function LendingPage() {
   const { t } = useLanguage()
@@ -147,7 +138,7 @@ export default function LendingPage() {
           <tbody>
             {tab === 'queue' && applications.map(a => (
               <tr key={a.id} style={{ borderTop: '1px solid var(--border)' }}>
-                <td style={{ padding: '10px 14px' }}><PartyLink id={a.partyId} /></td>
+                <td style={{ padding: '10px 14px' }}><EntityChip type="party" id={a.partyId} /></td>
                 <td style={{ padding: '10px 14px', fontWeight: 600 }}>{fmt(a.requestedAmount)}</td>
                 <td style={{ padding: '10px 14px' }}><span className="pill">{a.status}</span></td>
                 <td style={{ padding: '10px 14px', color: 'var(--text-tertiary)', fontSize: 12 }}>
@@ -157,7 +148,7 @@ export default function LendingPage() {
             ))}
             {tab === 'portfolio' && loans.map(l => (
               <tr key={l.id} style={{ borderTop: '1px solid var(--border)' }}>
-                <td style={{ padding: '10px 14px' }}><PartyLink id={l.partyId} /></td>
+                <td style={{ padding: '10px 14px' }}><EntityChip type="party" id={l.partyId} /></td>
                 <td style={{ padding: '10px 14px', fontWeight: 600 }}>{fmt(l.principal)}</td>
                 <td style={{ padding: '10px 14px' }}><span className="pill">{l.status}</span></td>
                 <td style={{ padding: '10px 14px', color: 'var(--text-tertiary)', fontSize: 12 }}>
