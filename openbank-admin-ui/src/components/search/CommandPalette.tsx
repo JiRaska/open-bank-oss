@@ -1,0 +1,202 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+// ADR-0228 D3: the ⌘K palette. Debounced queries against the entity-resolution facade (D2),
+// grouped typed results with keyboard navigation, recent searches per operator in
+// sessionStorage. Replaces the painted "Quick search…" placeholder in the header with a real
+// one — the audit's showcase example of a feature that looked shipped but was not.
+
+'use client'
+
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { CreditCard, Search, User, X } from 'lucide-react'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
+
+type EntityRef = {
+  type: 'party' | 'account'
+  id: string
+  label: string
+  sublabel?: string
+  route: string
+}
+
+const RECENTS_KEY = 'ob.palette.recents'
+const DEBOUNCE_MS = 300
+const MAX_RECENTS = 5
+
+function loadRecents(): EntityRef[] {
+  try {
+    return JSON.parse(sessionStorage.getItem(RECENTS_KEY) ?? '[]') as EntityRef[]
+  } catch {
+    return []
+  }
+}
+
+function pushRecent(ref: EntityRef) {
+  try {
+    const rest = loadRecents().filter(r => !(r.type === ref.type && r.id === ref.id))
+    sessionStorage.setItem(RECENTS_KEY, JSON.stringify([ref, ...rest].slice(0, MAX_RECENTS)))
+  } catch { /* sessionStorage unavailable — recents are a nicety, never a blocker */ }
+}
+
+export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const router = useRouter()
+  const { t } = useLanguage()
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<EntityRef[]>([])
+  const [recents, setRecents] = useState<EntityRef[]>([])
+  const [active, setActive] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  const shown = query.trim().length >= 2 ? results : recents
+
+  useEffect(() => {
+    if (open) {
+      setQuery('')
+      setResults([])
+      setRecents(loadRecents())
+      setActive(0)
+      setTimeout(() => inputRef.current?.focus(), 0)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open || query.trim().length < 2) return
+    setLoading(true)
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => {
+      fetch(`/api/entities/resolve?q=${encodeURIComponent(query.trim())}`, { signal: ctrl.signal, cache: 'no-store' })
+        .then(r => (r.ok ? r.json() : { results: [] }))
+        .then(d => setResults(d.results ?? []))
+        .catch(() => {})
+        .finally(() => setLoading(false))
+    }, DEBOUNCE_MS)
+    return () => { clearTimeout(timer); ctrl.abort() }
+  }, [open, query])
+
+  const choose = useCallback((ref: EntityRef) => {
+    pushRecent(ref)
+    onClose()
+    router.push(ref.route)
+  }, [onClose, router])
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); onClose() }
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(a => Math.min(a + 1, shown.length - 1)) }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setActive(a => Math.max(a - 1, 0)) }
+      if (e.key === 'Enter' && shown[active]) { e.preventDefault(); choose(shown[active]) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, shown, active, choose, onClose])
+
+  useEffect(() => {
+    const el = listRef.current?.children[active] as HTMLElement | undefined
+    el?.scrollIntoView?.({ block: 'nearest' })
+  }, [active])
+
+  if (!open) return null
+
+  const groups: Array<{ title: string; icon: typeof User; items: Array<{ ref: EntityRef; index: number }> }> = []
+  const parties = shown.map((ref, index) => ({ ref, index })).filter(x => x.ref.type === 'party')
+  const accounts = shown.map((ref, index) => ({ ref, index })).filter(x => x.ref.type === 'account')
+  if (parties.length) groups.push({ title: t('Klienti', 'Parties'), icon: User, items: parties })
+  if (accounts.length) groups.push({ title: t('Účty', 'Accounts'), icon: CreditCard, items: accounts })
+
+  return (
+    <div
+      role="dialog" aria-modal="true" aria-label={t('Rychlé hledání', 'Quick search')}
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.45)',
+        display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '12vh',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '560px', maxWidth: '92vw', background: 'var(--surface)',
+          border: '1px solid var(--border)', borderRadius: '12px',
+          boxShadow: '0 16px 48px rgba(0,0,0,0.35)', overflow: 'hidden',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
+          <Search size={15} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={e => { setQuery(e.target.value); setActive(0) }}
+            placeholder={t('Jméno, e-mail, telefon, IČO, IBAN…', 'Name, email, phone, reg. no., IBAN…')}
+            aria-label={t('Hledat klienty a účty', 'Search parties and accounts')}
+            style={{
+              flex: 1, border: 'none', outline: 'none', background: 'transparent',
+              fontSize: '14px', color: 'var(--text-primary)',
+            }}
+          />
+          <button onClick={onClose} aria-label={t('Zavřít', 'Close')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 0 }}>
+            <X size={15} />
+          </button>
+        </div>
+
+        <div ref={listRef} style={{ maxHeight: '46vh', overflowY: 'auto', padding: '6px' }}>
+          {query.trim().length < 2 && recents.length > 0 && (
+            <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>
+              {t('Nedávné', 'Recent')}
+            </div>
+          )}
+          {groups.map(g => (
+            <div key={g.title}>
+              <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>
+                {g.title}
+              </div>
+              {g.items.map(({ ref, index }) => {
+                const Icon = g.icon
+                const isActive = index === active
+                return (
+                  <div
+                    key={`${ref.type}:${ref.id}`}
+                    onClick={() => choose(ref)}
+                    onMouseEnter={() => setActive(index)}
+                    role="option" aria-selected={isActive}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px',
+                      borderRadius: '8px', cursor: 'pointer',
+                      background: isActive ? 'var(--sidebar-active-bg, var(--surface-3)' : 'transparent',
+                    }}
+                  >
+                    <Icon size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {ref.label}
+                      </div>
+                      {ref.sublabel && (
+                        <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{ref.sublabel}</div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+          {query.trim().length >= 2 && !loading && shown.length === 0 && (
+            <div style={{ padding: '20px', textAlign: 'center', fontSize: '13px', color: 'var(--text-tertiary)' }}>
+              {t('Nic nenalezeno', 'No results')}
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding: '8px 16px', borderTop: '1px solid var(--border)', display: 'flex', gap: '12px', fontSize: '10px', color: 'var(--text-tertiary)' }}>
+          <span>↑↓ {t('výběr', 'select')}</span>
+          <span>↵ {t('otevřít', 'open')}</span>
+          <span>esc {t('zavřít', 'close')}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
