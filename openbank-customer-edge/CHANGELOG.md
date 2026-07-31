@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.52.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.52.0...customer-edge-v0.52.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **customer-edge:** make the committed bank list the declared source, not a pretend fallback ([#2959](https://github.com/JiRaska/open-bank-oss/issues/2959)) ([14b6771](https://github.com/JiRaska/open-bank-oss/commit/14b6771d7e4faf70f0e31b918b471d9a9b26c39e))
+
 ## [0.52.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.51.0...customer-edge-v0.52.0) (2026-07-31)
 
 
