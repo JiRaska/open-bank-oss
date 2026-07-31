@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/v0.4.0...v0.4.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **campaign:** make the consent-event consumer suspend so revocation can reach the DB ([#2973](https://github.com/JiRaska/open-bank-oss/issues/2973)) ([bc9763c](https://github.com/JiRaska/open-bank-oss/commit/bc9763cb7cfba87025f175a8cb402215c01197ca))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/v0.3.7...v0.4.0) (2026-07-31)
 
 
