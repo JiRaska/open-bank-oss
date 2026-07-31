@@ -64,7 +64,12 @@ class NotificationConsumerIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
-            InMemoryConnector.switchIncomingChannelsToInMemory("notification-events-in")
+            InMemoryConnector.switchIncomingChannelsToInMemory("notification-events-in") +
+                // Quarkus 3.38 dropped the quarkus.smallrye-reactive-messaging.kafka.bootstrap-servers
+                // alias, so the outgoing channel's kafka connector is unconfigured and the emitter
+                // fails with "has no downstream" — killing consume() before the oversight side-channel
+                // (OversightWebhookIT). Switching outgoing to in-memory keeps the out event flowing.
+                InMemoryConnector.switchOutgoingChannelsToInMemory("notification-events-out")
 
         override fun stop() = InMemoryConnector.clear()
     }
