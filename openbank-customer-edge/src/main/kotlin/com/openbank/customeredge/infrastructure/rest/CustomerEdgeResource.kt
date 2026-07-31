@@ -1360,7 +1360,56 @@ class CustomerEdgeResource(
             return forbidden("Account does not belong to caller")
         }
         val query = buildTransactionsQuery(accountId, limit, cursor)
-        return upstream.get("$transactionServiceUrl/api/v1/transactions$query", customer.partyId.toString())
+        val resp = upstream.get("$transactionServiceUrl/api/v1/transactions$query", customer.partyId.toString())
+        return enrichWithCounterpartyIban(resp, accountId, customer.partyId)
+    }
+
+    /**
+     * Add `counterpartyIban` to each transaction in a page.
+     *
+     * transaction-service keys both sides by ACCOUNT ID and carries no IBAN, so a client reading
+     * the history has no way to address the other side — which is why "repeat this payment" and
+     * "pay the sender back" could not be built on it. Resolving the id here, once, is cheaper and
+     * far less leaky than teaching every client to walk /accounts itself.
+     *
+     * Only the IBAN is taken from the counterparty account — never the owner's name, party or
+     * balance. An IBAN the customer already transacted with is on their statement anyway; the rest
+     * of that account is none of their business.
+     *
+     * The field is ABSENT, not empty, when it cannot be resolved: a counterparty at another bank
+     * has no account here to look up, and an account this caller may not read stays unreadable.
+     * Absent means "we could not say", which the app renders as no repeat button — a wrong IBAN
+     * would address money at a stranger.
+     *
+     * Lookups are memoised per request, so a page of twenty payments to one payee costs one call.
+     */
+    private fun enrichWithCounterpartyIban(resp: Response, accountId: UUID, partyId: UUID): Response {
+        if (resp.status != 200) return resp
+        val body = (resp.entity as? String)?.takeIf { it.isNotBlank() } ?: return resp
+        return runCatching {
+            val root = objectMapper.readTree(body)
+            val items = root.path("data").takeIf { it.isArray } ?: return resp
+            val ibanByAccount = mutableMapOf<String, String?>()
+            items.forEach { item ->
+                val obj = item as? com.fasterxml.jackson.databind.node.ObjectNode ?: return@forEach
+                val source = obj.path("sourceAccountId").asText(null)
+                val target = obj.path("targetAccountId").asText(null)
+                // The side that is NOT the account being read. A transfer between two of the
+                // caller's own accounts still has a counterparty — the other one.
+                val other = when (accountId.toString()) {
+                    target -> source
+                    source -> target
+                    else -> null
+                } ?: return@forEach
+                val iban = ibanByAccount.getOrPut(other) {
+                    runCatching { UUID.fromString(other) }.getOrNull()
+                        ?.let { fetchAccount(it, partyId) }
+                        ?.let { extractTextField(objectMapper, it, "accountNumber") }
+                }
+                if (iban != null) obj.put("counterpartyIban", iban)
+            }
+            Response.ok(root.toString()).build()
+        }.getOrElse { resp }
     }
 
     // Fetch an account from account-service by id (with the M2M token + party header). Returns the raw
