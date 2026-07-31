@@ -59,6 +59,7 @@ class LendingResource(
     private val reschedule: RescheduleLoanUseCase,
     private val collateral: CollateralUseCase,
     private val provisioning: ProvisioningUseCase,
+    private val terminate: com.openbank.lending.application.port.`in`.TerminateLoanUseCase,
     private val outbox: com.openbank.lending.application.port.out.LendingOutboxRepository,
     private val identity: SecurityIdentity,
     private val clock: Clock,
@@ -76,8 +77,117 @@ class LendingResource(
     @Operation(summary = "Submit a loan application (maker)")
     @Authorize(action = "lending.create", resource = "")
     fun applyForLoan(request: LoanApplicationRequest): Uni<Response> = apply.apply(request, actor())
-        .map { Response.status(201).entity(it).build() }
+        .map { Response.status(HTTP_CREATED).entity(it).build() }
         .onFailure().recoverWithItem { e -> Response.status(400).entity(mapOf("error" to e.message)).build() }
+
+    // --- Termination & early exit (ADR-0215) ---------------------------------------------------------
+
+    @POST
+    @Path("/loans/{id}/settlement-quote")
+    @Operation(summary = "Issue a binding settlement quote for early repayment (ADR-0215 D2)")
+    @Authorize(action = "lending.settlement.quote", resource = "#id")
+    fun settlementQuote(@PathParam("id") id: UUID): Uni<Response> =
+        terminate.requestSettlementQuote(com.openbank.libs.domain.identifiers.LoanId(id), actor())
+            .map { Response.status(HTTP_CREATED).entity(it).build() }
+            .onFailure().recoverWithItem { e ->
+                Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+            }
+
+    @POST
+    @Path("/loans/{id}/settle")
+    @Operation(summary = "Settle the loan against a still-valid quote (expired quotes are refused)")
+    @Authorize(action = "lending.settlement.execute", resource = "#id")
+    fun settle(@PathParam("id") id: UUID): Uni<Response> =
+        terminate.settle(com.openbank.libs.domain.identifiers.LoanId(id), actor())
+            .map { Response.ok(it).build() }
+            .onFailure().recoverWithItem { e ->
+                Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+            }
+
+    @POST
+    @Path("/loans/{id}/withdrawal")
+    @Operation(summary = "Statutory withdrawal inside the pack's cooling-off window (ADR-0215 D4)")
+    @Authorize(action = "lending.withdrawal", resource = "#id")
+    fun withdraw(@PathParam("id") id: UUID): Uni<Response> =
+        terminate.withdraw(com.openbank.libs.domain.identifiers.LoanId(id), actor())
+            .map { Response.ok(it).build() }
+            .onFailure().recoverWithItem { e ->
+                Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+            }
+
+    @POST
+    @Path("/loans/{id}/mark-delinquent")
+    @RolesAllowed("ROLE_CREDIT_RISK", "ROLE_ADMIN")
+    @Operation(summary = "Mark the loan delinquent (oldest unpaid installment past due)")
+    @Authorize(action = "lending.delinquency.mark", resource = "#id")
+    fun markDelinquent(@PathParam("id") id: UUID): Uni<Response> =
+        terminate.markDelinquent(com.openbank.libs.domain.identifiers.LoanId(id), actor())
+            .map { Response.ok(it).build() }
+            .onFailure().recoverWithItem { e ->
+                Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+            }
+
+    @POST
+    @Path("/loans/{id}/mark-defaulted")
+    @RolesAllowed("ROLE_CREDIT_RISK", "ROLE_ADMIN")
+    @Operation(summary = "Mark the loan defaulted (DPD crosses the pack's CRR Art. 178 threshold)")
+    @Authorize(action = "lending.default.mark", resource = "#id")
+    fun markDefaulted(@PathParam("id") id: UUID): Uni<Response> =
+        terminate.markDefaulted(com.openbank.libs.domain.identifiers.LoanId(id), actor())
+            .map { Response.ok(it).build() }
+            .onFailure().recoverWithItem { e ->
+                Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+            }
+
+    @POST
+    @Path("/loans/{id}/forbearance")
+    @RolesAllowed("ROLE_CREDIT_RISK", "ROLE_ADMIN")
+    @Operation(summary = "Record the mandatory forbearance assessment (ADR-0215 D1)")
+    @Authorize(action = "lending.forbearance.record", resource = "#id")
+    fun forbearance(
+        @PathParam("id") id: UUID,
+        assessment: com.openbank.lending.domain.model.ForbearanceAssessment,
+    ): Uni<Response> = terminate.recordForbearance(com.openbank.libs.domain.identifiers.LoanId(id), assessment, actor())
+        .map { Response.ok(it).build() }
+        .onFailure().recoverWithItem { e ->
+            Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+        }
+
+    @POST
+    @Path("/loans/{id}/termination/propose")
+    @RolesAllowed("ROLE_CREDIT_RISK", "ROLE_ADMIN")
+    @Operation(summary = "Propose bank-initiated termination (maker; ground from the pinned pack)")
+    @Authorize(action = "lending.termination.propose", resource = "#id")
+    fun proposeTermination(@PathParam("id") id: UUID, request: TerminationProposalRequest): Uni<Response> =
+        terminate.proposeTermination(com.openbank.libs.domain.identifiers.LoanId(id), request.ground, actor())
+            .map { Response.ok(it).build() }
+            .onFailure().recoverWithItem { e ->
+                Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+            }
+
+    @POST
+    @Path("/loans/{id}/termination/decide")
+    @RolesAllowed("ROLE_COMPLIANCE", "ROLE_ADMIN")
+    @Operation(summary = "Decide a termination proposal (checker; must differ from maker)")
+    @Authorize(action = "lending.termination.decide", resource = "#id")
+    fun decideTermination(@PathParam("id") id: UUID, request: DecideTerminationRequest): Uni<Response> =
+        terminate.decideTermination(com.openbank.libs.domain.identifiers.LoanId(id), request.approve, actor())
+            .map { Response.ok(it).build() }
+            .onFailure().recoverWithItem { e ->
+                Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+            }
+
+    @POST
+    @Path("/loans/{id}/accelerate")
+    @RolesAllowed("ROLE_CREDIT_RISK", "ROLE_ADMIN")
+    @Operation(summary = "Accelerate the loan after the notice period elapses (ADR-0215 D1)")
+    @Authorize(action = "lending.acceleration.execute", resource = "#id")
+    fun accelerate(@PathParam("id") id: UUID): Uni<Response> =
+        terminate.accelerate(com.openbank.libs.domain.identifiers.LoanId(id), actor())
+            .map { Response.ok(it).build() }
+            .onFailure().recoverWithItem { e ->
+                Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+            }
 
     @GET
     @Path("/applications/{id}/evidence")
@@ -154,7 +264,7 @@ class LendingResource(
     @RolesAllowed("ROLE_LENDING_OFFICER", "ROLE_ADMIN")
     @Authorize(action = "lending.disburse", resource = "#id")
     fun disburseLoan(@PathParam("id") id: UUID): Uni<Response> = disburse.disburse(LoanApplicationId(id), actor())
-        .map { Response.status(201).entity(it).build() }
+        .map { Response.status(HTTP_CREATED).entity(it).build() }
         .onFailure().recoverWithItem { e -> Response.status(409).entity(mapOf("error" to e.message)).build() }
 
     // --- Servicing ----------------------------------------------------------------------------------
@@ -256,7 +366,7 @@ class LendingResource(
     @Authorize(action = "lending.collateralRegister", resource = "#id")
     fun registerCollateral(@PathParam("id") id: UUID, request: CollateralRequest): Uni<Response> =
         collateral.register(LoanId(id), request, actor())
-            .map { Response.status(201).entity(it).build() }
+            .map { Response.status(HTTP_CREATED).entity(it).build() }
             .onFailure().recoverWithItem { e -> Response.status(400).entity(mapOf("error" to e.message)).build() }
 
     @POST
@@ -288,7 +398,12 @@ class LendingResource(
             .onFailure().recoverWithItem { e -> Response.status(404).entity(mapOf("error" to e.message)).build() }
 
     private companion object {
+        const val HTTP_CREATED = 201
         const val HTTP_NOT_FOUND = 404
         const val HTTP_UNPROCESSABLE = 422
     }
 }
+
+data class TerminationProposalRequest(val ground: String)
+
+data class DecideTerminationRequest(val approve: Boolean)

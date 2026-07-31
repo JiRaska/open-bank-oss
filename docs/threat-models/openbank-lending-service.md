@@ -252,6 +252,12 @@ Tracked as the named bootstrap follow-up (ADR-0212 D4).
 
 ## 9. Change log
 
+- **2026-07-31** — Termination and early-exit lifecycle (ADR-0215): termination
+  sub-lifecycle states + guard, settlement quote (expired quote refused), statutory
+  withdrawal with unwind journal + day interest, DPD/CRR-178 default gates, mandatory
+  forbearance gate, four-eyes bank termination (CREDIT_RISK maker, COMPLIANCE checker),
+  notice-period acceleration, collateral release with closure, credit.loan.transition
+  evidence. V10 migration.
 - **2026-07-31** — Credit evidence emission (ADR-0214): canonical
   credit.application.transition events in the transactional outbox (PII-minimised:
   ids, versions, hashes), evidence bundle endpoint GET /applications/{id}/evidence

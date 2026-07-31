@@ -19,8 +19,71 @@ import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
 
-/** Servicing lifecycle of a booked loan. */
-enum class LoanStatus { ACTIVE, CLOSED, WRITTEN_OFF }
+/** Servicing and termination lifecycle of a booked loan (ADR-0028, ADR-0215 D1). */
+enum class LoanStatus {
+    ACTIVE,
+    DELINQUENT,
+    DEFAULTED,
+    FORBEARANCE_ASSESSED,
+    TERMINATION_NOTICED,
+    ACCELERATED,
+    EARLY_REPAYMENT_REQUESTED,
+    SETTLEMENT_QUOTED,
+    SETTLED,
+    WITHDRAWN,
+    UNWOUND,
+    CLOSED,
+    WRITTEN_OFF,
+}
+
+/**
+ * Termination sub-lifecycle transition guard (ADR-0215 D1). Mirrors the origination
+ * machine's philosophy in miniature: the allowed exits are data, validated once here,
+ * never re-derived per endpoint. Terminal states have no outgoing transitions.
+ */
+object LoanTerminationPolicy {
+    private val ALLOWED: Map<LoanStatus, Set<LoanStatus>> = mapOf(
+        LoanStatus.ACTIVE to setOf(
+            LoanStatus.DELINQUENT,
+            LoanStatus.EARLY_REPAYMENT_REQUESTED,
+            LoanStatus.WITHDRAWN,
+            LoanStatus.CLOSED,
+        ),
+        LoanStatus.DELINQUENT to setOf(LoanStatus.DEFAULTED, LoanStatus.ACTIVE),
+        LoanStatus.DEFAULTED to setOf(LoanStatus.FORBEARANCE_ASSESSED),
+        LoanStatus.FORBEARANCE_ASSESSED to setOf(LoanStatus.TERMINATION_NOTICED),
+        LoanStatus.TERMINATION_NOTICED to setOf(LoanStatus.ACCELERATED),
+        LoanStatus.ACCELERATED to setOf(LoanStatus.CLOSED, LoanStatus.WRITTEN_OFF),
+        LoanStatus.EARLY_REPAYMENT_REQUESTED to setOf(LoanStatus.SETTLEMENT_QUOTED, LoanStatus.ACTIVE),
+        LoanStatus.SETTLEMENT_QUOTED to setOf(LoanStatus.SETTLED, LoanStatus.ACTIVE),
+        LoanStatus.SETTLED to setOf(LoanStatus.CLOSED),
+        LoanStatus.WITHDRAWN to setOf(LoanStatus.UNWOUND),
+    )
+
+    private val TERMINAL: Set<LoanStatus> = setOf(LoanStatus.CLOSED, LoanStatus.WRITTEN_OFF, LoanStatus.UNWOUND)
+
+    fun isAllowed(from: LoanStatus, to: LoanStatus): Boolean = ALLOWED[from].orEmpty().contains(to)
+
+    fun isTerminal(status: LoanStatus): Boolean = status in TERMINAL
+
+    fun requireAllowed(from: LoanStatus, to: LoanStatus) {
+        check(from !in TERMINAL) { "Loan is terminal ($from) — no outgoing transitions" }
+        require(isAllowed(from, to)) { "Transition from $from to $to is not allowed" }
+    }
+}
+
+/** One recorded forbearance assessment (ADR-0215 D1): mandatory before bank termination on default. */
+data class ForbearanceAssessment(val optionsEvaluated: String, val outcome: String, val rationale: String) {
+    init {
+        require(rationale.length >= MIN_RATIONALE_LENGTH) {
+            "forbearance rationale must be at least $MIN_RATIONALE_LENGTH characters"
+        }
+    }
+
+    companion object {
+        const val MIN_RATIONALE_LENGTH = 10
+    }
+}
 
 /** AnaCredit protection categories. */
 enum class CollateralType { REAL_ESTATE, VEHICLE, SECURITIES, CASH_DEPOSIT, GUARANTEE, OTHER }
@@ -75,6 +138,9 @@ data class Loan(
     val disbursedAt: OffsetDateTime,
     val version: Long = 0,
     val createdAt: OffsetDateTime,
+    val noticeEndsOn: LocalDate? = null,
+    val terminatedBy: String? = null,
+    val terminatedAt: OffsetDateTime? = null,
 )
 
 /**
@@ -123,6 +189,7 @@ data class Collateral(
     val decidedBy: String? = null,
     val decidedAt: OffsetDateTime? = null,
     val createdAt: OffsetDateTime,
+    val releasedAt: OffsetDateTime? = null,
 )
 
 // --- Inbound requests -------------------------------------------------------------------------------

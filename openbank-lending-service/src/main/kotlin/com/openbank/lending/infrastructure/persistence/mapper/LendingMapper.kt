@@ -67,6 +67,9 @@ class LendingMapper {
         it.firstDueDate = l.firstDueDate
         it.status = l.status
         it.disbursedAt = l.disbursedAt
+        it.noticeEndsOn = l.noticeEndsOn
+        it.terminatedBy = l.terminatedBy
+        it.terminatedAt = l.terminatedAt
         it.version = l.version
         it.createdAt = l.createdAt
     }
@@ -76,6 +79,7 @@ class LendingMapper {
         principal = Money.of(e.principal, e.currency), nominalAnnualRate = e.nominalAnnualRate,
         termPeriods = e.termPeriods, periodsPerYear = e.periodsPerYear, method = e.method,
         firstDueDate = e.firstDueDate, status = e.status, disbursedAt = e.disbursedAt,
+        noticeEndsOn = e.noticeEndsOn, terminatedBy = e.terminatedBy, terminatedAt = e.terminatedAt,
         version = e.version, createdAt = e.createdAt,
     )
 
@@ -118,6 +122,7 @@ class LendingMapper {
         it.decidedBy = c.decidedBy
         it.decidedAt = c.decidedAt
         it.createdAt = c.createdAt
+        it.releasedAt = c.releasedAt
     }
 
     fun toDomain(e: CollateralEntity) = Collateral(
@@ -128,7 +133,7 @@ class LendingMapper {
         marketValue = Money.of(e.marketValue, e.currency),
         haircut = e.haircut,
         valuedAt = e.valuedAt,
-        status = e.status,
+        status = e.status, releasedAt = e.releasedAt,
         registeredBy = e.registeredBy,
         decidedBy = e.decidedBy,
         decidedAt = e.decidedAt,

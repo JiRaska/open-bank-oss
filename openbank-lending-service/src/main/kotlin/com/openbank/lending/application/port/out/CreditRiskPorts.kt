@@ -68,6 +68,9 @@ enum class PostingKind {
     WRITE_OFF_INTEREST,
     PROVISIONING,
     RESCHEDULE_FORGIVENESS,
+    WITHDRAWAL_UNWIND,
+    EARLY_REPAYMENT_COMPENSATION,
+    SETTLEMENT,
 }
 
 /** Posts loan cash events to the ledger (via the outbox in the real adapter). */
