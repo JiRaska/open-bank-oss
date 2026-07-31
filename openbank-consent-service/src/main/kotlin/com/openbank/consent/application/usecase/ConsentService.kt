@@ -202,6 +202,7 @@ class ConsentService(
                 aggregateId = revoked.id,
                 partyId = revoked.partyId,
                 granteeId = revoked.granteeId,
+                scopes = revoked.scopes,
                 reason = command.reason,
                 occurredAt = clock.instant(),
             ),
