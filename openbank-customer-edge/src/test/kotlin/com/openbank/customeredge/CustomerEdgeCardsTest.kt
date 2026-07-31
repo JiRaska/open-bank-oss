@@ -277,7 +277,16 @@ class CustomerEdgeCardsTest {
             Response.ok("""{"id":"$productId","code":"CURRENT_CZK"}""").build()
         every { upstream.get(match { it.contains("/parties/$caller") }, any()) } returns
             Response.ok("""{"legalName":"Jan Novak"}""").build()
+        // The virtual-card idempotency key carries a generation counted from the party's TERMINAL
+        // cards, so issuing reads the card list. Default: nothing issued yet.
+        stubPartyCards(upstream, caller, "[]")
         approvedSca(upstream)
+    }
+
+    /** Stub `GET /api/v1/cards/party/{partyId}` with a raw card-list JSON array. */
+    private fun stubPartyCards(upstream: UpstreamClient, caller: UUID, json: String) {
+        every { upstream.get(match { it.endsWith("/api/v1/cards/party/$caller") }, any()) } returns
+            Response.ok(json).build()
     }
 
     @Test
@@ -324,7 +333,7 @@ class CustomerEdgeCardsTest {
     }
 
     @Test
-    fun `a VIRTUAL issue keeps the stable per-account idempotency key`() {
+    fun `a VIRTUAL issue keeps a per-account idempotency key stable across retries`() {
         val caller = UUID.randomUUID()
         val acct = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>()
@@ -338,7 +347,60 @@ class CustomerEdgeCardsTest {
             "client-supplied",
             UUID.randomUUID().toString(),
         )
-        assertThat(key.captured).isEqualTo("vcard-$caller-$acct")
+        assertThat(key.captured).isEqualTo("vcard-$caller-$acct-r0")
+    }
+
+    /**
+     * The regression that made the app's "issue a virtual card" button a dead end: with a fully
+     * constant key, card-issuance replayed the row it already had — so once that card was blocked,
+     * every later issue returned the DEAD card and the account could never hold a live virtual card
+     * again. The generation suffix has to move when a card reaches a terminal state.
+     */
+    @Test
+    fun `a VIRTUAL issue after the previous card was blocked uses a fresh key`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        stubIssue(upstream, caller, acct, UUID.randomUUID())
+        stubPartyCards(
+            upstream,
+            caller,
+            """[{"id":"${UUID.randomUUID()}","accountId":"$acct","cardType":"VIRTUAL","status":"BLOCKED"}]""",
+        )
+        val key = slot<String>()
+        every {
+            upstream.post(match { it.endsWith("/api/v1/cards") }, any(), any(), capture(key))
+        } returns Response.status(201).entity("{}").build()
+        resourceFor(upstream, caller).issueCard(
+            """{"accountId":"$acct","cardType":"VIRTUAL"}""",
+            null,
+            UUID.randomUUID().toString(),
+        )
+        assertThat(key.captured).isEqualTo("vcard-$caller-$acct-r1")
+    }
+
+    /** A FROZEN card is alive — freezing must not hand out a new virtual-card generation. */
+    @Test
+    fun `a suspended card does not free up a new virtual-card generation`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        stubIssue(upstream, caller, acct, UUID.randomUUID())
+        stubPartyCards(
+            upstream,
+            caller,
+            """[{"id":"${UUID.randomUUID()}","accountId":"$acct","cardType":"VIRTUAL","status":"SUSPENDED"}]""",
+        )
+        val key = slot<String>()
+        every {
+            upstream.post(match { it.endsWith("/api/v1/cards") }, any(), any(), capture(key))
+        } returns Response.status(201).entity("{}").build()
+        resourceFor(upstream, caller).issueCard(
+            """{"accountId":"$acct","cardType":"VIRTUAL"}""",
+            null,
+            UUID.randomUUID().toString(),
+        )
+        assertThat(key.captured).isEqualTo("vcard-$caller-$acct-r0")
     }
 
     @Test
