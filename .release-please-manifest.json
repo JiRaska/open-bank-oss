@@ -49,7 +49,7 @@
   "openbank-standing-order-service": "0.14.3",
   "openbank-statement-service": "0.5.10",
   "openbank-swift-service": "0.7.2",
-  "openbank-tpp-registry-service": "0.6.9",
+  "openbank-tpp-registry-service": "0.6.10",
   "openbank-transaction-service": "1.15.1",
   "openbank-vop-service": "0.3.1"
 }

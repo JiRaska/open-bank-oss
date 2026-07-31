@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.10](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.6.9...tpp-registry-service-v0.6.10) (2026-07-31)
+
+
+### Bug Fixes
+
+* **governance:** correct 21 specs' dev port and gate it against quarkus.http.port ([#2697](https://github.com/JiRaska/open-bank-oss/issues/2697)) ([1d2f830](https://github.com/JiRaska/open-bank-oss/commit/1d2f8301d8b55664eed36860a0ec78717375a66b))
+
 ## [0.6.9](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.6.8...tpp-registry-service-v0.6.9) (2026-07-26)
 
 
