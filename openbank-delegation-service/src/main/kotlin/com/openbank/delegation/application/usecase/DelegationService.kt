@@ -37,7 +37,7 @@ class DelegationNotGranteeException(id: UUID, partyId: UUID) :
     RuntimeException("Delegation $id is not granted to party $partyId")
 class DelegationNotGrantorException(id: UUID, partyId: UUID) :
     RuntimeException("Delegation $id is not granted by party $partyId")
-class DelegationScaException(message: String) : RuntimeException(message)
+class DelegationScaException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 class DelegationEligibilityException(message: String) : RuntimeException(message)
 
 @ApplicationScoped
@@ -262,9 +262,9 @@ class DelegationService(
         val challenge = try {
             scaChallengeClient.getChallenge(sessionId)
         } catch (e: NotFoundException) {
-            throw DelegationScaException("$errorPrefix challenge $sessionId not found")
+            throw DelegationScaException("$errorPrefix challenge $sessionId not found", e)
         } catch (e: Exception) {
-            throw DelegationScaException("$errorPrefix challenge $sessionId could not be verified")
+            throw DelegationScaException("$errorPrefix challenge $sessionId could not be verified", e)
         }
         if (challenge.partyId != expectedPartyId || challenge.purpose != expectedPurpose) {
             throw DelegationScaException("$errorPrefix challenge $sessionId does not match party or purpose")

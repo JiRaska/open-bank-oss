@@ -156,7 +156,8 @@ class DelegationGrantEntity : PanacheEntityBase() {
         if (amount != null && currency != null) Money.of(amount, currency) else null
 
     private fun toExposure(): Exposure? {
-        if (maxViews == null && watermark == null && allowDownload == null && redactionRules.isEmpty()) {
+        val noScalarExposure = maxViews == null && watermark == null && allowDownload == null
+        if (noScalarExposure && redactionRules.isEmpty()) {
             return null
         }
         return Exposure(
