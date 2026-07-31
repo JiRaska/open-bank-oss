@@ -138,6 +138,8 @@ data class LoanApplicationRequest(
     val periodsPerYear: Int = 12,
     val method: AmortizationMethod = AmortizationMethod.ANNUITY,
     val firstDueDate: LocalDate,
+    val jurisdiction: String? = null,
+    val productType: String? = null,
 )
 
 /**
