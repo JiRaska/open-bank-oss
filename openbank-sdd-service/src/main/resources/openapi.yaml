@@ -8,13 +8,13 @@ info:
     Debtor-side SEPA Direct Debit (ADR-0036): mandate vault keyed by (creditorIdentifier, UMR),
     lifecycle, fail-closed collection authorisation and refund-window assessment. v1 never moves
     money — an authorised collection is emitted for the ledger/payment path.
-  version: 1.0.0
+  version: 1.1.0
 tags:
   - name: SEPA Direct Debit
 paths:
   /api/v1/sdd/mandates/recent:
     get:
-      tags: [SDD]
+      tags: [SEPA Direct Debit]
       operationId: listRecentMandates
       summary: Backoffice queue — newest mandates fleet-wide (ADR-0230)
       description: >-

@@ -148,4 +148,21 @@ class SddMandateServiceTest {
 
         assertThat(d).isInstanceOf(RefundDecision.Eligible::class.java)
     }
+
+    @Test
+    fun `the backoffice queue clamps limit into 1_100 and passes the status filter through`() {
+        val captured = mutableListOf<Int>()
+        every { mandates.findRecent(any(), any()) } answers {
+            captured += secondArg<Int>()
+            Uni.createFrom().item(emptyList<SddMandate>())
+        }
+
+        service.listRecent(null, 0).await().indefinitely()
+        service.listRecent(null, 10_000).await().indefinitely()
+        service.listRecent("ACTIVE", 25).await().indefinitely()
+
+        assertThat(captured).containsExactly(1, 100, 25)
+        verify(exactly = 1) { mandates.findRecent("ACTIVE", 25) }
+        verify(exactly = 2) { mandates.findRecent(null, any()) }
+    }
 }
