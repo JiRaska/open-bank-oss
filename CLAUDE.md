@@ -348,6 +348,20 @@ fire from *outside* it, so they stay here:
   fast echo — what `adr-registry` already did, and what `agent-charter-registry` and `eu-ai-act` now
   do too. Corollary: reaching for the ruleset is usually the wrong instinct here, since the in-repo
   fix ships in the same PR as the gate and needs no GitHub-side config change.
+- **`/actions/runs/<id>/jobs` returns the LATEST attempt — anything reacting to `workflow_run`
+  must query `/actions/runs/<id>/attempts/<n>/jobs`.** The unscoped endpoint silently answers
+  about a *different* run than the event fired for, so a guard that inspects job or step
+  conclusions reads a re-run's green attempt and declines to act — no error, just a no-op that
+  only happens once a human has touched the run first. Caught in #2892 by testing the real
+  script against a fixture that had been re-run by hand: it reported "no spot-kill signature"
+  for a run whose attempt 1 was unambiguously spot-killed. If the job's `if:` already pins
+  `run_attempt`, pin the query to match.
+- **Test the script EXTRACTED from the workflow, not a retyped copy of it.** A transcription is
+  a different program: the first harness for #2890 used `[ … ] && { … }` where the real step
+  used `if` blocks, and under `set -e` those differ on exactly the passing case. Parse the YAML
+  and dump `.jobs.<job>.steps[<n>].run` to a file, then run that. When the step calls something
+  destructive (`gh run rerun`, a deploy, a delete), stub the binary on `PATH` — **and validate
+  the stub against a known-positive first**, or a silent passthrough runs the real thing.
 
 ### CI / bot commit signing
 - **What signs a bot commit is the *endpoint*, not the token — and `main-protection` enforces
@@ -423,6 +437,20 @@ Rationale + what does *not* cover it: `rules.yaml: dependencies.pr_time_cve_gate
 - **Use 3-dot diff for pre-merge review:** `git diff origin/main...origin/<branch>` is the actual
   squash delta; 2-dot includes main's post-divergence commits and makes stale branches look like
   regressions.
+
+### gh CLI
+- **Never pass a PR/issue body containing backticks via `--body` from zsh — use `--body-file`.**
+  Backticks inside a double-quoted string are command substitution, so zsh *executes* the
+  contents and silently drops them from the text. On #2890 the phrase
+  `` `steps.deps.outputs.changed == 'true'` `` was run as a command and the rendered body read
+  "PRs ()" — valid markdown, no error, nothing in the `gh` output to notice. The failure is
+  invisible unless you re-read the published body. Same trap for `--comment` and `gh release
+  create --notes`. Write the body to a file and pass the path.
+- **`gh` needs a repo context: outside a checkout it fails with `failed to run git: fatal: not
+  a git repository`,** which reads like a content or permissions problem rather than a cwd one.
+  Pass `-R <owner>/<repo>` explicitly in any script whose working directory is not guaranteed —
+  and note a verification command failing this way returns *nothing*, which is easy to misread
+  as "the thing I was checking is absent".
 
 ### API contract (ADR-0048)
 - **Two racing spec PRs can both claim the same `info.version` — and both pass the gate.** The
