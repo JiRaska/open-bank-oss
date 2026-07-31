@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.5](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.4...kyc-service-v0.10.5) (2026-07-31)
+
+
+### Bug Fixes
+
+* **governance:** correct 21 specs' dev port and gate it against quarkus.http.port ([#2697](https://github.com/JiRaska/open-bank-oss/issues/2697)) ([1d2f830](https://github.com/JiRaska/open-bank-oss/commit/1d2f8301d8b55664eed36860a0ec78717375a66b))
+
 ## [0.10.4](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.3...kyc-service-v0.10.4) (2026-07-26)
 
 
