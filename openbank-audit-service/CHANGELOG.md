@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.9.6...audit-service-v0.10.0) (2026-07-31)
+
+
+### Features
+
+* **audit:** cross-channel audit correlation — channel/act_chain/session_id + by-actor query (ADR-0226) ([#2756](https://github.com/JiRaska/open-bank-oss/issues/2756)) ([31c7abb](https://github.com/JiRaska/open-bank-oss/commit/31c7abbc2f6ae3a611ba0642326b571dc05ab21e))
+
+
+### Bug Fixes
+
+* **governance:** correct 21 specs' dev port and gate it against quarkus.http.port ([#2697](https://github.com/JiRaska/open-bank-oss/issues/2697)) ([1d2f830](https://github.com/JiRaska/open-bank-oss/commit/1d2f8301d8b55664eed36860a0ec78717375a66b))
+
 ## [0.9.6](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.9.5...audit-service-v0.9.6) (2026-07-17)
 
 
