@@ -5,7 +5,7 @@
 dataDomain: open-banking
 primaryDatastore: PostgreSQL
 databaseName: openbank_delegations
-dataLineageRole: source
+dataLineageRole: both
 dataClassification: confidential
 retentionPolicy: 5 years
 evidenceExported: true
