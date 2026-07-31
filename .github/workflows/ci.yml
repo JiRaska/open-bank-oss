@@ -1203,6 +1203,27 @@ jobs:
       #
       # Self-test first: the matchers are what separate "a server answered 200" from "the answer
       # is the feed", and one that has only ever passed is unfalsified.
+      # Kafka dotted-key ratchet (issues #686, #2945).
+      #
+      # A `group.id` / `auto.offset.reset` written as a YAML leaf key never reaches the connector —
+      # SmallRye Config quotes any leaf key containing a dot — so the file says one thing and the
+      # consumer does another, silently. Six services survive this on `group.id` only because the
+      # value they wanted happens to equal `quarkus.application.name`; that coincidence dies the day
+      # a service is renamed or a channel wants its own group.
+      #
+      # Ratchet, not a flat fail, and deliberately so: making a baselined `auto.offset.reset:
+      # earliest` actually take effect re-reads the topic from the beginning, which on a money-path
+      # channel is a mass replay, not a config tidy-up. Today's set is baselined with its issue; a
+      # NEW occurrence fails, and a baseline entry that becomes covered is reported too, so the list
+      # cannot rot in either direction.
+      #
+      # Self-test first: the classifier has to allow the harmless cases as well as flag the real
+      # ones, and a guard that flags everything is noise nobody keeps.
+      - name: "kafka dotted-key ratchet (issues #686/#2945, enforced)"
+        run: |
+          python3 .github/scripts/check-kafka-dotted-keys.py --self-test
+          python3 .github/scripts/check-kafka-dotted-keys.py --root .
+
       - name: "external feed declaration drift (issue #2204, enforced)"
         run: |
           python3 .github/scripts/check-external-feeds.py --self-test
