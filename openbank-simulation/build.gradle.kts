@@ -16,6 +16,12 @@
 // rung. It exercises the domain + application semantics faithfully (built on the real
 // `openbank-libs` primitives — Money, SagaStateMachine); it cannot catch JVM-threading
 // or OS-level non-determinism (that is the deferred Antithesis option).
+//
+// CI note: editing ANY `build.gradle.kts` — including a comment like this one, which
+// changes no dependency at all — matches the `**/build.gradle.kts` path filter in
+// dependency-submission.yml and dependency-review.yml, so it triggers a full ~11 min
+// fleet dependency resolution. That is deliberate (the filter cannot inspect intent),
+// but it means a comment-only touch here is not free. See issue #2833.
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
