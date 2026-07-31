@@ -118,6 +118,11 @@ jobs:
           # netty-codec-http2 at the 4.1.136.Final force() floor
           # (:openbank-campaign-service:dependencies --configuration testRuntimeClasspath
           # shows 4.1.135 -> 4.1.136), so the flagged version never ships in a service artefact.
+          # GHSA-pwqr-wmgm-9rr8 / GHSA-jppx-w49h-x2qq / GHSA-57rv-r2g8-2cj3 /
+          # GHSA-6jqx-86gh-f27w / GHSA-mvh2-crg5-v77c (io.netty: netty-codec-http 4.1.119):
+          # identical class on the identical classpath — the graph-extraction plugin's own
+          # netty stack, flagged under `settings.gradle.kts »` in the same #2751 review.
+          # Same verification: service runtime graphs pin 4.1.136.Final via force().
           # — trading a real regression for an alert on a classpath that never ships. If a
           # service ever resolves netty 4.2.x for real, these three must be dropped.
-          allow-ghsas: GHSA-pq2g-wx69-c263, GHSA-3qp7-7mw8-wx86, GHSA-x4gw-5cx5-pgmh, GHSA-c653-97m9-rcg9, GHSA-f6hv-jmp6-3vwv, GHSA-prj3-ccx8-p6x4, GHSA-w9fj-cfpg-grvv
+          allow-ghsas: GHSA-pq2g-wx69-c263, GHSA-3qp7-7mw8-wx86, GHSA-x4gw-5cx5-pgmh, GHSA-c653-97m9-rcg9, GHSA-f6hv-jmp6-3vwv, GHSA-prj3-ccx8-p6x4, GHSA-w9fj-cfpg-grvv, GHSA-pwqr-wmgm-9rr8, GHSA-jppx-w49h-x2qq, GHSA-57rv-r2g8-2cj3, GHSA-6jqx-86gh-f27w, GHSA-mvh2-crg5-v77c
