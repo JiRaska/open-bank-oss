@@ -32,9 +32,16 @@ const CACHE_MAX_ENTRIES = 1000
 
 function mcpUrl(): string {
   if (process.env.SERVICES_HOST === 'container') {
-    return 'http://openbank-mcp-service:8085/mcp'
+    return 'http://openbank-mcp-service:8150/mcp'
   }
-  return process.env.MCP_SERVICE_URL ?? 'http://localhost:8085/mcp'
+  return process.env.MCP_SERVICE_URL ?? 'http://localhost:8150/mcp'
+}
+
+function mcpSessionUrl(path: string): string {
+  const base = process.env.SERVICES_HOST === 'container'
+    ? 'http://openbank-mcp-service:8150'
+    : (process.env.MCP_SERVICE_URL?.replace(/\/mcp$/, '') ?? 'http://localhost:8150')
+  return `${base}/api/v1/mcp/sessions${path}`
 }
 
 const oboCache = new Map<string, { token: string; expiresAt: number }>()
@@ -44,11 +51,44 @@ function tokenExpMs(token: string): number {
   return (payload.exp ?? 0) * 1000
 }
 
-async function oboToken(subjectToken: string): Promise<string> {
+function tokenJti(token: string): string {
+  const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString())
+  return payload.jti ?? ''
+}
+
+// ADR-0224 D2 wiring: a fresh OBO token always comes with a fresh session row — created by the
+// operator's own bearer (ceiling = the operator's roles), then bound to the exchanged token's
+// jti so mcp-service can validate it live on every call.
+async function createSession(bearer: string, roles: string[]): Promise<string> {
+  const res = await fetch(mcpSessionUrl(''), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', authorization: `Bearer ${bearer}` },
+    body: JSON.stringify({ clientId: 'admin-ui', roleCeiling: roles, purpose: 'operator console' }),
+    cache: 'no-store',
+  })
+  if (!res.ok) throw new Error(`session create failed: ${res.status}`)
+  const data = (await res.json()) as { id: string }
+  return data.id
+}
+
+async function bindSession(bearer: string, sessionId: string, jti: string): Promise<void> {
+  const res = await fetch(mcpSessionUrl(`/${sessionId}/bind`), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', authorization: `Bearer ${bearer}` },
+    body: JSON.stringify({ jti }),
+    cache: 'no-store',
+  })
+  if (!res.ok) throw new Error(`session bind failed: ${res.status}`)
+}
+
+async function oboToken(subjectToken: string, roles: string[]): Promise<string> {
   const key = createHash('sha256').update(subjectToken).digest('hex')
   const cached = oboCache.get(key)
   if (cached && cached.expiresAt - EXPIRY_SKEW_MS > Date.now()) return cached.token
 
+  // Fresh token ⇒ fresh session: the row lives exactly one token-lifetime, so the one-time
+  // bind never races a re-exchange.
+  const sessionId = await createSession(subjectToken, roles)
   const res = await fetch(`${KC_INTERNAL}/realms/${KC_REALM}/protocol/openid-connect/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -65,6 +105,7 @@ async function oboToken(subjectToken: string): Promise<string> {
   })
   if (!res.ok) throw new Error(`token exchange failed: ${res.status}`)
   const data = (await res.json()) as { access_token: string }
+  await bindSession(subjectToken, sessionId, tokenJti(data.access_token))
   if (oboCache.size >= CACHE_MAX_ENTRIES) {
     const now = Date.now()
     for (const [k, v] of oboCache) if (v.expiresAt <= now) oboCache.delete(k)
@@ -80,14 +121,15 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     // Same session gate as every BFF relay (ADR-0056): no operator session, no relay.
-    const accessToken = (await auth())?.user?.accessToken
+    const session = await auth()
+    const accessToken = session?.user?.accessToken
     if (!accessToken) {
       return NextResponse.json(
         { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'unauthenticated' } },
         { status: 401 },
       )
     }
-    const obo = await oboToken(accessToken)
+    const obo = await oboToken(accessToken, session?.user?.roles ?? [])
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 10000)
     const res = await fetch(mcpUrl(), {
