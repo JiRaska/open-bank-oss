@@ -30,6 +30,7 @@ import com.openbank.lending.domain.model.LoanProvisioningRecord
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
+import com.openbank.lending.infrastructure.adapter.NoOpOriginationWorkflowPort
 import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
 import com.openbank.lending.infrastructure.compliance.OriginationConfig
 import com.openbank.libs.domain.identifiers.CollateralId
@@ -84,6 +85,7 @@ class LendingServiceTest {
         provisioning,
         CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
         OriginationConfig(false),
+        NoOpOriginationWorkflowPort(),
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")
@@ -134,6 +136,7 @@ class LendingServiceTest {
             valuation, riskParameters, events, clock, provisioning,
             CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
             OriginationConfig(true),
+            NoOpOriginationWorkflowPort(),
         )
         val slot: CapturingSlot<LoanApplication> = slot()
         every { applications.save(capture(slot)) } answers { Uni.createFrom().item(slot.captured) }

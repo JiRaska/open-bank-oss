@@ -11,10 +11,13 @@ import com.openbank.lending.application.port.out.LedgerPosting
 import com.openbank.lending.application.port.out.LedgerPostingPort
 import com.openbank.lending.application.port.out.LendingOutboxMessage
 import com.openbank.lending.application.port.out.LoanEventEmitter
+import com.openbank.lending.application.port.out.OriginationWorkflowPort
 import com.openbank.lending.application.port.out.RiskParameterSource
 import com.openbank.lending.domain.model.Loan
+import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.lending.EclInputs
+import com.openbank.libs.lending.origination.OriginationState
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Default
@@ -75,6 +78,21 @@ class LoggingLoanEventEmitter : LoanEventEmitter {
     /** Real adapter writes to `lending_outbox` in the state-change transaction (ADR-0003). */
     override fun emit(message: LendingOutboxMessage): Uni<Unit> {
         log.debugf("no-op outbox emit: %s for %s", message.eventType, message.aggregateId)
+        return Uni.createFrom().item(Unit)
+    }
+}
+
+@ApplicationScoped
+@Default
+class NoOpOriginationWorkflowPort : OriginationWorkflowPort {
+    private val log = Logger.getLogger(NoOpOriginationWorkflowPort::class.java)
+
+    override fun stateEntered(
+        applicationId: LoanApplicationId,
+        state: OriginationState,
+        reflectionPeriodDays: Int?,
+    ): Uni<Unit> {
+        log.debugf("no-op origination workflow: %s entered %s", applicationId.value, state)
         return Uni.createFrom().item(Unit)
     }
 }

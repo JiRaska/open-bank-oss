@@ -40,6 +40,15 @@ interface ApplyForLoanUseCase {
      */
     fun advance(id: LoanApplicationId, actor: String): Uni<LoanApplication>
 
+    /**
+     * Timer-driven expiry (ADR-0211 D2): transitions to EXPIRED only when the application
+     * is still in [expectedState] (the state's name); otherwise an idempotent no-op.
+     */
+    fun expireIfInState(id: LoanApplicationId, expectedState: String, actor: String): Uni<LoanApplication>
+
+    /** Like [expireIfInState], but drives one forward advance when still in [expectedState]. */
+    fun advanceIfInState(id: LoanApplicationId, expectedState: String, actor: String): Uni<LoanApplication>
+
     /** Backoffice queue (ADR-0230 D1): newest applications fleet-wide, optionally one status. */
     fun listRecentApplications(status: String?, limit: Int): Uni<List<LoanApplication>>
 }

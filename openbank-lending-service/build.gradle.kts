@@ -36,7 +36,12 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    implementation(project(":openbank-libs-temporal"))
+    implementation("io.temporal:temporal-sdk:1.25.1")
+
     testImplementation(libs.quarkus.junit5)
+    testImplementation("io.temporal:temporal-testing:1.25.1")
+    testImplementation("io.grpc:grpc-inprocess:1.68.1")
     // @TestSecurity for the advisory-mode authz regression test (ADR-0034 Phase 5, issue #266).
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
