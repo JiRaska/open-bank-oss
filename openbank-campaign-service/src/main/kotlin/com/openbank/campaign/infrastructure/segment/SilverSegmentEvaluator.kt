@@ -10,9 +10,11 @@ import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.net.URI
+import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.charset.StandardCharsets
 import java.util.UUID
 
 /**
@@ -44,29 +46,36 @@ class SilverSegmentEvaluator(
             append(" WHERE ").append(where)
             append(" FORMAT JSONEachRow")
         }
-        val requestBuilder = HttpRequest.newBuilder(URI.create(clickHouseUrl))
+        // Bind values travel as `?param_<name>=` on the URL — ClickHouse's only supported form for
+        // query parameters over HTTP. They used to be sent as `X-ClickHouse-Parameter-<name>`
+        // headers, which ClickHouse ignores entirely, so every evaluation died with
+        // `Code: 456 ... Substitution 'p0_status' is not set` (#2749). Still parameters, not
+        // interpolation: the values are URL-encoded here and substituted by ClickHouse, so a rule
+        // value cannot become SQL.
+        val query = params.entries.joinToString("&") { (k, v) ->
+            "param_$k=" + URLEncoder.encode(v.toString(), StandardCharsets.UTF_8)
+        }
+        val uri = URI.create(if (query.isEmpty()) clickHouseUrl else "$clickHouseUrl?$query")
+        val requestBuilder = HttpRequest.newBuilder(uri)
             .POST(HttpRequest.BodyPublishers.ofString(sql))
             .header("Content-Type", "text/plain")
         if (clickHouseUser.isNotBlank()) requestBuilder.header("X-ClickHouse-User", clickHouseUser)
         if (clickHousePassword.isNotBlank()) requestBuilder.header("X-ClickHouse-Key", clickHousePassword)
-        params.forEach { (k, v) -> requestBuilder.header("X-ClickHouse-Parameter-$k", v.toString()) }
 
         val response = http.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString())
         if (response.statusCode() != HTTP_OK) {
             log.errorf("ClickHouse segment evaluation failed (%d): %s", response.statusCode(), response.body())
-            // A REJECTED QUERY IS A BUG, NOT AN EMPTY COHORT. ClickHouse answers 4xx for SQL it
-            // cannot execute; returning emptyList() there reports "nobody matched" for a query that
-            // never ran, which is exactly how a DSL naming non-existent columns survived to
-            // production (#2891). Surface it so enrol() fails loudly instead.
-            if (response.statusCode() in HTTP_CLIENT_ERROR_RANGE) {
-                throw IllegalStateException(
-                    "segment ${segment.name}@${segment.version} could not be evaluated: " +
-                        "ClickHouse rejected the query (${response.statusCode()}) — ${response.body().trim()}",
-                )
-            }
-            // Fail closed only for an unavailable analytics layer (5xx): an outage means an empty
-            // cohort, never a guessed one.
-            return emptyList()
+            // ANY non-200 throws. An earlier version of this only threw on 4xx, reasoning that a
+            // rejected query is a bug while a 5xx is an outage worth failing closed on. That split
+            // does not survive contact with ClickHouse: it answers **500** for SQL it cannot
+            // execute, so the exact defect the split existed to surface — an unbound parameter,
+            // `Code: 456 ... Substitution is not set` — came back as 5xx and was swallowed into an
+            // empty cohort anyway. "Nobody matched" and "the query never ran" must not look alike,
+            // and no status-code split can tell them apart here.
+            throw IllegalStateException(
+                "segment ${segment.name}@${segment.version} could not be evaluated: " +
+                    "ClickHouse returned ${response.statusCode()} — ${response.body().trim()}",
+            )
         }
         return response.body().lineSequence()
             .filter { it.isNotBlank() }
@@ -80,7 +89,6 @@ class SilverSegmentEvaluator(
 
     companion object {
         private const val HTTP_OK = 200
-        private val HTTP_CLIENT_ERROR_RANGE = 400..499
         private val AGGREGATE_ID = Regex("\"aggregate_id\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"")
     }
 }
