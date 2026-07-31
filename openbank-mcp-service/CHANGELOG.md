@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.14.0...mcp-service-v0.14.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **mcp:** resolve the staff OBO identity end-to-end (ADR-0224, E2E [#2750](https://github.com/JiRaska/open-bank-oss/issues/2750)) ([#2946](https://github.com/JiRaska/open-bank-oss/issues/2946)) ([ff154eb](https://github.com/JiRaska/open-bank-oss/commit/ff154ebdb9310400f53a9aee5cf44c8d6ad92c69))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.13.0...mcp-service-v0.14.0) (2026-07-31)
 
 
