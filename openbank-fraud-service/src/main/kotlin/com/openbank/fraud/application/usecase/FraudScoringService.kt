@@ -9,6 +9,7 @@ import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.application.port.out.FraudScoreRepository
 import com.openbank.fraud.application.port.out.MlModelPort
 import com.openbank.fraud.application.port.out.PayeeHistoryRepository
+import com.openbank.fraud.application.port.out.ScoredRecord
 import com.openbank.fraud.application.port.out.VelocityAggregateRepository
 import com.openbank.fraud.domain.model.FraudScore
 import com.openbank.fraud.domain.model.ScoreRequest
@@ -71,6 +72,9 @@ class FraudScoringService @Inject constructor(
         runShadow(enriched, result) // logs + metrics only; its outcome is discarded
         return result // byte-identical to rules-only
     }
+
+    override suspend fun reviewQueue(verdict: String, limit: Int): List<ScoredRecord> =
+        repository.findRecentByVerdict(verdict, limit)
 
     /**
      * ADR-0139 phase-1 shadow plane: compute the ML score from the online feature store and log it

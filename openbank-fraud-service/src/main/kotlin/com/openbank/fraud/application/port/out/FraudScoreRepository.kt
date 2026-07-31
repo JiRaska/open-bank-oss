@@ -6,6 +6,8 @@ package com.openbank.fraud.application.port.out
 
 import com.openbank.fraud.domain.model.FraudScore
 import com.openbank.fraud.domain.model.ScoreRequest
+import java.math.BigDecimal
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -17,4 +19,21 @@ interface FraudScoreRepository {
 
     /** Persist one scoring decision (request context + verdict) and return its audit-row id. */
     suspend fun save(request: ScoreRequest, result: FraudScore): UUID
+
+    /** REVIEW-queue read (ADR-0230 D1): newest scoring rows with the given verdict. */
+    suspend fun findRecentByVerdict(verdict: String, limit: Int): List<ScoredRecord>
 }
+
+/** One persisted scoring row as the review queue renders it (the reasons payload stays server-side). */
+data class ScoredRecord(
+    val scoreId: UUID,
+    val amount: BigDecimal,
+    val currency: String,
+    val rail: String,
+    val accountId: UUID?,
+    val counterpartyId: UUID?,
+    val verdict: String,
+    val score: Int,
+    val ruleVersion: String,
+    val createdAt: Instant,
+)

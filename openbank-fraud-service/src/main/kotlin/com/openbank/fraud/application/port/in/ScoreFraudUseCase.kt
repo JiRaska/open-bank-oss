@@ -4,6 +4,7 @@
 
 package com.openbank.fraud.application.port.`in`
 
+import com.openbank.fraud.application.port.out.ScoredRecord
 import com.openbank.fraud.domain.model.FraudScore
 import com.openbank.fraud.domain.model.ScoreRequest
 
@@ -14,4 +15,7 @@ import com.openbank.fraud.domain.model.ScoreRequest
  */
 interface ScoreFraudUseCase {
     suspend fun score(request: ScoreRequest): FraudScore
+
+    /** REVIEW-queue read (ADR-0230 D1): newest rows with the given verdict for the analyst console. */
+    suspend fun reviewQueue(verdict: String, limit: Int): List<ScoredRecord>
 }
