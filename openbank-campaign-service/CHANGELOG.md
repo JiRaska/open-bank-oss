@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/v0.2.0...v0.3.0) (2026-07-31)
+
+
+### Features
+
+* **infra:** GitOps component for campaign-service + sandbox deploy wiring ([#2838](https://github.com/JiRaska/open-bank-oss/issues/2838)) ([bebbf84](https://github.com/JiRaska/open-bank-oss/commit/bebbf84ae16f878d5603dfd17ba62e27dfcd696c))
+
 ## [0.2.0](https://github.com/JiRaska/open-bank-oss/compare/v0.1.0...v0.2.0) (2026-07-31)
 
 
