@@ -74,14 +74,17 @@ spec:
             - name: KAFKA_SSL_KEYSTORE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: campaign-service
+                  name: campaign-service-kafka-keystore
                   key: user.password
             - name: KAFKA_SSL_TRUSTSTORE_LOCATION
               value: /mnt/kafka-truststore/ca.p12
             - name: KAFKA_SSL_TRUSTSTORE_TYPE
               value: PKCS12
             - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
-              value: changeit
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
             # Temporal (ADR-0200 D1 per-enrolment journeys; shared cluster).
             - name: OPENBANK_TEMPORAL_ENABLED
               value: "true"
@@ -219,11 +222,11 @@ spec:
           emptyDir: {}
         - name: kafka-keystore
           secret:
-            secretName: campaign-service
+            secretName: campaign-service-kafka-keystore
             optional: false
         - name: kafka-truststore
           secret:
-            secretName: campaign-service
+            secretName: kafka-cluster-ca-truststore
             optional: false
         - name: opa-bundle
           configMap:
