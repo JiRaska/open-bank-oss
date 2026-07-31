@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.49.1...customer-edge-v0.50.0) (2026-07-31)
+
+
+### Features
+
+* **directory:** pay-to-phone lookup, opt-in and honest about what hashing buys ([#2840](https://github.com/JiRaska/open-bank-oss/issues/2840)) ([73c4827](https://github.com/JiRaska/open-bank-oss/commit/73c48273d5956259d7356be9cb4fa39b4d70e311))
+
 ## [0.49.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.49.0...customer-edge-v0.49.1) (2026-07-31)
 
 
