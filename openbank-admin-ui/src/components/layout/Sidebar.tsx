@@ -31,6 +31,7 @@ const coreNav: NavItem[] = [
 ]
 
 const revenueNav: NavItem[] = [
+  { nameCs: 'Úvěry',        nameEn: 'Lending',      href: '/lending',      icon: TrendingUp,    permission: 'payments:view' },
   { nameCs: 'Poplatky',     nameEn: 'Fees',         href: '/fees',         icon: Receipt,         permission: 'payments:view' },
 ]
 
