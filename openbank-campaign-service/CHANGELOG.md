@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/JiRaska/open-bank-oss/compare/v0.3.1...v0.3.2) (2026-07-31)
+
+
+### Bug Fixes
+
+* **campaign:** open the management interface the probes and scrape target ([#2870](https://github.com/JiRaska/open-bank-oss/issues/2870)) ([706f2ae](https://github.com/JiRaska/open-bank-oss/commit/706f2ae97feac01e82e6643254e39c76f5e9e725)), closes [#2749](https://github.com/JiRaska/open-bank-oss/issues/2749)
+
 ## [0.3.1](https://github.com/JiRaska/open-bank-oss/compare/v0.3.0...v0.3.1) (2026-07-31)
 
 
