@@ -66,6 +66,11 @@ spec:
                 secretKeyRef:
                   name: mcp-db-app
                   key: password
+            # ADR-0224: admit staff OBO tokens at the resolver. Flip ONLY with the full
+            # chain live: realm permission (#2762), this service's session store (#2843),
+            # and the admin-ui OBO_MCP_ENABLED relay (#2850).
+            - name: MCP_OBO_ENABLED
+              value: "true"
             # ADR-0034 PDP: the OPA sidecar in this pod (localhost:8181), serving
             # data.openbank.rest.allow (mcp-opa-bundle ConfigMap). A PDP connectivity error
             # still fails CLOSED in McpEndpoint (money-adjacent surface — never fail-open).
