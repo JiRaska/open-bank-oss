@@ -253,6 +253,34 @@ fire from *outside* it, so they stay here:
   `openbank-infra/scripts/lib/cosign-attest.sh`. It passes `--platform` (remote scans default to
   amd64 and silently miss an arm64-only image) and checks the SBOM *before* attesting; `cosign
   attest` is additive, so a green `verify-attestation` can be about an earlier build's envelope.
+- **Verify realm-template changes against a local Keycloak BEFORE the PR — import runs on cold
+  start only, so a broken template ships silently.** The realm-JSON shapes are version-specific
+  traps: authorization policies want `config` maps (not first-class fields), a scope permission is
+  `type: "scope"` (not `scope-permission`), the `token-exchange` authorization scope must be
+  declared before a permission references it, the requesting client needs
+  `standard.token.exchange.enabled=true`, and client descriptions cap at 255 chars (a longer one
+  fails the whole import). Recipe: substitute the `__PLACEHOLDER__`s, then
+  `docker run -v <file>:/opt/keycloak/data/import/realm.json quay.io/keycloak/keycloak:<version>
+  start-dev --import-realm` and exercise the flow end-to-end (mint + exchange + inspect the JWT).
+  Also: a test user needs `firstName`/`lastName`/`email` or KC 26's user profile answers
+  "Account is not fully set up" with no hint why.
+
+### admin-ui
+- **Run vitest via `npm test`, never bare `npx vitest run`.** The `pretest` hook bakes the
+  CI-generated artifacts (`governance.json`, `catalog.json`); without them the governance/finops
+  taxonomy and registry-guard suites fail on an "empty manifest" that reads exactly like a
+  main-branch regression but is only a missing artifact. Full green = pretest + suite, not the
+  suite alone.
+
+### Multi-agent / parallel work
+- **Commit and push early — a `/private/tmp` worktree can vanish mid-edit.** Several agent
+  sessions share this machine and a worktree directory is one `worktree remove`/cleanup away from
+  gone; the branch ref survives, your uncommitted diff does not. Stage in small commits and push
+  the branch before the PR exists.
+- **Stacked PRs: merge the ADR/parent branch INTO the child instead of waiting.** When a child PR
+  references files living only in an unmerged parent PR (e.g. ADR numbers the registry gate
+  requires on-branch), merging the parent branch into the child makes the child's CI green
+  independently; the shared files drop out of the diff as the parent lands on main.
 
 ### CI gates — exercise the failure path before trusting the green
 - **A gate that has only ever passed is unfalsified.** Its failure path is code nobody has run, and
@@ -377,6 +405,13 @@ Rationale + what does *not* cover it: `rules.yaml: dependencies.pr_time_cve_gate
   stale graph — neither goes red when it is stale. Anything whose *output* others depend on needs an
   escalation path (raise/refresh an issue, as `fleet-attestation.yml` and this one now do). Its heap
   is a ratchet with nothing measuring it — expect to raise it again.
+- **Fresh-cache builds fail dependency-verification on artifacts nobody has hashed yet — fix
+  scoped, not by blanket regen.** `./gradlew <tasks> --write-verification-metadata sha256`
+  rewrites the whole file: reorder noise, unrelated components, and (for test-classpath graphs)
+  dozens of entries. The house norm (#2718, #2743) is additions-only — compute sha256 from the
+  isolated cache and insert just the missing components with `origin="Maven Central"`. Symptom:
+  `Dependency verification failed for configuration ...` on a cold `GRADLE_USER_HOME` (new runner,
+  isolated cache, CodeQL's tracing build).
 
 ### Reviewing a diff
 - **Use 3-dot diff for pre-merge review:** `git diff origin/main...origin/<branch>` is the actual
