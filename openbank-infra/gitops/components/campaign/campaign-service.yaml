@@ -90,6 +90,13 @@ spec:
               value: "true"
             - name: OPENBANK_TEMPORAL_SERVER_URL
               value: temporal-frontend.temporal.svc.cluster.local:7233
+            # Fleet convention is openbank-<domain>; the application default is the bare
+            # `openbank`, which is not a registered namespace. Leaving it unset does not
+            # fail the boot — readiness is an HTTP probe, not a Temporal one — the worker
+            # just spins on `NOT_FOUND: Namespace openbank is not found` while the pod
+            # reports Healthy. Registered by the temporal-namespace-registration Job.
+            - name: OPENBANK_TEMPORAL_NAMESPACE
+              value: openbank-campaign
             - name: OPENBANK_TEMPORAL_TASK_QUEUE
               value: openbank-campaign
             - name: CAMPAIGN_WORKER_ENABLED
