@@ -11,6 +11,7 @@ import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
+import io.quarkus.redis.datasource.keys.KeyScanArgs
 import io.quarkus.redis.datasource.value.SetArgs
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import java.time.Clock
@@ -36,6 +37,7 @@ import java.time.OffsetDateTime
 class RedisApprovalStore(private val redis: ReactiveRedisDataSource, private val clock: Clock) : ApprovalStore {
 
     private val valueCommands by lazy { redis.value(String::class.java) }
+    private val keyCommands by lazy { redis.key(String::class.java) }
 
     override suspend fun create(
         action: String,
@@ -58,6 +60,18 @@ class RedisApprovalStore(private val redis: ReactiveRedisDataSource, private val
     override suspend fun find(id: String): PendingApproval? {
         val raw = valueCommands.get(key(id)).awaitSuspending() ?: return null
         return decode(id, raw)
+    }
+
+    override suspend fun findPending(limit: Int): List<PendingApproval> {
+        val args = KeyScanArgs().match("$KEY_PREFIX*").count(SCAN_COUNT)
+        val keys = keyCommands.scan(args).toMulti().collect().asList().awaitSuspending()
+        return keys
+            .mapNotNull { k ->
+                valueCommands.get(k).awaitSuspending()?.let { decode(k.removePrefix(KEY_PREFIX), it) }
+            }
+            .filter { it.status == ApprovalStatus.PENDING }
+            .sortedBy { it.createdAt }
+            .take(limit)
     }
 
     override suspend fun decide(id: String, decidedBy: String, approve: Boolean): PendingApproval? {
@@ -128,6 +142,7 @@ class RedisApprovalStore(private val redis: ReactiveRedisDataSource, private val
         const val KEY_PREFIX = "approval:"
         const val SEPARATOR = "|"
         const val DECIDED_TTL_SECONDS = 86400L
+        const val SCAN_COUNT = 500L
 
         // Field order in the encoded value — must match encode()'s joinToString order.
         const val ACTION_IDX = 0

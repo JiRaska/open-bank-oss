@@ -48,6 +48,14 @@ interface ApprovalStore {
     suspend fun find(id: String): PendingApproval?
 
     /**
+     * PENDING approvals, oldest first (FIFO fairness for the checker queue) — the read side of
+     * the unified approval inbox (ADR-0227 D2): each service exposes its pending queue over REST
+     * and the admin-UI BFF federates them into one supervisor surface. Read-only; deciding stays
+     * on the per-service decide endpoint.
+     */
+    suspend fun findPending(limit: Int = 100): List<PendingApproval>
+
+    /**
      * Records a checker's decision. An approval can only ever be decided once.
      *
      * @throws SelfApprovalNotAllowedException if [decidedBy] is the original maker —

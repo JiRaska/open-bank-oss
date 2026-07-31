@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.3.0
+  version: 1.4.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -267,6 +267,33 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: Not found }
+  /api/v1/lending/approvals:
+    get:
+      tags: [Lending]
+      summary: List pending four-eyes approvals (ADR-0227 inbox federation)
+      description: >-
+        PENDING maker-checker approvals, oldest first. The read side of the unified approval
+        inbox — deciding stays on PATCH /api/v1/lending/approvals/{id}.
+        Requires ROLE_LENDING_OFFICER, ROLE_CREDIT_RISK or ROLE_ADMIN.
+      operationId: listPendingApprovals
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Pending approvals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/lending/approvals/{id}:
     patch:
       tags: [Lending]
@@ -354,6 +381,17 @@ components:
       type: object
       properties:
         error: { type: string }
+    ApprovalResponse:
+      type: object
+      required: [id, action, status]
+      properties:
+        id: { type: string }
+        action: { type: string, description: The gated action the maker requested (e.g. lending.disburse) }
+        resourceId: { type: string, nullable: true }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED, EXECUTED] }
+        makerId: { type: string, nullable: true, description: Principal that created the request }
+        createdAt: { type: string, format: date-time, nullable: true }
+        decidedBy: { type: string, nullable: true }
     Money:
       type: object
       required: [amount, currency]
