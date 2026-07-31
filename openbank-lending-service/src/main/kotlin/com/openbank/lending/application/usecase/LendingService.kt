@@ -131,6 +131,52 @@ class LendingService(
     private fun Uni<LoanApplication>.signalWorkflow(): Uni<LoanApplication> =
         call { app -> workflowPort.stateEntered(app.id, app.status, reflectionDaysFor(app)) }
 
+    private fun Uni<LoanApplication>.emitEvidence(
+        from: String,
+        actor: String,
+        actorKind: OriginationActorKind,
+        reason: String,
+    ): Uni<LoanApplication> = call { app ->
+        events.emit(transitionEvidence(app, from, app.status, actor, actorKind, reason))
+    }
+
+    /**
+     * Canonical credit evidence event (ADR-0214 D1/D2): every origination transition lands in the
+     * transactional outbox in the same commit as the state change, in a PII-minimised envelope —
+     * identifiers, versions and hashes, never application data. correlationId == applicationId, so
+     * the audit chain reconstructs the whole lifecycle from one key.
+     */
+    private fun transitionEvidence(
+        application: LoanApplication,
+        from: String,
+        to: OriginationState,
+        actor: String,
+        actorKind: OriginationActorKind,
+        reason: String,
+    ): LendingOutboxMessage {
+        val id = application.id.value
+        val payload = buildString {
+            append("""{"eventType":"credit.application.transition",""")
+            append(""""aggregateType":"LOAN_APPLICATION",""")
+            append(""""aggregateId":"$id",""")
+            append(""""loanApplicationId":"$id",""")
+            append(""""fromState":"$from",""")
+            append(""""toState":"${to.name}",""")
+            append(""""actorId":"$actor",""")
+            append(""""actorKind":"${actorKind.name}",""")
+            append(""""reason":"${reason.replace("\"", "'")}",""")
+            append(""""packVersion":${application.packVersion ?: "null"},""")
+            append(""""occurredAt":"${clock.instant()}",""")
+            append(""""correlationId":"$id",""")
+            append(""""sourceService":"lending"}""")
+        }
+        return LendingOutboxMessage(
+            aggregateId = id,
+            eventType = "credit.application.transition",
+            payload = payload,
+        )
+    }
+
     // --- Origination --------------------------------------------------------------------------------
 
     override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> {
@@ -162,6 +208,17 @@ class LendingService(
             workflowPort.stateEntered(saved.id, state, reflectionDaysFor(saved))
         }.map { saved ->
             if (originationConfig.autoApprove) straightThrough(saved) else saved
+        }.call { saved ->
+            events.emit(
+                transitionEvidence(
+                    application.copy(status = saved.status),
+                    "NONE",
+                    saved.status,
+                    if (originationConfig.autoApprove) OriginationConfig.SANDBOX_ACTOR else proposedBy,
+                    OriginationActorKind.HUMAN,
+                    "application submitted",
+                ),
+            )
         }
     }
 
@@ -204,7 +261,14 @@ class LendingService(
                             is OriginationTransitionResult.Rejected ->
                                 Uni.createFrom().failure(IllegalStateException(result.reason))
                             is OriginationTransitionResult.Applied ->
-                                applications.update(existing.copy(status = result.newState)).signalWorkflow()
+                                applications.update(existing.copy(status = result.newState))
+                                    .signalWorkflow()
+                                    .emitEvidence(
+                                        existing.status.name,
+                                        actor,
+                                        OriginationActorKind.HUMAN,
+                                        "operator advance",
+                                    )
                         }
                     }
                 }
@@ -229,7 +293,14 @@ class LendingService(
                     is OriginationTransitionResult.Rejected ->
                         Uni.createFrom().failure(IllegalStateException(result.reason))
                     is OriginationTransitionResult.Applied ->
-                        applications.update(existing.copy(status = result.newState)).signalWorkflow()
+                        applications.update(existing.copy(status = result.newState))
+                            .signalWorkflow()
+                            .emitEvidence(
+                                existing.status.name,
+                                actor,
+                                OriginationActorKind.SYSTEM,
+                                "durable timer elapsed",
+                            )
                 }
             }
         }
@@ -275,6 +346,12 @@ class LendingService(
                                 decidedAt = OffsetDateTime.now(clock),
                             ),
                         ).signalWorkflow()
+                            .emitEvidence(
+                                existing.status.name,
+                                decidedBy,
+                                OriginationActorKind.HUMAN,
+                                decision.reason ?: "four-eyes decision",
+                            )
                     }
                 }
             }
@@ -359,7 +436,20 @@ class LendingService(
                     is OriginationTransitionResult.Rejected ->
                         Uni.createFrom().failure(IllegalStateException(st.reason))
                     is OriginationTransitionResult.Applied ->
-                        applications.update(application.copy(status = st.newState)).map { saved }
+                        applications.update(application.copy(status = st.newState))
+                            .call { savedApp ->
+                                events.emit(
+                                    transitionEvidence(
+                                        savedApp,
+                                        application.status.name,
+                                        st.newState,
+                                        disbursedBy,
+                                        OriginationActorKind.HUMAN,
+                                        "disbursement booked",
+                                    ),
+                                )
+                            }
+                            .map { saved }
                 }
             }
             .flatMap { saved ->

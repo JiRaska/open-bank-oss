@@ -78,6 +78,8 @@ class AuditConsumer {
         "cardId" to "CARD",
         "disputeId" to "DISPUTE",
         "paymentId" to "PAYMENT",
+        "loanApplicationId" to "LOAN_APPLICATION",
+        "loanId" to "LOAN",
         "documentId" to "DOCUMENT",
         "ceremonyId" to "SIGNATURE_CEREMONY",
         "conversionId" to "FX_CONVERSION",

@@ -69,6 +69,11 @@ class LendingServiceTest {
     private val valuation = mockk<CollateralValuationPort>()
     private val riskParameters = mockk<RiskParameterSource>()
     private val events = mockk<LoanEventEmitter>()
+
+    @org.junit.jupiter.api.BeforeEach
+    fun stubEventEmitter() {
+        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+    }
     private val clock = Clock.fixed(Instant.parse("2024-01-01T00:00:00Z"), ZoneOffset.UTC)
     private val provisioning = mockk<ProvisioningRepository>()
 
@@ -127,6 +132,41 @@ class LendingServiceTest {
 
         assertThatThrownBy { service.advance(app.id, "officer-1").await().indefinitely() }
             .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `advance emits the canonical transition evidence into the outbox (ADR-0214)`() {
+        val app = proposedApplication().copy(status = OriginationState.SUBMITTED, packVersion = 1)
+        val evidenceSlot: CapturingSlot<LendingOutboxMessage> = slot()
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { applications.update(any()) } answers { Uni.createFrom().item(firstArg<LoanApplication>()) }
+        every { events.emit(capture(evidenceSlot)) } returns Uni.createFrom().item(Unit)
+
+        service.advance(app.id, "officer-1").await().indefinitely()
+
+        assertThat(evidenceSlot.captured.eventType).isEqualTo("credit.application.transition")
+        assertThat(evidenceSlot.captured.payload).contains("\"fromState\":\"SUBMITTED\"")
+            .contains("\"toState\":\"KYC_PENDING\"")
+            .contains("\"actorId\":\"officer-1\"")
+            .contains("\"packVersion\":1")
+            .contains("\"correlationId\":\"${app.id.value}\"")
+            .contains("\"sourceService\":\"lending\"")
+    }
+
+    @Test
+    fun `decide emits four-eyes evidence with the checker identity`() {
+        val app = proposedApplication(proposer = "alice")
+        val evidenceSlot: CapturingSlot<LendingOutboxMessage> = slot()
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { applications.update(any()) } answers { Uni.createFrom().item(firstArg<LoanApplication>()) }
+        every { events.emit(capture(evidenceSlot)) } returns Uni.createFrom().item(Unit)
+
+        service.decide(app.id, DecisionRequest(approve = true, reason = "solid affordability"), "bob")
+            .await().indefinitely()
+
+        assertThat(evidenceSlot.captured.payload).contains("\"toState\":\"OFFERED\"")
+            .contains("\"actorId\":\"bob\"")
+            .contains("solid affordability")
     }
 
     @Test
@@ -231,7 +271,7 @@ class LendingServiceTest {
         // Cash leaves the bank exactly once, for the full principal.
         assertThat(postingSlot.captured.amount).isEqualTo(eur("12000.00"))
         verify(exactly = 1) { ledger.post(any()) }
-        verify(exactly = 1) { events.emit(any<LendingOutboxMessage>()) }
+        verify(exactly = 2) { events.emit(any<LendingOutboxMessage>()) }
     }
 
     @Test

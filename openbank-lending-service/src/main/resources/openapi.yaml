@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.7.0
+  version: 1.8.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -87,6 +87,20 @@ paths:
       responses:
         '200': { description: Recent applications }
         '400': { description: Unknown status value }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/applications/{id}/evidence:
+    get:
+      tags: [Lending]
+      operationId: getApplicationEvidence
+      summary: Ordered evidence bundle for one loan application (ADR-0214)
+      description: >-
+        The application lifecycle as recorded in the transactional outbox, oldest first —
+        the same events the audit chain (ADR-0133) ingests. ROLE_COMPLIANCE / ROLE_AUDIT / ROLE_ADMIN.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: Ordered evidence events with attestation marker }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/applications/{id}/advance:

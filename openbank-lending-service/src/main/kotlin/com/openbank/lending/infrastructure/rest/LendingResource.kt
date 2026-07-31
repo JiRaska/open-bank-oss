@@ -59,6 +59,7 @@ class LendingResource(
     private val reschedule: RescheduleLoanUseCase,
     private val collateral: CollateralUseCase,
     private val provisioning: ProvisioningUseCase,
+    private val outbox: com.openbank.lending.application.port.out.LendingOutboxRepository,
     private val identity: SecurityIdentity,
     private val clock: Clock,
 ) {
@@ -77,6 +78,31 @@ class LendingResource(
     fun applyForLoan(request: LoanApplicationRequest): Uni<Response> = apply.apply(request, actor())
         .map { Response.status(201).entity(it).build() }
         .onFailure().recoverWithItem { e -> Response.status(400).entity(mapOf("error" to e.message)).build() }
+
+    @GET
+    @Path("/applications/{id}/evidence")
+    @RolesAllowed("ROLE_COMPLIANCE", "ROLE_AUDIT", "ROLE_ADMIN")
+    @Authorize(action = "lending.evidence.read", resource = "#id")
+    @Operation(summary = "Ordered evidence bundle for one loan application (ADR-0214)")
+    suspend fun evidence(@PathParam("id") id: UUID): Response {
+        val events = outbox.findByAggregateId(id).map { entry ->
+            mapOf(
+                "eventId" to entry.eventId.toString(),
+                "eventType" to entry.eventType,
+                "occurredAt" to entry.createdAt.toString(),
+                "payload" to entry.payload,
+            )
+        }
+        return Response.ok(
+            mapOf(
+                "applicationId" to id.toString(),
+                "attestation" to "local-outbox",
+                "eventCount" to events.size,
+                "events" to events,
+                "requestedBy" to actor(),
+            ),
+        ).build()
+    }
 
     @POST
     @Path("/applications/{id}/advance")

@@ -17,6 +17,9 @@ interface LendingOutboxRepository : OutboxRepository {
      * dispatch side (listProcessable / markSent / markFailed).
      */
     fun persistInTransaction(message: LendingOutboxMessage): Uni<Void>
+
+    /** Evidence-bundle read (ADR-0214 D3): all outbox events for one aggregate, oldest first. */
+    suspend fun findByAggregateId(aggregateId: java.util.UUID): List<com.openbank.libs.persistence.outbox.OutboxEntry>
 }
 
 /**

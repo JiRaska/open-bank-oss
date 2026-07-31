@@ -252,6 +252,10 @@ Tracked as the named bootstrap follow-up (ADR-0212 D4).
 
 ## 9. Change log
 
+- **2026-07-31** — Credit evidence emission (ADR-0214): canonical
+  credit.application.transition events in the transactional outbox (PII-minimised:
+  ids, versions, hashes), evidence bundle endpoint GET /applications/{id}/evidence
+  (ROLE_COMPLIANCE/ROLE_AUDIT), audit-service consumes openbank.lending.events.
 - **2026-07-31** — Temporal durable origination timers (ADR-0211 D2): per-application
   OriginationTimersWorkflow (document SLA with half-time reminder, offer expiry,
   reflection/cooling-off wait), generation-counter invalidation, idempotent expire/advance

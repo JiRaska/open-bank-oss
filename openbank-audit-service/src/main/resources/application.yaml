@@ -142,7 +142,7 @@ mp:
         # directly rather than assuming from the port/publisher shape alone). #1035's AML-case
         # design for this topic is a SEPARATE, additional consumer with real business logic
         # (case-opening criteria) — this audit-trail consumer does not replace or block that work.
-        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.security.scan.event,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.documents.document.event,openbank.payments.swift.event
+        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.security.scan.event,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%dev":
   quarkus:

@@ -8,6 +8,7 @@ import com.openbank.lending.application.port.out.CollateralRepository
 import com.openbank.lending.application.port.out.CollateralValuationPort
 import com.openbank.lending.application.port.out.InstallmentRepository
 import com.openbank.lending.application.port.out.LedgerPostingPort
+import com.openbank.lending.application.port.out.LendingOutboxMessage
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanEventEmitter
 import com.openbank.lending.application.port.out.LoanRepository
@@ -69,6 +70,11 @@ class LendingServiceEdgeCasesTest {
     private val valuation = mockk<CollateralValuationPort>()
     private val riskParameters = mockk<RiskParameterSource>()
     private val events = mockk<LoanEventEmitter>()
+
+    @org.junit.jupiter.api.BeforeEach
+    fun stubEventEmitter() {
+        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+    }
     private val clock = Clock.fixed(Instant.parse("2024-01-01T00:00:00Z"), ZoneOffset.UTC)
     private val provisioning = mockk<ProvisioningRepository>()
 
