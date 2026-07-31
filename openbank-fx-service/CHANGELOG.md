@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.9.1...fx-service-v0.9.2) (2026-07-31)
+
+
+### Bug Fixes
+
+* **fx:** point the ČNB fixing ingestion at the URL that actually serves it ([#2917](https://github.com/JiRaska/open-bank-oss/issues/2917)) ([9911418](https://github.com/JiRaska/open-bank-oss/commit/99114189056ac41a523d2d914fd80e4a0d917734))
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.9.0...fx-service-v0.9.1) (2026-07-31)
 
 
