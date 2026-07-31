@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: dispute-service
     app.kubernetes.io/part-of: dispute
   annotations:
-    openbank.tech/policy-checksum: "53cce7b63a0a4b99"
+    openbank.tech/policy-checksum: "bcb57622e32b8204"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2998,6 +2998,27 @@ data:
             analytics-sink deliberately DROPS hibernate-reactive-panache, reactive-pg-client and
             jdbc-postgresql (build.gradle.kts) — it has no OLTP datasource to reach. The
             reconciliation reads the warehouse and the WORM archive over blocking clients.
+
+      no_reactive_from_nonsuspend_scheduled_body: true
+      # The SAME defect without the `runBlocking` spelling — and keying the first version of this
+      # gate on that spelling is precisely how it walked past. #2913:
+      # ConsentExpirationJob.sweepExpiredConsents() built a Uni and `subscribe()`d it, with no
+      # `runBlocking` anywhere. `subscribe()` reads as "hand this off, it runs elsewhere" and does
+      # not: the subscription starts on the CALLER's thread, which is the contextless
+      # executor-thread. The hourly consent-expiration sweep had therefore never once succeeded
+      # (GDPR Art. 17 / PSD2 RTS Art. 10 — expired consents stayed ACTIVE and the ConsentExpired
+      # event never reached a single consumer), and the sweep for that shape found two more:
+      # notification-service's device-token sweep (ADR-0135) and its dead-letter janitor
+      # (ADR-0050 N5). Neither had ever purged a row.
+      #
+      # RULE: a @Scheduled method that starts reactive work must be `suspend` — or declared to
+      # return `Uni<…>`, the other shape Quarkus dispatches on a proper (duplicated) Vert.x context,
+      # which four services already use. The gate checks that PROPERTY rather than one forbidden
+      # identifier, so the next spelling is covered too.
+      #
+      # Same exception idiom as runblocking_allowlist above, and a stale entry is a violation in
+      # either direction.
+      nonsuspend_reactive_allowlist: []
       ci_producer: ".github/scripts/check-no-runblocking-in-scheduled.py"
 
       # The structural reason the HR000068 class was invisible (#2204). `quarkus.scheduler.enabled:
