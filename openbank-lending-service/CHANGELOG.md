@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.11.5...lending-service-v0.12.0) (2026-07-31)
+
+
+### Features
+
+* **lending:** pending-approvals list endpoint — first inbox federation source (ADR-0227 D2) ([#2791](https://github.com/JiRaska/open-bank-oss/issues/2791)) ([36e5d3a](https://github.com/JiRaska/open-bank-oss/commit/36e5d3a8ab97eb5db81c1e840f5df67bb77c53d0))
+
 ## [0.11.5](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.11.4...lending-service-v0.11.5) (2026-07-23)
 
 
