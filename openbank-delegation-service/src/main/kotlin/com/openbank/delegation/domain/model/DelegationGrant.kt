@@ -4,6 +4,7 @@
 
 package com.openbank.delegation.domain.model
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.money.Money
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -75,7 +76,7 @@ data class Exposure(
 }
 
 data class DelegationGrant(
-    val id: UUID = UUID.randomUUID(),
+    val id: UUID = Ids.newId(),
     val grantorPartyId: UUID,
     val granteePartyId: UUID,
     val resourceType: DelegationResourceType,
