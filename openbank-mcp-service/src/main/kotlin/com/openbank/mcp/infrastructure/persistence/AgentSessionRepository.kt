@@ -32,7 +32,9 @@ open class AgentSessionRepository : PanacheRepository<AgentSessionEntity> {
     open suspend fun revoke(id: UUID, asOf: Instant): Boolean {
         val session = findActive(id, asOf) ?: return false
         session.revokedAt = asOf
-        Panache.withTransaction { persist(session) }.awaitSuspending()
+        // merge, not persist: the entity is detached and has an app-assigned @Id, so persist()
+        // would schedule an INSERT and fail duplicate-key — the fleet's persist-vs-merge footgun.
+        Panache.withTransaction { getSession().flatMap { s -> s.merge(session) } }.awaitSuspending()
         return true
     }
 }

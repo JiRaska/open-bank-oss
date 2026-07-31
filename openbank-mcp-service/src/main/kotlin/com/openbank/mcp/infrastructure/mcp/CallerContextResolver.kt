@@ -8,7 +8,6 @@ import com.openbank.mcp.application.port.out.ConsentContext
 import com.openbank.mcp.infrastructure.persistence.AgentSessionRepository
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
-import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
 import java.time.Clock
@@ -49,7 +48,7 @@ class CallerContextResolver @Inject constructor(
      * @throws IllegalStateException when an agent token is present but carries no `consent_id` — a
      *   malformed token must fail closed, never silently degrade to an unscoped read.
      */
-    fun resolveOrNull(): ConsentContext? {
+    suspend fun resolveOrNull(): ConsentContext? {
         val subject = jwt.subject ?: return null
         if (subject.startsWith(AGENT_PREFIX)) {
             val consentId = jwt.getClaim<String?>(CLAIM_CONSENT_ID)?.takeIf { it.isNotBlank() }
@@ -73,8 +72,11 @@ class CallerContextResolver @Inject constructor(
      * session-binding anchor), the MCP audience client in `aud`, and at least one bounded realm
      * role. The token carries no consent — consent-scoped tools fail closed downstream; the PDP
      * decides by realm roles exactly as for a REST call (ADR-0034).
+     *
+     * Suspend (never wrapped in runBlocking here): the endpoint awaits it inside its own flat
+     * runBlocking on the JAX-RS worker thread — no nested blocking bridge on the auth path.
      */
-    private fun resolveOboHuman(subject: String): ConsentContext? {
+    private suspend fun resolveOboHuman(subject: String): ConsentContext? {
         val azp = jwt.getClaim<String?>(CLAIM_AZP)?.takeIf { it.isNotBlank() } ?: return null
         val sid = jwt.getClaim<String?>(CLAIM_SESSION_ID)?.takeIf { it.isNotBlank() } ?: return null
         if (MCP_AUDIENCE !in audience()) return null
@@ -84,7 +86,7 @@ class CallerContextResolver @Inject constructor(
         // ADR-0224 D2: the session must exist, be active (not revoked/expired), belong to this
         // subject, and the effective roles are bounded by BOTH the token and the session ceiling.
         // A missing store row or a mismatch is anonymous — revocation takes effect immediately.
-        val session = sid.toUuidOrNull()?.let { runBlocking { sessions?.findActive(it, Instant.now(clock)) } }
+        val session = sid.toUuidOrNull()?.let { sessions?.findActive(it, Instant.now(clock)) }
             ?: return null
         if (session.subject != subject) return null
         val ceiling = parseCeiling(session.roleCeiling)

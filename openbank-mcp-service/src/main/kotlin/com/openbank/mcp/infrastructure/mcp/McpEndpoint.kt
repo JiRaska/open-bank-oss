@@ -150,7 +150,7 @@ class McpEndpoint(
     @Suppress("TooGenericExceptionCaught")
     private fun handleToolsList(id: JsonNode): Response {
         val ctx = try {
-            callerResolver.resolveOrNull()
+            runBlocking { callerResolver.resolveOrNull() }
         } catch (ex: Exception) {
             log.warnf("caller context resolution failed for tools/list: %s — denying", ex.message)
             null
@@ -336,7 +336,7 @@ class McpEndpoint(
     // enum as the historical record of the #2206 blocker this cutover closes — the metric that used
     // to track it now reads zero by construction, not because fallback traffic happened to taper off.
     private fun resolveContext(): ConsentContext {
-        val ctx = callerResolver.resolveOrNull() ?: error("no agent token presented")
+        val ctx = runBlocking { callerResolver.resolveOrNull() } ?: error("no agent token presented")
         metrics.callerIdentityResolved(CallerIdentitySource.TOKEN)
         return ctx
     }
