@@ -4,9 +4,10 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.mcp.infrastructure.persistence
 
-import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntity
+import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntityBase
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
+import jakarta.persistence.Id
 import jakarta.persistence.Table
 import java.time.Instant
 import java.util.UUID
@@ -14,7 +15,11 @@ import java.util.UUID
 /** One staff OBO session row (ADR-0224 D2). `roleCeiling` is a JSON array string of ROLE_* names. */
 @Entity
 @Table(name = "agent_session")
-class AgentSessionEntity : PanacheEntity() {
+class AgentSessionEntity : PanacheEntityBase {
+    @Id
+    @Column(name = "id", nullable = false)
+    lateinit var id: UUID
+
     @Column(name = "subject", nullable = false)
     lateinit var subject: String
 

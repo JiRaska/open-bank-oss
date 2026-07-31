@@ -61,6 +61,7 @@ class McpSessionResource(
         }
         val now = Instant.now(clock)
         val session = AgentSessionEntity().also {
+            it.id = UUID.randomUUID()
             it.subject = identity.principal.name
             it.roleCeiling = ceiling.joinToString(",", prefix = "[", postfix = "]") { r -> "\"$r\"" }
             it.clientId = request.clientId
@@ -76,9 +77,10 @@ class McpSessionResource(
     @Path("/{id}")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "mcp.session.read", resource = "#id")
-    @Operation(summary = "Session status (for the issuing operator and admins)")
+    @Operation(summary = "Session status (only the owner, or an admin)")
     suspend fun status(@PathParam("id") id: UUID): Response {
         val session = sessions.findById(id) ?: throw NotFoundException("no session $id")
+        if (!owns(session)) return forbidden()
         return Response.ok(session.toResponse()).build()
     }
 
@@ -86,13 +88,26 @@ class McpSessionResource(
     @Path("/{id}")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "mcp.session.revoke", resource = "#id")
-    @Operation(summary = "Revoke a session immediately (self or admin)")
+    @Operation(summary = "Revoke a session immediately (only the owner, or an admin)")
     suspend fun revoke(@PathParam("id") id: UUID): Response {
+        val session = sessions.findById(id)
+            ?: return Response.status(Response.Status.NOT_FOUND)
+                .entity(mapOf("error" to "no active session $id"))
+                .build()
+        if (!owns(session)) return forbidden()
         if (!sessions.revoke(id, Instant.now(clock))) {
             return Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to "no active session $id")).build()
         }
         return Response.noContent().build()
     }
+
+    // Broken-access-control guard: the role grant admits every operator, but a session row is
+    // its owner's alone — reading or revoking another operator's session needs ROLE_ADMIN.
+    private fun owns(session: AgentSessionEntity): Boolean =
+        identity.roles.contains("ROLE_ADMIN") || session.subject == identity.principal.name
+
+    private fun forbidden(): Response =
+        Response.status(Response.Status.FORBIDDEN).entity(mapOf("error" to "not your session")).build()
 }
 
 data class CreateSessionRequest(

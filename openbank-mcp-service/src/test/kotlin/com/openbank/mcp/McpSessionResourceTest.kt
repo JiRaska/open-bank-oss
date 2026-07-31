@@ -57,4 +57,51 @@ class McpSessionResourceTest {
         assertThat(res.status).isEqualTo(403)
         assertThat(saved).isEmpty()
     }
+
+    @Test
+    fun `another operator cannot read or revoke a session that is not theirs`(): Unit = runBlocking {
+        val foreign = AgentSessionEntity().also {
+            it.id = java.util.UUID.randomUUID()
+            it.subject = "someone.else"
+            it.roleCeiling = "[\"ROLE_OPERATOR\"]"
+            it.clientId = "admin-ui"
+            it.createdAt = Instant.now(clock)
+            it.expiresAt = Instant.now(clock).plusSeconds(900)
+        }
+        val repoWithForeign = object : AgentSessionRepository() {
+            override suspend fun findById(id: java.util.UUID) = if (id == foreign.id) foreign else null
+        }
+        val outsider = McpSessionResource(repoWithForeign, clock, 15).apply {
+            identity = QuarkusSecurityIdentity.builder()
+                .setPrincipal { "jane.operator" }
+                .addRole("ROLE_OPERATOR")
+                .build() as SecurityIdentity
+        }
+        assertThat(outsider.status(foreign.id).status).isEqualTo(403)
+        assertThat(outsider.revoke(foreign.id).status).isEqualTo(403)
+    }
+
+    @Test
+    fun `an admin can read and revoke any session`(): Unit = runBlocking {
+        val foreign = AgentSessionEntity().also {
+            it.id = java.util.UUID.randomUUID()
+            it.subject = "someone.else"
+            it.roleCeiling = "[\"ROLE_OPERATOR\"]"
+            it.clientId = "admin-ui"
+            it.createdAt = Instant.now(clock)
+            it.expiresAt = Instant.now(clock).plusSeconds(900)
+        }
+        val repoWithForeign = object : AgentSessionRepository() {
+            override suspend fun findById(id: java.util.UUID) = if (id == foreign.id) foreign else null
+            override suspend fun revoke(id: java.util.UUID, asOf: Instant) = id == foreign.id
+        }
+        val admin = McpSessionResource(repoWithForeign, clock, 15).apply {
+            identity = QuarkusSecurityIdentity.builder()
+                .setPrincipal { "boss.admin" }
+                .addRole("ROLE_ADMIN")
+                .build() as SecurityIdentity
+        }
+        assertThat(admin.status(foreign.id).status).isEqualTo(200)
+        assertThat(admin.revoke(foreign.id).status).isEqualTo(204)
+    }
 }
