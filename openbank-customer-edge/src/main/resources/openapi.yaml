@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.22.0
+  version: 1.23.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -151,6 +151,58 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/AccessLogEntry'
+
+  /directory/lookup:
+    post:
+      tags: [Directory]
+      summary: Match address-book phone hashes against parties who opted into pay-to-phone
+      description: >
+        Takes SHA-256 hashes of phone numbers the caller already holds and returns the subset
+        belonging to parties who opted into being discoverable. Never accepts or returns a
+        plaintext phone number, and returns no account, email or address — the payment rail
+        resolves the account from the party id server-side. Hashing keeps numbers out of logs;
+        it is not a privacy guarantee against the bank, which holds the numbers regardless.
+      operationId: directoryLookup
+      security:
+        - customerOidc: [accounts:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DirectoryLookupRequest'
+      responses:
+        '200':
+          description: The hashes that matched a discoverable party
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DirectoryLookupResponse'
+        '400':
+          description: phoneHashes missing or not an array
+
+  /directory/discoverable:
+    put:
+      tags: [Directory]
+      summary: Turn the caller's own pay-to-phone findability on or off
+      operationId: setDiscoverable
+      security:
+        - customerOidc: [accounts:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscoverableRequest'
+      responses:
+        '200':
+          description: The stored setting
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoverableRequest'
+        '400':
+          description: discoverable missing or not a boolean
 
   /accounts:
     get:
@@ -1398,6 +1450,39 @@ components:
           type: integer
           nullable: true
 
+    DirectoryLookupRequest:
+      type: object
+      properties:
+        phoneHashes:
+          type: array
+          description: Lowercase hex SHA-256 of each phone number in E.164 form.
+          items:
+            type: string
+    DirectoryLookupResponse:
+      type: object
+      properties:
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/DirectoryMatch'
+    DirectoryMatch:
+      type: object
+      description: >
+        A hash that belongs to a discoverable party. Carries the party id and legal name only —
+        nothing else about the payee is the caller's to learn from a lookup.
+      properties:
+        phoneHash:
+          type: string
+        partyId:
+          type: string
+          format: uuid
+        legalName:
+          type: string
+    DiscoverableRequest:
+      type: object
+      properties:
+        discoverable:
+          type: boolean
     AccessLogEntry:
       type: object
       description: One audit event whose aggregate is the caller's party (metadata only,

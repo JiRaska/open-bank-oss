@@ -45,6 +45,18 @@ class PartyEntity : PanacheEntity() {
     @Column(name = "phone")
     var phone: String? = null
 
+    /**
+     * Whether this party may be FOUND by someone who knows their phone number (pay-to-phone).
+     * Opt-in: false until the customer turns it on. See [PhoneDirectory] for what the hash does
+     * and does not protect.
+     */
+    @Column(name = "discoverable", nullable = false)
+    var discoverable: Boolean = false
+
+    /** SHA-256 of the E.164 [phone]; kept in step with [phone] on every write. */
+    @Column(name = "phone_hash")
+    var phoneHash: String? = null
+
     @Column(name = "address_line1")
     var addressLine1: String? = null
 

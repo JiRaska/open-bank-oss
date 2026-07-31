@@ -1278,6 +1278,66 @@ class CustomerEdgeResource(
         )
     }
 
+    /**
+     * Pay-to-phone directory lookup. The app sends SHA-256 hashes of phone numbers from the
+     * customer's own address book and gets back the subset belonging to parties who opted into
+     * being discoverable.
+     *
+     * What this route deliberately does NOT do:
+     *   · it never sees a plaintext phone number (the app hashes before sending), so numbers stay
+     *     out of this service's access logs;
+     *   · it answers only about numbers the caller already had — it cannot be walked to enumerate
+     *     customers, and a party who has not opted in is invisible whatever is asked;
+     *   · it returns a party id and a name, never an account, an email or an address. The payment
+     *     rail resolves the account from the party id server-side, so knowing someone banks here
+     *     does not hand out their account number.
+     *
+     * The hashing is honest about its limits: it keeps plaintext off the wire and out of logs, it
+     * is NOT a privacy guarantee against OpenBank, which holds the numbers anyway. The opt-in is
+     * the control that matters.
+     */
+    @POST
+    @Path("/directory/lookup")
+    @Authorize(action = "customer.directory.lookup")
+    @Blocking
+    fun directoryLookup(body: String): Response {
+        val customer = customer()
+        val parsed = runCatching { objectMapper.readTree(body) }.getOrNull()
+            ?: return badRequest("body must be JSON")
+        val hashes = parsed.path("phoneHashes").takeIf { it.isArray }?.mapNotNull { it.asText(null) }
+            ?: return badRequest("phoneHashes (array of hex sha-256) is required")
+        if (hashes.isEmpty()) return Response.ok(mapOf("matches" to emptyList<Any>())).build()
+        val out = objectMapper.createObjectNode()
+        out.set<com.fasterxml.jackson.databind.JsonNode>(
+            "phoneHashes",
+            objectMapper.valueToTree(hashes.take(MAX_DIRECTORY_HASHES)),
+        )
+        return upstream.post(
+            "$partyServiceUrl/api/v1/parties/directory/lookup",
+            customer.partyId.toString(),
+            out.toString(),
+        )
+    }
+
+    /**
+     * Turn the caller's own pay-to-phone findability on or off. Party-scoped by the JWT party, so
+     * a customer can only ever change their own — the id is never taken from the body.
+     */
+    @PUT
+    @Path("/directory/discoverable")
+    @Authorize(action = "customer.directory.update")
+    @Blocking
+    fun setDiscoverable(body: String): Response {
+        val customer = customer()
+        val discoverable = extractBooleanField(objectMapper, body, "discoverable")
+            ?: return badRequest("discoverable (boolean) is required")
+        return upstream.put(
+            "$partyServiceUrl/api/v1/parties/${customer.partyId}/discoverable",
+            customer.partyId.toString(),
+            """{"discoverable":$discoverable}""",
+        )
+    }
+
     // --- Transactions ---
 
     /**
@@ -3320,6 +3380,9 @@ class CustomerEdgeResource(
 
         private const val BAD_REQUEST_STATUS = 400
         private const val FORBIDDEN_STATUS = 403
+
+        /** Upper bound on address-book hashes forwarded in one directory lookup. */
+        internal const val MAX_DIRECTORY_HASHES = 500
 
         internal const val CARD_TYPE_VIRTUAL = "VIRTUAL"
         internal const val CARD_TYPE_SINGLE_USE = "SINGLE_USE"

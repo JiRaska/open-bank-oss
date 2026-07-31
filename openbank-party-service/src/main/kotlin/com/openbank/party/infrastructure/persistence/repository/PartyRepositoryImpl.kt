@@ -108,6 +108,10 @@ class PartyRepositoryImpl :
                 it.status = party.status.name
                 it.email = party.email
                 it.phone = party.phone
+                // The hash is derived state, never supplied by a caller — recomputing it here is
+                // what keeps it from drifting out of step with the number it indexes.
+                it.phoneHash = PhoneDirectory.hash(party.phone)
+                it.discoverable = party.discoverable
                 it.tradingName = party.tradingName
                 it.kycStatus = party.kycStatus.name
                 it.amlStatus = party.amlStatus.name
@@ -124,6 +128,24 @@ class PartyRepositoryImpl :
             }
         }.replaceWith(party)
     }.awaitSuspending()
+
+    /**
+     * Discoverable parties whose phone hash is in [hashes]. Non-discoverable rows are excluded in
+     * the query, not filtered afterwards: a party that has not opted in must never leave this
+     * method, however the caller behaves.
+     */
+    override suspend fun findDiscoverableByPhoneHashes(hashes: Collection<String>): List<Party> {
+        if (hashes.isEmpty()) return emptyList()
+        return Panache.withSession {
+            find("discoverable = true and phoneHash in ?1", hashes.toList()).list()
+        }.awaitSuspending().map { it.toDomain() }
+    }
+
+    /** Scoped UPDATE of the opt-in flag alone — no read-modify-write of the whole aggregate. */
+    override suspend fun updateDiscoverable(partyId: UUID, discoverable: Boolean, at: Instant): Boolean =
+        Panache.withTransaction {
+            update("discoverable = ?1, updatedAt = ?2 where partyId = ?3", discoverable, at, partyId)
+        }.awaitSuspending() > 0
 
     override suspend fun findByKeycloakSub(sub: String): Party? =
         Panache.withSession { find("keycloakSub", sub).firstResult() }.awaitSuspending()?.toDomain()
@@ -152,6 +174,8 @@ class PartyRepositoryImpl :
         it.registrationNumber = registrationNumber
         it.email = email
         it.phone = phone
+        it.phoneHash = PhoneDirectory.hash(phone)
+        it.discoverable = discoverable
         it.kycStatus = kycStatus.name
         it.amlStatus = amlStatus.name
         it.addressLine1 = address?.line1
@@ -175,7 +199,7 @@ class PartyRepositoryImpl :
         id = partyId, partyType = PartyType.valueOf(partyType), status = PartyStatus.valueOf(status),
         legalName = legalName, tradingName = tradingName, dateOfBirth = dateOfBirth,
         nationality = nationality, taxId = taxId, registrationNumber = registrationNumber,
-        email = email, phone = phone, kycStatus = KycStatus.valueOf(kycStatus),
+        email = email, phone = phone, discoverable = discoverable, kycStatus = KycStatus.valueOf(kycStatus),
         address = if (addressLine1 !=
             null
         ) {
