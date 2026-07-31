@@ -27,15 +27,15 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: analytics-sink-ingress-allow-list
-  namespace: analytics
+  name: campaign-service-ingress-allow-list
+  namespace: campaign
   labels:
-    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/part-of: campaign
     openbank.io/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: analytics-sink
+      app.kubernetes.io/name: campaign-service
   policyTypes:
     - Ingress
   ingress:
@@ -47,48 +47,18 @@ spec:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP
-          port: 8134
+          port: 8128
     - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: observability
       ports:
         - protocol: TCP
-          port: 8086
+          port: 8085
     - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: security-scanner
       ports:
         - protocol: TCP
-          port: 8086
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: clickhouse-ingress-allow-list
-  namespace: analytics
-  labels:
-    app.kubernetes.io/part-of: analytics
-    openbank.io/derived: gen-network-policies
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: clickhouse
-  policyTypes:
-    - Ingress
-  ingress:
-    - from:
-        - podSelector: {}
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: campaign
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: admin-ui
-      ports:
-        - protocol: TCP
-          port: 8123
-        - protocol: TCP
-          port: 9000
+          port: 8085

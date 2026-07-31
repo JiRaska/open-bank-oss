@@ -17,7 +17,7 @@ quarkus:
     migrate-at-start: true
   oidc:
     auth-server-url: ${KEYCLOAK_URL:http://localhost:8080}/realms/openbank
-    client-id: openbank-campaign-service
+    client-id: openbank-services
   log:
     level: INFO
 

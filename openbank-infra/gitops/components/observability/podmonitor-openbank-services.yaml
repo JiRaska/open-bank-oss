@@ -42,6 +42,7 @@ spec:
       - audit
       - balances
       - billing
+      - campaign
       - consent
       - customer-edge
       - dispute

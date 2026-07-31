@@ -61,7 +61,7 @@ rules_real := {
 			"transitionStatus", "recall", "settle", "disburse", "send", "credit", "debit",
 			"collateralRegister", "convert", "grant", "revoke", "clear",
 		],
-		"actions": ["opsmessage.compose", "party.merge"],
+		"actions": ["opsmessage.compose", "party.merge", "campaign.activate"],
 	},
 	"feature_flags": {
 		"prohibited_flag_combinations": [

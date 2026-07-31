@@ -62,6 +62,9 @@ spec:
               kubernetes.io/metadata.name: balances
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: campaign
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: consent
         - namespaceSelector:
             matchLabels:
