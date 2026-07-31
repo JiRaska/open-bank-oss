@@ -536,7 +536,7 @@ class NotificationConsumer {
      * anything else is rejected upstream and can never arrive.
      */
     // one branch per template — grows with the catalogue; each branch stays a two-line render
-@Suppress("CyclomaticComplexMethod", "LongMethod")
+    @Suppress("CyclomaticComplexMethod", "LongMethod")
     private fun renderTemplate(template: NotificationTemplate, vars: Map<String, String>): Pair<String, String> =
         when (template) {
             NotificationTemplate.ACCOUNT_OPENED ->

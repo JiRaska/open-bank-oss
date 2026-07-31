@@ -108,22 +108,16 @@ jobs:
           # and the runtime line is force()-pinned to 4.1.136.Final in
           # openbank.dependency-vulnerability-pins.gradle.kts. A force() cannot reach the
           # plugin classpath, and forcing 4.2.x would override the 4.1.136 the runtime needs
+          #
+          # GHSA-f6hv-jmp6-3vwv / GHSA-prj3-ccx8-p6x4 / GHSA-w9fj-cfpg-grvv (io.netty:
+          # netty-codec-http2 4.1.110 — MadeYouReset, CONTINUATION flood, decompression
+          # bomb): the same class as the #1446 entries above, one classpath over — 4.1.110
+          # resolves only on the settings/tooling classpath the graph-extraction plugin
+          # itself pulls (it surfaced the first time a PR added a brand-new module to the
+          # settings auto-include, #2751). Verified: every service runtime graph resolves
+          # netty-codec-http2 at the 4.1.136.Final force() floor
+          # (:openbank-campaign-service:dependencies --configuration testRuntimeClasspath
+          # shows 4.1.135 -> 4.1.136), so the flagged version never ships in a service artefact.
           # — trading a real regression for an alert on a classpath that never ships. If a
           # service ever resolves netty 4.2.x for real, these three must be dropped.
-          #
-          # GHSA-prj3-ccx8-p6x4 / GHSA-w9fj-cfpg-grvv / GHSA-f6hv-jmp6-3vwv (io.netty:
-          # netty-codec-http2 4.1.119.Final — MadeYouReset, CONTINUATION-frame flood,
-          # HttpContentDecompressor maxAllocation bypass): 4.1.119 resolves ONLY on the
-          # Quarkus Gradle PLUGIN augmentation classpath (quarkusBuild/quarkusDev resolve
-          # their own Vert.x/Netty stack independently of any project's resolutionStrategy,
-          # so the fleet-wide force() cannot reach it — same shape as the netty 4.2.x case
-          # above). Every shipping graph is floored at 4.1.136.Final via
-          # openbank-dependency-vulnerability-pins: `:openbank-*-service:dependencies` shows
-          # `4.1.119.Final -> 4.1.136.Final` on every occurrence, i.e. no module ever
-          # downloads the vulnerable jar (gradle/verification-metadata.xml records 4.1.119
-          # on main already — pre-existing, not introduced by the Quarkus 3.38 bump this
-          # gate flagged it on). All three GHSAs need the vulnerable HTTP/2 codec exposed
-          # to untrusted traffic; a local build-augmentation classpath has none. If a
-          # service ever resolves 4.1.119 for real (no `-> 4.1.136` redirect), these must
-          # be dropped and the pin re-thought.
-          allow-ghsas: GHSA-pq2g-wx69-c263, GHSA-3qp7-7mw8-wx86, GHSA-x4gw-5cx5-pgmh, GHSA-c653-97m9-rcg9, GHSA-prj3-ccx8-p6x4, GHSA-w9fj-cfpg-grvv, GHSA-f6hv-jmp6-3vwv
+          allow-ghsas: GHSA-pq2g-wx69-c263, GHSA-3qp7-7mw8-wx86, GHSA-x4gw-5cx5-pgmh, GHSA-c653-97m9-rcg9, GHSA-f6hv-jmp6-3vwv, GHSA-prj3-ccx8-p6x4, GHSA-w9fj-cfpg-grvv
