@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.11.0...mcp-service-v0.12.0) (2026-07-31)
+
+
+### Features
+
+* **mcp:** policy-filtered tools/list — capability-shaped discovery (ADR-0225) ([#2755](https://github.com/JiRaska/open-bank-oss/issues/2755)) ([8ff6911](https://github.com/JiRaska/open-bank-oss/commit/8ff69119df6d4515ffada73c41e6f8df81326ac1))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.10.0...mcp-service-v0.11.0) (2026-07-26)
 
 
