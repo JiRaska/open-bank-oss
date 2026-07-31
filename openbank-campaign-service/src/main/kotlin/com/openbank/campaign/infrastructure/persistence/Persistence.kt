@@ -17,7 +17,6 @@ import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SegmentRef
-import com.openbank.campaign.domain.model.SegmentRule
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
 import com.openbank.libs.domain.identifiers.Ids
@@ -265,7 +264,7 @@ class PanacheSegmentRegistry(private val mapper: ObjectMapper) :
 
     override suspend fun load(name: String, version: Int): Segment? =
         Panache.withSession { find("name = ?1 and version = ?2", name, version).firstResult<SegmentEntity>() }
-            .awaitSuspending()?.let { Segment(it.name, it.version, mapper.readValue<List<SegmentRule>>(it.rulesJson)) }
+            .awaitSuspending()?.let { Segment(it.name, it.version, SegmentRuleSerde.read(mapper, it.rulesJson)) }
 
     override suspend fun save(segment: Segment): Segment {
         Panache.withTransaction {
@@ -274,7 +273,7 @@ class PanacheSegmentRegistry(private val mapper: ObjectMapper) :
                     id = Ids.newId()
                     name = segment.name
                     version = segment.version
-                    rulesJson = mapper.writeValueAsString(segment.rules)
+                    rulesJson = SegmentRuleSerde.write(mapper, segment.rules)
                     createdAt = Instant.now()
                 },
             )
@@ -283,5 +282,5 @@ class PanacheSegmentRegistry(private val mapper: ObjectMapper) :
     }
 
     override suspend fun list(): List<Segment> = Panache.withSession { listAll() }.awaitSuspending()
-        .map { Segment(it.name, it.version, mapper.readValue<List<SegmentRule>>(it.rulesJson)) }
+        .map { Segment(it.name, it.version, SegmentRuleSerde.read(mapper, it.rulesJson)) }
 }
