@@ -96,9 +96,5 @@ class CnbBanksClient {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    internal data class BankSnapshot(
-        val snapshotDate: String,
-        val source: String,
-        val banks: List<BankDto>,
-    )
+    internal data class BankSnapshot(val snapshotDate: String, val source: String, val banks: List<BankDto>)
 }
