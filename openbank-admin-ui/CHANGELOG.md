@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.67.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.66.0...admin-ui-v0.67.0) (2026-07-31)
+
+
+### Features
+
+* **admin-ui:** fraud analyst console — the REVIEW queue finally visible (ADR-0230 D2) ([#2804](https://github.com/JiRaska/open-bank-oss/issues/2804)) ([15a8943](https://github.com/JiRaska/open-bank-oss/commit/15a894331a3b584030a919dca742e4a83519419a))
+
 ## [0.66.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.65.0...admin-ui-v0.66.0) (2026-07-31)
 
 
