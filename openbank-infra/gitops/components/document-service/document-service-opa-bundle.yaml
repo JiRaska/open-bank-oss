@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: document-service
     app.kubernetes.io/part-of: documents
   annotations:
-    openbank.tech/policy-checksum: "5157342ea4b5e92a"
+    openbank.tech/policy-checksum: "e748b0fe1ce35686"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -160,7 +160,19 @@ data:
     allowed_reasons contains "matrix-allows" if {
     	input.principal.type == "HUMAN"
     	some role in input.principal.roles
-    	input.action in data.rules.authz.role_action_matrix[role].grant
+    	matrix_grants(input.action, role)
+    }
+
+    # Grants for a role = its own grant list plus ONE level of inheritance (e.g. ROLE_ADMIN
+    # inherits ROLE_OPERATOR). Single level deliberately: rego forbids recursion, and one hop
+    # covers the ADMIN-as-operator-superset case without a walkable chain to reason about.
+    matrix_grants(action, role) if {
+    	data.rules.authz.role_action_matrix[role].grant[_] == action
+    }
+
+    matrix_grants(action, role) if {
+    	parent := data.rules.authz.role_action_matrix[role].inherits
+    	data.rules.authz.role_action_matrix[parent].grant[_] == action
     }
 
     # Operators and admins may list or read any resource on behalf of any party (support-desk
@@ -2740,37 +2752,80 @@ data:
             - swift.read
             - transaction.list
             - transaction.read
+          # ── write grants (phase 1.5, operator-<domain>-write + opsmessage pair) ──
+            - account.approval.decide
+            - account.authorize
+            - account.close
+            - account.create
+            - account.freeze
+            - account.search
+            - account.unfreeze
+            - account.update
+            - balance.credit
+            - balance.debit
+            - balance.hold
+            - balance.holdRelease
+            - balance.initialize
+            - balance.reconciliation.run
+            - billing.approval.decide
+            - billing.post
+            - billing.reverse
+            - clearingBatch.approval.decide
+            - clearingBatch.reconcile
+            - clearingBatch.settle
+            - clearingBatch.submit
+            - clearingBatch.triggerCycle
+            - fraud.score
+            - fx.convert
+            - identity.case.decide
+            - identity.case.reopen
+            - identity.eudi.issue
+            - identity.eudi.poll
+            - identity.eudi.request
+            - identity.eudi.revoke
+            - identity.eudi.verify
+            - identity.link
+            - identity.register
+            - identity.resolve
+            - interest.create
+            - interest.delete
+            - interest.trigger
+            - ledger.create
+            - ledger.replay
+            - ledger.reverse
+            - ledger.trigger
+            - lending.approve
+            - lending.collateralDecide
+            - lending.collateralRegister
+            - lending.create
+            - lending.disburse
+            - lending.repay
+            - lending.reschedule
+            - lending.writeoff
+            - party.approval.decide
+            - party.consent.update
+            - party.merge
+            - party.update
+            - sanctions.approval.decide
+            - sanctions.clear
+            - sanctions.create
+            - sanctions.trigger
+            - sanctions.update
+            - sctInstPayment.create
+            - sepaPayment.approval.decide
+            - sepaPayment.create
+            - sepaPayment.handleReturn
+            - sepaPayment.transitionStatus
+            - settlement.create
+            - transaction.create
+            - transaction.reverse
+            - opsmessage.compose
+            - opsmessage.approval.decide
         ROLE_ADMIN:
-          grant:
-            - account.list
-            - account.read
-            - anacredit.list
-            - anacredit.read
-            - audit.read
-            - card.list
-            - card.read
-            - device.list
-            - dispatch.read
-            - fx.list
-            - fx.read
-            - interest.list
-            - interest.read
-            - ledger.list
-            - ledger.read
-            - lending.list
-            - lending.read
-            - notification.list
-            - notification.read
-            - sanctions.list
-            - sanctions.read
-            - sdd.list
-            - sdd.read
-            - statement.list
-            - statement.read
-            - swift.list
-            - swift.read
-            - transaction.list
-            - transaction.read
+          # One-line diff benefit: ADMIN = OPERATOR's full matrix (single level of inheritance,
+          # see rest.rego matrix_grants) — no duplicated grant list to drift apart.
+          inherits: ROLE_OPERATOR
+          grant: []
         ROLE_COMPLIANCE:
           grant:
             - account.read
@@ -2788,6 +2843,58 @@ data:
             - statement.read
             - swift.read
             - transaction.read
+        # ── ADR-0223 phase 1.5: write grants (derived from the same coverage inventory) ──────────
+        # operator-<domain>-write ext rules grant OPERATOR+ADMIN; desk rules grant their own roles.
+        # All entries remain a strict subset of today's effective grants (shadow matrix-allows is
+        # additive, so this changes no decision — it only moves the decision_reason mix toward the
+        # matrix, which is what the D2(b) operator-read-any retirement triage consumes).
+        ROLE_PAYMENTS:
+          grant:
+            # Payment desks' ext rules list ROLE_PAYMENTS alongside OPERATOR/ADMIN
+            # (domestic-payment, sepa-payment, sepa-instant, clearing — gen-*-opa-bundle.sh heredocs)
+            - sctInstPayment.create
+            - sepaPayment.create
+            - sepaPayment.handleReturn
+            - sepaPayment.transitionStatus
+            - clearingBatch.submit
+            - clearingBatch.reconcile
+            - clearingBatch.settle
+        ROLE_KYC_OPENER:
+          grant:
+            - kycCase.updateCheck
+            - kycCase.pepRescreen
+        ROLE_KYC_REVIEWER:
+          grant:
+            - kyc.case.approve
+            - kyc.case.reject
+        ROLE_AUDITOR:
+          grant:
+            - audit.read
+            - audit.verify
+        ROLE_SUPERVISOR:
+          grant:
+            - balance.overdraftLimit
+        ROLE_LENDING_OFFICER:
+          grant:
+            - lending.create
+            - lending.read
+            - lending.list
+            - lending.repay
+            - lending.disburse
+            - lending.collateralRegister
+            - lending.approval.read
+        ROLE_CREDIT_RISK:
+          grant:
+            - lending.create
+            - lending.read
+            - lending.list
+            - lending.repay
+            - lending.approve
+            - lending.writeoff
+            - lending.collateralRegister
+            - lending.collateralDecide
+            - lending.approval.read
+            - lending.approval.decide
   agents-data.yaml: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.

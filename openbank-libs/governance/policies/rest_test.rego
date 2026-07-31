@@ -1240,3 +1240,27 @@ test_matrix_allows_absent_role_and_absent_key_are_silent if {
 		with data.rules as {}
 >>>>>>> 97928e45c (feat(governance): role→action matrix as data + shadow matrix-allows reason (ADR-0223 phase 1))
 }
+
+# ADR-0223 phase 1.5: one-level inheritance — ADMIN inherits OPERATOR's full matrix; a role
+# with an empty own grant list still resolves via the parent.
+test_matrix_inherits_one_level if {
+	rest.allowed_reasons["matrix-allows"] with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "account.freeze",
+	}
+		with data.rules.authz as {"role_action_matrix": {
+			"ROLE_OPERATOR": {"grant": ["account.freeze"]},
+			"ROLE_ADMIN": {"grant": [], "inherits": "ROLE_OPERATOR"},
+		}}
+}
+
+test_matrix_inheritance_does_not_grant_unlisted if {
+	not rest.allowed_reasons["matrix-allows"] with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "account.close",
+	}
+		with data.rules.authz as {"role_action_matrix": {
+			"ROLE_OPERATOR": {"grant": ["account.freeze"]},
+			"ROLE_ADMIN": {"grant": [], "inherits": "ROLE_OPERATOR"},
+		}}
+}

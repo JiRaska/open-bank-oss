@@ -145,7 +145,19 @@ allowed_reasons contains "party-self-service" if {
 allowed_reasons contains "matrix-allows" if {
 	input.principal.type == "HUMAN"
 	some role in input.principal.roles
-	input.action in data.rules.authz.role_action_matrix[role].grant
+	matrix_grants(input.action, role)
+}
+
+# Grants for a role = its own grant list plus ONE level of inheritance (e.g. ROLE_ADMIN
+# inherits ROLE_OPERATOR). Single level deliberately: rego forbids recursion, and one hop
+# covers the ADMIN-as-operator-superset case without a walkable chain to reason about.
+matrix_grants(action, role) if {
+	data.rules.authz.role_action_matrix[role].grant[_] == action
+}
+
+matrix_grants(action, role) if {
+	parent := data.rules.authz.role_action_matrix[role].inherits
+	data.rules.authz.role_action_matrix[parent].grant[_] == action
 }
 
 # Operators and admins may list or read any resource on behalf of any party (support-desk
