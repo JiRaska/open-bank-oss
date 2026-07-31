@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.49.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.48.0...customer-edge-v0.49.0) (2026-07-31)
+
+
+### Features
+
+* **edge+security:** claimed-HTTPS app OAuth, wire-aligned OpenAPI, customer access log, VDP link ([#2814](https://github.com/JiRaska/open-bank-oss/issues/2814)) ([48fd47e](https://github.com/JiRaska/open-bank-oss/commit/48fd47e6f9b1db8bf5b43d38766adbc969aec30d))
+
 ## [0.48.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.47.0...customer-edge-v0.48.0) (2026-07-25)
 
 
