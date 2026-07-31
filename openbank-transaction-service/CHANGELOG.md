@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.15.1...transaction-service-v1.15.2) (2026-07-31)
+
+
+### Bug Fixes
+
+* **governance:** correct 21 specs' dev port and gate it against quarkus.http.port ([#2697](https://github.com/JiRaska/open-bank-oss/issues/2697)) ([1d2f830](https://github.com/JiRaska/open-bank-oss/commit/1d2f8301d8b55664eed36860a0ec78717375a66b))
+
 ## [1.15.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.15.0...transaction-service-v1.15.1) (2026-07-26)
 
 
