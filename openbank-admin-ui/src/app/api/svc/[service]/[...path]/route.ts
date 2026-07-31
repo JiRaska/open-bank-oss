@@ -42,6 +42,7 @@ const SERVICE_MAP: Record<string, { container: string; port: number }> = {
   'clearing-service':       { container: 'openbank-clearing-service',       port: 8124 },
   'interest-service':       { container: 'openbank-interest-service',       port: 8125 },
   'lending-service':        { container: 'openbank-lending-service',        port: 8126 },
+  'fraud-service':          { container: 'openbank-fraud-service',          port: 8133 },
   'dispute-service':        { container: 'openbank-dispute-service',        port: 8135 },
   'sepa-instant':           { container: 'openbank-sepa-instant',           port: 8127 },
   'document-service':       { container: 'openbank-document-service',       port: 8143 },
