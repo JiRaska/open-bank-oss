@@ -400,6 +400,12 @@ Rationale + what does *not* cover it: `rules.yaml: dependencies.pr_time_cve_gate
   `No snapshots were found for the head SHA`) — armed unconditionally it burnt >11 min on PRs
   touching no manifest. Arm it only on dependency-touching PRs, and size the window from the
   measured ~24 min end-to-end, not the 734 s resolve (the documented 600 s cannot work here).
+- **Touching ANY `build.gradle.kts` — even to add a comment — costs a ~11 min fleet resolution.**
+  Both `dependency-submission.yml` and `dependency-review.yml` filter on `**/build.gradle.kts`,
+  and a path filter cannot inspect intent: a comment-only edit changes no dependency yet arms the
+  whole submit-and-wait path. So a drive-by comment in a service's build file is not free, and
+  batching a real manifest change with unrelated formatting costs nothing extra — but doing the
+  reverse (splitting a comment tweak into its own PR) buys an 11 min job for zero information.
 - **A red push-triggered workflow on `main` is addressed to nobody.** `dependency-submission` died
   of `Java heap space` for three days, red every run, while Dependabot and the gate quietly read the
   stale graph — neither goes red when it is stale. Anything whose *output* others depend on needs an
