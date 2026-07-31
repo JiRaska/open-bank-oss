@@ -24,7 +24,8 @@ type Mandate = {
   createdAt?: string
 }
 
-const STATUSES = ['', 'PENDING_CONFIRMATION', 'ACTIVE', 'SUSPENDED', 'CANCELLED'] as const
+// Mirrors MandateStatus in sdd-service — an omitted member is a filter an operator cannot select.
+const STATUSES = ['', 'PENDING_CONFIRMATION', 'ACTIVE', 'SUSPENDED', 'CANCELLED', 'EXPIRED'] as const
 
 const STATUS_TONE: Record<string, { color: string; bg: string }> = {
   ACTIVE: { color: '#059669', bg: '#ecfdf5' },
