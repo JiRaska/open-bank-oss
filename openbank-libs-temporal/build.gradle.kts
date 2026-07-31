@@ -62,6 +62,12 @@ dependencies {
     // services resolve them), so this adds no new verification entries. Only the type
     // signatures are needed here; each consumer brings the real temporal-sdk itself.
     compileOnly("io.temporal:temporal-sdk:1.25.1") { isTransitive = false }
+    // Kotlin data classes as workflow payloads need the Kotlin module on the Temporal
+    // JSON converter; consumers already ship it via quarkus-rest-jackson (#2749).
+    compileOnly("com.fasterxml.jackson.module:jackson-module-kotlin:2.18.2")
+
+    testImplementation("io.temporal:temporal-sdk:1.25.1")
+    testImplementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.18.2")
     compileOnly("io.temporal:temporal-serviceclient:1.25.1") { isTransitive = false }
     compileOnly("com.uber.m3:tally-core:0.13.0") { isTransitive = false }
 

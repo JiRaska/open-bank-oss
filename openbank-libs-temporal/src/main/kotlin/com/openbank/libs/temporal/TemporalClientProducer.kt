@@ -4,11 +4,15 @@
 
 package com.openbank.libs.temporal
 
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.uber.m3.tally.RootScopeBuilder
 import com.uber.m3.util.Duration
 import io.micrometer.core.instrument.MeterRegistry
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowClientOptions
+import io.temporal.common.converter.DataConverter
+import io.temporal.common.converter.DefaultDataConverter
+import io.temporal.common.converter.JacksonJsonPayloadConverter
 import io.temporal.common.reporter.MicrometerClientStatsReporter
 import io.temporal.serviceclient.WorkflowServiceStubs
 import io.temporal.serviceclient.WorkflowServiceStubsOptions
@@ -43,9 +47,36 @@ class TemporalClientProducer(private val config: TemporalConfig, private val met
         }
         WorkflowClient.newInstance(
             WorkflowServiceStubs.newServiceStubs(stubsOptions.build()),
-            WorkflowClientOptions.newBuilder().setNamespace(config.namespace()).build(),
+            WorkflowClientOptions.newBuilder()
+                .setNamespace(config.namespace())
+                .setDataConverter(kotlinAwareDataConverter())
+                .build(),
         )
     }
+
+    /**
+     * Temporal's default JSON payload converter builds a plain Jackson ObjectMapper, which cannot
+     * construct a Kotlin data class — those have no no-arg constructor. Any workflow argument or
+     * return value that is a Kotlin data class fails with
+     *
+     *     DataConverterException: Cannot construct instance of `X` (no Creators, like default
+     *     constructor, exist)
+     *
+     * and the workflow task fails in a loop: the activity has already run, so the work is done and
+     * the journey still never advances. Measured on campaign-service, whose journey passes
+     * `List<CampaignStep>` (#2749); services that only pass Strings and UUIDs never hit it, which is
+     * why this survived in a fleet with several Temporal consumers.
+     *
+     * Additive: this only teaches the existing JSON converter to build Kotlin types. Payload
+     * encoding is unchanged, so in-flight workflows and histories written before this stay readable.
+     */
+    internal fun kotlinAwareDataConverter(): DataConverter = DefaultDataConverter
+        .newDefaultInstance()
+        .withPayloadConverterOverrides(
+            JacksonJsonPayloadConverter(
+                JacksonJsonPayloadConverter.newDefaultObjectMapper().registerKotlinModule(),
+            ),
+        )
 
     @Produces
     @ApplicationScoped
