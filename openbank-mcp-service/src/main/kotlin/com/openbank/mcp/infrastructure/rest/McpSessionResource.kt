@@ -13,6 +13,7 @@ import jakarta.inject.Inject
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.NotFoundException
+import jakarta.ws.rs.PATCH
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -84,6 +85,27 @@ class McpSessionResource(
         return Response.ok(session.toResponse()).build()
     }
 
+    @PATCH
+    @Path("/{id}/bind")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "mcp.session.create", resource = "#id")
+    @Operation(
+        summary = "Bind a session to the jti of the token minted for it (ADR-0224 D2) — " +
+            "called by the BFF right after a successful Keycloak token exchange",
+    )
+    suspend fun bind(@PathParam("id") id: UUID, request: BindSessionRequest): Response {
+        val session = sessions.findById(id) ?: throw NotFoundException("no session $id")
+        if (!owns(session)) return forbidden()
+        if (session.jti != null) {
+            return Response.status(Response.Status.CONFLICT)
+                .entity(mapOf("error" to "session already bound"))
+                .build()
+        }
+        session.jti = request.jti
+        sessions.merge(session)
+        return Response.ok(session.toResponse()).build()
+    }
+
     @DELETE
     @Path("/{id}")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
@@ -115,6 +137,8 @@ data class CreateSessionRequest(
     val roleCeiling: List<String> = emptyList(),
     val purpose: String? = null,
 )
+
+data class BindSessionRequest(val jti: String)
 
 fun AgentSessionEntity.toResponse() = mapOf(
     "id" to id,

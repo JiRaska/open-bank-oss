@@ -29,6 +29,9 @@ class AgentSessionEntity : PanacheEntityBase {
     @Column(name = "client_id", nullable = false)
     lateinit var clientId: String
 
+    @Column(name = "jti")
+    var jti: String? = null
+
     @Column(name = "purpose")
     var purpose: String? = null
 

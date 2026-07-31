@@ -175,7 +175,7 @@ class McpEndpointTest {
     fun `a staff token missing any of the four marks is anonymous even with the flag on`() {
         val variants = listOf(
             staffClaims - "azp",
-            staffClaims - "sid",
+            staffClaims - "jti",
             staffClaims - "aud",
             staffClaims - "realm_access",
             staffClaims + ("aud" to "some-other-service"),
@@ -196,27 +196,27 @@ class McpEndpointTest {
     private val staffClaims = mapOf(
         "sub" to "jane.operator",
         "azp" to "openbank-admin-ui",
-        "sid" to staffSessionId,
+        "jti" to staffSessionId,
         "aud" to "openbank-mcp-service",
         "realm_access" to mapOf("roles" to listOf("ROLE_OPERATOR", "default-roles-openbank")),
     )
 
     private fun staffOboJwt() = TestJsonWebToken(staffClaims)
 
-    // ADR-0224 D2 live check: a fake session store holding one ACTIVE session for the staff sid.
+    // ADR-0224 D2 live check: a fake session store holding one ACTIVE session bound to the token's jti.
     private fun fakeSessionRepo() = object : AgentSessionRepository() {
-        override suspend fun findActive(id: java.util.UUID, asOf: java.time.Instant) =
-            if (id.toString() == staffSessionId) {
-                AgentSessionEntity().also {
-                    it.subject = "jane.operator"
-                    it.roleCeiling = "[\"ROLE_OPERATOR\"]"
-                    it.clientId = "admin-ui"
-                    it.createdAt = asOf
-                    it.expiresAt = asOf.plusSeconds(3600)
-                }
-            } else {
-                null
+        override suspend fun findActiveByJti(jti: String, asOf: java.time.Instant) = if (jti == staffSessionId) {
+            AgentSessionEntity().also {
+                it.subject = "jane.operator"
+                it.roleCeiling = "[\"ROLE_OPERATOR\"]"
+                it.clientId = "admin-ui"
+                it.jti = staffSessionId
+                it.createdAt = asOf
+                it.expiresAt = asOf.plusSeconds(3600)
             }
+        } else {
+            null
+        }
     }
 
     private class RecordingPdp : PolicyDecisionPoint {

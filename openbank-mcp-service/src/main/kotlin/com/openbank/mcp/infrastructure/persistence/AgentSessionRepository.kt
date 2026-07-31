@@ -18,6 +18,11 @@ open class AgentSessionRepository : PanacheRepository<AgentSessionEntity> {
         Panache.withTransaction { persist(session) }.awaitSuspending()
     }
 
+    /** Update path for a detached row with an app-assigned @Id (bind, lifecycle transitions). */
+    open suspend fun merge(session: AgentSessionEntity) {
+        Panache.withTransaction { getSession().flatMap { s -> s.merge(session) } }.awaitSuspending()
+    }
+
     open suspend fun findById(id: UUID): AgentSessionEntity? =
         Panache.withSession { find("id", id).firstResult() }.awaitSuspending()
 
@@ -27,6 +32,14 @@ open class AgentSessionRepository : PanacheRepository<AgentSessionEntity> {
      */
     open suspend fun findActive(id: UUID, asOf: Instant): AgentSessionEntity? = Panache.withSession {
         find("id = ?1 and revokedAt is null and expiresAt > ?2", id, asOf).firstResult()
+    }.awaitSuspending()
+
+    /**
+     * The live check the OBO resolver runs on every call (ADR-0224 D2): the session bound to this
+     * token's `jti` exists, is not revoked, and has not expired. Fail closed on any miss.
+     */
+    open suspend fun findActiveByJti(jti: String, asOf: Instant): AgentSessionEntity? = Panache.withSession {
+        find("jti = ?1 and revokedAt is null and expiresAt > ?2", jti, asOf).firstResult()
     }.awaitSuspending()
 
     open suspend fun revoke(id: UUID, asOf: Instant): Boolean {

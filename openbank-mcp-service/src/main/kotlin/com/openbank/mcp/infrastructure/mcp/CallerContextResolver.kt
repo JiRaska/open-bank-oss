@@ -78,16 +78,16 @@ class CallerContextResolver @Inject constructor(
      */
     private suspend fun resolveOboHuman(subject: String): ConsentContext? {
         val azp = jwt.getClaim<String?>(CLAIM_AZP)?.takeIf { it.isNotBlank() } ?: return null
-        val sid = jwt.getClaim<String?>(CLAIM_SESSION_ID)?.takeIf { it.isNotBlank() } ?: return null
+        val jti = jwt.getClaim<String?>(CLAIM_JTI)?.takeIf { it.isNotBlank() } ?: return null
         if (MCP_AUDIENCE !in audience()) return null
         val roles = realmRoles()
         if (roles.isEmpty()) return null
 
-        // ADR-0224 D2: the session must exist, be active (not revoked/expired), belong to this
-        // subject, and the effective roles are bounded by BOTH the token and the session ceiling.
-        // A missing store row or a mismatch is anonymous — revocation takes effect immediately.
-        val session = sid.toUuidOrNull()?.let { sessions?.findActive(it, Instant.now(clock)) }
-            ?: return null
+        // ADR-0224 D2: the token's `jti` must be bound to a live session of THIS subject (never
+        // the SSO `sid` — an exchange mints a fresh one, which is exactly why jti is the binding),
+        // and the effective roles are bounded by BOTH the token and the session ceiling. A missing
+        // store row or a mismatch is anonymous — revocation takes effect immediately.
+        val session = sessions?.findActiveByJti(jti, Instant.now(clock)) ?: return null
         if (session.subject != subject) return null
         val ceiling = parseCeiling(session.roleCeiling)
         val bounded = roles.filter { it in ceiling }
@@ -98,7 +98,7 @@ class CallerContextResolver @Inject constructor(
             consentId = "",
             grantedAccounts = emptyList(),
             actChain = listOf(azp) + actChain(jwt.getClaim(CLAIM_ACT)),
-            sessionId = sid,
+            sessionId = jti,
             principalType = "HUMAN",
             roles = bounded,
         )
@@ -109,8 +109,6 @@ class CallerContextResolver @Inject constructor(
         .map { it.trim().removeSurrounding("\"") }
         .filter { it.isNotBlank() }
         .toSet()
-
-    private fun String.toUuidOrNull(): java.util.UUID? = runCatching { java.util.UUID.fromString(this) }.getOrNull()
 
     /** The `aud` claim is a single string or an array depending on the grant — accept both. */
     private fun audience(): List<String> = when (val aud = jwt.getClaim<Any?>(CLAIM_AUD)) {
@@ -144,6 +142,7 @@ class CallerContextResolver @Inject constructor(
         const val CLAIM_ACT = "act"
         const val CLAIM_SESSION_ID = "sid"
         const val CLAIM_AZP = "azp"
+        const val CLAIM_JTI = "jti"
         const val CLAIM_AUD = "aud"
         const val CLAIM_REALM_ACCESS = "realm_access"
         const val ROLE_PREFIX = "ROLE_"
