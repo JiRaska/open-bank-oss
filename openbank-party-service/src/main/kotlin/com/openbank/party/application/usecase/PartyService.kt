@@ -217,11 +217,12 @@ class PartyService : PartyUseCase {
         return result
     }
 
-    // ADR-0055: bounded name search. The shared SearchRequest contract owns the DB-safety
-    // guardrails (page-size clamp, min-term length, LIKE-escaping); this service owns the SQL
-    // (legal_name / trading_name) and the keyset cursor. A blank/`*`/sub-2-char term has no
-    // fulltext predicate — we return an empty page rather than enumerate the whole table from
-    // the /search surface (use GET /parties to list). Data-minimised response via toSimpleResponse.
+    // ADR-0055 bounded search, extended to business keys by ADR-0228 D1 (name, email, phone,
+    // tax id, registration number — never birth number). The shared SearchRequest contract owns
+    // the DB-safety guardrails (page-size clamp, min-term length, LIKE-escaping); this service
+    // owns the SQL and the keyset cursor. A blank/`*`/sub-2-char term has no fulltext predicate —
+    // we return an empty page rather than enumerate the whole table from the /search surface
+    // (use GET /parties to list). Data-minimised response via toSimpleResponse.
     override suspend fun searchParties(query: SearchPartiesQuery): CursorPage<Party> {
         val req = SearchRequest.of(query.q, query.limit, query.cursor)
         if (!req.hasTerm) {
@@ -229,7 +230,7 @@ class PartyService : PartyUseCase {
         }
         val afterId = req.cursor?.let { runCatching { UUID.fromString(CursorEncoder.decode(it)) }.getOrNull() }
         // Fetch limit+1 to detect a next page without a second count query.
-        val rows = partyRepo.searchByName(req.term!!, req.limit + 1, afterId)
+        val rows = partyRepo.searchByBusinessKeys(req.term!!, req.limit + 1, afterId)
         val hasNext = rows.size > req.limit
         val pageRows = if (hasNext) rows.dropLast(1) else rows
         val nextCursor = if (hasNext &&
