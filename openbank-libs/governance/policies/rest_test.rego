@@ -670,6 +670,44 @@ test_allow_service_consent_revoke if {
 	decision.reason == "edge-service-consent"
 }
 
+# edge-service-audit-customer: the app's privacy centre reads the customer's own access log
+# (P2-27). The endpoint's @RolesAllowed had to include ROLE_OPERATOR — the edge's service
+# account carries it and ROLE_API alone 403'd before the PDP ran — so this identity match is
+# what keeps the surface narrow.
+test_allow_service_audit_customer_read if {
+	decision := rest.allow with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "audit.customerRead",
+		"resource": {"type": "party", "id": "p-1"},
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "edge-service-audit-customer"
+}
+
+# Staff carrying ROLE_OPERATOR must NOT reach the customer access log off this rule: it is
+# pinned to the edge's client_credentials identity. This is the assertion that makes the
+# widened @RolesAllowed safe — note `audit.customerRead` deliberately does not end in `.read`,
+# so operator-read-any cannot pick it up either.
+test_deny_operator_audit_customer_read if {
+	not rest.allow with input as {
+		"principal": {"id": "alice.operator", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "audit.customerRead",
+		"resource": {"type": "party", "id": "p-1"},
+	}
+}
+
+# The grant is one action, not the `audit.` family — the edge principal must never reach the
+# auditor/compliance trail (GET /entries/{aggregateId}, /entries/by-actor/{actorId}).
+test_deny_service_audit_read if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_API"]},
+		"action": "audit.read",
+		"resource": {"type": "party", "id": "p-1"},
+	}
+}
+
 # Least privilege: the grant is the two exact actions the app uses, NOT the consent. family
 # — the edge must not be able to create/activate/validate consents on the customer's behalf.
 test_deny_service_consent_create if {

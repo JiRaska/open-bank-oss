@@ -3,5 +3,18 @@
     "apps": [
       "37YYRR972B.tech.openbank.app"
     ]
+  },
+  "applinks": {
+    "details": [
+      {
+        "appID": "37YYRR972B.tech.openbank.app",
+        "components": [
+          {
+            "/": "/app/oauth/*",
+            "comment": "OAuth2 PKCE redirect (claimed-HTTPS callback, P0)"
+          }
+        ]
+      }
+    ]
   }
 }

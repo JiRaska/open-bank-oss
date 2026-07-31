@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Audit Service API
-  version: 1.4.0
+  version: 1.5.0
   description: Immutable audit trail — retrieve event history per aggregate; verify hash-chain integrity (ADR-0086) and externally-signed anchors (ADR-0031 D5).
   license:
     name: Apache-2.0
@@ -15,6 +15,32 @@ tags:
   - name: Audit
 
 paths:
+  /api/v1/audit/customer/{partyId}:
+    get:
+      tags: [Audit]
+      summary: Get a party's own access log (customer privacy view)
+      operationId: getCustomerAccessLog
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Access-log entries for the party (event metadata only, no payloads)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccessLogEntryResponse'
+
   /api/v1/audit/entries/{aggregateId}:
     get:
       tags: [Audit]
@@ -278,6 +304,24 @@ components:
         headHashMismatch:
           type: boolean
           description: The attested head hash no longer matches the live chain (rewrite).
+
+    AccessLogEntryResponse:
+      type: object
+      description: Customer-facing privacy projection of an audit entry — event metadata
+        only, deliberately without the payload (AuditResource#getCustomerAccessLog).
+      properties:
+        eventType:
+          type: string
+        aggregateType:
+          type: string
+        actorType:
+          type: string
+          nullable: true
+        sourceService:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
 
     AuditEntryResponse:
       type: object

@@ -34,6 +34,7 @@
       "serviceAccountsEnabled": false,
       "protocol": "openid-connect",
       "redirectUris": [
+        "https://open-bank.tech/app/oauth/callback",
         "tech.openbank.app://oauth/callback",
         "http://localhost:*"
       ],
@@ -42,7 +43,7 @@
         "pkce.code.challenge.method": "S256",
         "oauth2.device.authorization.grant.enabled": "false",
         "backchannel.logout.session.required": "true",
-        "post.logout.redirect.uris": "tech.openbank.app://oauth/logout"
+        "post.logout.redirect.uris": "https://open-bank.tech/app/oauth/logout##tech.openbank.app://oauth/logout"
       },
       "defaultClientScopes": [
         "openid",

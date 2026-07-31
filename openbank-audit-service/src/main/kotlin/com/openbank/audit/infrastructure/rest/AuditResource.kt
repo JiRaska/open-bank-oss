@@ -7,6 +7,7 @@ package com.openbank.audit.infrastructure.rest
 import com.openbank.audit.application.AuditAnchorService
 import com.openbank.audit.infrastructure.persistence.AuditRepository
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.security.Roles
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.DefaultValue
@@ -31,6 +32,37 @@ class AuditResource {
     @Inject lateinit var repo: AuditRepository
 
     @Inject lateinit var anchors: AuditAnchorService
+
+    @GET
+    @Path("/customer/{partyId}")
+    // Customer-facing privacy view (P2-27): the customer edge proxies a caller's OWN access
+    // trail here, injecting partyId from the JWT so a client-supplied id never reaches this
+    // path. Roles mirror the edge-proxied precedent (document-service SignatureCeremonyResource)
+    // because they have to: UpstreamClient authenticates as the `openbank-edge` client, whose
+    // service account carries ROLE_OPERATOR — @RolesAllowed(ROLE_API) alone 403'd every call
+    // before OPA was ever consulted. ROLE_OPERATOR is also held by real staff, so the narrowing
+    // is OPA's job: `audit.customerRead` is a DISTINCT action from the auditor-facing
+    // `audit.read`, granted by rest.rego's `edge-service-audit-customer` rule to exactly the
+    // `service-account-openbank-edge` principal id and nothing else. The payload is deliberately
+    // not projected: the app gets event metadata, not event internals.
+    @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "audit.customerRead", resource = "#partyId")
+    @Operation(summary = "Get a party's own access log (customer privacy view)")
+    suspend fun getCustomerAccessLog(
+        @PathParam("partyId") partyId: String,
+        @QueryParam("limit") @DefaultValue("100") limit: Int,
+    ): Response {
+        val entries = repo.findByAggregateId(partyId, limit.coerceIn(1, 500)).map {
+            mapOf(
+                "eventType" to it.eventType,
+                "aggregateType" to it.aggregateType,
+                "actorType" to it.actorType,
+                "sourceService" to it.sourceService,
+                "occurredAt" to it.occurredAt.toString(),
+            )
+        }
+        return Response.ok(entries).build()
+    }
 
     @GET
     @Path("/entries/{aggregateId}")

@@ -4,8 +4,9 @@ Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 
 -->
 # Threat model — QRlessPay (BLE proximity SPAYD)
 
-- **Date:** 2026-06-16
-- **Status:** Lightweight STRIDE/DFD (ADR-0030 D2). **Money-path** capability — stub, to be completed before enforcement rollout.
+- **Date:** 2026-06-16 (completed 2026-07-30)
+- **Status:** Complete as a design-level STRIDE/DFD (ADR-0030 D2). **Money-path** capability —
+  rollout remains gated by the external reviews in §8 (they are process gates, not doc gaps).
 - **ADR:** [ADR-0095](../adr/0095-qrlesspay-ble-proximity-spayd-payments.md) · **Spec:** [qrlesspay-v1](../specs/qrlesspay-v1.md)
 
 ## 1. Scope & purpose
@@ -111,3 +112,26 @@ must add the optional layers — bank attestation, VOP (when it exists for CZ),
 strong proximity (UWB) or a verification code — none of which can be assumed
 today. The baseline should therefore be positioned as **"as safe as a QR scan,
 more private, nicer to use"**, not as "more secure", until those layers land.
+
+## 8. Rollout gates (what must be true before code ships)
+
+The app-side implementation state (2026-07): protocol core, controller and the
+nearby-tiles UI exist; the **Android GATT receive/write paths are deliberate
+stubs** (`ProximityBeacon.android.kt` — `startListeningForSpayd` TODO, `pushSpayd`
+returns false). Those stubs must NOT be filled until all of the following hold:
+
+1. **Independent cryptographic review** of the Ed25519 bundle format, the
+   advert↔bundle `kh` binding, and the in-memory session keypair handling (§6).
+2. **Protocol fuzzing** of the CBOR bundle decoder (malformed length prefixes,
+   truncation, oversize SPAYD, replayed/expired bundles, invalid `kh`/`sid`).
+3. **ADR-0030 security review + second approval** for this money-path capability.
+4. **DPIA sign-off** on the first-name broadcast (§5), incl. the "initials only"
+   opt-out decision.
+5. Decisions on the two open parameters: the **SAS/verification-code default**
+   and the **high-value threshold** that forces SAS/QR fallback (§6).
+6. Per-device **peripheral-role compatibility** documented; payee role degrades
+   to QR where GATT server is unreliable (§6).
+
+Until 1-4 are done, QRlessPay stays **dormant** in the app (BLE permission is
+optional, the feature flag is off, and the only live surfaces are the read-only
+nearby-tiles list and the QR fallback).

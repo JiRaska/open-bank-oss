@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.21.0
+  version: 1.22.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -134,6 +134,23 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/BankDto'
+
+  /privacy/access-log:
+    get:
+      tags: [Privacy]
+      summary: The caller's own access log (privacy centre)
+      operationId: getAccessLog
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: Access-log entries for the caller's party (event metadata only)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccessLogEntry'
 
   /accounts:
     get:
@@ -1367,11 +1384,30 @@ components:
       type: object
       description: Cursor pagination envelope shared by the account and transaction list pages.
       properties:
+        limit:
+          type: integer
+        hasNextPage:
+          type: boolean
         nextCursor:
           type: string
           nullable: true
-        hasMore:
-          type: boolean
+        previousCursor:
+          type: string
+          nullable: true
+        totalCount:
+          type: integer
+          nullable: true
+
+    AccessLogEntry:
+      type: object
+      description: One audit event whose aggregate is the caller's party (metadata only,
+        no event payload — audit-service's customer-facing privacy projection).
+      properties:
+        eventType: {type: string}
+        aggregateType: {type: string}
+        actorType: {type: string, nullable: true}
+        sourceService: {type: string}
+        occurredAt: {type: string, format: date-time}
 
     # Mirrors openbank-account-service AccountResponse.
     Account:
@@ -1435,15 +1471,17 @@ components:
           format: uuid
         currency:
           type: string
-        availableBalance:
+        bookedAmount:
           type: number
-        currentBalance:
+        availableAmount:
           type: number
-        reservedBalance:
+        reservedAmount:
           type: number
-        pendingBalance:
+        pendingAmount:
           type: number
-        lastUpdatedAt:
+        arrangedOverdraftLimit:
+          type: number
+        updatedAt:
           type: string
           format: date-time
 

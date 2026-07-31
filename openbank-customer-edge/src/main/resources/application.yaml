@@ -106,6 +106,7 @@ openbank:
   edge:
     account-service-url: ${ACCOUNT_SERVICE_URL:http://account-service.accounts.svc:8100}
     balance-service-url: ${BALANCE_SERVICE_URL:http://balance-service.balances.svc:8103}
+    audit-service-url: ${AUDIT_SERVICE_URL:http://audit-service.audit.svc:8113}
     interest-service-url: ${INTEREST_SERVICE_URL:http://interest-service.interest.svc:8125}
     kyc-service-url: ${KYC_SERVICE_URL:http://kyc-service.kyc.svc:8114}
     lending-service-url: ${LENDING_SERVICE_URL:http://lending-service.lending.svc:8126}

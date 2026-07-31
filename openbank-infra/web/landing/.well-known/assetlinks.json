@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "tech.openbank.app",
+      "sha256_cert_fingerprints": [
+        "F0:41:0D:90:40:2E:4C:92:48:4F:48:5F:45:FA:2E:6A:CB:80:E0:16:30:5D:B7:96:6D:2B:CF:6F:4C:26:B8:F9"
+      ]
+    }
+  }
+]

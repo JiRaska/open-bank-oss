@@ -107,6 +107,9 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.balance-service-url")
     lateinit var balanceServiceUrl: String
 
+    @ConfigProperty(name = "openbank.edge.audit-service-url")
+    lateinit var auditServiceUrl: String
+
     @ConfigProperty(name = "openbank.edge.interest-service-url")
     lateinit var interestServiceUrl: String
 
@@ -594,6 +597,20 @@ class CustomerEdgeResource(
     // The customer's view of who (TPPs, delegated agents) may access their account data, and the
     // ability to revoke. Consents are party-scoped: consent-service keys them by partyId, so the
     // edge injects the caller's partyId from the JWT and never trusts a client-supplied one.
+
+    /** The caller's own access log for the privacy centre (P2-27): audit entries whose
+     *  aggregate is the caller's party, projected by audit-service to event metadata only. */
+    @GET
+    @Path("/privacy/access-log")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun accessLog(): Response {
+        val customer = customer()
+        return upstream.get(
+            "$auditServiceUrl/api/v1/audit/customer/${customer.partyId}",
+            customer.partyId.toString(),
+        )
+    }
 
     /** The third-party / agent data-access consents granted by the caller. */
     @GET
