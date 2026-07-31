@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.14.0...lending-service-v0.15.0) (2026-07-31)
+
+
+### Features
+
+* **lending:** CZ reference compliance pack + activation runbook (ADR-0212 bootstrap) ([86d07e6](https://github.com/JiRaska/open-bank-oss/commit/86d07e688e965e87b8d910d8db5d3c1f30a61c72))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.13.0...lending-service-v0.14.0) (2026-07-31)
 
 
