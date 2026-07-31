@@ -53,7 +53,11 @@ class McpSessionResource(
         val held = identity.roles.filter { it.startsWith("ROLE_") }.toSet()
         val ceiling = request.roleCeiling.filter { it in held }
         if (ceiling.isEmpty()) {
-            return Response.status(403).entity(mapOf("error" to "role ceiling must be a non-empty subset of your own roles")).build()
+            return Response.status(Response.Status.FORBIDDEN).entity(
+                mapOf(
+                    "error" to "role ceiling must be a non-empty subset of your own roles",
+                ),
+            ).build()
         }
         val now = Instant.now(clock)
         val session = AgentSessionEntity().also {
@@ -65,7 +69,7 @@ class McpSessionResource(
             it.expiresAt = now.plus(ttlMinutes, ChronoUnit.MINUTES)
         }
         sessions.save(session)
-        return Response.status(201).entity(session.toResponse()).build()
+        return Response.status(Response.Status.CREATED).entity(session.toResponse()).build()
     }
 
     @GET
@@ -85,7 +89,7 @@ class McpSessionResource(
     @Operation(summary = "Revoke a session immediately (self or admin)")
     suspend fun revoke(@PathParam("id") id: UUID): Response {
         if (!sessions.revoke(id, Instant.now(clock))) {
-            return Response.status(404).entity(mapOf("error" to "no active session $id")).build()
+            return Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to "no active session $id")).build()
         }
         return Response.noContent().build()
     }

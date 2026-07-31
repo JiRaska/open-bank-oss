@@ -1,12 +1,60 @@
 openapi: 3.0.3
 info:
   title: OpenBank MCP Server
-  version: 1.0.0
+  version: 1.1.0
   description: >
     Model Context Protocol (JSON-RPC 2.0 over HTTP POST) exposing curated consent-scoped read tools
     and a HITL payment proposal to governed AI agents (ADR-0181). Every tools/call is authorized by
     the ADR-0034 OPA PDP as an AI_AGENT principal.
 paths:
+  /api/v1/mcp/sessions:
+    post:
+      summary: Issue a staff OBO agent session (ADR-0224 D2)
+      description: >-
+        Creates a session for the authenticated operator with a role ceiling bounded to
+        requested ∩ held roles, a client binding and a TTL. Requires ROLE_OPERATOR or
+        ROLE_ADMIN (OPA action mcp.session.create).
+      operationId: createSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                clientId: { type: string, default: admin-ui }
+                roleCeiling:
+                  type: array
+                  items: { type: string }
+                purpose: { type: string, nullable: true }
+      responses:
+        "201":
+          description: Session created
+        "403":
+          description: Role ceiling is not a non-empty subset of the caller's roles
+  /api/v1/mcp/sessions/{id}:
+    get:
+      summary: Session status
+      operationId: getSession
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Session status }
+        "404": { description: Not found }
+    delete:
+      summary: Revoke a session immediately (self or admin)
+      operationId: revokeSession
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Revoked }
+        "404": { description: No active session }
   /mcp:
     post:
       summary: MCP JSON-RPC endpoint (initialize, tools/list, tools/call, ping)

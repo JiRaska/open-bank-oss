@@ -25,10 +25,9 @@ open class AgentSessionRepository : PanacheRepository<AgentSessionEntity> {
      * The live check the OBO resolver runs on every call (ADR-0224 D2): the session exists, is
      * not revoked, and has not expired. A revoked or expired session returns null — fail closed.
      */
-    open suspend fun findActive(id: UUID, asOf: Instant): AgentSessionEntity? =
-        Panache.withSession {
-            find("id = ?1 and revokedAt is null and expiresAt > ?2", id, asOf).firstResult()
-        }.awaitSuspending()
+    open suspend fun findActive(id: UUID, asOf: Instant): AgentSessionEntity? = Panache.withSession {
+        find("id = ?1 and revokedAt is null and expiresAt > ?2", id, asOf).firstResult()
+    }.awaitSuspending()
 
     open suspend fun revoke(id: UUID, asOf: Instant): Boolean {
         val session = findActive(id, asOf) ?: return false

@@ -335,6 +335,15 @@ on an invariant nothing distinguishes" pattern, just one layer up from where it 
 
 ## 5. Documented-but-unenforced controls (summary)
 
+> **2026-07-31 — ADR-0224 D2 (agent sessions) landed.** The service is stateful now: the
+> `agent_session` store backs a staff OBO session lifecycle (`McpSessionResource`). New trust
+> notes: (a) issuance self-binds — subject is the authenticated operator and the role ceiling is
+> intersected with held roles server-side, so a session can never exceed its owner's authority;
+> (b) the OBO resolver validates the session **live** on every call (revoked/expired/mismatched
+> → anonymous), so revocation has no propagation delay; (c) the session store is a new
+> availability dependency for the OBO path — its outage fails closed (no OBO calls), mirroring
+> the consent-validate stance.
+
 Collected in one place because in this service they outnumber the enforced ones, and because a
 reader skimming `agents.yaml` would reasonably assume all of them work:
 
