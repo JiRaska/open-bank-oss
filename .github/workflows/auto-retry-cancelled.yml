@@ -142,3 +142,92 @@ jobs:
           echo "Re-running ${RUN_URL}: ${killed} job(s) killed mid-step by a runner reclaim (issue #2841)"
           gh run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}" --failed
           echo "::notice title=spot-kill auto-retry::Re-ran ${killed} spot-killed job(s) in ${RUN_URL} (attempt 2 of max 2; a second kill stays for a human)"
+
+  # ── The alarm (issue #2901) ───────────────────────────────────────────────────
+  # Why this exists: this workflow failed 208 times without anyone noticing. It is
+  # `workflow_run`-triggered, so there is no PR to show a red check on and no commit status
+  # anyone reads — its red is addressed to nobody, the same blind spot dependency-submission
+  # sat in for three days before it grew a raise-issue job.
+  #
+  # It is the sharp case rather than an ordinary one: the whole POINT of this workflow is to
+  # act unattended, so "nobody is looking" is the design, not an accident. A silent failure is
+  # therefore indistinguishable from a silent success — the spot-killed run just sits there
+  # red, looking like an ordinary build failure, which is exactly the human round-trip #2330
+  # existed to remove.
+  #
+  # The defect behind those 208 (a bare `gh run rerun` with no repo context, #2898) is fixed
+  # and the workflow now succeeds. This job is about the NEXT one: it cannot prevent a
+  # breakage, only make it arrive as an addressed issue instead of two quiet days.
+  #
+  # A separate job, not a step: a guard that fails in place is either skipped or strips the
+  # job of dependents. `retry` has none today, but keeping escalation independent of what the
+  # retry step does next is the pattern CLAUDE.md records.
+  raise-issue:
+    name: Raise issue on retry failure
+    needs: retry
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5 # API calls only
+    permissions:
+      contents: read
+      issues: write
+    # No actions/checkout, so gh cannot infer the repo from a git remote (#2841).
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Open or refresh the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TARGET_URL: ${{ github.event.workflow_run.html_url }}
+          TARGET_NAME: ${{ github.event.workflow_run.name }}
+          TARGET_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -euo pipefail
+          TITLE="Spot-kill auto-retry is failing — reclaimed CI runs are not being re-run"
+          # Body written with a plain redirect + --body-file, NOT `BODY=$(cat <<EOF ...)`.
+          # A heredoc nested inside $( ) mis-parses an apostrophe as an opening quote on
+          # bash 3.2 (still the default /bin/bash on macOS), so that shape cannot be dry-run
+          # locally — a step only its own CI can syntax-check is a step nobody tests before
+          # pushing. Flush-left because `run: |` strips only the common YAML indent.
+          cat > "${RUNNER_TEMP:-/tmp}/issue-body.md" <<EOF
+          \`auto-retry-cancelled.yml\` FAILED, so a CI run killed by a spot reclaim was **not**
+          re-run and is sitting red waiting for a human.
+
+          | | |
+          |---|---|
+          | this run | ${RUN_URL} |
+          | triggering run | ${TARGET_URL} |
+          | triggering workflow | \`${TARGET_NAME}\` |
+          | its conclusion | \`${TARGET_CONCLUSION}\` |
+
+          **Which branch was taken** follows from that conclusion: \`cancelled\` is the
+          whole-run path (full re-run), \`failure\` is the partial-spot-kill path, which
+          re-runs only the failed jobs and only when one of them has a \`cancelled\` step and
+          no \`failed\` step.
+
+          **This is latent, not cosmetic.** The reclaimed run looks like an ordinary build
+          failure from every angle, so the cost is the human round-trip #2330 removed —
+          silently reinstated. Nothing else reports it: a \`workflow_run\` job has no PR to
+          redden and no commit status anyone reads, which is why this job exists (#2901).
+
+          **Check the repo context first.** The 208 failures that preceded this job were all
+          one cause: \`gh run rerun\` with no \`-R\` in a job with no \`actions/checkout\`, so
+          \`gh\` could not resolve the repository and exited 1 (\`failed to determine base
+          repo\`, fixed in #2898). If the log says that, something dropped the \`-R\` or the
+          \`GH_REPO\` env — \`.github/scripts/check-gh-repo-context.py\` should have caught it
+          at PR time, so check that gate too.
+
+          Read the step output from **after the last** \`##[endgroup]\`: GitHub prints the
+          step's own script into the log header, so grepping the whole log matches strings
+          that never executed.
+
+          This issue is refreshed on each further failure; close it once a run is green.
+          EOF
+          existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file "${RUNNER_TEMP:-/tmp}/issue-body.md"
+          else
+            gh issue create --title "$TITLE" --body-file "${RUNNER_TEMP:-/tmp}/issue-body.md" \
+              --label tech-debt --label "severity:high"
+          fi
