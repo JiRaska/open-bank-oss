@@ -11,9 +11,12 @@ import com.openbank.libs.authz.Authorize
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
@@ -43,6 +46,16 @@ class FraudResource {
     suspend fun score(req: ScoreFraudRequest): Response {
         val result: FraudScore = scoreFraud.score(req.toDomain())
         return Response.ok(result.toResponse()).build()
+    }
+
+    @GET
+    @Path("/review-queue")
+    @RolesAllowed("ROLE_COMPLIANCE", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "fraud.review.read")
+    @Operation(summary = "Analyst review queue: newest REVIEW verdicts (ADR-0230)")
+    suspend fun reviewQueue(@QueryParam("limit") @DefaultValue("50") limit: Int): Response {
+        val rows = scoreFraud.reviewQueue("REVIEW", limit)
+        return Response.ok(rows).build()
     }
 }
 

@@ -6,6 +6,7 @@ package com.openbank.fraud.infrastructure.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.fraud.application.port.out.FraudScoreRepository
+import com.openbank.fraud.application.port.out.ScoredRecord
 import com.openbank.fraud.domain.model.FraudScore
 import com.openbank.fraud.domain.model.ScoreRequest
 import com.openbank.libs.domain.identifiers.Ids
@@ -77,6 +78,14 @@ class FraudScoreRepositoryImpl(private val clock: Clock) :
         Panache.withTransaction { persist(entity) }.awaitSuspending()
         return entity.scoreId
     }
+
+    override suspend fun findRecentByVerdict(verdict: String, limit: Int): List<ScoredRecord> = Panache.withSession {
+        find("verdict = ?1 ORDER BY createdAt DESC", verdict).page(0, limit.coerceIn(1, MAX_QUEUE_LIMIT)).list()
+    }.awaitSuspending().map { it.toScoredRecord() }
+
+    private companion object {
+        const val MAX_QUEUE_LIMIT = 200
+    }
 }
 
 // Mapper kept at file scope (pure function over an injected ObjectMapper) so the repository class
@@ -95,3 +104,16 @@ private fun toEntity(request: ScoreRequest, result: FraudScore, objectMapper: Ob
         it.ruleVersion = result.ruleVersion
         it.createdAt = Instant.now(clock)
     }
+
+private fun FraudScoreEntity.toScoredRecord() = ScoredRecord(
+    scoreId = scoreId,
+    amount = amount,
+    currency = currency,
+    rail = rail,
+    accountId = accountId,
+    counterpartyId = counterpartyId,
+    verdict = verdict,
+    score = score,
+    ruleVersion = ruleVersion,
+    createdAt = createdAt,
+)
