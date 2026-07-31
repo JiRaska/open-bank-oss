@@ -203,7 +203,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0192](0192-screen-feedback.md) | In-app screen feedback with screenshot capture | Accepted | Partial | mobile-app,customer-edge,analytics,privacy-gdpr | openbank-app |
 | [0193](0193-ap2-mandate-verification-model-and-liability-position-promotes-adr-0182.md) | AP2 mandate verification model and liability position (promotes ADR-0182) | Accepted | Partial | payments,ai-agents,sca,compliance | — |
 | [0194](0194-card-lifecycle-synthetic-pan-vault-and-sca-gated-card-operations.md) | Card lifecycle, synthetic PAN vault and SCA-gated card operations | Accepted | Partial | cards,sca,customer-edge,product-catalog | openbank-app |
-| [0195](0195-mcp-server-caller-authentication-and-psd2-consent-binding.md) | MCP server caller authentication and PSD2 consent binding | Proposed | Planned | ai-agents,psd2-api,authz,sca | — |
+| [0195](0195-mcp-server-caller-authentication-and-psd2-consent-binding.md) | MCP server caller authentication and PSD2 consent binding | Accepted | Partial | ai-agents,psd2-api,authz,sca | — |
 | [0196](0196-governance-declarations-are-cross-checked-against-the-code.md) | Governance declarations are cross-checked against the code | Accepted | Shipped | governance,database,compliance,ci | — |
 | [0197](0197-agpl-open-core-boundary-covers-the-whole-agent-plane.md) | AGPL open-core boundary covers the whole agent plane, enumerated in rules.yaml | Accepted | Shipped | licensing,ai-agents,governance | — |
 | [0198](0198-marketing-consent-as-a-first-class-consent-service-scope.md) | Marketing consent as a first-class consent-service scope | Accepted | Partial | privacy-gdpr,notifications,compliance | — |
