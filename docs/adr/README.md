@@ -216,3 +216,111 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0205](0205-marketing-consent-forwarder-and-sca-exempt-activation.md) | Marketing consent forwarder shape and SCA-exempt activation | Accepted | Shipped | privacy-gdpr,sca,accounts | — |
 | [0206](0206-scope-m2m-consent-grant-revoke-by-grantee-resource.md) | Scope M2M consent grant/revoke by grantee resource | Accepted | Shipped | authz,security-ops | — |
 | [0207](0207-business-date-authority-and-the-accounting-day-state-machine.md) | Business date authority and the accounting day state machine | Accepted | Partial | accounting-close,ledger,statements | — |
+| [0208](0208-admin-ui-consolidation-a-primitive-layer-one-status-vocabulary-and-an-interactive-flow-explainer.md) | Admin UI consolidation: a primitive layer, one status vocabulary, and an interactive flow explainer | Proposed | Planned | admin-ui,architecture,governance | — |
+| [0209](0209-crm-and-campaign-sequencing-prerequisites-first-slice-and-what-must-not-start-yet.md) | CRM and campaign sequencing: prerequisites, first slice, and what must not start yet | Proposed | Planned | governance,architecture,ml,analytics | — |
+| [0210](0210-customer-360-as-a-query-over-the-analytics-silver-layer.md) | Customer 360 as a query over the analytics silver layer | Accepted | Shipped | analytics,architecture,privacy-gdpr,admin-ui | — |
+| [0211](0211-loan-origination-orchestration.md) | Loan origination orchestration: persisted state machine with durable timers, not a BPM suite | Proposed | Planned | lending,architecture,resilience | — |
+| [0212](0212-jurisdictional-credit-compliance-packs.md) | Jurisdictional credit compliance packs as versioned effective-dated data | Proposed | Planned | lending,compliance,product-catalog | — |
+| [0213](0213-deterministic-credit-policy-decision-engine.md) | Deterministic credit policy decision engine: versioned decision tables, fail-closed, explainable | Proposed | Planned | lending,compliance,architecture | — |
+| [0214](0214-credit-lifecycle-audit-evidence.md) | Credit lifecycle audit evidence and reconstruction | Proposed | Planned | lending,audit,privacy-gdpr | — |
+| [0215](0215-loan-termination-early-exit-lifecycle.md) | Loan termination and early-exit lifecycle | Proposed | Planned | lending,compliance | — |
+| [0216](0216-ai-act-high-risk-credit-compliance.md) | EU AI Act high-risk compliance for credit AI systems | Proposed | Planned | lending,ml,compliance,ai-agents | — |
+| [0217](0217-credit-lifecycle-ai-agents.md) | AI agents in the credit lifecycle: MCP-exposed, policy-gated, human-deciding | Proposed | Planned | ai-agents,lending,compliance | — |
+| [0218](0218-credit-platform-slo-scalability-finops.md) | Credit platform SLOs, scalability and FinOps guardrails | Proposed | Planned | lending,observability,finops,resilience | — |
+| [0219](0219-platform-contact-policy-gate-contact-classes-durable-counters-suppression.md) | Platform contact-policy gate: contact classes, durable counters, suppression | Proposed | Planned | privacy-gdpr,notifications,compliance | — |
+| [0220](0220-in-app-engagement-surfaces-gamification-and-pre-approved-offers.md) | In-app engagement surfaces, gamification and pre-approved offers | Proposed | Planned | mobile-app,customer-edge,privacy-gdpr,lending | openbank-app |
+| [0221](0221-campaign-studio-the-campaign-authoring-operator-experience.md) | Campaign Studio: the campaign authoring operator experience | Proposed | Planned | admin-ui,notifications,governance | — |
+| [0222](0222-offer-explanation-and-relationship-manager-agents.md) | Offer-explanation and relationship-manager agents | Proposed | Planned | ai-agents,privacy-gdpr,compliance | — |
+| [0223](0223-channel-agnostic-authz-hardening.md) | Channel-agnostic authorization hardening: sidecar-only enforcement, operator-read-any retirement, four-eyes rollout | Accepted | Partial | authz,governance,audit,libs | — |
+| [0224](0224-human-operator-mcp-obo-channel.md) | Human-operator MCP channel: on-behalf-of token exchange with bounded role subsets | Accepted | Partial | authn,authz,ai-agents | — |
+| [0225](0225-mcp-policy-filtered-tools-list.md) | Policy-filtered MCP tool discovery | Accepted | Shipped | authz,ai-agents,security-ops | — |
+| [0226](0226-cross-channel-audit-correlation.md) | Cross-channel audit correlation: one identity, one trail | Accepted | Partial | audit,authz,admin-ui | — |
+| [0227](0227-unified-approval-inbox.md) | Unified approval inbox: one disposition point for human and agent proposals | Proposed | Planned | governance,admin-ui,authz | — |
+| [0228](0228-unified-entity-resolution-search.md) | Unified entity resolution and global search for backoffice | Proposed | Planned | admin-ui,architecture,privacy-gdpr | — |
+| [0229](0229-roles-single-source-persona-ia.md) | Roles single source of truth and persona-driven information architecture | Proposed | Planned | authz,admin-ui,governance | — |
+| [0230](0230-backoffice-hybrid-consoles.md) | Backoffice hybrid consoles for lending, fraud and SDD | Proposed | Planned | admin-ui,lending,fraud | — |
+| [0231](0231-backoffice-identity-admin-no-mock.md) | Backoffice identity administration, no mock data in production UI, entity navigation standard | Proposed | Planned | admin-ui,governance,security-ops | — |
+
+## By tag
+
+_Tags come from the closed vocabulary in [tags.txt](tags.txt); the validator rejects
+anything else, so this map cannot sprawl into synonyms._
+
+- **accounting-close** — 0025 0046 0078 0096 0097 0207
+- **accounts** — 0024 0035 0036 0039 0105 0107 0109 0110 0153 0158 0178 0179 0205
+- **admin-ui** — 0051 0056 0068 0071 0076 0079 0080 0149 0150 0156 0176 0199 0208 0210 0221 0226 0227 0228 0229 0230 0231
+- **ai-agents** — 0031 0034 0080 0089 0091 0102 0112 0119 0136 0148 0154 0156 0163 0164 0165 0166 0167 0168 0181 0182 0183 0191 0193 0195 0197 0202 0203 0216 0217 0222 0224 0225
+- **aml-sanctions** — 0032 0116
+- **analytics** — 0022 0023 0026 0061 0192 0199 0201 0209 0210
+- **api-contract** — 0005 0006 0026 0048 0055 0063 0090 0092 0104 0145
+- **architecture** — 0001 0002 0003 0004 0009 0013 0014 0016 0019 0028 0045 0049 0064 0067 0100 0101 0105 0106 0113 0114 0122 0138 0139 0143 0152 0162 0183 0185 0188 0190 0191 0199 0208 0209 0210 0211 0213 0228
+- **audit** — 0023 0031 0047 0068 0086 0117 0118 0133 0164 0214 0223 0226
+- **authn** — 0065 0066 0069 0073 0080 0094 0177 0224
+- **authz** — 0018 0031 0034 0089 0155 0167 0169 0181 0195 0202 0206 0223 0224 0225 0226 0227 0229
+- **capacity** — 0040 0083 0173
+- **cards** — 0113 0194
+- **ci** — 0011 0020 0029 0040 0042 0043 0044 0049 0053 0054 0060 0061 0063 0076 0082 0092 0115 0119 0121 0122 0144 0154 0160 0165 0168 0196
+- **compliance** — 0017 0021 0023 0032 0033 0037 0047 0050 0072 0078 0085 0090 0094 0096 0097 0111 0116 0117 0118 0126 0133 0134 0142 0146 0148 0149 0171 0172 0174 0175 0180 0187 0193 0196 0198 0200 0201 0203 0204 0212 0213 0215 0216 0217 0219 0222
+- **crypto-keys** — 0007 0073 0095 0133 0172 0189
+- **customer-edge** — 0065 0069 0086 0089 0109 0110 0125 0132 0153 0169 0191 0192 0194 0220
+- **database** — 0009 0022 0055 0099 0106 0159 0183 0196
+- **disputes** — 0085 0117
+- **docs** — 0001 0019 0052 0071 0074 0093 0124 0147 0156 0166
+- **documents** — 0161 0162 0169 0170
+- **fees-billing** — 0138 0143
+- **finops** — 0027 0040 0041 0053 0054 0057 0058 0062 0083 0112 0173 0218
+- **fraud** — 0084 0102 0139 0140 0203 0230
+- **fx** — 0024 0025 0035 0046 0107 0109 0110 0125
+- **gitops** — 0010 0027 0060 0098
+- **governance** — 0001 0002 0005 0006 0012 0014 0020 0029 0030 0031 0042 0044 0047 0048 0052 0067 0071 0074 0082 0091 0092 0123 0124 0134 0136 0141 0144 0145 0147 0148 0152 0154 0155 0160 0163 0164 0166 0167 0174 0176 0196 0197 0202 0203 0208 0209 0221 0223 0227 0229 0231
+- **i18n-a11y** — 0149 0150
+- **infrastructure** — 0007 0010 0027 0054 0058 0060 0079 0161 0174 0175
+- **interest** — 0033 0038
+- **kafka** — 0003 0006 0013 0050 0084 0137 0140 0202
+- **kubernetes** — 0010 0027 0041 0051 0057 0077 0081 0083 0098 0151 0159 0173 0177
+- **kyc** — 0068 0069 0072 0094 0102 0116 0179
+- **ledger** — 0024 0025 0028 0039 0046 0050 0078 0096 0107 0108 0115 0143 0178 0179 0207
+- **lending** — 0028 0037 0142 0211 0212 0213 0214 0215 0216 0217 0218 0220 0230
+- **libs** — 0003 0013 0014 0019 0026 0034 0045 0049 0055 0067 0122 0161 0223
+- **licensing** — 0012 0123 0136 0197
+- **ml** — 0102 0139 0140 0141 0142 0201 0209 0216
+- **mobile-app** — 0064 0065 0066 0070 0073 0074 0075 0088 0089 0095 0109 0110 0125 0135 0153 0170 0191 0192 0200 0220
+- **networking** — 0051 0058 0081 0093
+- **notifications** — 0059 0135 0176 0198 0200 0219 0221
+- **observability** — 0008 0059 0061 0070 0075 0077 0087 0088 0091 0112 0119 0160 0163 0218
+- **onboarding** — 0066 0068 0069 0072 0094 0162 0170
+- **payments** — 0004 0021 0032 0036 0084 0086 0090 0095 0101 0103 0104 0108 0111 0114 0120 0137 0171 0182 0184 0190 0193
+- **privacy-gdpr** — 0059 0118 0126 0175 0189 0192 0198 0199 0200 0204 0205 0210 0214 0219 0220 0222 0228
+- **product-catalog** — 0105 0138 0158 0194 0201 0212
+- **psd2-api** — 0005 0090 0093 0126 0145 0181 0195 0204
+- **regulatory-reporting** — 0022 0023 0037 0038 0085 0096 0097 0180
+- **release-versioning** — 0029 0044 0048 0165
+- **resilience** — 0004 0045 0050 0088 0098 0100 0101 0120 0132 0134 0146 0151 0159 0186 0211 0218
+- **sca** — 0021 0066 0086 0169 0170 0182 0193 0194 0195 0205
+- **secrets** — 0007 0017 0073 0099 0172 0177
+- **security-ops** — 0018 0030 0047 0056 0070 0079 0080 0081 0082 0099 0121 0124 0132 0135 0137 0146 0206 0225 0231
+- **serverless** — 0041 0057 0083
+- **statements** — 0035 0078 0207
+- **supply-chain** — 0029 0030 0053 0079 0081 0121 0141
+- **tax** — 0033 0038 0180
+- **testing** — 0011 0020 0030 0043 0063 0076 0092 0100 0104 0115 0151 0168
+- **transactions** — 0039 0103 0108 0111 0120 0178
+
+---
+
+**Numbering gaps:** 0015 0127 0128 0129 0130 0131 0157
+
+These numbers correspond to no file in this repo's history — confirmed by
+`git log --diff-filter=A` across all branches, not just an absent current file.
+The list above is computed from the files, so it cannot rot into a stale claim.
+
+Known history: ADR-0132 was one of these gaps until it was cited in code/config
+comments before the file existed, and has since been written down properly — a real,
+gap-filling backfill. ADR-0128 turned out to be a plain typo for
+[ADR-0037](0037-anacredit-credit-exposure-reporting.md) in two gitops comments
+(fixed); it stays a gap because no ADR-0128 decision was ever made. The pre-launch
+gaps are formally closed as unrecoverable: no decision record, commit, or PR in this
+repo's full history accounts for any of them, and no one with access to
+pre-public-launch history has identified one. Treat them as numbering artifacts from
+before the public repo transition, not pending ADRs — no ADR will be retroactively
+written for them absent new evidence.

@@ -71,10 +71,34 @@ BANNED = [
     (re.compile(r"\bZoneId\s*\.\s*systemDefault\s*\("), "ZoneId.systemDefault()"),
 ]
 
-# Files allowed to construct a clock or name a zone inside domain/application. Every entry needs a
-# reason, and the check fails on a STALE entry (a path that no longer exists or no longer
-# violates) so a temporary exemption cannot quietly become permanent.
-ALLOWLIST: dict[str, str] = {}
+# Files allowed to bind a clock to a locally-chosen zone inside domain/application.
+#
+# This gate is ENFORCED, and these three pre-existing sites are the reason it can be: naming them
+# individually, with a reason each, is what makes enforcement honest. The alternative considered was
+# shipping the whole gate advisory, which registers as "someone should look" forever and is exactly
+# the failure mode `check-advisory-gate-registration.py` exists to prevent.
+#
+# The check FAILS on a stale entry — a path that no longer exists or no longer violates — so an
+# exemption and its fix move together and this debt cannot quietly become permanent. Tracked in
+# issue #2963; see it for why each is not a one-line change.
+ALLOWLIST: dict[str, str] = {
+    "openbank-transaction-service/src/main/kotlin/com/openbank/transaction/domain/settlement/"
+    "SettlementDateResolver.kt": (
+        "#2963 — settlement/booking-date rolling, entangled with #1302 item 3 (reconciliation false "
+        "drift). Changing the zone handling alone risks moving the drift rather than fixing it."
+    ),
+    "openbank-fx-service/src/main/kotlin/com/openbank/fx/application/usecase/"
+    "CnbRateIngestionService.kt": (
+        "#2963 — ČNB fixing day may legitimately be a publication calendar rather than the "
+        "accounting day. The code does not currently say which it means; that has to be decided "
+        "before it can be mechanically converted."
+    ),
+    "openbank-sanctions-service/src/main/kotlin/com/openbank/sanctions/application/usecase/"
+    "SanctionsListService.kt": (
+        "#2963 — ZoneId.systemDefault() in list-refresh bookkeeping, not an accounting date. Worst "
+        "in principle (host-dependent), least consequential in practice; wants the injected clock."
+    ),
+}
 
 
 def money_path_services() -> list[str]:

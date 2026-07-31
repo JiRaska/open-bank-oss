@@ -1134,17 +1134,17 @@ jobs:
       # domain/application layer of any money-path service; the accounting date comes from
       # com.openbank.libs.domain.calendar.AccountingClock.
       #
-      # ADVISORY (no --enforce) on purpose: ledger is clean, but the first run surfaced three
-      # pre-existing sites in other services (transaction SettlementDateResolver, fx
-      # CnbRateIngestionService, sanctions SanctionsListService). Each needs its own review — one
-      # of them is #1302 item 3's structural false drift — so blocking merge on them here would
-      # either strand this PR or invite a blanket allowlist, and a blanket allowlist is how a gate
-      # stops meaning anything. Flip to --enforce when those three land.
+      # ENFORCED from day one. The three pre-existing sites it surfaced (transaction
+      # SettlementDateResolver, fx CnbRateIngestionService, sanctions SanctionsListService) are
+      # named individually in the script's ALLOWLIST with a reason each, and tracked in #2963 —
+      # rather than shipping the whole gate advisory, which registers as "someone should look"
+      # forever (the failure mode check-advisory-gate-registration.py exists to prevent). The
+      # script FAILS on a stale ALLOWLIST entry, so an exemption and its fix move together.
       #
       # Scope is DERIVED from rules.yaml money_path_services, not hand-kept: check-clock-injection
       # lists 8 of the 20 and reads as passing about the 12 it never looks at.
-      - name: "accounting-clock gate — one business-date authority (ADR-0207 D1, advisory)"
-        run: python3 .github/scripts/check-accounting-clock.py
+      - name: "accounting-clock gate — one business-date authority (ADR-0207 D1, enforced)"
+        run: python3 .github/scripts/check-accounting-clock.py --enforce
 
       # ADR-0002 / rules.yaml architecture.domain_zero_framework_imports: the
       # hexagonal invariant was documented in every PR template but never enforced,
