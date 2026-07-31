@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.65.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.64.0...admin-ui-v0.65.0) (2026-07-31)
+
+
+### Features
+
+* **admin-ui:** lending console — origination queue + active-loan portfolio (ADR-0230 D1) ([#2794](https://github.com/JiRaska/open-bank-oss/issues/2794)) ([091b847](https://github.com/JiRaska/open-bank-oss/commit/091b847c047bdf62e56cd617aa18d2d238085576))
+
 ## [0.64.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.63.1...admin-ui-v0.64.0) (2026-07-31)
 
 
