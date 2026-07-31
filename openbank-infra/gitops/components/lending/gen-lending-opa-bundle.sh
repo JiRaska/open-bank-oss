@@ -67,6 +67,7 @@ allowed_reasons contains "lending-officer-desk" if {
 		"lending.repay",
 		"lending.disburse",
 		"lending.collateralRegister",
+		"lending.approval.read",
 	}
 }
 
@@ -86,6 +87,8 @@ allowed_reasons contains "credit-risk-desk" if {
 		"lending.writeoff",
 		"lending.collateralRegister",
 		"lending.collateralDecide",
+		"lending.approval.read",
+		"lending.approval.decide",
 	}
 }
 

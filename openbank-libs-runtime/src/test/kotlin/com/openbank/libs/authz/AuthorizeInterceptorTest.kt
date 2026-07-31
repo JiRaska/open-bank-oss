@@ -516,6 +516,9 @@ class AuthorizeInterceptorTest {
 
         override suspend fun find(id: String): PendingApproval? = approvals[id]
 
+        override suspend fun findPending(limit: Int): List<PendingApproval> =
+            approvals.values.filter { it.status == ApprovalStatus.PENDING }.sortedBy { it.createdAt }.take(limit)
+
         override suspend fun decide(id: String, decidedBy: String, approve: Boolean): PendingApproval? {
             val approval = approvals[id] ?: return null
             if (decidedBy == approval.makerId) throw SelfApprovalNotAllowedException(approval.makerId)
