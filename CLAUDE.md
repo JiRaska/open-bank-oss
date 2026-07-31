@@ -456,13 +456,20 @@ Rationale + what does *not* cover it: `rules.yaml: dependencies.pr_time_cve_gate
   regressions.
 
 ### gh CLI
-- **Never pass a PR/issue body containing backticks via `--body` from zsh — use `--body-file`.**
-  Backticks inside a double-quoted string are command substitution, so zsh *executes* the
-  contents and silently drops them from the text. On #2890 the phrase
-  `` `steps.deps.outputs.changed == 'true'` `` was run as a command and the rendered body read
-  "PRs ()" — valid markdown, no error, nothing in the `gh` output to notice. The failure is
-  invisible unless you re-read the published body. Same trap for `--comment` and `gh release
-  create --notes`. Write the body to a file and pass the path.
+- **Always write a PR/issue body to a file and pass `--body-file`. Never `--body` with an
+  inline string.** Not "when it contains backticks" — *always*, because you decide the flag
+  before you know what the final text will contain. Backticks in a double-quoted string are
+  command substitution, so zsh *executes* them and silently drops them from the text: on #2890
+  `` `steps.deps.outputs.changed == 'true'` `` was run as a command and the published body read
+  "PRs ()" — valid markdown, no error, nothing in `gh`'s output to notice. The failure is
+  invisible unless you re-read the *published* body, which nobody does.
+  This bullet was written after the first occurrence and the same mistake happened **twice more
+  the same day** (#2919's correction comment lost a clause to `command not found:
+  auto-deploy.yml`). Knowing the rule does not help, because the moment of choice is when the
+  text is still an idea. Only the unconditional habit does. Same trap for `--comment`,
+  `gh release create --notes` and `-f body=`; for an edit, `-F body=@file`.
+  If you did use `--body`, re-read what was published (`gh pr view <n> --json body`) — grep it
+  for `()` and for the phrases you meant to include.
 - **`gh` needs a repo context: outside a checkout it fails with `failed to run git: fatal: not
   a git repository`,** which reads like a content or permissions problem rather than a cwd one.
   Pass `-R <owner>/<repo>` explicitly in any script whose working directory is not guaranteed —
