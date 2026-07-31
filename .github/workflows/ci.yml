@@ -682,6 +682,17 @@ jobs:
       - name: "Kafka topic existence (issue #2598, enforced)"
         run: python3 .github/scripts/check-kafka-topics-exist.py --enforce
 
+      # The other half of the same two-list problem (#2598). Correcting analytics-sink's SUBSCRIPTION
+      # to the real topic names left its KafkaUser ACLs on the dead ones, so the sink asked for
+      # topics its own principal had no Read on — and a denial is as quiet as the missing topic was:
+      # a retry loop, never a red pod. Enforced, with the pre-existing gaps enumerated in the
+      # script's KNOWN_GAPS (shrink-only, stale entries reported) rather than left as a warning
+      # nobody reads.
+      - name: "Kafka ACL coverage self-test (issue #2598)"
+        run: python3 .github/scripts/check-kafka-acl-coverage.py --selftest
+      - name: "Kafka ACL coverage (issue #2598, enforced)"
+        run: python3 .github/scripts/check-kafka-acl-coverage.py --enforce
+
       # issue #2370. The admin-ui compliance matrix is a hardcoded literal and nothing verified any
       # of its rows. 16 of 39 `ok` rows cited a database column that exists only in a Flyway
       # migration — evidence of a schema, not of a control, on AML/KYC/FATCA rows (SAR filing, MLRO
