@@ -29,6 +29,15 @@ interface Proposal {
   modelId: string | null
 }
 
+interface InboxItem {
+  id: string
+  domain: 'lending' | 'agent'
+  action: string
+  resourceId: string | null
+  maker: string | null
+  proposedAt: string | null
+}
+
 const STATE_META: Record<string, { color: string; bg: string; border: string; Icon: React.ElementType; cs: string; en: string }> = {
   PROPOSED: { color: '#d97706', bg: '#fffbeb', border: '#fcd34d', Icon: Clock, cs: 'Čeká na rozhodnutí', en: 'Pending' },
   APPROVED: { color: '#059669', bg: '#ecfdf5', border: '#6ee7b7', Icon: CheckCircle2, cs: 'Schváleno', en: 'Approved' },
@@ -41,6 +50,8 @@ export default function ApprovalsPage() {
   const decidedBy = session?.user?.email || session?.user?.name || 'operator'
 
   const [rows, setRows] = useState<Proposal[]>([])
+  const [domainItems, setDomainItems] = useState<InboxItem[]>([])
+  const [domainSources, setDomainSources] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [reasons, setReasons] = useState<Record<string, string>>({})
@@ -49,9 +60,17 @@ export default function ApprovalsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/agent/proposals?state=all', { cache: 'no-store' })
-      const data = await res.json()
+      const [proposalsRes, inboxRes] = await Promise.all([
+        fetch('/api/agent/proposals?state=all', { cache: 'no-store' }),
+        fetch('/api/approvals/pending', { cache: 'no-store' }),
+      ])
+      const data = await proposalsRes.json()
       setRows(Array.isArray(data) ? data : [])
+      if (inboxRes.ok) {
+        const inbox = await inboxRes.json()
+        setDomainItems(Array.isArray(inbox.items) ? inbox.items : [])
+        setDomainSources(inbox.sources ?? {})
+      }
       setError(null)
     } catch {
       setError('unreachable')
@@ -86,6 +105,12 @@ export default function ApprovalsPage() {
 
   const pending = useMemo(() => rows.filter(r => r.state === 'PROPOSED'), [rows])
   const decided = useMemo(() => rows.filter(r => r.state !== 'PROPOSED'), [rows])
+  // Sources that answered anything other than 200 — a 403 here is ordinary (lending's list is
+  // desk-role gated while this page is not), and it must never look like an empty queue.
+  const degradedSources = useMemo(
+    () => Object.entries(domainSources).filter(([, v]) => v !== 'ok').map(([k]) => k),
+    [domainSources],
+  )
 
   return (
     <div>
@@ -117,8 +142,53 @@ export default function ApprovalsPage() {
         </div>
       )}
 
+      {/* ADR-0227 D2/D4: domain maker-checker queues, federated. Read-only here — disposal
+          belongs to the governed per-domain flows (money-path adds SCA). */}
       <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', margin: '4px 0 10px' }}>
-        {t('Čeká na rozhodnutí', 'Pending')} ({pending.length})
+        {t('Doménová schvalování (money-path)', 'Domain approvals (money-path)')} ({domainItems.filter(i => i.domain !== 'agent').length})
+      </div>
+      {degradedSources.length > 0 && (
+        <div className="card" style={{
+          padding: 14, marginBottom: 16, fontSize: 13,
+          color: '#92400e', background: '#fffbeb', border: '1px solid #fcd34d',
+        }}>
+          {t(
+            `Fronta není úplná — nepodařilo se načíst: ${degradedSources.join(', ')}. Prázdný seznam neznamená, že nic nečeká.`,
+            `This queue is incomplete — could not read: ${degradedSources.join(', ')}. An empty list does not mean nothing is pending.`,
+          )}
+        </div>
+      )}
+      {!loading && degradedSources.length === 0 && domainItems.filter(i => i.domain !== 'agent').length === 0 && (
+        <div className="card" style={{ padding: 16, marginBottom: 16, color: 'var(--text-secondary)', fontSize: 13 }}>
+          {t('Žádná doménová schvalování nečekají.', 'No domain approvals pending.')}
+        </div>
+      )}
+      <div style={{ display: 'grid', gap: 10, marginBottom: 24 }}>
+        {domainItems.filter(i => i.domain !== 'agent').map(item => (
+          <div key={`${item.domain}:${item.id}`} className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{
+              fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase',
+              color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', flexShrink: 0,
+            }}>
+              {item.domain}
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{item.action}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                {item.resourceId && <span style={{ fontFamily: 'var(--font-mono)' }}>{item.resourceId} · </span>}
+                {item.maker && <span>{t('navrhl', 'by')} {item.maker}</span>}
+                {item.proposedAt && <span> · {new Date(item.proposedAt).toLocaleString()}</span>}
+              </div>
+            </div>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#d97706', background: '#fffbeb', border: '1px solid #fcd34d', padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', flexShrink: 0 }}>
+              {t('Čeká', 'Pending')}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', margin: '4px 0 10px' }}>
+        {t('Čeká na rozhodnutí (AI agent)', 'Pending (AI agent)')} ({pending.length})
       </div>
       {!loading && pending.length === 0 && (
         <div className="card" style={{ padding: 20, color: 'var(--text-secondary)', fontSize: 13 }}>
