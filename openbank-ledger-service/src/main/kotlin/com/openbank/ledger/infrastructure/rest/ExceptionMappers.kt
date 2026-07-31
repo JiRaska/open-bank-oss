@@ -4,6 +4,8 @@
 
 package com.openbank.ledger.infrastructure.rest
 
+import com.openbank.ledger.application.usecase.AccountingDayNotFoundException
+import com.openbank.ledger.application.usecase.ClosedAccountingDayException
 import com.openbank.ledger.application.usecase.ClosedFiscalPeriodException
 import com.openbank.ledger.application.usecase.GlAccountValidationException
 import com.openbank.ledger.application.usecase.JournalNotFoundException
@@ -101,6 +103,28 @@ class YearCloseConflictExceptionMapper : ExceptionMapper<YearCloseConflictExcept
 class ClosedFiscalPeriodExceptionMapper : ExceptionMapper<ClosedFiscalPeriodException> {
     override fun toResponse(exception: ClosedFiscalPeriodException): Response = Response.status(CONFLICT)
         .entity(mapOf("error" to (exception.message ?: "Fiscal period is closed")))
+        .type(MediaType.APPLICATION_JSON)
+        .build()
+}
+
+// 404 (ADR-0207 D2): the requested accounting day has not been opened.
+@Provider
+class AccountingDayNotFoundExceptionMapper : ExceptionMapper<AccountingDayNotFoundException> {
+    override fun toResponse(exception: AccountingDayNotFoundException): Response = Response.status(NOT_FOUND)
+        .entity(mapOf("error" to (exception.message ?: "Accounting day not found")))
+        .type(MediaType.APPLICATION_JSON)
+        .build()
+}
+
+// 409 day lock (ADR-0207 D3): a posting targeted an accounting day that is no longer OPEN.
+// Deliberately a DIFFERENT type from ClosedFiscalPeriodException even though both map to 409 —
+// the two locks have different granularity and different remedies (a closed day is corrected
+// forward into the current open day; a closed fiscal year needs an adjustment posting), and the
+// caller can only tell them apart if the exception does.
+@Provider
+class ClosedAccountingDayExceptionMapper : ExceptionMapper<ClosedAccountingDayException> {
+    override fun toResponse(exception: ClosedAccountingDayException): Response = Response.status(CONFLICT)
+        .entity(mapOf("error" to (exception.message ?: "Accounting day is closed")))
         .type(MediaType.APPLICATION_JSON)
         .build()
 }

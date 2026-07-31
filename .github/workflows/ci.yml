@@ -1126,6 +1126,26 @@ jobs:
       - name: "clock-injection gate — domain/application layers (ADR-0100, #1612)"
         run: bash .github/scripts/check-clock-injection.sh
 
+      # ADR-0207 D1 — accounting-date authority. The gate above could NOT have caught the defect
+      # this one exists for: `Clock.system(ZoneId.of("Europe/Prague"))` is injected-clock-shaped,
+      # so ledger-service ran a UTC ClockProducer bean AND a Prague clock built inside
+      # LedgerService/YearCloseService, disagreeing about the date for two hours a day half the
+      # year, green the whole time. This step bans binding a clock to a locally-chosen zone in the
+      # domain/application layer of any money-path service; the accounting date comes from
+      # com.openbank.libs.domain.calendar.AccountingClock.
+      #
+      # ADVISORY (no --enforce) on purpose: ledger is clean, but the first run surfaced three
+      # pre-existing sites in other services (transaction SettlementDateResolver, fx
+      # CnbRateIngestionService, sanctions SanctionsListService). Each needs its own review — one
+      # of them is #1302 item 3's structural false drift — so blocking merge on them here would
+      # either strand this PR or invite a blanket allowlist, and a blanket allowlist is how a gate
+      # stops meaning anything. Flip to --enforce when those three land.
+      #
+      # Scope is DERIVED from rules.yaml money_path_services, not hand-kept: check-clock-injection
+      # lists 8 of the 20 and reads as passing about the 12 it never looks at.
+      - name: "accounting-clock gate — one business-date authority (ADR-0207 D1, advisory)"
+        run: python3 .github/scripts/check-accounting-clock.py
+
       # ADR-0002 / rules.yaml architecture.domain_zero_framework_imports: the
       # hexagonal invariant was documented in every PR template but never enforced,
       # and the fleet quietly accumulated violations (Quarkus @RegisterForReflection

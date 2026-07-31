@@ -19,14 +19,13 @@ import com.openbank.ledger.domain.model.YearCloseRecord
 import com.openbank.ledger.domain.model.YearCloseStatus
 import com.openbank.ledger.domain.model.YearCloseVerification
 import com.openbank.ledger.domain.model.requireValid
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.inject.Inject
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.Year
-import java.time.ZoneId
 
 /**
  * Entity-level statutory year-close, increment 1 (ADR-0078 D5 / issue #471): fiscal-year GL
@@ -46,14 +45,14 @@ class YearCloseService(
     private val yearCloseRepository: YearCloseRepository,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
+    private val accountingClock: AccountingClock,
 ) : YearCloseUseCase {
-
-    @Inject
-    constructor(
-        journalRepository: JournalRepository,
-        yearCloseRepository: YearCloseRepository,
-        objectMapper: ObjectMapper,
-    ) : this(journalRepository, yearCloseRepository, objectMapper, Clock.system(BANK_TIME))
+    // Single constructor = the CDI entry point. ADR-0207 D1: the second, @Inject constructor that
+    // used to sit here built `Clock.system(Europe/Prague)` while this service's ClockProducer
+    // produced `Clock.systemUTC()` — the two disagreed about the date for two hours a day, half
+    // the year, and a year-close cutoff is exactly the decision that must not depend on which
+    // object you ask. The wall clock is now the injected UTC bean (timestamps); the accounting
+    // date comes from AccountingClock, the single authority for it.
 
     override suspend fun getTrialBalance(query: GetFiscalYearTrialBalanceQuery): FiscalYearTrialBalance =
         computeTrialBalance(query.fiscalYear)
@@ -88,7 +87,7 @@ class YearCloseService(
                 "Year close ${command.fiscalYear} is not DRAFT (status=${record.status})",
             )
         }
-        if (command.fiscalYear >= LocalDate.now(clock.withZone(BANK_TIME)).year) {
+        if (command.fiscalYear >= accountingClock.today().year) {
             throw YearCloseConflictException(
                 "Fiscal year ${command.fiscalYear} has not ended yet — cannot attest an open year",
             )
@@ -196,7 +195,8 @@ class YearCloseService(
 
     companion object {
         private const val YEAR_CLOSE_ATTESTED = "YearCloseAttested"
-        private val BANK_TIME = ZoneId.of("Europe/Prague")
+        // The BANK_TIME constant that used to live here is gone — the accounting time zone is
+        // declared once, in com.openbank.libs.domain.calendar.AccountingClock (ADR-0207 D1).
     }
 }
 
