@@ -14,7 +14,12 @@ import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
 import com.openbank.libs.domain.identifiers.Ids
+import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.asUni
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Instant
 import java.time.ZoneId
@@ -121,7 +126,16 @@ class CampaignJourneyActivitiesImpl(
     // never carries an e-mail address itself (ADR-0200 D3 — no PII duplication).
     private fun recipientFor(partyId: UUID): String = partyId.toString()
 
-    private fun <T> runBlockingOnWorker(block: suspend () -> T): T = kotlinx.coroutines.runBlocking { block() }
+    /**
+     * Every repository here is reactive Panache, and a Temporal activity runs on a plain worker
+     * thread that carries NO Vert.x context — a bare `runBlocking` around a reactive Panache call
+     * throws `HR000068 No current Vertx context found`, which would fail every activity in this
+     * class and deliver nothing (same shape as the @Scheduled sweep in #2148/#2187). Bridge
+     * through [VertxContextSupport] instead, exactly as `DomesticPaymentActivitiesImpl.vtx` does
+     * — safe here precisely because an activity thread is never an event loop.
+     */
+    private fun <T> runBlockingOnWorker(block: suspend () -> T): T =
+        VertxContextSupport.subscribeAndAwait { CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni() }
 
     companion object {
         private const val SECONDS_PER_WEEK = 7L * 24 * 3600
