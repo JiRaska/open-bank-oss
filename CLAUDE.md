@@ -296,6 +296,23 @@ fire from *outside* it, so they stay here:
   does not match reality" — there is no judgement left to exercise, so advisory just makes the drift
   mergeable. `eu-ai-act-registry` went red twice on #2156 and the PR merged anyway, leaving the EU AI
   Act inventory omitting an AI system until it was regenerated (#2216).
+- **A third-party URL in `application.yaml` is unfalsifiable by every test layer this repo has —
+  only fetching it can be wrong out loud.** A unit test stubs the client, an IT serves a local
+  fixture, and a consumer pact answers whatever path it is asked for (the #2283 asymmetry). So
+  `openbank-fx-service`'s ČNB fixing URL was a 404 — one path segment short, `kurzy-devizoveho-trhu`
+  appears TWICE — for the entire life of the service, and every layer stayed green: a 404 IS a valid
+  HTTP response, so the rest-client succeeded and the circuit breaker never opened; ČNB serves it as
+  a 58 KB HTML page, the parser rejected that, and the scheduler's `catch` swallowed it into one
+  ERROR line. Downstream, `FxRevaluationService` found no valid rate, logged "skipping its
+  revaluation leg" and returned `posted = false` — a successful-looking run of a job that revalued
+  nothing. The only evidence anywhere was a table that stopped growing, and **nothing alerts on a
+  table not growing**. Two transferable rules. (a) **Probe the payload's SHAPE, never the status
+  code** — a 200 proves a server answered, not that the answer is the feed. (b) **The probe must
+  read the URL out of the committed config, never keep its own copy** — a second copy moves with the
+  first and keeps passing against a URL the service does not use. `check-external-feeds.py` +
+  `external-feed-watch.yml` do both (drift half enforced in `Validate manifests`, liveness half
+  daily and escalating, never merge-blocking). Its first run found a *second* dead ČNB URL,
+  customer-edge's bank registry, silently masked by an embedded fallback (#2204).
 - **The gate that never existed beats the unfalsified one: check whether anything reads the artifact
   at all before assuming a green covers it.** This repo is a MULTI-LICENSE tree — Apache-2.0 at the
   root, an AGPL-3.0-only open-core subset (ADR-0136 + ADR-0181/0193) — and *nothing* compared the

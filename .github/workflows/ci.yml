@@ -1172,6 +1172,27 @@ jobs:
       - name: "EU AI Act inventory drift (ADR-0148 rule #7, enforced)"
         run: bash .github/scripts/check-eu-ai-act.sh
 
+      # External public-feed declaration drift (issue #2204).
+      #
+      # `--offline` on purpose: this is the DRIFT half only — every third-party URL in an
+      # `openbank-*/src/main/resources/application.yaml` is either declared in the watch's FEEDS
+      # (so it gets probed daily) or in NOT_PROBED with a reason. No network, deterministic, ~1 s.
+      # The liveness half lives in the `external-feed-watch` workflow and never gates a merge: a
+      # third party having a bad day must not wedge the repo.
+      #
+      # The binding copy is HERE for the reason spelled out above: `external-feed-watch` is
+      # path-filtered and therefore un-requireable, so its verdict is advisory in practice. What
+      # this step actually buys is that adding a new external dependency to a service's config
+      # cannot silently create a feed nothing ever fetches — which is exactly how the ČNB fixing
+      # URL stayed a 404 for the whole life of openbank-fx-service.
+      #
+      # Self-test first: the matchers are what separate "a server answered 200" from "the answer
+      # is the feed", and one that has only ever passed is unfalsified.
+      - name: "external feed declaration drift (issue #2204, enforced)"
+        run: |
+          python3 .github/scripts/check-external-feeds.py --self-test
+          python3 .github/scripts/check-external-feeds.py --root . --offline
+
   # ---------------------------------------------------------------------------
   # Customer-app dossier content check (ADR-0074 invariant 5).
   #

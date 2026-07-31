@@ -1,0 +1,150 @@
+# -----------------------------------------------------------------------------
+# External public-feed watch (issue #2204).
+#
+# WHY THIS EXISTS
+#   `openbank-fx-service`'s ČNB fixing URL was a 404 for the whole life of the
+#   service — one path segment short — and no layer of the stack could say so. A
+#   404 is a valid HTTP response, so the rest-client succeeded, the circuit
+#   breaker stayed closed, and the scheduler's catch turned the parse failure
+#   into one ERROR line. The only evidence was a table that stopped growing.
+#
+#   No test in this repo can catch that by construction: a unit test stubs the
+#   client, an IT serves a local fixture, and a consumer pact answers whatever
+#   path it is asked for (#2283). The upstream is a foreign government feed with
+#   no pact. Fetching it is the only thing that falsifies its URL.
+#
+# TWO HALVES, DELIBERATELY DIFFERENT LANES
+#   DRIFT is a property of the committed files, needs no network, and is exact —
+#   so it runs on PRs that touch a scanned file and BLOCKS. That is what stops a
+#   newly added external dependency from becoming a feed this watch knows
+#   nothing about while still reporting green.
+#
+#   LIVENESS is a property of the internet at this moment. It never blocks a
+#   merge: a third-party outage must not wedge the repo. It escalates instead —
+#   a red scheduled run is addressed to nobody, so a dead feed posts on #2204.
+#
+# WHY IT IS NOT A REQUIRED CHECK
+#   `paths:`-filtered workflows cannot be required contexts (a required context
+#   that never reports blocks every PR touching none of its paths). The binding
+#   copy of the DRIFT half therefore belongs in `Validate manifests` in ci.yml,
+#   the same shape adr-registry and eu-ai-act use; this workflow is the fast
+#   echo plus the scheduled liveness lane.
+# -----------------------------------------------------------------------------
+name: External feed watch
+
+on:
+  schedule:
+    # 05:10 UTC daily. Daily is the right cadence: the ČNB fixing is a daily
+    # publication, so a dead feed costs at most one missed business day before
+    # this says so — against the 46 days it went unnoticed the first time.
+    - cron: "10 5 * * *"
+  pull_request:
+    paths:
+      - "openbank-*/src/main/resources/application.yaml"
+      - ".github/scripts/check-external-feeds.py"
+      - ".github/workflows/external-feed-watch.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-feed-watch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    name: external-feed-watch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install PyYAML
+        run: python3 -m pip install --quiet pyyaml
+
+      # The shape matchers decide whether a 200 is really the feed. A matcher
+      # that has only ever returned "fine" is indistinguishable from one that
+      # always does, so it is exercised against payloads it MUST reject —
+      # including the exact ČNB HTML error page that read as success for 46
+      # days. This step failing voids every verdict below it.
+      - name: Self-test the shape matchers
+        run: python3 .github/scripts/check-external-feeds.py --self-test
+
+      # PR lane: drift only. No network, so nothing here can go red because a
+      # third party is having a bad day.
+      - name: Check declaration drift (blocking)
+        if: ${{ github.event_name == 'pull_request' }}
+        run: python3 .github/scripts/check-external-feeds.py --root . --offline
+
+      - name: Probe the declared feeds
+        id: probe
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          set +e
+          python3 .github/scripts/check-external-feeds.py --root . | tee /tmp/feeds.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) echo "Every declared feed is live and correctly shaped." ;;
+            1) echo "::error::Declaration drift on the default branch — reconcile the script with the YAMLs."
+               exit 1 ;;
+            2) echo "::warning::A declared external feed is dead or misshapen — escalating to #2204." ;;
+            *) echo "::error::The feed probe could not run. This is NOT a 'feeds are fine' verdict."
+               exit "$code" ;;
+          esac
+
+      - name: Escalate a dead feed on its issue
+        if: ${{ github.event_name != 'pull_request' && steps.probe.outputs.code == '2' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs')
+            const report = fs.readFileSync('/tmp/feeds.txt', 'utf8')
+            const MARKER = '<!-- external-feed-watch -->'
+            const issue_number = 2204
+            const body = [
+              MARKER,
+              '## External feed watch — a declared feed is dead or misshapen',
+              '',
+              'The daily probe fetched each declared third-party feed and checked its',
+              'payload shape, not just its status code. Something is not answering with',
+              'the feed:',
+              '',
+              '```',
+              report.trim(),
+              '```',
+              '',
+              'A dead feed here is silent in the service: the rest-client succeeds, the',
+              'circuit breaker stays closed, and the scheduler logs one ERROR line. Fix',
+              'the URL in the service\'s `application.yaml` (the probe reads it from',
+              'there, so the fix and the check can never disagree).',
+              '',
+              `_Automated: \`${context.workflow}\` run ${context.runId}._`,
+            ].join('\n')
+
+            let issue
+            try {
+              issue = (await github.rest.issues.get({ ...context.repo, issue_number })).data
+            } catch (e) {
+              core.setFailed(`issue #${issue_number}: ${e.message}`)
+              return
+            }
+            if (issue.state !== 'open') {
+              await github.rest.issues.update({ ...context.repo, issue_number, state: 'open' })
+            }
+            // Refresh a previous report rather than stacking one comment per day —
+            // a watch that spams its own issue trains people to filter it.
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo, issue_number, per_page: 100,
+            })
+            const prior = comments.find(c => c.body && c.body.includes(MARKER))
+            if (prior) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: prior.id, body })
+            } else {
+              await github.rest.issues.createComment({ ...context.repo, issue_number, body })
+            }
