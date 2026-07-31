@@ -423,6 +423,21 @@ jobs:
       - name: "License header consistency (issue #2280, enforced)"
         run: python3 .github/scripts/check-license-headers.py
 
+      # issue #2841 / #1449. `gh` infers the target repo from the working directory's git
+      # remote, so a job with no actions/checkout dies on every subcommand with
+      # "failed to determine base repo". The jobs shaped that way here are escalation paths —
+      # they run only when something has already broken — so they almost never execute, and a
+      # path that never executes never reveals that it cannot. Measured 2026-07-31: four such
+      # jobs, three of which had NEVER run, and the fourth (auto-retry-cancelled) had failed on
+      # this exact line every time since it was written, so the #2330 spot-kill retry had never
+      # re-run anything. One of the three was the #1449 alarm itself.
+      # Its --self-test carries the false positive that the first draft produced (prose in an
+      # escaped-backtick code span) as a must-NOT-flag case, alongside the must-flag ones.
+      - name: "gh repo context self-test (issue #2841)"
+        run: python3 .github/scripts/check-gh-repo-context.py --self-test
+      - name: "gh repo context in checkoutless jobs (issue #2841, enforced)"
+        run: python3 .github/scripts/check-gh-repo-context.py
+
 
       # issue #2255. docs/runbooks/svc-*.md are GENERATED from governance.yaml + the gitops
       # manifests, and nothing checked them, so 25 of 30 had silently gone stale: they told
