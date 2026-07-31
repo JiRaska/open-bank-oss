@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Per-service governance manifest (ADR-0071). Declarative, curatorial facts only.
 dataDomain: payments
-primaryDatastore: postgres
+primaryDatastore: PostgreSQL
 databaseName: openbank_mcp
 dataLineageRole: consumer
 dataClassification: confidential
