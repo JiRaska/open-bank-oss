@@ -5,6 +5,7 @@
 package com.openbank.mcp.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.mcp.infrastructure.persistence.AgentSessionEntity
 import com.openbank.mcp.infrastructure.persistence.AgentSessionRepository
 import io.quarkus.security.identity.SecurityIdentity
@@ -65,7 +66,7 @@ class McpSessionResource(
         }
         val now = Instant.now(clock)
         val session = AgentSessionEntity().also {
-            it.id = UUID.randomUUID()
+            it.id = Ids.newId()
             it.subject = identity.principal.name
             it.roleCeiling = ceiling.joinToString(",", prefix = "[", postfix = "]") { r -> "\"$r\"" }
             it.clientId = request.clientId
