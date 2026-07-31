@@ -109,9 +109,10 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
     @POST
     @Path("/{id}/enrol")
     @Authorize(action = "campaign.enrol", resource = "#id")
-    suspend fun enrol(@PathParam("id") id: UUID): Response =
-        runCatching { Response.ok(mapOf("enrolled" to service.enrol(id))).build() }
-            .getOrElse { Response.status(Response.Status.CONFLICT).entity(mapOf("error" to it.message)).build() }
+    suspend fun enrol(@PathParam("id") id: UUID): Response = runCatching {
+        val outcome = service.enrol(id)
+        Response.ok(mapOf("enrolled" to outcome.enrolled, "failed" to outcome.failed)).build()
+    }.getOrElse { Response.status(Response.Status.CONFLICT).entity(mapOf("error" to it.message)).build() }
 
     @GET
     @Path("/{id}/enrolments")

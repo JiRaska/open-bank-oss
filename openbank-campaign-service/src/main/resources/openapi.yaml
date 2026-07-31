@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.1.0
+  version: 1.2.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -142,7 +142,10 @@ paths:
         - $ref: '#/components/parameters/CampaignId'
       responses:
         '200':
-          description: Number of journeys started
+          description: >-
+            What the call actually did. A party whose journey could not be started is counted in
+            `failed` rather than aborting the remaining parties, so `enrolled` alone can no longer
+            be mistaken for the size of the segment.
           content:
             application/json:
               schema:
@@ -150,6 +153,12 @@ paths:
                 properties:
                   enrolled:
                     type: integer
+                    description: Journeys started, each with its enrolment row committed.
+                  failed:
+                    type: integer
+                    description: >-
+                      Parties whose journey start or enrolment write threw. Nothing is persisted
+                      for them, so a later `enrol` retries them.
         '409':
           description: Campaign not ACTIVE
   /api/v1/campaigns/{id}/enrolments:
