@@ -96,7 +96,7 @@ paths:
       summary: Ordered evidence bundle for one loan application (ADR-0214)
       description: >-
         The application lifecycle as recorded in the transactional outbox, oldest first —
-        the same events the audit chain (ADR-0133) ingests. ROLE_COMPLIANCE / ROLE_AUDIT / ROLE_ADMIN.
+        the same events the audit chain (ADR-0133) ingests. ROLE_COMPLIANCE / ROLE_CREDIT_RISK / ROLE_ADMIN.
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:

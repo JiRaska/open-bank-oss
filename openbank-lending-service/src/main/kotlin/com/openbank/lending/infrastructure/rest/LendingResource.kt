@@ -81,7 +81,7 @@ class LendingResource(
 
     @GET
     @Path("/applications/{id}/evidence")
-    @RolesAllowed("ROLE_COMPLIANCE", "ROLE_AUDIT", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_COMPLIANCE", "ROLE_CREDIT_RISK", "ROLE_ADMIN")
     @Authorize(action = "lending.evidence.read", resource = "#id")
     @Operation(summary = "Ordered evidence bundle for one loan application (ADR-0214)")
     suspend fun evidence(@PathParam("id") id: UUID): Response {
