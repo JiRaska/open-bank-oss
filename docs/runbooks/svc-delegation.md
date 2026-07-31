@@ -18,7 +18,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Datastore | PostgreSQL (database `openbank_delegations`) |
 | Classification | confidential |
 | Retention | 5 years |
-| Lineage role | source |
+| Lineage role | both |
 
 ## Dependencies
 
