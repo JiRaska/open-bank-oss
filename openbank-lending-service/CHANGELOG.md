@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.15.0...lending-service-v0.16.0) (2026-07-31)
+
+
+### Features
+
+* **lending:** canonical origination graph wired into apply/decide/disburse (ADR-0211) ([2b6cf67](https://github.com/JiRaska/open-bank-oss/commit/2b6cf676e25a75bfec3b0e82cfb6fcf0db013c2d))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.14.0...lending-service-v0.15.0) (2026-07-31)
 
 
