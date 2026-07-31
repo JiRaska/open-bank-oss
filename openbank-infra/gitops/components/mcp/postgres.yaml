@@ -13,6 +13,14 @@ spec:
   storage:
     storageClass: gp3
     size: 2Gi
+  # The service connects to database `openbank_mcp` (QUARKUS_DATASOURCE_*_URL); without this
+  # initdb CNPG bootstraps the default `app` database and the pod crashloops with
+  # PSQLException: database "openbank_mcp" does not exist (surfaced by the ADR-0224 E2E, #2750).
+  # Applies at cluster bootstrap only — an existing cluster needs the database created by hand.
+  bootstrap:
+    initdb:
+      database: openbank_mcp
+      owner: app
   resources:
     requests:
       cpu: 100m

@@ -86,15 +86,19 @@ class CallerContextResolver @Inject constructor(
         // ADR-0224 D2: the token's `jti` must be bound to a live session of THIS subject (never
         // the SSO `sid` — an exchange mints a fresh one, which is exactly why jti is the binding),
         // and the effective roles are bounded by BOTH the token and the session ceiling. A missing
-        // store row or a mismatch is anonymous — revocation takes effect immediately.
+        // store row or a mismatch is anonymous — revocation takes effect immediately. The session
+        // row's subject is the REST-layer principal name (Quarkus resolves preferred_username
+        // before sub), while Keycloak's `sub` is the stable UUID — match the name the store wrote,
+        // not the claim (E2E #2750: a UUID-vs-email mismatch here denied every bound call).
         val session = sessions?.findActiveByJti(jti, Instant.now(clock)) ?: return null
-        if (session.subject != subject) return null
+        val principalName = jwt.getClaim<String?>(CLAIM_PREFERRED_USERNAME)?.takeIf { it.isNotBlank() } ?: subject
+        if (session.subject != principalName) return null
         val ceiling = parseCeiling(session.roleCeiling)
         val bounded = roles.filter { it in ceiling }
         if (bounded.isEmpty()) return null
 
         return ConsentContext(
-            agentId = subject,
+            agentId = principalName,
             consentId = "",
             grantedAccounts = emptyList(),
             actChain = listOf(azp) + actChain(jwt.getClaim(CLAIM_ACT)),
@@ -145,6 +149,7 @@ class CallerContextResolver @Inject constructor(
         const val CLAIM_JTI = "jti"
         const val CLAIM_AUD = "aud"
         const val CLAIM_REALM_ACCESS = "realm_access"
+        const val CLAIM_PREFERRED_USERNAME = "preferred_username"
         const val ROLE_PREFIX = "ROLE_"
 
         /** The audience client an OBO token must target (ADR-0224 D1; realm config from #2762). */

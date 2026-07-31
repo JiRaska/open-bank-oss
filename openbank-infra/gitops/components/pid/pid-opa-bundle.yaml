@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pid-service
     app.kubernetes.io/part-of: pid
   annotations:
-    openbank.tech/policy-checksum: "d4af3ed9689c23c2"
+    openbank.tech/policy-checksum: "cad182c655fe29b9"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -3579,6 +3579,14 @@ data:
             - lending.read
             - notification.list
             - notification.read
+            # ADR-0224 D3 (E2E #2750): the staff OBO channel's MCP read tools — the capabilities
+            # McpToolRegistry maps list_accounts/get_balance/list_transactions/list_consents to.
+            # Without these the human tools/list fails closed to empty (query.marketing.readonly and
+            # the propose.payment write stay ungranted on purpose).
+            - query.account.readonly
+            - query.balance.readonly
+            - query.consent.readonly
+            - query.transaction.readonly
             - sanctions.list
             - sanctions.read
             - sdd.list
