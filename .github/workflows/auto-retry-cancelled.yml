@@ -30,10 +30,24 @@
 #
 # A run-level `failure` is NOT retried on its own — that is the normal outcome of a broken
 # build, and blanket-retrying it would burn runner time and turn a deterministic red into a
-# flaky-looking one. It is retried only when a failed job carries the spot-kill SIGNATURE:
-# at least one `cancelled` step and NO `failed` step. A genuine build failure has a `failure`
-# step followed by `skipped` ones, never a `cancelled` one. Read from the jobs API, so no log
-# download is needed.
+# flaky-looking one. The run is retried when AT LEAST ONE failed job carries the spot-kill
+# SIGNATURE: at least one `cancelled` step and NO `failed` step. A genuine build failure has a
+# `failure` step followed by `skipped` ones, never a `cancelled` one. Read from the jobs API,
+# so no log download is needed.
+#
+# MIXED RUNS ARE THE NORMAL CASE, and the rule above is a per-RUN decision, not a per-JOB
+# filter. `gh run rerun --failed` re-runs every failed job, so a run containing both a
+# spot-killed job and a genuinely broken one re-runs both. That is accepted: the reclaimed job
+# needs the retry, the broken one fails again for the same reason, and `run_attempt == 1`
+# bounds the whole thing to a single extra attempt.
+#
+# Do not read the rule as "only spot-killed jobs are re-run" — it isn't, and the very first
+# live firing was already a mixed run. Services CI 30630120640 (main, 63 jobs) had three
+# failed jobs: `build (openbank-product-catalog)` killed by a reclaim (1 cancelled step, 0
+# failed), `build (openbank-mcp-service)` genuinely broken (0 cancelled, 1 failed), and
+# `all-green` failing downstream of them. The signature matched on one job and the whole set
+# was re-run. If per-job precision is ever wanted, it needs `gh run rerun --job <id>` per
+# killed job, which is a different and larger change.
 #
 # LOOP SAFETY
 # github.event.workflow_run.run_attempt is 1 for the original run and 2 for the first rerun,
@@ -44,6 +58,18 @@
 # (approval gates are a human's job) and runs cancelled by anything other than the runner
 # dying — indistinguishable from the outside, so we accept one wasted retry on a manually
 # cancelled run over a more clever heuristic that can misfire.
+#
+# `-R` ON EVERY `gh run rerun` IS LOAD-BEARING (issue #2841 follow-up)
+# This job has no `actions/checkout`, so there is no git repository for `gh` to infer the
+# target repo from, and a bare `gh run rerun <id>` dies with
+#   failed to determine base repo: failed to run git: fatal: not a git repository
+# That is not a new hazard: it is how this workflow behaved from the day it was written, so
+# the auto-retry from #2330 had NEVER once succeeded — every invocation exited 1. Nothing
+# caught it because a `workflow_run` job's red is addressed to nobody (the same blind spot
+# `dependency-submission` hit for three days, which is why that one raises an issue now).
+# Verified from a non-git directory: without `-R` the command cannot resolve the repo; with
+# it, the call reaches the API. Do not drop the flag, and do not "fix" this by adding a
+# checkout — cloning the repo to make one API call is pure waste.
 #
 # WATCH LIST
 # Only the lanes that run on the spot pool and hurt when killed mid-flight: the PR services CI
@@ -84,7 +110,7 @@ jobs:
             # LOOP SAFETY above describes. `--failed` is a no-op against `cancelled`, so this
             # is always the full re-run.
             echo "Re-running cancelled run ${RUN_URL} (issue #2330)"
-            gh run rerun "${RUN_ID}"
+            gh run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}"
             echo "::notice title=spot-kill auto-retry::Re-ran cancelled run ${RUN_URL} (attempt 2 of max 2; a second kill stays for a human)"
             exit 0
           fi
@@ -114,5 +140,5 @@ jobs:
           fi
 
           echo "Re-running ${RUN_URL}: ${killed} job(s) killed mid-step by a runner reclaim (issue #2841)"
-          gh run rerun "${RUN_ID}" --failed
+          gh run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}" --failed
           echo "::notice title=spot-kill auto-retry::Re-ran ${killed} spot-killed job(s) in ${RUN_URL} (attempt 2 of max 2; a second kill stays for a human)"
