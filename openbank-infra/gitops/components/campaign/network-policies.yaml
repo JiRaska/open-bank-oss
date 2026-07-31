@@ -62,3 +62,21 @@ spec:
       ports:
         - protocol: TCP
           port: 8085
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-ingress-allow-list
+  namespace: campaign
+  labels:
+    app.kubernetes.io/part-of: campaign
+    openbank.io/derived: gen-network-policies
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
