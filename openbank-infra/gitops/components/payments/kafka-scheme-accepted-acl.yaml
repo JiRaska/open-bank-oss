@@ -382,6 +382,7 @@ rules:
       - document-service                # ADR-0161/0162: document lifecycle events, ns documents (first ESO client there)
       - customer-edge                   # ADR-0086 audit trail + ADR-0072 resume, ns customer-edge (first ESO Kafka client there); missed by the #2665 sweep
       - analytics-sink                  # ADR-0022/0069: analytics bronze consumer (party/kyc/consent/sca/documents/onboarding-funnel), ns analytics (first ESO client there)
+      - campaign-service                # ADR-0200: campaign journey delivery requests, ns campaign (first ESO client there); missing entry blocked the whole sandbox rollout at sync-wave -1 (#2749)
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1
