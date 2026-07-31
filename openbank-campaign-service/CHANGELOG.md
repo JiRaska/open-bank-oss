@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.7](https://github.com/JiRaska/open-bank-oss/compare/v0.3.6...v0.3.7) (2026-07-31)
+
+
+### Bug Fixes
+
+* **campaign:** send ClickHouse query parameters the only way ClickHouse accepts them ([#2921](https://github.com/JiRaska/open-bank-oss/issues/2921)) ([31868c9](https://github.com/JiRaska/open-bank-oss/commit/31868c9d664d8552cb69e4a564cfccd0ba3a0bad))
+
 ## [0.3.6](https://github.com/JiRaska/open-bank-oss/compare/v0.3.5...v0.3.6) (2026-07-31)
 
 
