@@ -22,7 +22,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-party-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "f7d01d7cca1831f1"
+        openbank.tech/policy-checksum: "058321ede6ffd39d"
       labels:
         app.kubernetes.io/name: party-service
         app.kubernetes.io/part-of: party
@@ -36,7 +36,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: party-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-party-service:sandbox-2412a551
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-party-service:sandbox-b6fd3153
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -163,11 +163,6 @@ spec:
             # default-deny NetworkPolicy. Resolves identically to the in-image default.
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
-            # GDPR Art. 20 portability export (ADR-0204 D2): transaction history per account.
-            # The URL env also feeds the network-policy generator's URL_RE scan for the
-            # party→payments:8102 edge (same derivation as the accounts edge above).
-            - name: TRANSACTION_SERVICE_URL
-              value: http://transaction-service.payments.svc:8102
           startupProbe:
             tcpSocket:
               port: management

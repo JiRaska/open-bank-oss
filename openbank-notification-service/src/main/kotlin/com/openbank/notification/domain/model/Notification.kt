@@ -49,6 +49,13 @@ enum class NotificationTemplate(val variables: Set<String>) {
 
     /** Decoupled/push SCA — "you have a payment to approve" (#4). [detail] = the human summary. */
     SCA_APPROVAL(setOf("detail")),
+
+    /**
+     * ADR-0200/0201 first-slice marketing template: a product/offer communication composed by
+     * campaign-service from catalogue variables only. The closed variable schema is the ADR-0176 D4
+     * discipline — a campaign supplies values, never free-form body text.
+     */
+    MARKETING_PRODUCT_OFFER(setOf("offerTitle", "offerText", "ctaText")),
     ;
 
     /** Keys in [vars] that this template does not accept. Empty = the request is well-formed. */
@@ -67,6 +74,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
             -> NotificationCategory.SECURITY
             TRANSACTION_COMPLETED, TRANSACTION_FAILED -> NotificationCategory.PAYMENTS
             ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT
+            MARKETING_PRODUCT_OFFER -> NotificationCategory.MARKETING
         }
 }
 

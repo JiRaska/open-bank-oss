@@ -505,9 +505,6 @@ spec:
               kubernetes.io/metadata.name: customer-edge
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: party
-        - namespaceSelector:
-            matchLabels:
               kubernetes.io/metadata.name: platform
         - namespaceSelector:
             matchLabels:

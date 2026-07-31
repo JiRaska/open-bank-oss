@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only.
+dataDomain: platform
+primaryDatastore: PostgreSQL
+databaseName: openbank_campaigns
+dataLineageRole: both
+dataClassification: confidential
+retentionPolicy: 5 years
+evidenceExported: true
+lineage:
+  downstream:
+    - serviceName: notification-service
+      relationType: topic
+      description: delivery via openbank.notification.requests (ADR-0200 D3)
+    - serviceName: consent-service
+      relationType: api
+      description: per-send marketing consent check (ADR-0198)
+  upstream:
+    - serviceName: consent-service
+      relationType: topic
+      description: openbank.consent.events — revocation signals journeys (ADR-0200 D2)
+    - serviceName: analytics-sink
+      relationType: api
+      description: silver-layer segment evaluation (ADR-0210)

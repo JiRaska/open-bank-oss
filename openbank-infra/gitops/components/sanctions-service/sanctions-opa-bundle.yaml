@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sanctions-service
     app.kubernetes.io/part-of: sanctions
   annotations:
-    openbank.tech/policy-checksum: "7c5c926811f6fe39"
+    openbank.tech/policy-checksum: "a8338376f7fca3fa"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2358,6 +2358,10 @@ data:
                                              # action requires HUMAN + (ROLE_OPERATOR or ROLE_ADMIN) and
                                              # explicitly excludes any service-account-* principal id
                                              # (rest.rego operator-compose-message), the same exclusion
+        - campaign.activate                 # ADR-0200 D5: marketing campaign activation reaches a cohort,
+                                             # so its blast radius exceeds a single operator message —
+                                             # four-eyes with the self-approval guard, human-only
+                                             # (maker != checker), same mechanism as opsmessage.compose.
                                              # m2m-sanctions-screening uses for the opposite carve-out.
         - party.merge                       # ADR-0179: retire a duplicate identity into a survivor
                                              # (POST /api/v1/parties/{id}/merge). Gated HERE and not via

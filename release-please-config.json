@@ -378,6 +378,9 @@
       "exclude-paths": [
         "openbank-vop-service/src/test"
       ]
+    },
+    "openbank-campaign-service": {
+      "release-type": "simple"
     }
   }
 }
