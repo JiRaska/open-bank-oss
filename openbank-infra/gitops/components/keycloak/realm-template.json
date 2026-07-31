@@ -82,7 +82,15 @@
         "name": "ROLE_DEMO",
         "description": "Demo/guided-tour badge shown by the admin-UI (src/lib/auth/roles.ts). Existed in the live sandbox realm and in the docker dev realm but was missing here, so a cold-started cluster would not have it — added by the #2442 drift reconciliation"
       }
-    ]
+    ],
+    "client": {
+      "openbank-mcp-service": [
+        {
+          "name": "mcp-caller",
+          "description": "May call MCP tools via an OBO-exchanged token (ADR-0224). Assignment to staff is operational, not realm-managed"
+        }
+      ]
+    }
   },
   "clients": [
     {
@@ -100,7 +108,9 @@
       "webOrigins": [
         "https://__ADMIN_HOST__"
       ],
-      "attributes": {},
+      "attributes": {
+        "standard.token.exchange.enabled": "true"
+      },
       "defaultClientScopes": [
         "openid",
         "profile",
@@ -108,6 +118,55 @@
         "roles"
       ],
       "secret": "__ADMINUI_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-mcp-service",
+      "name": "OpenBank MCP Service (OBO audience)",
+      "description": "Audience target for RFC 8693 OBO-exchanged staff tokens (ADR-0224). Token-exchange scope permission granted to openbank-admin-ui only (verified on Keycloak 26.6.3)",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "secret": "__MCP_OBO_CLIENT_SECRET__",
+      "authorizationSettings": {
+        "allowRemoteResourceManagement": false,
+        "policyEnforcementMode": "ENFORCING",
+        "scopes": [
+          {
+            "name": "token-exchange"
+          }
+        ],
+        "policies": [
+          {
+            "type": "client",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "name": "requester-openbank-admin-ui",
+            "config": {
+              "clients": "[\"openbank-admin-ui\"]"
+            }
+          },
+          {
+            "type": "scope",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "name": "token-exchange.openbank-mcp-service",
+            "config": {
+              "scopes": "[\"token-exchange\"]",
+              "applyPolicies": "[\"requester-openbank-admin-ui\"]"
+            }
+          }
+        ]
+      }
     },
     {
       "clientId": "openbank-services",

@@ -28,7 +28,12 @@ BUILTINS = ["offline_access", "uma_authorization", "default-roles-openbank"]
 
 def declared_roles() -> list:
     doc = json.loads(TEMPLATE.read_text())
-    return sorted(r["name"] for r in doc["roles"]["realm"])
+    names = [r["name"] for r in doc["roles"]["realm"]]
+    # The detector flattens client roles into the same name set as realm roles — the synthetic
+    # live snapshot must do the same, or any client-role addition reads as declared-not-live.
+    for client_roles in (doc["roles"].get("client", {}) or {}).values():
+        names += [r["name"] for r in client_roles or []]
+    return sorted(names)
 
 
 def run(live_roles, realm="openbank", extra=()):
