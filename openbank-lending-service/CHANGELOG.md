@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.16.0...lending-service-v0.17.0) (2026-07-31)
+
+
+### Features
+
+* **lending:** Temporal durable origination timers (ADR-0211 D2) ([35980f4](https://github.com/JiRaska/open-bank-oss/commit/35980f429cee132664eec58fa0ecf1354ebb2134))
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.15.0...lending-service-v0.16.0) (2026-07-31)
 
 
