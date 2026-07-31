@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.51.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.50.0...customer-edge-v0.51.0) (2026-07-31)
+
+
+### Features
+
+* **edge:** resolve the counterparty account on a transaction ([#2900](https://github.com/JiRaska/open-bank-oss/issues/2900)) ([20e6d23](https://github.com/JiRaska/open-bank-oss/commit/20e6d23529059463a79374f053d01e0078221335))
+
 ## [0.50.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.49.1...customer-edge-v0.50.0) (2026-07-31)
 
 
