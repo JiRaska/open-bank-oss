@@ -120,7 +120,16 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: billing
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: customer-edge
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: documents
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: payments
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: platform
