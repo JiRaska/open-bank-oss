@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.63.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.63.0...admin-ui-v0.63.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **admin-ui:** admit KYC four-eyes and SUPERVISOR roles to the UI permission matrix ([#2769](https://github.com/JiRaska/open-bank-oss/issues/2769)) ([51dfe14](https://github.com/JiRaska/open-bank-oss/commit/51dfe14572dc7e3a580230fb366835d681c9aee1))
+
 ## [0.63.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.62.3...admin-ui-v0.63.0) (2026-07-29)
 
 
