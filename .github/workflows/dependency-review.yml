@@ -112,3 +112,69 @@ jobs:
           # or buildscript configuration is a graph artifact — fix the submission filter in
           # dependency-submission.yml, do not allowlist it. One naming a real *Classpath is a
           # genuine finding: bump the pin.
+
+      # The gate above PROCEEDS on an invalid basis instead of failing (issue #2833, item 4).
+      #
+      # dependency-review compares two SUBMITTED graphs. When one side has no snapshot it
+      # logs a warning, exhausts retry-on-snapshot-warnings, prints
+      # `Retry timeout exceeded. Proceeding...`, and then reports a normal pass/fail computed
+      # from a diff that treated the ENTIRE head graph as additions. Both outcomes are wrong
+      # and neither is distinguishable from a real verdict: a green means "not evaluated",
+      # a red means "every pre-existing dependency, re-flagged".
+      #
+      # #2837 made every main commit submit, so the systemic cause is gone — but a branch
+      # whose merge-base predates that fix, or a submission that failed outright, still lands
+      # here. This step makes that state RED and says why, instead of letting the gate claim
+      # a verdict it did not earn.
+      #
+      # Only armed on dependency-touching PRs: with no Gradle submission in flight there is no
+      # Gradle graph on either side and nothing to assert.
+      #
+      # Deliberately checks the submission RUN, not snapshot queryability. GitHub indexes a
+      # submitted graph some seconds after the API call returns, so asserting the snapshot
+      # itself would flake; asserting the run catches the case that actually caused #2833
+      # (no submission was ever scheduled for that SHA) and accepts the narrow window where a
+      # run has succeeded but is not yet indexed.
+      #
+      # Last step in the job on purpose — nothing runs after it, so failing here costs no
+      # downstream work.
+      - name: Assert the dependency diff had a valid basis
+        if: ${{ success() && steps.deps.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          runs_api="repos/${GITHUB_REPOSITORY}/actions/workflows/dependency-submission.yml/runs"
+
+          mb="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" \
+                  --jq '.merge_base_commit.sha' 2>/dev/null || true)"
+          if [ -z "${mb}" ]; then
+            echo "::warning title=basis unverified::Could not resolve the merge-base; skipping the basis assertion rather than failing on an API hiccup."
+            exit 0
+          fi
+
+          count() { gh api "${runs_api}?head_sha=$1&status=success" --jq '.total_count' 2>/dev/null || echo ""; }
+          base_runs="$(count "${mb}")"
+          head_runs="$(count "${HEAD_SHA}")"
+          if [ -z "${base_runs}" ] || [ -z "${head_runs}" ]; then
+            echo "::warning title=basis unverified::Could not query dependency-submission runs; skipping the assertion."
+            exit 0
+          fi
+
+          echo "merge-base ${mb}: ${base_runs} successful submission run(s)"
+          echo "head ${HEAD_SHA}: ${head_runs} successful submission run(s)"
+
+          fail=0
+          if [ "${base_runs}" -eq 0 ]; then
+            echo "::error title=Dependency review had no base graph::No successful dependency-submission run exists for the merge-base ${mb}, so the Gradle half of this review compared against nothing and reported the whole head graph as additions. Rebase onto current main — every main commit has carried a snapshot since #2837, so a current merge-base resolves. See issue #2833."
+            fail=1
+          fi
+          if [ "${head_runs}" -eq 0 ]; then
+            echo "::error title=Dependency review had no head graph::No successful dependency-submission run exists for the head ${HEAD_SHA}. Check the Dependency submission workflow for this PR — if it failed, the Gradle half of this review is vacuous. See issue #2833."
+            fail=1
+          fi
+          [ "${fail}" -eq 0 ] || exit 1
+
+          echo "Both sides of the dependency diff had a submitted graph — the verdict above is about this PR's delta."
