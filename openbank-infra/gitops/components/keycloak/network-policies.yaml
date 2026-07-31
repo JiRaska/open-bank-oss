@@ -65,6 +65,9 @@ spec:
               kubernetes.io/metadata.name: billing
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: campaign
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: consent
         - namespaceSelector:
             matchLabels:

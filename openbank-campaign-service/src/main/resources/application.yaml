@@ -15,6 +15,12 @@ quarkus:
     password: ${DB_PASSWORD:campaign}
   flyway:
     migrate-at-start: true
+  # Backs the four-eyes approval store (libs' RedisApprovalStore, produced by
+  # ApprovalConfig). Without it the ReactiveRedisDataSource bean is inactive and the
+  # app cannot start — the deployed pod died with InactiveBeanException. Overridden
+  # per environment via QUARKUS_REDIS_HOSTS.
+  redis:
+    hosts: redis://localhost:6379
   oidc:
     auth-server-url: ${KEYCLOAK_URL:http://localhost:8080}/realms/openbank
     client-id: openbank-services
