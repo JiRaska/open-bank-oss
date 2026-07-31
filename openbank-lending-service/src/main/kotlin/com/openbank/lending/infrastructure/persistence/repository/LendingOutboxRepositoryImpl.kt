@@ -29,6 +29,10 @@ class LendingOutboxRepositoryImpl(private val clock: Clock) :
     override fun persistInTransaction(message: LendingOutboxMessage): Uni<Void> =
         persist(message.toEntity()).replaceWithVoid()
 
+    override suspend fun findByAggregateId(aggregateId: UUID): List<OutboxEntry> = Panache.withSession {
+        find("aggregateId = ?1 order by createdAt asc", aggregateId).list()
+    }.awaitSuspending().map { it.toEntry() }
+
     override suspend fun listProcessable(limit: Int): List<OutboxEntry> = Panache.withSession {
         find(
             "status in (?1, ?2) order by createdAt asc",

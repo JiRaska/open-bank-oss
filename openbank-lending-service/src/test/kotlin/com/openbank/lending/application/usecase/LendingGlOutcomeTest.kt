@@ -69,6 +69,11 @@ class LendingGlOutcomeTest {
     private val valuation = mockk<CollateralValuationPort>()
     private val riskParameters = mockk<RiskParameterSource>()
     private val events = mockk<LoanEventEmitter>()
+
+    @org.junit.jupiter.api.BeforeEach
+    fun stubEventEmitter() {
+        every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+    }
     private val clock = Clock.fixed(Instant.parse("2026-04-01T00:00:00Z"), ZoneOffset.UTC)
     private val provisioning = mockk<ProvisioningRepository>()
 
