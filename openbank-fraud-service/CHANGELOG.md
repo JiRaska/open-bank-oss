@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.9.1...fraud-service-v0.10.0) (2026-07-31)
+
+
+### Features
+
+* **fraud:** analyst review queue — GET /api/v1/fraud/review-queue (ADR-0230 D2) ([#2798](https://github.com/JiRaska/open-bank-oss/issues/2798)) ([2a765b2](https://github.com/JiRaska/open-bank-oss/commit/2a765b258ebd63cdc4ea1ef93c0788fb4484bdcd))
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.9.0...fraud-service-v0.9.1) (2026-07-26)
 
 
