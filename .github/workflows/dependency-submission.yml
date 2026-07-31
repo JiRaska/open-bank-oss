@@ -127,6 +127,42 @@ jobs:
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
           dependency-graph: generate-and-submit
+          # Keep detached and buildscript configurations OUT of the submitted graph (#2833).
+          #
+          # `configurations.all { resolutionStrategy { force(...) } }` — how
+          # openbank.dependency-vulnerability-pins applies the fleet-wide patch floors — does
+          # NOT reach configurations created via `detachedConfiguration(...)`. Those therefore
+          # resolve their own, older versions of the same modules, and every one of them lands
+          # in the submitted graph as a distinct coordinate that no service can ever load.
+          #
+          # Measured 2026-07-31 with the extractor's own `resolvedBy` report
+          # (`:ForceDependencyResolutionPlugin_resolveAllDependencies` + SimpleDependencyGraphPlugin):
+          #
+          #   io.netty:netty-codec-http:4.1.110  resolvedBy=1     path=:  detachedConfiguration11
+          #   io.netty:netty-codec-http:4.1.119  resolvedBy=1     path=:  detachedConfiguration11
+          #   io.netty:netty-codec-http:4.1.133  resolvedBy=1     path=:  detachedConfiguration11
+          #   io.netty:netty-codec-http:4.1.136  resolvedBy=1147  compile/runtimeClasspath × 56 projects
+          #
+          # 105 of 1389 resolved coordinates came exclusively from a detached configuration
+          # (104 from `detachedConfiguration11` alone), and they carried 24 of the 30
+          # vulnerability findings. `classpath` — the root project's BUILDSCRIPT classpath —
+          # accounted for 3 more. Filtering both takes the gate from 30 findings to 3, all
+          # `moderate`, i.e. below `fail-on-severity: high`.
+          #
+          # This does NOT narrow test coverage: testCompileClasspath, testRuntimeClasspath and
+          # integrationTest* are all still submitted. The surviving
+          # hibernate-reactive-core:3.4.2 finding is reported partly BECAUSE of its
+          # integration-test classpaths — that is the check that this filter is not too broad.
+          #
+          # Excluding `classpath` IS a deliberate scope reduction, unlike the detached case: a
+          # vulnerable build plugin never ships but does run on CI runners. Accepted because
+          # the buildscript graph is not what `block_on_cve_severity` is about; revisit if
+          # build-time supply-chain becomes an explicit goal.
+          #
+          # The regex is name-shaped, not identity-shaped, on purpose: Gradle renumbers
+          # `detachedConfiguration<N>` freely between builds and versions, so pinning to
+          # `detachedConfiguration11` would silently stop matching.
+          dependency-graph-exclude-configurations: '^(detachedConfiguration.*|classpath)$'
 
       # assemble resolves runtimeClasspath (what actually ships); testClasses additionally
       # resolves testCompileClasspath/testRuntimeClasspath — together the full graph the
