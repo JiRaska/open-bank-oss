@@ -23,6 +23,7 @@ import jakarta.inject.Inject
 import org.eclipse.microprofile.reactive.messaging.Message
 import org.eclipse.microprofile.reactive.messaging.spi.Connector
 import org.junit.jupiter.api.Test
+import java.net.URI
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
@@ -49,22 +50,39 @@ import java.util.function.Supplier
 class OversightWebhookIT {
 
     /**
-     * Custom qualifier for WireMock field injection from [SlackMockResource.inject].
-     */
-    @Target(AnnotationTarget.FIELD)
-    @Retention(AnnotationRetention.RUNTIME)
-    annotation class InjectWireMock
-
-    /**
-     * Shared WireMock lifecycle holder (thread-safe, start-once semantics).
+     * Shared WireMock lifecycle holder (start-once semantics, safe across classloaders).
      *
-     * WireMock is started by [SlackMockResource.start], which runs BEFORE Quarkus CDI boot.
-     * That makes the port available for `${SLACK_WEBHOOK_URL}` expansion in application.yaml
-     * before `@ConfigProperty` values are resolved.
+     * Since Quarkus 3.38 the [QuarkusTestResourceLifecycleManager], the [QuarkusTestProfile]
+     * and the test class itself can each be loaded by a DIFFERENT classloader, so every
+     * classloader would get its own copy of this `object` — and with dynamic ports each copy
+     * would start its own WireMock server. The app then posts to the URL computed in one
+     * classloader while the test asserts on a different, request-free server.
+     *
+     * The single source of truth is therefore the JVM-global `SLACK_WEBHOOK_URL` system
+     * property: the first caller (any classloader) starts the server and publishes the URL;
+     * every later caller — including the profile overrides the APP config is built from —
+     * reuses exactly that URL. The property is read/written under a mutex on the shared
+     * `System.getProperties()` instance so a cross-classloader first-call race cannot split
+     * the URL either.
      */
     object SlackHolder {
+        const val URL_PROPERTY = "SLACK_WEBHOOK_URL"
+
         @Volatile
         var instance: WireMockServer? = null
+
+        /**
+         * The one URL everyone (app config AND test assertion) must agree on.
+         * Starts the WireMock server on first use and records its URL in the system property.
+         */
+        fun url(): String = synchronized(System.getProperties()) {
+            System.getProperty(URL_PROPERTY) ?: run {
+                val s = server()
+                val u = "http://localhost:${s.port()}/slack"
+                System.setProperty(URL_PROPERTY, u)
+                u
+            }
+        }
 
         fun server(): WireMockServer {
             val current = instance
@@ -92,55 +110,44 @@ class OversightWebhookIT {
     }
 
     /**
-     * Test resource that starts WireMock and injects the dynamic URL into Quarkus config via
-     * System property (SmallRye ordinal 400 > YAML ordinal 250). Runs before Quarkus boots.
+     * Test resource that makes sure the WireMock server exists and injects its URL into
+     * Quarkus config (returned map + System property, both > YAML ordinal 250). Runs before
+     * Quarkus boots. The URL always comes from [SlackHolder.url] so it is identical to what
+     * [SlackProfile.getConfigOverrides] and the test assertion see.
      */
     class SlackMockResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> {
-            val port = SlackHolder.server().port()
-            System.setProperty("SLACK_WEBHOOK_URL", "http://localhost:$port/slack")
+            val url = SlackHolder.url()
             return mapOf(
                 "openbank.notification.webhook.slack.enabled" to "true",
-                "openbank.notification.webhook.slack.url" to "http://localhost:$port/slack",
-                "SLACK_WEBHOOK_URL" to "http://localhost:$port/slack",
+                "openbank.notification.webhook.slack.url" to url,
+                "SLACK_WEBHOOK_URL" to url,
             )
         }
 
         override fun stop() {
-            System.clearProperty("SLACK_WEBHOOK_URL")
+            System.clearProperty(SlackHolder.URL_PROPERTY)
             SlackHolder.stop()
-        }
-
-        override fun inject(testInjector: QuarkusTestResourceLifecycleManager.TestInjector) {
-            testInjector.injectIntoFields(
-                SlackHolder.server(),
-                QuarkusTestResourceLifecycleManager.TestInjector.AnnotatedAndMatchesType(
-                    InjectWireMock::class.java,
-                    WireMockServer::class.java,
-                ),
-            )
         }
     }
 
     /**
      * Activates the `slack-it` Quarkus profile (defined in application.yaml) which enables Slack
-     * oversight webhooks. [getConfigOverrides] adds the same overrides as [SlackMockResource.start]
-     * as a belt-and-suspenders layer; these are the highest-priority config source in Quarkus.
+     * oversight webhooks. [getConfigOverrides] carries the same URL as [SlackMockResource.start]
+     * (both funnel through [SlackHolder.url]); these are the highest-priority config source in
+     * Quarkus, which is exactly why they must not be allowed to diverge.
      */
     class SlackProfile : QuarkusTestProfile {
         override fun getConfigProfile(): String = "slack-it"
 
         override fun getConfigOverrides(): Map<String, String> {
-            val port = SlackHolder.server().port()
+            val url = SlackHolder.url()
             return mapOf(
                 "openbank.notification.webhook.slack.enabled" to "true",
-                "openbank.notification.webhook.slack.url" to "http://localhost:$port/slack",
+                "openbank.notification.webhook.slack.url" to url,
             )
         }
     }
-
-    @InjectWireMock
-    lateinit var wireMock: WireMockServer
 
     @Inject
     lateinit var objectMapper: ObjectMapper
@@ -177,7 +184,11 @@ class OversightWebhookIT {
         // Wait for full pipeline (email + oversight fan-out) to complete before asserting.
         acked.get(20, TimeUnit.SECONDS)
 
-        // Verify exactly one POST reached the mocked Slack endpoint.
-        wireMock.verify(1, WireMock.postRequestedFor(WireMock.urlPathEqualTo("/slack")))
+        // Verify exactly one POST reached the mocked Slack endpoint. Assert through the WireMock
+        // ADMIN API of the server whose URL the app was configured with — never an injected
+        // WireMockServer field: under split classloaders (Quarkus 3.38+) the injected instance
+        // can be a second, request-free server while the real one lives in another classloader.
+        val adminClient = WireMock("localhost", URI(SlackHolder.url()).port)
+        adminClient.verifyThat(1, WireMock.postRequestedFor(WireMock.urlPathEqualTo("/slack")))
     }
 }
