@@ -11,7 +11,7 @@ import { useSession } from 'next-auth/react'
 import {
   LayoutDashboard, CreditCard, ArrowLeftRight, BookOpen, Settings,
   HeartPulse, SlidersHorizontal, Bot, Users, ShieldCheck, Banknote,
-  ScrollText, Bell, Map, FileCode, Shield, Library, Building2, FileText, Flag,
+  ScrollText, Bell, Map, FileCode, Shield, Library, FileText, Flag,
   DollarSign, Globe, Repeat, Zap, AlertOctagon, ScanLine,
   Layers, TrendingUp, MessageSquareWarning, Package, Receipt, Server, ShieldAlert, FlaskConical, Cloud,
   PiggyBank, GitBranch, Lock, ClipboardList, Scale, Smartphone,
@@ -68,7 +68,6 @@ const complianceNav: NavItem[] = [
 ]
 
 const opsNav: NavItem[] = [
-  { nameCs: 'Tech. účty',            nameEn: 'Tech Accounts',    href: '/technical-accounts',icon: Building2,    permission: 'technical-accounts:view' },
   { nameCs: 'PID',                   nameEn: 'PID',              href: '/pid',               icon: Map,          permission: 'payments:view' },
   { nameCs: 'Oznámení',              nameEn: 'Notifications',    href: '/notifications',     icon: Bell,         permission: 'system:view' },
   { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
