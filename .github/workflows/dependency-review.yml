@@ -60,11 +60,64 @@ jobs:
             echo "No dependency manifest touched — no Gradle submission runs for this PR, so nothing to wait for."
           fi
 
+      # Diff against the MERGE-BASE, not `pull_request.base.sha` (issue #2833).
+      #
+      # A correct delta needs the base to satisfy BOTH conditions: carry a submitted
+      # snapshot, and be an ancestor of the head. `base.sha` is the tip of the base
+      # branch, so for any PR that is not freshly rebased it is neither — and when the
+      # basis is invalid the action silently falls back to reporting the ENTIRE head
+      # graph as additions, re-flagging every pre-existing transitive as if this PR
+      # introduced it.
+      #
+      # Measured 2026-07-31 against head 33334a2db (PR #2751), same head throughout:
+      #   base 98fc64c9c  snapshot=yes  ancestor=yes  ->    29 entries (the true delta)
+      #   base 27e83b42c  snapshot=yes  ancestor=NO   ->  1235 entries (whole graph)
+      #   base add0b5e83  snapshot=NO   ancestor=NO   ->  1235 entries  <- the real base.sha
+      # Ancestry alone is enough to break it: row 2 has a perfectly good snapshot.
+      #
+      # #2837 fixed the snapshot half by submitting a graph for every main commit, which
+      # is what makes the merge-base reliably snapshot-bearing from now on. This step is
+      # the other half. NOTE this is NOT the `base-ref: main` that was tried and rejected
+      # in #2833 — `main` resolves to a tip (not an ancestor); a merge-base is an ancestor
+      # by construction.
+      #
+      # Resolved via the compare API rather than `git merge-base`: actions/checkout is
+      # shallow here, and deepening until the merge-base appears is unbounded. Verified
+      # the API agrees with git on a real pair — `.merge_base_commit.sha` for
+      # add0b5e83...33334a2db returns 51364286f, identical to `git merge-base`.
+      - name: Resolve the merge-base to diff against
+        id: mb
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Fall back to base.sha rather than failing the gate: a resolution hiccup should
+          # degrade to today's (noisier) behaviour, not block every PR. The warning is the
+          # signal that the diff is untrustworthy — silence here would be the #2833 bug
+          # reintroduced one level up.
+          if mb="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" \
+                    --jq '.merge_base_commit.sha' 2>/dev/null)" && [ -n "${mb}" ]; then
+            echo "Merge-base of ${BASE_SHA} and ${HEAD_SHA}: ${mb}"
+          else
+            mb="${BASE_SHA}"
+            echo "::warning title=merge-base unresolved::Could not resolve the merge-base; falling back to pull_request.base.sha (${BASE_SHA}). The dependency diff may report pre-existing packages as additions."
+          fi
+          echo "sha=${mb}" >> "$GITHUB_OUTPUT"
+
       - name: Dependency Review
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
           comment-summary-in-pr: always
+          # Both refs pinned explicitly so they are a coherent pair. head-ref is set to the
+          # value the action already defaults to on `pull_request` — the PR head SHA, which
+          # is what the Gradle snapshot is keyed on (the failing run's log named exactly
+          # this SHA: "No snapshots were found for the head SHA 33334a2db..."), so this is
+          # a no-op made visible rather than a behaviour change.
+          base-ref: ${{ steps.mb.outputs.sha }}
+          head-ref: ${{ github.event.pull_request.head.sha }}
           # This action only ever diffs SUBMITTED dependency graphs. Gradle — the fleet's
           # primary language — is not natively parsed by GitHub, so until
           # dependency-submission.yml also ran on pull_request (#1419) the Gradle half of
