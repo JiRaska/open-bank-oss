@@ -49,26 +49,25 @@ class PartyRepositoryImpl :
     override suspend fun countByStatus(status: PartyStatus): Long =
         Panache.withSession { count("status", status.name) }.awaitSuspending()
 
-    // ADR-0055 bounded name search. Case-insensitive substring over legal_name / trading_name,
-    // backed by the `lower(...) gin_trgm_ops` GIN indexes (V7). The term arrives already
-    // LIKE-escaped from SearchRequest, so `%`/`_` typed by the user match literally (ESCAPE '\').
-    // Keyset pagination by partyId for constant cost at any depth.
-    override suspend fun searchByName(escapedTerm: String, limit: Int, afterId: UUID?): List<Party> =
+    // ADR-0055 bounded name search, extended by ADR-0228 D1 to the business keys a backoffice
+    // operator actually holds: email, phone, tax id and company registration number alongside
+    // legal/trading name. Case-insensitive substring over all six (lower(...) + the V7
+    // gin_trgm_ops indexes cover the names; the rest are bounded by the same page limit). The
+    // term arrives already LIKE-escaped from SearchRequest, so `%`/`_` typed by the user match
+    // literally (ESCAPE '\'). Keyset pagination by partyId for constant cost at any depth.
+    // Birth number stays out by design (data-minimisation, see openapi.yaml) — the RČ blind
+    // index is used for dedup, not search.
+    override suspend fun searchByBusinessKeys(escapedTerm: String, limit: Int, afterId: UUID?): List<Party> =
         Panache.withSession {
             val pattern = "%${escapedTerm.lowercase()}%"
+            val predicate =
+                "(lower(legalName) like ?1 escape '\\' or lower(tradingName) like ?1 escape '\\' " +
+                    "or lower(email) like ?1 escape '\\' or lower(phone) like ?1 escape '\\' " +
+                    "or lower(taxId) like ?1 escape '\\' or lower(registrationNumber) like ?1 escape '\\') "
             val query = if (afterId != null) {
-                find(
-                    "(lower(legalName) like ?1 escape '\\' or lower(tradingName) like ?1 escape '\\') " +
-                        "and partyId > ?2 order by partyId",
-                    pattern,
-                    afterId,
-                )
+                find("$predicate and partyId > ?2 order by partyId", pattern, afterId)
             } else {
-                find(
-                    "(lower(legalName) like ?1 escape '\\' or lower(tradingName) like ?1 escape '\\') " +
-                        "order by partyId",
-                    pattern,
-                )
+                find("$predicate order by partyId", pattern)
             }
             query.page(0, limit).list()
         }.awaitSuspending().map { it.toDomain() }

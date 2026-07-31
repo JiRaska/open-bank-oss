@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.8 -> 1.9): additive
   # only — a new PATCH /api/v1/parties/approvals/{id} endpoint and an additional 202 response
   # on POST /{id}/merge (ADR-0155 four-eyes). No existing response or schema changed.
-  version: 1.11.0
+  version: 1.12.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -68,9 +68,10 @@ paths:
   /api/v1/parties/search:
     get:
       tags: [Parties]
-      summary: Search parties by name (trigram), cursor-paginated
+      summary: Search parties by business keys, cursor-paginated
       description: >-
-        Case-insensitive substring match over legal name / trading name (ADR-0055).
+        Case-insensitive substring match over legal name / trading name / email / phone /
+        tax id / company registration number (ADR-0055, extended by ADR-0228).
         Blank, '*', or a term shorter than 2 characters returns an empty page (no
         full-table enumeration from this surface — use GET /api/v1/parties to list).
         Page size is clamped to [1,100]. Birth number is never searchable here

@@ -344,6 +344,45 @@ class PartyApiIT {
 
     @Test
     @Order(22)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `GET search finds a party by email, phone and registration-number fragments (ADR-0228)`() {
+        val marker = UUID.randomUUID().toString().take(8)
+        val email = "ops.$marker@openbank.test"
+        val phone = "+420777${(100000..999999).random()}"
+        val regNo = "IC$marker"
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", UUID.randomUUID().toString())
+            body(
+                """{"partyType":"COMPANY","legalName":"Searchco $marker","email":"$email","phone":"$phone","registrationNumber":"$regNo"}""",
+            )
+        } When { post("/api/v1/parties") } Then { statusCode(201) }
+
+        listOf(email, marker).forEach { q ->
+            Given { queryParam("q", q) } When {
+                get("/api/v1/parties/search")
+            } Then {
+                statusCode(200)
+                body("data[0].legalName", equalTo("Searchco $marker"))
+            }
+        }
+        // The same fragment matches via phone and via registration number (the OR covers both).
+        Given { queryParam("q", phone) } When {
+            get("/api/v1/parties/search")
+        } Then {
+            statusCode(200)
+            body("data[0].legalName", equalTo("Searchco $marker"))
+        }
+        Given { queryParam("q", regNo) } When {
+            get("/api/v1/parties/search")
+        } Then {
+            statusCode(200)
+            body("data[0].legalName", equalTo("Searchco $marker"))
+        }
+    }
+
+    @Test
+    @Order(22)
     fun `GET search without auth returns 401`() {
         Given { queryParam("q", "novak") } When {
             get("/api/v1/parties/search")

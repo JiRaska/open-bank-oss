@@ -33,7 +33,7 @@ interface PartyRepository {
      * [com.openbank.libs.api.search.SearchRequest] (paired with `ESCAPE '\'`); the impl
      * lower-cases it and wraps it in `%…%`. Fetches up to [limit] rows after [afterId].
      */
-    suspend fun searchByName(escapedTerm: String, limit: Int, afterId: UUID?): List<Party>
+    suspend fun searchByBusinessKeys(escapedTerm: String, limit: Int, afterId: UUID?): List<Party>
 
     suspend fun countAll(): Long
 
