@@ -15,12 +15,27 @@ import org.junit.jupiter.api.Test
  */
 class PhoneDirectoryTest {
 
+    /**
+     * The same literal openbank-app's `PhoneNumbersTest` pins for this number.
+     *
+     * The two sides hash INDEPENDENTLY and compare the results, so agreeing on "some 64-hex
+     * string" is not agreement: a change to normalisation or to the encoding on either side leaves
+     * both suites green and surfaces to a customer as "your contact isn't on OpenBank" for someone
+     * who is. Pinning the same value on both sides is what turns a one-sided change into a failing
+     * test — before this, only the app pinned it, so a change HERE was the one direction nothing
+     * could catch.
+     *
+     * It is sha256("+420601123456"). Recompute it if it ever fails; copying a new value out of the
+     * failure message would only re-pin the drift.
+     */
+    private val pinned = "f417a9109171fe54f0433ef3af126615f06e2dacb615f11ffb59a4f7cdfd4c10"
+
     @Test
     fun `the same number written four ways hashes identically`() {
         val forms = listOf("+420 601 123 456", "+420601123456", "601 123 456", "00420601123456")
         val hashes = forms.map { PhoneDirectory.hash(it) }.toSet()
         assertThat(hashes).hasSize(1)
-        assertThat(hashes.single()).isNotNull()
+        assertThat(hashes.single()).isEqualTo(pinned)
     }
 
     @Test
@@ -43,7 +58,7 @@ class PhoneDirectoryTest {
 
     @Test
     fun `a hash is lowercase hex sha-256`() {
-        assertThat(PhoneDirectory.hash("+420601123456")).isNotNull().matches("[0-9a-f]{64}")
+        assertThat(PhoneDirectory.hash("+420601123456")).isEqualTo(pinned)
     }
 
     @Test
