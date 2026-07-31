@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.9.0...fx-service-v0.9.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **governance:** correct 21 specs' dev port and gate it against quarkus.http.port ([#2697](https://github.com/JiRaska/open-bank-oss/issues/2697)) ([1d2f830](https://github.com/JiRaska/open-bank-oss/commit/1d2f8301d8b55664eed36860a0ec78717375a66b))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.8.2...fx-service-v0.9.0) (2026-07-26)
 
 
