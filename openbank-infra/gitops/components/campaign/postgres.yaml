@@ -1,0 +1,61 @@
+# Single-owner Postgres for campaign-service, reconciled by the cluster-wide CNPG
+# operator. CNPG generates the `campaign-db-app` secret (username/password for the
+# `openbank` owner) and a `campaign-db-rw` Service — both consumed by the
+# campaign-service Deployment for the reactive datasource and Flyway migrations.
+# One instance for sandbox FinOps; prod should raise to 3 for HA.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: campaign-db
+  namespace: campaign
+spec:
+  # DB-layer observability: CNPG runs its built-in Prometheus exporter on :9187 and
+  # creates a PodMonitor the operator owns, lighting up cnpg_* metrics with zero
+  # app changes (same as every other single-owner cluster).
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_campaigns
+      owner: openbank
+  # WAL archiving + base backups to S3. The send_log is the ADR-0219 D2 frequency-cap
+  # durable source and campaigns/enrolments are the marketing audit record — losing
+  # this DB loses both. Credentials from EKS Pod Identity on the campaign-db
+  # ServiceAccount (aws/envs/sandbox-platform/db-backups.tf).
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/campaign-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+# Daily base backup at 04:20 (outside every sender's quiet-hours window).
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: campaign-db-daily
+  namespace: campaign
+spec:
+  schedule: "0 20 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: campaign-db

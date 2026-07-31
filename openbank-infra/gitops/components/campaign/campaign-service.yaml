@@ -1,0 +1,250 @@
+# campaign-service: campaign definitions + per-enrolment Temporal journeys (ADR-0200,
+# first slice ADR-0209 D3). Reactive Postgres datasource + Flyway JDBC migrations
+# against the single-owner CNPG cluster. Produces send requests onto
+# openbank.notification.requests (delivery stays with notification-service, D3) and
+# consumes openbank.consent.events to signal journeys on revocation (D2). Live per-send
+# consent check against consent-service (ADR-0198, fail-closed); segments evaluated
+# read-only against the analytics ClickHouse silver layer (ADR-0210). Journeys run on
+# the shared Temporal cluster. OIDC bearer validation points at Keycloak.
+# Reachable only in-cluster via ClusterIP, no ingress.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: campaign-service
+  namespace: campaign
+  labels:
+    app.kubernetes.io/name: campaign-service
+    app.kubernetes.io/part-of: campaign
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: campaign-service
+  template:
+    metadata:
+      annotations:
+        # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-campaign-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "377e51c50f526541"
+      labels:
+        app.kubernetes.io/name: campaign-service
+        app.kubernetes.io/part-of: campaign
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: campaign-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-campaign-service:sandbox-main
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8128
+            - name: management
+              containerPort: 8085
+          env:
+            # Reactive + JDBC (Flyway) legs onto the same CNPG primary; username is
+            # the `openbank` owner, password from the CNPG-generated app secret.
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://campaign-db-rw.campaign.svc:5432/openbank_campaigns
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://campaign-db-rw.campaign.svc:5432/openbank_campaigns
+            - name: DB_USER
+              value: openbank
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: campaign-db-app
+                  key: password
+            # Kafka: send requests out (notification.requests) + consent events in →
+            # Strimzi bootstrap over mTLS (ADR-0137). The connector reads only
+            # KAFKA_BOOTSTRAP_SERVERS, never a quarkus.* key.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka-keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: campaign-service
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka-truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              value: changeit
+            # Temporal (ADR-0200 D1 per-enrolment journeys; shared cluster).
+            - name: OPENBANK_TEMPORAL_ENABLED
+              value: "true"
+            - name: OPENBANK_TEMPORAL_SERVER_URL
+              value: temporal-frontend.temporal.svc.cluster.local:7233
+            - name: OPENBANK_TEMPORAL_TASK_QUEUE
+              value: openbank-campaign
+            - name: CAMPAIGN_WORKER_ENABLED
+              value: "true"
+            # ADR-0198: live per-send consent check (fail-closed). Declared as an
+            # explicit svc URL so gen-network-policies.py sees the edge.
+            - name: CONSENT_SERVICE_URL
+              value: http://consent-service.consent.svc:8106
+            # ADR-0210: read-only segment evaluation against the silver layer.
+            - name: CLICKHOUSE_URL
+              value: http://clickhouse.analytics.svc:8123
+            - name: KEYCLOAK_URL
+              value: http://keycloak.platform.svc:8080
+            # ADR-0200 D6 suppression defaults; override per environment here, not in code.
+            - name: CAMPAIGN_MAX_SENDS_PER_WEEK
+              value: "2"
+            - name: CAMPAIGN_QUIET_HOURS_START
+              value: "21"
+            - name: CAMPAIGN_QUIET_HOURS_END
+              value: "8"
+            # Kept ADVISORY (false) for the first rollout: the interceptor evaluates +
+            # records every decision but does NOT block while false, so the "would DENY"
+            # population can be confirmed empty in the live decision log before the
+            # enforce flip (a separate, deliberate follow-up per the rules.yaml guardrail).
+            - name: AUTHZ_ENFORCE
+              value: "false"
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: campaign-service-oidc
+                  key: OIDC_CLIENT_SECRET
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: 8085
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: 8085
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka-keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka-truststore
+              readOnly: true
+        # OPA policy decision point (ADR-0034). Co-located sidecar the app reaches on
+        # localhost:8181 (AuthorizeInterceptor default). Bundle mounted read-only from
+        # the campaign-opa-bundle ConfigMap generated by gen-campaign-opa-bundle.sh.
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 101
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/campaign_rest_ext.rego
+              subPath: campaign_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents-data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules-data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/manifest.json
+              subPath: manifest.json
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: kafka-keystore
+          secret:
+            secretName: campaign-service
+            optional: false
+        - name: kafka-truststore
+          secret:
+            secretName: campaign-service
+            optional: false
+        - name: opa-bundle
+          configMap:
+            name: campaign-opa-bundle
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: campaign-service
+  namespace: campaign
+  labels:
+    app.kubernetes.io/name: campaign-service
+    app.kubernetes.io/part-of: campaign
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: campaign-service
+  ports:
+    - name: http
+      port: 8128
+      targetPort: http
+    - name: management
+      port: 8085
+      targetPort: management

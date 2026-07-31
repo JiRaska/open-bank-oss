@@ -1,0 +1,46 @@
+# Kafka mTLS identity + ACLs for openbank-campaign-service (ADR-0137 Tier 2).
+#
+# campaign-service PRODUCES send requests onto openbank.notification.requests
+# (delivery stays with notification-service, ADR-0200 D3) and CONSUMES
+# openbank.consent.events (group: openbank-campaign-service) to signal live journeys
+# on ConsentRevoked/ConsentExpired (ADR-0200 D2 push mechanism).
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for
+# all of this service's Kafka traffic. The Strimzi User Operator mints the per-user
+# Secret of the same name in `messaging`; ESO projection into `campaign` is done by
+# the platform-level reflector, as for every other service user.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # Certs (KafkaUsers→Strimzi secrets→ESO projection) must land before the
+    # campaign-service Deployment rolls pods onto mTLS; lower waves sync first.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: campaign-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      # Produce campaign send requests → notification-service consumes (ADR-0200 D3).
+      - resource:
+          type: topic
+          name: openbank.notification.requests
+          patternType: literal
+        operations: [Write, Describe]
+      # Consume consent lifecycle events → journey revocation signals (ADR-0200 D2).
+      - resource:
+          type: topic
+          name: openbank.consent.events
+          patternType: literal
+        operations: [Read, Describe]
+      - resource:
+          type: group
+          name: openbank-campaign-service
+          patternType: literal
+        operations: [Read, Describe]

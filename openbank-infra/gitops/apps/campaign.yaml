@@ -1,0 +1,32 @@
+# Campaign marketing domain: campaign-service + its single-owner CNPG Postgres +
+# OIDC ExternalSecret + OPA bundle. campaign-service owns campaign definitions and
+# per-party Temporal journeys (ADR-0200); delivery stays with notification-service,
+# consent with consent-service, segments with the analytics silver layer.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: campaign
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/campaign
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: campaign
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false

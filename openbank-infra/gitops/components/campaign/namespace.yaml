@@ -1,0 +1,13 @@
+# Campaign marketing domain (ADR-0037: domain = namespace). App plane. Holds
+# campaign-service plus its single-owner CNPG Postgres. campaign-service owns campaign
+# definitions, per-party enrolments, the send_log (ADR-0219 D2 frequency-cap source) and
+# versioned segment artifacts (ADR-0201 D1); journeys execute as Temporal workflows.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: campaign
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
