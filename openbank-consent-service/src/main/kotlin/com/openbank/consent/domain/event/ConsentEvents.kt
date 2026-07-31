@@ -25,10 +25,18 @@ data class ConsentGranted(
     override val version = 1L
 }
 
+/**
+ * `scopes` mirrors [ConsentGranted]: a consumer deciding whether a revocation concerns it needs the
+ * same granularity it had when the consent was granted. campaign-service's ConsentEventConsumer
+ * filters on `scopes` for a `MARKETING_COMMS*` prefix (ADR-0200 D2) — without the field its filter
+ * matched nothing, so a revocation never terminated a running journey. Additive and therefore
+ * backward compatible: existing consumers ignore the new field.
+ */
 data class ConsentRevoked(
     override val aggregateId: UUID,
     val partyId: UUID,
     val granteeId: String,
+    val scopes: Set<ConsentScope>,
     val reason: String,
     override val occurredAt: Instant,
 ) : DomainEvent(occurredAt) {
