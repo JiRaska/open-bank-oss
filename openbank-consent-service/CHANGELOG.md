@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.16.1...consent-service-v0.16.2) (2026-07-31)
+
+
+### Bug Fixes
+
+* **consent:** bind consent.revoke's authz resource to granteeId so the M2M rule can fire ([#2916](https://github.com/JiRaska/open-bank-oss/issues/2916)) ([de3779f](https://github.com/JiRaska/open-bank-oss/commit/de3779f62e29eb5f6b805bbac6a11a80ae725fd7)), closes [#2911](https://github.com/JiRaska/open-bank-oss/issues/2911) [#2749](https://github.com/JiRaska/open-bank-oss/issues/2749)
+
 ## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.16.0...consent-service-v0.16.1) (2026-07-31)
 
 
