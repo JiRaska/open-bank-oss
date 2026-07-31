@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.18.0...lending-service-v0.19.0) (2026-07-31)
+
+
+### Features
+
+* **lending:** termination and early-exit lifecycle (ADR-0215) ([816a409](https://github.com/JiRaska/open-bank-oss/commit/816a409f8f5c33bdeaa3bbc529dc826196ffabcd))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.17.0...lending-service-v0.18.0) (2026-07-31)
 
 
