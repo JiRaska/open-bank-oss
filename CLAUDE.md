@@ -356,6 +356,18 @@ fire from *outside* it, so they stay here:
   script against a fixture that had been re-run by hand: it reported "no spot-kill signature"
   for a run whose attempt 1 was unambiguously spot-killed. If the job's `if:` already pins
   `run_attempt`, pin the query to match.
+- **A job log CONTAINS the step's own `run:` script, so grepping it matches strings that never
+  executed.** GitHub prints the script into the log header, which means every `echo "…"` in it
+  appears whether or not that branch ran — a naive `grep 'treating it as a real failure'` reports
+  a hit on *every* run of the step, forever. Read only the output after the **LAST**
+  `##[endgroup]` (there are several; the last one closes the `Run …` block):
+  `awk '/##\[endgroup\]/{n=NR} {a[NR]=$0} END{for(i=n+1;i<=NR;i++) print a[i]}'`.
+  Validated on a real pair: the naive grep reports 1 hit on a run where the clean pipeline
+  reports 0, and the 0 is right. Cost two wrong conclusions on 2026-07-31, the second from a
+  monitor built minutes after diagnosing the first — the fix is easy, noticing is not, because
+  a false positive here looks exactly like the success you were hoping for. Prefer structured
+  data outright where it exists: step conclusions from
+  `gh api .../actions/jobs/<id> --jq '.steps[]'` cannot be spoofed by the script listing.
 - **Test the script EXTRACTED from the workflow, not a retyped copy of it.** A transcription is
   a different program: the first harness for #2890 used `[ … ] && { … }` where the real step
   used `if` blocks, and under `set -e` those differ on exactly the passing case. Parse the YAML
