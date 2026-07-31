@@ -7,6 +7,7 @@ package com.openbank.audit.infrastructure.rest
 import com.openbank.audit.application.AuditAnchorService
 import com.openbank.audit.infrastructure.persistence.AuditRepository
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.security.Roles
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.DefaultValue
@@ -31,6 +32,31 @@ class AuditResource {
     @Inject lateinit var repo: AuditRepository
 
     @Inject lateinit var anchors: AuditAnchorService
+
+    @GET
+    @Path("/customer/{partyId}")
+    // Customer-facing privacy view (P2-27): the customer edge proxies a caller's OWN
+    // access trail here. ROLE_API is an authenticated M2M service account — never
+    // anonymous (K7) — and OPA scopes the resource to the requested party. The payload
+    // is deliberately NOT projected: the app gets event metadata, not event internals.
+    @RolesAllowed(Roles.API)
+    @Authorize(action = "audit.read", resource = "#partyId")
+    @Operation(summary = "Get a party's own access log (customer privacy view)")
+    suspend fun getCustomerAccessLog(
+        @PathParam("partyId") partyId: String,
+        @QueryParam("limit") @DefaultValue("100") limit: Int,
+    ): Response {
+        val entries = repo.findByAggregateId(partyId, limit.coerceIn(1, 500)).map {
+            mapOf(
+                "eventType" to it.eventType,
+                "aggregateType" to it.aggregateType,
+                "actorType" to it.actorType,
+                "sourceService" to it.sourceService,
+                "occurredAt" to it.occurredAt.toString(),
+            )
+        }
+        return Response.ok(entries).build()
+    }
 
     @GET
     @Path("/entries/{aggregateId}")
