@@ -87,72 +87,28 @@ jobs:
           # 4.22.3 migration dropped rfc3987 from the resolved set entirely. Re-add only
           # with a fresh justification and a tracking issue.
           #
-          # allow-ghsas: GHSA-pq2g-wx69-c263 (net.minidev:json-smart Uncontrolled Recursion,
-          # issue #461). json-smart:2.5.0 is a POM-only BOM constraint stub that never
-          # resolves onto any real classpath — confirmed independently via
-          # gradle/verification-metadata.xml, which records only a `.pom` artifact for
-          # 2.5.0 (no `.jar` ever downloaded) while 2.5.2 (the fleet's real, force()-pinned
-          # floor in openbank.dependency-vulnerability-pins.gradle.kts) has both. The
-          # osv-scanner.toml PackageOverrides ignore entry for the same coordinate/version
-          # documents the identical reasoning for that separate scanner; this suppression
-          # is that same, already-established conclusion applied to dependency-review,
-          # which otherwise flags a BOM-management-only entry as if it were an in-use
-          # dependency. Re-verify against verification-metadata.xml before ever removing —
-          # if a future dependency starts resolving 2.5.0 for real, this must be dropped.
+          # allow-ghsas: DELIBERATELY EMPTY (issue #2833).
           #
-          # GHSA-3qp7-7mw8-wx86 / GHSA-x4gw-5cx5-pgmh / GHSA-c653-97m9-rcg9 (io.netty:
-          # netty-handler 4.2.1, issue #1446): the 4.2.x netty line resolves ONLY on the
-          # Gradle dependency-graph-extraction tooling classpath
-          # (org.gradle:github-dependency-graph-gradle-plugin, per #1385), never on any
-          # shipped service classpath — no project-level graph pulls netty-handler at 4.2.x,
-          # and the runtime line is force()-pinned to 4.1.136.Final in
-          # openbank.dependency-vulnerability-pins.gradle.kts. A force() cannot reach the
-          # plugin classpath, and forcing 4.2.x would override the 4.1.136 the runtime needs
-          # — trading a real regression for an alert on a classpath that never ships. If a
-          # service ever resolves netty 4.2.x for real, these three must be dropped.
+          # This carried seven suppressions — json-smart 2.5.0, netty-handler 4.2.1 and
+          # netty-codec-http2 4.1.119 — every one of them added to silence a coordinate that
+          # no service can load. #2874 removed the cause instead: those versions were resolved
+          # only by `detachedConfiguration*` and the root buildscript `classpath`, which the
+          # fleet-wide `force()` pins cannot reach, and they are no longer submitted at all.
+          # Measured on the first filtered submission (f64ac653d): graph 1235 -> 1091
+          # coordinates, vulnerability findings 30 -> 3, and all three survivors are `moderate`,
+          # i.e. below fail-on-severity.
           #
-          # GHSA-prj3-ccx8-p6x4 / GHSA-w9fj-cfpg-grvv / GHSA-f6hv-jmp6-3vwv (io.netty:
-          # netty-codec-http2 4.1.119.Final — MadeYouReset, CONTINUATION-frame flood,
-          # HttpContentDecompressor maxAllocation bypass): 4.1.119 resolves ONLY on a
-          # BUILD-TIME classpath, never a shipped one — the Quarkus Gradle plugin's
-          # augmentation classpath (quarkusBuild/quarkusDev resolve their own Vert.x/Netty
-          # stack independently of any project's resolutionStrategy) and, since #2751 added a
-          # module to the settings auto-include, the graph-extraction plugin's own stack,
-          # which the run reports under `settings.gradle.kts »`. A fleet-wide force() cannot
-          # reach either — same shape as the netty 4.2.x case above. Neither is resolvable
-          # locally, so read the flagged coordinate off the failing run rather than trusting
-          # a version restated here. Every shipping graph is floored at 4.1.136.Final via
-          # openbank-dependency-vulnerability-pins, and 4.1.119 does not appear on one at
-          # all. Re-measured 2026-07-31 on :openbank-ledger-service after #2751 merged
-          # (`dependencies --configuration runtimeClasspath`): ZERO occurrences of 4.1.119 or
-          # 4.1.110, with netty-codec-http/-http2 resolving directly at 4.1.136.Final and NO
-          # `->` redirect. Two earlier revisions of this comment claimed those graphs show
-          # `4.1.119.Final -> 4.1.136.Final` and `4.1.135 -> 4.1.136`; neither is true —
-          # nothing requests those versions in the first place. Either way no module downloads the vulnerable jar
-          # (gradle/verification-metadata.xml records 4.1.119 on main already — pre-existing,
-          # not introduced by the Quarkus 3.38 bump this gate flagged it on). All three GHSAs
-          # need the vulnerable HTTP/2 codec exposed to untrusted traffic; a local
-          # build-augmentation classpath has none.
-          # DROP TRIGGER: a service's resolved graph containing 4.1.119 AT ALL, redirected or
-          # not. Grep the resolved graph for the version — never for the redirect arrow: a
-          # missing `-> 4.1.136` is the healthy state, so testing for it inverts the trigger.
-          # Validate any such grep against a known-positive first (the graphs do render
-          # redirects — e.g. `kotlin-stdlib:2.3.20 -> 2.4.0` in the ledger graph — so a silent
-          # grep is a real negative, not a broken probe).
+          # WHY EMPTY MATTERS, not just tidier: an allow-ghsas entry is a permanent fleet-wide
+          # suppression. It silences the pre-existing false positive it was added for AND a
+          # future PR that genuinely introduces that same GHSA on a real classpath. Every entry
+          # here was therefore buying noise reduction with a hole in the gate.
           #
-          # NOT allowlisted, deliberately — GHSA-pwqr-wmgm-9rr8, GHSA-jppx-w49h-x2qq,
-          # GHSA-57rv-r2g8-2cj3, GHSA-mvh2-crg5-v77c, GHSA-6jqx-86gh-f27w (io.netty:
-          # netty-codec-http, five highs). These failed this gate on PR #2751 against the same
-          # 4.1.119 tooling-classpath entry, but their 4.1.x fixes are 4.1.132 / 4.1.133 /
-          # 4.1.136 / 4.1.136 / 4.1.136 — all at or below the 4.1.136 fleet pin, so every
-          # shipping classpath is ALREADY remediated. An allowlist entry would therefore
-          # suppress a genuine regression the day the pin slipped below 4.1.136. They surfaced
-          # only because the base SHA had no submitted snapshot ("The number of snapshots
-          # compared for the base SHA (0) and the head SHA (1) do not match"), which makes the
-          # action diff the entire head graph as additions and re-evaluate pre-existing
-          # transitives as if the PR introduced them. Fix the snapshot, not the allowlist.
-          # Three of the five are patched at exactly 4.1.136, i.e. the pin sits on the floor
-          # with zero margin — as does build-logic/build.gradle.kts's own 4.2.16.Final. Expect
-          # the next netty advisory to re-fire this, and check whether it is a real finding
-          # before assuming it is another snapshot artifact.
-          allow-ghsas: GHSA-pq2g-wx69-c263, GHSA-3qp7-7mw8-wx86, GHSA-x4gw-5cx5-pgmh, GHSA-c653-97m9-rcg9, GHSA-prj3-ccx8-p6x4, GHSA-w9fj-cfpg-grvv, GHSA-f6hv-jmp6-3vwv
+          # Before adding an entry, establish that the coordinate is not resolved on a real
+          # classpath — the extractor answers this directly:
+          #   ./gradlew -I init.gradle --dependency-verification=off --no-configuration-cache \
+          #     --no-configure-on-demand :ForceDependencyResolutionPlugin_resolveAllDependencies
+          # then read `resolvedBy` in build/reports/dependency-graph-snapshots/
+          # dependency-resolution.json. A coordinate with one resolvedBy entry naming a detached
+          # or buildscript configuration is a graph artifact — fix the submission filter in
+          # dependency-submission.yml, do not allowlist it. One naming a real *Classpath is a
+          # genuine finding: bump the pin.
