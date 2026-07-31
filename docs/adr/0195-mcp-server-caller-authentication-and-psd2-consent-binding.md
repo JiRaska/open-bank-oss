@@ -1,7 +1,7 @@
 ---
 date: 2026-07-25
-decision-status: proposed
-delivery-status: planned
+decision-status: accepted
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +11,20 @@ summary: "MCP server becomes an OAuth 2.1 resource server: the token sub is the 
 ---
 
 # ADR-0195 — MCP server caller authentication and PSD2 consent binding
+
+**Delivery note (updated 2026-07-31):** the header said `proposed` / `planned` long after the
+decision was built, so the ADR asserted the opposite of the code — the exact drift class ADR-0166
+exists to catch. Steps 1–4 are **shipped** and the BLOCKER they gate (#2206) is closed:
+OIDC resource-server mode is on (#2253), the acting agent comes from the validated token `sub` and
+the `agent:mcp-anonymous` constant is gone from the code with a CI guard against its return (#2316),
+`consent_id` is read from the token and `grantedAccounts`/`scopes` come from a live
+`POST /consents/{id}/validate` per call (#2262, #2278), and the real `@RegisterRestClient` read ports
+enforce the intersection (`RealAccountReadPort`). **Step 5 is open:** `rest.rego`'s
+`agent-charter-allows` bridge still translates only `agent`/`tool`/`resource` into `agents.allow`
+and drops `attributes`, so the PDP still cannot see the `consentId` the endpoint passes. Also still
+open, and *not* part of steps 1–5: `propose_payment` remains backed by `StubProposalPort` (no
+maker-checker row is written anywhere), and the M2M OIDC secret is a manual operator seed — until it
+is seeded every downstream call 401s, which fails closed but is not a verified-working state.
 
 ## Context
 
