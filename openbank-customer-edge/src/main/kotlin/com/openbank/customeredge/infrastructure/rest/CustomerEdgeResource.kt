@@ -2788,6 +2788,33 @@ class CustomerEdgeResource(
     }
 
     /**
+     * How many VIRTUAL cards on [accountId] have reached a terminal state. This is the generation
+     * counter in the virtual-card idempotency key — see [issueCard] for why the key cannot simply
+     * be constant.
+     *
+     * Counting DEAD cards rather than all cards is the whole trick: the number is unchanged by a
+     * successful issue, so a retry after a dropped response still replays instead of minting a
+     * duplicate, and it only moves when a card is blocked or cancelled — which is exactly when a
+     * fresh card must become mintable.
+     *
+     * On an upstream failure this returns 0, i.e. the previous constant-key behaviour: replaying an
+     * existing card is a safe answer to "I could not tell", whereas guessing high would mint a card
+     * the customer did not ask for.
+     */
+    private fun terminalVirtualCardCount(partyId: UUID, accountId: UUID): Int {
+        val resp = upstream.get("$cardIssuanceServiceUrl/api/v1/cards/party/$partyId", partyId.toString())
+        if (resp.status != 200) return 0
+        val body = (resp.entity as? String)?.takeIf { it.isNotBlank() } ?: return 0
+        return runCatching {
+            objectMapper.readTree(body).count { card ->
+                card.path("accountId").asText() == accountId.toString() &&
+                    card.path("cardType").asText().uppercase() == CARD_TYPE_VIRTUAL &&
+                    card.path("status").asText().uppercase() in TERMINAL_CARD_STATUSES
+            }
+        }.getOrDefault(0)
+    }
+
+    /**
      * Issue a VIRTUAL or SINGLE_USE card on one of the caller's OWN accounts (self-service, #4b). The
      * app sends { "accountId": "...", "cardType": "VIRTUAL"|"SINGLE_USE" }; the edge forces the
      * partyId from the JWT, verifies the account belongs to the caller, and resolves the cardholder
@@ -2849,10 +2876,19 @@ class CustomerEdgeResource(
         //    would make the SECOND one impossible (it would replay the first forever). Honour a
         //    client-supplied Idempotency-Key so a genuine network retry still de-duplicates, and
         //    generate one otherwise.
+        //
+        // The VIRTUAL key carries a generation suffix because a FULLY constant key does not just
+        // de-duplicate retries — it permanently caps the account at one virtual card ever. Once
+        // that card is blocked or cancelled, card-issuance's `findByIdempotencyKey(...)?.let {
+        // return it }` keeps replaying the DEAD row: the customer taps "issue", gets 200 and a
+        // card that cannot pay, and no amount of retrying can ever produce a live one. (The
+        // `idempotency_key` column is NOT NULL UNIQUE, so the key has to move for a new row to
+        // exist at all.) The suffix counts TERMINAL cards, which a successful issue leaves
+        // unchanged — retry de-duplication survives, the dead end does not.
         val key = if (cardType == CARD_TYPE_SINGLE_USE) {
             idempotencyKey?.takeIf { it.isNotBlank() } ?: Ids.randomId().toString()
         } else {
-            "vcard-${customer.partyId}-$acct"
+            "vcard-${customer.partyId}-$acct-r${terminalVirtualCardCount(customer.partyId, acct)}"
         }
         val resp = upstream.post(
             "$cardIssuanceServiceUrl/api/v1/cards",
@@ -3287,6 +3323,11 @@ class CustomerEdgeResource(
 
         internal const val CARD_TYPE_VIRTUAL = "VIRTUAL"
         internal const val CARD_TYPE_SINGLE_USE = "SINGLE_USE"
+
+        // Card states from which there is no way back — the card will never transact again,
+        // whatever the customer does. SUSPENDED is deliberately absent: a frozen card is alive
+        // and must NOT free up a new virtual-card generation.
+        internal val TERMINAL_CARD_STATUSES = setOf("BLOCKED", "CANCELLED", "EXPIRED")
 
         /** The only card types a customer may mint themselves — plastic stays an operator flow. */
         internal val SELF_SERVICE_CARD_TYPES = setOf(CARD_TYPE_VIRTUAL, CARD_TYPE_SINGLE_USE)
