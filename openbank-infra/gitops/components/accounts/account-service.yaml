@@ -37,7 +37,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-account-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "8c41fb8571249943"
+        openbank.tech/policy-checksum: "f521c1fbe717ea57"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -106,13 +106,6 @@ spec:
             # user tokens validate here without the edge cert.
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
-            # ADR-0083 T1 re-entry: product-catalog reads route through the KEDA HTTP
-            # interceptor (dispatches on Host) so a scaled-to-zero pod wakes instead of
-            # refusing the connection (#668's fail-open hid exactly that refusal).
-            - name: PRODUCT_CATALOG_SERVICE_URL
-              value: http://keda-add-ons-http-interceptor-proxy.keda:8080
-            - name: PRODUCT_CATALOG_API_HOST_OVERRIDE
-              value: product-catalog.accounts.svc
             - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:

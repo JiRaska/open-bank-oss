@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "05fc06809676bf6a"
+    openbank.tech/policy-checksum: "ba68b384b7540dd4"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -145,6 +145,21 @@ data:
     	input.principal.id == input.resource.id
     	some verb in {"list", "read"}
     	endswith(input.action, sprintf(".%v", [verb]))
+    }
+
+    # ---------------------------------------------------------------------------------------
+    # ADR-0223 D2 phase 1 (shadow): the role->action matrix as data (rules.yaml: authz.
+    # role_action_matrix), granting ALONGSIDE the legacy reasons. The seed is derived as a
+    # strict subset of today's effective grants (operator-read-any's and compliance-read-any's
+    # read verbs, verbatim), so this rule changes no decision; what it changes is the
+    # decision_reason mix, which the D2(b) retirement triage reads to find where the matrix
+    # already carries the call. A role absent from the matrix yields an undefined lookup and
+    # the rule simply does not fire — fail-closed by construction.
+    # ---------------------------------------------------------------------------------------
+    allowed_reasons contains "matrix-allows" if {
+    	input.principal.type == "HUMAN"
+    	some role in input.principal.roles
+    	input.action in data.rules.authz.role_action_matrix[role].grant
     }
 
     # Operators and admins may list or read any resource on behalf of any party (support-desk
@@ -3562,5 +3577,95 @@ data:
           form: "a runnable skill that encodes the steps so they aren't re-derived each time"
       not_a_home:
         - "assistant session/local memory — does not travel to other agents or contributors, and may be stale"
+
+    # ADR-0223 D2 (phase 1, shadow): the role→action matrix as data. Seeded as the EXACT read
+    # half of today's operator-read-any (ROLE_OPERATOR/ROLE_ADMIN: every .list/.read) and
+    # compliance-read-any (ROLE_COMPLIANCE: every .read) — the action inventory is derived from
+    # the fleet-wide @Authorize coverage report (openbank-infra/scripts/authz-coverage-report.py),
+    # making this a provable subset of today's effective grants: rest.rego's matrix-allows reason
+    # grants nothing new, and decision_reason telemetry shows where the matrix already carries
+    # the call. Write grants (operator-<domain>-write etc.) join in phase 1.5 after the D2(b)
+    # triage; the retirement of operator-read-any itself is D2(c), a separate PR.
+    authz:
+      role_action_matrix:
+        ROLE_OPERATOR:
+          grant:
+            - account.list
+            - account.read
+            - anacredit.list
+            - anacredit.read
+            - audit.read
+            - card.list
+            - card.read
+            - device.list
+            - dispatch.read
+            - fx.list
+            - fx.read
+            - interest.list
+            - interest.read
+            - ledger.list
+            - ledger.read
+            - lending.list
+            - lending.read
+            - notification.list
+            - notification.read
+            - sanctions.list
+            - sanctions.read
+            - sdd.list
+            - sdd.read
+            - statement.list
+            - statement.read
+            - swift.list
+            - swift.read
+            - transaction.list
+            - transaction.read
+        ROLE_ADMIN:
+          grant:
+            - account.list
+            - account.read
+            - anacredit.list
+            - anacredit.read
+            - audit.read
+            - card.list
+            - card.read
+            - device.list
+            - dispatch.read
+            - fx.list
+            - fx.read
+            - interest.list
+            - interest.read
+            - ledger.list
+            - ledger.read
+            - lending.list
+            - lending.read
+            - notification.list
+            - notification.read
+            - sanctions.list
+            - sanctions.read
+            - sdd.list
+            - sdd.read
+            - statement.list
+            - statement.read
+            - swift.list
+            - swift.read
+            - transaction.list
+            - transaction.read
+        ROLE_COMPLIANCE:
+          grant:
+            - account.read
+            - anacredit.read
+            - audit.read
+            - card.read
+            - dispatch.read
+            - fx.read
+            - interest.read
+            - ledger.read
+            - lending.read
+            - notification.read
+            - sanctions.read
+            - sdd.read
+            - statement.read
+            - swift.read
+            - transaction.read
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}

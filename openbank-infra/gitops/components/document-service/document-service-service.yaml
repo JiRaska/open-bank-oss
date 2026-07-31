@@ -43,7 +43,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-document-service-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "3ea4c49faa98e1e8"
+        openbank.tech/policy-checksum: "03182587fbf1f696"
     spec:
       # ADR-0162 D4 (continued): a dedicated SA (not `default`) is what OpenBao's Kubernetes-auth
       # role `document-service-signing` is bound to — least-privilege, one identity per consumer.
@@ -57,7 +57,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: document-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-document-service:sandbox-f603f4d7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-document-service:sandbox-e8458d94
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -88,14 +88,9 @@ spec:
             # product-catalog REST client base URL (application.yaml:
             # quarkus.rest-client.product-catalog-api.url) — ADR-0162 D7: AccountCreatedConsumer's
             # ProductCatalogAdapter looks up documentTemplateCode for the account's product on
-            # every account.created event. Routed via the KEDA HTTP interceptor (ADR-0083 T1
-            # re-entry): the interceptor dispatches on Host, so a scaled-to-zero product-catalog
-            # wakes instead of this adapter reading "no template -> no onboarding document"
-            # (the silent onboarding breakage, 2026-06-24..2026-07-17).
+            # every account.created event. Same in-cluster address billing-service already uses.
             - name: PRODUCT_CATALOG_SERVICE_URL
-              value: http://keda-add-ons-http-interceptor-proxy.keda:8080
-            - name: PRODUCT_CATALOG_API_HOST_OVERRIDE
-              value: product-catalog.accounts.svc
+              value: http://product-catalog.accounts.svc:8104
             # party-service / account-service REST client base URLs (application.yaml:
             # quarkus.rest-client.party-service-api / account-service-api) — fill the
             # RAMCOVA_SMLOUVA template's {{party.*}}/{{account.*}}/{{product.*}} clauses at sign
