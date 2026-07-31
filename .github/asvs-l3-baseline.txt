@@ -79,7 +79,6 @@ V9.1 openbank-infra/gitops/components/party/party-service.yaml:80: plaintext htt
 V9.1 openbank-infra/gitops/components/party/party-service.yaml:82: plaintext http:// env value http://card-issuance-service.payments.svc:8118
 V9.1 openbank-infra/gitops/components/party/party-service.yaml:84: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/party/party-service.yaml:165: plaintext http:// env value http://account-service.accounts.svc:8100
-V9.1 openbank-infra/gitops/components/party/party-service.yaml:170: plaintext http:// env value http://transaction-service.payments.svc:8102
 V9.1 openbank-infra/gitops/components/copilot/copilot-service.yaml:73: plaintext http:// env value http://litellm.ai-platform.svc:4000/v1
 V9.1 openbank-infra/gitops/components/copilot/copilot-service.yaml:112: plaintext http:// env value http://customer-edge.customer-edge.svc:8128
 V9.1 openbank-infra/gitops/components/copilot/copilot-service.yaml:114: plaintext http:// env value http://tempo.observability.svc:4317
