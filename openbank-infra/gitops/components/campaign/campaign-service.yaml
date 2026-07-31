@@ -39,7 +39,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: campaign-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-campaign-service:sandbox-bebbf84a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-campaign-service:sandbox-71125c07
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -90,6 +90,13 @@ spec:
               value: "true"
             - name: OPENBANK_TEMPORAL_SERVER_URL
               value: temporal-frontend.temporal.svc.cluster.local:7233
+            # Fleet convention is openbank-<domain>; the application default is the bare
+            # `openbank`, which is not a registered namespace. Leaving it unset does not
+            # fail the boot — readiness is an HTTP probe, not a Temporal one — the worker
+            # just spins on `NOT_FOUND: Namespace openbank is not found` while the pod
+            # reports Healthy. Registered by the temporal-namespace-registration Job.
+            - name: OPENBANK_TEMPORAL_NAMESPACE
+              value: openbank-campaign
             - name: OPENBANK_TEMPORAL_TASK_QUEUE
               value: openbank-campaign
             - name: CAMPAIGN_WORKER_ENABLED
@@ -116,8 +123,17 @@ spec:
                 secretKeyRef:
                   name: clickhouse-auth
                   key: password
+            # Keycloak runs in `iam`, not `platform` — the fleet's other 55 references all
+            # say keycloak.iam.svc. The wrong host does not fail the boot (OIDC defers the
+            # discovery to the first request), it just makes every authenticated call fail
+            # later with `Name does not resolve`.
             - name: KEYCLOAK_URL
-              value: http://keycloak.platform.svc:8080
+              value: http://keycloak.iam.svc:8080
+            # Four-eyes approval store (campaign.activate) is Redis-backed via
+            # libs' RedisApprovalStore. Without this the ReactiveRedisDataSource bean is
+            # inactive and the app dies at boot with InactiveBeanException.
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.campaign.svc:6379
             # ADR-0200 D6 suppression defaults; override per environment here, not in code.
             - name: CAMPAIGN_MAX_SENDS_PER_WEEK
               value: "2"
@@ -179,8 +195,17 @@ spec:
           args:
             - run
             - --server
+            # Bind on the pod network (not 127.0.0.1) so kubelet httpGet probes reach
+            # /health. The image is scratch (no shell), so an exec probe isn't possible.
+            # Reachability is fenced by the NetworkPolicy; OPA serves only policy decisions.
             - --addr=0.0.0.0:8181
             - --log-level=info
+            # `--bundle` is REQUIRED, not decorative: without it OPA loads /bundle as a
+            # plain data directory and merges every YAML into the root data document, so
+            # rules-data.yaml and agents-data.yaml collide and the sidecar dies with
+            # `/bundle/rules-data.yaml: merge error`. In bundle mode the roots declared in
+            # .manifest keep them apart. Mount paths below must match those roots.
+            - --bundle
             - /bundle
           ports:
             - name: opa
@@ -220,18 +245,24 @@ spec:
               mountPath: /bundle/agents.rego
               subPath: agents.rego
               readOnly: true
+            # Data files land under the bundle roots declared in .manifest
+            # (`agents`, `rules`) — NOT flat in /bundle, which is what produced the
+            # merge error above.
             - name: opa-bundle
-              mountPath: /bundle/agents-data.yaml
+              mountPath: /bundle/agents/data.yaml
               subPath: agents-data.yaml
               readOnly: true
             - name: opa-bundle
-              mountPath: /bundle/rules-data.yaml
+              mountPath: /bundle/rules/data.yaml
               subPath: rules-data.yaml
               readOnly: true
             - name: opa-bundle
-              mountPath: /bundle/manifest.json
+              mountPath: /bundle/.manifest
               subPath: manifest.json
               readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem.
+            - name: opa-tmp
+              mountPath: /tmp
       volumes:
         - name: tmp
           emptyDir: {}
@@ -243,6 +274,8 @@ spec:
           secret:
             secretName: kafka-cluster-ca-truststore
             optional: false
+        - name: opa-tmp
+          emptyDir: {}
         - name: opa-bundle
           configMap:
             name: campaign-opa-bundle
