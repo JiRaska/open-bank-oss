@@ -112,10 +112,22 @@ function safeDate(raw: string | null, fallback: string): string {
 
 // ── Route ───────────────────────────────────────────────────────────────────
 
+/**
+ * Comments and screenshot keys are personal data (ADR-0192), and this route talks to ClickHouse
+ * directly — there is no downstream service @RolesAllowed to fall back on, so the check has to
+ * live here as well as in the middleware guard on /feedback (which does not cover a direct
+ * fetch of this path).
+ */
+const ALLOWED_ROLES = ['ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_COMPLIANCE']
+
 export async function GET(req: NextRequest) {
   const session = await auth()
   if (!session?.user?.accessToken) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  const roles: string[] = session.user.roles ?? []
+  if (!roles.some(r => ALLOWED_ROLES.includes(r))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   const today = new Date()
@@ -205,6 +217,9 @@ export async function GET(req: NextRequest) {
     }
     return NextResponse.json(board)
   } catch (e) {
-    return NextResponse.json({ ...empty, error: e instanceof Error ? e.message : 'unknown error' })
+    // The ClickHouse error body can carry the failing SQL and server detail — logged, never
+    // returned. The board only needs to know the mart is not readable right now.
+    console.error('screen-feedback board unavailable', e)
+    return NextResponse.json({ ...empty, error: 'analytics_unavailable' })
   }
 }
