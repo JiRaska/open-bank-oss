@@ -16,7 +16,6 @@ import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.PostingKind
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
-import com.openbank.lending.domain.model.ApplicationStatus
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
@@ -32,6 +31,7 @@ import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
+import com.openbank.lending.infrastructure.compliance.OriginationConfig
 import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
@@ -40,6 +40,7 @@ import com.openbank.libs.lending.AmortizationMethod
 import com.openbank.libs.lending.EclInputs
 import com.openbank.libs.lending.Ifrs9Stage
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
+import com.openbank.libs.lending.origination.OriginationState
 import io.mockk.CapturingSlot
 import io.mockk.every
 import io.mockk.mockk
@@ -82,12 +83,66 @@ class LendingServiceTest {
         clock,
         provisioning,
         CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
+        OriginationConfig(false),
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")
     private val firstDue = LocalDate.parse("2026-06-30")
 
     private fun eur(v: String) = Money.of(v, "EUR")
+
+    @Test
+    fun `advance walks the canonical path skipping optional states by default`() {
+        val app = proposedApplication().copy(status = OriginationState.SUBMITTED)
+        val slot: CapturingSlot<LoanApplication> = slot()
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { applications.update(capture(slot)) } answers { Uni.createFrom().item(slot.captured) }
+
+        val result = service.advance(app.id, "officer-1").await().indefinitely()
+
+        assertThat(result.status).isEqualTo(OriginationState.KYC_PENDING)
+        verify(exactly = 1) { applications.update(any()) }
+    }
+
+    @Test
+    fun `advance from ASSESSMENT reaches DECISION_PENDING and cannot skip four-eyes`() {
+        val app = proposedApplication().copy(status = OriginationState.ASSESSMENT)
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { applications.update(any()) } answers { Uni.createFrom().item(firstArg<LoanApplication>()) }
+
+        val first = service.advance(app.id, "officer-1").await().indefinitely()
+        assertThat(first.status).isEqualTo(OriginationState.DECISION_PENDING)
+
+        every { applications.findById(app.id) } returns Uni.createFrom().item(first)
+        val second = service.advance(app.id, "officer-1").await().indefinitely()
+        assertThat(second.status).isEqualTo(OriginationState.FOUR_EYES)
+    }
+
+    @Test
+    fun `advance refuses a terminal state`() {
+        val app = proposedApplication().copy(status = OriginationState.DISBURSED)
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+
+        assertThatThrownBy { service.advance(app.id, "officer-1").await().indefinitely() }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `sandbox straight-through drives a fresh application to READY_TO_DISBURSE`() {
+        val stp = LendingService(
+            applications, loans, installments, collateral, ledger,
+            valuation, riskParameters, events, clock, provisioning,
+            CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
+            OriginationConfig(true),
+        )
+        val slot: CapturingSlot<LoanApplication> = slot()
+        every { applications.save(capture(slot)) } answers { Uni.createFrom().item(slot.captured) }
+
+        val result = stp.apply(sampleRequest(), "alice").await().indefinitely()
+
+        assertThat(result.status).isEqualTo(OriginationState.READY_TO_DISBURSE)
+        assertThat(result.decidedBy).isEqualTo(OriginationConfig.SANDBOX_ACTOR)
+    }
 
     private fun sampleRequest() = LoanApplicationRequest(
         partyId = partyId,
@@ -106,18 +161,18 @@ class LendingServiceTest {
         termPeriods = 12,
         firstDueDate = firstDue,
         proposedBy = proposer,
-        status = ApplicationStatus.PROPOSED,
+        status = OriginationState.FOUR_EYES,
         createdAt = fixedNow,
     )
 
     @Test
-    fun `apply saves a PROPOSED application`() {
+    fun `apply saves a SUBMITTED application`() {
         val slot: CapturingSlot<LoanApplication> = slot()
         every { applications.save(capture(slot)) } answers { Uni.createFrom().item(slot.captured) }
 
         val result = service.apply(sampleRequest(), "alice").await().indefinitely()
 
-        assertThat(result.status).isEqualTo(ApplicationStatus.PROPOSED)
+        assertThat(result.status).isEqualTo(OriginationState.SUBMITTED)
         assertThat(result.proposedBy).isEqualTo("alice")
         assertThat(result.decidedBy).isNull()
         verify(exactly = 1) { applications.save(any()) }
@@ -145,14 +200,14 @@ class LendingServiceTest {
 
         val result = service.decide(app.id, DecisionRequest(approve = true), "bob").await().indefinitely()
 
-        assertThat(result.status).isEqualTo(ApplicationStatus.APPROVED)
+        assertThat(result.status).isEqualTo(OriginationState.OFFERED)
         assertThat(result.decidedBy).isEqualTo("bob")
         verify(exactly = 1) { applications.update(any()) }
     }
 
     @Test
     fun `disburse books the loan, persists a 12-row schedule and posts the disbursement`() {
-        val app = proposedApplication().copy(status = ApplicationStatus.APPROVED, decidedBy = "bob")
+        val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
         val rowsSlot: CapturingSlot<List<LoanInstallment>> = slot()
         val postingSlot: CapturingSlot<LedgerPosting> = slot()
 
@@ -183,14 +238,14 @@ class LendingServiceTest {
 
         assertThatThrownBy { service.disburse(app.id, "dave").await().indefinitely() }
             .isInstanceOf(IllegalStateException::class.java)
-            .hasMessageContaining("APPROVED")
+            .hasMessageContaining("READY_TO_DISBURSE")
 
         verify(exactly = 0) { loans.save(any()) }
     }
 
     @Test
     fun `disburse refuses when the disburser is the approver (segregation of duties)`() {
-        val app = proposedApplication().copy(status = ApplicationStatus.APPROVED, decidedBy = "bob")
+        val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)
 
         assertThatThrownBy { service.disburse(app.id, "bob").await().indefinitely() }

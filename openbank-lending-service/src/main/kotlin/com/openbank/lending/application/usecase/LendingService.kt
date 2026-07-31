@@ -26,7 +26,6 @@ import com.openbank.lending.application.port.out.PostingKind
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
 import com.openbank.lending.domain.model.AccrualOutcome
-import com.openbank.lending.domain.model.ApplicationStatus
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
@@ -42,6 +41,7 @@ import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import com.openbank.lending.domain.model.ProvisioningSnapshot
 import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
+import com.openbank.lending.infrastructure.compliance.OriginationConfig
 import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
@@ -50,6 +50,13 @@ import com.openbank.libs.lending.Amortization
 import com.openbank.libs.lending.Delinquency
 import com.openbank.libs.lending.EclInputs
 import com.openbank.libs.lending.Ifrs9
+import com.openbank.libs.lending.compliance.CompliancePackEvaluator
+import com.openbank.libs.lending.origination.OriginationActorKind
+import com.openbank.libs.lending.origination.OriginationAdvance
+import com.openbank.libs.lending.origination.OriginationState
+import com.openbank.libs.lending.origination.OriginationStateMachine
+import com.openbank.libs.lending.origination.OriginationTransition
+import com.openbank.libs.lending.origination.OriginationTransitionResult
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -86,6 +93,7 @@ class LendingService(
     private val clock: Clock,
     private val provisioning: ProvisioningRepository,
     private val complianceGuard: com.openbank.lending.infrastructure.compliance.CompliancePackGuard,
+    private val originationConfig: OriginationConfig,
 ) : ApplyForLoanUseCase,
     DisburseLoanUseCase,
     ServicingUseCase,
@@ -96,6 +104,25 @@ class LendingService(
     ProvisioningUseCase,
     RunProvisioningCycleUseCase {
 
+    private val machine = OriginationStateMachine()
+
+    private fun transition(application: LoanApplication, from: OriginationState, to: OriginationState, actor: String) =
+        OriginationTransition(
+            applicationId = application.id.value.toString(),
+            from = from,
+            to = to,
+            actor = actor,
+            actorKind = OriginationActorKind.HUMAN,
+            reason = "origination transition $from -> $to",
+            occurredAt = clock.instant(),
+            packVersion = application.packVersion?.toString(),
+        )
+
+    private fun mandatoryStepsFor(application: LoanApplication): Set<OriginationState> =
+        complianceGuard.resolveOriginationPack(application.jurisdiction, application.productType)
+            ?.let { CompliancePackEvaluator.mandatorySteps(it) }
+            ?: emptySet()
+
     // --- Origination --------------------------------------------------------------------------------
 
     override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> {
@@ -105,6 +132,7 @@ class LendingService(
         require(request.nominalAnnualRate.signum() >= 0) { "Nominal rate cannot be negative" }
         require(proposedBy.isNotBlank()) { "Proposer identity is required" }
         val now = OffsetDateTime.now(clock)
+        val pack = complianceGuard.resolveOriginationPack(request.jurisdiction, request.productType)
         val application = LoanApplication(
             partyId = request.partyId,
             requestedAmount = request.requestedAmount,
@@ -113,21 +141,73 @@ class LendingService(
             periodsPerYear = request.periodsPerYear,
             method = request.method,
             firstDueDate = request.firstDueDate,
+            status = OriginationState.SUBMITTED,
             // Trusted: the authenticated maker, captured by the adapter from the JWT subject.
             proposedBy = proposedBy,
             createdAt = now,
+            jurisdiction = request.jurisdiction,
+            productType = request.productType,
+            packVersion = pack?.pack?.version,
         )
-        return applications.save(application)
+        return applications.save(application).map { saved ->
+            if (originationConfig.autoApprove) straightThrough(saved) else saved
+        }
     }
+
+    /**
+     * Sandbox straight-through drive (ADR-0211 D5, never in production): validate the full
+     * forward path through the state machine, then persist the terminal STP state once.
+     */
+    private fun straightThrough(application: LoanApplication): LoanApplication {
+        val mandatory = mandatoryStepsFor(application)
+        var state = application.status
+        while (state != OriginationState.READY_TO_DISBURSE) {
+            val next = OriginationAdvance.nextState(state, mandatory)
+                ?: return application.copy(status = state)
+            val result = machine.apply(transition(application, state, next, OriginationConfig.SANDBOX_ACTOR))
+            check(result is OriginationTransitionResult.Applied) {
+                "STP drive refused at $state -> $next: ${(result as OriginationTransitionResult.Rejected).reason}"
+            }
+            state = result.newState
+        }
+        return application.copy(status = state, decidedBy = OriginationConfig.SANDBOX_ACTOR)
+    }
+
+    override fun advance(id: LoanApplicationId, actor: String): Uni<LoanApplication> =
+        applications.findById(id).flatMap { existing ->
+            when {
+                existing == null ->
+                    Uni.createFrom().failure(IllegalArgumentException("Application not found: $id"))
+                actor.isBlank() ->
+                    Uni.createFrom().failure(IllegalArgumentException("Actor identity is required"))
+                else -> {
+                    val next = OriginationAdvance.nextState(existing.status, mandatoryStepsFor(existing))
+                    when {
+                        next == null ->
+                            Uni.createFrom().failure(
+                                IllegalStateException("No forward transition from ${existing.status}"),
+                            )
+                        else -> when (
+                            val result = machine.apply(transition(existing, existing.status, next, actor))
+                        ) {
+                            is OriginationTransitionResult.Rejected ->
+                                Uni.createFrom().failure(IllegalStateException(result.reason))
+                            is OriginationTransitionResult.Applied ->
+                                applications.update(existing.copy(status = result.newState))
+                        }
+                    }
+                }
+            }
+        }
 
     override fun decide(id: LoanApplicationId, decision: DecisionRequest, decidedBy: String): Uni<LoanApplication> =
         applications.findById(id).flatMap { existing ->
             when {
                 existing == null ->
                     Uni.createFrom().failure(IllegalArgumentException("Application not found: $id"))
-                existing.status != ApplicationStatus.PROPOSED ->
+                existing.status != OriginationState.FOUR_EYES ->
                     Uni.createFrom().failure(
-                        IllegalStateException("Application is not awaiting a decision: ${existing.status}"),
+                        IllegalStateException("Application is not awaiting a four-eyes decision: ${existing.status}"),
                     )
                 decidedBy.isBlank() ->
                     Uni.createFrom().failure(IllegalArgumentException("Decider identity is required"))
@@ -137,14 +217,21 @@ class LendingService(
                     Uni.createFrom().failure(
                         IllegalStateException("Four-eyes violation: approver must differ from proposer"),
                     )
-                else -> applications.update(
-                    existing.copy(
-                        status = if (decision.approve) ApplicationStatus.APPROVED else ApplicationStatus.REJECTED,
-                        decidedBy = decidedBy,
-                        decisionReason = decision.reason,
-                        decidedAt = OffsetDateTime.now(clock),
-                    ),
-                )
+                else -> {
+                    val target = if (decision.approve) OriginationState.OFFERED else OriginationState.DECLINED
+                    when (val result = machine.apply(transition(existing, existing.status, target, decidedBy))) {
+                        is OriginationTransitionResult.Rejected ->
+                            Uni.createFrom().failure(IllegalStateException(result.reason))
+                        is OriginationTransitionResult.Applied -> applications.update(
+                            existing.copy(
+                                status = result.newState,
+                                decidedBy = decidedBy,
+                                decisionReason = decision.reason,
+                                decidedAt = OffsetDateTime.now(clock),
+                            ),
+                        )
+                    }
+                }
             }
         }
 
@@ -162,9 +249,11 @@ class LendingService(
             when {
                 application == null ->
                     Uni.createFrom().failure(IllegalArgumentException("Application not found: $applicationId"))
-                application.status != ApplicationStatus.APPROVED ->
+                application.status != OriginationState.READY_TO_DISBURSE ->
                     Uni.createFrom().failure(
-                        IllegalStateException("Only an APPROVED application can be disbursed: ${application.status}"),
+                        IllegalStateException(
+                            "Only a READY_TO_DISBURSE application can be disbursed: ${application.status}",
+                        ),
                     )
                 disbursedBy.isBlank() ->
                     Uni.createFrom().failure(IllegalArgumentException("Disburser identity is required"))
@@ -174,12 +263,12 @@ class LendingService(
                     Uni.createFrom().failure(
                         IllegalStateException("Segregation of duties: disburser must differ from approver"),
                     )
-                else -> bookLoan(application)
+                else -> bookLoan(application, disbursedBy)
             }
         }
 
     @Suppress("LongMethod") // ADR-0100: clock-stamp fields push this 3 lines past threshold
-    private fun bookLoan(application: LoanApplication): Uni<Loan> {
+    private fun bookLoan(application: LoanApplication, disbursedBy: String): Uni<Loan> {
         val now = OffsetDateTime.now(clock)
         val loan = Loan(
             applicationId = application.id,
@@ -217,7 +306,16 @@ class LendingService(
         return loans.save(loan)
             .flatMap { saved -> installments.saveAll(rows).map { saved } }
             .flatMap { saved ->
-                applications.update(application.copy(status = ApplicationStatus.DISBURSED)).map { saved }
+                when (
+                    val st = machine.apply(
+                        transition(application, application.status, OriginationState.DISBURSED, disbursedBy),
+                    )
+                ) {
+                    is OriginationTransitionResult.Rejected ->
+                        Uni.createFrom().failure(IllegalStateException(st.reason))
+                    is OriginationTransitionResult.Applied ->
+                        applications.update(application.copy(status = st.newState)).map { saved }
+                }
             }
             .flatMap { saved ->
                 // Cash leaves the bank: post the disbursement to the ledger (we never mutate balances).

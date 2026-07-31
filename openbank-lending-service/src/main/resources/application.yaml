@@ -130,6 +130,11 @@ lending:
     # after the CZ reference pack is seeded and four-eyes-activated — with enforcement on and no
     # active pack for the request's (jurisdiction, productType), origination is REFUSED.
     enforce-pack: ${LENDING_ENFORCE_PACK:false}
+  origination:
+    # Sandbox straight-through (ADR-0211 D5, ADR-0116 pattern): a submitted application is driven to
+    # READY_TO_DISBURSE by the 'sandbox-auto-approval' actor so sandbox e2e runs without an operator.
+    # Restart-required. MUST stay false in production — it bypasses the four-eyes gate entirely.
+    auto-approve: ${LENDING_ORIGINATION_AUTO_APPROVE:false}
   # Outbox event write (ADR-0003 transactional outbox). `backend=jpa` build-time-activates
   # JpaLoanEventEmitter, persisting each domain event to `lending_outbox` for LendingOutboxDispatcher
   # to publish. Defaults to `jpa` (unlike ledger.backend above) — the write targets this service's own

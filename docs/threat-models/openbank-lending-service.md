@@ -252,6 +252,9 @@ Tracked as the named bootstrap follow-up (ADR-0212 D4).
 
 ## 9. Change log
 
+- **2026-07-31** — Canonical origination graph wired (ADR-0211): V8/V9 status migration
+  (PROPOSED→SUBMITTED, APPROVED→OFFERED, REJECTED→DECLINED), state machine guards on
+  apply/decide/disburse, `POST /applications/{id}/advance`, sandbox STP flag (never prod).
 - **2026-07-31** — CZ reference pack (`compliance-packs/cz-consumer-credit-v1.json`) with a
   rot-guard test + activation runbook. Enforcement flag stays `false` until the pack is
   four-eyes-activated per environment (ADR-0212 D4 bootstrap order: seed → activate → verify → flip).

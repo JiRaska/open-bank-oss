@@ -69,6 +69,11 @@ class LendingOutboxWriteIT {
     private lateinit var applicationId: String
     private lateinit var loanId: String
 
+    private companion object {
+        const val ADVANCES_TO_FOUR_EYES = 4
+        const val ADVANCES_TO_DISBURSABLE = 3
+    }
+
     @Test
     @Order(1)
     @TestSecurity(user = "outbox-it-proposer", roles = ["ROLE_LENDING_OFFICER"])
@@ -94,8 +99,23 @@ class LendingOutboxWriteIT {
 
     @Test
     @Order(2)
+    @TestSecurity(user = "outbox-it-officer", roles = ["ROLE_LENDING_OFFICER"])
+    fun `2 - advance the application to the four-eyes gate`() {
+        repeat(ADVANCES_TO_FOUR_EYES) {
+            Given {
+                contentType("application/json")
+            } When {
+                post("/api/v1/lending/applications/$applicationId/advance")
+            } Then {
+                statusCode(200)
+            }
+        }
+    }
+
+    @Test
+    @Order(3)
     @TestSecurity(user = "outbox-it-checker", roles = ["ROLE_CREDIT_RISK"])
-    fun `2 - approve the application`() {
+    fun `3 - approve the application`() {
         Given {
             contentType("application/json")
             body("""{"approve":true}""")
@@ -107,9 +127,24 @@ class LendingOutboxWriteIT {
     }
 
     @Test
-    @Order(3)
+    @Order(4)
+    @TestSecurity(user = "outbox-it-officer", roles = ["ROLE_LENDING_OFFICER"])
+    fun `4 - advance the approved offer to READY_TO_DISBURSE`() {
+        repeat(ADVANCES_TO_DISBURSABLE) {
+            Given {
+                contentType("application/json")
+            } When {
+                post("/api/v1/lending/applications/$applicationId/advance")
+            } Then {
+                statusCode(200)
+            }
+        }
+    }
+
+    @Test
+    @Order(5)
     @TestSecurity(user = "outbox-it-disburser", roles = ["ROLE_LENDING_OFFICER"])
-    fun `3 - disburse and assert the loan_disbursed row lands in lending_outbox`() {
+    fun `5 - disburse and assert the loan_disbursed row lands in lending_outbox`() {
         val response = Given {
             contentType("application/json")
         } When {

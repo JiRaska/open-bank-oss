@@ -4,7 +4,6 @@
 
 package com.openbank.lending.infrastructure.persistence.entity
 
-import com.openbank.lending.domain.model.ApplicationStatus
 import com.openbank.lending.domain.model.CollateralStatus
 import com.openbank.lending.domain.model.CollateralType
 import com.openbank.lending.domain.model.LoanStatus
@@ -12,6 +11,7 @@ import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.lending.AmortizationMethod
 import com.openbank.libs.lending.DelinquencyBucket
 import com.openbank.libs.lending.Ifrs9Stage
+import com.openbank.libs.lending.origination.OriginationState
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -59,7 +59,16 @@ class LoanApplicationEntity : PanacheEntityBase() {
 
     @Column(name = "status")
     @Enumerated(EnumType.STRING)
-    var status: ApplicationStatus = ApplicationStatus.PROPOSED
+    var status: OriginationState = OriginationState.SUBMITTED
+
+    @Column(name = "jurisdiction", length = 8)
+    var jurisdiction: String? = null
+
+    @Column(name = "product_type", length = 32)
+    var productType: String? = null
+
+    @Column(name = "pack_version")
+    var packVersion: Int? = null
 
     @Column(name = "proposed_by")
     var proposedBy: String = ""
