@@ -18,6 +18,23 @@
 # one queued re-run instead of a human round-trip; the job lands on a fresh spot node (or the
 # on-demand warm pool) and proceeds.
 #
+# ALSO `failure` — a reclaim that takes only PART of a multi-job run (issue #2841).
+# A spot kill sets the killed STEP to `cancelled`, which makes its JOB `failure`, which makes
+# the whole RUN `failure` as soon as any sibling job succeeded. Gating on a run-level
+# `cancelled` therefore missed every partial kill: `security.yml` has 6 jobs and
+# `services-ci.yml` fans out per service, so the common case never matched. Measured on
+# security.yml run 30627400819 — CodeQL java-kotlin killed by
+# "The runner has received a shutdown signal", five sibling jobs green, run `failure`, no
+# retry — while three concurrency-superseded `cancelled` runs the same hour WERE retried.
+# The mechanism was firing on the harmless case and missing the one it was built for.
+#
+# A run-level `failure` is NOT retried on its own — that is the normal outcome of a broken
+# build, and blanket-retrying it would burn runner time and turn a deterministic red into a
+# flaky-looking one. It is retried only when a failed job carries the spot-kill SIGNATURE:
+# at least one `cancelled` step and NO `failed` step. A genuine build failure has a `failure`
+# step followed by `skipped` ones, never a `cancelled` one. Read from the jobs API, so no log
+# download is needed.
+#
 # LOOP SAFETY
 # github.event.workflow_run.run_attempt is 1 for the original run and 2 for the first rerun,
 # so gating on run_attempt == 1 gives exactly one automatic retry per run — a cancelled retry
@@ -43,18 +60,59 @@ permissions:
 
 jobs:
   retry:
-    name: Re-run cancelled run (once)
+    name: Re-run spot-killed run (once)
     runs-on: ubuntu-latest
+    # `failure` is admitted here only so the step below can inspect the jobs; the decision to
+    # re-run is made there, not by this expression. A job-level `if:` cannot reach the jobs API.
     if: >-
-      github.event.workflow_run.conclusion == 'cancelled' &&
+      (github.event.workflow_run.conclusion == 'cancelled' ||
+       github.event.workflow_run.conclusion == 'failure') &&
       github.event.workflow_run.run_attempt == 1
     steps:
-      - name: Re-run the cancelled workflow
+      - name: Re-run only if the runner was reclaimed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
-          echo "Re-running cancelled run $RUN_URL (spot-kill retry, issue #2330)"
-          gh run rerun "$RUN_ID"
-          echo "::notice title=spot-kill auto-retry::Re-ran cancelled run $RUN_URL (attempt 2 of max 2; a second kill stays for a human)"
+          set -euo pipefail
+
+          if [ "${CONCLUSION}" = "cancelled" ]; then
+            # Whole run cancelled. Indistinguishable from the outside between a reclaim and a
+            # human/concurrency cancel, so retry once either way — the accepted waste that
+            # LOOP SAFETY above describes. `--failed` is a no-op against `cancelled`, so this
+            # is always the full re-run.
+            echo "Re-running cancelled run ${RUN_URL} (issue #2330)"
+            gh run rerun "${RUN_ID}"
+            echo "::notice title=spot-kill auto-retry::Re-ran cancelled run ${RUN_URL} (attempt 2 of max 2; a second kill stays for a human)"
+            exit 0
+          fi
+
+          # conclusion == failure: retry ONLY on the partial-spot-kill signature.
+          # ATTEMPT-SCOPED on purpose: /actions/runs/<id>/jobs returns the LATEST attempt's jobs,
+          # so a concurrent manual re-run would make this inspect a different (possibly green)
+          # attempt and silently decline to retry. The `if:` above already pins run_attempt to 1;
+          # this pins the query to match. Caught by running the real script against a fixture run
+          # that had since been re-run by hand — the unscoped query reported "no spot-kill
+          # signature" for a run whose attempt 1 was unambiguously spot-killed.
+          killed="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/1/jobs?per_page=100" \
+            --jq '[.jobs[]
+                   | select(.conclusion == "failure")
+                   | select(([.steps[]? | select(.conclusion == "cancelled")] | length) > 0)
+                   | select(([.steps[]? | select(.conclusion == "failure")]  | length) == 0)]
+                  | length' 2>/dev/null || echo "")"
+
+          if [ -z "${killed}" ]; then
+            echo "::warning title=spot-kill auto-retry::Could not read jobs for ${RUN_URL}; not re-running. A genuine reclaim will need a manual re-run."
+            exit 0
+          fi
+
+          if [ "${killed}" -eq 0 ]; then
+            echo "::notice title=spot-kill auto-retry::${RUN_URL} failed with no spot-kill signature (no job has a cancelled step and no failed step) — treating it as a real failure and NOT re-running."
+            exit 0
+          fi
+
+          echo "Re-running ${RUN_URL}: ${killed} job(s) killed mid-step by a runner reclaim (issue #2841)"
+          gh run rerun "${RUN_ID}" --failed
+          echo "::notice title=spot-kill auto-retry::Re-ran ${killed} spot-killed job(s) in ${RUN_URL} (attempt 2 of max 2; a second kill stays for a human)"
