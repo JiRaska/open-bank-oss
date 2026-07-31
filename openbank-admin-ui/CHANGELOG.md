@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.68.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.67.0...admin-ui-v0.68.0) (2026-07-31)
+
+
+### Features
+
+* **admin-ui:** persona workspace pinned in the sidebar (ADR-0229 D4, first cut) ([#2790](https://github.com/JiRaska/open-bank-oss/issues/2790)) ([7fd4546](https://github.com/JiRaska/open-bank-oss/commit/7fd45469d3b382bd56876e82d87f490e3a3f6446))
+
 ## [0.67.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.66.0...admin-ui-v0.67.0) (2026-07-31)
 
 
