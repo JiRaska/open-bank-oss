@@ -106,6 +106,16 @@ interface PartyUseCase {
     suspend fun getParty(id: UUID): Party
     suspend fun updateParty(cmd: UpdatePartyCommand): Party
 
+    /**
+     * Pay-to-phone directory lookup. Answers ONLY about parties that opted into being
+     * discoverable, and only for hashes the caller already supplied — it cannot be used to
+     * enumerate customers. Hashes that do not match are not recorded anywhere.
+     */
+    suspend fun lookupByPhoneHashes(hashes: Collection<String>): List<PhoneDirectoryMatch>
+
+    /** Turn pay-to-phone findability on or off for one party (revocable, opt-in). */
+    suspend fun updateDiscoverable(partyId: UUID, discoverable: Boolean): Boolean
+
     /** Post-onboarding marketing-consent toggle (mobile app Profile screen, revocable). */
     suspend fun updateMarketingConsent(cmd: UpdateMarketingConsentCommand): Party
     suspend fun addDocument(cmd: AddDocumentCommand): PartyDocument
@@ -167,3 +177,11 @@ interface PartyUseCase {
      */
     suspend fun getPartyKeycloakSub(id: UUID): String?
 }
+
+/**
+ * One directory hit. Carries the party id and the LEGAL NAME only — the caller already knows the
+ * phone number they asked about, and nothing else about the payee is theirs to learn from a
+ * lookup. In particular no account, no email and no address: the payment rail resolves the
+ * account from the party id server-side.
+ */
+data class PhoneDirectoryMatch(val phoneHash: String, val partyId: UUID, val legalName: String)

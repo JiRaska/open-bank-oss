@@ -20,6 +20,12 @@ interface PartyRepository {
 
     suspend fun findByEmail(email: String): Party?
 
+    /** Pay-to-phone: parties that opted in AND whose phone hash is in [hashes]. */
+    suspend fun findDiscoverableByPhoneHashes(hashes: Collection<String>): List<Party>
+
+    /** Toggle pay-to-phone findability. Returns false when no such party exists. */
+    suspend fun updateDiscoverable(partyId: UUID, discoverable: Boolean, at: Instant): Boolean
+
     suspend fun update(party: Party): Party
 
     suspend fun listAll(page: Int, size: Int): List<Party>

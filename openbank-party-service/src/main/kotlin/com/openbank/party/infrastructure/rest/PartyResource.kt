@@ -130,6 +130,33 @@ class PartyResource {
         return Response.created(URI.create("/api/v1/parties/${party.id}")).entity(party.toResponse()).build()
     }
 
+    /**
+     * Pay-to-phone directory lookup (ROLE_API — the customer edge, never a browser).
+     *
+     * POST, not GET: the request body is a list of phone-number hashes derived from the caller's
+     * address book, and those have no business sitting in a URL, an access log or a proxy cache.
+     * Only parties who opted into being discoverable can come back, and a hash that matches
+     * nothing is not recorded anywhere.
+     */
+    @POST
+    @Path("/directory/lookup")
+    @RolesAllowed("ROLE_API")
+    @Operation(summary = "Match phone-number hashes against parties who opted into being discoverable")
+    suspend fun lookupDirectory(req: DirectoryLookupRequest): Response =
+        Response.ok(mapOf("matches" to partyUseCase.lookupByPhoneHashes(req.phoneHashes))).build()
+
+    /** Turn this party's pay-to-phone findability on or off. Revocable at any time. */
+    @PUT
+    @Path("/{id}/discoverable")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @Operation(summary = "Opt a party in or out of pay-to-phone discoverability")
+    suspend fun setDiscoverable(@PathParam("id") id: UUID, req: DiscoverableRequest): Response =
+        if (partyUseCase.updateDiscoverable(id, req.discoverable)) {
+            Response.ok(mapOf("discoverable" to req.discoverable)).build()
+        } else {
+            Response.status(Response.Status.NOT_FOUND).build()
+        }
+
     @GET
     @Path("/{id}")
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_API")
@@ -647,3 +674,8 @@ private const val GDPR_EXPORT_SCOPE =
     "party-service direct PII and identity-document metadata. KYC PII (kyc-service) and " +
         "card PII (card-issuance-service) are held by those services; aggregating them into this " +
         "subject-access response is a tracked follow-up (ADR-0118 §6)."
+
+/** Address-book hashes to match. See PhoneDirectory for what the hashing does and does not buy. */
+data class DirectoryLookupRequest(val phoneHashes: List<String> = emptyList())
+
+data class DiscoverableRequest(val discoverable: Boolean = false)

@@ -116,6 +116,32 @@ class PartyService : PartyUseCase {
      * D1's auto-activate path); the persisted row catches up asynchronously over Kafka, typically
      * within milliseconds.
      */
+    /**
+     * Pay-to-phone lookup. The caller sends hashes it computed from numbers it already holds; this
+     * returns the subset that belongs to a party who opted in. Nothing about a MISS is recorded —
+     * no log line, no table — because the set of numbers a customer knows is itself personal data
+     * and the bank has no business accumulating it.
+     *
+     * [MAX_DIRECTORY_LOOKUP] bounds a single call. It is not a privacy control on its own (a
+     * caller can page), it is what stops one request from turning into an unbounded IN-list; the
+     * privacy control is [Party.discoverable].
+     */
+    override suspend fun lookupByPhoneHashes(hashes: Collection<String>): List<PhoneDirectoryMatch> {
+        val clean = hashes.asSequence()
+            .map { it.trim().lowercase() }
+            .filter { it.length == SHA256_HEX_LENGTH && it.all { c -> c.isDigit() || c in 'a'..'f' } }
+            .distinct()
+            .take(MAX_DIRECTORY_LOOKUP)
+            .toList()
+        if (clean.isEmpty()) return emptyList()
+        return partyRepo.findDiscoverableByPhoneHashes(clean).mapNotNull { p ->
+            p.phone?.let { PhoneDirectory.hash(it) }?.let { h -> PhoneDirectoryMatch(h, p.id, p.legalName) }
+        }
+    }
+
+    override suspend fun updateDiscoverable(partyId: UUID, discoverable: Boolean): Boolean =
+        partyRepo.updateDiscoverable(partyId, discoverable, Instant.now(clock))
+
     override suspend fun updateMarketingConsent(cmd: UpdateMarketingConsentCommand): Party {
         val party = partyRepo.findById(cmd.id) ?: throw PartyNotFoundException(cmd.id)
         if (cmd.marketingConsent) {
@@ -431,3 +457,9 @@ class PartyService : PartyUseCase {
 
     override suspend fun getPartyKeycloakSub(id: UUID): String? = partyRepo.findById(id)?.keycloakSub
 }
+
+/** SHA-256 rendered as lowercase hex. */
+private const val SHA256_HEX_LENGTH = 64
+
+/** Upper bound on hashes accepted in one directory lookup — a request-shape guard, not a privacy one. */
+private const val MAX_DIRECTORY_LOOKUP = 500

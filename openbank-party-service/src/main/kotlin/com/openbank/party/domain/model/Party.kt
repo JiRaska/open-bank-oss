@@ -29,6 +29,8 @@ data class Party(
     val registrationNumber: String?,
     val email: String,
     val phone: String?,
+    /** Pay-to-phone findability. Opt-in — see [PhoneDirectory]. */
+    val discoverable: Boolean = false,
     val address: Address?,
     val kycStatus: KycStatus,
     val createdAt: Instant,
