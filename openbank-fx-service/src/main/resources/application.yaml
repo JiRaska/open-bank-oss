@@ -69,7 +69,15 @@ quarkus:
     hosts: redis://localhost:6379
   rest-client:
     cnb-feed:
-      url: ${CNB_FEED_URL:https://www.cnb.cz/cs/financni-trhy/devizovy-trh/kurzy-devizoveho-trhu/kurzy/denni_kurz.txt}
+      # The path segment `kurzy-devizoveho-trhu` appears TWICE — section, then page. A single
+      # occurrence is a 404 that ČNB serves as a 58 KB HTML error page, which the parser rejects
+      # with `Unparseable ČNB fixing date header`, which `CnbRateIngestionScheduler`'s catch
+      # swallows into one ERROR line. That is exactly how the previous value shipped and how the
+      # daily fixing went un-ingested for 46 days after the #2187 Vert.x fix made the job actually
+      # run (#2204). `check-external-feeds.py` now probes this URL daily so a dead feed cannot be
+      # silent again. Verify by hand with:
+      #   curl -sSo /dev/null -w '%{http_code}\n' "<url>"     # must be 200, not 404
+      url: ${CNB_FEED_URL:https://www.cnb.cz/cs/financni-trhy/devizovy-trh/kurzy-devizoveho-trhu/kurzy-devizoveho-trhu/denni_kurz.txt}
       scope: jakarta.inject.Singleton
     sanctions-service:
       url: ${SANCTIONS_SERVICE_URL:http://localhost:8123}
