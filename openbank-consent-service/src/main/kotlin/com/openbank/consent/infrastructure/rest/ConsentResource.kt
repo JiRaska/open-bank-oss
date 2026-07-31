@@ -138,13 +138,19 @@ class ConsentResource(
     @Operation(summary = "Revoke an ACTIVE consent; transitions to REVOKED and enqueues ConsentRevoked event")
     @DELETE
     @Path("/{id}")
-    // "resource = #id" is unaffected (unscoped human/operator rule). The optional granteeId
-    // query param is for the M2M path (ADR-0206 D2): consent-opa-bundle.yaml's
-    // service-consent-m2m-marketing rule checks it via #granteeId directly (no dotted path
-    // needed here — it's already a top-level parameter), and the use case cross-checks it
-    // against the loaded consent's actual granteeId before revoking, since the OPA decision
-    // can't see the DB row this endpoint hasn't loaded yet.
-    @Authorize(action = "consent.revoke", resource = "#id")
+    // resource = "#granteeId", NOT "#id" (issue #2911). The M2M path (ADR-0206 D2) is gated by
+    // consent-opa-bundle.yaml's service-consent-m2m-marketing rule, which requires
+    // `input.resource.id == "party-service:marketing-comms"`. Binding the resource to the consent
+    // UUID made that comparison unsatisfiable, so the rule's consent.revoke half was dead code and
+    // every M2M revoke 403'd — while consent.grant worked, because create binds
+    // `#request.granteeId`. Measured: grant 201, revoke 403, same principal.
+    //
+    // Human/operator callers are unaffected: they do not pass granteeId, extractResource then
+    // yields no resource at all, and `operator-consent-write` does not inspect one.
+    //
+    // The use case still cross-checks the passed granteeId against the loaded consent's actual
+    // granteeId before revoking, since the OPA decision cannot see the DB row.
+    @Authorize(action = "consent.revoke", resource = "#granteeId")
     suspend fun revoke(
         @PathParam("id") id: UUID,
         @QueryParam("partyId") partyId: UUID,
