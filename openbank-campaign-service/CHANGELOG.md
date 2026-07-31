@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/v0.3.7...v0.4.0) (2026-07-31)
+
+
+### Features
+
+* **campaign:** expose the send log so suppressions are visible outside psql ([#2972](https://github.com/JiRaska/open-bank-oss/issues/2972)) ([91e9b2c](https://github.com/JiRaska/open-bank-oss/commit/91e9b2c51303204674412456f2d03791fe4364b6))
+
 ## [0.3.7](https://github.com/JiRaska/open-bank-oss/compare/v0.3.6...v0.3.7) (2026-07-31)
 
 
