@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.12.1...party-service-v0.13.0) (2026-07-31)
+
+
+### Features
+
+* **party:** search by business keys — email, phone, tax id, registration number (ADR-0228 D1) ([#2781](https://github.com/JiRaska/open-bank-oss/issues/2781)) ([b6fd315](https://github.com/JiRaska/open-bank-oss/commit/b6fd3153501b2553bcf3cabe6586328ed861630b))
+
+
+### Bug Fixes
+
+* **governance:** correct 21 specs' dev port and gate it against quarkus.http.port ([#2697](https://github.com/JiRaska/open-bank-oss/issues/2697)) ([1d2f830](https://github.com/JiRaska/open-bank-oss/commit/1d2f8301d8b55664eed36860a0ec78717375a66b))
+
 ## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.12.0...party-service-v0.12.1) (2026-07-27)
 
 
