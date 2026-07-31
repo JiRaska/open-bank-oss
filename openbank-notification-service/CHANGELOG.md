@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.16.2...notification-service-v0.17.0) (2026-07-31)
+
+
+### Features
+
+* **campaign:** campaign-service first slice — deterministic segments, consent-gated Temporal journeys (ADR-0200/0209 D3) ([#2751](https://github.com/JiRaska/open-bank-oss/issues/2751)) ([27e83b4](https://github.com/JiRaska/open-bank-oss/commit/27e83b42c70cc7289d5f684e1ccd40c3f326c14c))
+
 ## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.16.1...notification-service-v0.16.2) (2026-07-30)
 
 
