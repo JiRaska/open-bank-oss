@@ -76,6 +76,7 @@ object LendingJournalFactory {
             PostingKind.WRITE_OFF_INTEREST -> accounts.loanLossExpense to accounts.interestReceivable
             PostingKind.RESCHEDULE_FORGIVENESS -> accounts.loanLossExpense to accounts.loansReceivable
             PostingKind.PROVISIONING -> error("unreachable: handled above")
+            else -> terminationAccountPair(posting.kind, accounts)
         }
         val ccy = posting.amount.currency.code
         val value = posting.amount.amount
@@ -90,6 +91,13 @@ object LendingJournalFactory {
      * a negative amount is a smaller ECL (release some of the previously booked allowance/expense). The
      * ledger line amount is always the absolute value; the sign only picks which side each account is on.
      */
+    private fun terminationAccountPair(kind: PostingKind, accounts: LendingGlAccounts) = when (kind) {
+        PostingKind.WITHDRAWAL_UNWIND -> accounts.loansReceivable to accounts.fundingClearing
+        PostingKind.EARLY_REPAYMENT_COMPENSATION -> accounts.fundingClearing to accounts.interestIncome
+        PostingKind.SETTLEMENT -> accounts.fundingClearing to accounts.loansReceivable
+        else -> error("not a termination posting kind: $kind")
+    }
+
     private fun buildProvisioningLines(posting: LedgerPosting, accounts: LendingGlAccounts): List<JournalLineRequest> {
         val ccy = posting.amount.currency.code
         val value = posting.amount.amount.abs()

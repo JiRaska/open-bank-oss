@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.8.0
+  version: 1.9.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -89,6 +89,105 @@ paths:
         '400': { description: Unknown status value }
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/loans/{id}/settlement-quote:
+    post:
+      tags: [Lending]
+      operationId: requestSettlementQuote
+      summary: Issue a binding early-repayment settlement quote (ADR-0215 D2)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '201': { description: Quote issued and persisted with its validity window }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: Loan not in a quotable state }
+  /api/v1/lending/loans/{id}/settle:
+    post:
+      tags: [Lending]
+      operationId: settleLoan
+      summary: Settle the loan against a still-valid quote (expired quotes refused)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: Loan settled and closed }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: No valid quote or invalid state }
+  /api/v1/lending/loans/{id}/withdrawal:
+    post:
+      tags: [Lending]
+      operationId: withdrawLoan
+      summary: Statutory withdrawal inside the pack's cooling-off window (ADR-0215 D4)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: Contract unwound with statutory day interest }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: Cooling-off window closed or no pack }
+  /api/v1/lending/loans/{id}/mark-delinquent:
+    post:
+      tags: [Lending]
+      operationId: markLoanDelinquent
+      summary: Mark the loan delinquent
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: Loan marked DELINQUENT }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: No past-due installment }
+  /api/v1/lending/loans/{id}/mark-defaulted:
+    post:
+      tags: [Lending]
+      operationId: markLoanDefaulted
+      summary: Mark the loan defaulted (CRR Art. 178 DPD threshold)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: Loan marked DEFAULTED }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: DPD below threshold }
+  /api/v1/lending/loans/{id}/forbearance:
+    post:
+      tags: [Lending]
+      operationId: recordForbearance
+      summary: Record the mandatory forbearance assessment
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: Assessment recorded (FORBEARANCE_ASSESSED) }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: Not in DEFAULTED state }
+  /api/v1/lending/loans/{id}/termination/propose:
+    post:
+      tags: [Lending]
+      operationId: proposeTermination
+      summary: Propose bank-initiated termination (maker)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: Termination proposed }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: Ground not permitted by the pinned pack }
+  /api/v1/lending/loans/{id}/termination/decide:
+    post:
+      tags: [Lending]
+      operationId: decideTermination
+      summary: Decide a termination proposal (checker, must differ from maker)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: TERMINATION_NOTICED with the pack notice period }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: Four-eyes violation }
+  /api/v1/lending/loans/{id}/accelerate:
+    post:
+      tags: [Lending]
+      operationId: accelerateLoan
+      summary: Accelerate after the notice period elapses
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200': { description: Loan ACCELERATED — full balance due }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: Notice period not yet elapsed }
   /api/v1/lending/applications/{id}/evidence:
     get:
       tags: [Lending]

@@ -128,6 +128,15 @@ class LoanEntity : PanacheEntityBase() {
     @Column(name = "disbursed_at")
     var disbursedAt: OffsetDateTime = OffsetDateTime.MIN
 
+    @Column(name = "notice_ends_on")
+    var noticeEndsOn: LocalDate? = null
+
+    @Column(name = "terminated_by", length = 128)
+    var terminatedBy: String? = null
+
+    @Column(name = "terminated_at")
+    var terminatedAt: OffsetDateTime? = null
+
     @Column(name = "version")
     var version: Long = 0
 
@@ -211,6 +220,9 @@ class CollateralEntity : PanacheEntityBase() {
     @Column(name = "valued_at")
     var valuedAt: OffsetDateTime = OffsetDateTime.MIN
 
+    @Column(name = "released_at")
+    var releasedAt: OffsetDateTime? = null
+
     @Column(name = "status")
     @Enumerated(EnumType.STRING)
     var status: CollateralStatus = CollateralStatus.PENDING
@@ -276,4 +288,46 @@ class LoanProvisioningEntity : PanacheEntityBase() {
 
     @Column(name = "created_at")
     var createdAt: OffsetDateTime = OffsetDateTime.MIN
+}
+
+@Entity
+@Table(name = "settlement_quote")
+class SettlementQuoteEntity : io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntityBase {
+
+    @Id
+    @Column(columnDefinition = "uuid")
+    var id: UUID = UUID.randomUUID()
+
+    @Column(name = "loan_id", columnDefinition = "uuid")
+    var loanId: UUID = UUID.randomUUID()
+
+    @Column(name = "as_of_date")
+    var asOfDate: LocalDate = LocalDate.EPOCH
+
+    @Column(name = "valid_until")
+    var validUntil: LocalDate = LocalDate.EPOCH
+
+    @Column(name = "outstanding_principal", precision = 20, scale = 2)
+    var outstandingPrincipal: BigDecimal = BigDecimal.ZERO
+
+    @Column(name = "accrued_interest", precision = 20, scale = 2)
+    var accruedInterest: BigDecimal = BigDecimal.ZERO
+
+    @Column(name = "compensation", precision = 20, scale = 2)
+    var compensation: BigDecimal = BigDecimal.ZERO
+
+    @Column(name = "unapplied_credit", precision = 20, scale = 2)
+    var unappliedCredit: BigDecimal = BigDecimal.ZERO
+
+    @Column(name = "total", precision = 20, scale = 2)
+    var total: BigDecimal = BigDecimal.ZERO
+
+    @Column(name = "currency", length = 3)
+    var currency: String = "EUR"
+
+    @Column(name = "created_at")
+    var createdAt: OffsetDateTime = OffsetDateTime.now()
+
+    @Column(name = "settled_at")
+    var settledAt: OffsetDateTime? = null
 }
