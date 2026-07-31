@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.71.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.70.0...admin-ui-v0.71.0) (2026-07-31)
+
+
+### Features
+
+* **admin-ui:** full OBO session flow in the relay — create, exchange, bind (ADR-0224 D2) ([#2850](https://github.com/JiRaska/open-bank-oss/issues/2850)) ([7915cdf](https://github.com/JiRaska/open-bank-oss/commit/7915cdf736d9e6c70830a6e0d83faa88d4e5bb25))
+
 ## [0.70.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.69.0...admin-ui-v0.70.0) (2026-07-31)
 
 
