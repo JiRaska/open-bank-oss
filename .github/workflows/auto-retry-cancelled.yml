@@ -30,10 +30,24 @@
 #
 # A run-level `failure` is NOT retried on its own — that is the normal outcome of a broken
 # build, and blanket-retrying it would burn runner time and turn a deterministic red into a
-# flaky-looking one. It is retried only when a failed job carries the spot-kill SIGNATURE:
-# at least one `cancelled` step and NO `failed` step. A genuine build failure has a `failure`
-# step followed by `skipped` ones, never a `cancelled` one. Read from the jobs API, so no log
-# download is needed.
+# flaky-looking one. The run is retried when AT LEAST ONE failed job carries the spot-kill
+# SIGNATURE: at least one `cancelled` step and NO `failed` step. A genuine build failure has a
+# `failure` step followed by `skipped` ones, never a `cancelled` one. Read from the jobs API,
+# so no log download is needed.
+#
+# MIXED RUNS ARE THE NORMAL CASE, and the rule above is a per-RUN decision, not a per-JOB
+# filter. `gh run rerun --failed` re-runs every failed job, so a run containing both a
+# spot-killed job and a genuinely broken one re-runs both. That is accepted: the reclaimed job
+# needs the retry, the broken one fails again for the same reason, and `run_attempt == 1`
+# bounds the whole thing to a single extra attempt.
+#
+# Do not read the rule as "only spot-killed jobs are re-run" — it isn't, and the very first
+# live firing was already a mixed run. Services CI 30630120640 (main, 63 jobs) had three
+# failed jobs: `build (openbank-product-catalog)` killed by a reclaim (1 cancelled step, 0
+# failed), `build (openbank-mcp-service)` genuinely broken (0 cancelled, 1 failed), and
+# `all-green` failing downstream of them. The signature matched on one job and the whole set
+# was re-run. If per-job precision is ever wanted, it needs `gh run rerun --job <id>` per
+# killed job, which is a different and larger change.
 #
 # LOOP SAFETY
 # github.event.workflow_run.run_attempt is 1 for the original run and 2 for the first rerun,
