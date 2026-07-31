@@ -389,6 +389,8 @@ components:
         action: { type: string, description: The gated action the maker requested (e.g. lending.disburse) }
         resourceId: { type: string, nullable: true }
         status: { type: string, enum: [PENDING, APPROVED, REJECTED, EXECUTED] }
+        makerId: { type: string, nullable: true, description: Principal that created the request }
+        createdAt: { type: string, format: date-time, nullable: true }
         decidedBy: { type: string, nullable: true }
     Money:
       type: object

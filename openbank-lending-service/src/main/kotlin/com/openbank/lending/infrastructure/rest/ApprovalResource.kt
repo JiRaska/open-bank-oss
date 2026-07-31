@@ -79,6 +79,8 @@ data class ApprovalResponse(
     val action: String,
     val resourceId: String?,
     val status: String,
+    val makerId: String?,
+    val createdAt: String?,
     val decidedBy: String?,
 )
 
@@ -87,5 +89,7 @@ fun PendingApproval.toResponse() = ApprovalResponse(
     action = action,
     resourceId = resourceId,
     status = status.name,
+    makerId = makerId,
+    createdAt = createdAt.toString(),
     decidedBy = decidedBy,
 )
