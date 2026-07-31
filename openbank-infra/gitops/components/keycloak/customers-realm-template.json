@@ -112,6 +112,18 @@
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
+        },
+        {
+          "comment": "Adds openbank-rum to the JWT aud claim. The mobile-RUM ingest gateway (ADR-0088 §D4, rum.open-bank.tech) is an OTel collector whose OIDC authenticator requires audience=openbank-rum, and openbank-rum is not a Keycloak client — it is a resource name — so it needs a CUSTOM audience, not a client one. Without this the app's session token carries only openbank-edge and every OTLP export is rejected 401: mobile RUM produced literally zero spans from the day it was switched on, and a crash's trace_id pointed at a trace that did not exist. id.token.claim=false keeps the ID token lean.",
+          "name": "openbank-rum-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "openbank-rum",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
         }
       ]
     },
