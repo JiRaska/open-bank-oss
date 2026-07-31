@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.69.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.68.0...admin-ui-v0.69.0) (2026-07-31)
+
+
+### Features
+
+* **admin-ui:** federated approval inbox — domain maker-checker queues on /approvals (ADR-0227 D2) ([#2792](https://github.com/JiRaska/open-bank-oss/issues/2792)) ([4d748f5](https://github.com/JiRaska/open-bank-oss/commit/4d748f5c3afbb0cbb6848c80e1f34424aa770c44))
+* **admin-ui:** no mock data — real session profile in settings, drop hardcoded technical-accounts page (ADR-0231 D2) ([#2788](https://github.com/JiRaska/open-bank-oss/issues/2788)) ([350325f](https://github.com/JiRaska/open-bank-oss/commit/350325fba300e080617fb345bf2e8e295094a79e))
+* **admin-ui:** SDD console — fleet-wide mandate queue with status filter (ADR-0230 D3) ([#2807](https://github.com/JiRaska/open-bank-oss/issues/2807)) ([6b3690b](https://github.com/JiRaska/open-bank-oss/commit/6b3690bd03a549aeb1062a31b8fcf1adcb648987))
+
 ## [0.68.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.67.0...admin-ui-v0.68.0) (2026-07-31)
 
 
