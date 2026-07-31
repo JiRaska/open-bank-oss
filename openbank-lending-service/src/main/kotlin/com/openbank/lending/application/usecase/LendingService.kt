@@ -150,6 +150,9 @@ class LendingService(
 
     override fun listApplications(partyId: UUID): Uni<List<LoanApplication>> = applications.findByParty(partyId)
 
+    override fun listRecentApplications(status: String?, limit: Int): Uni<List<LoanApplication>> =
+        applications.findRecent(status, limit.coerceIn(1, MAX_LIST_LIMIT))
+
     // --- Disbursement (origination → servicing) -----------------------------------------------------
 
     override fun disburse(applicationId: LoanApplicationId, disbursedBy: String): Uni<Loan> =
@@ -245,6 +248,8 @@ class LendingService(
     override fun getSchedule(id: LoanId): Uni<List<LoanInstallment>> = installments.findByLoan(id)
 
     override fun listLoans(partyId: UUID): Uni<List<Loan>> = loans.findByParty(partyId)
+
+    override fun listActiveLoans(limit: Int): Uni<List<Loan>> = loans.findActive(limit.coerceIn(1, MAX_LIST_LIMIT))
 
     override fun recordRepayment(loanId: LoanId, installmentId: UUID): Uni<LoanInstallment> =
         loans.findById(loanId).flatMap { loan ->
@@ -885,5 +890,9 @@ class LendingService(
     private fun outstandingBalance(loan: Loan, schedule: List<LoanInstallment>): Money {
         val firstUnpaid = schedule.filter { !it.paid }.minByOrNull { it.number }
         return firstUnpaid?.openingBalance ?: Money.zero(loan.principal.currency.code)
+    }
+
+    private companion object {
+        const val MAX_LIST_LIMIT = 100
     }
 }

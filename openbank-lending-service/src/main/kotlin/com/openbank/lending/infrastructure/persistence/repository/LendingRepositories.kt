@@ -9,6 +9,7 @@ import com.openbank.lending.application.port.out.InstallmentRepository
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.ProvisioningRepository
+import com.openbank.lending.domain.model.ApplicationStatus
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
@@ -51,6 +52,22 @@ class LoanApplicationRepositoryImpl @Inject constructor(
             LoanApplicationEntity::class.java,
         )
             .setParameter("p", partyId).resultList
+    }.map { it.map(mapper::toDomain) }
+
+    @WithSession
+    override fun findRecent(status: String?, limit: Int): Uni<List<LoanApplication>> = sf.withSession { s ->
+        val query = if (status != null) {
+            s.createQuery(
+                "FROM LoanApplicationEntity WHERE status = :st ORDER BY createdAt DESC",
+                LoanApplicationEntity::class.java,
+            ).setParameter("st", ApplicationStatus.valueOf(status))
+        } else {
+            s.createQuery(
+                "FROM LoanApplicationEntity ORDER BY createdAt DESC",
+                LoanApplicationEntity::class.java,
+            )
+        }
+        query.setMaxResults(limit).resultList
     }.map { it.map(mapper::toDomain) }
 
     @WithTransaction override fun update(application: LoanApplication): Uni<LoanApplication> = sf.withTransaction { s ->

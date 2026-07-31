@@ -25,6 +25,7 @@ import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.mutiny.Uni
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -100,6 +101,16 @@ class LendingResource(
     @Authorize(action = "lending.list", resource = "")
     fun listApplications(@QueryParam("partyId") partyId: UUID) = apply.listApplications(partyId)
 
+    @GET
+    @Path("/applications/recent")
+    @Operation(summary = "Backoffice queue: newest applications fleet-wide, optionally one status (ADR-0230)")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_LENDING_OFFICER", "ROLE_CREDIT_RISK")
+    @Authorize(action = "lending.list", resource = "")
+    fun listRecentApplications(
+        @QueryParam("status") status: String?,
+        @QueryParam("limit") @DefaultValue("50") limit: Int,
+    ) = apply.listRecentApplications(status, limit)
+
     @POST
     @Path("/applications/{id}/disburse")
     @Operation(summary = "Disburse an approved application, booking the loan and its schedule")
@@ -156,6 +167,20 @@ class LendingResource(
     )
     @Authorize(action = "lending.list", resource = "")
     fun listLoans(@QueryParam("partyId") partyId: UUID) = servicing.listLoans(partyId)
+
+    @GET
+    @Path("/loans/active")
+    @Operation(summary = "Backoffice portfolio: active loans fleet-wide (ADR-0230)")
+    @RolesAllowed(
+        "ROLE_VIEWER",
+        "ROLE_OPERATOR",
+        "ROLE_LENDING_OFFICER",
+        "ROLE_CREDIT_RISK",
+        "ROLE_COMPLIANCE",
+        "ROLE_ADMIN",
+    )
+    @Authorize(action = "lending.list", resource = "")
+    fun listActiveLoans(@QueryParam("limit") @DefaultValue("50") limit: Int) = servicing.listActiveLoans(limit)
 
     @POST
     @Path("/loans/{id}/installments/{installmentId}/repay")
