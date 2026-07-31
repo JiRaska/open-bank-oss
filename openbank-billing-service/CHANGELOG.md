@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.7.0...billing-service-v0.8.0) (2026-07-31)
+
+
+### Features
+
+* **finops:** route all four product-catalog callers through the KEDA interceptor ([#2699](https://github.com/JiRaska/open-bank-oss/issues/2699)) ([f603f4d](https://github.com/JiRaska/open-bank-oss/commit/f603f4d7d590200bb03bf97d83e36880ac74c862))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.6.6...billing-service-v0.7.0) (2026-07-26)
 
 
