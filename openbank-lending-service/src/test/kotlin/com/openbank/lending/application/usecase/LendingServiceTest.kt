@@ -16,6 +16,7 @@ import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.PostingKind
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
+import com.openbank.lending.application.port.out.StarterCreditPolicy
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
@@ -30,6 +31,7 @@ import com.openbank.lending.domain.model.LoanProvisioningRecord
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
+import com.openbank.lending.infrastructure.adapter.NoOpCreditBureauPort
 import com.openbank.lending.infrastructure.adapter.NoOpOriginationWorkflowPort
 import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
 import com.openbank.lending.infrastructure.compliance.OriginationConfig
@@ -91,6 +93,12 @@ class LendingServiceTest {
         CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
         OriginationConfig(false),
         NoOpOriginationWorkflowPort(),
+        OriginationDecisionService(
+            NoOpCreditBureauPort(),
+            StarterCreditPolicy(),
+            CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
+            clock,
+        ),
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")
@@ -170,6 +178,63 @@ class LendingServiceTest {
     }
 
     @Test
+    fun `advance from ASSESSMENT runs the deterministic engine and records an APPROVE with band`() {
+        val app = proposedApplication().copy(
+            status = OriginationState.ASSESSMENT,
+            verifiedIncomeMonthly = eur("50000.00"),
+            ageYears = 35,
+            residency = "CZ",
+            jurisdiction = "CZ",
+            productType = "CONSUMER_CREDIT",
+            packVersion = 1,
+        )
+        val updateSlot: CapturingSlot<LoanApplication> = slot()
+        val evidenceSlot = mutableListOf<LendingOutboxMessage>()
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { applications.update(capture(updateSlot)) } answers { Uni.createFrom().item(updateSlot.captured) }
+        every { events.emit(capture(evidenceSlot)) } returns Uni.createFrom().item(Unit)
+
+        val result = service.advance(app.id, "officer-1").await().indefinitely()
+
+        assertThat(result.status).isEqualTo(OriginationState.DECISION_PENDING)
+        assertThat(result.decisionOutcome).isEqualTo("APPROVE")
+        assertThat(result.decisionPriceBand).isEqualTo("PRIME")
+        assertThat(result.decisionInputHash).hasSize(64)
+        assertThat(evidenceSlot.map { it.eventType }).contains("credit.decision.evaluated")
+    }
+
+    @Test
+    fun `advance from ASSESSMENT declines an unaffordable application (fail-closed floor)`() {
+        val app = proposedApplication().copy(
+            status = OriginationState.ASSESSMENT,
+            verifiedIncomeMonthly = eur("2000.00"),
+            ageYears = 35,
+            residency = "CZ",
+        )
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { applications.update(any()) } answers { Uni.createFrom().item(firstArg<LoanApplication>()) }
+
+        val result = service.advance(app.id, "officer-1").await().indefinitely()
+
+        assertThat(result.status).isEqualTo(OriginationState.DECLINED)
+        assertThat(result.decisionOutcome).isEqualTo("DECLINE")
+        assertThat(result.decisionReasons).contains("AFFORDABILITY_FAILED")
+    }
+
+    @Test
+    fun `advance from ASSESSMENT with a missing input refers, never silently approves`() {
+        val app = proposedApplication().copy(status = OriginationState.ASSESSMENT)
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { applications.update(any()) } answers { Uni.createFrom().item(firstArg<LoanApplication>()) }
+
+        val result = service.advance(app.id, "officer-1").await().indefinitely()
+
+        assertThat(result.status).isEqualTo(OriginationState.DECISION_PENDING)
+        assertThat(result.decisionOutcome).isEqualTo("REFER")
+        assertThat(result.decisionReasons).contains("INPUT_MISSING")
+    }
+
+    @Test
     fun `sandbox straight-through drives a fresh application to READY_TO_DISBURSE`() {
         val stp = LendingService(
             applications, loans, installments, collateral, ledger,
@@ -177,6 +242,12 @@ class LendingServiceTest {
             CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
             OriginationConfig(true),
             NoOpOriginationWorkflowPort(),
+            OriginationDecisionService(
+                NoOpCreditBureauPort(),
+                StarterCreditPolicy(),
+                CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
+                clock,
+            ),
         )
         val slot: CapturingSlot<LoanApplication> = slot()
         every { applications.save(capture(slot)) } answers { Uni.createFrom().item(slot.captured) }
