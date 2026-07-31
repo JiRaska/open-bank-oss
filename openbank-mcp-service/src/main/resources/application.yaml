@@ -51,6 +51,23 @@ quarkus:
     info-title: OpenBank MCP Server
     info-version: "1.0.0"
 
+  # ADR-0224 D2: the agent-session store (this service's first persistence).
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_mcp
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_mcp
+  flyway:
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
+
 # OPA PDP (ADR-0034). Phase 1: no sidecar deployed yet, so the default localhost:8181 fails closed
 # (every tools/call denied) until the gitops component ships the sidecar (deploy follow-up).
 opa:

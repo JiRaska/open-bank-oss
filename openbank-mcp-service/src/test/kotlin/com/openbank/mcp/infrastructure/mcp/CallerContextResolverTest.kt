@@ -3,6 +3,7 @@
 package com.openbank.mcp.infrastructure.mcp
 
 import com.openbank.mcp.TestJsonWebToken
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -15,7 +16,7 @@ import org.junit.jupiter.api.Test
 class CallerContextResolverTest {
 
     @Test
-    fun `resolves agent id and consent from an agent token`() {
+    fun `resolves agent id and consent from an agent token`(): Unit = runBlocking {
         val ctx = CallerContextResolver(
             TestJsonWebToken(mapOf("sub" to "agent:mcp-tpp-42", "consent_id" to "c-123")),
         ).resolveOrNull()
@@ -29,12 +30,12 @@ class CallerContextResolverTest {
     }
 
     @Test
-    fun `returns null when no token is present (anonymous, OIDC disabled)`() {
+    fun `returns null when no token is present (anonymous, OIDC disabled)`(): Unit = runBlocking {
         assertThat(CallerContextResolver(TestJsonWebToken()).resolveOrNull()).isNull()
     }
 
     @Test
-    fun `returns null when the subject is not an agent principal`() {
+    fun `returns null when the subject is not an agent principal`(): Unit = runBlocking {
         val ctx = CallerContextResolver(
             TestJsonWebToken(mapOf("sub" to "service-account-openbank-services")),
         ).resolveOrNull()
@@ -44,7 +45,9 @@ class CallerContextResolverTest {
     @Test
     fun `fails closed when an agent token carries no consent_id`() {
         assertThatThrownBy {
-            CallerContextResolver(TestJsonWebToken(mapOf("sub" to "agent:mcp-tpp-42"))).resolveOrNull()
+            runBlocking {
+                CallerContextResolver(TestJsonWebToken(mapOf("sub" to "agent:mcp-tpp-42"))).resolveOrNull()
+            }
         }.isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("consent_id")
     }
@@ -52,9 +55,11 @@ class CallerContextResolverTest {
     @Test
     fun `fails closed when consent_id is blank`() {
         assertThatThrownBy {
-            CallerContextResolver(
-                TestJsonWebToken(mapOf("sub" to "agent:mcp-tpp-42", "consent_id" to "  ")),
-            ).resolveOrNull()
+            runBlocking {
+                CallerContextResolver(
+                    TestJsonWebToken(mapOf("sub" to "agent:mcp-tpp-42", "consent_id" to "  ")),
+                ).resolveOrNull()
+            }
         }.isInstanceOf(IllegalStateException::class.java)
     }
 }

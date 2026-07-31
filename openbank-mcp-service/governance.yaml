@@ -1,13 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Per-service governance manifest (ADR-0071). Declarative, curatorial facts only.
 dataDomain: payments
-primaryDatastore: none
-# Owns no database, asserted explicitly (ADR-0071): no databaseName key is correct here.
-ownsNoDatabase: true
+primaryDatastore: PostgreSQL
+databaseName: openbank_mcp
 dataLineageRole: consumer
 dataClassification: confidential
-# Phase 1 holds no state (tools delegate to other services; proposals are a stub). When phase 2
-# adds a maker-checker proposal store, drop `ownsNoDatabase` and set
-# primaryDatastore/databaseName + a 13-month retention.
-retentionPolicy: not applicable
+# Phase 2 (ADR-0224 D2): the agent-session store made this service stateful — 13-month retention
+# for the staff session audit trail, matching the banking evidence norm.
+retentionPolicy: 13-months
 evidenceExported: false

@@ -24,6 +24,14 @@ dependencies {
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
+    // ADR-0224 D2: the agent-session store — this service's first persistence (governance.yaml's
+    // ownsNoDatabase note anticipated exactly this step). The reactive pg client is what creates
+    // the pool hibernate-reactive boots from — jdbc.postgresql alone is only the Flyway/driver leg.
+    implementation(libs.quarkus.hibernate.reactive.panache)
+    implementation(libs.quarkus.hibernate.reactive.panache.base)
+    implementation(libs.quarkus.reactive.pg.client)
+    implementation(libs.quarkus.flyway)
+    implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
@@ -42,6 +50,8 @@ dependencies {
     // (sub, consent_id) for McpAuditEventIT (ADR-0195 step 4), no real IdP round-trip.
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.quarkus.test.security.oidc)
+    // Session-store integration tests against a real Postgres (ADR-0224 D2).
+    testImplementation(libs.testcontainers.postgresql)
 }
 
 kover {

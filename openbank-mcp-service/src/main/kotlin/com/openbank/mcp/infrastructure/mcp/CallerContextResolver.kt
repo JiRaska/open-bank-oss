@@ -5,10 +5,13 @@
 package com.openbank.mcp.infrastructure.mcp
 
 import com.openbank.mcp.application.port.out.ConsentContext
+import com.openbank.mcp.infrastructure.persistence.AgentSessionRepository
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
+import java.time.Clock
+import java.time.Instant
 
 /**
  * Resolves the acting agent + presented PSD2 consent from the caller's validated OAuth 2.1 access
@@ -35,6 +38,8 @@ class CallerContextResolver @Inject constructor(
     private val jwt: JsonWebToken,
     @ConfigProperty(name = "mcp.obo.enabled", defaultValue = "false")
     private val oboEnabled: Boolean = false,
+    private val sessions: AgentSessionRepository? = null,
+    private val clock: Clock = Clock.systemUTC(),
 ) {
 
     /**
@@ -43,7 +48,7 @@ class CallerContextResolver @Inject constructor(
      * @throws IllegalStateException when an agent token is present but carries no `consent_id` — a
      *   malformed token must fail closed, never silently degrade to an unscoped read.
      */
-    fun resolveOrNull(): ConsentContext? {
+    suspend fun resolveOrNull(): ConsentContext? {
         val subject = jwt.subject ?: return null
         if (subject.startsWith(AGENT_PREFIX)) {
             val consentId = jwt.getClaim<String?>(CLAIM_CONSENT_ID)?.takeIf { it.isNotBlank() }
@@ -67,23 +72,43 @@ class CallerContextResolver @Inject constructor(
      * session-binding anchor), the MCP audience client in `aud`, and at least one bounded realm
      * role. The token carries no consent — consent-scoped tools fail closed downstream; the PDP
      * decides by realm roles exactly as for a REST call (ADR-0034).
+     *
+     * Suspend (never wrapped in runBlocking here): the endpoint awaits it inside its own flat
+     * runBlocking on the JAX-RS worker thread — no nested blocking bridge on the auth path.
      */
-    private fun resolveOboHuman(subject: String): ConsentContext? {
+    private suspend fun resolveOboHuman(subject: String): ConsentContext? {
         val azp = jwt.getClaim<String?>(CLAIM_AZP)?.takeIf { it.isNotBlank() } ?: return null
-        val sid = jwt.getClaim<String?>(CLAIM_SESSION_ID)?.takeIf { it.isNotBlank() } ?: return null
+        val jti = jwt.getClaim<String?>(CLAIM_JTI)?.takeIf { it.isNotBlank() } ?: return null
         if (MCP_AUDIENCE !in audience()) return null
         val roles = realmRoles()
         if (roles.isEmpty()) return null
+
+        // ADR-0224 D2: the token's `jti` must be bound to a live session of THIS subject (never
+        // the SSO `sid` — an exchange mints a fresh one, which is exactly why jti is the binding),
+        // and the effective roles are bounded by BOTH the token and the session ceiling. A missing
+        // store row or a mismatch is anonymous — revocation takes effect immediately.
+        val session = sessions?.findActiveByJti(jti, Instant.now(clock)) ?: return null
+        if (session.subject != subject) return null
+        val ceiling = parseCeiling(session.roleCeiling)
+        val bounded = roles.filter { it in ceiling }
+        if (bounded.isEmpty()) return null
+
         return ConsentContext(
             agentId = subject,
             consentId = "",
             grantedAccounts = emptyList(),
             actChain = listOf(azp) + actChain(jwt.getClaim(CLAIM_ACT)),
-            sessionId = sid,
+            sessionId = jti,
             principalType = "HUMAN",
-            roles = roles,
+            roles = bounded,
         )
     }
+
+    private fun parseCeiling(roleCeiling: String): Set<String> = roleCeiling.removePrefix("[").removeSuffix("]")
+        .split(",")
+        .map { it.trim().removeSurrounding("\"") }
+        .filter { it.isNotBlank() }
+        .toSet()
 
     /** The `aud` claim is a single string or an array depending on the grant — accept both. */
     private fun audience(): List<String> = when (val aud = jwt.getClaim<Any?>(CLAIM_AUD)) {
@@ -117,6 +142,7 @@ class CallerContextResolver @Inject constructor(
         const val CLAIM_ACT = "act"
         const val CLAIM_SESSION_ID = "sid"
         const val CLAIM_AZP = "azp"
+        const val CLAIM_JTI = "jti"
         const val CLAIM_AUD = "aud"
         const val CLAIM_REALM_ACCESS = "realm_access"
         const val ROLE_PREFIX = "ROLE_"

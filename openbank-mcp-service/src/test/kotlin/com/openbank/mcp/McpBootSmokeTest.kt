@@ -2,6 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
 package com.openbank.mcp
 
+import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.Test
  * here — it fails closed without an OPA sidecar, which is the intended posture.
  */
 @QuarkusTest
+@QuarkusTestResource(PostgresTestResource::class)
 class McpBootSmokeTest {
 
     @Test
