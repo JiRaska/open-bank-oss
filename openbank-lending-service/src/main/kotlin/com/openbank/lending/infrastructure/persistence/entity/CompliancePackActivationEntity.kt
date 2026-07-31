@@ -4,6 +4,7 @@
 
 package com.openbank.lending.infrastructure.persistence.entity
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.governance.ProposalState
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import jakarta.persistence.Column
@@ -21,7 +22,7 @@ import java.util.UUID
 class CompliancePackActivationEntity : PanacheEntityBase() {
     @Id
     @Column(columnDefinition = "uuid")
-    var id: UUID = UUID.randomUUID()
+    var id: UUID = Ids.newId()
 
     @Column(name = "state", length = 16)
     @Enumerated(EnumType.STRING)

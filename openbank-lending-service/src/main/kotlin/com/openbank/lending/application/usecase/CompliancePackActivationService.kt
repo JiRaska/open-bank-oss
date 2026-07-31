@@ -50,7 +50,7 @@ class CompliancePackActivationService(
         val compiled = CompliancePackCompiler.compile(CompliancePackParser.fromJson(packJson))
         val now = OffsetDateTime.now(clock)
         val entity = CompliancePackActivationEntity().apply {
-            id = UUID.randomUUID()
+            id = com.openbank.libs.domain.identifiers.Ids.newId()
             state = ProposalState.PROPOSED
             jurisdiction = compiled.pack.jurisdiction
             productType = compiled.pack.productType.name
