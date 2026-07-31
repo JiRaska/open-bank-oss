@@ -1,0 +1,54 @@
+{
+  "jurisdiction": "CZ",
+  "productType": "CONSUMER_CREDIT",
+  "version": 1,
+  "effectiveFrom": "2026-08-01",
+  "coolingOffDays": 14,
+  "aprDisclosure": { "label": "RPSN", "locale": "cs-CZ" },
+  "earlyRepaymentCompensationCap": "0.01",
+  "requiredSteps": ["DOCS_REQUIRED"],
+  "terminationRules": {
+    "noticePeriodDays": 30,
+    "permittedGrounds": ["DEFAULT_DPD", "MATERIAL_BREACH", "INSOLVENCY", "FRAUD"],
+    "defaultDpdThreshold": 90
+  },
+  "disclosures": [
+    {
+      "id": "predsmluvni-informace",
+      "templateKey": "cz/predsmluvni-informace-v1",
+      "languages": ["cs"],
+      "requiresAcknowledgement": true,
+      "stage": "PRE_CONTRACTUAL"
+    },
+    {
+      "id": "smlouva-o-uveru",
+      "templateKey": "cz/smlouva-o-uveru-v1",
+      "languages": ["cs"],
+      "requiresAcknowledgement": true,
+      "stage": "CONTRACTUAL"
+    },
+    {
+      "id": "vypoved-smlouvy",
+      "templateKey": "cz/vypoved-smlouvy-v1",
+      "languages": ["cs"],
+      "requiresAcknowledgement": false,
+      "stage": "PRE_TERMINATION"
+    }
+  ],
+  "mandatoryChecks": [
+    {
+      "id": "cz-plnoletost",
+      "attribute": "AGE_YEARS",
+      "operator": "GTE",
+      "threshold": 18,
+      "detail": "zletilost jako zákonná podmínka úvěrové smlouvy"
+    },
+    {
+      "id": "cz-dsti-cap",
+      "attribute": "DSTI",
+      "operator": "LTE",
+      "threshold": 0.45,
+      "detail": "poměr měsíčních splátek k čistému měsíčnímu příjmu (odpovědné úvěrování, EBA/GL/2020/06)"
+    }
+  ]
+}
