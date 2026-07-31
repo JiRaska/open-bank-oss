@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/JiRaska/open-bank-oss/compare/v0.3.3...v0.3.4) (2026-07-31)
+
+
+### Bug Fixes
+
+* **campaign:** evaluate segments against the silver layer that exists ([#2896](https://github.com/JiRaska/open-bank-oss/issues/2896)) ([1916342](https://github.com/JiRaska/open-bank-oss/commit/19163420e6c8121a365ddd2231bb766e4060f28b))
+
 ## [0.3.3](https://github.com/JiRaska/open-bank-oss/compare/v0.3.2...v0.3.3) (2026-07-31)
 
 
