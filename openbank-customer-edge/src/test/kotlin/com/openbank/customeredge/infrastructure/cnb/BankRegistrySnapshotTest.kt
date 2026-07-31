@@ -29,20 +29,20 @@ class BankRegistrySnapshotTest {
         val c = client()
         c.load()
 
-        assertThat(c.getBanks())
+        assertThat(c.banks)
             .describedAs("the snapshot is the only source of bank codes — an empty list is a broken deploy")
             .isNotEmpty
         assertThat(c.snapshotDate)
             .describedAs("an undated snapshot cannot be reasoned about, so it is not allowed to exist")
             .isBefore(LocalDate.of(2100, 1, 1))
-        assertThat(c.getBanks().map { it.code })
+        assertThat(c.banks.map { it.code })
             .describedAs("served in code order, so the endpoint's output is stable across restarts")
             .isSorted
     }
 
     @Test
     fun `every entry has a usable 4-digit code and a name`() {
-        val banks = client().apply { load() }.getBanks()
+        val banks = client().apply { load() }.banks
         assertThat(banks).allSatisfy {
             assertThat(it.code).matches("\\d{4}")
             assertThat(it.name).isNotBlank

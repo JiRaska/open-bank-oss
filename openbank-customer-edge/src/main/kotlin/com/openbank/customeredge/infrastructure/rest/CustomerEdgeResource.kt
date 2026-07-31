@@ -208,7 +208,7 @@ class CustomerEdgeResource(
     @Path("/banks")
     @PermitAll
     @Blocking
-    fun listBanks(): Response = Response.ok(banksClient.getBanks()).build()
+    fun listBanks(): Response = Response.ok(banksClient.banks).build()
 
     // --- Accounts ---
 

@@ -59,15 +59,18 @@ class CnbBanksClient {
     private lateinit var loadedBanks: List<BankDto>
     private lateinit var loadedSnapshotDate: LocalDate
 
-    /** The committed snapshot, ordered by bank code. Never empty — startup fails first. */
+    /**
+     * The committed snapshot, ordered by bank code. Never empty — startup fails first.
+     *
+     * This property IS the accessor: Kotlin compiles it to `getBanks()`, so a separate
+     * `fun getBanks()` alongside it is a JVM signature clash, not a convenience.
+     */
     val banks: List<BankDto> get() = loadedBanks
 
     /** The day the committed list was taken from ČNB. */
     val snapshotDate: LocalDate get() = loadedSnapshotDate
 
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") e: StartupEvent) = load()
-
-    fun getBanks(): List<BankDto> = banks
 
     /**
      * Loads the snapshot, and **throws** if it cannot. Deliberate: the file is now the only source,
