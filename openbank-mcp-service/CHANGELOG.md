@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.13.0...mcp-service-v0.14.0) (2026-07-31)
+
+
+### Features
+
+* **mcp:** agent sessions become stateful — store, lifecycle, live OBO validation (ADR-0224 D2) ([#2843](https://github.com/JiRaska/open-bank-oss/issues/2843)) ([45b7d87](https://github.com/JiRaska/open-bank-oss/commit/45b7d870a752fbd9a3b590b10a5f27f49715d4fb))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.12.0...mcp-service-v0.13.0) (2026-07-31)
 
 
