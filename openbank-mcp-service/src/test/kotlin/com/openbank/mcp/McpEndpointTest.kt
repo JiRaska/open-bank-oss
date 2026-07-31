@@ -172,6 +172,36 @@ class McpEndpointTest {
     }
 
     @Test
+    fun `a staff token matches its session by preferred_username when sub is a uuid (E2E #2750)`() {
+        val pdp = RecordingPdp()
+        val kcShaped = staffClaims + mapOf(
+            "sub" to "ff90e87e-e7fc-4768-9e41-8b0474deb78d",
+            "preferred_username" to "jane.operator",
+        )
+        endpoint(pdp, jwt = TestJsonWebToken(kcShaped), oboEnabled = true).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        val principal = pdp.queries.single().principal
+        assertThat(principal.type).isEqualTo("HUMAN")
+        assertThat(principal.id).isEqualTo("jane.operator")
+    }
+
+    @Test
+    fun `a staff token whose preferred_username owns no session is anonymous`() {
+        val kcShaped = staffClaims + mapOf(
+            "sub" to "ff90e87e-e7fc-4768-9e41-8b0474deb78d",
+            "preferred_username" to "mallory.operator",
+        )
+        val resp = body(
+            endpoint(allowAll(), jwt = TestJsonWebToken(kcShaped), oboEnabled = true).handle(
+                rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+            ).entity,
+        )
+        assertThat(resp.path("result").path("content").first().path("text").asText())
+            .isEqualTo("Authorization unavailable")
+    }
+
+    @Test
     fun `a staff token missing any of the four marks is anonymous even with the flag on`() {
         val variants = listOf(
             staffClaims - "azp",

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sepa-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "1dd7dd729fb0c1bd"
+    openbank.tech/policy-checksum: "25692f4784465c8a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -3590,6 +3590,14 @@ data:
             - lending.read
             - notification.list
             - notification.read
+            # ADR-0224 D3 (E2E #2750): the staff OBO channel's MCP read tools — the capabilities
+            # McpToolRegistry maps list_accounts/get_balance/list_transactions/list_consents to.
+            # Without these the human tools/list fails closed to empty (query.marketing.readonly and
+            # the propose.payment write stay ungranted on purpose).
+            - query.account.readonly
+            - query.balance.readonly
+            - query.consent.readonly
+            - query.transaction.readonly
             - sanctions.list
             - sanctions.read
             - sdd.list
