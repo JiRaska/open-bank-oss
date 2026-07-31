@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.66.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.65.0...admin-ui-v0.66.0) (2026-07-31)
+
+
+### Features
+
+* **admin-ui:** EntityChip navigation standard — party on account detail, related accounts on party detail (ADR-0231 D3) ([#2789](https://github.com/JiRaska/open-bank-oss/issues/2789)) ([d8e1201](https://github.com/JiRaska/open-bank-oss/commit/d8e1201d15c0daff15c243f1e68e634428433e15))
+
 ## [0.65.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.64.0...admin-ui-v0.65.0) (2026-07-31)
 
 
