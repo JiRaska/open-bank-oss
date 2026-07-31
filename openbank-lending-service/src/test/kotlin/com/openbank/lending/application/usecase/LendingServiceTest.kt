@@ -31,6 +31,7 @@ import com.openbank.lending.domain.model.LoanProvisioningRecord
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
+import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
 import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
@@ -38,6 +39,7 @@ import com.openbank.libs.domain.money.Money
 import com.openbank.libs.lending.AmortizationMethod
 import com.openbank.libs.lending.EclInputs
 import com.openbank.libs.lending.Ifrs9Stage
+import com.openbank.libs.lending.compliance.CompliancePackRegistry
 import io.mockk.CapturingSlot
 import io.mockk.every
 import io.mockk.mockk
@@ -79,6 +81,7 @@ class LendingServiceTest {
         events,
         clock,
         provisioning,
+        CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")

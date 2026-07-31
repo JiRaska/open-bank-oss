@@ -25,6 +25,7 @@ import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.WriteOffRequest
+import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.domain.money.Money
@@ -33,6 +34,7 @@ import com.openbank.libs.lending.DelinquencyBucket
 import com.openbank.libs.lending.EclHorizon
 import com.openbank.libs.lending.EclInputs
 import com.openbank.libs.lending.Ifrs9Stage
+import com.openbank.libs.lending.compliance.CompliancePackRegistry
 import io.mockk.CapturingSlot
 import io.mockk.every
 import io.mockk.mockk
@@ -79,6 +81,7 @@ class LendingServiceEdgeCasesTest {
         events,
         clock,
         provisioning,
+        CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
     )
 
     private val partyId = UUID.fromString("22222222-2222-2222-2222-222222222222")

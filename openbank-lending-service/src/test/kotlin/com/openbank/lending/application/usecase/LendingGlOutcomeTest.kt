@@ -22,10 +22,12 @@ import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.lending.infrastructure.client.LendingGlAccounts
 import com.openbank.lending.infrastructure.client.LendingJournalFactory
+import com.openbank.lending.infrastructure.compliance.CompliancePackGuard
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.lending.AmortizationMethod
+import com.openbank.libs.lending.compliance.CompliancePackRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -71,6 +73,7 @@ class LendingGlOutcomeTest {
     private val service = LendingService(
         applications, loans, installments, collateral, ledger,
         valuation, riskParameters, events, clock, provisioning,
+        CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")

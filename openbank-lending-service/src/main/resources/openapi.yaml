@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.5.0
+  version: 1.6.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -384,6 +384,75 @@ paths:
                     nullable: true
         '404':
           description: No pending approval with that id
+  /api/v1/lending/compliance-packs/proposals:
+    post:
+      tags: [Lending]
+      operationId: proposeCompliancePack
+      summary: Propose a compliance pack for four-eyes activation (maker, ROLE_COMPLIANCE)
+      description: >-
+        Strict, fail-closed pack decoding (ADR-0212): an unknown key, enum value or type rejects the
+        whole proposal. The pack activates only after a DIFFERENT compliance principal approves it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '201':
+          description: Proposal registered, awaiting a checker
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/compliance-packs/proposals/{id}/decide:
+    post:
+      tags: [Lending]
+      operationId: decideCompliancePack
+      summary: Approve or reject a pack activation (checker, must differ from maker)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve: { type: boolean }
+                reason: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Decision recorded; an approved pack is active in-memory immediately
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: Four-eyes violation (maker equals checker) or the proposal is not decidable
+  /api/v1/lending/compliance-packs/proposals/pending:
+    get:
+      tags: [Lending]
+      operationId: listPendingCompliancePacks
+      summary: List pack proposals awaiting a checker
+      responses:
+        '200':
+          description: Pending proposals, oldest first
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/compliance-packs/active:
+    get:
+      tags: [Lending]
+      operationId: listActiveCompliancePacks
+      summary: List packs currently active in the origination guard
+      responses:
+        '200':
+          description: Active packs with content hashes
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
 components:
   securitySchemes:
@@ -452,6 +521,18 @@ components:
           enum: [ANNUITY, EQUAL_PRINCIPAL, BULLET]
           default: ANNUITY
         firstDueDate: { type: string, format: date }
+        jurisdiction:
+          type: string
+          nullable: true
+          description: >-
+            Origination jurisdiction (e.g. CZ). Required when compliance-pack enforcement is on
+            (ADR-0212 D2): without an active pack for (jurisdiction, productType) the request is
+            refused fail-closed.
+        productType:
+          type: string
+          nullable: true
+          enum: [CONSUMER_CREDIT, MORTGAGE, OVERDRAFT, SME_CREDIT, null]
+          description: Credit product type resolved against the compliance pack registry (ADR-0212).
     DecisionRequest:
       type: object
       required: [approve]

@@ -229,8 +229,33 @@ an additional store; not implemented in this PR. (The collateral decision itself
 ADR-0155 `PendingApproval` wrapper, IS durably recorded in Postgres via `Collateral.decidedBy`/
 `decidedAt` — this residual risk is scoped to the Redis-backed ADR-0155 layer only.)
 
-## 8. Change log
+## 8. Compliance pack activation (ADR-0212) — STRIDE supplement
 
+`POST /api/v1/lending/compliance-packs/proposals` + `/proposals/{id}/decide` put the legal rule
+set of every origination under a runtime four-eyes gate: a compliance maker proposes a pack, a
+DIFFERENT compliance principal activates it. The pack the origination guard (fail-closed,
+ADR-0212 D2, behind `lending.compliance.enforce-pack`) refuses or accepts loans by is therefore
+not a deployable artifact a single developer or a CI job can change — it is data that requires
+two authenticated principals to alter.
+
+| Threat | Mitigation |
+|---|---|
+| Tampering — one actor weakens a jurisdiction's rules (affordability floor, cooling-off, termination caps) | MakerChecker four-eyes in code (maker ≠ checker, `MakerCheckerViolation`); activated versions immutable (re-activation refused); strict closed-schema parser + ~15 compile-time invariants reject malformed or unlawful packs before any human sees them |
+| Information disclosure — pack contents leak | Packs are reference data, not secrets; read endpoints role-gated (`ROLE_COMPLIANCE`/`ROLE_CREDIT_RISK`/`ROLE_LENDING_OFFICER`) |
+| Repudiation — "who activated this rule set?" | Durable Postgres record per activation (`compliance_pack_activation`: maker, checker, reason, timestamps) + canonical SHA-256 `content_hash` pinned into the audit evidence (ADR-0214); unlike the Redis-backed ADR-0155 layer this trail is permanent |
+| DoS — boot bricked by a corrupt activation row | Deliberate fail-loud: boot refuses to start over a corrupt activation rather than originate unprotected; operator remediation is to fix the row (the in-memory registry cannot silently run with a partial rule set) |
+| Elevation of privilege — maker self-approves | Server-side identity from the JWT subject (never request body); segregation enforced twice: `Proposal.approve` and registry re-assertion |
+
+**Residual risk:** pack enforcement ships behind the bootstrap flag (default `false`) until the
+CZ reference pack is seeded and activated — the guard cannot protect origination while off.
+Tracked as the named bootstrap follow-up (ADR-0212 D4).
+
+## 9. Change log
+
+- **2026-07-30** — Compliance pack four-eyes activation (ADR-0212 slice 1): `compliance_pack_activation`
+  table (V7), boot rehydration of the in-memory registry, admin propose/decide endpoints, fail-closed
+  origination guard behind `lending.compliance.enforce-pack` (default off — bootstrap). Threat
+  supplement in §8.
 - **2026-07-22** — Deploy an in-namespace Redis backing the four-eyes `ApprovalStore` (issue #1354).
   The CDI bean already resolved (`ApprovalConfig` @Produces `RedisApprovalStore`), so
   `AuthorizeInterceptor`'s "no store → log + proceed" branch was never taken for lending; the store

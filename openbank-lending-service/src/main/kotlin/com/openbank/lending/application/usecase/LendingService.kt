@@ -85,6 +85,7 @@ class LendingService(
     private val events: LoanEventEmitter,
     private val clock: Clock,
     private val provisioning: ProvisioningRepository,
+    private val complianceGuard: com.openbank.lending.infrastructure.compliance.CompliancePackGuard,
 ) : ApplyForLoanUseCase,
     DisburseLoanUseCase,
     ServicingUseCase,
@@ -98,6 +99,7 @@ class LendingService(
     // --- Origination --------------------------------------------------------------------------------
 
     override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> {
+        complianceGuard.checkOriginationAllowed(request.jurisdiction, request.productType)
         require(request.requestedAmount.isPositive()) { "Requested amount must be positive" }
         require(request.termPeriods > 0) { "Term must be at least one period" }
         require(request.nominalAnnualRate.signum() >= 0) { "Nominal rate cannot be negative" }
