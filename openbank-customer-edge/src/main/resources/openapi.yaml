@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.23.0
+  version: 1.24.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1625,6 +1625,15 @@ components:
             How the movement was instructed (ADR-0103) — orthogonal to rail. One of the
             InstructionType enum values (ONE_OFF, STANDING_ORDER, DIRECT_DEBIT, FUTURE_DATED,
             SYSTEM, UNKNOWN). Null on legacy rows not yet stamped.
+        counterpartyIban:
+          type: string
+          description: >
+            IBAN of the other side of this transaction, resolved from its account id. Absent —
+            not empty — when it cannot be resolved: a counterparty at another bank has no account
+            here, and an account the caller may not read stays unreadable. Absent means "we could
+            not say", so a client must not render or pre-fill anything from it. Czech clients
+            should display and pre-fill the BBAN form (prefix-number/bankcode) derived from this;
+            the IBAN is carried because it converts to BBAN without loss and back only with it.
         merchantCategory:
           type: string
           nullable: true
