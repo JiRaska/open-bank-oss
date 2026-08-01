@@ -4,9 +4,11 @@ WORKDIR /build
 # The root settings.gradle.kts is the entry point for every openbank-* module and it
 # `includeBuild("build-logic")` for the `openbank.quarkus-service` convention plugin,
 # so the wrapper, the root build files and build-logic all have to be in the context —
-# not just the service directory.
+# not just the service directory. gradle.properties matters too: it carries
+# org.gradle.dependency.verification=lenient, so omitting it silently builds the
+# image under Gradle's default STRICT verification - different rules than the repo.
 COPY gradle /build/gradle
-COPY gradlew build.gradle.kts settings.gradle.kts /build/
+COPY gradlew gradle.properties build.gradle.kts settings.gradle.kts /build/
 COPY build-logic /build/build-logic
 # ADR-0122 split the shared code into sibling top-level modules; `COPY openbank-libs`
 # alone leaves `project(":openbank-libs-domain")` etc. unresolvable at configuration time.
