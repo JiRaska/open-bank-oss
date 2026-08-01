@@ -196,6 +196,17 @@ spec:
             - api
             - --api-url=http://pyrra-kubernetes.observability.svc:9444
             - --prometheus-url=http://kube-prometheus-stack-prometheus.observability.svc:9090
+            # Served as a sub-path of the console behind the identity-aware edge
+            # gate (ADR-0234); Pyrra keeps no Ingress of its own. --route-prefix
+            # is Pyrra's own flag for exactly this (`pyrra api --help`), so the
+            # edge passes the prefix through unrewritten and Pyrra builds its
+            # asset and API URLs from it.
+            #
+            # --api-url and --prometheus-url are IN-CLUSTER and must stay that
+            # way: they are the server-side legs, and pointing either at the
+            # public host would send them through the gate, which has no session
+            # to present. Only the browser leg goes via admin.open-bank.tech.
+            - --route-prefix=/tools/pyrra
           ports:
             - name: http
               containerPort: 9099

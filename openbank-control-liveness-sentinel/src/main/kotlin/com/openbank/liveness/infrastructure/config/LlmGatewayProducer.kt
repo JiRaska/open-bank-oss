@@ -7,6 +7,7 @@ package com.openbank.liveness.infrastructure.config
 
 import com.openbank.libs.llm.LlmGatewayPort
 import com.openbank.libs.llm.OpenAiCompatibleLlmGatewayClient
+import com.openbank.libs.observability.LlmCallMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Produces
 import org.eclipse.microprofile.config.ConfigProvider
@@ -27,7 +28,7 @@ class LlmGatewayProducer {
 
     @Produces
     @ApplicationScoped
-    fun llmGateway(config: LivenessSentinelConfig): LlmGatewayPort {
+    fun llmGateway(config: LivenessSentinelConfig, metrics: LlmCallMetrics): LlmGatewayPort {
         val apiKey = ConfigProvider.getConfig()
             .getOptionalValue("liveness.model.api-key", String::class.java)
             .orElse("")
@@ -35,6 +36,7 @@ class LlmGatewayProducer {
             baseUrl = config.modelEndpoint(),
             model = config.modelId(),
             apiKey = apiKey,
+            metrics = metrics,
         )
     }
 }

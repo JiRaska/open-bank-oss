@@ -26,7 +26,7 @@ spec:
         # would leave agent-service's repointed call failing "model not found" with a green,
         # in-sync ArgoCD — the same silent-degradation shape as an `optional: true` secret ref.
         # BUMP THIS whenever litellm-config.yaml changes; that is what rolls the pod.
-        openbank.tech/litellm-config-revision: "2"
+        openbank.tech/litellm-config-revision: "4"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -69,6 +69,21 @@ spec:
                   name: litellm-secrets
                   key: LITELLM_MASTER_KEY
                   optional: true
+            # DATABASE_URL / LITELLM_SALT_KEY are DELIBERATELY NOT SET YET (#3065 -> this PR).
+            # Wiring them made the new ReplicaSet CrashLoopBackOff for 12h / 180 restarts while the
+            # old one kept serving — nothing went red, the Service still answered, ArgoCD said
+            # Synced. Three separate causes, each only visible after the previous one was fixed:
+            #   1. this pod is Egress-deny-by-default and 5432 was not on the allow-list
+            #      (fixed in networkpolicy-litellm-egress.yaml, verified TCP_5432_OPEN);
+            #   2. no writable HOME, so Prisma could not create /.cache/prisma-python/binaries
+            #      under uid 1000 — the local docker check missed this because that container ran
+            #      as root;
+            #   3. even past that, the image DOWNLOADS the Prisma CLI and a node runtime at every
+            #      start and is OOMKilled at the 512Mi limit.
+            # (3) is the one that makes this more than a config tweak: it puts an internet download
+            # on the boot path of the very pod that exists to BE the egress choke point (ADR-0175).
+            # That trade needs its own reviewed change, so the DB stays provisioned and unused
+            # rather than half-wired. postgres.yaml and seed-litellm-virtual-keys.sh are kept as-is.
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false

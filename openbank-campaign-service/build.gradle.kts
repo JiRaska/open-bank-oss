@@ -49,4 +49,8 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    // CampaignRestContractIT drives the real HTTP surface against real Postgres/Redis (#3133).
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.junit)
+    testImplementation(libs.testcontainers.postgresql)
 }

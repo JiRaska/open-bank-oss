@@ -33,7 +33,31 @@ data class StepRequest(
     val delaySeconds: Long = 0,
 )
 
-data class ApprovalRequest(val approver: String)
+/**
+ * The old activate body. Retained as a type only so the OpenAPI schema can keep documenting it as
+ * accepted-and-ignored: a client still posting `{"approver": "..."}` should know it is harmless.
+ *
+ * `activate` declares **no entity parameter at all**, deliberately. Keeping one — even nullable,
+ * even with `@Consumes(WILDCARD)` — makes RESTEasy look for a reader that can turn the request's
+ * media type into this class, so a caller sending `text/plain` (RestAssured's default for a
+ * bodyless POST) gets 415 while one sending no Content-Type at all (curl's default) succeeds. A
+ * method with no entity parameter never reads the body, so every shape works: none, empty, or
+ * legacy JSON. That asymmetry is why the first fix passed a manual curl check and still failed
+ * CampaignRestContractIT.
+ *
+ * The URL major is deliberately not spelled out here: the api-contract gate derives "the newest
+ * served URL major" by matching that text in the source, so a comment explaining the rule is read
+ * as an endpoint implementing it, and the gate fails on prose (#3119).
+ */
+data class ApprovalRequest(val approver: String? = null)
+
+/**
+ * The authenticated caller — recorded as the maker on create and as the checker on activate.
+ *
+ * A top-level extension rather than a method: `CampaignResource` sits exactly at detekt's
+ * `TooManyFunctions` threshold of 11, which fires AT the limit, so a private helper costs the gate.
+ */
+private fun JsonWebToken.principalName(): String = name ?: subject ?: "unknown"
 
 /**
  * Operator API for the campaign first slice (ADR-0200). Activation is four-eyes gated by the
@@ -57,7 +81,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
     @POST
     @Authorize(action = "campaign.create", resource = "#request.name")
     suspend fun create(request: CreateCampaignRequest): Response {
-        val createdBy = jwt.name ?: jwt.subject ?: "unknown"
+        val createdBy = jwt.principalName()
         val steps = request.steps.map {
             CampaignStep(it.order, it.template, Channel.EMAIL, it.variables, it.delaySeconds)
         }
@@ -78,14 +102,20 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
         .getOrElse { Response.status(Response.Status.CONFLICT).entity(mapOf("error" to it.message)).build() }
 
     /**
-     * ADR-0200 D5: `campaign.activate` is a rules.yaml four_eyes action — this endpoint only runs
-     * after the approval flow completes; the domain re-asserts maker != checker.
+     * ADR-0200 D5 / ADR-0221 D2: `campaign.activate` is a rules.yaml four_eyes action, and the
+     * domain re-asserts maker != checker.
+     *
+     * The approver is the authenticated caller — it used to arrive in the request body, which made
+     * the maker/checker check compare a stored field against a string the same caller supplied.
+     * One operator could create a campaign and activate it by sending any other name (#3051). Taken
+     * from the token, `approver != createdBy` is a comparison the caller does not control both
+     * sides of, which is the only version of that check worth having.
      */
     @POST
     @Path("/{id}/activate")
     @Authorize(action = "campaign.activate", resource = "#id")
-    suspend fun activate(@PathParam("id") id: UUID, request: ApprovalRequest): Response =
-        runCatching { Response.ok(service.activate(id, request.approver)).build() }
+    suspend fun activate(@PathParam("id") id: UUID): Response =
+        runCatching { Response.ok(service.activate(id, jwt.principalName())).build() }
             .getOrElse { Response.status(Response.Status.CONFLICT).entity(mapOf("error" to it.message)).build() }
 
     @POST
