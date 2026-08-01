@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/v0.7.0...v0.7.1) (2026-08-01)
+
+
+### Bug Fixes
+
+* **campaign:** activate answered 415 to every caller that sent no body ([#3137](https://github.com/JiRaska/open-bank-oss/issues/3137)) ([3abc53e](https://github.com/JiRaska/open-bank-oss/commit/3abc53e84e3f6b732f9fa228e2be6ff79c13da19))
+
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/v0.6.0...v0.7.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** campaign authoring in the console, with the four-eyes gate intact ([#3110](https://github.com/JiRaska/open-bank-oss/issues/3110)) ([4e071db](https://github.com/JiRaska/open-bank-oss/commit/4e071db22b18bb05dd40221ac90f3425fcfc5b38))
+
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/v0.5.0...v0.6.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** page and filter the send log instead of reading it whole ([#3111](https://github.com/JiRaska/open-bank-oss/issues/3111)) ([da87baa](https://github.com/JiRaska/open-bank-oss/commit/da87baad0c7d43eafe282a1777f11093a2ddc74a))
+
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/v0.4.2...v0.5.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** make the segment catalogue code-defined and visible to marketers ([#3055](https://github.com/JiRaska/open-bank-oss/issues/3055)) ([baa7b6c](https://github.com/JiRaska/open-bank-oss/commit/baa7b6c8729a47eefbf359a0c64cb94d95742dd5))
+
+## [0.4.2](https://github.com/JiRaska/open-bank-oss/compare/v0.4.1...v0.4.2) (2026-08-01)
+
+
+### Bug Fixes
+
+* **campaign:** start the journey before persisting the enrolment, and keep a bad party local ([#2978](https://github.com/JiRaska/open-bank-oss/issues/2978)) ([ec841cf](https://github.com/JiRaska/open-bank-oss/commit/ec841cf57ba06227e9ad0b333b2b2910c14ebed9)), closes [#2953](https://github.com/JiRaska/open-bank-oss/issues/2953)
+
+## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/v0.4.0...v0.4.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **campaign:** make the consent-event consumer suspend so revocation can reach the DB ([#2973](https://github.com/JiRaska/open-bank-oss/issues/2973)) ([bc9763c](https://github.com/JiRaska/open-bank-oss/commit/bc9763cb7cfba87025f175a8cb402215c01197ca))
+
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/v0.3.7...v0.4.0) (2026-07-31)
+
+
+### Features
+
+* **campaign:** expose the send log so suppressions are visible outside psql ([#2972](https://github.com/JiRaska/open-bank-oss/issues/2972)) ([91e9b2c](https://github.com/JiRaska/open-bank-oss/commit/91e9b2c51303204674412456f2d03791fe4364b6))
+
 ## [0.3.7](https://github.com/JiRaska/open-bank-oss/compare/v0.3.6...v0.3.7) (2026-07-31)
 
 

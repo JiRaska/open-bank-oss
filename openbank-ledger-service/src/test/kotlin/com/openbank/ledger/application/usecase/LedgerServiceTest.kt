@@ -17,6 +17,7 @@ import com.openbank.ledger.application.port.`in`.ReverseJournalCommand
 import com.openbank.ledger.application.port.out.GlAccountRepository
 import com.openbank.ledger.application.port.out.JournalRepository
 import com.openbank.ledger.application.port.out.YearCloseRepository
+import com.openbank.ledger.domain.model.DayLockDecision
 import com.openbank.ledger.domain.model.GlAccount
 import com.openbank.ledger.domain.model.GlAccountType
 import com.openbank.ledger.domain.model.JournalEntry
@@ -30,6 +31,7 @@ import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
@@ -40,8 +42,10 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.UUID
 
 class LedgerServiceTest {
@@ -50,7 +54,14 @@ class LedgerServiceTest {
     private lateinit var glAccountRepository: GlAccountRepository
     private lateinit var metrics: DomainMetrics
     private lateinit var yearCloseRepository: YearCloseRepository
+    private lateinit var accountingDayLock: AccountingDayLock
     private lateinit var service: LedgerService
+
+    // A fixed clock so every emitted timestamp is deterministic (ADR-0100 Layer 1). Since ADR-0207
+    // this is the ONLY clock LedgerService has: it no longer builds Clock.system(Europe/Prague)
+    // internally, so a test can no longer be green against a service that disagrees with itself
+    // about what day it is.
+    private val clock = Clock.fixed(Instant.parse("2026-07-31T09:00:00Z"), ZoneOffset.UTC)
 
     private val debitAccountId = UUID.fromString("a0000000-0000-0000-0000-000000000001")
     private val creditAccountId = UUID.fromString("a0000000-0000-0000-0000-000000000002")
@@ -81,12 +92,27 @@ class LedgerServiceTest {
         glAccountRepository = mockk()
         metrics = mockk(relaxed = true)
         yearCloseRepository = mockk()
-        service = LedgerService(journalRepository, glAccountRepository, jsonMapper, metrics, yearCloseRepository)
+        accountingDayLock = mockk(relaxed = true)
+        service = LedgerService(
+            journalRepository,
+            glAccountRepository,
+            jsonMapper,
+            metrics,
+            yearCloseRepository,
+            accountingDayLock,
+            clock,
+        )
 
         // Default: idempotency miss + persistence echoes the entry back; the fiscal period is open.
         coEvery { journalRepository.findByIdempotencyKey(any()) } returns null
         coEvery { journalRepository.save(any(), any(), any()) } answers { firstArg() }
         coEvery { yearCloseRepository.isFiscalYearAttested(any()) } returns false
+
+        // Day lock neutral by default (ADR-0207): shadow mode, no day rows — these tests are about
+        // the posting/reversal behaviour, and AccountingDayLockTest owns the lock's own semantics.
+        coEvery { accountingDayLock.requireOpen(any(), any()) } returns Unit
+        coEvery { accountingDayLock.evaluate(any(), any()) } answers { DayLockDecision.unknownDay(firstArg()) }
+        every { accountingDayLock.enforcing } returns false
     }
 
     private fun mockGlAccounts(currency: String = "CZK") {
@@ -479,19 +505,26 @@ class LedgerServiceTest {
                 // would carry its original posting's timestamp forever. A mutant that removed the
                 // `.copy(createdAt = clock.instant())` override would silently do exactly that, and no
                 // other test here would catch it.
-                val original = postedEntry()
+                // The original is stamped strictly BEFORE the injected clock, deterministically.
+                // This test used to build the original with Instant.now() and Thread.sleep(5) to let a
+                // real clock tick past it — which worked only because LedgerService secretly built its
+                // own Clock.system(Europe/Prague) instead of taking the injected one. ADR-0207 removed
+                // that constructor, so the service now honours the fixed test clock and the sleep-based
+                // version would compare a fixed 2026-07-31 stamp against a real "today". Asserting
+                // equality with the injected clock is also strictly stronger than isAfter(): it proves
+                // the stamp CAME FROM that clock, where isAfter() is satisfied by any later value.
+                val original = postedEntry().copy(createdAt = clock.instant().minusSeconds(3600))
                 coEvery { journalRepository.findById(original.id) } returns original
                 coEvery { journalRepository.nextEntryNumber() } returns 5L
                 val savedReversal = slot<JournalEntry>()
                 coEvery { journalRepository.saveReversal(capture(savedReversal), any(), any(), any()) } answers
                     { firstArg() }
 
-                Thread.sleep(5) // real clock tick to separate original.createdAt from the reversal's stamp
-
                 service.reverseJournal(
                     ReverseJournalCommand(journalId = original.id, reason = "x", reversedBy = UUID.randomUUID()),
                 )
 
+                assertThat(savedReversal.captured.createdAt).isEqualTo(clock.instant())
                 assertThat(savedReversal.captured.createdAt).isAfter(original.createdAt)
             }
 

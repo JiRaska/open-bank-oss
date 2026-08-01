@@ -1,0 +1,55 @@
+# Single-owner Postgres for the LiteLLM gateway (cluster-wide CNPG operator, ADR-0119).
+# Generates the litellm-db-app secret (username/password/uri) + litellm-db-rw Service.
+#
+# WHY LiteLLM NEEDS A DATABASE AT ALL. Virtual keys — the only mechanism that can enforce a spend
+# ceiling per CALLER rather than per model — require a Postgres: upstream is explicit that
+# `DATABASE_URL` is a setup prerequisite for them, and keys are created through /key/generate, not
+# declared in config.yaml. Without it the gateway has exactly one credential (the master key) shared
+# by every agent, so "which agent burned the budget" is unanswerable and "stop THAT agent" is
+# unimplementable. The AiFleetDailySpendHigh alert added alongside is a detective control that fires
+# after the money is spent; this is the preventive one that refuses the call.
+#
+# It is also what makes the spend numbers durable. LiteLLM without a DB keeps its counters in
+# memory, so every pod restart resets them to zero — the same "gauge resets on pod restart" shape
+# this repo has been bitten by before, and the reason a config-only `max_budget` was rejected as the
+# whole answer.
+#
+# NOTE: no S3 WAL/backup here, matching devops-agent's and the other control-plane agents' pattern —
+# that needs an EKS Pod Identity role (aws/.../db-backups.tf, #863). The stakes are deliberately
+# different from a banking DB: this holds spend counters and key metadata, not regulated records.
+# Losing it means budget windows restart and the virtual keys must be re-seeded, which is an
+# operational annoyance, not a retention breach. Backups become worth adding the day a key's spend
+# history is used as evidence rather than as a guardrail.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: litellm-db
+  namespace: ai-platform
+spec:
+  # DB-layer observability: CNPG's built-in Prometheus exporter on :9187 plus a PodMonitor the
+  # operator owns (selected cluster-wide), so cnpg_* metrics appear with no app change. Note this
+  # is a different scrape path from the fleet PodMonitor, which selects on a `management` port.
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  # ECR pull-through rather than ghcr.io (issue #1290). CNPG instance pods are correctly excluded
+  # from the Kyverno ecr-pull-through-rewrite policy — the operator reconciles the running pod's
+  # image against spec.imageName, so a mutating webhook would make the pod permanently drift and be
+  # recreated every ~10s. Setting the ref here avoids that. Same tag as the rest of the fleet's
+  # single-owner clusters, so it resolves through a cache path that is already warm.
+  imageName: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+      # Bound WAL so a checkpoint spike cannot fill the 2Gi volume (#1432).
+      max_wal_size: "512MB"
+  bootstrap:
+    initdb:
+      database: litellm
+      owner: litellm

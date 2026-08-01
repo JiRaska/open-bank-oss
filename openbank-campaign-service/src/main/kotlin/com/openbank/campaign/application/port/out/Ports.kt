@@ -7,6 +7,7 @@ package com.openbank.campaign.application.port.out
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.Segment
+import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
 import java.util.UUID
 
@@ -26,6 +27,18 @@ interface EnrolmentRepository {
 interface SendLogRepository {
     suspend fun record(send: SendRecord)
     suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long): Int
+
+    /**
+     * One page of send attempts for a campaign, newest first — the operator view of what happened.
+     *
+     * Paged at the repository, not in the caller: a campaign's send log has one row per party per
+     * step, so reading it whole to show the first screenful is unbounded work that grows with the
+     * audience. [outcome], when set, filters in SQL for the same reason.
+     */
+    suspend fun listByCampaign(campaignId: UUID, outcome: SendOutcome?, page: Int, size: Int): List<SendRecord>
+
+    /** How many rows [listByCampaign] would return in total, for the same filter. */
+    suspend fun countByCampaign(campaignId: UUID, outcome: SendOutcome?): Long
 }
 
 /** ADR-0201 D1: segments are versioned artifacts loaded as code/data, never UI-typed SQL. */

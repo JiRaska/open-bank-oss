@@ -1,0 +1,145 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.campaign.application
+
+import com.openbank.campaign.application.port.out.CampaignRepository
+import com.openbank.campaign.application.port.out.EnrolmentRepository
+import com.openbank.campaign.application.port.out.JourneySignaller
+import com.openbank.campaign.application.port.out.SegmentEvaluationPort
+import com.openbank.campaign.application.port.out.SegmentRegistry
+import com.openbank.campaign.application.usecase.CampaignService
+import com.openbank.campaign.application.usecase.EnrolmentOutcome
+import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignState
+import com.openbank.campaign.domain.model.CampaignStep
+import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.Enrolment
+import com.openbank.campaign.domain.model.Segment
+import com.openbank.campaign.domain.model.SegmentRef
+import com.openbank.campaign.domain.model.SegmentRule
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
+import java.time.Instant
+import java.util.UUID
+
+/**
+ * Regression coverage for #2953 — a failed journey start used to strand its party forever.
+ *
+ * `enrol()` saved the enrolment row and *then* started the Temporal workflow. When the start threw
+ * (the #2749 rollout hit a missing Temporal namespace), the row was already committed with
+ * `state = ACTIVE, currentStep = 0` — identical to a healthy enrolment — and the loop's
+ * "already enrolled, skip" guard meant every later `enrol` call did nothing for that party. A
+ * party in a campaign with no workflow behind it is never contacted and never retried, and the
+ * only recovery was deleting the row by hand.
+ *
+ * Both halves are pinned here, because both were real: the ordering, and the loop aborting on the
+ * first bad party so one failure took out every party after it.
+ */
+class CampaignEnrolmentFailureTest {
+
+    private val campaignId = UUID.randomUUID()
+    private val parties = List(3) { UUID.randomUUID() }
+
+    private val campaign = Campaign(
+        id = campaignId,
+        name = "winback",
+        goal = "reactivate dormant parties",
+        segmentRef = SegmentRef("dormant-parties", 1),
+        steps = listOf(
+            CampaignStep(
+                order = 1,
+                // Was "WINBACK_CS", a template notification-service has never rendered. The
+                // catalogue rejects it at construction now, which is the point of the catalogue.
+                template = "MARKETING_PRODUCT_OFFER",
+                channel = Channel.EMAIL,
+                variables = emptyMap(),
+                delaySeconds = 0,
+            ),
+        ),
+        state = CampaignState.ACTIVE,
+        createdBy = "maker",
+        approvedBy = "checker",
+        createdAt = Instant.parse("2026-07-31T18:00:00Z"),
+        updatedAt = Instant.parse("2026-07-31T18:00:00Z"),
+    )
+
+    private val segment = Segment("dormant-parties", 1, listOf(SegmentRule.PartyStatusIs("ACTIVE")))
+
+    /** Records what was written, so the test can assert on absence as well as presence. */
+    private class RecordingEnrolments : EnrolmentRepository {
+        val saved = mutableListOf<Enrolment>()
+        override suspend fun findByCampaignAndParty(campaignId: UUID, partyId: UUID): Enrolment? =
+            saved.firstOrNull { it.campaignId == campaignId && it.partyId == partyId }
+        override suspend fun listByCampaign(campaignId: UUID): List<Enrolment> =
+            saved.filter { it.campaignId == campaignId }
+        override suspend fun listByParty(partyId: UUID): List<Enrolment> = saved.filter { it.partyId == partyId }
+        override suspend fun save(enrolment: Enrolment): Enrolment = enrolment.also { saved += it }
+    }
+
+    /** Fails for exactly [failFor], the way a missing Temporal namespace fails for every party. */
+    private class FlakyJourneys(private val failFor: Set<UUID>) : JourneySignaller {
+        val started = mutableListOf<UUID>()
+        override fun signalConsentRevoked(campaignId: UUID, partyId: UUID) = Unit
+        override fun startJourney(campaignId: UUID, partyId: UUID) {
+            check(partyId !in failFor) { "Namespace default is not found" }
+            started += partyId
+        }
+    }
+
+    private fun service(enrolments: EnrolmentRepository, journeys: JourneySignaller) = CampaignService(
+        campaigns = object : CampaignRepository {
+            override suspend fun findById(id: UUID): Campaign? = campaign.takeIf { it.id == id }
+            override suspend fun list(): List<Campaign> = listOf(campaign)
+            override suspend fun save(campaign: Campaign): Campaign = campaign
+        },
+        enrolments = enrolments,
+        segments = object : SegmentRegistry {
+            override suspend fun load(name: String, version: Int): Segment? = segment
+            override suspend fun save(segment: Segment): Segment = segment
+            override suspend fun list(): List<Segment> = listOf(segment)
+        },
+        segmentEvaluation = object : SegmentEvaluationPort {
+            override suspend fun evaluate(segment: Segment): List<UUID> = parties
+        },
+        journeys = journeys,
+    )
+
+    @Test
+    fun `a party whose journey start fails is left with no enrolment, so a later enrol retries it`(): Unit =
+        runBlocking {
+            val enrolments = RecordingEnrolments()
+            val outcome = service(enrolments, FlakyJourneys(setOf(parties[0]))).enrol(campaignId)
+
+            assertThat(enrolments.saved.map { it.partyId })
+                .describedAs(
+                    "an enrolment row for a party with no workflow is indistinguishable from a healthy " +
+                        "one and is skipped forever after — persist only once the journey started (#2953)",
+                )
+                .doesNotContain(parties[0])
+            assertThat(outcome.enrolled).isEqualTo(2)
+            assertThat(outcome.failed).isEqualTo(1)
+
+            // The retry: the same call again, with Temporal healthy, must pick that party back up.
+            val healthy = FlakyJourneys(emptySet())
+            val second = service(enrolments, healthy).enrol(campaignId)
+            assertThat(healthy.started).containsExactly(parties[0])
+            assertThat(second.enrolled).isEqualTo(1)
+            assertThat(second.failed).isZero()
+        }
+
+    @Test
+    fun `one failing party does not abort the parties after it`(): Unit = runBlocking {
+        val enrolments = RecordingEnrolments()
+        val journeys = FlakyJourneys(setOf(parties[0]))
+
+        val outcome = service(enrolments, journeys).enrol(campaignId)
+
+        assertThat(journeys.started)
+            .describedAs("the loop used to abort on the first failure, so parties 2 and 3 were never reached")
+            .containsExactly(parties[1], parties[2])
+        assertThat(outcome).isEqualTo(EnrolmentOutcome(enrolled = 2, failed = 1))
+    }
+}

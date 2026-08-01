@@ -1,0 +1,128 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+import React from 'react'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import { SessionProvider } from 'next-auth/react'
+import { LanguageProvider } from '@/lib/i18n/LanguageContext'
+import CampaignDetailPage from '@/app/campaigns/[id]/page'
+import NewCampaignPage from '@/app/campaigns/new/page'
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+
+const CAMPAIGN_ID = '7b1f1d5e-0d2a-4a6a-8f7e-2c1b9a0d3e4f'
+
+const SEGMENTS = {
+  state: 'ok',
+  items: [{ name: 'actives', version: 1, rules: ['party status is ACTIVE'] }],
+}
+
+function detail(state: string) {
+  return {
+    campaign: {
+      id: CAMPAIGN_ID,
+      name: 'spring offer',
+      goal: 'promote the savings product',
+      segmentRef: { name: 'actives', version: 1 },
+      state,
+      createdBy: 'marketa',
+      approvedBy: null,
+      createdAt: '2026-07-31T18:00:00Z',
+      steps: [{ order: 1, template: 'MARKETING_PRODUCT_OFFER', delaySeconds: 0 }],
+    },
+    enrolments: [],
+    sends: { items: [], total: 0, page: 0, size: 50 },
+    sendSummary: {},
+    sources: { campaign: 'ok', enrolments: 'ok', sends: 'ok', sendSummary: 'ok' },
+  }
+}
+
+function mockFetch(routes: Record<string, unknown>) {
+  return vi.fn(async (url: string) => {
+    const match = Object.keys(routes).find(k => String(url).includes(k))
+    return { ok: true, status: 200, json: async () => (match ? routes[match] : {}) }
+  })
+}
+
+function Providers({ children }: { children: React.ReactNode }) {
+  return React.createElement(SessionProvider, null, React.createElement(LanguageProvider, null, children))
+}
+
+function renderDetail() {
+  return render(
+    React.createElement(
+      Providers,
+      null,
+      React.createElement(CampaignDetailPage, { params: Promise.resolve({ id: CAMPAIGN_ID }) }),
+    ),
+  )
+}
+
+describe('campaign studio', () => {
+  beforeEach(() => vi.unstubAllGlobals())
+
+  /**
+   * ADR-0221 D1 step 2: the audience is a picker over versioned segment artifacts, and ADR-0201 D1
+   * forbids typing a definition in. The absence of any way to author a segment here is the design,
+   * so it is worth a test — a helpful "add segment" field would be a regression, not a feature.
+   */
+  it('the audience is chosen from the catalogue and cannot be typed in', async () => {
+    vi.stubGlobal('fetch', mockFetch({ '/api/segments': SEGMENTS }))
+    render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
+
+    await waitFor(() => expect(screen.getByLabelText('Audience')).toBeTruthy(), { timeout: 8000 })
+    expect((screen.getByLabelText('Audience') as HTMLSelectElement).tagName).toBe('SELECT')
+    expect(screen.getByText(/a pull request, not a UI action/)).toBeTruthy()
+  }, 15000)
+
+  /**
+   * ADR-0176 D4 / ADR-0221 D1 step 3: a campaign supplies values, never body text. The fields
+   * offered are exactly the template's declared variables — a free-form body field here would be a
+   * control the service refuses by construction, which is a worse experience than not offering it.
+   */
+  it('offers only the declared template variables, never a free-text body', async () => {
+    vi.stubGlobal('fetch', mockFetch({ '/api/segments': SEGMENTS }))
+    render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
+
+    await waitFor(() => expect(screen.getByLabelText('offerTitle')).toBeTruthy(), { timeout: 8000 })
+    expect(screen.getByLabelText('offerText')).toBeTruthy()
+    expect(screen.getByLabelText('ctaText')).toBeTruthy()
+    expect(document.querySelector('textarea')).toBeNull()
+  }, 15000)
+
+  it('a draft can be submitted but not activated from the same screen', async () => {
+    vi.stubGlobal('fetch', mockFetch({ [`/api/campaigns/${CAMPAIGN_ID}`]: detail('DRAFT') }))
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByText('Submit for approval')).toBeTruthy(), { timeout: 8000 })
+    // The whole point of four eyes: the author never sees the button that would let them skip it.
+    expect(screen.queryByText('Approve and activate')).toBeNull()
+  }, 15000)
+
+  /**
+   * ADR-0200 D5: maker != checker. The approver is taken from the token, so the creator's own
+   * attempt is refused — and a refusal that reads as a generic failure is indistinguishable from an
+   * outage, which is how a working control gets reported as a bug.
+   */
+  it('states who may approve, so the refusal is not read as a malfunction', async () => {
+    vi.stubGlobal('fetch', mockFetch({ [`/api/campaigns/${CAMPAIGN_ID}`]: detail('PENDING_APPROVAL') }))
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByText('Approve and activate')).toBeTruthy(), { timeout: 8000 })
+    expect(screen.getByText(/Someone other than marketa must approve/)).toBeTruthy()
+  }, 15000)
+
+  it('only the transitions the current state allows are offered', async () => {
+    vi.stubGlobal('fetch', mockFetch({ [`/api/campaigns/${CAMPAIGN_ID}`]: detail('ACTIVE') }))
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByText('Pause')).toBeTruthy(), { timeout: 8000 })
+    expect(screen.getByText('Close')).toBeTruthy()
+    // Rendering every button and letting the service reject four of them teaches operators that
+    // red messages are normal, which is how a real refusal stops being read.
+    expect(screen.queryByText('Submit for approval')).toBeNull()
+    expect(screen.queryByText('Resume')).toBeNull()
+  }, 15000)
+})

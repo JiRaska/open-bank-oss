@@ -1,7 +1,7 @@
 ---
 date: 2026-07-26
-decision-status: proposed
-delivery-status: planned
+decision-status: accepted
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -168,6 +168,45 @@ blind, on the money path, is how #1197 killed five workloads for four days.
            reported period that can still be written to cannot be relied on afterwards. No
            requirement number is cited because none was consulted in reaching this
            decision.
+
+## Delivery
+
+**Increment 1 (this ADR's D1, D2, D4, and D3 in shadow mode).**
+
+Shipped:
+- `com.openbank.libs.domain.calendar.AccountingClock` in `openbank-libs-domain` — the business-date
+  authority (D1). `LedgerService` and `YearCloseService` no longer construct
+  `Clock.system(Europe/Prague)`; the dual-regime bug inside ledger-service is gone, and the bank
+  zone is declared exactly once (`AccountingClock.BANK_ZONE`).
+- `ledger_accounting_day` (Flyway `V21`) + `AccountingDayRecord` — the `OPEN → CUTOFF → TIED_OUT →
+  LOCKED` state machine (D2), monotonic single-step, no reopen, every transition carrying an actor.
+- `AccountingDayTransitioned` on the existing outbox, written in the same transaction as the state
+  change (D4). Consumers react; nothing polls ledger-service per posting.
+- `AccountingDayResource` — the operator surface (`/api/v1/ledger/accounting-days`), reads gated to
+  the ledger read roles, every state change operator-only. OpenAPI `info.version` 1.11.0 → 1.12.0
+  (additive, ADR-0048).
+- `AccountingDayLock` (D3) wired into `LedgerService.postJournal` **before** the year check, and
+  into `reverseJournal` as a forward-correction route rather than a refusal.
+- `.github/scripts/check-accounting-clock.py` — the CI guard D1 asks for, scope derived from
+  `rules.yaml: money_path_services`.
+
+**The day lock ships in `shadow`** (`openbank.ledger.day-lock.mode`, default `shadow`): it records
+what it would have refused and refuses nothing. Nothing in this increment changes a booking date or
+rejects a posting that is legal today. Enforcement is a config flip, and its precondition is
+evidence, not a calendar: `openbank_ledger_day_lock_decisions_total{outcome="would_refuse"}` at zero
+or every hit explained.
+
+Not yet built, and deliberately out of this increment:
+- The stuck-`CUTOFF` alert. The ADR's own Consequences section makes it a precondition of
+  enforcement, not of the state machine — a day stuck in `CUTOFF` blocks nothing while the lock is
+  in shadow. It must exist before the flip.
+- A scheduler that opens each day automatically. Days are opened by an operator for now; the day
+  lock treats an unopened day as *not refused* precisely so that this ordering is safe.
+- #1302 items 3–5 (reconciliation false drift, FX rate staleness, statement correction path), which
+  this ADR's Context predicted would "collapse into wiring once this is settled".
+- The three pre-existing accounting-clock sites the new guard surfaced outside ledger-service
+  (`transaction` `SettlementDateResolver`, `fx` `CnbRateIngestionService`, `sanctions`
+  `SanctionsListService`) — hence the guard is advisory, not enforcing, on arrival.
 
 ## References
 

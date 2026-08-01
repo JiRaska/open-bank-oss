@@ -173,6 +173,8 @@ class LedgerServiceIdempotencyPropertyTest {
                 jsonMapper,
                 metrics,
                 yearCloseRepository,
+                mockk<AccountingDayLock>(relaxed = true),
+                java.time.Clock.fixed(java.time.Instant.parse("2026-07-31T09:00:00Z"), java.time.ZoneOffset.UTC),
             )
 
             val idempotencyKey = UUID.randomUUID().toString()

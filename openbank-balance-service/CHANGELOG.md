@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.12.2](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.12.1...balance-service-v1.12.2) (2026-08-01)
+
+
+### Bug Fixes
+
+* **approvals:** a null JSON body on the four-eyes decide endpoint returned 500 ([#3029](https://github.com/JiRaska/open-bank-oss/issues/3029)) ([#3032](https://github.com/JiRaska/open-bank-oss/issues/3032)) ([36ff2ac](https://github.com/JiRaska/open-bank-oss/commit/36ff2ac571df954a408f80fa7d661967953d6144))
+* **money-path:** a null JSON body returned 500 on 12 handlers ([#3038](https://github.com/JiRaska/open-bank-oss/issues/3038)) ([#3050](https://github.com/JiRaska/open-bank-oss/issues/3050)) ([7af4d19](https://github.com/JiRaska/open-bank-oss/commit/7af4d19aac4a0d75e221fbc64a1a24196e61ce8f))
+
 ## [1.12.1](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.12.0...balance-service-v1.12.1) (2026-07-26)
 
 

@@ -16,12 +16,25 @@ import {
   Layers, TrendingUp, MessageSquareWarning, Package, Receipt, Server, ShieldAlert, FlaskConical, Cloud,
   PiggyBank, GitBranch, Lock, ClipboardList, Scale, Smartphone,
   ClipboardCheck, Activity, Boxes, Bluetooth, Fingerprint, FileSignature, Network, Waypoints, Workflow,
+  Megaphone,
+  Target,
 } from 'lucide-react'
 import { hasPermission, Permission } from '@/lib/auth/roles'
 import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
-type NavItem = { nameCs: string; nameEn: string; href: string; icon: React.ElementType; permission?: Permission; lockedPermission?: Permission; badge?: string }
+// `external: true` marks a destination that is NOT a Next.js route — today the
+// internal tool UIs served as sub-paths of this same host by their own Ingress
+// (ADR-0234). They must render as a plain <a>: a next/link would try a
+// client-side navigation into the App Router and 404, because no page.tsx backs
+// the path. Same origin, so the session cookie still rides along and the edge
+// gate can read it.
+// `deniedRole` mirrors the per-tool deny-list in src/app/api/gate/route.ts. The
+// gate is what ENFORCES it; this only decides how the entry renders, so a denied
+// tool shows as a disabled item with the demo-account tooltip instead of a live
+// link that 403s. A link that visibly fails reads as a broken platform, which for
+// the public demo account is the outcome worth avoiding.
+type NavItem = { nameCs: string; nameEn: string; href: string; icon: React.ElementType; permission?: Permission; lockedPermission?: Permission; deniedRole?: string; badge?: string; external?: boolean }
 
 const coreNav: NavItem[] = [
   { nameCs: 'Přehled',      nameEn: 'Dashboard',    href: '/dashboard',    icon: LayoutDashboard },
@@ -63,6 +76,8 @@ const complianceNav: NavItem[] = [
   { nameCs: 'Sankce',             nameEn: 'Sanctions',        href: '/sanctions',         icon: Shield,                permission: 'compliance:view' },
   { nameCs: 'Spory',              nameEn: 'Disputes',         href: '/disputes',          icon: MessageSquareWarning,  permission: 'compliance:view' },
   { nameCs: 'Customer 360',        nameEn: 'Customer 360',     href: '/customer-360',      icon: Users,                 permission: 'compliance:view' },
+  { nameCs: 'Kampaně',            nameEn: 'Campaigns',        href: '/campaigns',         icon: Megaphone,             permission: 'compliance:view' },
+  { nameCs: 'Segmenty',           nameEn: 'Segments',         href: '/segments',          icon: Target,                permission: 'compliance:view' },
   { nameCs: 'Souhlasy',           nameEn: 'Consents',         href: '/consents',          icon: FileSignature,           permission: 'compliance:view' },
   { nameCs: 'Auditní záznamy',    nameEn: 'Audit Log',        href: '/audit',             icon: ScrollText,            permission: 'audit:view' },
   { nameCs: 'Regulatorní',        nameEn: 'Regulatory',       href: '/regulatory',        icon: FileText,              permission: 'regulatory:view' },
@@ -102,6 +117,18 @@ const platformNav: NavItem[] = [
   { nameCs: 'Schvalování', nameEn: 'Approvals', href: '/approvals', icon: ClipboardCheck, permission: 'system:view' },
 ]
 
+// Internal tool UIs, reachable at /tools/<tool> on this same host behind the
+// identity-aware edge gate (ADR-0234). The permission here MUST match the one
+// `src/app/api/gate/route.ts` requires for the tool — the gate is what actually
+// enforces it, this only decides whether the operator sees the link.
+const toolsNav: NavItem[] = [
+  { nameCs: 'Grafana',        nameEn: 'Grafana',        href: '/tools/grafana',      icon: Activity,    permission: 'system:view', external: true },
+  // Denied to the public demo account: Alertmanager has no role model, so anything
+  // that can load its UI can silence alerts platform-wide (gate route.ts).
+  { nameCs: 'Alerty',         nameEn: 'Alertmanager',   href: '/tools/alertmanager', icon: Bell,        permission: 'system:view', external: true, deniedRole: 'ROLE_DEMO' },
+  { nameCs: 'SLO (Pyrra)',    nameEn: 'SLO (Pyrra)',    href: '/tools/pyrra',        icon: Scale,       permission: 'system:view', external: true },
+]
+
 const sysNav: NavItem[] = [
   { nameCs: 'Zdraví systému',   nameEn: 'System Health',   href: '/system/health',    icon: HeartPulse,        permission: 'system:view' },
   { nameCs: 'Tech Inventory',   nameEn: 'Tech Inventory',  href: '/system/inventory', icon: Package,           permission: 'system:view' },
@@ -118,7 +145,7 @@ const SCROLL_KEY = 'ob.sidebar.scroll'
 
 const ALL_NAV: NavItem[] = [
   ...coreNav, ...revenueNav, ...customerNav, ...paymentsNav,
-  ...complianceNav, ...opsNav, ...docsNav, ...platformNav, ...sysNav,
+  ...complianceNav, ...opsNav, ...docsNav, ...platformNav, ...toolsNav, ...sysNav,
 ]
 
 export function Sidebar() {
@@ -127,7 +154,9 @@ export function Sidebar() {
   const { t, language } = useLanguage()
   const roles: string[] = session?.user?.roles ?? []
   const filter = (items: NavItem[]) => items.filter(i => !i.permission || hasPermission(roles, i.permission))
-  const isLocked = (item: NavItem) => !!item.lockedPermission && !hasPermission(roles, item.lockedPermission)
+  const isLocked = (item: NavItem) =>
+    (!!item.lockedPermission && !hasPermission(roles, item.lockedPermission)) ||
+    (!!item.deniedRole && roles.includes(item.deniedRole))
 
   // ADR-0229 D4 (first cut): the persona's quick links pinned at the top — the full menu below
   // is untouched. Each link inherits its permission from the same destination's nav entry.
@@ -210,6 +239,8 @@ export function Sidebar() {
         <NavSection items={filter(platformNav)} pathname={pathname} />
         <SectionLabel>{t('Dokumentace', 'Documentation')}</SectionLabel>
         <NavSection items={filter(docsNav)} pathname={pathname} />
+        <SectionLabel>{t('Nástroje', 'Tools')}</SectionLabel>
+        <NavSection items={filter(toolsNav)} pathname={pathname} isLocked={isLocked} />
         <SectionLabel>{t('Systém', 'System')}</SectionLabel>
         <NavSection items={filter(sysNav)} pathname={pathname} isLocked={isLocked} />
       </nav>
@@ -262,8 +293,7 @@ function NavSection({ items, pathname, isLocked }: { items: NavItem[]; pathname:
           )
         }
 
-        return (
-          <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>
+        const row = (
             <div style={{
               display: 'flex', alignItems: 'center', gap: '10px',
               padding: '8px 12px', borderRadius: '8px', cursor: 'pointer',
@@ -290,7 +320,15 @@ function NavSection({ items, pathname, isLocked }: { items: NavItem[]; pathname:
                   background: 'var(--sidebar-accent)', color: '#fff' }}>{item.badge}</span>
               )}
             </div>
-          </Link>
+        )
+
+        // A tool path is served by its own Ingress, not by the App Router — a
+        // next/link would client-side navigate and 404 (ADR-0234). Plain <a>,
+        // same origin, so the session cookie reaches the edge gate.
+        return item.external ? (
+          <a key={item.href} href={item.href} style={{ textDecoration: 'none' }}>{row}</a>
+        ) : (
+          <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>{row}</Link>
         )
       })}
     </>

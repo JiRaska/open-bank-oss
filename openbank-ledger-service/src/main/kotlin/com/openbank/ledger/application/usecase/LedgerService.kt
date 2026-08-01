@@ -37,10 +37,8 @@ import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.inject.Inject
 import jakarta.persistence.PersistenceException
 import java.time.Clock
-import java.time.ZoneId
 import java.util.UUID
 
 @ApplicationScoped
@@ -50,32 +48,32 @@ class LedgerService(
     private val objectMapper: ObjectMapper,
     private val metrics: DomainMetrics,
     private val yearCloseRepository: YearCloseRepository,
+    private val accountingDayLock: AccountingDayLock,
     private val clock: Clock,
 ) : LedgerUseCase {
-
-    // CDI entry point: injects the production system clock in the bank time zone. Tests use the
-    // primary constructor with a fixed Clock for deterministic timestamps (ADR-0100 Layer 1).
-    @Inject
-    constructor(
-        journalRepository: JournalRepository,
-        glAccountRepository: GlAccountRepository,
-        objectMapper: ObjectMapper,
-        metrics: DomainMetrics,
-        yearCloseRepository: YearCloseRepository,
-    ) : this(
-        journalRepository,
-        glAccountRepository,
-        objectMapper,
-        metrics,
-        yearCloseRepository,
-        Clock.system(BANK_TIME),
-    )
+    // The single constructor is the CDI entry point; tests pass a fixed Clock for deterministic
+    // timestamps (ADR-0100 Layer 1).
+    //
+    // ADR-0207 D1: there used to be a second, @Inject constructor here that built
+    // `Clock.system(Europe/Prague)` while ClockProducer produced `Clock.systemUTC()` — two regimes
+    // inside one service, disagreeing about the date for two hours a day, half the year, with
+    // nothing able to detect it because both answers are individually plausible. The wall clock is
+    // now the injected UTC bean (correct for timestamps); the accounting DATE comes from
+    // AccountingClock via [accountingDayLock], the single authority for it.
 
     override suspend fun postJournal(command: PostJournalCommand): JournalEntry {
         // Idempotent replay: a repeated key returns the original entry, never double-posts.
         // Checked BEFORE the period lock so replaying an entry that was legitimately booked while
         // the year was still open stays idempotent even after the year is later attested.
         journalRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return it }
+
+        // Day lock (ADR-0207 D3) runs BEFORE the year check because the day is the tighter
+        // constraint: a day already CUTOFF/TIED_OUT/LOCKED refuses a posting even inside an open
+        // fiscal year. Ships in shadow mode — it records what it *would* have refused without
+        // refusing, so the volume of currently-legal backdated postings is measured before any
+        // start failing (#1197: turning on a new money-path refusal blind killed five workloads
+        // for four days).
+        accountingDayLock.requireOpen(command.entryDate, AccountingDayLock.OPERATION_POSTING)
 
         // Period lock (#869): an ATTESTED fiscal year is closed; new activity into it would
         // silently invalidate the attested trial-balance hash. Reject before doing any work.
@@ -180,13 +178,33 @@ class LedgerService(
         // an adjustment in the current open period, not into the sealed one.
         requireOpenPeriod(original.entryDate.year)
 
+        // Day lock (ADR-0207 D3), reversal variant: a reversal of an entry in a closed day is NOT
+        // refused — it is exactly what that situation calls for. It is routed FORWARD instead, into
+        // the current open day, so the closed day's tied-out figures stay true. Rewriting a
+        // tied-out day in place is the operation being removed; correcting it forward is not.
+        // In shadow mode the decision is recorded but the date is left alone, so no booking date
+        // changes until the lock is deliberately enforced.
+        val dayDecision = accountingDayLock.evaluate(original.entryDate, AccountingDayLock.OPERATION_REVERSAL)
+        val correctionDate = if (dayDecision.wouldRefuse && accountingDayLock.enforcing) {
+            accountingDayLock.forwardCorrectionDate()
+        } else {
+            original.entryDate
+        }
+
         val reversalId = UUID.randomUUID()
         // A reversal is itself a journal entry and needs its own unique entry number
         // (uq_journal_entry_number); reverse() leaves it null, so assign one here.
         // reverse() inherits the original's timestamp as a placeholder; stamp the real reversal
         // time here from the injected clock (ADR-0100 Layer 1 — application owns the clock).
+        // entryDate is [correctionDate]: the original's own date normally, the current open day
+        // when the original's day is sealed. reversalOf already links back to the original, so the
+        // forward correction stays attributable to the entry it reverses.
         val reversal = original.reverse(reversalId, command.reversedBy)
-            .copy(entryNumber = journalRepository.nextEntryNumber(), createdAt = clock.instant())
+            .copy(
+                entryNumber = journalRepository.nextEntryNumber(),
+                createdAt = clock.instant(),
+                entryDate = correctionDate,
+            )
 
         val outbox = OutboxMessage(
             aggregateId = reversal.id,
@@ -311,8 +329,10 @@ class LedgerService(
     }
 
     companion object {
-        // Bank time zone for the default (CDI) system clock — matches YearCloseService.
-        private val BANK_TIME = ZoneId.of("Europe/Prague")
+        // The bank time zone constant that used to live here is gone: the accounting date is no
+        // longer derived from a wall clock in this class. It is owned by
+        // com.openbank.libs.domain.calendar.AccountingClock (ADR-0207 D1), whose BANK_ZONE is the
+        // one place the zone is declared.
 
         private const val JOURNAL_POSTED = "JournalPosted"
         private const val JOURNAL_REVERSED = "JournalReversed"

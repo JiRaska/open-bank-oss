@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.7.4...copilot-service-v0.8.0) (2026-08-01)
+
+
+### Features
+
+* **observability:** make fleet LLM spend and reliability observable in Prometheus ([#3043](https://github.com/JiRaska/open-bank-oss/issues/3043)) ([000ba2a](https://github.com/JiRaska/open-bank-oss/commit/000ba2a516069ba4c65b50015a76b4086b229b30))
+
 ## [0.7.4](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.7.3...copilot-service-v0.7.4) (2026-07-25)
 
 

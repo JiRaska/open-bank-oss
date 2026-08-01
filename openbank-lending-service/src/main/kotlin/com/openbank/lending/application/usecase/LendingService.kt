@@ -95,6 +95,7 @@ class LendingService(
     private val complianceGuard: com.openbank.lending.infrastructure.compliance.CompliancePackGuard,
     private val originationConfig: OriginationConfig,
     private val workflowPort: com.openbank.lending.application.port.out.OriginationWorkflowPort,
+    private val decisionEngine: OriginationDecisionService,
 ) : ApplyForLoanUseCase,
     DisburseLoanUseCase,
     ServicingUseCase,
@@ -118,6 +119,22 @@ class LendingService(
             occurredAt = clock.instant(),
             packVersion = application.packVersion?.toString(),
         )
+
+    private fun evaluateAndAdvance(
+        existing: LoanApplication,
+        next: OriginationState,
+        actor: String,
+    ): Uni<LoanApplication> = decisionEngine.evaluate(existing).flatMap { outcome ->
+        val target = if (outcome.declined) OriginationState.DECLINED else next
+        when (val result = machine.apply(transition(outcome.recorded, existing.status, target, actor))) {
+            is OriginationTransitionResult.Rejected ->
+                Uni.createFrom().failure(IllegalStateException(result.reason))
+            is OriginationTransitionResult.Applied ->
+                applications.update(outcome.recorded.copy(status = result.newState))
+                    .signalWorkflow()
+                    .call { _ -> events.emit(outcome.evidence) }
+        }
+    }
 
     private fun mandatoryStepsFor(application: LoanApplication): Set<OriginationState> =
         complianceGuard.resolveOriginationPack(application.jurisdiction, application.productType)
@@ -202,6 +219,11 @@ class LendingService(
             jurisdiction = request.jurisdiction,
             productType = request.productType,
             packVersion = pack?.pack?.version,
+            verifiedIncomeMonthly = request.verifiedIncomeMonthly,
+            existingDebtServiceMonthly = request.existingDebtServiceMonthly,
+            ageYears = request.ageYears,
+            residency = request.residency,
+            employmentTenureMonths = request.employmentTenureMonths,
         )
         return applications.save(application).call { saved ->
             val state = if (originationConfig.autoApprove) straightThrough(saved).status else saved.status
@@ -255,6 +277,8 @@ class LendingService(
                             Uni.createFrom().failure(
                                 IllegalStateException("No forward transition from ${existing.status}"),
                             )
+                        existing.status == OriginationState.ASSESSMENT ->
+                            evaluateAndAdvance(existing, next, actor)
                         else -> when (
                             val result = machine.apply(transition(existing, existing.status, next, actor))
                         ) {
