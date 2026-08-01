@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.78.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.78.1...admin-ui-v0.78.2) (2026-08-01)
+
+
+### Bug Fixes
+
+* **ci:** make the customer-app dossier check actually enforce, and refresh it ([#3179](https://github.com/JiRaska/open-bank-oss/issues/3179)) ([6bb6bdf](https://github.com/JiRaska/open-bank-oss/commit/6bb6bdfc9253302c51502c96c74a7766a0b94500))
+
 ## [0.78.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.78.0...admin-ui-v0.78.1) (2026-08-01)
 
 
