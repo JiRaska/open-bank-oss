@@ -225,7 +225,6 @@ class DelegationServiceTest {
         assertThat(result).isInstanceOf(DelegationCheckResult.Denied::class.java)
     }
 
-
     // --- P0: the grantor must own the resource -------------------------------------------------
     // Without this gate two consenting parties mint payment rights over a THIRD party's account
     // using nothing but their own valid SCA: the product-service projection keys its guard on

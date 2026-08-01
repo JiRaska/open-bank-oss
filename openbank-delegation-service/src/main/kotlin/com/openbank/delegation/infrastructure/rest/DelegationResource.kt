@@ -26,8 +26,8 @@ import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
-import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.DELETE
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
@@ -72,8 +72,7 @@ class DelegationResource(
      * — it excludes `service-account-openbank-services` from the operator write rules. This
      * check is the defence-in-depth half, not the whole gate.
      */
-    private fun isBankOperator(): Boolean =
-        identity.roles.any { it == "ROLE_OPERATOR" || it == "ROLE_ADMIN" }
+    private fun isBankOperator(): Boolean = identity.roles.any { it == "ROLE_OPERATOR" || it == "ROLE_ADMIN" }
 
     @Operation(summary = "Offer a delegation grant (OFFERED); idempotent via X-Request-ID")
     @POST

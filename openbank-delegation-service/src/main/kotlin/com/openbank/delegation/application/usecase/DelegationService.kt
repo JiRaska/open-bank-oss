@@ -326,16 +326,19 @@ class DelegationService(
      * an ownership lookup we could not perform is not permission.
      */
     private suspend fun verifyResourceOwnership(command: OfferDelegationCommand) {
-        when (resourceOwnershipClient.verifyOwnership(
+        val verdict = resourceOwnershipClient.verifyOwnership(
             command.grantorPartyId,
             command.resourceType,
             command.resourceId,
-        )) {
+        )
+        when (verdict) {
             OwnershipVerdict.OWNED -> Unit
+
             OwnershipVerdict.NOT_OWNED -> throw DelegationResourceOwnershipException(
                 "grantor ${command.grantorPartyId} does not own " +
                     "${command.resourceType}/${command.resourceId}",
             )
+
             OwnershipVerdict.UNVERIFIABLE -> throw DelegationResourceOwnershipException(
                 "ownership of ${command.resourceType}/${command.resourceId} could not be established — " +
                     "refusing to mint a grant over an unverified resource",

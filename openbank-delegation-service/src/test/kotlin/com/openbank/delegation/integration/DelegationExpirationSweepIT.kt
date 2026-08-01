@@ -104,15 +104,16 @@ class DelegationExpirationSweepIT {
         }
     }
 
-    private fun statusOf(id: UUID): String? =
-        queryOne("SELECT status FROM delegation_grants WHERE id = ?", id) { it.getString(1) }
+    private fun statusOf(id: UUID): String? = queryOne(
+        "SELECT status FROM delegation_grants WHERE id = ?",
+        id,
+    ) { it.getString(1) }
 
-    private fun outboxCount(id: UUID, eventType: String): Int =
-        queryOne(
-            "SELECT COUNT(*) FROM delegation_outbox WHERE aggregate_id = ? AND event_type = ?",
-            id,
-            eventType,
-        ) { it.getInt(1) } ?: 0
+    private fun outboxCount(id: UUID, eventType: String): Int = queryOne(
+        "SELECT COUNT(*) FROM delegation_outbox WHERE aggregate_id = ? AND event_type = ?",
+        id,
+        eventType,
+    ) { it.getInt(1) } ?: 0
 
     private fun await(ready: () -> Boolean): Boolean {
         val deadline = System.nanoTime() + BUDGET_NANOS

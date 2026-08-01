@@ -118,6 +118,7 @@ data class DelegationCheckResponse(val granted: Boolean, val reason: String? = n
     companion object {
         fun from(result: DelegationCheckResult): DelegationCheckResponse = when (result) {
             is DelegationCheckResult.Allowed -> DelegationCheckResponse(granted = true)
+
             is DelegationCheckResult.Denied -> DelegationCheckResponse(
                 granted = false,
                 reason = result.reason,
