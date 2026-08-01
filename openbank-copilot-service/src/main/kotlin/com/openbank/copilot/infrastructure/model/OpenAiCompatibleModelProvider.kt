@@ -18,7 +18,7 @@ import com.openbank.copilot.domain.model.StopReason
 import com.openbank.copilot.domain.model.ToolInvocation
 import com.openbank.copilot.domain.model.ToolSpec
 import com.openbank.libs.llm.LlmCallMetricsPort
-import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.LlmCallMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.ConfigProvider
@@ -55,7 +55,7 @@ class OpenAiCompatibleModelProvider : ModelProvider {
     // Field injection, not a constructor arg: the bean is instantiated by Arc, and detekt's
     // LongParameterList fires AT constructorThreshold rather than above it.
     @Inject
-    lateinit var metrics: DomainMetrics
+    lateinit var metrics: LlmCallMetrics
 
     // Resolved lazily (NOT @ConfigProperty-injected): an un-seeded/empty key would otherwise fail
     // config load at boot (SmallRye SRCFG00040 on an empty String binding) and CrashLoop the pod.

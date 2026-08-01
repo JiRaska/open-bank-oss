@@ -39,13 +39,7 @@ interface LlmCallMetricsPort {
      * @param durationNanos wall-clock for the whole attempt, including a failed one — a timeout is
      *   the slowest and most interesting case, so timing only successes would hide it.
      */
-    fun recordCall(
-        model: String,
-        outcome: String,
-        promptTokens: Int,
-        completionTokens: Int,
-        durationNanos: Long,
-    )
+    fun recordCall(model: String, outcome: String, promptTokens: Int, completionTokens: Int, durationNanos: Long)
 
     companion object {
         const val OUTCOME_SUCCESS = "success"

@@ -18,7 +18,7 @@ import com.openbank.agent.domain.model.ModelUsage
 import com.openbank.agent.domain.model.StopReason
 import com.openbank.agent.domain.model.ToolInvocation
 import com.openbank.libs.llm.LlmCallMetricsPort
-import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.LlmCallMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.ConfigProvider
@@ -53,7 +53,7 @@ class OpenAiCompatibleModelProvider : ModelProvider {
     // constructorThreshold, and this class is instantiated by Arc, so there is no
     // constructor to widen anyway. Same shape as LoanStageEventConsumer / VopRateLimitFilter.
     @Inject
-    lateinit var metrics: DomainMetrics
+    lateinit var metrics: LlmCallMetrics
 
     // Resolved lazily (NOT @ConfigProperty-injected): an un-seeded/empty key would otherwise fail
     // config load at boot (SmallRye SRCFG00040 on an empty String binding) and CrashLoop the pod —
