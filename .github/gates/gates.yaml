@@ -889,6 +889,13 @@ gates:
     env:
       OASDIFF_VERSION: "1.22.0"
       OASDIFF_SHA256: "8b972accaf49f984cf40702af8b29360126ac9436594ccf6ac1ae662209a5fe6"
+    # Falsifies the URL-major scan, which had no self-test and shipped a false positive for months:
+    # it read /api/v{N} out of RAW file text, so a comment explaining the URL-major rule read as an
+    # endpoint implementing it and failed a service whose every @Path says /api/v1 (#3119). Needs no
+    # oasdiff — it exercises url_majors / own_api_majors directly, including against the two real
+    # services (psd2, customer-edge) whose distinction a naive fix breaks.
+    selftest: |
+      python3 .github/scripts/check-api-contract.py --self-test
     run: |
       set -euo pipefail
       curl -fsSL -o /tmp/oasdiff.tar.gz \
