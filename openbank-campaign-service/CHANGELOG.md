@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/v0.6.0...v0.7.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** campaign authoring in the console, with the four-eyes gate intact ([#3110](https://github.com/JiRaska/open-bank-oss/issues/3110)) ([4e071db](https://github.com/JiRaska/open-bank-oss/commit/4e071db22b18bb05dd40221ac90f3425fcfc5b38))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/v0.5.0...v0.6.0) (2026-08-01)
 
 
