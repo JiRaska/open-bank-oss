@@ -17,6 +17,7 @@ import java.util.UUID
 private data class DelegationEvent(
     val type: String,
     val grantId: UUID,
+    val grantorPartyId: UUID,
     val granteePartyId: UUID,
     val resourceType: String,
     val resourceId: UUID?,
@@ -59,6 +60,9 @@ class DelegationEventConsumer(
         val node = runCatching { objectMapper.readTree(payload) }.getOrNull() ?: return null
         val grantId = runCatching { UUID.fromString(node.path("aggregateId").asText()) }.getOrNull() ?: return null
         val grantee = runCatching { UUID.fromString(node.path("granteePartyId").asText()) }.getOrNull() ?: return null
+        // A grant with no readable grantor cannot be checked against the account owner, so it is
+        // a poison pill rather than a row to project optimistically.
+        val grantor = runCatching { UUID.fromString(node.path("grantorPartyId").asText()) }.getOrNull() ?: return null
         val resourceId = node.path("resourceId").asText(null)
             ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
         val caps = node.path("capabilities").takeIf { it.isArray }
@@ -66,6 +70,7 @@ class DelegationEventConsumer(
         return DelegationEvent(
             type = node.path("eventType").asText(""),
             grantId = grantId,
+            grantorPartyId = grantor,
             granteePartyId = grantee,
             resourceType = node.path("resourceType").asText(""),
             resourceId = resourceId,
@@ -95,6 +100,7 @@ class DelegationEventConsumer(
             DelegatedAccessGrant(
                 id = event.grantId,
                 accountId = accountId,
+                grantorPartyId = event.grantorPartyId,
                 granteePartyId = event.granteePartyId,
                 capabilities = event.capabilities,
                 resourceType = event.resourceType,

@@ -29,6 +29,9 @@ class DelegationProjectionEntity : PanacheEntityBase() {
     @Column(name = "account_id", nullable = false)
     lateinit var accountId: UUID
 
+    @Column(name = "grantor_party_id", nullable = false)
+    lateinit var grantorPartyId: UUID
+
     @Column(name = "grantee_party_id", nullable = false)
     lateinit var granteePartyId: UUID
 
@@ -61,6 +64,7 @@ class DelegationProjectionEntity : PanacheEntityBase() {
     fun toDomain(): DelegatedAccessGrant = DelegatedAccessGrant(
         id = id,
         accountId = accountId,
+        grantorPartyId = grantorPartyId,
         granteePartyId = granteePartyId,
         capabilities = capabilities.toSet(),
         resourceType = resourceType,
@@ -76,6 +80,7 @@ class DelegationProjectionEntity : PanacheEntityBase() {
             DelegationProjectionEntity().apply {
                 id = g.id
                 accountId = g.accountId
+                grantorPartyId = g.grantorPartyId
                 granteePartyId = g.granteePartyId
                 resourceType = g.resourceType
                 capabilities = g.capabilities.toMutableSet()
