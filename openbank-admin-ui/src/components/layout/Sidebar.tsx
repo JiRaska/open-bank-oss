@@ -17,6 +17,7 @@ import {
   PiggyBank, GitBranch, Lock, ClipboardList, Scale, Smartphone,
   ClipboardCheck, Activity, Boxes, Bluetooth, Fingerprint, FileSignature, Network, Waypoints, Workflow,
   Megaphone,
+  Target,
 } from 'lucide-react'
 import { hasPermission, Permission } from '@/lib/auth/roles'
 import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
@@ -65,6 +66,7 @@ const complianceNav: NavItem[] = [
   { nameCs: 'Spory',              nameEn: 'Disputes',         href: '/disputes',          icon: MessageSquareWarning,  permission: 'compliance:view' },
   { nameCs: 'Customer 360',        nameEn: 'Customer 360',     href: '/customer-360',      icon: Users,                 permission: 'compliance:view' },
   { nameCs: 'Kampaně',            nameEn: 'Campaigns',        href: '/campaigns',         icon: Megaphone,             permission: 'compliance:view' },
+  { nameCs: 'Segmenty',           nameEn: 'Segments',         href: '/segments',          icon: Target,                permission: 'compliance:view' },
   { nameCs: 'Souhlasy',           nameEn: 'Consents',         href: '/consents',          icon: FileSignature,           permission: 'compliance:view' },
   { nameCs: 'Auditní záznamy',    nameEn: 'Audit Log',        href: '/audit',             icon: ScrollText,            permission: 'audit:view' },
   { nameCs: 'Regulatorní',        nameEn: 'Regulatory',       href: '/regulatory',        icon: FileText,              permission: 'regulatory:view' },
