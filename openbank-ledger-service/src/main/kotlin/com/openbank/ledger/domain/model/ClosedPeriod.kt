@@ -4,11 +4,16 @@
 
 package com.openbank.ledger.domain.model
 
+import com.openbank.libs.domain.identifiers.Ids
 import java.math.BigDecimal
 import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
+
+private const val MONTHS_PER_QUARTER = 3
+private const val DECEMBER = 12
+private const val LAST_DAY_OF_DECEMBER = 31
 
 /** Statutory close granularities (ADR-0096 D1). */
 enum class PeriodType {
@@ -26,11 +31,11 @@ enum class PeriodType {
             val lastMonth = from.plusMonths((MONTHS_PER_QUARTER - 1).toLong())
             AccountingPeriod(this, from, lastMonth.withDayOfMonth(lastMonth.lengthOfMonth()))
         }
-        YEAR -> AccountingPeriod(this, LocalDate.of(date.year, 1, 1), LocalDate.of(date.year, 12, 31))
-    }
-
-    companion object {
-        private const val MONTHS_PER_QUARTER = 3
+        YEAR -> AccountingPeriod(
+            this,
+            LocalDate.of(date.year, 1, 1),
+            LocalDate.of(date.year, DECEMBER, LAST_DAY_OF_DECEMBER),
+        )
     }
 }
 
@@ -51,7 +56,8 @@ data class AccountingPeriod(val type: PeriodType, val from: LocalDate, val to: L
     val label: String
         get() = when (type) {
             PeriodType.MONTH -> "MONTH:%04d-%02d".format(from.year, from.monthValue)
-            PeriodType.QUARTER -> "QUARTER:%04d-Q%d".format(from.year, (from.monthValue - 1) / 3 + 1)
+            PeriodType.QUARTER ->
+                "QUARTER:%04d-Q%d".format(from.year, (from.monthValue - 1) / MONTHS_PER_QUARTER + 1)
             PeriodType.YEAR -> "YEAR:%04d".format(from.year)
         }
 
@@ -196,7 +202,7 @@ data class ClosedPeriodRecord(
         fun draftOf(
             trialBalance: PeriodTrialBalance,
             computedAt: Instant,
-            id: UUID = UUID.randomUUID(),
+            id: UUID = Ids.newId(),
             draftedBy: String? = null,
         ) = ClosedPeriodRecord(
             id = id,
