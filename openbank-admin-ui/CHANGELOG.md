@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.76.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.75.0...admin-ui-v0.76.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** campaign authoring in the console, with the four-eyes gate intact ([#3110](https://github.com/JiRaska/open-bank-oss/issues/3110)) ([4e071db](https://github.com/JiRaska/open-bank-oss/commit/4e071db22b18bb05dd40221ac90f3425fcfc5b38))
+
 ## [0.75.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.74.0...admin-ui-v0.75.0) (2026-08-01)
 
 
