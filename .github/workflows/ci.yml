@@ -1240,6 +1240,25 @@ jobs:
           python3 .github/scripts/check-external-feeds.py --self-test
           python3 .github/scripts/check-external-feeds.py --root . --offline
 
+      # A probed or scraped port must be a port the service opens (issue #2872, item 1).
+      #
+      # Rolling campaign-service into the sandbox hit five defects that each kill the pod or its
+      # readiness in the first seconds, all of them on main with every required check green. This
+      # is the cheapest of them (#2870): the Deployment's probes named port 8085 and the service
+      # config had no `quarkus.management` block, so nothing ever listened there.
+      #
+      # No existing gate could see it. `Validate manifests` lints the YAML, the service build
+      # compiles and tests the code — neither reads a Deployment and a service config TOGETHER.
+      # Unit tests cannot either: the management interface is disabled under `%test`, so the port
+      # a test could bind is not the port production probes.
+      #
+      # Self-test first, and it matters here: the fleet is clean today, so the flagging branch
+      # would otherwise never execute again.
+      - name: "probe/scrape port has a listener (issue #2872, enforced)"
+        run: |
+          python3 .github/scripts/check-probe-port-listener.py --selftest
+          python3 .github/scripts/check-probe-port-listener.py --enforce
+
   # ---------------------------------------------------------------------------
   # Customer-app dossier content check (ADR-0074 invariant 5).
   #
