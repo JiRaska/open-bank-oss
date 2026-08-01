@@ -311,6 +311,18 @@ fire from *outside* it, so they stay here:
   (#2984): same inputs, same comparison, same cited defect. Merging it would have put two copies
   of one rule in `Validate manifests`, on every PR, to drift apart later. CI cannot see that;
   only looking at what else landed recently can.
+- **Parallel agents land on the SAME artifact routinely — "what else touched this file today" is
+  as load-bearing a question as "are the checks green".** Three instances on 2026-08-01 alone:
+  `check-probe-port-listener.py` vs `check-probe-port-has-listener.py` (#2984/#3009),
+  `security.yml` (#3103/#3079), `api-fuzz-authenticated.yml` (#3024/#3079). None was visible to
+  CI — #3009 was fully green — and each was found only by comparing CONTENT:
+  `git diff origin/main origin/<branch> -- <file>`, or a shasum of the file on both sides.
+  The three outcomes differ, so measure before deciding: identical content (#3103's `security.yml`
+  matched `main` byte for byte, so merging was a no-op), a true duplicate (#3009, close one),
+  or genuine divergence (#3024 differed by 101 lines — an authoring decision, not a merge).
+  Note the file list `gh pr view --json files` shows is computed against the MERGE-BASE, so after
+  a competing PR squash-merges it still lists the overlap as a diff even when the content already
+  agrees. Read the content, not the diff.
 - **A finding from a CI run goes stale in MINUTES while a parallel agent is active — re-check
   before acting on it.** Three times in one session a ktlint/test failure was already fixed by the
   time the fix was written: the branch had moved (`db25c9ac8` -> `629aff176`,
