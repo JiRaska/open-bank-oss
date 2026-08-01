@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: standing-order-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "353ca3af2f5f56f1"
+    openbank.tech/policy-checksum: "28fd488264398206"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2888,6 +2888,72 @@ data:
     # ---------------------------------------------------------------------------------------
     # Kafka topic existence (issue #2598). A service may only reference a topic that exists.
     # ---------------------------------------------------------------------------------------
+    external_feeds:
+      # A third-party URL in a service's application.yaml is unfalsifiable by every test layer this
+      # repo has. A unit test stubs the client, an IT serves a local fixture, and a consumer pact
+      # answers whatever path it is asked for (the #2283 asymmetry). The upstreams here are foreign
+      # government feeds with no pact and no contract, so fetching them is the only thing that can be
+      # wrong out loud.
+      #
+      # Found live: openbank-fx-service's statutory CNB fixing URL was a 404 for the entire life of
+      # the service — the path segment `kurzy-devizoveho-trhu` appears TWICE in CNB's URL and the
+      # config carried it once. Every layer stayed green: a 404 is a valid HTTP response, so the
+      # rest-client succeeded and the @CircuitBreaker never opened (its requestVolumeThreshold of 4
+      # can never be filled by a once-daily caller anyway); CNB serves the 404 as a 58 KB HTML page,
+      # the parser rejected it, and the scheduler's catch swallowed that into one ERROR line.
+      # Downstream, FxRevaluationService found no rate, logged "skipping its revaluation leg" and
+      # returned posted=false — a successful-looking run of a job that revalued nothing. The only
+      # evidence anywhere was a table that stopped growing, and nothing alerts on that (#2204).
+      #
+      # TWO PROPERTIES, deliberately in different lanes:
+      declaration_drift_is_blocking: true
+      # Every external URL in an openbank-*/src/main/resources/application.yaml must be declared
+      # either in the watch's FEEDS (probed) or in NOT_PROBED (with a reason). Offline, deterministic,
+      # enforced in `Validate manifests`. This is the derived-scope rule: a gate whose coverage set is
+      # maintained separately from the artifacts it covers reads as PASSING when the set is short,
+      # never as unchecked.
+      liveness_never_blocks_merge: true
+      # Fetching is a property of the internet at this moment, so a dead feed escalates onto its issue
+      # instead of gating a merge — a third party having a bad day must not wedge the repo, and a
+      # scheduled job that is red every day is a red addressed to nobody.
+      probe_asserts_payload_shape: true
+      # A 200 proves a server answered, not that the answer is the feed. Each declared feed carries a
+      # matcher the real payload must satisfy, and --self-test drives every matcher against payloads
+      # it MUST reject — including the exact CNB HTML error page that read as success for 46 days.
+      probe_reads_url_from_committed_config: true
+      # The declaration names the YAML path, never the URL. A second copy moves together with the
+      # first, so the probe would keep passing against a URL the service does not use — the same
+      # vacuous shape as deriving both halves of a pact from one annotation.
+      ci_producer: .github/scripts/check-external-feeds.py
+
+    kafka_dotted_keys:
+      # SmallRye Config's YAML source quotes any leaf map key containing a literal dot, so
+      # `group.id: foo` under `mp.messaging.incoming.<channel>:` registers as the property
+      # `…<channel>."group.id"` — quotes included — and KafkaConnectorIncomingConfiguration's plain
+      # getOptionalValue("group.id", …) never finds it. Nothing errors; the connector silently uses
+      # its own default (#686).
+      #
+      # THE RULE: a dotted `group.id` / `auto.offset.reset` must either resolve to the same value its
+      # fallback produces, or be set from a real config source — a `<svc>-msg-override.yaml` ConfigMap
+      # carrying override.properties with config_ordinal=500. Do NOT simply delete the YAML key: local
+      # dev and tests read it fine, and it is only the deployed path that breaks.
+      must_match_fallback_or_be_overridden: true
+      #
+      # WHY IT IS A RATCHET rather than a sweep. Six services currently satisfy the rule for
+      # `group.id` only by COINCIDENCE — the value they wanted equals quarkus.application.name, which
+      # is exactly what the fallback produces — and that holds until a service is renamed or a channel
+      # wants its own group (which is what transaction-service did). The SAME six declare
+      # `auto.offset.reset: earliest`, where no such coincidence is available, so the effective value
+      # is the connector default and not the one in the file.
+      #
+      # Those six are NOT a pending tidy-up. Forcing `earliest` onto a consumer group that has been
+      # running as the default re-reads the topic from the beginning — a mass replay on money-path
+      # channels, and a deliberate per-channel operational decision (#2945). So they are baselined in
+      # the script against that issue, a NEW occurrence fails, and a baseline entry that becomes
+      # covered is reported too, so the list cannot rot in either direction.
+      baseline_is_checked_both_ways: true
+      ci_producer: .github/scripts/check-kafka-dotted-keys.py
+
     kafka_topics:
       referenced_topics_must_be_declared: true
       # A Kafka consumer subscribed to a topic that does not exist does NOT error. It joins its

@@ -11,7 +11,7 @@
 
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
-import { svcUrl } from '@/lib/services/bff'
+import { serverSvcUrl } from '@/lib/services/bff'
 
 export const dynamic = 'force-dynamic'
 
@@ -55,7 +55,7 @@ function stateFor(status: number): SourceState {
 }
 
 async function lendingPending(headers: HeadersInit): Promise<SourceResult> {
-  const res = await fetch(svcUrl('lending-service', '/api/v1/lending/approvals', { limit: '50' }), {
+  const res = await fetch(serverSvcUrl('lending-service', 'lending', 8126, '/api/v1/lending/approvals', { limit: '50' }), {
     headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
   })
   if (!res.ok) return { items: [], state: stateFor(res.status) }

@@ -38,7 +38,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: admin-ui
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-abca07e1
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-6bb6bdfc
           ports:
             - name: http
               containerPort: 3000
@@ -75,7 +75,7 @@ spec:
             #   3. Add a RoleBinding for admin-ui-discovery below.
             # Adding a service *inside* an existing namespace is fully automatic.
             - name: OPENBANK_NAMESPACES
-              value: accounts,payments,compliance,identity,open-banking,platform,ledger,balances,audit,sanctions,security-scanner,onboarding,party,sca,statements,customer-edge,kyc,notifications,aml,consent,dispute,fraud,fx,interest,pid,psd2,documents
+              value: accounts,payments,compliance,identity,open-banking,platform,ledger,balances,audit,sanctions,security-scanner,onboarding,party,sca,statements,customer-edge,kyc,notifications,aml,consent,dispute,fraud,fx,interest,pid,psd2,documents,campaign,anacredit,billing,finrep,lending,sdd,tpp-registry
             # agent-service (MCP) is NOT reached via the discovery proxy: the
             # /api/agent/mcp and /api/agent/chat routes resolve it from this env
             # directly. Unset, they fall back to localhost:8109 (the admin-ui pod
@@ -742,3 +742,118 @@ spec:
                 name: admin-ui
                 port:
                   number: 3000
+---
+# campaign (ADR-0200/#2749). Without BOTH this binding and the OPENBANK_NAMESPACES
+# entry above, discovery cannot see campaign-service and the console renders
+# "Campaign-service is not responding" against a healthy 2/2 pod.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: campaign
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: anacredit
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: billing
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: finrep
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: lending
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: sdd
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: tpp-registry
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui

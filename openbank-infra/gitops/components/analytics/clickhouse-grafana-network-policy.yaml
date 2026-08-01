@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Grafana (observability) → ClickHouse HTTP (analytics:8123), for the business-warehouse dashboard
+# over the gold marts (ADR-0022).
+#
+# HAND-MAINTAINED, and in its OWN file on purpose. network-policies.yaml in this directory carries
+# `openbank.io/derived: gen-network-policies` and is rewritten wholesale by
+# openbank-infra/scripts/gen-network-policies.py — an edit there is erased by the next regeneration,
+# and the house rule is that derived artifacts are never hand-edited.
+#
+# The generator cannot derive this edge. It reads cross-namespace callers out of Deployment env URLs
+# in openbank-infra/gitops/components/, which is how `campaign` and `admin-ui` earned their entries
+# in the derived allow-list — both declare CLICKHOUSE_URL on their own Deployments. Grafana has no
+# Deployment in components/: it is rendered by the kube-prometheus-stack Helm chart from
+# apps/kube-prometheus-stack.yaml, and its ClickHouse edge is a Grafana *datasource*, a shape the
+# URL scan does not look at. Same reason temporal-network-policies.yaml is hand-maintained.
+#
+# Additive, not a replacement: NetworkPolicies union, so this grants the observability edge without
+# touching what the generator emits. Enforcement is LIVE (VPC CNI standard mode, ADR-0060) — without
+# this policy the datasource fails with a connection timeout that looks exactly like a wrong
+# password.
+#
+# Port 8123 (HTTP) only. The native protocol on 9000 is deliberately NOT opened: the Grafana
+# ClickHouse datasource speaks either, and the smaller hole is the right default.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: clickhouse-ingress-grafana
+  namespace: analytics
+  labels:
+    app.kubernetes.io/part-of: analytics
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: clickhouse
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - protocol: TCP
+          port: 8123

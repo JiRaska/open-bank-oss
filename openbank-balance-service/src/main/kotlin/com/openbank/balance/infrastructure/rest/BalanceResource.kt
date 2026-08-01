@@ -101,7 +101,11 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
     @Path("/{accountId}/holds")
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "balance.hold", resource = "#accountId")
-    suspend fun placeHold(@PathParam("accountId") accountId: UUID, body: PlaceHoldRequest): Response {
+    suspend fun placeHold(@PathParam("accountId") accountId: UUID, body: PlaceHoldRequest?): Response {
+        // A JSON `null` body deserialises to null despite the non-nullable Kotlin type, so the
+        // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
+        // IllegalArgumentException to 400.
+        requireNotNull(body) { "request body is required" }
         val hold = svc.placeHold(
             PlaceHoldCommand(accountId, body.amount, body.currency, body.reason, body.referenceId, body.ttlSeconds),
         )
@@ -119,21 +123,37 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
     @Path("/{accountId}/credit")
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "balance.credit", resource = "#accountId")
-    suspend fun credit(@PathParam("accountId") accountId: UUID, body: BalanceOperationRequest): Response =
-        Response.ok(svc.credit(CreditAccountCommand(accountId, body.amount, body.currency, body.referenceId))).build()
+    suspend fun credit(@PathParam("accountId") accountId: UUID, body: BalanceOperationRequest?): Response {
+        // A JSON `null` body deserialises to null despite the non-nullable Kotlin type, so the
+        // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
+        // IllegalArgumentException to 400.
+        requireNotNull(body) { "request body is required" }
+        return Response.ok(svc.credit(CreditAccountCommand(accountId, body.amount, body.currency, body.referenceId)))
+            .build()
+    }
 
     @POST
     @Path("/{accountId}/debit")
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "balance.debit", resource = "#accountId")
-    suspend fun debit(@PathParam("accountId") accountId: UUID, body: BalanceOperationRequest): Response =
-        Response.ok(svc.debit(DebitAccountCommand(accountId, body.amount, body.currency, body.referenceId))).build()
+    suspend fun debit(@PathParam("accountId") accountId: UUID, body: BalanceOperationRequest?): Response {
+        // A JSON `null` body deserialises to null despite the non-nullable Kotlin type, so the
+        // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
+        // IllegalArgumentException to 400.
+        requireNotNull(body) { "request body is required" }
+        return Response.ok(svc.debit(DebitAccountCommand(accountId, body.amount, body.currency, body.referenceId)))
+            .build()
+    }
 
     @POST
     @Path("/{accountId}/initialize")
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "balance.initialize", resource = "#accountId")
-    suspend fun initialize(@PathParam("accountId") accountId: UUID, body: InitializeRequest): Response {
+    suspend fun initialize(@PathParam("accountId") accountId: UUID, body: InitializeRequest?): Response {
+        // A JSON `null` body deserialises to null despite the non-nullable Kotlin type, so the
+        // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
+        // IllegalArgumentException to 400.
+        requireNotNull(body) { "request body is required" }
         val balance = svc.initializeBalance(
             InitializeBalanceCommand(
                 accountId,

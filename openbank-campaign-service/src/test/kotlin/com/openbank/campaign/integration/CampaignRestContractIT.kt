@@ -1,0 +1,262 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.campaign.integration
+
+import com.openbank.campaign.it.CampaignPostgresRedisTestResource
+import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
+import io.restassured.module.kotlin.extensions.Extract
+import io.restassured.module.kotlin.extensions.Given
+import io.restassured.module.kotlin.extensions.Then
+import io.restassured.module.kotlin.extensions.When
+import io.smallrye.reactive.messaging.memory.InMemoryConnector
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
+import java.util.UUID
+
+/**
+ * The HTTP surface of campaign-service, driven as a real request (#3133).
+ *
+ * Every other test in this module calls a class directly, which makes an entire family of defects
+ * structurally invisible: media-type negotiation, `@Consumes`/`@Produces`, DTO (de)serialisation,
+ * response headers, and the Vert.x context a reactive Panache call only gets from a real request.
+ *
+ * The bug that prompted this: `activate` answered **415** to any caller that sent no body — which is
+ * exactly what the console sends — so the "Approve and activate" button could not work. The unit
+ * tests call `activate(id, null)` directly and passed against it, because a direct call supplies
+ * what the HTTP layer does not. Same shape as the `@Scheduled`/Vert.x lesson in CLAUDE.md.
+ *
+ * Scope is deliberately the endpoints whose failure mode is HTTP-shaped rather than logic-shaped;
+ * the domain rules themselves are already covered by fast unit tests and are not re-litigated here.
+ */
+@QuarkusTest
+@QuarkusTestResource(CampaignRestContractIT.NoBrokerNoWorkerResource::class)
+@QuarkusTestResource(CampaignPostgresRedisTestResource::class)
+@TestSecurity(user = "maker@openbank.test", roles = ["ROLE_OPERATOR"])
+class CampaignRestContractIT {
+
+    /**
+     * No Kafka and no Temporal worker. Neither is on the path of these endpoints, and starting them
+     * would let this test go red for reasons that say nothing about the HTTP contract.
+     */
+    class NoBrokerNoWorkerResource : QuarkusTestResourceLifecycleManager {
+        override fun start(): Map<String, String> {
+            val props = InMemoryConnector.switchOutgoingChannelsToInMemory("notification-requests-out").toMutableMap()
+            props.putAll(InMemoryConnector.switchIncomingChannelsToInMemory("consent-events-in"))
+            props["campaign.worker.enabled"] = "false"
+            props["openbank.campaign.worker.enabled"] = "false"
+            props["openbank.temporal.enabled"] = "false"
+            return props
+        }
+
+        override fun stop() = InMemoryConnector.clear()
+    }
+
+    private fun draftBody(name: String) = """
+        {"name":"$name","goal":"prove the HTTP contract","segmentName":"actives","segmentVersion":1,
+         "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                   "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
+    """.trimIndent()
+
+    private fun createDraft(name: String = "it-${UUID.randomUUID()}"): String = Given {
+        contentType("application/json")
+        body(draftBody(name))
+    } When {
+        post("/api/v1/campaigns")
+    } Then {
+        statusCode(201)
+    } Extract {
+        path<String>("id")
+    }
+
+    private fun submit(id: String) = When { post("/api/v1/campaigns/$id/submit") } Then { statusCode(200) }
+
+    /**
+     * The regression this file exists for, and the reason a manual check was not enough.
+     *
+     * An entity parameter — even nullable, even with `@Consumes(WILDCARD)` — makes RESTEasy look for
+     * a reader for the request's media type. RestAssured defaults a bodyless POST to `text/plain`
+     * and gets 415; curl sends no Content-Type at all and gets through. So the first fix passed a
+     * hand-run curl and still failed here, which is exactly the gap this file closes: `activate`
+     * now declares no entity parameter, so nothing is negotiated and every shape works.
+     *
+     * All three must reach the maker/checker check — a 415 means the console's approve button is
+     * dead again.
+     */
+    @Test
+    fun `activate accepts a request with no body at all`() {
+        val id = createDraft()
+        submit(id)
+
+        When {
+            post("/api/v1/campaigns/$id/activate")
+        } Then {
+            // 409 = it reached the domain and maker == checker (the test principal created it).
+            // Any 415 means negotiation rejected it before the gate was ever consulted.
+            statusCode(409)
+            body("error", org.hamcrest.Matchers.containsString("approver must differ"))
+        }
+    }
+
+    @Test
+    fun `activate accepts an empty JSON body`() {
+        val id = createDraft()
+        submit(id)
+
+        Given {
+            contentType("application/json")
+            body("{}")
+        } When {
+            post("/api/v1/campaigns/$id/activate")
+        } Then {
+            statusCode(409)
+        }
+    }
+
+    /**
+     * The legacy shape #3051 kept the parameter for. The value is ignored — what matters is that a
+     * caller still sending it is not rejected, which is the whole reason the parameter was retained
+     * instead of deleted.
+     */
+    @Test
+    fun `activate still accepts a legacy approver body, and ignores it`() {
+        val id = createDraft()
+        submit(id)
+
+        Given {
+            contentType("application/json")
+            body("""{"approver":"someone-else@openbank.test"}""")
+        } When {
+            post("/api/v1/campaigns/$id/activate")
+        } Then {
+            // Still 409: the approver comes from the token, so naming a different person in the
+            // body cannot satisfy maker != checker. A 200 here would mean the body was believed.
+            statusCode(409)
+        }
+    }
+
+    @Test
+    fun `the segment catalogue is served over HTTP with its rules in words`() {
+        When {
+            get("/api/v1/segments")
+        } Then {
+            statusCode(200)
+            body("name", org.hamcrest.Matchers.hasItem("actives"))
+            body("find { it.name == 'actives' }.rules[0]", org.hamcrest.Matchers.equalTo("party status is ACTIVE"))
+        }
+    }
+
+    /**
+     * The 404 must not echo the requested name back: reflecting caller input into a response body is
+     * the reflected-XSS shape CodeQL flagged as `java/xss` (high) on #3055.
+     */
+    @Test
+    fun `an unknown segment 404s without echoing what was asked for`() {
+        val body = When {
+            get("/api/v1/segments/%3Cscript%3Ealert(1)%3C%2Fscript%3E/1/preview")
+        } Then {
+            statusCode(404)
+        } Extract {
+            asString()
+        }
+
+        assertThat(body).doesNotContain("script")
+    }
+
+    /**
+     * The console builds its page shape from these headers, so a silently dropped header degrades
+     * the UI — a page with no total renders as "this is everything" whether or not it is — without
+     * failing anything. The body must stay an array: wrapping it would be a breaking contract
+     * change (ADR-0048 D5).
+     */
+    @Test
+    fun `the send log answers with an array plus its pagination headers`() {
+        val id = createDraft()
+
+        When {
+            get("/api/v1/campaigns/$id/sends?page=0&size=2")
+        } Then {
+            statusCode(200)
+            contentType(org.hamcrest.Matchers.containsString("json"))
+            header("X-Total-Count", "0")
+            header("X-Page", "0")
+            header("X-Page-Size", "2")
+            // A JSON array, not an object: `size()` only resolves against an array, so this
+            // assertion fails outright if the body were ever wrapped in a page object.
+            body("size()", org.hamcrest.Matchers.equalTo(0))
+        }
+    }
+
+    @Test
+    fun `an unrecognised outcome is a 400 listing what is allowed, never an unfiltered page`() {
+        val id = createDraft()
+
+        When {
+            get("/api/v1/campaigns/$id/sends?outcome=NOPE")
+        } Then {
+            // Answering a filter the caller did not ask for with every row reads as
+            // "no suppressions here", which is the wrong conclusion to hand an operator.
+            statusCode(400)
+            body("allowed", org.hamcrest.Matchers.hasItem("SUPPRESSED_CONSENT"))
+        }
+    }
+
+    @Test
+    fun `the send summary is keyed by outcome name so the console can label it`() {
+        val id = createDraft()
+
+        When {
+            get("/api/v1/campaigns/$id/sends/summary")
+        } Then {
+            statusCode(200)
+            body("SENT", org.hamcrest.Matchers.equalTo(0))
+            body("SUPPRESSED_CONSENT", org.hamcrest.Matchers.equalTo(0))
+        }
+    }
+
+    /**
+     * The template catalogue rejects by construction, but the operator only benefits if the reason
+     * survives the trip out through the exception mapper — "400" alone does not say what to change.
+     */
+    @Test
+    fun `an unknown template is a 400 whose message names the template`() {
+        val body = """
+            {"name":"it-bad-template","goal":"must fail","segmentName":"actives","segmentVersion":1,
+             "steps":[{"order":1,"template":"WINBACK_CS","variables":{},"delaySeconds":0}]}
+        """.trimIndent()
+
+        Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(400)
+            body("message", org.hamcrest.Matchers.containsString("WINBACK_CS"))
+        }
+    }
+
+    @Test
+    fun `a variable the template does not declare is a 400 that names the variable`() {
+        val body = """
+            {"name":"it-bad-variable","goal":"must fail","segmentName":"actives","segmentVersion":1,
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                       "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go","bodyHtml":"<b>no</b>"},
+                       "delaySeconds":0}]}
+        """.trimIndent()
+
+        Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(400)
+            body("message", org.hamcrest.Matchers.containsString("bodyHtml"))
+        }
+    }
+}

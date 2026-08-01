@@ -65,6 +65,7 @@ spec:
                   - fx
                   - statements
                   - campaign
+                  - lending
                   - finops-agent
                   - devops-agent
                   - control-liveness-sentinel

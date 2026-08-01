@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.16.0...account-service-v0.16.1) (2026-08-01)
+
+
+### Bug Fixes
+
+* **approvals:** a null JSON body on the four-eyes decide endpoint returned 500 ([#3029](https://github.com/JiRaska/open-bank-oss/issues/3029)) ([#3032](https://github.com/JiRaska/open-bank-oss/issues/3032)) ([36ff2ac](https://github.com/JiRaska/open-bank-oss/commit/36ff2ac571df954a408f80fa7d661967953d6144))
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.15.6...account-service-v0.16.0) (2026-07-30)
 
 

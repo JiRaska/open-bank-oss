@@ -31,7 +31,6 @@ class DisputeResource(
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     fun open(request: OpenDisputeRequest): Uni<Response> =
         openUseCase.open(request).map { Response.status(201).entity(it).build() }
-            .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
 
     @GET
     @Authorize(action = "dispute.list")
@@ -69,7 +68,6 @@ class DisputeResource(
     @Operation(summary = "Update dispute status/resolution")
     fun update(@PathParam("id") id: UUID, request: UpdateDisputeRequest): Uni<Response> =
         updateUseCase.update(id, request).map { Response.ok(it).build() }
-            .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
 
     @POST
     @Path("/{id}/evidence")

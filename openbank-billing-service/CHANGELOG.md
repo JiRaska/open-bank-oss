@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.8.0...billing-service-v0.8.1) (2026-08-01)
+
+
+### Bug Fixes
+
+* **approvals:** a null JSON body on the four-eyes decide endpoint returned 500 ([#3029](https://github.com/JiRaska/open-bank-oss/issues/3029)) ([#3032](https://github.com/JiRaska/open-bank-oss/issues/3032)) ([36ff2ac](https://github.com/JiRaska/open-bank-oss/commit/36ff2ac571df954a408f80fa7d661967953d6144))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.7.0...billing-service-v0.8.0) (2026-07-31)
 
 

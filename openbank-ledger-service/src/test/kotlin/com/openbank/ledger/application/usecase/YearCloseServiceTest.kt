@@ -19,6 +19,7 @@ import com.openbank.ledger.domain.model.LedgerValidationException
 import com.openbank.ledger.domain.model.TrialBalanceLine
 import com.openbank.ledger.domain.model.YearCloseRecord
 import com.openbank.ledger.domain.model.YearCloseStatus
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -85,6 +86,8 @@ class YearCloseServiceTest {
             yearCloseRepository,
             ObjectMapper().registerModule(JavaTimeModule()),
             clock,
+            // ADR-0207: the accounting date is no longer derived from `clock` inside the service.
+            AccountingClock.bank(clock),
         )
         coEvery { yearCloseRepository.saveDraft(any()) } answers { firstArg() }
         coEvery { yearCloseRepository.saveAttested(any(), any()) } answers { firstArg() }

@@ -14,7 +14,7 @@ data:
     {
       "id": null,
       "uid": "openbank-soc",
-      "title": "OpenBank \u2014 Security & Compliance Ops",
+      "title": "OpenBank — Security & Compliance Ops",
       "tags": [
         "openbank",
         "security",
@@ -54,7 +54,7 @@ data:
       "panels": [
         {
           "type": "row",
-          "title": "Posture \u2014 admission control & screening",
+          "title": "Posture — admission control & screening",
           "collapsed": false,
           "gridPos": {
             "h": 1,
@@ -191,7 +191,7 @@ data:
         {
           "type": "stat",
           "title": "Sanctions hits (5m)",
-          "description": "openbank_* contract \u2014 lights up with screening traffic",
+          "description": "openbank_* contract — lights up with screening traffic",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -254,7 +254,7 @@ data:
         },
         {
           "type": "stat",
-          "title": "Falco priority\u2265Warning (5m)",
+          "title": "Falco priority≥Warning (5m)",
           "description": "needs Falco metrics.enabled + SM (follow-up)",
           "datasource": {
             "type": "prometheus",
@@ -574,8 +574,8 @@ data:
         },
         {
           "type": "grafana-polystat-panel",
-          "title": "Service error % \u2014 fleet (hex)",
-          "description": "green<1% \u00b7 amber<5% \u00b7 red\u22655%",
+          "title": "Service error % — fleet (hex)",
+          "description": "green<1% · amber<5% · red≥5%",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -695,6 +695,328 @@ data:
               }
             }
           ]
+        },
+        {
+          "type": "row",
+          "title": "Audit chain integrity (ADR-0133)",
+          "collapsed": false,
+          "panels": [],
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 31
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Chain verdict",
+          "description": "1 = every link recomputed correctly on the last run. NO DATA here is not 'healthy' — it means the verification has never reported, and AuditChainBroken cannot fire.",
+          "gridPos": {
+            "x": 0,
+            "y": 32,
+            "w": 5,
+            "h": 5
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "openbank_audit_chain_intact{job=\"observability/openbank-services\"}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "0": {
+                      "text": "BROKEN",
+                      "color": "red",
+                      "index": 0
+                    },
+                    "1": {
+                      "text": "intact",
+                      "color": "green",
+                      "index": 1
+                    }
+                  }
+                }
+              ]
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Last verified",
+          "description": "Age of the verdict above. The scheduler runs hourly; over ~3h the verdict on the left is stale rather than current, and AuditChainVerificationStale fires.",
+          "gridPos": {
+            "x": 5,
+            "y": 32,
+            "w": 5,
+            "h": 5
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "time() - openbank_audit_chain_last_verified_timestamp_seconds{job=\"observability/openbank-services\"}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Links verified",
+          "description": "Chain links successfully recomputed on the last run.",
+          "gridPos": {
+            "x": 10,
+            "y": 32,
+            "w": 5,
+            "h": 5
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "openbank_audit_chain_entries_checked{job=\"observability/openbank-services\"}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Pre-chain rows (unverifiable)",
+          "description": "Rows written before V5 carry no record_hash and cannot be verified retroactively. Not a failure — but a chain of ZERO verifiable rows would report 'intact' and look perfect.",
+          "gridPos": {
+            "x": 15,
+            "y": 32,
+            "w": 4,
+            "h": 5
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "openbank_audit_chain_entries_unchained{job=\"observability/openbank-services\"}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Verifiable share",
+          "description": "Share of audit rows the chain can actually vouch for. This is the number that says how much the verdict on the left is worth.",
+          "gridPos": {
+            "x": 19,
+            "y": 32,
+            "w": 5,
+            "h": 5
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "100 * openbank:audit_chain_verifiable_ratio",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "decimals": 1,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Chain verification duration",
+          "description": "Cost of the control itself — what tells an operator whether the hourly cadence is still affordable as the log grows.",
+          "gridPos": {
+            "x": 0,
+            "y": 37,
+            "w": 24,
+            "h": 7
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(openbank_audit_chain_verify_duration_seconds_bucket{job=\"observability/openbank-services\"}[30m])))",
+              "legendFormat": "p95",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
         }
       ]
     }

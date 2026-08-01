@@ -27,10 +27,17 @@ spec:
     acls:
       # Read-only consumer across the analytics ingest topics (analytics-sink application.yaml
       # `topics:` list). Describe is required alongside Read for metadata/offset fetch.
-      - resource: { type: topic, name: openbank.account.events, patternType: literal }
+      #
+      # These two carried the dead names `openbank.account.events` / `openbank.transaction.events`
+      # (issue #2598). #2629 corrected the SUBSCRIPTION to the real topics but left this list
+      # behind, so the sink asked for topics its own principal had no Read on — the second half of
+      # the same drift, and just as quiet: an authorization failure here is a retry loop in the
+      # consumer, never a red pod. `check-kafka-acl-coverage.py` now derives this list from the
+      # service's own channel config so the two cannot disagree again.
+      - resource: { type: topic, name: openbank.accounts.account.created, patternType: literal }
         operations: [Read, Describe]
         host: "*"
-      - resource: { type: topic, name: openbank.transaction.events, patternType: literal }
+      - resource: { type: topic, name: openbank.transactions.transaction.initiated, patternType: literal }
         operations: [Read, Describe]
         host: "*"
       - resource: { type: topic, name: openbank.balance.events, patternType: literal }
