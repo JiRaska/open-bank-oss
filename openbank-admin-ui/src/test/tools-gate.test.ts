@@ -75,6 +75,26 @@ describe('GET /api/gate — nginx auth_request contract', () => {
     expect((await (await route()).GET(req('?tool=grafana'))).status).toBe(403)
   })
 
+  it('403s the public demo account on alertmanager despite ROLE_ADMIN', async () => {
+    // Alertmanager has no role model: its UI is its API, so anything that can load
+    // the page can silence or expire alerts platform-wide. There is no read-only
+    // Alertmanager to offer a public account, so it is denied outright.
+    vi.mocked(auth).mockResolvedValue(session(['ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_DEMO']))
+    expect((await (await route()).GET(req('?tool=alertmanager'))).status).toBe(403)
+  })
+
+  it.each(['grafana', 'pyrra'])(
+    'still ADMITS the demo account to %s — a greyed-out console is the worse outcome',
+    async tool => {
+      // Deliberate: the demo exists so a visitor sees a working platform. It is held
+      // to least privilege INSIDE each tool instead — Grafana pins ROLE_DEMO to
+      // Viewer (no Explore, so no raw Loki/Tempo), Pyrra is read-only by construction.
+      // If this ever flips to 403, the demo silently starts looking broken.
+      vi.mocked(auth).mockResolvedValue(session(['ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_DEMO']))
+      expect((await (await route()).GET(req(`?tool=${tool}`))).status).toBe(204)
+    },
+  )
+
   it('403s an unknown tool even for an admin', async () => {
     // The allow-list is what makes an Ingress path added without a gate entry
     // fail closed. If this ever returns 204 the allow-list is decorative.
@@ -166,6 +186,18 @@ describe('ADR-0234 wiring — the halves of the boundary agree', () => {
     const navTools = [...sidebarSrc.matchAll(/href: '\/tools\/([A-Za-z0-9_-]+)'/g)].map(m => m[1])
     expect(navTools.length).toBeGreaterThan(0)
     expect([...new Set(navTools)].sort()).toEqual([...new Set(ingressTools)].sort())
+  })
+
+  it('Grafana pins ROLE_DEMO to Viewer, and tests it BEFORE the admin role', () => {
+    // jmespath `||` short-circuits, so order IS the mechanism: placed after the
+    // ROLE_ADMIN test this never fires and the public account lands as a Grafana
+    // Admin with Explore over Prometheus, Loki and Tempo.
+    const kps = readFileSync('../openbank-infra/gitops/apps/kube-prometheus-stack.yaml', 'utf8')
+    const expr = kps.match(/role_attribute_path: (.*)/)?.[1]
+    expect(expr, 'role_attribute_path not found').toBeDefined()
+    expect(expr).toMatch(/ROLE_DEMO/)
+    expect(expr!.indexOf('ROLE_DEMO')).toBeLessThan(expr!.indexOf('ROLE_ADMIN'))
+    expect(expr).toMatch(/ROLE_DEMO'\)\s*&&\s*'Viewer'/)
   })
 
   it('the Ingress does not forward gate response headers into the upstream', () => {
