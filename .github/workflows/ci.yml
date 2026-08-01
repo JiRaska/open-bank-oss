@@ -405,6 +405,29 @@ jobs:
       - name: "PodMonitor namespace coverage (issue #2255, enforced)"
         run: python3 .github/scripts/check-podmonitor-namespace-coverage.py
 
+      # Loki's ruler lists rule groups per tenant as ONE operation, so a single unparseable file
+      # fails the whole listing and /prometheus/api/v1/rules returns an EMPTY group list. Measured:
+      # four valid, healthy rules plus one file with an unbalanced parenthesis took the loaded
+      # groups from four to zero. A typo in a new alert therefore disables EVERY log-based alert in
+      # the estate, silently — the ruler keeps running, Loki stays ready, the ConfigMap is valid
+      # YAML, and ArgoCD syncs it green. The only signal is one ERROR line in the ruler's own log,
+      # which is the very class of failure these rules exist to catch, so relying on it is circular.
+      # yamllint cannot help: the defect is in the LogQL expression, and Loki ships no lokitool in
+      # its image, so the only reachable LogQL parser is a real ruler. The self-test runs first and
+      # feeds it a file it MUST reject.
+      - name: "Loki rule load test self-test"
+        run: python3 .github/scripts/check-loki-rules.py --self-test
+      # --since scopes the EXPENSIVE half (pull ~100 MB + boot Loki, ~90 s) to PRs that can
+      # actually invalidate it. This job is unconditional and required, so an unscoped run charged
+      # every PR in the fleet 90 s for a check about files it did not touch. Direct cost is $0
+      # (public repo, GitHub-hosted runners), but 90 s on a required check is 90 s every
+      # contributor waits on every PR. The STEP still runs unconditionally and prints whether it
+      # loaded or skipped and why — a step that silently no-ops reads exactly like one that passed.
+      - name: "Loki rule load test (enforced)"
+        run: |
+          git fetch origin "${{ github.base_ref || github.ref_name }}:refs/remotes/origin/${{ github.base_ref || github.ref_name }}" --no-tags || true
+          python3 .github/scripts/check-loki-rules.py --since "origin/${{ github.base_ref || github.ref_name }}"
+
       # issue #2280. This repo is a MULTI-LICENSE tree: Apache-2.0 at the root (ADR-0123) with an
       # AGPL-3.0-only open-core subset (ADR-0136, extended by ADR-0181 and ADR-0193). NOTHING
       # compared the per-file SPDX headers against that declaration — no reuse-tool, no licensee,
