@@ -10,10 +10,12 @@ import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.libs.authz.Authorize
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.jwt.JsonWebToken
 import java.util.UUID
@@ -107,6 +109,11 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
      */
     @POST
     @Path("/{id}/activate")
+    // WILDCARD because the body is genuinely optional. A nullable entity parameter still makes
+    // RESTEasy negotiate a media type, so a POST with no body — which is exactly what the console
+    // sends, having nothing to say — was answered 415 instead of reaching the maker/checker check.
+    // Keeping the parameter for old callers is only backwards-compatible if new callers can omit it.
+    @Consumes(MediaType.WILDCARD)
     @Authorize(action = "campaign.activate", resource = "#id")
     suspend fun activate(@PathParam("id") id: UUID, @Suppress("UNUSED_PARAMETER") ignored: ApprovalRequest?): Response =
         runCatching { Response.ok(service.activate(id, jwt.principalName())).build() }
