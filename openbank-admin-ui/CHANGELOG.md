@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.75.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.74.0...admin-ui-v0.75.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** page and filter the send log instead of reading it whole ([#3111](https://github.com/JiRaska/open-bank-oss/issues/3111)) ([da87baa](https://github.com/JiRaska/open-bank-oss/commit/da87baad0c7d43eafe282a1777f11093a2ddc74a))
+
 ## [0.74.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.73.0...admin-ui-v0.74.0) (2026-08-01)
 
 
