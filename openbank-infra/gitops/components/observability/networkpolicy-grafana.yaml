@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0234 — the network half of the identity-aware edge gate.
+#
+# Grafana is now routed (as a sub-path of admin.open-bank.tech, behind the
+# admin-ui `admin-ui-tools` Ingress and its auth_request gate). The gate is an
+# EDGE control, so it says nothing about the in-cluster path: without this
+# policy any pod in the cluster could still reach
+# kube-prometheus-stack-grafana.observability.svc and get Grafana's own login
+# page — and Grafana is the richest post-auth pivot here (it holds the
+# datasource credentials for Prometheus, Loki and Tempo).
+#
+# So: ingress to the Grafana pod is restricted to the callers that actually
+# exist. Egress is deliberately NOT restricted — Grafana must reach every
+# datasource plus the Keycloak token/userinfo endpoints, and an allow-list that
+# has to be re-derived on every new datasource would be a gate that breaks
+# dashboards rather than one that stops an attacker.
+#
+# HAND-WRITTEN, not generated: `network-policies.yaml` in this directory is
+# emitted by openbank-infra/scripts/gen-network-policies.py from the declared
+# GitOps edges of Deployments in components/. Grafana is a Helm subchart of
+# kube-prometheus-stack, so the generator never sees it. Same reason
+# networkpolicy-rum-gateway.yaml lives beside it as its own file.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: grafana-ingress-allow-list
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: grafana
+  policyTypes:
+    - Ingress
+  ingress:
+    # Same namespace: the Prometheus scrape of Grafana's own /metrics, and the
+    # chart's sidecar containers that push dashboards/datasources into it.
+    - from:
+        - podSelector: {}
+    # The edge. This is the ONLY path a browser has, and it arrives already
+    # gated — nginx has run the auth_request against /api/gate before proxying.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+    # The admin-UI BFF, for server-side calls (dashboard links, embedded panel
+    # metadata). Matches the goalert/holmes-rca/ntfy/pyrra rules in the
+    # generated policy file.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: admin-ui

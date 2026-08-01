@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Kyverno ClusterPolicy: an Ingress in `observability` must either be gated by
+# the identity-aware edge gate (ADR-0234) or explicitly declare that it exists
+# for machine callers that cannot follow a login redirect.
+#
+# WHY THIS EXISTS. The tools in this namespace are Helm subcharts, and every one
+# of them ships an `ingress.enabled` switch that is one values edit — or one
+# chart-default change on upgrade — away from publishing a login page, a Django
+# /admin/, or a full management API. That is how the exposure happens in
+# practice: not a decision, a default. The gate annotation is the thing that
+# makes the exposure safe, so the gate annotation is what admission checks.
+#
+# THE EXEMPTION IS THE THING A HUMAN HAS TO JUSTIFY. Machine traffic genuinely
+# cannot pass the gate — a Sentry/GlitchTip SDK authenticates by DSN and a
+# `sentry-cli` dSYM upload by org token; neither can follow a 302 to the console
+# login, so gating those paths breaks ingest silently (the SDK swallows the
+# redirect). Those Ingresses carry
+# `openbank.io/ungated-machine-callers: "<why>"`, which is a sentence someone
+# had to write, not a default someone inherited.
+#
+# Scope is `observability` only, and CREATE/UPDATE only.
+#
+# WHY Audit AND NOT Enforce, TODAY. The precondition for Enforce is "every
+# Ingress in this namespace already carries one of the two annotations". That is
+# true in git as of this PR and FALSE in the cluster, and the gap does not close
+# on merge:
+#
+#   - this policy auto-syncs (the `kyverno-policies` ArgoCD Application watches
+#     components/kyverno with prune+selfHeal), so it lands minutes after merge;
+#   - the two annotations it would look for live in `gitops/apps/glitchtip.yaml`
+#     and `gitops/apps/rum-gateway.yaml`, which NOTHING syncs — those Application
+#     objects reach the cluster only via a manual `kubectl apply`;
+#   - both of those Applications are themselves prune+selfHeal, so ArgoCD keeps
+#     re-applying their rendered Ingress.
+#
+# Enforce would therefore reject ArgoCD's own re-apply of two Ingresses that are
+# correct in git, taking GlitchTip ingest and the RUM gateway to SyncFailed until
+# a human happened to run the apply. Verified 2026-08-01 against the sandbox:
+# both live Ingresses carry NEITHER annotation. That is a false precondition, and
+# this repo has already paid for one — ADR-0030's SBOM policy went Audit→Enforce
+# on exactly this shape and killed five workloads for four days (#1197).
+#
+# FLIP CONDITION, checkable in one command — when this returns two annotated
+# rows, change validationFailureAction to Enforce:
+#
+#   kubectl -n observability get ingress -o custom-columns=\
+#   'NAME:.metadata.name,DECLARED:.metadata.annotations.openbank\.io/ungated-machine-callers'
+#
+# Audit still records a policy report for every violation, so a regression is
+# visible rather than silent — it just does not reject. Tracked as a follow-up.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-gated-or-declared-tool-ingress
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+    openbank.io/plane: platform
+  annotations:
+    policies.kyverno.io/title: Tool Ingress must be gated or declared (ADR-0234)
+    policies.kyverno.io/category: Access Control
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Rejects an Ingress in the observability namespace that neither carries the
+      identity-aware edge gate (nginx.ingress.kubernetes.io/auth-url, ADR-0234)
+      nor declares why it must stay ungated for machine callers
+      (openbank.io/ungated-machine-callers). Prevents a Helm values edit or a
+      chart-default change from silently publishing an internal tool UI.
+spec:
+  # Audit, not Enforce — see the flip condition in the header. Not a permanent
+  # advisory: the condition is one command, and it is met by applying the two
+  # gitops/apps manifests this PR already changed.
+  validationFailureAction: Audit
+  background: false
+  rules:
+    - name: gated-or-declared
+      match:
+        any:
+          - resources:
+              kinds:
+                - Ingress
+              namespaces:
+                - observability
+              operations:
+                - CREATE
+                - UPDATE
+      validate:
+        message: >-
+          Ingress '{{ request.object.metadata.name }}' in namespace
+          'observability' is neither gated nor declared. An internal tool UI must
+          be served behind the identity-aware edge gate — as a sub-path of
+          admin.open-bank.tech carrying
+          'nginx.ingress.kubernetes.io/auth-url' (ADR-0234). If this Ingress
+          exists for machine callers that cannot follow a login redirect (SDK
+          ingest by DSN, sentry-cli by org token), annotate it
+          'openbank.io/ungated-machine-callers: "<why, and which paths>"' and
+          keep its path list narrowed to those endpoints.
+        deny:
+          conditions:
+            all:
+              - key: "{{ request.object.metadata.annotations.\"nginx.ingress.kubernetes.io/auth-url\" || '' }}"
+                operator: Equals
+                value: ""
+              - key: "{{ request.object.metadata.annotations.\"openbank.io/ungated-machine-callers\" || '' }}"
+                operator: Equals
+                value: ""

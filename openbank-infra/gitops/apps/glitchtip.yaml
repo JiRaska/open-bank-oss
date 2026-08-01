@@ -81,6 +81,19 @@ spec:
             className: nginx
             annotations:
               cert-manager.io/cluster-issuer: letsencrypt-prod
+              # ADR-0234: declared exemption from the identity-aware edge gate.
+              # This host carries ONLY machine traffic — a GlitchTip/Sentry SDK
+              # authenticates by DSN and cannot follow a 302 to the console login,
+              # so an auth_request here would break every crash report silently
+              # (the SDK swallows the redirect). The UI is NOT served from this
+              # host; it stays port-forward-only until ADR-0234 phase 2 moves it
+              # to admin.open-bank.tech/tools/glitchtip. Keep the path list below
+              # narrowed to ingest + the two dSYM-upload endpoints — widening it
+              # re-opens the management API on an ungated host, which is exactly
+              # what this annotation waives.
+              openbank.io/ungated-machine-callers: >-
+                SDK event ingest (DSN-authenticated) and sentry-cli dSYM upload
+                (org-token-authenticated); neither can follow a login redirect.
               # ATTACK-SURFACE REDUCTION (ADR-0056): only the event INGEST must be
               # public (devices in the field + the admin-ui operator browser POST
               # crashes here). The web UI, Django /admin/ (a superuser password login)

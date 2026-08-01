@@ -1,0 +1,106 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0234 — identity-aware edge gate for internal tool UIs.
+#
+# Internal tool UIs are served as SUB-PATHS of admin.open-bank.tech, behind an
+# nginx `auth_request` that validates the admin-UI session before nginx proxies
+# anything. An unauthenticated request is rejected at the edge, so the tool's
+# pre-auth surface stays as unreachable as it was when the tool had no Ingress
+# at all (ADR-0056) — this adds a routed path, not an unauthenticated one.
+#
+# WHY A SEPARATE INGRESS OBJECT and not a path on the `admin-ui` Ingress:
+# ingress-nginx applies an object's annotations to EVERY location that object
+# declares. Putting auth-url on the admin-ui Ingress would gate /auth/login
+# against itself — the login page would require a session to render.
+#
+# WHY A SUB-PATH and not grafana.open-bank.tech: the session cookie
+# (`__Secure-authjs.session-token`) is host-only, so the browser would not send
+# it to another hostname and the gate would deny every request. Widening the
+# cookie to `.open-bank.tech` would hand the operator session to every
+# subdomain, including public ones — a worse trade than the problem. See the ADR.
+#
+# WHY AN ExternalName SERVICE: an Ingress can only name Services in its own
+# namespace, and Grafana's Service lives in `observability`. Routing through an
+# ExternalName keeps the whole edge definition — host, TLS secret, gate — in one
+# object in one namespace, instead of relying on ingress-nginx merging two
+# Ingress objects for the same host across namespaces.
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-tools
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: admin-ui
+    app.kubernetes.io/component: tools-gate
+spec:
+  type: ExternalName
+  externalName: kube-prometheus-stack-grafana.observability.svc.cluster.local
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: admin-ui-tools
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: admin-ui
+    app.kubernetes.io/component: tools-gate
+  annotations:
+    # No cert-manager annotation: this host's certificate is issued by the
+    # `admin-ui` Ingress. Referencing the same secret reuses that leaf rather
+    # than asking for a second certificate for a host that already has one.
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # THE GATE. nginx issues a sub-request here (forwarding the browser's
+    # cookies) before proxy_pass. 204 → proxy; 401 → auth-signin redirect;
+    # 403 → authenticated but not entitled. `auth_request` fails CLOSED: if the
+    # admin-UI pod is unreachable nginx answers 500, it does not pass traffic
+    # through. That is the correct direction, and it is why grafana-local.sh is
+    # kept as break-glass.
+    #
+    # The `?tool=` is hard-coded here, never taken from the request — the gate's
+    # allow-list is keyed by it, so a caller cannot select its own tool.
+    nginx.ingress.kubernetes.io/auth-url: "http://admin-ui.admin-ui.svc.cluster.local:3000/api/gate?tool=grafana"
+    nginx.ingress.kubernetes.io/auth-signin: "https://admin.open-bank.tech/auth/login?callbackUrl=$escaped_request_uri"
+    # No auth-method / auth-response-headers annotations on purpose: the default
+    # is a GET sub-request with `proxy_pass_request_body off`, and the gate
+    # returns no headers to propagate. Adding auth-response-headers here would
+    # start forwarding gate output into the upstream request — the identity-header
+    # trust model this ADR explicitly rejects.
+    #
+    # Same edge security headers as the admin-ui Ingress. These are location-scoped,
+    # so they do NOT inherit from the other object for this host — a tool response
+    # would otherwise be served without HSTS/nosniff.
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "Strict-Transport-Security: max-age=63072000; includeSubDomains; preload";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+    # ExternalName upstreams are resolved by nginx, and Grafana renders absolute
+    # URLs from its root_url — keep the browser's Host so those URLs stay on
+    # admin.open-bank.tech rather than the .svc name.
+    nginx.ingress.kubernetes.io/upstream-vhost: "admin.open-bank.tech"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - admin.open-bank.tech
+      secretName: admin-ui-tls
+  rules:
+    - host: admin.open-bank.tech
+      http:
+        paths:
+          # NOT rewritten. Grafana is configured with
+          # root_url=https://admin.open-bank.tech/tools/grafana and
+          # serve_from_sub_path=true, so it expects to receive the prefix and
+          # builds its own asset/API URLs from it. Stripping the prefix here
+          # would break every asset on the page.
+          - path: /tools/grafana
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana-tools
+                port:
+                  number: 80
