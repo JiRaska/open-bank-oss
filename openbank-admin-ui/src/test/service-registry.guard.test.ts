@@ -121,6 +121,39 @@ function gitopsWorkloadNames(): Set<string> {
   return names
 }
 
+
+/**
+ * Namespaces that run an openbank-* Deployment/Rollout, derived from the gitops tree.
+ * Derived, not listed: a second hand-kept list is the drift this guard exists to prevent.
+ */
+function gitopsWorkloadNamespaces(): Set<string> {
+  const namespaces = new Set<string>()
+  for (const file of walkYaml(GITOPS)) {
+    const src = readFileSync(file, 'utf-8')
+    for (const doc of src.split(/^---$/m)) {
+      if (!/^kind:\s*(Deployment|Rollout)\s*$/m.test(doc)) continue
+      const name = doc.match(/^\s{2}name:\s*(\S+)/m)?.[1]
+      const ns = doc.match(/^\s{2}namespace:\s*(\S+)/m)?.[1]
+      if (name?.startsWith('openbank-') || /-service$/.test(name ?? '')) {
+        if (ns) namespaces.add(ns)
+      }
+    }
+  }
+  return namespaces
+}
+
+/**
+ * Namespaces deliberately outside the discovery boundary. Kept tight: each entry is a namespace
+ * whose workloads the console never proxies to.
+ */
+const DISCOVERY_EXEMPT_NAMESPACES = new Set<string>([
+  'admin-ui',      // the console itself
+  'temporal',      // infra, reached through its own status route
+  'messaging',     // Kafka/Strimzi
+  'observability', // Prometheus/Tempo, reached directly
+  'argocd', 'external-secrets', 'vault', 'cnpg-system', 'keda', 'iam',
+])
+
 /** BFF SERVICE_MAP keys, read from the route source. */
 function serviceMapKeys(): string[] {
   const src = readFileSync(BFF_ROUTE, 'utf-8')
@@ -242,6 +275,41 @@ describe('service registry drift guard', () => {
       unknown.map(c => `${c.file} → ${c.key}`),
       'svcUrl() callers naming a key SERVICE_MAP does not define. The proxy answers '
       + '"Unknown service" and the page degrades to "not responding" on a healthy service.',
+    ).toEqual([])
+  })
+
+  it('every namespace with a gitops workload is discoverable (OPENBANK_NAMESPACES + RoleBinding)', () => {
+    // ADR-0051 makes adding a domain namespace a THREE-step change, two of which live in
+    // admin-ui.yaml: the OPENBANK_NAMESPACES filter and a per-namespace RoleBinding for
+    // admin-ui-discovery. Miss either and discovery cannot see the service, so the console renders
+    // "not responding" against a healthy pod — which is exactly what campaign did (#2749).
+    //
+    // The checklist was already written in a comment. A comment cannot fail; this can.
+    const manifest = readFileSync(
+      path.join(GITOPS, 'components/admin-ui/admin-ui.yaml'), 'utf8',
+    )
+    const listed = new Set(
+      (manifest.match(/name: OPENBANK_NAMESPACES\s*\n\s*value:\s*(.+)/)?.[1] ?? '')
+        .split(',').map(n => n.trim()).filter(Boolean),
+    )
+    const bound = new Set(
+      [...manifest.matchAll(/name: admin-ui-discovery\s*\n\s*namespace:\s*(\S+)/g)].map(m => m[1]),
+    )
+
+    // Namespaces that actually run an openbank service, derived from the gitops tree rather than
+    // from a second hand-kept list — the whole point is that the set cannot drift.
+    const serviceNamespaces = new Set<string>()
+    for (const ns of gitopsWorkloadNamespaces()) serviceNamespaces.add(ns)
+
+    const missing = [...serviceNamespaces]
+      .filter(ns => !DISCOVERY_EXEMPT_NAMESPACES.has(ns))
+      .filter(ns => !listed.has(ns) || !bound.has(ns))
+      .map(ns => `${ns}${listed.has(ns) ? '' : ' (not in OPENBANK_NAMESPACES)'}${bound.has(ns) ? '' : ' (no RoleBinding)'}`)
+
+    expect(
+      missing,
+      'namespaces running an openbank service that admin-ui discovery cannot see. The console '
+      + 'will render "not responding" for every service in them, against healthy pods.',
     ).toEqual([])
   })
 
