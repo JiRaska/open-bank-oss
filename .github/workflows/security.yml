@@ -37,6 +37,7 @@ jobs:
     outputs:
       run_sbom: ${{ steps.f.outputs.run_sbom }}
       run_codeql: ${{ steps.f.outputs.run_codeql }}
+      codeql_matrix: ${{ steps.f.outputs.codeql_matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -53,10 +54,42 @@ jobs:
           # ~14 min java-kotlin autobuild is pure waste there. CodeQL is NOT a required
           # check, so skipping it on such PRs is safe — the weekly + main-push full scan
           # (and Trivy on every PR) still cover them.
-          CODE_RE='(\.(java|kt|kts)$|(^|/)(build|settings)\.gradle|gradle/|\.(js|jsx|ts|tsx|mjs|cjs)$|(^|/)package(-lock)?\.json$|(^|/)Dockerfile|\.github/workflows/)'
+          # Per LANGUAGE, because the analysis is per language: a PR that changes only
+          # .ts has nothing for the java-kotlin leg to look at, and vice versa.
+          JAVA_RE='(\.(java|kt|kts)$|(^|/)(build|settings)\.gradle|gradle/|(^|/)Dockerfile)'
+          JS_RE='(\.(js|jsx|ts|tsx|mjs|cjs)$|(^|/)package(-lock)?\.json$)'
+          CODE_RE="($JAVA_RE|$JS_RE)"
+          # NOTE: .github/workflows/ is deliberately NOT in either pattern. A workflow-only
+          # PR changes no analysable source, so every compile resolves from cache, CodeQL
+          # traces nothing, and `analyze` dies with "could not process any code written in
+          # Java/Kotlin" (issue seen on PR #3079). Including workflows bought no coverage —
+          # it bought a guaranteed red on exactly the PRs that change no code.
+
+          # Emits codeql_matrix as a JSON array of matrix entries; '[]' means skip the job.
+          emit_matrix() {
+            local java="$1" js="$2" out="["
+            if [ "$java" = "true" ]; then
+              out="$out{\"language\":\"java-kotlin\",\"build-mode\":\"manual\"}"
+              if [ "$js" = "true" ]; then out="$out,"; fi
+            fi
+            if [ "$js" = "true" ]; then
+              out="$out{\"language\":\"javascript-typescript\",\"build-mode\":\"none\"}"
+            fi
+            out="$out]"
+            echo "codeql_matrix=$out" >> "$GITHUB_OUTPUT"
+            echo "codeql matrix: $out"
+          }
+          # Same reason: a bare `grep -q ... && VAR=true` is fatal under errexit when it
+          # does not match, which is the common case. classify() never fails.
+          classify() {
+            J=false; S=false
+            if printf '%s\n' "$1" | grep -qE "$JAVA_RE"; then J=true; fi
+            if printf '%s\n' "$1" | grep -qE "$JS_RE"; then S=true; fi
+          }
           # schedule / manual: always run the full audit.
           if [ "$EVENT" = "schedule" ] || [ "$EVENT" = "workflow_dispatch" ]; then
-            echo "run_sbom=true" >> "$GITHUB_OUTPUT"; echo "run_codeql=true" >> "$GITHUB_OUTPUT"; exit 0
+            echo "run_sbom=true" >> "$GITHUB_OUTPUT"; echo "run_codeql=true" >> "$GITHUB_OUTPUT"
+            emit_matrix true true; exit 0
           fi
           # PRs never run the SBOM jobs (too heavy for the PR gate). CodeQL runs only
           # when code actually changed — diff against the merge-base with the target
@@ -64,16 +97,25 @@ jobs:
           if [ "$EVENT" = "pull_request" ]; then
             git fetch --no-tags --depth=1 origin "$BASE_REF" >/dev/null 2>&1 || true
             BASE="$(git merge-base "origin/$BASE_REF" HEAD 2>/dev/null || true)"
-            if [ -n "$BASE" ] && ! git diff --name-only "$BASE" HEAD | grep -qE "$CODE_RE"; then
-              echo "run_codeql=false" >> "$GITHUB_OUTPUT"
+            if [ -z "$BASE" ]; then
+              # Cannot diff — default to running everything rather than skipping silently.
+              echo "run_codeql=true" >> "$GITHUB_OUTPUT"; emit_matrix true true
             else
-              echo "run_codeql=true" >> "$GITHUB_OUTPUT"   # default to running when unsure
+              CHANGED="$(git diff --name-only "$BASE" HEAD)"
+              classify "$CHANGED"
+              if [ "$J" = "false" ] && [ "$S" = "false" ]; then
+                echo "run_codeql=false" >> "$GITHUB_OUTPUT"
+              else
+                echo "run_codeql=true" >> "$GITHUB_OUTPUT"
+              fi
+              emit_matrix "$J" "$S"
             fi
             echo "run_sbom=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
           # First push of a branch has an all-zero "before" → cannot diff, run to be safe.
           if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            echo "run_sbom=true" >> "$GITHUB_OUTPUT"; echo "run_codeql=true" >> "$GITHUB_OUTPUT"; exit 0
+            echo "run_sbom=true" >> "$GITHUB_OUTPUT"; echo "run_codeql=true" >> "$GITHUB_OUTPUT"
+            emit_matrix true true; exit 0
           fi
           CHANGED="$(git diff --name-only "$BEFORE" "$SHA")"
           # Dependency-affecting paths: Gradle build/version files, lockfiles, Dockerfiles.
@@ -82,11 +124,13 @@ jobs:
           else
             echo "run_sbom=false" >> "$GITHUB_OUTPUT"
           fi
-          if echo "$CHANGED" | grep -qE "$CODE_RE"; then
+          classify "$CHANGED"
+          if [ "$J" = "true" ] || [ "$S" = "true" ]; then
             echo "run_codeql=true" >> "$GITHUB_OUTPUT"
           else
             echo "run_codeql=false" >> "$GITHUB_OUTPUT"
           fi
+          emit_matrix "$J" "$S"
 
   # ---------------------------------------------------------------------------
   # CodeQL (semantic analysis)
@@ -103,7 +147,7 @@ jobs:
     # support linux/arm64, so it could not run on the arm64 sandbox runner anyway.)
     # Skip on gitops/docs-only PRs (run_codeql=false) — CodeQL isn't a required check
     # there, and the java-kotlin autobuild is the ~14 min tax that strands deploy PRs.
-    if: github.event.repository.private == false && needs.detect-deps.outputs.run_codeql != 'false'
+    if: github.event.repository.private == false && needs.detect-deps.outputs.codeql_matrix != '[]'
     # Standard github/codeql-action usage targets ubuntu-latest; no self-hosted-specific
     # dependency here (setup-java/setup-node are already used to work around the Hetzner
     # pool lacking those toolchains). Public repo = free GitHub-hosted minutes.
@@ -124,11 +168,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - language: java-kotlin
-            build-mode: manual
-          - language: javascript-typescript
-            build-mode: none
+        include: ${{ fromJSON(needs.detect-deps.outputs.codeql_matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
