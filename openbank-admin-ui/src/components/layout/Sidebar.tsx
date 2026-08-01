@@ -22,7 +22,13 @@ import { hasPermission, Permission } from '@/lib/auth/roles'
 import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
-type NavItem = { nameCs: string; nameEn: string; href: string; icon: React.ElementType; permission?: Permission; lockedPermission?: Permission; badge?: string }
+// `external: true` marks a destination that is NOT a Next.js route — today the
+// internal tool UIs served as sub-paths of this same host by their own Ingress
+// (ADR-0234). They must render as a plain <a>: a next/link would try a
+// client-side navigation into the App Router and 404, because no page.tsx backs
+// the path. Same origin, so the session cookie still rides along and the edge
+// gate can read it.
+type NavItem = { nameCs: string; nameEn: string; href: string; icon: React.ElementType; permission?: Permission; lockedPermission?: Permission; badge?: string; external?: boolean }
 
 const coreNav: NavItem[] = [
   { nameCs: 'Přehled',      nameEn: 'Dashboard',    href: '/dashboard',    icon: LayoutDashboard },
@@ -104,6 +110,14 @@ const platformNav: NavItem[] = [
   { nameCs: 'Schvalování', nameEn: 'Approvals', href: '/approvals', icon: ClipboardCheck, permission: 'system:view' },
 ]
 
+// Internal tool UIs, reachable at /tools/<tool> on this same host behind the
+// identity-aware edge gate (ADR-0234). The permission here MUST match the one
+// `src/app/api/gate/route.ts` requires for the tool — the gate is what actually
+// enforces it, this only decides whether the operator sees the link.
+const toolsNav: NavItem[] = [
+  { nameCs: 'Grafana',        nameEn: 'Grafana',        href: '/tools/grafana', icon: Activity, permission: 'system:view', external: true },
+]
+
 const sysNav: NavItem[] = [
   { nameCs: 'Zdraví systému',   nameEn: 'System Health',   href: '/system/health',    icon: HeartPulse,        permission: 'system:view' },
   { nameCs: 'Tech Inventory',   nameEn: 'Tech Inventory',  href: '/system/inventory', icon: Package,           permission: 'system:view' },
@@ -120,7 +134,7 @@ const SCROLL_KEY = 'ob.sidebar.scroll'
 
 const ALL_NAV: NavItem[] = [
   ...coreNav, ...revenueNav, ...customerNav, ...paymentsNav,
-  ...complianceNav, ...opsNav, ...docsNav, ...platformNav, ...sysNav,
+  ...complianceNav, ...opsNav, ...docsNav, ...platformNav, ...toolsNav, ...sysNav,
 ]
 
 export function Sidebar() {
@@ -212,6 +226,8 @@ export function Sidebar() {
         <NavSection items={filter(platformNav)} pathname={pathname} />
         <SectionLabel>{t('Dokumentace', 'Documentation')}</SectionLabel>
         <NavSection items={filter(docsNav)} pathname={pathname} />
+        <SectionLabel>{t('Nástroje', 'Tools')}</SectionLabel>
+        <NavSection items={filter(toolsNav)} pathname={pathname} />
         <SectionLabel>{t('Systém', 'System')}</SectionLabel>
         <NavSection items={filter(sysNav)} pathname={pathname} isLocked={isLocked} />
       </nav>
@@ -264,8 +280,7 @@ function NavSection({ items, pathname, isLocked }: { items: NavItem[]; pathname:
           )
         }
 
-        return (
-          <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>
+        const row = (
             <div style={{
               display: 'flex', alignItems: 'center', gap: '10px',
               padding: '8px 12px', borderRadius: '8px', cursor: 'pointer',
@@ -292,7 +307,15 @@ function NavSection({ items, pathname, isLocked }: { items: NavItem[]; pathname:
                   background: 'var(--sidebar-accent)', color: '#fff' }}>{item.badge}</span>
               )}
             </div>
-          </Link>
+        )
+
+        // A tool path is served by its own Ingress, not by the App Router — a
+        // next/link would client-side navigate and 404 (ADR-0234). Plain <a>,
+        // same origin, so the session cookie reaches the edge gate.
+        return item.external ? (
+          <a key={item.href} href={item.href} style={{ textDecoration: 'none' }}>{row}</a>
+        ) : (
+          <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>{row}</Link>
         )
       })}
     </>

@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Kyverno ClusterPolicy: an Ingress in `observability` must either be gated by
+# the identity-aware edge gate (ADR-0234) or explicitly declare that it exists
+# for machine callers that cannot follow a login redirect.
+#
+# WHY THIS EXISTS. The tools in this namespace are Helm subcharts, and every one
+# of them ships an `ingress.enabled` switch that is one values edit — or one
+# chart-default change on upgrade — away from publishing a login page, a Django
+# /admin/, or a full management API. That is how the exposure happens in
+# practice: not a decision, a default. The gate annotation is the thing that
+# makes the exposure safe, so the gate annotation is what admission checks.
+#
+# THE EXEMPTION IS THE THING A HUMAN HAS TO JUSTIFY. Machine traffic genuinely
+# cannot pass the gate — a Sentry/GlitchTip SDK authenticates by DSN and a
+# `sentry-cli` dSYM upload by org token; neither can follow a 302 to the console
+# login, so gating those paths breaks ingest silently (the SDK swallows the
+# redirect). Those Ingresses carry
+# `openbank.io/ungated-machine-callers: "<why>"`, which is a sentence someone
+# had to write, not a default someone inherited.
+#
+# Scope is `observability` only, and CREATE/UPDATE only. Both Ingresses that
+# exist in the namespace today — GlitchTip's ingest ingress and the RUM gateway
+# — carry the exemption annotation as of this policy's own PR, so it is
+# Enforce from the start rather than an Audit rule that would let the first
+# regression through while reading green.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-gated-or-declared-tool-ingress
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+    openbank.io/plane: platform
+  annotations:
+    policies.kyverno.io/title: Tool Ingress must be gated or declared (ADR-0234)
+    policies.kyverno.io/category: Access Control
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Rejects an Ingress in the observability namespace that neither carries the
+      identity-aware edge gate (nginx.ingress.kubernetes.io/auth-url, ADR-0234)
+      nor declares why it must stay ungated for machine callers
+      (openbank.io/ungated-machine-callers). Prevents a Helm values edit or a
+      chart-default change from silently publishing an internal tool UI.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: gated-or-declared
+      match:
+        any:
+          - resources:
+              kinds:
+                - Ingress
+              namespaces:
+                - observability
+              operations:
+                - CREATE
+                - UPDATE
+      validate:
+        message: >-
+          Ingress '{{ request.object.metadata.name }}' in namespace
+          'observability' is neither gated nor declared. An internal tool UI must
+          be served behind the identity-aware edge gate — as a sub-path of
+          admin.open-bank.tech carrying
+          'nginx.ingress.kubernetes.io/auth-url' (ADR-0234). If this Ingress
+          exists for machine callers that cannot follow a login redirect (SDK
+          ingest by DSN, sentry-cli by org token), annotate it
+          'openbank.io/ungated-machine-callers: "<why, and which paths>"' and
+          keep its path list narrowed to those endpoints.
+        deny:
+          conditions:
+            all:
+              - key: "{{ request.object.metadata.annotations.\"nginx.ingress.kubernetes.io/auth-url\" || '' }}"
+                operator: Equals
+                value: ""
+              - key: "{{ request.object.metadata.annotations.\"openbank.io/ungated-machine-callers\" || '' }}"
+                operator: Equals
+                value: ""
