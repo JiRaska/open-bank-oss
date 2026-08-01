@@ -72,7 +72,9 @@ class DelegationEventConsumer(
             capabilities = caps,
             perTxLimitAmount = node.path("perTransactionLimit").path("amount").asText(null)?.toBigDecimalOrNull(),
             perTxLimitCurrency = node.path("perTransactionLimit").path("currency").asText(null),
-            validFrom = node.path("validFrom").asText(null)?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() },
+            validFrom = node.path("validFrom").asText(null)?.let {
+                runCatching { OffsetDateTime.parse(it) }.getOrNull()
+            },
             validTo = node.path("validTo").asText(null)?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() },
         )
     }

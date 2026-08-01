@@ -56,7 +56,9 @@ class DelegationEventConsumerTest {
         coVerify {
             repository.upsertActive(
                 match<DelegatedAccessGrant> {
-                    it.id == grantId && it.accountId == accountId && it.active &&
+                    it.id == grantId &&
+                        it.accountId == accountId &&
+                        it.active &&
                         "ACCOUNT_READ_BALANCES" in it.capabilities &&
                         it.perTransactionLimitAmount?.compareTo("5000.00".toBigDecimal()) == 0
                 },

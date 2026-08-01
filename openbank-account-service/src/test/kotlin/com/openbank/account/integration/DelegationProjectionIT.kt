@@ -13,6 +13,7 @@ import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
+import jakarta.enterprise.inject.Any
 import jakarta.inject.Inject
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -37,6 +38,7 @@ class DelegationProjectionIT {
         override fun stop() = InMemoryConnector.clear()
     }
 
+    @Any
     @Inject
     lateinit var connector: InMemoryConnector
 
@@ -48,11 +50,16 @@ class DelegationProjectionIT {
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
     fun `grant activation opens access and revocation closes it`(): Unit = runBlocking {
         val accountId = openAccount()
+        // Mirror the real Kafka connector's Vert.x delivery context — without this the
+        // suspend @Incoming handler has no duplicated context for the Panache transaction.
+        val source: io.smallrye.reactive.messaging.memory.InMemorySource<String> =
+            connector.source("delegation-events-in")
+        source.runOnVertxContext(true)
 
-        connector.source<String>("delegation-events-in").send(delegationEvent("DelegationActivated", accountId))
+        source.send(delegationEvent("DelegationActivated", accountId))
         assertThat(awaitAuthorized(accountId, expected = true)).isTrue()
 
-        connector.source<String>("delegation-events-in").send(delegationEvent("DelegationRevoked", accountId))
+        source.send(delegationEvent("DelegationRevoked", accountId))
         assertThat(awaitAuthorized(accountId, expected = false)).isTrue()
     }
 
@@ -81,11 +88,13 @@ class DelegationProjectionIT {
 
     private suspend fun awaitAuthorized(accountId: String, expected: Boolean): Boolean {
         repeat(40) {
-            val authorized: Boolean = Given { this } When {
-                get("/api/v1/accounts/$accountId/authorizations/check?partyId=$delegateParty&role=READ_ONLY")
-            } Then {
-                statusCode(200)
-            }.extract().path("authorized")
+            val authorized: Boolean = (
+                Given { this } When {
+                    get("/api/v1/accounts/$accountId/authorizations/check?partyId=$delegateParty&role=READ_ONLY")
+                } Then {
+                    statusCode(200)
+                }
+                ).extract().path("authorized")
             if (authorized == expected) return true
             delay(250)
         }
