@@ -5,7 +5,7 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  version: 1.5.0
+  version: 1.6.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -297,6 +297,43 @@ paths:
                 $ref: '#/components/schemas/AccountResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/savings-goal/delegation/check:
+    get:
+      tags: [Accounts]
+      summary: Whether a party may act on the account's savings goal via delegation
+      description: >-
+        Machine-readable answer to "may this party DEPOSIT / WITHDRAW /
+        PROPOSE_WITHDRAW on this account's savings goal?" (ADR-0232 D3): true when
+        the party owns the account or holds an ACTIVE, in-window SAVINGS_GOAL
+        delegation grant from the local event-fed projection. Savings goals are
+        account metadata (ADR-0153), so the grant keys on the account id. Authorize
+        action `account.read`.
+      operationId: checkSavingsGoalDelegation
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: intent
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [DEPOSIT, WITHDRAW, PROPOSE_WITHDRAW]
+      responses:
+        '200':
+          description: The authorization decision
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authorized:
+                    type: boolean
 
   /api/v1/accounts/{accountId}/goal:
     put:
