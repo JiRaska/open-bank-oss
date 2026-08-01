@@ -53,7 +53,7 @@ class DelegationServiceTest {
         service = DelegationService(repository, scaClient, eligibilityClient, ownershipClient, clock)
         coEvery { ownershipClient.verifyOwnership(grantor, any(), any()) } returns OwnershipVerdict.OWNED
         coEvery { scaClient.consumeChallenge(any(), any()) } answers {
-            ScaChallengeSnapshot(firstArg(), secondArg(), "CONSUMED", "COMPLETED")
+            ScaChallengeSnapshot(firstArg(), secondArg(), "DELEGATION_GRANT", "COMPLETED")
         }
     }
 
@@ -100,6 +100,9 @@ class DelegationServiceTest {
     @Test
     fun `offer rejects mismatched SCA purpose`(): Unit = runBlocking {
         scaOk(grantor, "CONSENT_GRANT")
+        // Ownership and eligibility are checked BEFORE the SCA gate (so a doomed request does not
+        // spend the ceremony), hence both must be stubbed for the SCA assertion to be reached.
+        eligibilityOk()
         assertThatThrownBy { runBlocking { service.offer(offerCommand()) } }
             .isInstanceOf(DelegationScaException::class.java)
         coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
@@ -108,6 +111,7 @@ class DelegationServiceTest {
     @Test
     fun `offer rejects SCA completed by a different party`(): Unit = runBlocking {
         scaOk(UUID.randomUUID(), "DELEGATION_GRANT")
+        eligibilityOk()
         assertThatThrownBy { runBlocking { service.offer(offerCommand()) } }
             .isInstanceOf(DelegationScaException::class.java)
     }
