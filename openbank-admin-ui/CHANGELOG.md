@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.80.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.79.0...admin-ui-v0.80.0) (2026-08-01)
+
+
+### Features
+
+* **admin-ui:** a four-eyes console for credit compliance pack activation ([#3190](https://github.com/JiRaska/open-bank-oss/issues/3190)) ([8642767](https://github.com/JiRaska/open-bank-oss/commit/86427672456506b28894536d47a0b6db20cbcd90))
+
 ## [0.79.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.78.2...admin-ui-v0.79.0) (2026-08-01)
 
 
