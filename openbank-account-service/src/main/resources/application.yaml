@@ -76,6 +76,10 @@ quarkus:
     hosts: redis://localhost:6379
 
   rest-client:
+    sca-service:
+      url: ${SCA_SERVICE_URL:http://localhost:8110}
+      connect-timeout: 2000
+      read-timeout: 2000
     balance-service:
       url: ${BALANCE_SERVICE_URL:http://localhost:8103}
     transaction-service:

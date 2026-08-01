@@ -11,12 +11,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Produces
 import java.time.Clock
 
-/**
- * Per-service producer for [ApprovalStore] (ADR-0155). Mirrors
- * [com.openbank.account.infrastructure.idempotency.IdempotencyConfig] — see
- * [RedisApprovalStore]'s KDoc for why this is a per-service `@Produces`
- * rather than a libs-side bean.
- */
+/** Per-service producer for [ApprovalStore] (ADR-0155), mirrors consent-service's. */
 @ApplicationScoped
 class ApprovalConfig {
     @Produces
