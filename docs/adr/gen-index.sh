@@ -38,16 +38,42 @@ adrs=$(ls [0-9]*.md | sort)
 
 # Title is derived from the H1, and the number from the filename, so neither is
 # duplicated into front-matter where it could drift. See SCHEMA.md.
-h1_title() {
-  grep -m1 '^# ' "$1" | perl -CSD -pe 's/^#\s+//; s/^ADR-\d+\s*[:\x{2014}\x{2013}-]\s+//; s/^\d+\.\s+//'
+# One grep, then pure bash. This used to pipe into `perl -CSD`, and a perl
+# interpreter start per ADR was ~10% of this script's total runtime for three
+# substitutions. The dash class is written as an alternation rather than a bracket
+# expression on purpose: em-dash and en-dash are multi-byte in UTF-8, and inside a
+# bracket expression their bytes can be matched individually under a C locale.
+# Takes the H1 LINE (supplied by fm_extract_many's `!h1`), not a filename — so no
+# grep, and the file is read once for everything. This used to pipe into `perl -CSD`;
+# a perl interpreter start per ADR was ~10% of this script's runtime for three
+# substitutions. The dash class is an alternation rather than a bracket expression on
+# purpose: em-dash and en-dash are multi-byte in UTF-8, and inside a bracket
+# expression their bytes can be matched individually under a C locale.
+h1_title_from() {
+  local t=$1
+  [[ $t =~ ^\#[[:space:]]+(.*)$ ]] && t=${BASH_REMATCH[1]}
+  [[ $t =~ ^ADR-[0-9]+[[:space:]]*(:|—|–|-)[[:space:]]+(.*)$ ]] && t=${BASH_REMATCH[2]}
+  [[ $t =~ ^[0-9]+\.[[:space:]]+(.*)$ ]] && t=${BASH_REMATCH[1]}
+  printf '%s\n' "$t"
 }
 
 # Present an enum to humans: `n-a` -> `N/A`, otherwise capitalise.
+# Called twice per ADR; the old form forked a subshell and a `tr` each time.
+# Bash 3.2 (the macOS default) has no ${var^}, so capitalise with a case.
 pretty() {
   case "$1" in
-    n-a) echo "N/A" ;;
-    *)   echo "$(echo "${1:0:1}" | tr '[:lower:]' '[:upper:]')${1:1}" ;;
+    n-a) printf 'N/A\n'; return ;;
   esac
+  local first=${1:0:1} rest=${1:1}
+  case "$first" in
+    a) first=A ;; b) first=B ;; c) first=C ;; d) first=D ;; e) first=E ;;
+    f) first=F ;; g) first=G ;; h) first=H ;; i) first=I ;; j) first=J ;;
+    k) first=K ;; l) first=L ;; m) first=M ;; n) first=N ;; o) first=O ;;
+    p) first=P ;; q) first=Q ;; r) first=R ;; s) first=S ;; t) first=T ;;
+    u) first=U ;; v) first=V ;; w) first=W ;; x) first=X ;; y) first=Y ;;
+    z) first=Z ;;
+  esac
+  printf '%s%s\n' "$first" "$rest"
 }
 
 # Field separator for the cached table. NOT a tab: tab is IFS whitespace, so bash
@@ -55,27 +81,73 @@ pretty() {
 # shift every later column. \037 (US) is non-whitespace and cannot occur in an ADR.
 SEP=$'\037'
 
-json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+# Backslash first, then quote — reversing the order would double-escape the
+# backslashes this step just introduced.
+json_escape() {
+  local v=${1//\\/\\\\}
+  printf '%s' "${v//\"/\\\"}"
+}
 
 # --- one pass over the fleet, cached as a $SEP-separated table -----------------
 # Bash 3.2 (the macOS default) has no associative arrays, so the cache is one
 # delimited table held in a variable and sliced with awk. ~180 rows -- fine.
+# ONE awk process for the whole fleet (fm_extract_many), then pure bash. This loop
+# used to run fm_extract + grep per ADR and slice the result with forking helpers:
+# ~30 processes per ADR, ~6800 for the fleet, and 62 s of CPU on a check that runs on
+# every PR (issue #3108). Nothing about the parse changed — only how many times the
+# process table is touched.
+#
+# `flush_row` is called when the stream moves to a new file, and once more at the end.
+# Reading the stream with `while read` in the CURRENT shell (a here-string, not a
+# pipe) matters: a pipeline would put the loop in a subshell and TABLE would be
+# discarded at the end of it — the row-building would run, and the table would be
+# empty.
 TABLE=""
-for f in $adrs; do
-  num=${f%%-*}
-  fm="$(fm_extract "$f")" || { echo "ERROR: $f: no valid front-matter block (see SCHEMA.md)" >&2; exit 1; }
-  title=$(h1_title "$f")
-  decision=$(fm_field "$fm" decision-status)
-  delivery=$(fm_field "$fm" delivery-status)
-  date=$(fm_field "$fm" date)
-  summary=$(fm_unquote "$(fm_field "$fm" summary)")
-  tags=$(fm_list "$(fm_field "$fm" tags)" | paste -sd',' -)
-  repos=$(fm_list "$(fm_field "$fm" delivery-repos)" | paste -sd',' -)
-  sup=$(fm_list "$(fm_field "$fm" supersedes)" | paste -sd',' -)
-  supby=$(fm_list "$(fm_field "$fm" superseded-by)" | paste -sd',' -)
-  TABLE="${TABLE}${num}${SEP}${f}${SEP}${title}${SEP}${decision}${SEP}${delivery}${SEP}${date}${SEP}${tags}${SEP}${repos}${SEP}${sup}${SEP}${supby}${SEP}${summary}
+cur=""; c_title=""; c_dec=""; c_del=""; c_date=""; c_sum=""
+c_tags=""; c_repos=""; c_sup=""; c_supby=""; c_status=""
+
+join_list() {  # newline-separated -> comma-separated, no `paste`
+  local out="" line
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    out="${out}${out:+,}${line}"
+  done <<< "$1"
+  printf '%s' "$out"
+}
+
+flush_row() {
+  [[ -z "$cur" ]] && return 0
+  if [[ "$c_status" != "ok" ]]; then
+    echo "ERROR: $cur: no valid front-matter block (see SCHEMA.md)" >&2
+    exit 1
+  fi
+  local num=${cur%%-*}
+  TABLE="${TABLE}${num}${SEP}${cur}${SEP}${c_title}${SEP}${c_dec}${SEP}${c_del}${SEP}${c_date}${SEP}${c_tags}${SEP}${c_repos}${SEP}${c_sup}${SEP}${c_supby}${SEP}${c_sum}
 "
-done
+}
+
+while IFS=$'\t' read -r file key value; do
+  [[ -z "$file" ]] && continue
+  if [[ "$file" != "$cur" ]]; then
+    flush_row
+    cur=$file; c_title=""; c_dec=""; c_del=""; c_date=""; c_sum=""
+    c_tags=""; c_repos=""; c_sup=""; c_supby=""; c_status=""
+  fi
+  case "$key" in
+    # First occurrence wins, matching fm_field's `exit` on first match.
+    decision-status)  [[ -z "$c_dec"   ]] && c_dec=$value ;;
+    delivery-status)  [[ -z "$c_del"   ]] && c_del=$value ;;
+    date)             [[ -z "$c_date"  ]] && c_date=$value ;;
+    summary)          [[ -z "$c_sum"   ]] && c_sum=$(fm_unquote "$value") ;;
+    tags)             [[ -z "$c_tags"  ]] && c_tags=$(join_list "$(fm_list "$value")") ;;
+    delivery-repos)   [[ -z "$c_repos" ]] && c_repos=$(join_list "$(fm_list "$value")") ;;
+    supersedes)       [[ -z "$c_sup"   ]] && c_sup=$(join_list "$(fm_list "$value")") ;;
+    superseded-by)    [[ -z "$c_supby" ]] && c_supby=$(join_list "$(fm_list "$value")") ;;
+    '!h1')            c_title=$(h1_title_from "$value") ;;
+    '!status')        c_status=$value ;;
+  esac
+done <<< "$(fm_extract_many $adrs)"
+flush_row
 
 # --- numbering gaps, computed (never hand-typed, so the claim cannot rot) ------
 gaps=$(printf '%s' "$TABLE" | awk -F"$SEP" 'NF{print $1+0}' | sort -n | awk '
@@ -180,7 +252,17 @@ count=$(printf '%s' "$TABLE" | grep -c . || true)
 } > DIGEST.md
 
 # =============================== index.json ==================================
-json_arr() { echo "$1" | tr ',' '\n' | grep -v '^$' | sed 's/.*/"&"/' | paste -sd',' -; }
+# Four processes per call, four calls per ADR, in pure bash instead.
+json_arr() {
+  local out="" e parts=() IFS=','
+  read -ra parts <<< "$1"
+  IFS=$' \t\n'
+  for e in ${parts[@]+"${parts[@]}"}; do   # empty array + set -u = unbound in bash 3.2
+    [[ -z "$e" ]] && continue
+    out="${out}${out:+,}\"${e}\""
+  done
+  printf '%s' "$out"
+}
 {
   echo '{'
   echo '  "_comment": "DERIVED — generated by docs/adr/gen-index.sh from ADR front-matter (docs/adr/SCHEMA.md). Do not hand-edit.",'
