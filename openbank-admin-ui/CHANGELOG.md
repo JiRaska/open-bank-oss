@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.77.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.76.0...admin-ui-v0.77.0) (2026-08-01)
+
+
+### Features
+
+* **admin-ui:** serve Grafana behind an identity-aware edge gate, not a port-forward ([#3072](https://github.com/JiRaska/open-bank-oss/issues/3072)) ([85feb82](https://github.com/JiRaska/open-bank-oss/commit/85feb826d99d3590e73baa79bdfb05d3c3a704e5)), closes [#3071](https://github.com/JiRaska/open-bank-oss/issues/3071)
+
 ## [0.76.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.75.0...admin-ui-v0.76.0) (2026-08-01)
 
 
