@@ -32,6 +32,7 @@ class LedgerPaginationTest {
         mockk<com.openbank.libs.observability.DomainMetrics>(relaxed = true),
         mockk<com.openbank.ledger.application.port.out.YearCloseRepository>(relaxed = true),
         mockk<AccountingDayLock>(relaxed = true),
+        mockk<PeriodFreezeLock>(relaxed = true),
         java.time.Clock.fixed(Instant.parse("2026-07-31T09:00:00Z"), java.time.ZoneOffset.UTC),
     )
 

@@ -110,7 +110,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0093](0093-public-developer-portal-for-psd2-xs2a.md) | Public developer portal for the PSD2 XS2A API | Accepted | Partial | psd2-api,docs,networking | — |
 | [0094](0094-eudi-native-identity-hub.md) | EUDI-native identity hub — eIDAS 2.0 wallet onboarding, probabilistic record linkage, and durable orchestration | Accepted | Partial | onboarding,kyc,authn,compliance | — |
 | [0095](0095-qrlesspay-ble-proximity-spayd-payments.md) | QRlessPay — BLE proximity SPAYD payments | Accepted | Partial | payments,mobile-app,crypto-keys | openbank-app |
-| [0096](0096-entity-level-statutory-accounting-close.md) | Entity-level statutory accounting close (GL period freeze, attested trial balance, financial statements, EoY) | Accepted | Planned | accounting-close,ledger,compliance,regulatory-reporting | — |
+| [0096](0096-entity-level-statutory-accounting-close.md) | Entity-level statutory accounting close (GL period freeze, attested trial balance, financial statements, EoY) | Accepted | Partial | accounting-close,ledger,compliance,regulatory-reporting | — |
 | [0097](0097-supervisory-prudential-returns-finrep-corep.md) | Supervisory / prudential returns (FINREP / COREP) derived from the attested close | Accepted | Partial | regulatory-reporting,compliance,accounting-close | — |
 | [0098](0098-progressive-delivery-argo-rollouts.md) | Progressive Delivery for Money-Path Services via Argo Rollouts | Accepted | Shipped | kubernetes,gitops,resilience | — |
 | [0099](0099-automated-secret-rotation.md) | Automated secret rotation: OpenBao dynamic credentials + CronJob rotator | Accepted | Partial | secrets,security-ops,database | — |
