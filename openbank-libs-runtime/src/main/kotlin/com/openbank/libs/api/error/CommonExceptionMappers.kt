@@ -70,9 +70,16 @@ class IllegalStateExceptionMapper : ExceptionMapper<IllegalStateException> {
  */
 @Provider
 class DateTimeExceptionMapper : ExceptionMapper<DateTimeException> {
-    override fun toResponse(exception: DateTimeException): Response = Response.status(400)
-        .entity(apiError(400, ErrorCode.VALIDATION_ERROR.code, exception.message ?: "Invalid date or time value"))
-        .build()
+    override fun toResponse(exception: DateTimeException): Response =
+        Response.status(ErrorCode.VALIDATION_ERROR.httpStatus)
+            .entity(
+                apiError(
+                    ErrorCode.VALIDATION_ERROR.httpStatus,
+                    ErrorCode.VALIDATION_ERROR.code,
+                    exception.message ?: "Invalid date or time value",
+                ),
+            )
+            .build()
 }
 
 @Provider
