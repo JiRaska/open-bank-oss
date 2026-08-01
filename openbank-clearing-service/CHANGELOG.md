@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.6](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.5...clearing-service-v0.7.6) (2026-08-01)
+
+
+### Bug Fixes
+
+* **api:** stop reporting client errors as 500 — unmapped DateTimeException and catch-all recovers ([#3038](https://github.com/JiRaska/open-bank-oss/issues/3038)) ([#3057](https://github.com/JiRaska/open-bank-oss/issues/3057)) ([fafe119](https://github.com/JiRaska/open-bank-oss/commit/fafe1194c56224c98de40be8f4e9dcba018c2f91))
+
 ## [0.7.5](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.4...clearing-service-v0.7.5) (2026-08-01)
 
 
