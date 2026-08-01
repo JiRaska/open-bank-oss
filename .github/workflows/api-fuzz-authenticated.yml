@@ -10,10 +10,18 @@
 # (authz-bypass, IDOR-shaped inputs, parameter coercion behind auth).
 #
 # Target selection: a service whose OIDC authN is the only gate — i.e.
-# authz.enforce=false (no OPA sidecar needed). consent-service fits (AUTHZ_ENFORCE
-# defaults false) and is already in the unauthenticated fuzz set, so the two lanes
-# are directly comparable. Services with authz.enforce=true additionally need the
-# OPA sidecar + rest.rego bundle and are a later step (tracked with #266).
+# authz.enforce=false (no OPA sidecar needed). Measured 2026-08-01: 17 of the 20
+# money-path services qualify; sdd, sanctions and vop default AUTHZ_ENFORCE=true and
+# additionally need the OPA sidecar + rest.rego bundle (a later step, tracked with #266).
+# The list is DERIVED from rules.yaml money_path_services and each service's own config,
+# so a service that flips either way is picked up without editing this file.
+#
+# WHY THE REALM FILE IS NAMED openbank-realm.json (#2365): Keycloak's directory import
+# derives the REALM NAME from the filename, `<realm>-realm.json`. It was called
+# openbank-fuzz-realm.json, so Keycloak looked for a realm "openbank-fuzz" while the JSON
+# declares "openbank" — it imported openbank, then died with "Session not bound to a
+# realm". That is why this lane had 0 successful runs, ever. Renaming the file IS the fix;
+# its contents were always correct. Do not rename it back to something descriptive.
 #
 # DISPATCH-ONLY on purpose: this lane boots Keycloak + Postgres + Redis + the
 # service and depends on OIDC issuer/audience alignment that must be confirmed by
@@ -25,10 +33,10 @@ name: API fuzz (authenticated)
 on:
   workflow_dispatch:
     inputs:
-      service:
-        description: "Service module to fuzz (must have authz.enforce=false)"
+      services:
+        description: "Space-separated modules to fuzz (blank = derived money-path set with authz.enforce=false)"
         required: false
-        default: "openbank-consent-service"
+        default: ""
       max_examples:
         description: "Hypothesis examples per endpoint"
         required: false
@@ -42,15 +50,69 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  prepare:
+    name: derive fuzz scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      services: ${{ steps.derive.outputs.services }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Eligibility is a PROPERTY of each service's config, not a list someone maintains:
+      # authz.enforce must default false (OIDC is then the only gate), and the harness must be
+      # able to derive a port and provision a database. Ineligible services are excluded OUT
+      # LOUD with the reason — a silently shortened list reads as "covered".
+      - name: Derive service list
+        id: derive
+        env:
+          OVERRIDE: ${{ github.event.inputs.services }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, re, yaml
+
+          override = (os.environ.get("OVERRIDE") or "").split()
+          money = yaml.safe_load(open("openbank-libs/governance/rules.yaml"))["money_path_services"]
+          candidates = override or money
+
+          keep, skipped = [], []
+          for svc in candidates:
+              app = pathlib.Path(svc) / "src/main/resources/application.yaml"
+              spec = pathlib.Path(svc) / "src/main/resources/openapi.yaml"
+              if not app.is_file() or not spec.is_file():
+                  skipped.append((svc, "no application.yaml or openapi.yaml")); continue
+              raw = app.read_text()
+              enforce = re.findall(r"AUTHZ_ENFORCE[^\n]*", raw)
+              if any(re.search(r":\s*true", e) for e in enforce):
+                  skipped.append((svc, "authz.enforce defaults true — needs the OPA sidecar (#266)")); continue
+              if not re.search(r"^  http:\n(?:.*\n)?\s*port:\s*(\d+)", raw, re.M):
+                  skipped.append((svc, "no derivable quarkus.http.port")); continue
+              if not re.search(r"jdbc:postgresql://[^/]+/([A-Za-z0-9_]+)", raw):
+                  skipped.append((svc, "no jdbc:postgresql URL — the harness cannot provision its DB")); continue
+              keep.append(svc)
+
+          for svc, why in skipped:
+              print(f"::warning::api-fuzz-authenticated: {svc} EXCLUDED — {why}")
+          print(f"fuzzing {len(keep)} service(s); {len(skipped)} excluded")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write("services=" + json.dumps(keep) + "\n")
+          PY
+
   fuzz-authenticated:
-    name: schemathesis (authenticated)
+    name: "schemathesis auth (${{ matrix.service }})"
+    needs: prepare
     runs-on: ubuntu-latest  # public repo => hosted runners free (FinOps: hosted-first)
-    timeout-minutes: 45
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        service: ${{ fromJson(needs.prepare.outputs.services) }}
     env:
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
       POSTGRES_PASSWORD: "fuzz-ci-throwaway"
       OIDC_CLIENT_SECRET: "fuzz-ci-throwaway-secret"   # matches the realm import client secret
-      SERVICE: ${{ github.event.inputs.service || 'openbank-consent-service' }}
+      SERVICE: ${{ matrix.service }}
       MAX_EXAMPLES: ${{ github.event.inputs.max_examples || '50' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -178,6 +240,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: api-fuzz-auth-reports
+          name: api-fuzz-auth-reports-${{ matrix.service }}
           path: fuzz-reports/
           retention-days: 30
