@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.16.1...ledger-service-v1.17.0) (2026-08-01)
+
+
+### Features
+
+* **ledger:** the accounting day becomes an owned concept, with a business-date authority (ADR-0207) ([#2962](https://github.com/JiRaska/open-bank-oss/issues/2962)) ([f994c49](https://github.com/JiRaska/open-bank-oss/commit/f994c4928141032ac940a61d0d8ed835d5167294))
+
 ## [1.16.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.16.0...ledger-service-v1.16.1) (2026-07-31)
 
 
