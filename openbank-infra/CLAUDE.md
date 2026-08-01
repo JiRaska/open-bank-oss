@@ -75,6 +75,19 @@ out of it (they are path-scoped, not less important — several are live-inciden
   admission for that image (admin-ui outage, 2026-07-09). Producers must call the shared
   `openbank-infra/scripts/lib/cosign-attest.sh` (which passes `--platform` and hard-fails), never
   hand-roll `trivy`+`cosign attest` again.
+- **An inline `#trivy:ignore:<ID>` comment does NOT suppress a Kubernetes misconfig finding — the
+  only lever is `.trivyignore`, which is repo-wide.** `Trivy config (IaC) scan` in `security.yml`
+  runs `trivy config … --ignorefile .trivyignore openbank-infra`, and on trivy 0.72 the inline form
+  was measured against all three plausible spellings (`KSV-0108`, `AVD-KSV-0108`, `KSV0108`) above
+  the resource: the finding still reports in every case. So there is no narrow, in-place way to
+  accept one resource — a baseline entry silently exempts every *future* occurrence too. When you
+  add one, say so in the comment and pair it with something that counts the occurrences, so the
+  second one has to be justified rather than inheriting the exemption. `AVD-KSV-0108` (the ADR-0234
+  `grafana-tools` ExternalName Service, an in-cluster target the CVE-2020-8554 check cannot
+  distinguish from an external one) is the worked example: `tools-gate.test.ts` asserts it stays the
+  only `type: ExternalName` in gitops. Verify a baseline edit the same way — re-run with the OLD
+  ignorefile and confirm it still exits 1, or you cannot tell your new line from the scan going
+  quiet for some unrelated reason.
 - **Kyverno verifies at ADMISSION, not continuously — a running pod is NOT evidence its image is
   attested.** An unattested image keeps running; it is denied only on the next reschedule (node
   roll, eviction, scale-up) and then can never restart, one pod at a time. So "the fleet is
