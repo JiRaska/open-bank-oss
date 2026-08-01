@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.20.1...lending-service-v0.20.2) (2026-08-01)
+
+
+### Bug Fixes
+
+* **lending:** document the fail-closed input contract of the decision evaluation ([#3168](https://github.com/JiRaska/open-bank-oss/issues/3168)) ([9052f5f](https://github.com/JiRaska/open-bank-oss/commit/9052f5f17477d72da595660a25cfa569a5c69b95))
+
 ## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.20.0...lending-service-v0.20.1) (2026-08-01)
 
 
