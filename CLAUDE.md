@@ -131,6 +131,24 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   profile: a `QuarkusTestProfile` loads in a **different classloader** from the test class, so a
   companion object initializes twice — a randomized id in `getConfigOverrides()` hands the scheduler
   one value and the assertion another. Use literals.
+- **A Kafka `group.id` / `auto.offset.reset` written as a YAML key never reaches the connector.**
+  SmallRye Config's YAML source quotes any leaf map key containing a literal dot, so
+  `group.id: foo` under `mp.messaging.incoming.<channel>:` registers as the property
+  `…<channel>."group.id"` — quotes included — and `KafkaConnectorIncomingConfiguration`'s plain
+  `getOptionalValue("group.id", …)` never finds it. **Nothing errors**; the connector silently uses
+  its own default. Set it from a real config source instead: a `<svc>-msg-override.yaml` ConfigMap
+  with `override.properties` + `config_ordinal=500` (`openbank-transaction-service` is the worked
+  example, and documents it in place). Do NOT just delete the YAML key — local dev and tests read it
+  fine, and it is only the deployed path that breaks. **The trap is that six services look correct
+  and are not the same kind of correct:** their `group.id` happens to equal
+  `quarkus.application.name`, which is what the fallback produces, so the broken key is a no-op —
+  until someone renames a service or gives a channel its own group. Those same six declare
+  `auto.offset.reset: earliest`, where **no such coincidence is available**, so the effective value
+  is the connector default and not the one in the file. Fixing that is not a config tidy-up: forcing
+  `earliest` onto a consumer group running as the default re-reads the topic from the beginning, a
+  mass replay on money-path channels. `check-kafka-dotted-keys.py` ratchets it (enforced in
+  `Validate manifests`) — new occurrences fail, today's six are baselined against #2945, and a
+  baseline entry that becomes covered is reported too (#686, #2945).
 
 ### ktlint
 - Path-scoped CI only lints changed files, so a pre-existing wildcard import or a latent
