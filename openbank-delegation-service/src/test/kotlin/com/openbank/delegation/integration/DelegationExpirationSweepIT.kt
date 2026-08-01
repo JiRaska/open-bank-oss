@@ -74,22 +74,38 @@ class DelegationExpirationSweepIT {
 
     private fun connect() = DriverManager.getConnection(jdbcUrl(), "openbank", "openbank_secret")
 
-    private fun seedGrant(id: UUID, validToSql: String) = connect().use { c ->
-        c.prepareStatement(
-            """
-            INSERT INTO delegation_grants
-              (id, grantor_party_id, grantee_party_id, resource_type, resource_id,
-               approval_policy, valid_from, valid_to, status, created_at, updated_at)
-            VALUES (?, ?, ?, 'ACCOUNT', ?, 'SOLO', NOW() - INTERVAL '10 days', $validToSql,
-                    'ACTIVE', NOW(), NOW())
-            ON CONFLICT (id) DO NOTHING
-            """.trimIndent(),
-        ).use { st ->
-            st.setObject(1, id)
-            st.setObject(2, UUID.randomUUID())
-            st.setObject(3, UUID.randomUUID())
-            st.setObject(4, UUID.randomUUID())
-            st.executeUpdate()
+    /**
+     * A capability row is not optional decoration: DelegationGrantEntity.toDomain rebuilds the
+     * aggregate, whose invariant is at least one capability. Seeding the grant alone made the
+     * sweep abort on the mapping — and abort the WHOLE batch, since findExpiredActive maps every
+     * row before the per-grant loop begins.
+     */
+    private fun seedGrant(id: UUID, validToSql: String) {
+        connect().use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO delegation_grants
+                  (id, grantor_party_id, grantee_party_id, resource_type, resource_id,
+                   approval_policy, valid_from, valid_to, status, created_at, updated_at)
+                VALUES (?, ?, ?, 'ACCOUNT', ?, 'SOLO', NOW() - INTERVAL '10 days', $validToSql,
+                        'ACTIVE', NOW(), NOW())
+                ON CONFLICT (id) DO NOTHING
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, id)
+                statement.setObject(2, UUID.randomUUID())
+                statement.setObject(3, UUID.randomUUID())
+                statement.setObject(4, UUID.randomUUID())
+                statement.executeUpdate()
+            }
+            connection.prepareStatement(
+                "INSERT INTO delegation_capabilities (grant_id, capability) VALUES (?, ?) " +
+                    "ON CONFLICT DO NOTHING",
+            ).use { statement ->
+                statement.setObject(1, id)
+                statement.setString(2, "ACCOUNT_READ_BALANCES")
+                statement.executeUpdate()
+            }
         }
     }
 
