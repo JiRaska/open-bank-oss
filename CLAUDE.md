@@ -433,6 +433,31 @@ fire from *outside* it, so they stay here:
   grep -v '\${'` found the one line that did. Took three attempts on #3024 *after* the bullet
   above was already written, so treat "my grep found it" as a hypothesis until the match shows a
   value the script could not have contained.
+- **A `concurrency.group` that interpolates a LIST silently stops the job being created once the
+  list is big enough — and an absent job cannot honour its own `if:`.** `auto-deploy.yml`'s
+  `gitops-pr` keyed its group on `needs.changes.outputs.services` verbatim. A change under
+  `openbank-libs-*` rebuilds the whole fleet, so that expanded to ~1436 characters, and the job was
+  then **never instantiated**: not skipped, absent — no job, no check-run on the commit, and
+  `needs.gitops-pr.result` reading as a failure downstream. That job carries
+  `if: always() && … != 'cancelled'` precisely so a partial `can-i-deploy` failure still deploys
+  the
+  subset that passed (#846), so the whole fleet build was built, pushed, signed, attested and then
+  discarded — worst in the highest-stakes case. Correlation over 20 runs was exact: 53 services
+  (~1436 chars) → job absent (three separate times); 12 (~322) and 1 (~30) → created. Key the
+  group
+  on a short digest of the **sorted** set (`jq -S -c 'sort' | sha256sum | cut -c1-12`), which keeps
+  the same-set/disjoint-set semantics the list was there for and bounds the name at ~50 chars
+  (#3082, fixed #3084). Generalize: anything interpolated into a `concurrency.group` must be O(1) in
+  the size of the fleet — a group name is not a place to carry data.
+- **`gh pr merge` refuses on `mergeStateStatus=UNSTABLE` even when every REQUIRED check is green.**
+  A non-required check that is red (here `CodeQL (java-kotlin, manual)`, failing with "could not
+  process any code written in Java/Kotlin" on a PR that touches only a workflow YAML — there is no
+  Java to analyse) leaves the PR mergeable by the ruleset but unstable to `gh`, which then suggests
+  `--admin`. Do NOT reach for it: `--squash --auto` is the documented non-override path and merges
+  as soon as the required contexts pass. On this repo that is immediate, since
+  `required_approving_review_count: 0` — it returns with `autoMergeRequest` null and the PR
+  already
+  MERGED, which reads like it did nothing.
 - **Validate the PROBE, not the command inside it — in zsh a `for x in $VAR` loop runs ONCE.**
   zsh does not word-split an unquoted parameter (bash does), so a sweep written as
   `LIST="a b c"; for b in $LIST; do git show-ref --verify --quiet "refs/heads/$b" …` tests one

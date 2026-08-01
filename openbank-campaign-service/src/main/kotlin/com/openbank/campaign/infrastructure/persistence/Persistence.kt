@@ -16,6 +16,7 @@ import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.Segment
+import com.openbank.campaign.domain.model.SegmentCatalog
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
@@ -275,8 +276,17 @@ class PanacheSegmentRegistry(private val mapper: ObjectMapper) :
     SegmentRegistry,
     PanacheRepository<SegmentEntity> {
 
-    override suspend fun load(name: String, version: Int): Segment? =
-        Panache.withSession { find("name = ?1 and version = ?2", name, version).firstResult<SegmentEntity>() }
+    /**
+     * Code first, database second.
+     *
+     * ADR-0201 D1 makes a segment a versioned artifact defined in code; [SegmentCatalog] is that
+     * definition. The table is kept only so rows created before the catalogue existed still resolve
+     * — nothing in this codebase writes to it (`save` has no caller), which is exactly why the
+     * "versioned artifact" property was unenforceable: a hand-written UPDATE could redefine who an
+     * approved campaign reaches, with no version bump and no trace.
+     */
+    override suspend fun load(name: String, version: Int): Segment? = SegmentCatalog.find(name, version)
+        ?: Panache.withSession { find("name = ?1 and version = ?2", name, version).firstResult<SegmentEntity>() }
             .awaitSuspending()?.let { Segment(it.name, it.version, SegmentRuleSerde.read(mapper, it.rulesJson)) }
 
     override suspend fun save(segment: Segment): Segment {
@@ -294,6 +304,10 @@ class PanacheSegmentRegistry(private val mapper: ObjectMapper) :
         return segment
     }
 
-    override suspend fun list(): List<Segment> = Panache.withSession { listAll() }.awaitSuspending()
-        .map { Segment(it.name, it.version, SegmentRuleSerde.read(mapper, it.rulesJson)) }
+    override suspend fun list(): List<Segment> {
+        val legacy = Panache.withSession { listAll() }.awaitSuspending()
+            .map { Segment(it.name, it.version, SegmentRuleSerde.read(mapper, it.rulesJson)) }
+        val catalogKeys = SegmentCatalog.ALL.map { it.name to it.version }.toSet()
+        return SegmentCatalog.ALL + legacy.filterNot { (it.name to it.version) in catalogKeys }
+    }
 }
