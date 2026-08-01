@@ -5,6 +5,7 @@
 package com.openbank.campaign.application
 
 import com.openbank.campaign.application.port.out.SendLogRepository
+import com.openbank.campaign.application.port.out.StepOutcomeCount
 import com.openbank.campaign.application.usecase.CampaignSendLogQuery
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
@@ -53,6 +54,10 @@ class CampaignSendLogTest {
 
             override suspend fun countByCampaign(campaignId: UUID, outcome: SendOutcome?) =
                 records.count { outcome == null || it.outcome == outcome }.toLong()
+
+            override suspend fun countByStepAndOutcome(campaignId: UUID) =
+                records.groupBy { it.stepOrder to it.outcome }
+                    .map { (k, v) -> StepOutcomeCount(k.first, k.second, v.size.toLong()) }
         },
     )
 
