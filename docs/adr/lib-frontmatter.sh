@@ -50,64 +50,160 @@
 # READ failure and is surfaced as such, never as a schema verdict.
 # -----------------------------------------------------------------------------
 
+# The line grammar, as ONE awk function shared verbatim by both readers below —
+# the per-file one the validator uses, and the whole-fleet one the generator uses.
+# Whatever a key/value line means, it means the same thing to both. That is the
+# invariant this file exists to hold, and the reason the batch reader is not a second
+# parser. `emit(k, v)` is supplied by each reader.
+FM_AWK_GRAMMAR='
+function fm_line(line,   p, k, v) {
+  # Blank lines and comments inside the block are tolerated but carry nothing.
+  if (line ~ /^[ \t]*$/) return
+  if (line ~ /^[ \t]*#/) return
+  p = index(line, ":")
+  # A key must be flat and left-anchored. Anything else (indentation => nesting,
+  # "- " => a block sequence, no colon => a stray line or a block scalar
+  # continuation) is malformed under this schema and is reported, not guessed at.
+  if (p < 2 || line ~ /^[ \t]/ || line ~ /^-/) { emit("!malformed", line); return }
+  k = substr(line, 1, p - 1)
+  if (k !~ /^[a-z][a-z0-9-]*$/) { emit("!malformed", line); return }
+  v = substr(line, p + 1)
+  sub(/^[ \t]+/, "", v)
+  sub(/[ \t]+$/, "", v)
+  emit(k, v)
+}'
+
 fm_extract() {
-  awk '
+  awk "$FM_AWK_GRAMMAR"'
+    function emit(k, v) { print k "\t" v }
     NR == 1 {
       if ($0 != "---") { exit 3 }   # no front-matter block at all
       next
     }
     $0 == "---" { closed = 1; exit 0 }
-    # Blank lines and comments inside the block are tolerated but carry nothing.
-    /^[ \t]*$/ { next }
-    /^[ \t]*#/ { next }
-    {
-      p = index($0, ":")
-      # A key must be flat and left-anchored. Anything else (indentation => nesting,
-      # "- " => a block sequence, no colon => a stray line or a block scalar
-      # continuation) is malformed under this schema and is reported, not guessed at.
-      if (p < 2 || $0 ~ /^[ \t]/ || $0 ~ /^-/) {
-        print "!malformed\t" $0
-        next
-      }
-      k = substr($0, 1, p - 1)
-      if (k !~ /^[a-z][a-z0-9-]*$/) { print "!malformed\t" $0; next }
-      v = substr($0, p + 1)
-      sub(/^[ \t]+/, "", v)
-      sub(/[ \t]+$/, "", v)
-      print k "\t" v
-    }
+    { fm_line($0) }
     END { if (!closed) exit 4 }     # opening --- but never closed
   ' "$1"
 }
 
-fm_field() {
-  awk -F'\t' -v k="$2" '$1 == k { print $2; exit }' <<< "$1"
+# The whole fleet in ONE awk process. Emits `FILE<TAB>key<TAB>value` in file order,
+# then two synthetic keys per file:
+#   !h1      the first `# ` line, verbatim (the generator derives the title from it)
+#   !status  `ok`, or `3` / `4` — the same conditions fm_extract exits 3 and 4 on.
+# The caller decides what a bad status means, exactly as with fm_extract.
+#
+# WHY THIS EXISTS: gen-index.sh ran fm_extract once per ADR and grepped each file for
+# its H1 — 454 processes for 227 ADRs. Once the helpers below stopped forking, that
+# was ALL that remained of its runtime (9 s + 9 s of 24 s, measured). Same parse, two
+# processes instead of 454.
+#
+# Unlike fm_extract this never exits early: one malformed file must not truncate the
+# other 226. It also reads each file to the end, because the H1 follows the block.
+# No gawk extensions (no ENDFILE) — macOS ships BSD awk.
+fm_extract_many() {
+  awk "$FM_AWK_GRAMMAR"'
+    function emit(k, v) { print FILENAME "\t" k "\t" v }
+    function flush() {
+      if (prev == "") return
+      if (st == "ok" && !closed) st = "4"
+      print prev "\t!h1\t" h1
+      print prev "\t!status\t" st
+    }
+    FNR == 1 {
+      flush()
+      prev = FILENAME; h1 = ""; closed = 0; inblock = 0; st = "ok"
+      if ($0 == "---") { inblock = 1 } else { st = "3" }
+      next
+    }
+    {
+      if (inblock) {
+        if ($0 == "---") { inblock = 0; closed = 1; next }
+        fm_line($0)
+        next
+      }
+      if (h1 == "" && substr($0, 1, 2) == "# ") h1 = $0
+    }
+    END { flush() }
+  ' "$@"
 }
 
-# 0 = present, 1 = genuinely absent, 2 = the blob could not be read. The caller MUST
-# distinguish 1 from 2: only 1 is a statement about the ADR.
+# PURE BASH BELOW THIS LINE — no awk, sed, tr or grep. That is a performance property
+# with a correctness consequence, so it is worth stating plainly.
+#
+# These four are called ~14 times per ADR by gen-index.sh and ~10 times by
+# check-adr-registry.sh, and every one of them used to fork: `fm_list` alone was a
+# four-stage pipeline, so one ADR cost roughly thirty processes. Measured over 40 ADRs,
+# field extraction was 88% of gen-index.sh's runtime; reading every file was most of
+# the rest. They are pure string operations over a blob already in memory — nothing
+# here ever needed a process.
+#
+# The PARSING is still done once, by the shared awk grammar above; these only slice its
+# output. There is still exactly one implementation of the schema.
+#
+# It also removes the SIGPIPE class described above by construction rather than by
+# discipline: with no pipes and no external readers, there is no early-exit consumer to
+# signal a writer, so no caller can be handed a 141 dressed up as a verdict.
+
+fm_field() {
+  local line
+  while IFS= read -r line; do
+    if [[ "${line%%$'\t'*}" == "$2" ]]; then
+      # Only the FIRST tab separates key from value; a value may contain tabs.
+      printf '%s\n' "${line#*$'\t'}"
+      return 0
+    fi
+  done <<< "$1"
+  return 0
+}
+
+# 0 = present, 1 = genuinely absent. The third state — 2, "the blob could not be READ"
+# — is now unreachable BY CONSTRUCTION: there is no scanner left to fail, so a tool
+# failure can no longer be mistaken for a missing key. Callers keep handling 2
+# (check-adr-registry.sh does); it costs nothing and documents a distinction that must
+# never be collapsed if a reader is ever reintroduced here.
 fm_has() {
-  local rc=0
-  awk -F'\t' -v k="$2" '$1 == k { found = 1; exit } END { exit !found }' <<< "$1" || rc=$?
-  if (( rc > 1 )); then
-    echo "::error title=ADR front-matter::fm_has: could not READ front-matter while looking for key '$2' (scanner exited $rc). This is a tool failure, NOT a missing key." >&2
-    return 2
-  fi
-  return "$rc"
+  local line
+  while IFS= read -r line; do
+    [[ "${line%%$'\t'*}" == "$2" ]] && return 0
+  done <<< "$1"
+  return 1
 }
 
 # `[a, b]` -> one element per line. `[]` -> no output. Elements are trimmed; empty
 # elements (a trailing comma, `[ , ]`) are dropped rather than emitted as blanks,
 # so callers can count lines and get the real element count.
 fm_list() {
-  sed -E 's/^\[//; s/\]$//' <<< "$1" \
-    | tr ',' '\n' \
-    | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//; s/^"//; s/"$//' \
-    | grep -v '^$' || true
+  local v=$1 elem parts=()
+  v=${v#'['}
+  v=${v%']'}
+  local IFS=','
+  # `read -ra`, not `for elem in $v`: unquoted word-splitting also glob-expands, so an
+  # element containing * or ? would silently become a list of filenames.
+  read -ra parts <<< "$v"
+  IFS=$' \t\n'
+  # `${parts[@]+"${parts[@]}"}`, not a bare `"${parts[@]}"`: under `set -u`, bash 3.2
+  # (the macOS default) treats an EMPTY array's expansion as unbound and aborts, and
+  # every `[]` field in the fleet hits that. Worth recording how it was caught, because
+  # it very nearly was not: the abort happened inside a command substitution before
+  # gen-index.sh wrote anything, so the committed artefacts were left untouched — and
+  # the byte-identical check therefore PASSED, comparing the originals against
+  # themselves. A generator that produces nothing looks exactly like one that
+  # reproduces its input. Always check the run reached its last line.
+  for elem in ${parts[@]+"${parts[@]}"}; do
+    elem="${elem#"${elem%%[![:space:]]*}"}"   # ltrim
+    elem="${elem%"${elem##*[![:space:]]}"}"   # rtrim
+    elem=${elem#\"}
+    elem=${elem%\"}
+    [[ -n "$elem" ]] && printf '%s\n' "$elem"
+  done
+  return 0
 }
 
 # One layer of surrounding double quotes, and `\"` back to `"`. Left alone if the
 # value is not quoted, so the caller can tell the difference and reject it.
 fm_unquote() {
-  sed -E 's/^"//; s/"$//; s/\\"/"/g' <<< "$1"
+  local v=$1
+  v=${v#\"}
+  v=${v%\"}
+  printf '%s\n' "${v//\\\"/\"}"
 }
