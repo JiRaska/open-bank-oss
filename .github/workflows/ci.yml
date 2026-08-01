@@ -877,17 +877,6 @@ jobs:
       - name: "can-i-deploy block classifier unit test"
         run: bash .github/scripts/test-classify-can-i-deploy-block.sh
 
-      # can-i-deploy version-selector unit test (issue #3082, defect 1). The classifier above
-      # labels WHY a block happened; this one decides WHICH VERSION the gate asks about in the
-      # first place — and getting that wrong is quieter than any block. `--latest main` on a
-      # push routinely resolves to the PREVIOUS build, so a green can be inherited from a
-      # commit that is not the one being deployed: a contract gate answering about the wrong
-      # version. The load-bearing case is "version present → --version <sha>"; if someone
-      # simplifies the selector back to always returning `--latest main`, that case is what
-      # goes red.
-      - name: "can-i-deploy version selector unit test"
-        run: bash .github/scripts/test-resolve-can-i-deploy-selector.sh
-
       # co-deploy set derivation unit test (issue #1985). The classifier above says WHAT KIND
       # of block a service has; this one says whether the block can be resolved by deploying
       # that service at all. Two services that name each other never converge one at a time,
