@@ -111,6 +111,13 @@ class AuditChainIntegrityGauge {
         cron = "\${openbank.audit.chain-verify.cron:0 0 * * * ?}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
+    // The breadth IS the requirement, so it is suppressed with a reason rather than narrowed: the
+    // rule is "no failure to RUN may ever be reported as tampering", and that has to hold for
+    // whatever the reactive stack throws — a Hibernate PersistenceException, a CompletionException
+    // wrapping a driver timeout, a pool exhaustion. Enumerating those would be a list that goes
+    // stale on the next Quarkus bump, and the one it missed would surface as a false
+    // AuditChainBroken critical. Same trade as OpenAiCompatibleLlmGatewayClient's suppression.
+    @Suppress("TooGenericExceptionCaught")
     suspend fun verify() {
         if (!enabled) return
         val startedAt = System.nanoTime()
