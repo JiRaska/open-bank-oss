@@ -27,8 +27,9 @@ grafana/loki:3.6.7 — `usr/bin/loki` is the only binary), so the parser we can 
 itself.
 
 Usage:
-    check-loki-rules.py                 # gate (exit 1 when the ruler rejects anything)
-    check-loki-rules.py --self-test     # prove the gate can fail
+    check-loki-rules.py                       # always run the load test
+    check-loki-rules.py --since origin/main   # run it only when a rule input changed (CI)
+    check-loki-rules.py --self-test           # prove the gate can fail
 
 Requires docker. Without it the check SKIPS with a warning and exit 0 — deliberately, so this
 cannot become a hard dependency that blocks unrelated work on a machine without docker; the CI job
@@ -238,11 +239,60 @@ def self_test() -> int:
     return 0
 
 
+# What this gate costs, stated rather than assumed (the house rule is to quantify FinOps with a
+# denominator). Booting a real Loki means pulling ~100 MB and waiting ~25 s for readiness, so a full
+# run adds roughly 90 s. It lives in `Validate manifests`, which is UNCONDITIONAL and required — so
+# without scoping, every PR in the fleet pays that, including the overwhelming majority that touch
+# no rule at all. Direct dollar cost is $0 (public repo, GitHub-hosted runners are free), but 90 s
+# on a required check is 90 s every contributor waits, on every PR, forever.
+#
+# So the expensive part is scoped to the PRs that can actually invalidate it, and the STEP still
+# runs unconditionally and PRINTS what it decided. That distinction matters: a path-filtered
+# workflow can never be a required check (a required context that never reports blocks every PR
+# that misses its paths), and a step that silently no-ops reads exactly like a step that passed.
+# This one says which it did.
+RULE_INPUTS = [
+    "openbank-infra/gitops/components",       # where loki_rule ConfigMaps live
+    "openbank-infra/gitops/apps/loki.yaml",   # the ruler config the rules load under
+    ".github/scripts/check-loki-rules.py",    # the gate itself
+]
+
+
+def rule_inputs_changed(base_ref: str) -> tuple[bool, str]:
+    """-> (changed, detail). Fails OPEN: an unanswerable git question runs the check."""
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--name-only", f"{base_ref}...HEAD", "--", *RULE_INPUTS],
+            capture_output=True, text=True, cwd=REPO, check=True).stdout
+    except (subprocess.CalledProcessError, OSError) as ex:
+        # Never skip because git was unhappy — that would turn an infrastructure hiccup into a
+        # silently unchecked rule set, which is the failure mode this whole file exists to prevent.
+        return True, f"could not diff against {base_ref} ({ex}) — running the load test anyway"
+    files = [f for f in out.splitlines() if f.strip()]
+    if not files:
+        return False, f"no rule inputs changed vs {base_ref}"
+    return True, f"{len(files)} rule input(s) changed vs {base_ref}: {', '.join(files[:5])}"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--self-test", action="store_true", help="prove the gate can fail")
+    ap.add_argument("--since", metavar="REF",
+                    help="skip the load test when no rule input changed vs REF (e.g. origin/main). "
+                         "Omit to always run.")
     args = ap.parse_args()
-    return self_test() if args.self_test else run_gate()
+    if args.self_test:
+        return self_test()
+    if args.since:
+        changed, detail = rule_inputs_changed(args.since)
+        if not changed:
+            n = len(rule_configmaps(COMPONENTS))
+            print(f"check-loki-rules: SKIPPED the Loki load test — {detail}. "
+                  f"{n} rule file(s) in tree, unchanged by this PR, and validated on the PR that "
+                  f"last touched them.")
+            return 0
+        print(f"check-loki-rules: {detail}")
+    return run_gate()
 
 
 if __name__ == "__main__":
