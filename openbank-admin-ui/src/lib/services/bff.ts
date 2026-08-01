@@ -38,6 +38,33 @@ export function svcUrl(
 /** The monorepo folder / release-please component for a service, e.g.
  *  `account-service` → `openbank-account-service`. Used by the docs BFF
  *  (/api/docs/...) to locate per-service CHANGELOG / release tags. */
+/**
+ * Absolute upstream URL for a cluster service, for use in SERVER code (route handlers).
+ *
+ * [svcUrl] returns a same-origin *relative* path, which is right for the browser and wrong here:
+ * Node's `fetch` rejects a relative URL outright with `Failed to parse URL from /api/svc/…`. That
+ * throw is easy to swallow in a `catch` and surface as "the service did not answer", which is how
+ * the campaign console reported a healthy service as down (#2749).
+ *
+ * In-cluster we address the Service DNS directly — the proxy exists to give the *browser* a
+ * same-origin path, and server code has no such constraint. Off-cluster we fall back to the same
+ * localhost convention the proxy uses for local dev.
+ */
+export function serverSvcUrl(
+  k8sName: string,
+  namespace: string,
+  port: number,
+  path: string,
+  query?: Record<string, string>,
+): string {
+  const p = path.startsWith('/') ? path : `/${path}`
+  const qs = query && Object.keys(query).length ? `?${new URLSearchParams(query).toString()}` : ''
+  const host = process.env.KUBERNETES_SERVICE_HOST
+    ? `${k8sName}.${namespace}.svc:${port}`
+    : `${process.env.SERVICES_HOST ?? 'localhost'}:${port}`
+  return `http://${host}${p}${qs}`
+}
+
 export function componentFolder(k8sName: string): string {
   return k8sName.startsWith('openbank-') ? k8sName : `openbank-${k8sName}`
 }
