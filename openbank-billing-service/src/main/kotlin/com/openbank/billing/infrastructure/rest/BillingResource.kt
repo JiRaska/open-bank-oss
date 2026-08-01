@@ -152,11 +152,7 @@ class BillingResource(
      * distinct values in both the column and the `(cycleId, accountId, currency)` idempotency key,
      * so the same fee could be assessed twice under two spellings of one currency.
      */
-    private fun validateParams(
-        cycleId: String?,
-        accountId: String?,
-        currency: String?,
-    ): ParamValidation {
+    private fun validateParams(cycleId: String?, accountId: String?, currency: String?): ParamValidation {
         if (cycleId.isNullOrBlank() || accountId.isNullOrBlank() || currency.isNullOrBlank()) {
             return ParamValidation.Invalid("cycleId, accountId and currency are required")
         }

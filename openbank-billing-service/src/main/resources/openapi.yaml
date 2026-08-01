@@ -6,7 +6,7 @@ info:
   title: Billing Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.2 -> 1.3): additive
   # endpoint only (POST /fees/reverse) — phase 2e, no breaking change.
-  version: 1.3.1
+  version: 1.4.0
   description: >-
     Runtime product fee assessment, posting and reversal (ADR-0143). POST /api/v1/fees/assess
     computes an account's fee assessment from live account/balance/catalog reads and returns it
