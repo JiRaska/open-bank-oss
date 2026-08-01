@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.2.0
+  version: 1.3.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -200,6 +200,52 @@ paths:
                 items:
                   $ref: '#/components/schemas/SendRecord'
 
+  /api/v1/segments:
+    get:
+      tags: [Segments]
+      summary: The segment catalogue — every targetable segment and what it selects
+      description: >-
+        Read-only by design. ADR-0201 D1 makes a segment a versioned artifact defined in code;
+        a new segment is a pull request, not a UI action ("no free-form SQL from a UI").
+      operationId: listSegments
+      responses:
+        '200':
+          description: Segments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SegmentSummary'
+
+  /api/v1/segments/{name}/{version}/preview:
+    get:
+      tags: [Segments]
+      summary: How many parties this segment currently matches
+      description: >-
+        Runs the same evaluation enrolment runs, so a preview can differ from the send only by time.
+        `asOf` carries that: ADR-0201 D1 requires the previewed cohort and the sent-to cohort to be
+        the same set or provably a different version.
+      operationId: previewSegment
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Cohort size at a point in time
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SegmentPreview'
+        '404':
+          description: No such segment version
+
 components:
   parameters:
     CampaignId:
@@ -263,6 +309,24 @@ components:
       required: [approver]
       properties:
         approver: { type: string }
+    SegmentSummary:
+      type: object
+      properties:
+        name: { type: string }
+        version: { type: integer }
+        rules:
+          type: array
+          items: { type: string }
+          description: What the segment selects, in words.
+
+    SegmentPreview:
+      type: object
+      properties:
+        name: { type: string }
+        version: { type: integer }
+        size: { type: integer, description: Parties matched at asOf. }
+        asOf: { type: string, format: date-time }
+
     SendRecord:
       type: object
       properties:
