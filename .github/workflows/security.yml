@@ -95,10 +95,18 @@ jobs:
           # when code actually changed — diff against the merge-base with the target
           # branch (not the frozen base.sha, which drifts once a competing PR merges).
           if [ "$EVENT" = "pull_request" ]; then
-            git fetch --no-tags --depth=1 origin "$BASE_REF" >/dev/null 2>&1 || true
+            # NOT --depth=1: a shallow base ref has no ancestry, so `git merge-base` finds
+            # nothing and BASE comes back empty — which silently falls through to "run
+            # everything". Measured on PR #3079 (both languages) vs #3103 ([]) with identical
+            # code: the only difference was how far the branch had drifted from main. An
+            # explicit refspec also guarantees refs/remotes/origin/<base> exists at all.
+            git fetch --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" >/dev/null 2>&1 || true
             BASE="$(git merge-base "origin/$BASE_REF" HEAD 2>/dev/null || true)"
             if [ -z "$BASE" ]; then
-              # Cannot diff — default to running everything rather than skipping silently.
+              # Cannot diff — run everything rather than skip silently. Say so out loud: a
+              # quiet fallback to "run everything" is indistinguishable from "scoping decided
+              # to run everything", so the scoping can stop working and nothing reports it.
+              echo "::warning::merge-base against $BASE_REF could not be resolved — running CodeQL for ALL languages (scoping did not engage)"
               echo "run_codeql=true" >> "$GITHUB_OUTPUT"; emit_matrix true true
             else
               CHANGED="$(git diff --name-only "$BASE" HEAD)"
