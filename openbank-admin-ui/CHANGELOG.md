@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.78.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.77.0...admin-ui-v0.78.0) (2026-08-01)
+
+
+### Features
+
+* **admin-ui:** put Alertmanager and Pyrra behind the identity-aware edge gate ([#3150](https://github.com/JiRaska/open-bank-oss/issues/3150)) ([6cc27d6](https://github.com/JiRaska/open-bank-oss/commit/6cc27d62b3ee20ec8a8f2beb123011e97afb5420)), closes [#3071](https://github.com/JiRaska/open-bank-oss/issues/3071)
+
 ## [0.77.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.76.0...admin-ui-v0.77.0) (2026-08-01)
 
 
