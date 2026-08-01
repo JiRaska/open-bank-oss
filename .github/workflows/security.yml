@@ -165,21 +165,31 @@ jobs:
       # This repo has `org.gradle.caching=true` + a remote HTTP build cache
       # (settings.gradle.kts) fleet-wide; autobuild's `./gradlew testClasses` was
       # intermittently satisfied entirely from the build cache, so javac/kotlinc
-      # never ran, the extractor traced zero compilations, and GitHub recorded the
-      # analysis as "unsuccessful execution, exit code: 0" (0 rules, 0 results) —
-      # the empty result then sits as the default branch's "current" CodeQL state
-      # until the next code-touching main push, showing as a code-scanning
-      # configuration error. --no-build-cache forces a real compile every run.
-      # Wrapped in the heap sampler (#2177 problem 1, #2330). This job is the one that keeps
-      # coming back `cancelled` with no failing step while every other job in the same run
-      # succeeds — the signature of a runner killed rather than a build that failed. It compiles
-      # the whole fleet with `--no-build-cache` at `-Xmx6g` alongside the Kotlin daemon and the
-      # per-task worker JVMs, and nothing has ever recorded what that actually costs. Now it does,
-      # in the job summary, whether or not the run is healthy. Advisory only: the sampler exits
-      # with Gradle's exit code and never its own.
+      # Cache the Gradle build between runs (same setup-gradle as the service CI). The
+      # cold --no-build-cache leg took ~25-30 min of wall time and was the single most
+      # preemption-exposed job in the fleet (killed mid-analysis twice in a row,
+      # run 30666238087, attempt 2 also cancelled). A warm cache cuts the leg to a few
+      # minutes; the two-phase step below keeps the empty-analysis guard that the cold
+      # flag was protecting (a run where every compile resolves FROM-CACHE would trace
+      # zero compilations and record an empty CodeQL analysis).
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        if: matrix.language == 'java-kotlin'
+
+      # Two-phase: try the cached build; if NO compile task actually executed (all
+      # FROM-CACHE/UP-TO-DATE — grep anchors on the line end so FROM-CACHE rows don't
+      # count), fall back to the cold compile so the CodeQL trace stays non-empty.
       - name: Build (java-kotlin) for CodeQL tracing
         if: matrix.language == 'java-kotlin'
-        run: .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- ./gradlew testClasses --no-build-cache --no-daemon
+        run: |
+          set -euo pipefail
+          .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- ./gradlew testClasses --no-daemon 2>&1 | tee "${RUNNER_TEMP:-/tmp}/codeql-build.log"
+          executed=$( { grep -c '> Task :.*:compileKotlin$' "${RUNNER_TEMP:-/tmp}/codeql-build.log" || true; } )
+          if [ "$executed" -eq 0 ]; then
+            echo "::warning::every compile resolved from cache — cold re-run so the CodeQL trace is non-empty"
+            .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- ./gradlew testClasses --no-build-cache --no-daemon
+          else
+            echo "compile tasks executed: $executed"
+          fi
 
       - uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
         with:
