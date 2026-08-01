@@ -23,7 +23,9 @@ import com.openbank.campaign.domain.model.SendRecord
 import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
+import io.quarkus.hibernate.reactive.panache.PanacheQuery
 import io.quarkus.hibernate.reactive.panache.PanacheRepository
+import io.quarkus.panache.common.Page
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.Column
@@ -248,8 +250,13 @@ class PanacheSendLogRepository :
         }.awaitSuspending()
     }
 
-    override suspend fun listByCampaign(campaignId: UUID): List<SendRecord> = Panache.withSession {
-        find("campaignId = ?1 order by occurredAt desc", campaignId).list<SendLogEntity>()
+    override suspend fun listByCampaign(
+        campaignId: UUID,
+        outcome: SendOutcome?,
+        page: Int,
+        size: Int,
+    ): List<SendRecord> = Panache.withSession {
+        query(campaignId, outcome).page<SendLogEntity>(Page.of(page, size)).list<SendLogEntity>()
     }.awaitSuspending().map {
         SendRecord(
             id = it.id,
@@ -259,6 +266,19 @@ class PanacheSendLogRepository :
             outcome = SendOutcome.valueOf(it.outcome),
             occurredAt = it.occurredAt,
         )
+    }
+
+    override suspend fun countByCampaign(campaignId: UUID, outcome: SendOutcome?): Long =
+        Panache.withSession { query(campaignId, outcome).count() }.awaitSuspending()
+
+    /**
+     * One place builds the filter so the page and its total can never disagree about what is being
+     * counted — a paging bug that shows up only as a page number that runs past the end.
+     */
+    private fun query(campaignId: UUID, outcome: SendOutcome?): PanacheQuery<SendLogEntity> = if (outcome == null) {
+        find("campaignId = ?1 order by occurredAt desc", campaignId)
+    } else {
+        find("campaignId = ?1 and outcome = ?2 order by occurredAt desc", campaignId, outcome.name)
     }
 
     override suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long): Int = Panache.withSession {

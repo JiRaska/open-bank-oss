@@ -45,13 +45,20 @@ class CampaignSendLogTest {
         object : SendLogRepository {
             override suspend fun record(send: SendRecord) = Unit
             override suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long) = 0
-            override suspend fun listByCampaign(campaignId: UUID) = records
+
+            // Filters and pages the way SQL does, so the test exercises the real contract rather
+            // than a fake that always answers with everything.
+            override suspend fun listByCampaign(campaignId: UUID, outcome: SendOutcome?, page: Int, size: Int) =
+                records.filter { outcome == null || it.outcome == outcome }.drop(page * size).take(size)
+
+            override suspend fun countByCampaign(campaignId: UUID, outcome: SendOutcome?) =
+                records.count { outcome == null || it.outcome == outcome }.toLong()
         },
     )
 
     @Test
     fun `every recorded outcome is surfaced, suppressions included`(): Unit = runBlocking {
-        val sends = query.listSends(campaignId)
+        val sends = query.listSends(campaignId, outcome = null, page = 0, size = 50).items
 
         assertEquals(records.size, sends.size)
         assertEquals(
@@ -68,9 +75,54 @@ class CampaignSendLogTest {
 
     @Test
     fun `the record keeps party and step so a suppression can be attributed`(): Unit = runBlocking {
-        val suppressed = query.listSends(campaignId).first { it.outcome == SendOutcome.SUPPRESSED_CONSENT }
+        val suppressed = query.listSends(campaignId, outcome = null, page = 0, size = 50)
+            .items.first { it.outcome == SendOutcome.SUPPRESSED_CONSENT }
 
         assertEquals(campaignId, suppressed.campaignId)
         assertEquals(1, suppressed.stepOrder)
+    }
+
+    /**
+     * `total` is what lets the console tell "this is everything" from "this is the first page of
+     * many". Those render identically and mean opposite things to whoever is deciding whether a
+     * campaign reached its audience, so the count must survive paging.
+     */
+    @Test
+    fun `a page carries the total it was cut from`(): Unit = runBlocking {
+        val page = query.listSends(campaignId, outcome = null, page = 0, size = 2)
+
+        assertEquals(2, page.items.size)
+        assertEquals(records.size.toLong(), page.total)
+    }
+
+    @Test
+    fun `the total is of the filtered set, not of everything`(): Unit = runBlocking {
+        // A total that ignored the filter would show a page of 1 out of "5 sends", which reads as
+        // four rows the console failed to render.
+        val page = query.listSends(campaignId, SendOutcome.SUPPRESSED_CONSENT, page = 0, size = 50)
+
+        assertEquals(page.items.size.toLong(), page.total)
+        assertEquals(setOf(SendOutcome.SUPPRESSED_CONSENT), page.items.map { it.outcome }.toSet())
+    }
+
+    /**
+     * A caller-supplied page size is a caller-supplied amount of work. Clamping rather than
+     * rejecting keeps an over-large request useful, and the ceiling is the whole reason paging
+     * removes the unbounded read instead of relocating it.
+     */
+    @Test
+    fun `an over-large page size is clamped, not honoured`(): Unit = runBlocking {
+        val page = query.listSends(campaignId, outcome = null, page = 0, size = 1_000_000)
+
+        assertEquals(CampaignSendLogQuery.MAX_PAGE_SIZE, page.size)
+    }
+
+    @Test
+    fun `a negative page or a zero size cannot produce an empty page by accident`(): Unit = runBlocking {
+        val page = query.listSends(campaignId, outcome = null, page = -3, size = 0)
+
+        assertEquals(0, page.page)
+        assertEquals(1, page.size)
+        assertEquals(1, page.items.size)
     }
 }
