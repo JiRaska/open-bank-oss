@@ -8,8 +8,8 @@ import com.openbank.delegation.application.port.`in`.CheckDelegationCommand
 import com.openbank.delegation.application.port.`in`.OfferDelegationCommand
 import com.openbank.delegation.application.port.`in`.RevokeDelegationCommand
 import com.openbank.delegation.application.port.out.DelegationRepository
-import com.openbank.delegation.application.port.out.PartyEligibility
 import com.openbank.delegation.application.port.out.OwnershipVerdict
+import com.openbank.delegation.application.port.out.PartyEligibility
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
 import com.openbank.delegation.application.port.out.ResourceOwnershipClient
 import com.openbank.delegation.application.port.out.ScaChallengeClient
