@@ -77,7 +77,6 @@ data class FiscalYearTrialBalance(val fiscalYear: Int, val lines: List<TrialBala
     fun contentHash(): String = MessageDigest.getInstance("SHA-256")
         .digest(canonicalJson().toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it) }
-
 }
 
 enum class YearCloseStatus { DRAFT, ATTESTED }
