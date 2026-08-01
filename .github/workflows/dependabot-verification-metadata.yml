@@ -74,7 +74,13 @@ jobs:
         if: steps.tok.outputs.have == 'true'
         run: |
           set -euo pipefail
-          ./gradlew --write-verification-metadata sha256 testClasses --no-daemon -q
+          # testClasses alone resolves only the TEST graph. The prod runtime classpath and
+          # its platform BOMs (quarkusProdRuntimeClasspathConfigurationPlatform) are never
+          # touched by it, so artifacts that exist only there were never hashed — measured
+          # as 38 missing for one service (#3028). quarkusDependenciesBuild resolves the
+          # Quarkus application model without running a full quarkusBuild.
+          ./gradlew --write-verification-metadata sha256 \
+            testClasses quarkusDependenciesBuild --no-daemon -q
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false"
 
