@@ -408,6 +408,33 @@ gates:
     run: |
       bash .github/scripts/test-classify-can-i-deploy-block.sh
 
+  # can-i-deploy version-selector unit test (#3082). The classifier above labels WHY a block
+  # happened; this decides WHICH VERSION the gate asks about at all, and getting that wrong is
+  # quieter than any block: `--latest main` on a push routinely answers about the PREVIOUS
+  # build, so a green can be inherited from a commit that is not the one being deployed.
+  - id: can-i-deploy-version-selector-unit-test
+    name: "can-i-deploy version selector unit test"
+    group: supplychain
+    mode: enforced
+    run: |
+      bash .github/scripts/test-resolve-can-i-deploy-selector.sh
+
+  # Workflow `run:` step size (#3082). GitHub rejects an oversized run script by making the
+  # WHOLE workflow unparseable — zero jobs, no error message, every contributor's runs of that
+  # file dead until someone reverts. It happened to auto-deploy.yml (#3135 -> #3139) and NOTHING
+  # else here sees it: PyYAML, a strict duplicate-key loader, actionlint and yamllint were all
+  # clean on the very file GitHub refused to read. Measured against GitHub by bisecting pushes to
+  # a throwaway branch: 20054 chars accepted, 20654 rejected; not a whole-file limit (a 95295-byte
+  # control parsed fine while no single step crossed).
+  - id: workflow-run-step-size
+    name: "workflow run-step size"
+    group: lint
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-workflow-run-step-size.py --self-test
+    run: |
+      python3 .github/scripts/check-workflow-run-step-size.py
+
   # co-deploy set derivation unit test (issue #1985). The classifier above says WHAT KIND
   # of block a service has; this one says whether the block can be resolved by deploying
   # that service at all. Two services that name each other never converge one at a time,
