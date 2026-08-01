@@ -27,7 +27,7 @@ interface Campaign {
 }
 
 export default function CampaignsPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const [items, setItems] = useState<Campaign[]>([])
   const [unavailable, setUnavailable] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
@@ -45,6 +45,9 @@ export default function CampaignsPage() {
       .catch(() => setUnavailable('unreachable'))
       .finally(() => setLoading(false))
   }, [])
+
+  const fmtDate = (iso: string | null | undefined) =>
+    iso ? new Intl.DateTimeFormat(language === 'cs' ? 'cs-CZ' : 'en-GB', { dateStyle: 'medium' }).format(new Date(iso)) : '—'
 
   return (
     <div className="space-y-6">
@@ -72,6 +75,7 @@ export default function CampaignsPage() {
                 <th className="px-4 py-2 font-medium">{t('Segment', 'Segment')}</th>
                 <th className="px-4 py-2 font-medium">{t('Vytvořil', 'Created by')}</th>
                 <th className="px-4 py-2 font-medium">{t('Schválil', 'Approved by')}</th>
+                <th className="px-4 py-2 font-medium">{t('Vytvořeno', 'Created')}</th>
               </tr>
             </thead>
             <tbody>
@@ -93,6 +97,7 @@ export default function CampaignsPage() {
                   {/* The checker, shown next to the maker on purpose: the maker/checker pair is
                       the audit-relevant fact about an ACTIVE campaign, not a detail. */}
                   <td className="px-4 py-2 text-xs">{c.approvedBy ?? '—'}</td>
+                  <td className="px-4 py-2 text-xs whitespace-nowrap">{fmtDate(c.createdAt)}</td>
                 </tr>
               ))}
             </tbody>
