@@ -50,11 +50,7 @@ import java.time.ZoneId
  * `LocalDate.now()` without a clock — that is the defect this type replaces, and
  * `.github/scripts/check-accounting-clock.py` enforces it for money-path services.
  */
-class AccountingClock(
-    private val clock: Clock,
-    val zone: ZoneId = BANK_ZONE,
-    val cutoff: LocalTime = DAY_START,
-) {
+class AccountingClock(private val clock: Clock, val zone: ZoneId = BANK_ZONE, val cutoff: LocalTime = DAY_START) {
 
     /** The current accounting day. */
     fun today(): LocalDate = accountingDayOf(clock.instant())
