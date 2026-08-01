@@ -12,7 +12,7 @@ import { svcUrl } from '@/lib/services/bff'
 
 export const dynamic = 'force-dynamic'
 
-type Part = { data: unknown; state: 'ok' | 'unauthorized' | 'unreachable' }
+type Part = { data: unknown; state: 'ok' | 'unauthorized' | 'not_deployed' | 'unreachable' }
 
 async function read(headers: HeadersInit, path: string, fallback: unknown): Promise<Part> {
   try {
@@ -24,7 +24,15 @@ async function read(headers: HeadersInit, path: string, fallback: unknown): Prom
     if (!res.ok) {
       return {
         data: fallback,
-        state: res.status === 401 || res.status === 403 ? 'unauthorized' : 'unreachable',
+        state: res.status === 401 || res.status === 403
+            ? 'unauthorized'
+            // 404 from the BFF proxy means the service key resolved to nothing — "not deployed",
+            // NOT "deployed but silent". Collapsing the two sends whoever debugs it to look at a
+            // healthy pod, which is exactly what happened when campaign-service was missing from
+            // SERVICE_MAP (#2997).
+            : res.status === 404
+              ? 'not_deployed'
+              : 'unreachable',
       }
     }
     return { data: await res.json(), state: 'ok' }
