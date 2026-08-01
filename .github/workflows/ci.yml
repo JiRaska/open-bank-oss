@@ -1218,6 +1218,21 @@ jobs:
       - name: "EU AI Act inventory drift (ADR-0148 rule #7, enforced)"
         run: bash .github/scripts/check-eu-ai-act.sh
 
+      # #2872 — the Deployment and the service config must describe the same process.
+      # Rolling campaign-service to sandbox hit five defects that each kill the pod or its
+      # readiness in the first seconds, all on main with every required check green. Four were pure
+      # repo-internal contradictions: two artifacts in this tree disagree and nothing compared them.
+      # This closes the pair behind defect #5 — probes on a management port the service never opens.
+      # No existing gate could see it: manifests are linted in isolation, and unit tests cannot,
+      # because the management interface is off under %test and @ApplicationScoped is lazy.
+      #
+      # Its first run found the same defect live in openbank-customer-edge (fixed in this PR).
+      #
+      # This is the CHEAPER half of the trade recorded on #2872: static checks like this would have
+      # caught ~3 of that rollout's 17 defects, a boot smoke test ~8. It is not a substitute.
+      - name: "probe/scrape port has a listener (#2872, enforced)"
+        run: python3 .github/scripts/check-probe-port-has-listener.py
+
       # External public-feed declaration drift (issue #2204).
       #
       # `--offline` on purpose: this is the DRIFT half only — every third-party URL in an
