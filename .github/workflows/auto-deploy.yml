@@ -608,6 +608,39 @@ jobs:
             exit 1
           }
 
+      # Fleet SBOM attestation — the gate that binds the deploy (issue #2947).
+      #
+      # `fleet-attestation.yml` runs exactly this check on gitops PRs, and it is not one of the
+      # five required contexts — it cannot be, being `paths:`-filtered, since GitHub holds a
+      # path-filtered required context as permanently "Expected". So the auto-deploy snapshot PR
+      # auto-merged without waiting for it: measured, 8 of the last 10 merged 24-65 s BEFORE the
+      # gate finished. All eight passed, which is luck about timing rather than a property of the
+      # process.
+      #
+      # What that risks is not a red deploy. Kyverno verifies at ADMISSION, not continuously, so
+      # an unattested image whose pods are already running keeps running, and is denied the next
+      # time anything reschedules it — a deploy that looks fine for days and then cannot come
+      # back. That is the admin-ui outage of 2026-07-09.
+      #
+      # HERE rather than in `Validate manifests`: this is the earliest point at which the answer
+      # can be known, and the PR then cannot exist for an unattested fleet at all. It also needs
+      # no new permission — this job already holds `id-token: write` and an ECR login for the
+      # push and the attestation above — whereas the required-check placement would have put
+      # `id-token: write` on a job that runs on every PR in the repo.
+      #
+      # AFTER the attestation step, never racing it: #1226 is exactly what a cancellation between
+      # `Docker push` and `Attest image SBOMs` costs. The images built by THIS run are already
+      # proven by that step (it binds the verify to the serialNumber trivy minted per image); what
+      # this adds is every OTHER image the fleet still declares, which is where a latent gap
+      # actually hides. A failure here fails `build-push`, and `gitops-pr` needs it — so no
+      # manifest PR is opened.
+      #
+      # The daily schedule on `fleet-attestation.yml` stays, and is not made redundant: a latent
+      # gap can appear with no deploy at all (a registry lifecycle rule, a hand-pushed image).
+      - name: Fleet SBOM attestation gate (issue #2947)
+        timeout-minutes: 20  # measured max 198s on the same check in fleet-attestation.yml
+        run: bash .github/scripts/check-fleet-attestations.sh
+
       - name: Collect image tags
         id: collect
         run: |
