@@ -17,7 +17,8 @@
 // them, so a path added to one and not the other would only be discovered by
 // trying it.
 
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { NextRequest } from 'next/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -165,5 +166,33 @@ describe('ADR-0234 wiring — the halves of the boundary agree', () => {
     // root_url carries /tools/grafana and serve_from_sub_path is true, so a
     // rewrite-target here would break every asset on the page.
     expect(ingressSrc).not.toMatch(/rewrite-target/)
+  })
+
+  it('grafana-tools is still the only ExternalName Service in gitops', () => {
+    // `.trivyignore` carries AVD-KSV-0108 for this one Service, and a trivyignore
+    // entry is REPO-WIDE — it would silently exempt the next ExternalName Service
+    // anyone adds. KSV-0108 exists for CVE-2020-8554, where a Service pointing
+    // OUTSIDE the cluster lets a namespace-scoped actor intercept traffic to an
+    // arbitrary external IP; the suppression is only honest while every
+    // ExternalName in the tree points in-cluster, as this one does.
+    //
+    // So assert the COUNT, not merely that ours exists. A second ExternalName
+    // fails here and forces a decision instead of inheriting the exemption.
+    const root = '../openbank-infra/gitops'
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap(e => {
+        const p = join(dir, e.name)
+        if (e.isDirectory()) return walk(p)
+        return /\.ya?ml$/.test(e.name) ? [p] : []
+      })
+
+    const files = walk(root)
+    // Guard against a vacuous pass if the path or the walk ever breaks.
+    expect(files.length).toBeGreaterThan(100)
+
+    const withExternalName = files.filter(f =>
+      /^\s*type:\s*ExternalName\s*$/m.test(readFileSync(f, 'utf8')),
+    )
+    expect(withExternalName).toEqual([join(root, 'components/admin-ui/tools-gate.yaml')])
   })
 })
