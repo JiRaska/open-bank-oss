@@ -100,11 +100,20 @@ describe('campaign console', () => {
 
     // The whole point of the screen: SUPPRESSED_CONSENT must be visible as an outcome, because
     // nothing else in the API distinguishes "deliberately skipped" from "never targeted".
-    await waitFor(() => expect(screen.getByText('SUPPRESSED_CONSENT')).toBeTruthy(), { timeout: 8000 })
-    expect(screen.getByText('SENT')).toBeTruthy()
-    expect(screen.getByText('TERMINATED_CONSENT_REVOKED')).toBeTruthy()
+    // Human phrasing is what a marketer reads…
+    await waitFor(() => expect(screen.getByText('Consent withdrawn')).toBeTruthy(), { timeout: 8000 })
+    expect(screen.getByText('Sent')).toBeTruthy()
+    expect(screen.getByText('Ended — consent withdrawn')).toBeTruthy()
+
+    // …and the raw enum stays reachable, so the screen and the API never describe different things.
+    // Without this, relabelling could quietly drift from the values the service actually emits.
+    expect(screen.getByTitle('SUPPRESSED_CONSENT')).toBeTruthy()
+    expect(screen.getByTitle('TERMINATED_CONSENT_REVOKED')).toBeTruthy()
+
     // Surfaced as a headline number, not buried in the table.
     expect(screen.getByText('Suppressed sends')).toBeTruthy()
+    // And broken down by reason: "2 suppressed" says something is off, "2× quiet hours" says whether to act.
+    expect(screen.getByText(/1× Consent withdrawn/)).toBeTruthy()
   }, 15000)
 
   it('a restricted send log is stated, never rendered as "nothing was suppressed"', async () => {

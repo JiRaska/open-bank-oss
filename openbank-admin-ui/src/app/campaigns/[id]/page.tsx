@@ -60,7 +60,7 @@ function outcomeTone(outcome: string): Tone {
 }
 
 export default function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   // Params are unwrapped in an effect rather than with React `use()`. `use()` suspends until the
   // promise settles, which forces every caller — including tests — to provide a Suspense boundary
   // and, in jsdom, leaves the tree on the fallback indefinitely. An effect keeps the page mountable
@@ -92,6 +92,48 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   const sends = detail?.sends ?? []
   const suppressed = sends.filter(s => s.outcome.startsWith('SUPPRESSED')).length
 
+  const fmtDateTime = (iso: string | null | undefined) =>
+    iso
+      ? new Intl.DateTimeFormat(language === 'cs' ? 'cs-CZ' : 'en-GB', {
+          dateStyle: 'medium', timeStyle: 'short',
+        }).format(new Date(iso))
+      : '—'
+
+  /**
+   * Human phrasing for a send outcome. The raw enum is what the API returns and what an engineer
+   * debugs with; a marketer needs to know WHY nothing was sent, in words. The raw value stays in
+   * the badge title so the two are never disconnected.
+   */
+  const outcomeLabel = (o: string): string => {
+    switch (o) {
+      case 'SENT': return t('Odesláno', 'Sent')
+      case 'SUPPRESSED_CONSENT': return t('Odvolaný souhlas', 'Consent withdrawn')
+      case 'SUPPRESSED_CAP': return t('Limit četnosti', 'Frequency cap')
+      case 'SUPPRESSED_QUIET_HOURS': return t('Tiché hodiny', 'Quiet hours')
+      case 'FAILED': return t('Selhalo', 'Failed')
+      default: return o
+    }
+  }
+
+  const stateLabel = (s: string): string => {
+    switch (s) {
+      case 'ACTIVE': return t('Aktivní', 'Active')
+      case 'COMPLETED': return t('Dokončeno', 'Completed')
+      case 'TERMINATED_CONSENT_REVOKED': return t('Ukončeno — odvolaný souhlas', 'Ended — consent withdrawn')
+      case 'TERMINATED_SUPPRESSED': return t('Ukončeno — potlačeno', 'Ended — suppressed')
+      default: return s
+    }
+  }
+
+  /** Short id for scanning; the full value stays in `title` and is what you copy. */
+  const shortId = (id: string) => id.slice(0, 8)
+
+  // Suppressions grouped by reason: "2 suppressed" tells an operator something is off,
+  // "2 × quiet hours" tells them whether to act.
+  const byReason = sends
+    .filter(s => s.outcome.startsWith('SUPPRESSED'))
+    .reduce<Record<string, number>>((acc, s) => ({ ...acc, [s.outcome]: (acc[s.outcome] ?? 0) + 1 }), {})
+
   return (
     <div className="space-y-6">
       <Link href="/campaigns" className="inline-flex items-center gap-1 text-sm hover:underline">
@@ -119,6 +161,45 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 contacted" is the question the send log exists to answer (#2895). */}
             <StatCard label={t('Potlačených odeslání', 'Suppressed sends')} value={String(suppressed)} />
           </div>
+
+          {Object.keys(byReason).length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {t('Potlačeno: ', 'Suppressed: ')}
+              {Object.entries(byReason)
+                .map(([reason, n]) => `${n}× ${outcomeLabel(reason)}`)
+                .join(', ')}
+            </p>
+          )}
+
+          <section className="space-y-2">
+            <h2 className="text-sm font-semibold">{t('Kroky', 'Steps')}</h2>
+            {/* The steps were fetched all along and never shown — a campaign whose content you
+                cannot see is hard to reason about when its sends are being suppressed. */}
+            <div className="overflow-x-auto rounded-lg border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-left">
+                  <tr>
+                    <th className="px-4 py-2 font-medium">#</th>
+                    <th className="px-4 py-2 font-medium">{t('Šablona', 'Template')}</th>
+                    <th className="px-4 py-2 font-medium">{t('Zpoždění', 'Delay')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(c.steps ?? []).map(step => (
+                    <tr key={step.order} className="border-t">
+                      <td className="px-4 py-2">{step.order}</td>
+                      <td className="px-4 py-2 font-mono text-xs">{step.template}</td>
+                      <td className="px-4 py-2 text-xs">
+                        {step.delaySeconds === 0
+                          ? t('ihned', 'immediately')
+                          : `${Math.round(step.delaySeconds / 60)} min`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
 
           <section className="space-y-2">
             <h2 className="text-sm font-semibold">{t('Čtyři oči', 'Four-eyes')}</h2>
@@ -150,8 +231,10 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                   <tbody>
                     {detail.enrolments.map(e => (
                       <tr key={e.id} className="border-t">
-                        <td className="px-4 py-2 font-mono text-xs">{e.partyId}</td>
-                        <td className="px-4 py-2"><StatusBadge status={e.state} /></td>
+                        <td className="px-4 py-2 font-mono text-xs" title={e.partyId}>{shortId(e.partyId)}</td>
+                        <td className="px-4 py-2">
+                          <span title={e.state}><StatusBadge status={e.state} label={stateLabel(e.state)} /></span>
+                        </td>
                         <td className="px-4 py-2">{e.currentStep}</td>
                       </tr>
                     ))}
@@ -167,6 +250,14 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
               {t(
                 'Včetně potlačených pokusů — výsledek je jediné místo, kde je vidět odvolaný souhlas, limit četnosti nebo tiché hodiny.',
                 'Includes suppressed attempts — the outcome is the only place a consent withdrawal, frequency cap or quiet-hours skip is visible.',
+              )}
+            </p>
+            {/* Stated on screen because an evening test run produces nothing but quiet-hours
+                suppressions, which reads as a broken campaign rather than a working rule. */}
+            <p className="text-xs text-muted-foreground">
+              {t(
+                'Tiché hodiny: 21:00–8:00. Odeslání v tomto okně se potlačí (ADR-0200 D6).',
+                'Quiet hours: 21:00–08:00. Sends in that window are suppressed (ADR-0200 D6).',
               )}
             </p>
             {detail?.sources.sends !== 'ok' ? (
@@ -192,12 +283,14 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                   <tbody>
                     {sends.map(s => (
                       <tr key={s.id} className="border-t">
-                        <td className="px-4 py-2 font-mono text-xs">{s.partyId}</td>
+                        <td className="px-4 py-2 font-mono text-xs" title={s.partyId}>{shortId(s.partyId)}</td>
                         <td className="px-4 py-2">{s.stepOrder}</td>
                         <td className="px-4 py-2">
-                          <StatusBadge status={s.outcome} tone={outcomeTone(s.outcome)} />
+                          <span title={s.outcome}>
+                            <StatusBadge status={s.outcome} tone={outcomeTone(s.outcome)} label={outcomeLabel(s.outcome)} />
+                          </span>
                         </td>
-                        <td className="px-4 py-2 text-xs">{s.occurredAt}</td>
+                        <td className="px-4 py-2 text-xs whitespace-nowrap">{fmtDateTime(s.occurredAt)}</td>
                       </tr>
                     ))}
                   </tbody>
