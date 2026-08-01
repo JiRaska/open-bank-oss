@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/v0.4.2...v0.5.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** make the segment catalogue code-defined and visible to marketers ([#3055](https://github.com/JiRaska/open-bank-oss/issues/3055)) ([baa7b6c](https://github.com/JiRaska/open-bank-oss/commit/baa7b6c8729a47eefbf359a0c64cb94d95742dd5))
+
 ## [0.4.2](https://github.com/JiRaska/open-bank-oss/compare/v0.4.1...v0.4.2) (2026-08-01)
 
 
