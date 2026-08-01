@@ -281,6 +281,29 @@ fire from *outside* it, so they stay here:
   references files living only in an unmerged parent PR (e.g. ADR numbers the registry gate
   requires on-branch), merging the parent branch into the child makes the child's CI green
   independently; the shared files drop out of the diff as the parent lands on main.
+- **A PR-queue drain has a CEILING, and "queue empty" is the wrong success measure.** Measured
+  2026-08-01: 21 PRs merged in one session and the queue still went 2 -> 8, because parallel
+  agents open roughly one PR every two minutes. What survives a drain is structural, not
+  incidental — money-path scopes, `governance(...)`/`security(...)` types, auth changes and whole
+  new services all need a human by rule, and the rest is usually someone else's live worktree.
+  Stop when nothing SAFELY mergeable remains and say what is left and why; a drain that keeps
+  going until the list is empty is one that started merging things it should not have.
+- **A green PR can still be the wrong one to merge — classify by category before reading checks.**
+  #3009 had all five required contexts green and duplicated a guard merged an hour earlier
+  (#2984): same inputs, same comparison, same cited defect. Merging it would have put two copies
+  of one rule in `Validate manifests`, on every PR, to drift apart later. CI cannot see that;
+  only looking at what else landed recently can.
+- **A finding from a CI run goes stale in MINUTES while a parallel agent is active — re-check
+  before acting on it.** Three times in one session a ktlint/test failure was already fixed by the
+  time the fix was written: the branch had moved (`db25c9ac8` -> `629aff176`,
+  `a9381b256` -> `13335a859`) and the reported line no longer existed. Reporting a defect that is
+  already gone sends the reader hunting for nothing. Diff the file at the CURRENT head, not the
+  head the run used.
+- **Omitting `--delete-branch` does NOT protect someone else's worktree — the repo sets
+  `delete_branch_on_merge: true`.** That setting deletes the remote ref regardless of the merge
+  flag, so the precaution is theatre. The local branch and working tree survive (verified on
+  #2960), so nothing is lost, but if the branch had unpushed commits their only off-machine copy
+  would be gone. Check the repo setting before promising the protection, not after.
 
 ### CI gates — exercise the failure path before trusting the green
 - **A gate that has only ever passed is unfalsified.** Its failure path is code nobody has run, and
