@@ -10,6 +10,7 @@ import { ArrowLeft, Megaphone } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
+import { JourneyFlow, type StepFunnel } from '@/components/campaigns/JourneyFlow'
 
 interface Campaign {
   id: string
@@ -49,6 +50,7 @@ type Detail = {
   enrolments: Enrolment[]
   sends: SendPage
   sendSummary: Record<string, number>
+  journey: StepFunnel[]
   sources: Record<string, string>
 }
 
@@ -314,33 +316,25 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           )}
 
           <section className="space-y-2">
-            <h2 className="text-sm font-semibold">{t('Kroky', 'Steps')}</h2>
-            {/* The steps were fetched all along and never shown — a campaign whose content you
-                cannot see is hard to reason about when its sends are being suppressed. */}
-            <div className="overflow-x-auto rounded-lg border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-left">
-                  <tr>
-                    <th className="px-4 py-2 font-medium">#</th>
-                    <th className="px-4 py-2 font-medium">{t('Šablona', 'Template')}</th>
-                    <th className="px-4 py-2 font-medium">{t('Zpoždění', 'Delay')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(c.steps ?? []).map(step => (
-                    <tr key={step.order} className="border-t">
-                      <td className="px-4 py-2">{step.order}</td>
-                      <td className="px-4 py-2 font-mono text-xs">{step.template}</td>
-                      <td className="px-4 py-2 text-xs">
-                        {step.delaySeconds === 0
-                          ? t('ihned', 'immediately')
-                          : `${Math.round(step.delaySeconds / 60)} min`}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <h2 className="text-sm font-semibold">{t('Průchod kampaní', 'Journey')}</h2>
+            {/* Replaces a three-column table of order / template id / delay-in-minutes. That table
+                showed the campaign's DEFINITION; a marketer needs its RESULT — who it reached and
+                where the rest went — and had to correlate it against the send log by eye to get
+                there. The definition is still visible, just drawn as the flow it describes. */}
+            {detail?.sources.journey !== 'ok' ? (
+              <DataUnavailable
+                kind={detail?.sources.journey === 'unauthorized' ? 'unauthorized' : 'unreachable'}
+                service="Campaign-service"
+                feature={t('Průchod kampaní', 'Journey')}
+                dense
+              />
+            ) : (
+              <JourneyFlow
+                steps={c.steps ?? []}
+                funnel={detail?.journey ?? []}
+                audienceSize={(detail?.enrolments?.length ?? 0) > 0 ? (detail?.enrolments?.length ?? 0) : null}
+              />
+            )}
           </section>
 
           <section className="space-y-2">

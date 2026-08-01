@@ -24,6 +24,9 @@ interface EnrolmentRepository {
     suspend fun save(enrolment: Enrolment): Enrolment
 }
 
+/** A single cell of the per-step funnel: how many sends of [outcome] step [stepOrder] produced. */
+data class StepOutcomeCount(val stepOrder: Int, val outcome: SendOutcome, val count: Long)
+
 interface SendLogRepository {
     suspend fun record(send: SendRecord)
     suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long): Int
@@ -39,6 +42,15 @@ interface SendLogRepository {
 
     /** How many rows [listByCampaign] would return in total, for the same filter. */
     suspend fun countByCampaign(campaignId: UUID, outcome: SendOutcome?): Long
+
+    /**
+     * One row per (step, outcome) with its count — the shape a journey view needs.
+     *
+     * Aggregated in SQL rather than folded from a page of records: a funnel drawn from whatever
+     * rows happen to be loaded understates every campaign larger than one page, and a funnel is
+     * read as the whole picture by definition.
+     */
+    suspend fun countByStepAndOutcome(campaignId: UUID): List<StepOutcomeCount>
 }
 
 /** ADR-0201 D1: segments are versioned artifacts loaded as code/data, never UI-typed SQL. */

@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.5.0
+  version: 1.6.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -186,6 +186,27 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Enrolment'
+
+  /api/v1/campaigns/{id}/journey:
+    get:
+      tags: [Campaigns]
+      summary: Per-step funnel — who each step reached, and where the rest went
+      description: >-
+        Every number is a SQL aggregate over the send log, grouped by (step, outcome). A funnel is
+        read as the whole picture by definition, so one folded from a page of records would
+        understate every campaign larger than that page while looking exactly as authoritative.
+      operationId: campaignJourney
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: One entry per journey step, ordered by step
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StepFunnel'
 
   /api/v1/campaigns/{id}/sends/summary:
     get:
@@ -377,6 +398,33 @@ components:
         approver:
           type: string
           deprecated: true
+
+    StepFunnel:
+      type: object
+      properties:
+        stepOrder: { type: integer }
+        reached:
+          type: integer
+          format: int64
+          description: Sends this step recorded at all — delivered plus every suppression.
+        delivered: { type: integer, format: int64 }
+        failed: { type: integer, format: int64 }
+        suppressed:
+          type: array
+          description: >-
+            One entry per reason that produced at least one suppression, in the order ADR-0200 D6
+            evaluates them (cap, quiet hours, consent). A reason with no occurrences is omitted
+            rather than sent as zero, so a client cannot render an empty bar segment.
+          items:
+            $ref: '#/components/schemas/SuppressionCount'
+
+    SuppressionCount:
+      type: object
+      properties:
+        reason:
+          type: string
+          enum: [SUPPRESSED_CAP, SUPPRESSED_QUIET_HOURS, SUPPRESSED_CONSENT]
+        count: { type: integer, format: int64 }
 
     SegmentSummary:
       type: object
