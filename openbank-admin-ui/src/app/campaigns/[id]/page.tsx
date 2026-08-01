@@ -83,6 +83,9 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   const [detail, setDetail] = useState<Detail | null>(null)
   const [unavailable, setUnavailable] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
+  // Bumped after a lifecycle action so the screen re-reads the campaign rather than guessing the
+  // new state locally — the service owns the state machine and may refuse a transition.
+  const [reloadToken, setReloadToken] = useState(0)
 
   useEffect(() => {
     if (!id) return
@@ -97,7 +100,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       })
       .catch(() => setUnavailable('unreachable'))
       .finally(() => setLoading(false))
-  }, [id])
+  }, [id, reloadToken])
 
   const c = detail?.campaign
 
@@ -110,6 +113,68 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
 
   const sendPage = sendOverride ?? detail?.sends ?? { items: [], total: 0, page: 0, size: 50 }
   const sends = sendPage.items
+
+  // Lifecycle actions (ADR-0221 D2). Which ones are offered follows the campaign's own state
+  // machine; whether the caller may run them is decided by OPA, and the domain re-asserts
+  // maker != checker on activate. The UI renders capability, the policy decides it.
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [acting, setActing] = useState(false)
+
+  const runAction = (action: string) => {
+    setActing(true)
+    setActionError(null)
+    fetch(`/api/campaigns/${encodeURIComponent(id ?? '')}/actions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action }),
+    })
+      .then(r => r.json())
+      .then((d: { state: string; error?: string }) => {
+        if (d.state === 'ok') {
+          // Drop the paged override too: after a transition the first page is the right thing to
+          // show, and keeping page 7 of a log that just changed is a stale view of a new state.
+          setSendOverride(null)
+          setReloadToken(n => n + 1)
+          return
+        }
+        // The service answers a refused transition with the invariant that blocked it — including
+        // "the approver must differ from the creator". That sentence IS the four-eyes gate becoming
+        // visible; replacing it with "action failed" would make a working control look like a bug.
+        setActionError(
+          d.error ??
+            (d.state === 'forbidden'
+              ? t('Nemáte oprávnění k této akci.', 'You are not permitted to do that.')
+              : t('Campaign-service neodpovídá.', 'Campaign-service is not responding.')),
+        )
+      })
+      .catch(() => setActionError(t('Campaign-service neodpovídá.', 'Campaign-service is not responding.')))
+      .finally(() => setActing(false))
+  }
+
+  const actionsFor = (state?: string): string[] => {
+    switch (state) {
+      case 'DRAFT':
+        return ['submit']
+      case 'PENDING_APPROVAL':
+        return ['activate']
+      case 'ACTIVE':
+        return ['enrol', 'pause', 'close']
+      case 'PAUSED':
+        return ['resume', 'close']
+      default:
+        return []
+    }
+  }
+
+  const actionLabel = (a: string): string =>
+    ({
+      submit: t('Odeslat ke schválení', 'Submit for approval'),
+      activate: t('Schválit a spustit', 'Approve and activate'),
+      pause: t('Pozastavit', 'Pause'),
+      resume: t('Obnovit', 'Resume'),
+      close: t('Uzavřít', 'Close'),
+      enrol: t('Zařadit publikum', 'Enrol audience'),
+    })[a] ?? a
 
   const loadSends = (page: number, outcome: string) => {
     setSendsLoading(true)
@@ -192,6 +257,36 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         subtitle={c?.goal}
         icon={<Megaphone className="h-6 w-6" />}
       />
+
+      {/* Only the transitions this state actually allows are offered. Rendering every button and
+          letting the service reject four of them teaches operators that red messages are normal,
+          which is how a real refusal stops being read. */}
+      {!loading && !unavailable && c && actionsFor(c.state).length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {actionsFor(c.state).map(a => (
+            <button
+              key={a}
+              onClick={() => runAction(a)}
+              disabled={acting}
+              className="rounded-md border px-3 py-1.5 text-sm disabled:opacity-40"
+            >
+              {actionLabel(a)}
+            </button>
+          ))}
+          {c.state === 'PENDING_APPROVAL' && (
+            // Said out loud, because the refusal is otherwise indistinguishable from a bug: the
+            // approver is taken from the token, so the person who created it cannot approve it.
+            <span className="text-xs text-muted-foreground">
+              {t(
+                `Schválit musí někdo jiný než ${c.createdBy}.`,
+                `Someone other than ${c.createdBy} must approve this.`,
+              )}
+            </span>
+          )}
+        </div>
+      )}
+
+      {actionError && <p className="text-sm text-red-600">{actionError}</p>}
 
       {loading && <p className="text-sm text-muted-foreground">{t('Načítám…', 'Loading…')}</p>}
       {!loading && unavailable && (

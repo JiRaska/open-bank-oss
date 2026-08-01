@@ -70,6 +70,13 @@ export default function CampaignsPage() {
         icon={<Megaphone className="h-6 w-6" />}
       />
 
+      <Link
+        href="/campaigns/new"
+        className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+      >
+        {t('Nová kampaň', 'New campaign')}
+      </Link>
+
       {loading && <p className="text-sm text-muted-foreground">{t('Načítám…', 'Loading…')}</p>}
 
       {!loading && unavailable && <DataUnavailable kind={unavailable} service="Campaign-service" feature={t('Kampaně', 'Campaigns')} />}
