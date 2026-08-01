@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""
+Load every committed Loki rule ConfigMap into a real Loki ruler and assert it accepts them.
+
+WHY THIS IS NOT OPTIONAL, and why structural YAML validation would not do.
+
+Loki's ruler lists rule groups per tenant as one operation. When ANY file in the tenant directory
+fails to parse, that operation fails wholesale:
+
+    msg="unable to list rules" err="failed to list rule groups for user fake: ...
+    error parsing /rules/fake/broken.yaml: could not parse expression for alert '...'"
+
+and `/prometheus/api/v1/rules` then returns an EMPTY group list. Measured, not assumed: with four
+valid rules loaded and healthy, adding one file with a single unbalanced parenthesis dropped the
+loaded groups from four to zero. So a typo in a new alert does not disable that alert — it disables
+every log-based alert in the estate, silently, with the ruler still running and Loki still ready.
+
+That is the worst possible blast radius for the cheapest possible mistake, and nothing else in this
+repo would catch it: `yamllint` sees valid YAML, ArgoCD syncs a valid ConfigMap, the sidecar copies
+a valid file, and the pod stays Running. The only signal is one ERROR line in the ruler's own log —
+which is exactly the class of failure these rules exist to catch, so relying on it would be circular.
+
+Structural validation cannot substitute: the failure is in the LogQL *expression*, and only a LogQL
+parser can judge it. Loki ships no `lokitool` in its container image (verified against
+grafana/loki:3.6.7 — `usr/bin/loki` is the only binary), so the parser we can reach is the ruler
+itself.
+
+Usage:
+    check-loki-rules.py                 # gate (exit 1 when the ruler rejects anything)
+    check-loki-rules.py --self-test     # prove the gate can fail
+
+Requires docker. Without it the check SKIPS with a warning and exit 0 — deliberately, so this
+cannot become a hard dependency that blocks unrelated work on a machine without docker; the CI job
+that runs it does have docker.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+try:
+    import yaml
+except ImportError:
+    sys.stderr.write("PyYAML required: pip install pyyaml\n")
+    sys.exit(2)
+
+REPO = Path(__file__).resolve().parents[2]
+COMPONENTS = REPO / "openbank-infra" / "gitops" / "components"
+LOKI_IMAGE = "grafana/loki:3.6.7"
+PORT = 13199
+CONTAINER = "openbank-loki-rule-check"
+
+# Minimal single-binary config whose ruler section mirrors apps/loki.yaml's: local rule storage in
+# /rules, single-tenant (auth_enabled: false, so the tenant directory is `fake`). Storage is
+# filesystem rather than S3 because this only exercises the RULE PARSER, and an S3 dependency would
+# make the gate fail for reasons that have nothing to do with the rules.
+LOKI_CONFIG = """
+auth_enabled: false
+server:
+  http_listen_port: 3100
+common:
+  path_prefix: /loki
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules-tmp
+schema_config:
+  configs:
+    - from: "2024-04-01"
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+ruler:
+  enable_api: true
+  storage:
+    type: local
+    local:
+      directory: /rules
+  rule_path: /tmp/loki-rules
+  ring:
+    kvstore:
+      store: inmemory
+"""
+
+
+def rule_configmaps(root: Path) -> dict[str, str]:
+    """{filename: rule-file body} for every ConfigMap labelled loki_rule.
+
+    Derived from the label the Loki sidecar actually selects on, not from a hand-kept path list —
+    a rules ConfigMap added in a new directory is in scope automatically. The label IS the contract.
+    """
+    out: dict[str, str] = {}
+    for f in sorted(root.rglob("*.yaml")):
+        text = f.read_text(encoding="utf-8", errors="ignore")
+        if "loki_rule" not in text:
+            continue
+        for doc in yaml.safe_load_all(text):
+            if not isinstance(doc, dict) or doc.get("kind") != "ConfigMap":
+                continue
+            if "loki_rule" not in (doc.get("metadata", {}).get("labels") or {}):
+                continue
+            for key, body in (doc.get("data") or {}).items():
+                out[f"{doc['metadata']['name']}__{key}"] = body
+    return out
+
+
+def _get(url: str, timeout: float = 5.0) -> str | None:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return r.read().decode()
+    except (urllib.error.URLError, OSError):
+        return None
+
+
+def load_into_ruler(bodies: dict[str, str], quiet: bool = False) -> tuple[bool, str]:
+    """-> (accepted, detail). accepted is False when the ruler lists fewer groups than we gave it."""
+    tmp = Path(tempfile.mkdtemp())
+    rules_dir = tmp / "rules" / "fake"
+    rules_dir.mkdir(parents=True)
+    (tmp / "config.yaml").write_text(LOKI_CONFIG)
+    expected_groups = 0
+    for name, body in bodies.items():
+        (rules_dir / f"{name}.yaml").write_text(body)
+        doc = yaml.safe_load(body) or {}
+        expected_groups += len(doc.get("groups") or [])
+
+    subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True)
+    run = subprocess.run(
+        ["docker", "run", "-d", "--name", CONTAINER, "-p", f"{PORT}:3100",
+         "-v", f"{tmp / 'config.yaml'}:/etc/loki/local-config.yaml",
+         "-v", f"{tmp / 'rules'}:/rules", LOKI_IMAGE,
+         "-config.file=/etc/loki/local-config.yaml"],
+        capture_output=True, text=True)
+    if run.returncode != 0:
+        return False, f"could not start {LOKI_IMAGE}: {run.stderr.strip()[:300]}"
+    try:
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            if (_get(f"http://localhost:{PORT}/ready") or "").strip().startswith("ready"):
+                break
+            time.sleep(2)
+        else:
+            return False, "Loki never became ready within 120s"
+
+        # The ruler lists lazily; poll until it reports the expected count or we run out of patience.
+        deadline = time.monotonic() + 60
+        loaded: list[str] = []
+        while time.monotonic() < deadline:
+            raw = _get(f"http://localhost:{PORT}/prometheus/api/v1/rules")
+            if raw:
+                groups = (json.loads(raw).get("data") or {}).get("groups") or []
+                loaded = [g["name"] for g in groups]
+                if len(loaded) >= expected_groups:
+                    break
+            time.sleep(2)
+
+        if len(loaded) < expected_groups:
+            logs = subprocess.run(["docker", "logs", CONTAINER], capture_output=True, text=True)
+            err = [ln for ln in (logs.stderr + logs.stdout).splitlines()
+                   if "unable to list rules" in ln or "error parsing" in ln]
+            return False, (
+                f"ruler loaded {len(loaded)} group(s), expected {expected_groups}. "
+                f"A SINGLE unparseable file empties the whole list, so the broken rule may not be "
+                f"the one you just added. Ruler said: "
+                + (err[-1][:600] if err else "(no parse error logged)"))
+        if not quiet:
+            print(f"  ruler accepted {len(loaded)} group(s): {', '.join(sorted(loaded))}")
+        return True, ""
+    finally:
+        subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True)
+
+
+def run_gate() -> int:
+    if not shutil.which("docker"):
+        print("::warning title=Loki rules::docker not available — skipping the Loki rule load test. "
+              "The CI job that gates this does have docker.")
+        return 0
+    bodies = rule_configmaps(COMPONENTS)
+    if not bodies:
+        print("check-loki-rules: no ConfigMaps labelled loki_rule found — nothing to check.")
+        return 0
+    print(f"check-loki-rules: loading {len(bodies)} rule file(s) into {LOKI_IMAGE}")
+    ok, detail = load_into_ruler(bodies)
+    if ok:
+        print("check-loki-rules: every committed Loki rule file parses.")
+        return 0
+    print(f"::error title=Loki rules::{detail}")
+    return 1
+
+
+def self_test() -> int:
+    """A gate that has only ever passed is unfalsified. Feed it a file it MUST reject."""
+    if not shutil.which("docker"):
+        print("::warning title=Loki rules::docker not available — cannot run the self-test.")
+        return 0
+    failures = []
+    good = {"good": yaml.safe_dump({"groups": [{
+        "name": "selftest.good", "interval": "5m", "rules": [{
+            "alert": "SelfTestGood",
+            "expr": 'sum by (namespace) (count_over_time({namespace=~".+"} |= "x" [15m])) > 0',
+            "labels": {"severity": "warning"}}]}]})}
+    # Unbalanced parenthesis: valid YAML, invalid LogQL — the exact shape yamllint cannot see.
+    bad = dict(good, bad='groups:\n  - name: selftest.bad\n    rules:\n      - alert: SelfTestBad\n'
+                         '        expr: sum by (namespace ( count_over_time({namespace=~".+"} |= "x" [15m])\n')
+
+    print("self-test: the case the gate MUST pass")
+    ok, detail = load_into_ruler(good)
+    print(f"  {'ok  ' if ok else 'FAIL'} a valid rule file is accepted" + ("" if ok else f" — {detail}"))
+    if not ok:
+        failures.append("valid rule rejected")
+
+    print("self-test: the case the gate MUST flag")
+    ok, _ = load_into_ruler(bad, quiet=True)
+    print(f"  {'ok  ' if not ok else 'FAIL'} a file with unparseable LogQL is rejected")
+    if ok:
+        failures.append("broken rule accepted")
+
+    if failures:
+        print(f"\n::error::check-loki-rules --self-test: {', '.join(failures)}")
+        return 1
+    print("\nself-test passed: the gate accepts valid LogQL and rejects a broken file.")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--self-test", action="store_true", help="prove the gate can fail")
+    args = ap.parse_args()
+    return self_test() if args.self_test else run_gate()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
