@@ -146,14 +146,54 @@ def load(root: pathlib.Path, path: str = MANIFEST):
                     f"shard job in ci.yml and read $NAME here.\n"
                 )
                 sys.exit(2)
-        # A gate that reads $PR_DIFF_BASE without declaring needs_base would silently diff
-        # against an empty string on push-to-main. Catch the mismatch at load time, in both
-        # directions, so the declaration cannot drift from the command.
-        reads_base = "PR_DIFF_BASE" in g["run"]
-        if reads_base != bool(g.get("needs_base")):
+        # $PR_DIFF_BASE handling. `needs_base` is DERIVED from the command and then checked
+        # against the declaration, in both directions, so the two cannot drift.
+        #
+        #   required  the command reads $PR_DIFF_BASE bare. An empty base would diff against
+        #             nothing and pass — a gate green about work it never did — so the runner
+        #             fails instead of running it vacuously.
+        #   optional  the command reads ${PR_DIFF_BASE:-}, i.e. it supplies its own default
+        #             and is written to work without one.
+        #   absent    the command does not read it at all.
+        #
+        # The distinction is not academic. `identifier-intent-guard` is `when: always` and
+        # reads ${PR_DIFF_BASE:-}; conflating "reads it" with "requires it" made it fail every
+        # push to main, where there is no PR and hence no base — the shard went red on main
+        # within minutes of this landing. Hence also the `required` + `when: always`
+        # contradiction check below: that combination can only ever fail on a push, so it is
+        # rejected at load time rather than discovered on the default branch.
+        run = g["run"]
+        if "${PR_DIFF_BASE:-" in run:
+            derived = "optional"
+        elif "PR_DIFF_BASE" in run:
+            derived = "required"
+        else:
+            derived = None
+        declared = g.get("needs_base")
+        if declared is True:
+            declared = "required"
+        elif declared is False:
+            declared = None
+        if declared not in (None, "required", "optional"):
             sys.stderr.write(
-                f"::error::gate {g['id']}: needs_base={bool(g.get('needs_base'))} but the "
-                f"command {'reads' if reads_base else 'does not read'} $PR_DIFF_BASE\n"
+                f"::error::gate {g['id']}: needs_base `{g.get('needs_base')}` must be "
+                f"`required`, `optional`, or absent\n"
+            )
+            sys.exit(2)
+        if declared != derived:
+            sys.stderr.write(
+                f"::error::gate {g['id']}: needs_base declares `{declared}` but the command "
+                f"is `{derived}` (bare $PR_DIFF_BASE = required, ${{PR_DIFF_BASE:-}} = "
+                f"optional, absent = neither)\n"
+            )
+            sys.exit(2)
+        g["needs_base"] = derived
+        if derived == "required" and g["when"] != "pull_request":
+            sys.stderr.write(
+                f"::error::gate {g['id']}: needs_base `required` with when `{g['when']}` can "
+                f"only fail on push to main, where there is no PR and no diff base. Either "
+                f"set `when: pull_request`, or make the command tolerate an empty base with "
+                f"${{PR_DIFF_BASE:-}} and declare `optional`.\n"
             )
             sys.exit(2)
     return gates
@@ -223,9 +263,20 @@ def _run(cmd: str, cwd: pathlib.Path, extra_env: dict, timeout: int, index: path
         )
         return p.returncode, p.stdout + p.stderr
     except subprocess.TimeoutExpired as exc:
-        got = (exc.stdout or "") + (exc.stderr or "")
-        if isinstance(got, bytes):
-            got = got.decode("utf-8", "replace")
+        # Decode each stream INDEPENDENTLY, before concatenating. Even with text=True,
+        # TimeoutExpired can carry one stream as str and the other as bytes, so the obvious
+        # `(exc.stdout or "") + (exc.stderr or "")` raises `TypeError: can't concat str to
+        # bytes` — swallowing the real output and turning a timeout into a stack trace that
+        # takes the whole shard down. Reached only on an actual timeout with output on both
+        # streams, which is why the `slow` self-test case below now writes to both.
+        def _text(stream):
+            if not stream:
+                return ""
+            if isinstance(stream, (bytes, bytearray)):
+                return stream.decode("utf-8", "replace")
+            return stream
+
+        got = _text(exc.stdout) + _text(exc.stderr)
         return 124, got + f"\n[run-gates] TIMEOUT after {timeout}s\n"
     finally:
         if scratch is not None:
@@ -241,11 +292,12 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> 
         r.status = "skipped"
         r.output = "skipped: pull_request-only gate, this is not a pull_request event\n"
         return r
-    if gate.get("needs_base") and not os.environ.get("PR_DIFF_BASE"):
+    if gate.get("needs_base") == "required" and not os.environ.get("PR_DIFF_BASE"):
         # Fail loudly. Running the gate with an empty base would diff against nothing and
-        # pass — a gate green about work it never did.
+        # pass — a gate green about work it never did. `optional` gates fall through: they
+        # supply their own default and are written to work without a base.
         r.status = "failed"
-        r.output = "PR_DIFF_BASE is empty but this gate needs it — refusing to run vacuously\n"
+        r.output = "PR_DIFF_BASE is empty but this gate requires it — refusing to run vacuously\n"
         return r
 
     t0 = time.monotonic()
@@ -450,7 +502,10 @@ gates:
   - id: slow
     name: "a gate that exceeds its timeout"
     group: t
-    run: "sleep 30"
+    # Writes to BOTH streams before hanging: a bare `sleep` produces no output, so the
+    # timeout path's stream handling was never exercised and a TypeError there went
+    # unnoticed until a real gate timed out on a loaded machine.
+    run: "echo on-stdout; echo on-stderr >&2; sleep 30"
 """
 
 EXPECTED = {
@@ -481,6 +536,15 @@ def self_test():
             print(f"  {mark} {r.id:18s} want={want:12s} got={r.status}")
             if r.status != want:
                 bad.append(f"{r.id}: want {want}, got {r.status}")
+            # A timeout must SURFACE what the gate printed before it hung — that output is
+            # usually the only clue to why. Asserting the status alone passes against a
+            # timeout path that raises instead of reporting.
+            if r.id == "slow":
+                for stream in ("on-stdout", "on-stderr"):
+                    if stream not in r.output:
+                        bad.append(f"slow: timeout output dropped {stream}")
+                if "TIMEOUT after" not in r.output:
+                    bad.append("slow: timeout not reported in the output")
 
         # The report() contract too: a failed gate must make the runner exit non-zero, and
         # an advisory-only failure must NOT. Checking the statuses alone would miss a
@@ -518,16 +582,62 @@ def self_test():
                 if not want_abort:
                     bad.append("load() rejected a ${{ }} mentioned only in a comment")
 
-        # A needs_base mismatch must abort in BOTH directions.
-        for body, decl in (('run: "echo $PR_DIFF_BASE"', ""), ('run: "true"', "needs_base: true")):
+        # needs_base. Every combination that must abort, and the three that must not —
+        # a load() that rejected everything would satisfy the negative cases on its own.
+        # The `required` + `when: always` row is the one that matters: that gate shape ran
+        # green on every PR and failed every push to main, so only a push found it.
+        for decl, body, when, want_abort in (
+            ('', 'run: "echo $PR_DIFF_BASE"', '', True),               # reads it, undeclared
+            ('needs_base: required', 'run: "true"', 'when: pull_request', True),  # declared, never read
+            ('needs_base: optional', 'run: "echo $PR_DIFF_BASE"', '', True),      # bare read is required
+            ('needs_base: required', 'run: "echo ${PR_DIFF_BASE:-}"',
+             'when: pull_request', True),                              # defaulted read is optional
+            ('needs_base: required', 'run: "echo $PR_DIFF_BASE"', '', True),      # required + when:always
+            ('needs_base: sometimes', 'run: "echo $PR_DIFF_BASE"',
+             'when: pull_request', True),                              # not a valid value
+            ('needs_base: required', 'run: "echo $PR_DIFF_BASE"',
+             'when: pull_request', False),                             # the valid required shape
+            ('needs_base: optional', 'run: "echo ${PR_DIFF_BASE:-}"', '', False),  # the valid optional shape
+            ('', 'run: "true"', '', False),                            # neither
+        ):
             (tmp / ".github" / "gates" / "gates.yaml").write_text(
-                f"gates:\n  - id: x\n    name: x\n    group: t\n    {decl}\n    {body}\n"
+                f"gates:\n  - id: x\n    name: x\n    group: t\n    {decl}\n    {when}\n    {body}\n"
             )
+            label = f"{decl or 'undeclared'} / {when or 'when:always'} / {body}"
             try:
                 load(tmp)
-                bad.append(f"load() accepted a needs_base mismatch ({decl or 'undeclared'})")
+                if want_abort:
+                    bad.append(f"load() accepted an invalid needs_base shape: {label}")
             except SystemExit:
-                pass
+                if not want_abort:
+                    bad.append(f"load() rejected a VALID needs_base shape: {label}")
+
+        # And at run time: `required` with an empty base is refused, `optional` runs anyway.
+        #
+        # Assert the MESSAGE, not just the status. Gates run under `bash -euo pipefail`, so a
+        # bare `$PR_DIFF_BASE` on an unset variable already dies with "unbound variable" —
+        # status alone cannot tell the guard from `-u`, and this assertion passed against a
+        # deliberately disabled guard until it checked the text. The guard still earns its
+        # place: "refusing to run vacuously" says what went wrong, `unbound variable` does not.
+        for decl, body, when, want, want_text in (
+            ('needs_base: required', 'run: "echo $PR_DIFF_BASE"', 'when: pull_request',
+             "failed", "refusing to run vacuously"),
+            ('needs_base: optional', 'run: "echo ${PR_DIFF_BASE:-}"', '', "ok", None),
+        ):
+            (tmp / ".github" / "gates" / "gates.yaml").write_text(
+                f"gates:\n  - id: x\n    name: x\n    group: t\n    {decl}\n    {when}\n    {body}\n"
+            )
+            os.environ.pop("PR_DIFF_BASE", None)
+            g = load(tmp)[0]
+            # `required` gates are pull_request-only by construction, so drive it as a PR.
+            r = execute(g, tmp, is_pr=True, timeout=5)
+            if r.status != want:
+                bad.append(f"empty PR_DIFF_BASE + {decl}: want {want}, got {r.status}")
+            if want_text and want_text not in r.output:
+                bad.append(
+                    f"empty PR_DIFF_BASE + {decl}: failed for the wrong reason — expected "
+                    f"the guard's message, got: {r.output.strip()[:120]}"
+                )
 
         if bad:
             print("\n::error::run-gates self-test FAILED:")

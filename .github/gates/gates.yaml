@@ -353,7 +353,7 @@ gates:
     group: supplychain
     mode: advisory
     when: pull_request
-    needs_base: true
+    needs_base: required
     run: |
       set -euo pipefail
       python3 openbank-infra/scripts/check-release-scope-mismatch.py \
@@ -739,7 +739,9 @@ gates:
     name: "identifier intent guard (ADR-0106, #1699)"
     group: kotlin
     mode: enforced
-    needs_base: true
+    # optional, not required: the command reads ${PR_DIFF_BASE:-} and this gate is
+    # `when: always`, so it also runs on push to main where there is no PR and no base.
+    needs_base: optional
     run: |
       bash .github/scripts/check-new-random-uuid.sh "${PR_DIFF_BASE:-}"
 
@@ -856,7 +858,7 @@ gates:
     group: api
     mode: enforced
     when: pull_request
-    needs_base: true
+    needs_base: required
     env:
       OASDIFF_VERSION: "1.22.0"
       OASDIFF_SHA256: "8b972accaf49f984cf40702af8b29360126ac9436594ccf6ac1ae662209a5fe6"
@@ -991,7 +993,7 @@ gates:
     group: data
     mode: advisory
     when: pull_request
-    needs_base: true
+    needs_base: required
     run: |
       python3 openbank-infra/scripts/check-db-migration.py --base "${PR_DIFF_BASE}"
 
@@ -1009,7 +1011,7 @@ gates:
     group: data
     mode: advisory
     when: pull_request
-    needs_base: true
+    needs_base: required
     run: |
       python3 .github/scripts/check-event-schema-compat.py --base "${PR_DIFF_BASE}"
 
@@ -1100,7 +1102,7 @@ gates:
     group: security
     mode: advisory
     when: pull_request
-    needs_base: true
+    needs_base: required
     run: |
       python3 openbank-infra/scripts/check-threat-model-diff.py --base "${PR_DIFF_BASE}"
 
