@@ -166,7 +166,9 @@ class PanacheObservedRemittanceRepository :
 }
 
 @ApplicationScoped
-class PanacheTaxFilingRepository : TaxFilingRepository, PanacheRepositoryBase<TaxFilingEntity, UUID> {
+class PanacheTaxFilingRepository :
+    TaxFilingRepository,
+    PanacheRepositoryBase<TaxFilingEntity, UUID> {
 
     override suspend fun findByPeriod(period: FilingPeriod): TaxFilingRecord? = Panache.withSession {
         find("periodYear = ?1 and periodMonth = ?2", period.year, period.month).firstResult()

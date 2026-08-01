@@ -27,12 +27,10 @@ import jakarta.enterprise.context.ApplicationScoped
 class UnavailableEpoRenderer : EpoRendererPort {
     override val available: Boolean = false
 
-    override suspend fun renderVyuctovani(
-        filing: TaxFilingRecord,
-        remittances: List<ObservedRemittance>,
-    ): ByteArray = throw UnsupportedOperationException(
-        "EPO XML rendering is not built (ADR-0180 v1). Assembled totals for ${filing.period.label} " +
-            "are available on the API; submit via the EPO portal or datová schránka and record the " +
-            "reference with POST /api/v1/tax/filings/${filing.period.label}/filed.",
-    )
+    override suspend fun renderVyuctovani(filing: TaxFilingRecord, remittances: List<ObservedRemittance>): ByteArray =
+        throw UnsupportedOperationException(
+            "EPO XML rendering is not built (ADR-0180 v1). Assembled totals for ${filing.period.label} " +
+                "are available on the API; submit via the EPO portal or datová schránka and record the " +
+                "reference with POST /api/v1/tax/filings/${filing.period.label}/filed.",
+        )
 }
