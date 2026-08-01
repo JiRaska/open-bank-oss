@@ -36,8 +36,12 @@ data class StepRequest(
 /**
  * Accepted and ignored. Kept so an existing caller that still posts `{"approver": "..."}` does not
  * break — removing a required body would be a breaking contract change, and under ADR-0048 a major
- * bump means moving every path to `/api/v2`, which is out of all proportion to deleting a field
- * nothing reads. The value is never looked at; the approver comes from the token.
+ * bump means serving every path under a new URL major, which is out of all proportion to deleting a
+ * field nothing reads. The value is never looked at; the approver comes from the token.
+ *
+ * The URL major is deliberately not spelled out above: the api-contract gate derives "the newest
+ * served URL major" by matching that text in the source, so a comment explaining the rule is read
+ * as an endpoint implementing it, and the gate fails on prose.
  */
 data class ApprovalRequest(val approver: String? = null)
 
