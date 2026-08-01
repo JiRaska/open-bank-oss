@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Grafana's OIDC back-channel to Keycloak (ADR-0234, ADR-0056).
+#
+# WHAT BROKE. Grafana's `auth.generic_oauth` runs the browser leg against
+# kc.open-bank.tech but the token/userinfo leg in-cluster against
+# `keycloak.iam.svc:8080`. That call was being DROPPED, so every SSO login got
+# as far as Keycloak, came back with a code, and then bounced to the login page
+# after a 20 s timeout:
+#
+#   authn.service level=error msg="Failed to authenticate request"
+#   client=auth.client.generic_oauth error="[auth.oauth.token.exchange]
+#   failed to exchange code to token: Post http://keycloak.iam.svc:8080/…"
+#
+# WHY THE ALLOW-LIST LOOKED CORRECT. `keycloak-ingress-allow-list` (generated,
+# ADR-0081) DOES name `observability` — but on **TCP:9000**, the metrics port,
+# in a rule of its own. The 8080 rule lists ~38 other namespaces and not this
+# one. Reading the policy's namespaces without their per-rule ports therefore
+# says "observability is allowed", and that reads as covered when it is not.
+# Only an actual connection attempt distinguishes the two: a plain pod in
+# `observability` times out on :8080 while :9000 is fine.
+#
+# WHY THE GENERATOR DID NOT CATCH IT. gen-network-policies.py derives edges from
+# the env URLs declared on Deployments under components/. Grafana is a Helm
+# subchart of kube-prometheus-stack and its `token_url` lives in a `grafana.ini`
+# values block, so this edge is invisible to it — the same blind spot that makes
+# networkpolicy-grafana.yaml hand-written. Hence a separate hand-written file
+# rather than an edit to the generated one; NetworkPolicies are additive.
+#
+# WHY IT SURFACED ONLY NOW. Grafana had no Ingress before ADR-0234, so the SSO
+# login was reachable only through a port-forward — and evidently never
+# completed end-to-end. The config had been correct-looking and non-functional
+# for as long as it had existed; routing the tool is simply what finally
+# exercised it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keycloak-allow-grafana-oidc
+  namespace: iam
+  labels:
+    app.kubernetes.io/part-of: iam
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - protocol: TCP
+          port: 8080

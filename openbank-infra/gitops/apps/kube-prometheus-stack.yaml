@@ -2,9 +2,13 @@
 # alertmanager (enabled, with the routing tree configured below). Lean FinOps
 # sizing per ADR-0027: single Prometheus replica, 12h retention, gp3 PVC.
 # serviceMonitorSelectorNilUsesHelmValues=false so app ServiceMonitors are
-# picked up regardless of release labels. Grafana has no Ingress — the edge NLB
-# is IP-locked and Grafana keeps the chart-default admin; reach it via
-# `kubectl -n observability port-forward svc/kube-prometheus-stack-grafana 3000:80`.
+# picked up regardless of release labels. Grafana still has no Ingress of its
+# own: it is reached at https://admin.open-bank.tech/tools/grafana, a sub-path of
+# the console served by the admin-ui `admin-ui-tools` Ingress behind an nginx
+# auth_request gate (ADR-0234), so an unauthenticated request is rejected at the
+# edge and never reaches this workload. `openbank-infra/scripts/grafana-local.sh`
+# stays as break-glass (port-forward, local Grafana admin login — SSO does not
+# complete over it, since root_url now carries the public sub-path).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -260,6 +264,18 @@ spec:
               name_attribute_path: name
               email_attribute_path: email
               role_attribute_path: contains(realm_access.roles[*], 'ROLE_ADMIN') && 'Admin' || (contains(realm_access.roles[*], 'ROLE_OPERATOR') && 'Editor' || 'Viewer')
+          # serve_from_sub_path makes Grafana 301 every root path to the sub-path,
+          # and it renders that redirect as an ABSOLUTE URL on root_url — so the
+          # chart-default `/metrics` scrape was answered with a redirect out to
+          # https://admin.open-bank.tech/tools/grafana/metrics, which Prometheus
+          # followed to the public edge and got the gate's login redirect instead
+          # of metrics. Grafana's own telemetry therefore stopped at the moment
+          # the sub-path landed, with nothing red anywhere: the ServiceMonitor was
+          # healthy, the target was "up", and it was scraping a login page.
+          # Scrape the sub-path directly so no redirect is involved.
+          serviceMonitor:
+            enabled: true
+            path: /tools/grafana/metrics
           # Sentry-protocol datasource plugin so GlitchTip mobile crashes
           # (ADR-0075) sit on the same pane as backend telemetry (ADR-0082).
           plugins:
