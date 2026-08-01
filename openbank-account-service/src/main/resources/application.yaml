@@ -189,6 +189,19 @@ mp:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # Delegation-grant enforcement projection (ADR-0232 D3): ACCOUNT-scoped grant
+      # lifecycle events feed account_delegation_projection; the guard then answers
+      # owner OR grant locally, never calling delegation-service on the request path.
+      delegation-events-in:
+        connector: smallrye-kafka
+        topic: openbank.delegation.events
+        group.id: openbank-account-service
+        auto.offset.reset: earliest
+        failure-strategy: dead-letter-queue
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 "%dev":
   quarkus:

@@ -242,3 +242,17 @@ not change any existing request's outcome until explicitly flipped.
   Verified by `AccountAuthorizationLifecycleIT` (real Postgres: grant→revoke→REVOKED; fails-first on
   the old code with 422). Same `persist`-vs-`merge` class as consent-service #1553; tracked in #1600.
   Rollback: revert the commit.
+- **2026-08-01** — Delegation-grant enforcement projection (ADR-0232 D3, issue #2990):
+  `account_delegation_projection` fed by `DelegationEventConsumer` from
+  `openbank.delegation.events`, and `AuthorizationService.isAuthorized` gains a third disjunct —
+  owner OR legacy `AccountAuthorization` OR an ACTIVE in-window delegation grant. **Risk class =
+  elevation of privilege / confused deputy.** Key properties: enforcement is local-only (no
+  synchronous call to delegation-service on the request path — guarded by
+  `NoDelegationRestClientTest`); the guard is additive (delegation can only ADD access, never
+  remove the owner's); per-transaction ceilings and currency match are enforced for
+  PAYMENT_ONLY; a missed close event would leave access open, so consumer failures dead-letter
+  instead of being swallowed (the worst drift direction is a REVOKED grant staying enforceable —
+  the DLQ preserves the close for replay); projection rows key on the grant id, so redelivered
+  activates are idempotent. Residual: seconds-level revoke propagation documented in ADR-0232;
+  card/savings/propose-only scopes land in their owning services' slices. Rollback: revert the
+  commits; the projection table is droppable without touching `account_authorizations`.
