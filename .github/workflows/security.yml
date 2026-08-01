@@ -186,7 +186,20 @@ jobs:
           executed=$( { grep -c '> Task :.*:compileKotlin$' "${RUNNER_TEMP:-/tmp}/codeql-build.log" || true; } )
           if [ "$executed" -eq 0 ]; then
             echo "::warning::every compile resolved from cache — cold re-run so the CodeQL trace is non-empty"
-            .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- ./gradlew testClasses --no-build-cache --no-daemon
+            # --rerun-tasks, not just --no-build-cache: the latter bypasses the build CACHE but
+            # not Gradle's UP-TO-DATE checks, and after the first run every compileKotlin output
+            # is already in build/. Measured on run 30692843630, where the fallback still produced
+            # `60 UP-TO-DATE, 60 FROM-CACHE, 0 executed` and CodeQL then failed with
+            # "could not process any code written in Java/Kotlin".
+            .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- \
+              ./gradlew testClasses --no-build-cache --rerun-tasks --no-daemon \
+              2>&1 | tee "${RUNNER_TEMP:-/tmp}/codeql-build-cold.log"
+            cold=$( { grep -c '> Task :.*:compileKotlin$' "${RUNNER_TEMP:-/tmp}/codeql-build-cold.log" || true; } )
+            if [ "$cold" -eq 0 ]; then
+              echo "::error::cold re-run still compiled nothing — CodeQL would report no source code"
+              exit 1
+            fi
+            echo "cold re-run compiled: $cold"
           else
             echo "compile tasks executed: $executed"
           fi
