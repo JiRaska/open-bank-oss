@@ -460,12 +460,21 @@ jobs:
         working-directory: openbank-admin-ui
         run: npm ci --no-audit --no-fund
 
-      # Diff the derived block in enforce mode: --enforce makes node exit 1 on drift,
-      # which propagates via pipefail and turns the step red. Do NOT add `|| true`.
+      # Diff the derived block in enforce mode: --enforce makes node exit 1 on drift, and the
+      # step must go red. Do NOT add `|| true`.
+      #
+      # `shell: bash` and the explicit `set -o pipefail` are load-bearing, not decoration. A `run:`
+      # step with no `shell:` key runs under `bash -e {0}` — WITHOUT pipefail — so `node … | tee`
+      # exits with tee's status and the step passed while printing the drift it had just detected.
+      # Measured: `bash -e -c 'false | tee /dev/null'` exits 0; the same under `-o pipefail` aborts.
+      # This step carried a comment claiming pipefail propagation for as long as it has existed, so
+      # the check was documented as enforcing, believed to be enforcing, and was not (#3053).
       - name: Regenerate & diff derived block
         if: env.APP_RO_TOKEN != ''
         working-directory: openbank-admin-ui
+        shell: bash
         run: |
+          set -euo pipefail
           node scripts/generate-app-status.mjs \
             --app-repo "${GITHUB_WORKSPACE}/.app-src" \
             --against app-status.json \
