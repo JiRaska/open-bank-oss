@@ -72,7 +72,6 @@ internal object RequiredBody {
 
     private const val CONTINUATION = "kotlin.coroutines.Continuation"
 
-
     /**
      * The entity parameter of [method], or null when it declares none.
      *
