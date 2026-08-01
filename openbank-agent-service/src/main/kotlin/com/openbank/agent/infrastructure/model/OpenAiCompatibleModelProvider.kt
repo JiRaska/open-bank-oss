@@ -17,6 +17,8 @@ import com.openbank.agent.domain.model.ModelResponse
 import com.openbank.agent.domain.model.ModelUsage
 import com.openbank.agent.domain.model.StopReason
 import com.openbank.agent.domain.model.ToolInvocation
+import com.openbank.libs.llm.LlmCallMetricsPort
+import com.openbank.libs.observability.DomainMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.ConfigProvider
@@ -47,6 +49,12 @@ class OpenAiCompatibleModelProvider : ModelProvider {
     @Inject
     lateinit var objectMapper: ObjectMapper
 
+    // Field injection, not a constructor arg: detekt's LongParameterList fires AT
+    // constructorThreshold, and this class is instantiated by Arc, so there is no
+    // constructor to widen anyway. Same shape as LoanStageEventConsumer / VopRateLimitFilter.
+    @Inject
+    lateinit var metrics: DomainMetrics
+
     // Resolved lazily (NOT @ConfigProperty-injected): an un-seeded/empty key would otherwise fail
     // config load at boot (SmallRye SRCFG00040 on an empty String binding) and CrashLoop the pod —
     // and break any @QuarkusTest / fresh env where GROQ_API_KEY isn't set. Empty here just degrades
@@ -66,6 +74,9 @@ class OpenAiCompatibleModelProvider : ModelProvider {
     override suspend fun complete(model: ModelDescriptor, request: ModelRequest): ModelResponse {
         val base = (model.endpoint ?: error("model '${model.id}' has no endpoint (base URL) configured"))
             .trimEnd('/')
+        if (apiKey.isBlank()) {
+            metrics.recordCall(model.id, LlmCallMetricsPort.OUTCOME_NOT_CONFIGURED, 0, 0, 0)
+        }
         require(apiKey.isNotBlank()) {
             "agent.model.openai.api-key is empty — set the backend API key (e.g. GROQ_API_KEY) to use model '${model.id}'"
         }
@@ -79,13 +90,42 @@ class OpenAiCompatibleModelProvider : ModelProvider {
             .POST(HttpRequest.BodyPublishers.ofString(payload))
             .build()
 
-        val resp = http.send(httpRequest, HttpResponse.BodyHandlers.ofString())
+        // Timed around the send AND the parse: `usage` is only known after parsing, and a body that
+        // fails to parse is a failed call from the caller's point of view even though HTTP said 200.
+        val startedAt = System.nanoTime()
+        val resp = try {
+            http.send(httpRequest, HttpResponse.BodyHandlers.ofString())
+        } catch (ex: java.io.IOException) {
+            metrics.recordCall(
+                model.id,
+                LlmCallMetricsPort.OUTCOME_EXCEPTION,
+                0,
+                0,
+                System.nanoTime() - startedAt,
+            )
+            throw ex
+        }
         if (resp.statusCode() !in 200..299) {
             // Body may echo the request on some gateways; do not log it wholesale (prompt PII).
             log.warnf("openai-compat backend %s returned HTTP %d for model %s", base, resp.statusCode(), model.id)
+            metrics.recordCall(
+                model.id,
+                LlmCallMetricsPort.OUTCOME_HTTP_ERROR,
+                0,
+                0,
+                System.nanoTime() - startedAt,
+            )
             error("model backend HTTP ${resp.statusCode()} for '${model.id}'")
         }
-        return parseResponse(model, resp.body())
+        val parsed = parseResponse(model, resp.body())
+        metrics.recordCall(
+            model.id,
+            LlmCallMetricsPort.OUTCOME_SUCCESS,
+            parsed.usage.inputTokens,
+            parsed.usage.outputTokens,
+            System.nanoTime() - startedAt,
+        )
+        return parsed
     }
 
     /** Neutral [ModelRequest] -> OpenAI `/chat/completions` request body. */

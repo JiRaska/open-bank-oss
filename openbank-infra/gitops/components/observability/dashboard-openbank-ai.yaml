@@ -1,0 +1,585 @@
+# AI / LLM cost and reliability dashboard (ADR-0112 / ADR-0174).
+#
+# Every query on this board resolves against series that exist: openbank_llm_requests_total,
+# openbank_llm_tokens_total and openbank_llm_call_duration_seconds are emitted by DomainMetrics
+# from the three code paths that make real /chat/completions calls, and the openbank:llm_* recording
+# rules come from prometheus-rules-ai.yaml in this same directory.
+#
+# The cost panels are DERIVED from a price book, not read from an invoice, and the board says so in
+# its own header panel rather than in a comment nobody opens. The "Unpriced models" panel is the
+# check on the check: a model added to the gateway and forgotten in the price book makes every spend
+# figure here quietly low, and a sum cannot notice that on its own.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-ai
+  namespace: observability
+  labels:
+    grafana_dashboard: '1'
+    app.kubernetes.io/part-of: observability
+data:
+  openbank-ai.json: |
+    {
+      "id": null,
+      "uid": "openbank-ai",
+      "title": "OpenBank — AI / LLM Cost & Reliability",
+      "description": "Fleet LLM spend, throughput and reliability from client-side token accounting (ADR-0112 / ADR-0174). Cost is derived from a price book, not billed.",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": {
+        "from": "now-24h",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "browser",
+      "tags": [
+        "openbank",
+        "ai",
+        "finops"
+      ],
+      "templating": {
+        "list": [
+          {
+            "current": {
+              "selected": false,
+              "text": "Prometheus",
+              "value": "prometheus"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "refresh": 1,
+            "type": "datasource",
+            "label": "Datasource"
+          }
+        ]
+      },
+      "annotations": {
+        "list": []
+      },
+      "links": [],
+      "panels": [
+        {
+          "id": 1,
+          "type": "text",
+          "title": "How to read this board",
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 6
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "**What this board can and cannot tell you.**\n\nToken counts are measured **client-side** by `DomainMetrics` on the three code paths that make real `/chat/completions` calls — the shared `LlmGatewayPort` client (devops-agent, control-liveness-sentinel), agent-service and copilot-service. LiteLLM's own Prometheus exporter is an Enterprise feature, so the gateway cannot report this.\n\n**Cost is derived, not billed.** Spend = tokens x the `openbank:llm_price_usd_per_token` price book in `prometheus-rules-ai.yaml`. Rows whose `price_source` is `nearest-sibling` are estimates (DeepInfra publishes no rate for DeepSeek-V3.2; its V3.1 rate is used). The provider invoice is the authority; this is the leading indicator. The **Unpriced models** panel is the check on the check — anything listed there is spend these figures do not include.\n\n`not_configured` is a first-class outcome, not an error: it means a caller skipped the call because no API key was seeded. Six of the eight control-plane agents ship a stub `LlmDiagnosisAdapter` that makes no LLM call at all, so they appear nowhere on this board — absence here is not evidence an agent is healthy."
+          }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "LLM spend (24h, derived)",
+          "gridPos": {
+            "x": 0,
+            "y": 6,
+            "w": 5,
+            "h": 5
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "openbank:llm_cost_usd_24h:total",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "decimals": 2
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area"
+          },
+          "description": "Rolling 24h, from the price book. Estimate, not an invoice."
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Calls/min",
+          "gridPos": {
+            "x": 5,
+            "y": 6,
+            "w": 5,
+            "h": 5
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "sum(rate(openbank_llm_requests_total{job=\"observability/openbank-services\"}[5m])) * 60",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "decimals": 1
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area"
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Error rate (15m)",
+          "gridPos": {
+            "x": 10,
+            "y": 6,
+            "w": 5,
+            "h": 5
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "100 * (sum(rate(openbank_llm_requests_total{outcome=~\"http_error|exception\",job=\"observability/openbank-services\"}[15m])) / clamp_min(sum(rate(openbank_llm_requests_total{outcome!=\"not_configured\",job=\"observability/openbank-services\"}[15m])), 0.0000001))",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "decimals": 1
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area"
+          },
+          "description": "Excludes not_configured — an unseeded key is a different failure with a different fix."
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Skipped: no API key (1h)",
+          "gridPos": {
+            "x": 15,
+            "y": 6,
+            "w": 4,
+            "h": 5
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "sum(increase(openbank_llm_requests_total{outcome=\"not_configured\",job=\"observability/openbank-services\"}[1h]))",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area"
+          },
+          "description": "Non-zero means an AI feature is silently off, degrading to its deterministic fallback."
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Unpriced models",
+          "gridPos": {
+            "x": 19,
+            "y": 6,
+            "w": 5,
+            "h": 5
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "count(openbank:llm_tokens_unpriced_24h > 0) or vector(0)",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area"
+          },
+          "description": "Models burning tokens with no price-book entry. Non-zero means the spend figures understate reality."
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "Spend by model (24h rolling, derived)",
+          "gridPos": {
+            "x": 0,
+            "y": 11,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "openbank:llm_cost_usd_24h:by_model",
+              "legendFormat": "{{model}} ({{price_source}})",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "description": "Legend carries price_source so an estimate is never mistaken for a billed figure."
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "Tokens/s by model and kind",
+          "gridPos": {
+            "x": 12,
+            "y": 11,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "sum by (model, kind) (rate(openbank_llm_tokens_total{job=\"observability/openbank-services\"}[5m]))",
+              "legendFormat": "{{model}} {{kind}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "description": "prompt and completion split because every provider prices them differently."
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "Call outcomes",
+          "gridPos": {
+            "x": 0,
+            "y": 19,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "sum by (outcome) (rate(openbank_llm_requests_total{job=\"observability/openbank-services\"}[5m]))",
+              "legendFormat": "{{outcome}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "Call latency p50/p95/p99 (successful calls)",
+          "gridPos": {
+            "x": 12,
+            "y": 19,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "histogram_quantile(0.5, sum by (le) (rate(openbank_llm_call_duration_seconds_bucket{outcome=\"success\",job=\"observability/openbank-services\"}[5m])))",
+              "legendFormat": "p50",
+              "refId": "A"
+            },
+            {
+              "datasource": "${datasource}",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(openbank_llm_call_duration_seconds_bucket{outcome=\"success\",job=\"observability/openbank-services\"}[5m])))",
+              "legendFormat": "p95",
+              "refId": "B"
+            },
+            {
+              "datasource": "${datasource}",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(openbank_llm_call_duration_seconds_bucket{outcome=\"success\",job=\"observability/openbank-services\"}[5m])))",
+              "legendFormat": "p99",
+              "refId": "C"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "description": "Failures are timed too but excluded here — a 60s timeout would swamp the success distribution."
+        },
+        {
+          "id": 11,
+          "type": "table",
+          "title": "Unpriced models (tokens with no price-book entry, 24h)",
+          "gridPos": {
+            "x": 0,
+            "y": 27,
+            "w": 12,
+            "h": 6
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "openbank:llm_tokens_unpriced_24h > 0",
+              "refId": "A",
+              "instant": true,
+              "format": "table"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true
+          },
+          "description": "Empty is the healthy state. Any row: add the model to the price book in prometheus-rules-ai.yaml."
+        },
+        {
+          "id": 12,
+          "type": "table",
+          "title": "Price book in force",
+          "gridPos": {
+            "x": 12,
+            "y": 27,
+            "w": 12,
+            "h": 6
+          },
+          "datasource": "${datasource}",
+          "targets": [
+            {
+              "datasource": "${datasource}",
+              "expr": "openbank:llm_price_usd_per_token",
+              "refId": "A",
+              "instant": true,
+              "format": "table"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true
+          },
+          "description": "USD per token, by model and kind. price_source=nearest-sibling marks an estimate."
+        }
+      ]
+    }

@@ -7,6 +7,7 @@ package com.openbank.devops.infrastructure.config
 
 import com.openbank.libs.llm.LlmGatewayPort
 import com.openbank.libs.llm.OpenAiCompatibleLlmGatewayClient
+import com.openbank.libs.observability.DomainMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Produces
 import org.eclipse.microprofile.config.ConfigProvider
@@ -24,7 +25,7 @@ class LlmGatewayProducer {
 
     @Produces
     @ApplicationScoped
-    fun llmGateway(config: DevOpsConfig): LlmGatewayPort {
+    fun llmGateway(config: DevOpsConfig, metrics: DomainMetrics): LlmGatewayPort {
         val apiKey = ConfigProvider.getConfig()
             .getOptionalValue("devops.model.api-key", String::class.java)
             .orElse("")
@@ -32,6 +33,7 @@ class LlmGatewayProducer {
             baseUrl = config.modelEndpoint(),
             model = config.modelId(),
             apiKey = apiKey,
+            metrics = metrics,
         )
     }
 }

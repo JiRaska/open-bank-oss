@@ -4,6 +4,7 @@
 
 package com.openbank.libs.observability
 
+import com.openbank.libs.llm.LlmCallMetricsPort
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.DistributionSummary
 import io.micrometer.core.instrument.Gauge
@@ -47,7 +48,7 @@ import java.time.Duration
  * Services that do ship a registry (sepa-payment-service, …) get full instrumentation.
  */
 @ApplicationScoped
-class DomainMetrics {
+class DomainMetrics : LlmCallMetricsPort {
 
     @Inject
     lateinit var registryInstance: Instance<MeterRegistry>
@@ -439,6 +440,61 @@ class DomainMetrics {
                 ref
             }.set(drift)
         }
+    }
+
+    // ── LLM calls (ADR-0174 / ADR-0112) ──────────────────────────────────────
+
+    /**
+     * One completed `/chat/completions` attempt, from any of the three code paths that make real
+     * LLM calls: the shared [com.openbank.libs.llm.OpenAiCompatibleLlmGatewayClient],
+     * agent-service's `OpenAiCompatibleModelProvider` and copilot-service's. Implements
+     * [LlmCallMetricsPort] so the two non-CDI clients can be handed this same bean and every path
+     * emits identical names and tags — otherwise a fleet-wide "tokens by model" query is not
+     * expressible.
+     *
+     * Emits three series:
+     *  - `openbank.llm.requests{model,outcome}` — call volume and reliability;
+     *  - `openbank.llm.tokens{model,kind}` — `prompt` and `completion` separately, because they are
+     *    priced differently by every provider, so a cost rule cannot use a combined total;
+     *  - `openbank.llm.call.duration{model,outcome}` — timed on failures too, since a timeout is
+     *    the slowest and most interesting case.
+     *
+     * **No cost metric here on purpose.** Price per token belongs in a Prometheus recording rule
+     * where it can be corrected without a redeploy of every LLM caller; a constant compiled into
+     * the fleet would be wrong the first time a provider changes its rate card, and silently so.
+     *
+     * Cardinality: `model` is a small closed set from the gateway config and `outcome` is the
+     * closed vocabulary in [LlmCallMetricsPort]. Never pass a prompt, a user id, or a status code.
+     */
+    override fun recordCall(
+        model: String,
+        outcome: String,
+        promptTokens: Int,
+        completionTokens: Int,
+        durationNanos: Long,
+    ) {
+        counter("openbank.llm.requests", "model", model, "outcome", outcome)
+        // Skip zero increments: providers omit `usage` on an error, and a counter that only ever
+        // sees 0 still creates the series — a flat line that reads as "no spend" rather than "no
+        // data", which is the same misreading the business dashboards hit with pinned-at-0 counters.
+        if (promptTokens > 0) {
+            reg()?.let {
+                Counter.builder("openbank.llm.tokens")
+                    .tags("model", model, "kind", "prompt")
+                    .register(it)
+                    .increment(promptTokens.toDouble())
+            }
+        }
+        if (completionTokens > 0) {
+            reg()?.let {
+                Counter.builder("openbank.llm.tokens")
+                    .tags("model", model, "kind", "completion")
+                    .register(it)
+                    .increment(completionTokens.toDouble())
+            }
+        }
+        timer("openbank.llm.call.duration", "model", model, "outcome", outcome)
+            ?.record(Duration.ofNanos(durationNanos))
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
