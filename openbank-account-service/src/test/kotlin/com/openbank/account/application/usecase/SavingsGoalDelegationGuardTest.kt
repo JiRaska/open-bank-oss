@@ -41,17 +41,46 @@ class SavingsGoalDelegationGuardTest {
         coEvery { accountRepository.findById(accountId) } returns account
     }
 
-    private fun grant(capabilities: Set<String>, validTo: OffsetDateTime? = now.plusDays(30), active: Boolean = true) =
-        DelegatedAccessGrant(
-            id = UUID.randomUUID(),
-            accountId = accountId,
-            granteePartyId = delegate,
-            capabilities = capabilities,
-            resourceType = DelegatedAccessGrant.RESOURCE_TYPE_SAVINGS_GOAL,
-            validFrom = now.minusDays(1),
-            validTo = validTo,
-            active = active,
-        )
+    private fun grant(
+        capabilities: Set<String>,
+        validTo: OffsetDateTime? = now.plusDays(30),
+        active: Boolean = true,
+        grantorPartyId: UUID = owner,
+    ) = DelegatedAccessGrant(
+        id = UUID.randomUUID(),
+        accountId = accountId,
+        grantorPartyId = grantorPartyId,
+        granteePartyId = delegate,
+        capabilities = capabilities,
+        resourceType = DelegatedAccessGrant.RESOURCE_TYPE_SAVINGS_GOAL,
+        validFrom = now.minusDays(1),
+        validTo = validTo,
+        active = active,
+    )
+
+    // A SAVINGS_GOAL grant is keyed on the OWNING ACCOUNT's id (a savings goal is account
+    // metadata, ADR-0153), so a grant naming a stranger's account arrives here exactly as it
+    // arrived at the account guard — and SAVINGS_WITHDRAW moves money.
+
+    @Test
+    fun `a savings grant issued by a non-owner is denied`(): Unit = runBlocking {
+        val stranger = UUID.randomUUID()
+        coEvery {
+            projectionRepository.findActiveByAccountPartyAndType(accountId, delegate, "SAVINGS_GOAL")
+        } returns listOf(grant(setOf("SAVINGS_DEPOSIT", "SAVINGS_WITHDRAW"), grantorPartyId = stranger))
+
+        assertThat(guard.isAuthorized(accountId, delegate, SavingsDelegationIntent.DEPOSIT)).isFalse()
+        assertThat(guard.isAuthorized(accountId, delegate, SavingsDelegationIntent.WITHDRAW)).isFalse()
+    }
+
+    @Test
+    fun `the same grant from the owner is allowed`(): Unit = runBlocking {
+        coEvery {
+            projectionRepository.findActiveByAccountPartyAndType(accountId, delegate, "SAVINGS_GOAL")
+        } returns listOf(grant(setOf("SAVINGS_DEPOSIT", "SAVINGS_WITHDRAW")))
+
+        assertThat(guard.isAuthorized(accountId, delegate, SavingsDelegationIntent.WITHDRAW)).isTrue()
+    }
 
     @Test
     fun `owner passes with an empty projection`(): Unit = runBlocking {

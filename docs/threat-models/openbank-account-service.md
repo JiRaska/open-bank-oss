@@ -272,8 +272,12 @@ not change any existing request's outcome until explicitly flipped.
   grant must never satisfy an account question — enforced by resource-type filtering in
   every guard query and proven by the IT (savings grant → account READ_ONLY stays
   denied). Savings goals are account metadata (ADR-0153), so SAVINGS_GOAL grants key on
-  the owning account id by convention. PROPOSE_WITHDRAW answers the maker-half of the
-  propose-only flow only; the approval-inbox execution half is the AC8 follow-up.
+  the owning account id by convention — which means a grant naming a stranger's account
+  reaches this guard exactly as it reached the account guard, and `SAVINGS_WITHDRAW`
+  moves money. The same issuer-must-own-the-account check therefore applies here:
+  `grant.grantorPartyId == account.partyId`, evaluated per request.
+  PROPOSE_WITHDRAW answers the maker-half of the propose-only flow only; the
+  approval-inbox execution half is the AC8 follow-up.
   Rollback: revert; V17 is a droppable column.
 - **2026-08-01 (propose-only slice)** — AC8 propose-only withdrawal flow (ADR-0232 D8,
   issue #2990): a delegate holding only SAVINGS_PROPOSE_WITHDRAW creates a
