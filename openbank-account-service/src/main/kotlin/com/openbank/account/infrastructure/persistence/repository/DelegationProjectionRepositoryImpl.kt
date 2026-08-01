@@ -35,8 +35,18 @@ class DelegationProjectionRepositoryImpl(private val clock: Clock) :
     }.awaitSuspending() > 0L
 
     override suspend fun findActiveByAccountAndParty(accountId: UUID, partyId: UUID): List<DelegatedAccessGrant> =
-        Panache.withSession {
-            find("accountId = ?1 and granteePartyId = ?2 and active = true", accountId, partyId)
-                .list<DelegationProjectionEntity>()
-        }.awaitSuspending().map { it.toDomain() }
+        findActiveByAccountPartyAndType(accountId, partyId, DelegatedAccessGrant.RESOURCE_TYPE_ACCOUNT)
+
+    override suspend fun findActiveByAccountPartyAndType(
+        accountId: UUID,
+        partyId: UUID,
+        resourceType: String,
+    ): List<DelegatedAccessGrant> = Panache.withSession {
+        find(
+            "accountId = ?1 and granteePartyId = ?2 and active = true and resourceType = ?3",
+            accountId,
+            partyId,
+            resourceType,
+        ).list<DelegationProjectionEntity>()
+    }.awaitSuspending().map { it.toDomain() }
 }

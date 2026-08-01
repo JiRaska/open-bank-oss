@@ -256,3 +256,15 @@ not change any existing request's outcome until explicitly flipped.
   activates are idempotent. Residual: seconds-level revoke propagation documented in ADR-0232;
   card/savings/propose-only scopes land in their owning services' slices. Rollback: revert the
   commits; the projection table is droppable without touching `account_authorizations`.
+- **2026-08-01 (savings slice)** — SAVINGS_GOAL grants join the delegation projection
+  (issue #2990): the projection gains `resource_type` (V17), the consumer projects
+  ACCOUNT and SAVINGS_GOAL events into typed rows, and `SavingsGoalDelegationGuard`
+  answers DEPOSIT / WITHDRAW / PROPOSE_WITHDRAW as owner OR an ACTIVE in-window grant
+  via `GET /api/v1/accounts/{id}/savings-goal/delegation/check` (reuses `account.read`
+  OPA action). **Risk class = elevation of privilege across resource types**: a savings
+  grant must never satisfy an account question — enforced by resource-type filtering in
+  every guard query and proven by the IT (savings grant → account READ_ONLY stays
+  denied). Savings goals are account metadata (ADR-0153), so SAVINGS_GOAL grants key on
+  the owning account id by convention. PROPOSE_WITHDRAW answers the maker-half of the
+  propose-only flow only; the approval-inbox execution half is the AC8 follow-up.
+  Rollback: revert; V17 is a droppable column.

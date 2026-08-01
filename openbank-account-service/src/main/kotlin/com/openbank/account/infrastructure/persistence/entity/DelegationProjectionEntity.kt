@@ -32,6 +32,9 @@ class DelegationProjectionEntity : PanacheEntityBase() {
     @Column(name = "grantee_party_id", nullable = false)
     lateinit var granteePartyId: UUID
 
+    @Column(name = "resource_type", nullable = false)
+    lateinit var resourceType: String
+
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "account_delegation_projection_caps", joinColumns = [JoinColumn(name = "grant_id")])
     @Column(name = "capability")
@@ -60,6 +63,7 @@ class DelegationProjectionEntity : PanacheEntityBase() {
         accountId = accountId,
         granteePartyId = granteePartyId,
         capabilities = capabilities.toSet(),
+        resourceType = resourceType,
         perTransactionLimitAmount = perTxLimitAmount,
         perTransactionLimitCurrency = perTxLimitCurrency,
         validFrom = validFrom,
@@ -73,6 +77,7 @@ class DelegationProjectionEntity : PanacheEntityBase() {
                 id = g.id
                 accountId = g.accountId
                 granteePartyId = g.granteePartyId
+                resourceType = g.resourceType
                 capabilities = g.capabilities.toMutableSet()
                 perTxLimitAmount = g.perTransactionLimitAmount
                 perTxLimitCurrency = g.perTransactionLimitCurrency

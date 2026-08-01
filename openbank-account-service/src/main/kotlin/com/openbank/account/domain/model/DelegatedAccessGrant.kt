@@ -21,6 +21,7 @@ data class DelegatedAccessGrant(
     val accountId: UUID,
     val granteePartyId: UUID,
     val capabilities: Set<String>,
+    val resourceType: String = RESOURCE_TYPE_ACCOUNT,
     val perTransactionLimitAmount: java.math.BigDecimal? = null,
     val perTransactionLimitCurrency: String? = null,
     val validFrom: OffsetDateTime,
@@ -38,6 +39,12 @@ data class DelegatedAccessGrant(
         AuthorizationRole.CARD_HOLDER -> false
     }
 
+    fun satisfiesSavings(intent: SavingsDelegationIntent): Boolean = when (intent) {
+        SavingsDelegationIntent.DEPOSIT -> CAP_SAVINGS_DEPOSIT in capabilities
+        SavingsDelegationIntent.WITHDRAW -> CAP_SAVINGS_WITHDRAW in capabilities
+        SavingsDelegationIntent.PROPOSE_WITHDRAW -> CAP_SAVINGS_PROPOSE_WITHDRAW in capabilities
+    }
+
     fun withinPerTransactionLimit(amount: java.math.BigDecimal, currency: String): Boolean {
         if (perTransactionLimitAmount == null) return true
         if (perTransactionLimitCurrency != currency) return false
@@ -45,11 +52,24 @@ data class DelegatedAccessGrant(
     }
 
     companion object {
+        const val RESOURCE_TYPE_ACCOUNT = "ACCOUNT"
+        const val RESOURCE_TYPE_SAVINGS_GOAL = "SAVINGS_GOAL"
+
         const val CAP_READ_BALANCES = "ACCOUNT_READ_BALANCES"
         const val CAP_READ_TRANSACTIONS = "ACCOUNT_READ_TRANSACTIONS"
         const val CAP_INITIATE_PAYMENT = "ACCOUNT_INITIATE_PAYMENT"
 
+        const val CAP_SAVINGS_DEPOSIT = "SAVINGS_DEPOSIT"
+        const val CAP_SAVINGS_WITHDRAW = "SAVINGS_WITHDRAW"
+        const val CAP_SAVINGS_PROPOSE_WITHDRAW = "SAVINGS_PROPOSE_WITHDRAW"
+
         val READ_CAPABILITIES = setOf(CAP_READ_BALANCES, CAP_READ_TRANSACTIONS)
         val FULL_ACCESS_CAPABILITIES = setOf(CAP_READ_BALANCES, CAP_READ_TRANSACTIONS, CAP_INITIATE_PAYMENT)
     }
+}
+
+enum class SavingsDelegationIntent {
+    DEPOSIT,
+    WITHDRAW,
+    PROPOSE_WITHDRAW,
 }

@@ -83,8 +83,21 @@ class DelegationEventConsumerTest {
     }
 
     @Test
-    fun `non-ACCOUNT lifecycle events are ignored`(): Unit = runBlocking {
+    fun `SAVINGS_GOAL events are projected with their resource type`(): Unit = runBlocking {
+        consumer.consume(event("DelegationActivated", resourceType = "SAVINGS_GOAL"))
+        coVerify {
+            repository.upsertActive(
+                match<DelegatedAccessGrant> {
+                    it.id == grantId && it.resourceType == "SAVINGS_GOAL" && it.active
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `non-projected lifecycle events are ignored`(): Unit = runBlocking {
         consumer.consume(event("DelegationActivated", resourceType = "CARD"))
+        consumer.consume(event("DelegationActivated", resourceType = "DOCUMENT"))
         coVerify(exactly = 0) { repository.upsertActive(any()) }
     }
 

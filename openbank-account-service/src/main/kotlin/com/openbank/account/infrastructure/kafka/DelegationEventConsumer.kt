@@ -80,7 +80,7 @@ class DelegationEventConsumer(
     }
 
     private suspend fun dispatch(event: DelegationEvent) {
-        if (event.resourceType != RESOURCE_ACCOUNT && event.type in ACCOUNT_SCOPED_TYPES) return
+        if (event.resourceType !in PROJECTED_RESOURCE_TYPES && event.type in LIFECYCLE_TYPES) return
         when (event.type) {
             "DelegationActivated", "DelegationReinstated" -> upsert(event)
             "DelegationRevoked", "DelegationSuspended", "DelegationRenounced", "DelegationExpired" ->
@@ -97,6 +97,7 @@ class DelegationEventConsumer(
                 accountId = accountId,
                 granteePartyId = event.granteePartyId,
                 capabilities = event.capabilities,
+                resourceType = event.resourceType,
                 perTransactionLimitAmount = event.perTxLimitAmount,
                 perTransactionLimitCurrency = event.perTxLimitCurrency,
                 validFrom = event.validFrom ?: OffsetDateTime.now(),
@@ -141,11 +142,17 @@ class DelegationEventConsumer(
     }
 
     private companion object {
-        const val RESOURCE_ACCOUNT = "ACCOUNT"
         const val MAX_PROJECTION_ATTEMPTS = 4
         const val RETRY_BACKOFF_MS = 500L
 
-        val ACCOUNT_SCOPED_TYPES = setOf(
+        /**
+         * SAVINGS_GOAL grants key on the account id too — a savings goal is account
+         * metadata (ADR-0153), not its own entity, so the delegation-service resource
+         * id for SAVINGS_GOAL is the owning account's id by convention.
+         */
+        val PROJECTED_RESOURCE_TYPES = setOf("ACCOUNT", "SAVINGS_GOAL")
+
+        val LIFECYCLE_TYPES = setOf(
             "DelegationActivated",
             "DelegationReinstated",
             "DelegationRevoked",
