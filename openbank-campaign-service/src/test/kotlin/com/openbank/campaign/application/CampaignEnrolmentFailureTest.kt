@@ -51,7 +51,9 @@ class CampaignEnrolmentFailureTest {
         steps = listOf(
             CampaignStep(
                 order = 1,
-                template = "WINBACK_CS",
+                // Was "WINBACK_CS", a template notification-service has never rendered. The
+                // catalogue rejects it at construction now, which is the point of the catalogue.
+                template = "MARKETING_PRODUCT_OFFER",
                 channel = Channel.EMAIL,
                 variables = emptyMap(),
                 delaySeconds = 0,

@@ -83,7 +83,7 @@ jobs:
       - name: Start Keycloak (throwaway realm)
         run: |
           set -euo pipefail
-          docker run -d --name fuzz-keycloak -p 8080:8080 \
+          docker run -d --name fuzz-keycloak -p 8543:8080 \
             -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
             -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
             -v "$PWD/.github/workflows/keycloak:/opt/keycloak/data/import:ro" \
@@ -93,7 +93,7 @@ jobs:
           KC_UP=0
           for i in $(seq 1 60); do
             code="$(curl -s -o /dev/null -w '%{http_code}' \
-              http://localhost:8080/realms/openbank/.well-known/openid-configuration || true)"
+              http://localhost:8543/realms/openbank/.well-known/openid-configuration || true)"
             if [ "$code" = "200" ]; then KC_UP=1; break; fi
             sleep 3
           done
@@ -130,8 +130,9 @@ jobs:
           echo "==> [${svc}] starting quarkusDev with OIDC on"
           ./gradlew ":${svc}:quarkusDev" \
             -Dquarkus.console.basic=true --console=plain --quiet \
+            -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
             -Dquarkus.oidc.enabled=true \
-            -Dquarkus.oidc.auth-server-url=http://localhost:8080/realms/openbank \
+            -Dquarkus.oidc.auth-server-url=http://localhost:8543/realms/openbank \
             -Dquarkus.oidc.client-id=openbank-services \
             -Dquarkus.oidc.credentials.secret="${OIDC_CLIENT_SECRET}" \
             > "fuzz-reports/${svc}-boot.log" 2>&1 &
@@ -144,12 +145,23 @@ jobs:
             sleep 2
           done
           if [ "$UP" != "1" ]; then
-            echo "::error::[${svc}] failed to boot"; tail -60 "fuzz-reports/${svc}-boot.log"; exit 1
+            echo "::error::[${svc}] failed to boot"
+            # A blind `tail` puts the root cause above the window — every ERROR and every
+            # `Caused by:` is what actually identifies it (issue #3039: six of seven services
+            # were "not determined" purely because of this).
+            echo "--- boot failure: ERROR lines and cause chain ---"
+            sed -E 's/\x1b\[[0-9;]*m//g' "fuzz-reports/${svc}-boot.log" \
+              | grep -E ' ERROR |Caused by:|Failed to start|Port already bound' \
+              | grep -v 'ht.wire' | tail -40
+            echo "--- last 40 lines ---"
+            tail -40 "fuzz-reports/${svc}-boot.log"
+            echo "(full log in the api-fuzz-auth-reports-${svc} artifact)"
+            exit 1
           fi
 
           # client_credentials token for the confidential service client.
           TOKEN="$(curl -s -X POST \
-            http://localhost:8080/realms/openbank/protocol/openid-connect/token \
+            http://localhost:8543/realms/openbank/protocol/openid-connect/token \
             -d grant_type=client_credentials \
             -d client_id=openbank-services \
             -d client_secret="${OIDC_CLIENT_SECRET}" | jq -r '.access_token')"

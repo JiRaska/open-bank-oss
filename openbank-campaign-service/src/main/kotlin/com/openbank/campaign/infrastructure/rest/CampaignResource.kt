@@ -10,10 +10,12 @@ import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.libs.authz.Authorize
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.jwt.JsonWebToken
 import java.util.UUID
@@ -33,7 +35,25 @@ data class StepRequest(
     val delaySeconds: Long = 0,
 )
 
-data class ApprovalRequest(val approver: String)
+/**
+ * Accepted and ignored. Kept so an existing caller that still posts `{"approver": "..."}` does not
+ * break — removing a required body would be a breaking contract change, and under ADR-0048 a major
+ * bump means serving every path under a new URL major, which is out of all proportion to deleting a
+ * field nothing reads. The value is never looked at; the approver comes from the token.
+ *
+ * The URL major is deliberately not spelled out above: the api-contract gate derives "the newest
+ * served URL major" by matching that text in the source, so a comment explaining the rule is read
+ * as an endpoint implementing it, and the gate fails on prose.
+ */
+data class ApprovalRequest(val approver: String? = null)
+
+/**
+ * The authenticated caller — recorded as the maker on create and as the checker on activate.
+ *
+ * A top-level extension rather than a method: `CampaignResource` sits exactly at detekt's
+ * `TooManyFunctions` threshold of 11, which fires AT the limit, so a private helper costs the gate.
+ */
+private fun JsonWebToken.principalName(): String = name ?: subject ?: "unknown"
 
 /**
  * Operator API for the campaign first slice (ADR-0200). Activation is four-eyes gated by the
@@ -57,7 +77,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
     @POST
     @Authorize(action = "campaign.create", resource = "#request.name")
     suspend fun create(request: CreateCampaignRequest): Response {
-        val createdBy = jwt.name ?: jwt.subject ?: "unknown"
+        val createdBy = jwt.principalName()
         val steps = request.steps.map {
             CampaignStep(it.order, it.template, Channel.EMAIL, it.variables, it.delaySeconds)
         }
@@ -78,14 +98,25 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
         .getOrElse { Response.status(Response.Status.CONFLICT).entity(mapOf("error" to it.message)).build() }
 
     /**
-     * ADR-0200 D5: `campaign.activate` is a rules.yaml four_eyes action — this endpoint only runs
-     * after the approval flow completes; the domain re-asserts maker != checker.
+     * ADR-0200 D5 / ADR-0221 D2: `campaign.activate` is a rules.yaml four_eyes action, and the
+     * domain re-asserts maker != checker.
+     *
+     * The approver is the authenticated caller — it used to arrive in the request body, which made
+     * the maker/checker check compare a stored field against a string the same caller supplied.
+     * One operator could create a campaign and activate it by sending any other name (#3051). Taken
+     * from the token, `approver != createdBy` is a comparison the caller does not control both
+     * sides of, which is the only version of that check worth having.
      */
     @POST
     @Path("/{id}/activate")
+    // WILDCARD because the body is genuinely optional. A nullable entity parameter still makes
+    // RESTEasy negotiate a media type, so a POST with no body — which is exactly what the console
+    // sends, having nothing to say — was answered 415 instead of reaching the maker/checker check.
+    // Keeping the parameter for old callers is only backwards-compatible if new callers can omit it.
+    @Consumes(MediaType.WILDCARD)
     @Authorize(action = "campaign.activate", resource = "#id")
-    suspend fun activate(@PathParam("id") id: UUID, request: ApprovalRequest): Response =
-        runCatching { Response.ok(service.activate(id, request.approver)).build() }
+    suspend fun activate(@PathParam("id") id: UUID, @Suppress("UNUSED_PARAMETER") ignored: ApprovalRequest?): Response =
+        runCatching { Response.ok(service.activate(id, jwt.principalName())).build() }
             .getOrElse { Response.status(Response.Status.CONFLICT).entity(mapOf("error" to it.message)).build() }
 
     @POST

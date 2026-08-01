@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.78.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.77.0...admin-ui-v0.78.0) (2026-08-01)
+
+
+### Features
+
+* **admin-ui:** put Alertmanager and Pyrra behind the identity-aware edge gate ([#3150](https://github.com/JiRaska/open-bank-oss/issues/3150)) ([6cc27d6](https://github.com/JiRaska/open-bank-oss/commit/6cc27d62b3ee20ec8a8f2beb123011e97afb5420)), closes [#3071](https://github.com/JiRaska/open-bank-oss/issues/3071)
+
+## [0.77.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.76.0...admin-ui-v0.77.0) (2026-08-01)
+
+
+### Features
+
+* **admin-ui:** serve Grafana behind an identity-aware edge gate, not a port-forward ([#3072](https://github.com/JiRaska/open-bank-oss/issues/3072)) ([85feb82](https://github.com/JiRaska/open-bank-oss/commit/85feb826d99d3590e73baa79bdfb05d3c3a704e5)), closes [#3071](https://github.com/JiRaska/open-bank-oss/issues/3071)
+
+## [0.76.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.75.0...admin-ui-v0.76.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** campaign authoring in the console, with the four-eyes gate intact ([#3110](https://github.com/JiRaska/open-bank-oss/issues/3110)) ([4e071db](https://github.com/JiRaska/open-bank-oss/commit/4e071db22b18bb05dd40221ac90f3425fcfc5b38))
+
+## [0.75.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.74.0...admin-ui-v0.75.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** page and filter the send log instead of reading it whole ([#3111](https://github.com/JiRaska/open-bank-oss/issues/3111)) ([da87baa](https://github.com/JiRaska/open-bank-oss/commit/da87baad0c7d43eafe282a1777f11093a2ddc74a))
+
+## [0.74.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.73.0...admin-ui-v0.74.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** make the segment catalogue code-defined and visible to marketers ([#3055](https://github.com/JiRaska/open-bank-oss/issues/3055)) ([baa7b6c](https://github.com/JiRaska/open-bank-oss/commit/baa7b6c8729a47eefbf359a0c64cb94d95742dd5))
+
+## [0.73.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.72.2...admin-ui-v0.73.0) (2026-08-01)
+
+
+### Features
+
+* **admin-ui:** make the campaign console readable by the people who will use it ([#3037](https://github.com/JiRaska/open-bank-oss/issues/3037)) ([b68590e](https://github.com/JiRaska/open-bank-oss/commit/b68590ea4314486bebeb29d6a6a0f14306e23677))
+
+## [0.72.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.72.1...admin-ui-v0.72.2) (2026-08-01)
+
+
+### Bug Fixes
+
+* **admin-ui:** server routes cannot fetch a relative URL — this is why the console said "not responding" ([#3022](https://github.com/JiRaska/open-bank-oss/issues/3022)) ([5d176f6](https://github.com/JiRaska/open-bank-oss/commit/5d176f68c46281e2e2e0c26a2becfe4b86fc29e1))
+
 ## [0.72.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.72.0...admin-ui-v0.72.1) (2026-08-01)
 
 

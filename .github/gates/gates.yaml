@@ -1,0 +1,1277 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# THE GATE MANIFEST — every static governance gate CI runs, declared in one place.
+#
+# WHY THIS FILE EXISTS
+#   These gates used to be 79 sequential steps in ci.yml's `validate` job. That shape had
+#   two costs, both of which compounded with every gate added:
+#
+#     1. SERIAL. One runner, one checkout, 79 steps end to end. Between 2026-07-04 and
+#        2026-08-01 the job went 35 -> 97 steps and its median wall time 0.7 -> 2.4 min,
+#        growing linearly with the gate count. `Validate manifests` is a REQUIRED check on
+#        every PR — including the ~40% that are release-please / auto-deploy bot PRs — so
+#        each new gate taxed every PR in the repo, permanently. Sharding turns that into
+#        max(shard) instead of sum(all).
+#
+#     2. UNADDRESSABLE. A gate WAS a workflow step, so nothing could enumerate the set:
+#        not a human, not a developer wanting to run one locally, and not
+#        check-advisory-gate-registration.py — which had to regex workflow YAML and infer
+#        "is this a gate?" from a step name (and, per its own header, flagged itself once
+#        for having the word `advisory` in a step name, issue #2450).
+#
+#   Declaring them here makes the set enumerable, runnable outside CI, and parallelisable:
+#
+#       python3 .github/scripts/run-gates.py --list
+#       python3 .github/scripts/run-gates.py --group kotlin
+#       python3 .github/scripts/run-gates.py --only domain-purity-gate-hexagonal-invariant
+#       python3 .github/scripts/run-gates.py --selftest-only        # falsify every gate
+#
+# THE CONTRACT — read this before adding an entry
+#   id          stable slug, unique across the file. Used by --only and in the run log.
+#   name        display name, carried verbatim from the step it replaces.
+#   group       which matrix shard runs it. Shards are WALL-TIME buckets, not a taxonomy —
+#               rebalance them freely when one gets slow. A gate and its self-test always
+#               run together, so that pairing is not a constraint on grouping.
+#   mode        `enforced` (a failure fails CI) or `advisory` (a failure is a ::warning and
+#               the run continues). An `advisory` entry MUST be registered in rules.yaml
+#               with a `target_enforce_date`: check-advisory-gate-registration.py reads
+#               THIS FILE, so an advisory gate cannot hide here either (issue #2392).
+#               Note that most gates here are ALSO advisory internally — they print
+#               ::warning and exit 0 unless passed --enforce. `mode:` is about what the
+#               RUNNER does with a non-zero exit; it does not override the script's own
+#               flag, and the two must agree. See rules.yaml: gate_modes.
+#   when        `always` (default) or `pull_request`. A `pull_request` gate is skipped on
+#               push-to-main, exactly as its `if:` did before.
+#   needs_base  true when the command reads $PR_DIFF_BASE — the merge-base resolved by the
+#               shard's setup step. NOT github.event.pull_request.base.sha, which is frozen
+#               at PR-creation time and is why two racing spec PRs could both claim the same
+#               openapi info.version (#481 x #524).
+#   selftest    proof that this gate's RED is reachable — the repo's hardest-won CI rule,
+#               "a gate that has only ever passed is unfalsified" (#2165, #2154, #2177).
+#               The runner executes it BEFORE the gate and skips the gate entirely if the
+#               verdict is wrong. Omit it only when the checker has no --self-test mode;
+#               never fake one that cannot fail.
+#   selftest_expect
+#               `pass` (default) or `fail` — and you must declare it, because the two
+#               shapes have OPPOSITE exit conventions and nothing in the command text says
+#               which is which:
+#                 pass — the command is the checker's own `--self-test` HARNESS: it builds
+#                        a fixture the gate must flag, runs the gate on it, and asserts the
+#                        gate went red. The harness exits 0 when the gate is falsifiable.
+#                        Every self-test in this repo today is this shape.
+#                 fail — the command IS the known-positive, invoking the gate directly on
+#                        input it must reject, so exit 0 means the gate failed to reject it.
+#               Getting this backwards is silent in the safe-looking direction: it turns a
+#               healthy gate into a reported failure, or a broken one into a green.
+#   env         extra environment for this gate only.
+#   run         the command, verbatim. Executed with `bash -euo pipefail` from the repo root.
+#
+#   Every entry below was extracted MECHANICALLY from the ci.yml step it replaces — the
+#   `run` bodies and the rationale comments above them are the originals, not retyped
+#   (repo lore: a transcription is a different program).
+#
+gates:
+
+  # ==== lint ==================================================================
+
+  # The runner's own falsification, riding the cheapest shard. run-gates.py decides for
+  # every other gate in this file whether a non-zero exit fails the build, whether an
+  # advisory warning is emitted, and — the part with no second opinion anywhere — whether a
+  # self-test that PASSED means the gate it guards is unfalsified. A runner that quietly
+  # classified everything as `ok` would turn all 66 gates green and nothing else in CI
+  # would notice, which is precisely the shape this repo keeps getting burnt by. So the
+  # runner is held to the standard it enforces: `--self-test` drives a synthetic manifest
+  # rigged to fail in each distinct way (and to pass in the ways that must still pass, so a
+  # fail-everything runner does not satisfy it either) and asserts the classification.
+  - id: gate-runner-self-test
+    name: "gate runner self-test (the runner must be falsifiable too)"
+    group: lint
+    mode: enforced
+    run: |
+      python3 .github/scripts/run-gates.py --self-test
+
+  - id: yamllint
+    name: "yamllint"
+    group: lint
+    mode: enforced
+    run: |
+      # Lint the infra/CI manifests this job is named for. Quarkus service
+      # application.yaml files are validated by Quarkus itself during the
+      # per-service build (services-ci.yml), so we don't double-lint them.
+      cat > "${RUNNER_TEMP:-/tmp}/yamllint-ci.yml" <<'YML'
+      extends: default
+      rules:
+        line-length: disable
+        document-start: disable
+        # Allow ONE space inside flow collections (`{ a: b }`, `[ x, y ]`) as well
+        # as zero. The fleet manifests use that style pervasively (ArgoCD
+        # Applications, component resources, the single-owner service manifests);
+        # both styles are equivalent YAML and harmless. Defaulting to 0-only kept
+        # re-breaking this required check every time a new service was onboarded
+        # (#648, #657, ...).
+        braces:
+          max-spaces-inside: 1
+        brackets:
+          max-spaces-inside: 1
+        # SHA-pinned actions use the `@<sha> # vX` convention (1 space) that
+        # Dependabot/GitHub generate and rewrite; don't fight it with 2.
+        comments:
+          min-spaces-from-content: 1
+        truthy:
+          check-keys: false
+        # Allow either sequence-indentation style (block sequences indented
+        # under their key, or flush with it). The Kyverno mutation policies
+        # (ecr-pull-through-rewrite.yaml) and several ArgoCD/gitops manifests
+        # author `- item` flush with the parent key, which the `default`
+        # (indent-sequences: true) flags as wrong-indentation — the same
+        # file-by-file fight as braces/brackets above. `whatever` accepts both
+        # equivalent styles instead of re-reddening the required check (#926).
+        indentation:
+          indent-sequences: whatever
+      YML
+      # strict:false equivalent — yamllint exits non-zero only on errors,
+      # warnings don't fail the job (no --strict).
+      yamllint -f github -c "${RUNNER_TEMP:-/tmp}/yamllint-ci.yml" openbank-infra .github
+
+  - id: shellcheck
+    name: "shellcheck"
+    group: lint
+    mode: enforced
+    run: |
+      files=$(find openbank-infra/scripts -type f -name '*.sh' 2>/dev/null || true)
+      if [ -n "$files" ]; then
+        shellcheck -S warning $files
+      else
+        echo "No shell scripts under openbank-infra/scripts — skipping."
+      fi
+
+  # ==== gitops ================================================================
+
+  # ADR-0081 / issue #854 step 4: NetworkPolicies are DERIVED data (DO NOT
+  # EDIT — generated by gen-network-policies.py from the declared GitOps
+  # edges). Re-run the generator and fail on any uncommitted diff so that a
+  # new cross-namespace call or a new service added to gitops/components/
+  # automatically surfaces a required regeneration.
+  # PyYAML is not stdlib: try multiple install paths for portability across
+  # macOS (system python3 without pip, Homebrew pip3) and Linux ARC runners
+  # (pip/pip3 not in PATH). Fall back to checking if pyyaml is already present.
+  - id: gen-network-policies-drift-gate
+    name: "gen-network-policies drift gate (ADR-0081, issue #854)"
+    group: gitops
+    mode: enforced
+    run: |
+      # PyYAML is a SHARD prerequisite, not this gate's: run-gates.py imports it, so the
+      # hash-pinned install that used to sit here now runs once per shard in ci.yml before
+      # any gate does. Installing it 8 times — once per shard — is the cost of sharding;
+      # installing it once per GATE, as this step did, was never the intent.
+      python3 openbank-infra/scripts/gen-network-policies.py
+      # `git diff` only inspects TRACKED files, so a policy the generator emits for a
+      # brand-new component that has never had one committed is UNTRACKED and therefore
+      # structurally invisible to the gate — it could only ever fail on a *modification*
+      # to an already-committed policy. That blind spot is how the `analytics` namespace
+      # shipped with no NetworkPolicy at all (issue #2064). `--intent-to-add` registers
+      # the untracked output in the index so `git diff` reports it as an addition, which
+      # makes "the generated file was never created" a first-class drift failure.
+      git add -A --intent-to-add openbank-infra/gitops/components/
+      if ! git diff --exit-code openbank-infra/gitops/components/; then
+        echo "::error::NetworkPolicy drift detected — run openbank-infra/scripts/gen-network-policies.py and commit the result (a new file listed above means a namespace has no committed policy)."
+        exit 1
+      fi
+
+  - id: podmonitor-namespace-coverage
+    name: "PodMonitor namespace coverage (issue #2255, enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-podmonitor-namespace-coverage.py --self-test
+    run: |
+      python3 .github/scripts/check-podmonitor-namespace-coverage.py
+
+  # --since scopes the EXPENSIVE half (pull ~100 MB + boot Loki, ~90 s) to PRs that can
+  # actually invalidate it. This job is unconditional and required, so an unscoped run charged
+  # every PR in the fleet 90 s for a check about files it did not touch. Direct cost is $0
+  # (public repo, GitHub-hosted runners), but 90 s on a required check is 90 s every
+  # contributor waits on every PR. The STEP still runs unconditionally and prints whether it
+  # loaded or skipped and why — a step that silently no-ops reads exactly like one that passed.
+  - id: loki-rule-load-test
+    name: "Loki rule load test (enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      # Scoped by --since exactly as the gate is (#3074): the self-test boots the same real
+      # ruler, so leaving it unscoped would have kept charging every PR the ~90 s the gate
+      # itself no longer costs them.
+      git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}" --no-tags || true
+      python3 .github/scripts/check-loki-rules.py --self-test --since "origin/${BASE_REF}"
+    run: |
+      # $BASE_REF is exported by the shard in ci.yml. A ${{ }} expression cannot appear in
+      # this file: nothing expands it outside the workflow, so bash sees the literal text
+      # and dies with "bad substitution" (run-gates.py now refuses to load one at all).
+      git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}" --no-tags || true
+      python3 .github/scripts/check-loki-rules.py --since "origin/${BASE_REF}"
+
+  # issue #2255. docs/runbooks/svc-*.md are GENERATED from governance.yaml + the gitops
+  # manifests, and nothing checked them, so 25 of 30 had silently gone stale: they told
+  # an on-call engineer "DR is not achievable today — no backup configured" for services
+  # whose CNPG backups had since been enabled. A generated artifact with no drift gate is
+  # not documentation, it is a claim nobody is accountable for. Same shape as the
+  # NetworkPolicy gate above, including --intent-to-add so a NEW service with no
+  # committed runbook fails as an addition rather than being invisible to `git diff`.
+  - id: service-runbook-drift
+    name: "service runbook drift (issue #2255, enforced)"
+    group: gitops
+    mode: enforced
+    run: |
+      python3 openbank-infra/scripts/generate-service-runbooks.py --force
+      git add -A --intent-to-add docs/runbooks/
+      if ! git diff --exit-code docs/runbooks/; then
+        echo "::error::Service runbook drift — run 'python3 openbank-infra/scripts/generate-service-runbooks.py --force' and commit the result (a new file listed above means a service has no committed runbook). Never hand-edit a generated runbook."
+        exit 1
+      fi
+
+  # gitops ref-integrity guard (rules.yaml: gitops_ref_integrity). The layer below
+  # deploy-coverage: that one proves a service gets BUILT, this one proves the manifest
+  # it deploys can actually START. A secretKeyRef to a Secret nobody declares passes
+  # YAML validation, ArgoCD sync and Kyverno admission alike — the pod then sits in
+  # CreateContainerConfigError forever with no signal but `kubectl describe`. vop-service
+  # burned an hour on exactly this (#1232) right after #1229 fixed its ALL_SERVICES gap.
+  - id: gitops-ref-integrity-guard
+    name: "gitops ref-integrity guard (referenced Secret/ConfigMap => declared)"
+    group: gitops
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-gitops-secret-refs.py
+
+  # rules.yaml event_change / ADR-0006: schema-compat gate. The fleet's event
+  # A CNPG cluster gets its S3 backup credentials from an EKS Pod Identity association in
+  # db-backups.tf, granted per (namespace, serviceAccount). That list is maintained by hand
+  # and nothing linked it to the gitops manifests, so a new database could declare
+  # `barmanObjectStore` + `inheritFromIAMRole: true`, report Ready and Healthy, and silently
+  # never back up — there is no failure until someone needs a restore. Three clusters were
+  # in exactly that state (issue #1444); sdd-db had been failing every WAL archive for three
+  # days. NOT diff-scoped: it runs against whole repo state, because the gap is a MISSING
+  # pair, and a PR that adds only the gitops half would not touch the .tf side at all.
+  # ADVISORY for now — add --enforce to flip.
+  - id: db-backup-association-gate
+    name: "db-backup association gate — every backed-up CNPG cluster has pod identity (advisory)"
+    group: gitops
+    mode: advisory
+    run: |
+      python3 openbank-infra/scripts/check-db-backup-associations.py
+
+  # A probed or scraped port must be a port the service opens (issue #2872, item 1).
+  #
+  # Rolling campaign-service into the sandbox hit five defects that each kill the pod or its
+  # readiness in the first seconds, all of them on main with every required check green. This
+  # is the cheapest of them (#2870): the Deployment's probes named port 8085 and the service
+  # config had no `quarkus.management` block, so nothing ever listened there.
+  #
+  # No existing gate could see it. `Validate manifests` lints the YAML, the service build
+  # compiles and tests the code — neither reads a Deployment and a service config TOGETHER.
+  # Unit tests cannot either: the management interface is disabled under `%test`, so the port
+  # a test could bind is not the port production probes.
+  #
+  # Self-test first, and it matters here: the fleet is clean today, so the flagging branch
+  # would otherwise never execute again.
+  - id: probe-scrape-port-has-a-listener
+    name: "probe/scrape port has a listener (issue #2872, enforced)"
+    group: gitops
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-probe-port-listener.py --selftest
+      python3 .github/scripts/check-probe-port-listener.py --enforce
+
+  # ==== supplychain ===========================================================
+
+  - id: license-header-consistency
+    name: "License header consistency (issue #2280, enforced)"
+    group: supplychain
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-license-headers.py --selftest
+    run: |
+      python3 .github/scripts/check-license-headers.py
+
+  - id: gh-repo-context-in-checkoutless-jobs
+    name: "gh repo context in checkoutless jobs (issue #2841, enforced)"
+    group: supplychain
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-gh-repo-context.py --self-test
+    run: |
+      python3 .github/scripts/check-gh-repo-context.py
+
+  - id: gradle-home-isolation-on-self-hosted-runners
+    name: "Gradle home isolation on self-hosted runners (enforced)"
+    group: supplychain
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-gradle-user-home-isolation.py --self-test
+    run: |
+      python3 .github/scripts/check-gradle-user-home-isolation.py
+
+  # The governance gates in this job (threat-model coverage + diff, network-policy
+  # generation, authz-coverage) are stdlib Python with committed *_test.py suites that,
+  # until now, no workflow ran — a gate whose own logic is untested silently rots. Run
+  # them here so a regression in a gate's parser fails the PR that introduced it.
+  # BOTH script directories, not just openbank-infra/scripts: gates live in .github/scripts
+  # too, and a discovery root that covers only one of them is a coverage set maintained
+  # separately from the artifacts it covers — the exact shape that let 16 pacts go
+  # unreplayed (#2327). Adding a *_test.py beside a gate must be enough to have it run.
+  - id: governance-script-unit-tests
+    name: "governance-script unit tests"
+    group: supplychain
+    mode: enforced
+    run: |
+      python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
+      python3 -m unittest discover -s .github/scripts -p '*_test.py' -v
+
+  # CLAUDE.md rule 3 / ADR-0029: a module is a released component iff it has
+  # a version.txt, and must be registered in release-please-config.json AND
+  # .release-please-manifest.json. stdlib-only gate; catches a new service
+  # that ships a version.txt but is never wired into release-please (so it
+  # silently never gets a Release PR / changelog / tag).
+  - id: release-registration-consistency
+    name: "release-registration consistency (rule 3, ADR-0029)"
+    group: supplychain
+    mode: enforced
+    run: |
+      python3 openbank-infra/scripts/check-release-registration.py
+
+  # rules.yaml change_requirements.release_scope_mismatch / CLAUDE.md rule 2: release-please
+  # attributes a commit to a component by the FILES IT TOUCHES under that component's
+  # directory, regardless of the typed scope (RELEASE.md) — so a feat/fix/perf/security PR
+  # that touches a service directory only outside <service>/src/main/** (a src/test-only
+  # boot smoke test, an openapi.yaml-only edit, gitops-only files) still makes release-please
+  # propose a version bump for an artifact that didn't actually change. Observed live: PR #547
+  # (feat(finrep): register ArgoCD Application, src/test + gitops/docs only) -> PR #551
+  # (finrep-service 0.4.0). Harmless but noisy; classifies from the PR title since the squash
+  # commit doesn't exist yet at PR-CI time. PR-only: no PR title to classify on a push to main.
+  - id: release-scope-mismatch-gate
+    name: "release-scope-mismatch gate (rules.yaml release_scope_mismatch, advisory)"
+    group: supplychain
+    mode: advisory
+    when: pull_request
+    needs_base: required
+    run: |
+      set -euo pipefail
+      python3 openbank-infra/scripts/check-release-scope-mismatch.py \
+        --title "${PR_TITLE}" --body "${PR_BODY}" --base "${PR_DIFF_BASE}"
+
+  # admin-ui version sync guard (ADR-0029 release_invariant). release-please bumps version.txt
+  # but its package.json extra-file updater is replace-based and silently desyncs after a one-off
+  # drift — which otherwise only surfaces at deploy (build-push-admin-ui.sh fails post-merge).
+  # This catches it at PR time instead. ENFORCED.
+  - id: admin-ui-version-sync-guard
+    name: "admin-ui version sync guard (version.txt == package.json, enforced)"
+    group: supplychain
+    mode: enforced
+    run: |
+      bash .github/scripts/check-admin-ui-version-sync.sh .
+
+  # Deploy-coverage guard (rules.yaml: deploy_coverage). auto-deploy's ALL_SERVICES is a
+  # hand-maintained list that must stay in sync with release-please's package list, and
+  # nothing checked that it did — so a service could be merged, released and given an
+  # ArgoCD manifest while nothing ever built it. Every push then "succeeds" and deploys
+  # nothing; there is no build failure because there is no build. Six instances by
+  # 2026-07-16 (the 6 control agents, document-service, clearing-simulator, finrep,
+  # vop), each fixed by hand and documented in an auto-deploy.yml comment. The comments
+  # did not stop the seventh. ENFORCED, with a shrink-only baseline for the known debt.
+  - id: deploy-coverage-guard
+    name: "deploy-coverage guard (released + gitops => in ALL_SERVICES, enforced)"
+    group: supplychain
+    mode: enforced
+    run: |
+      bash .github/scripts/check-deploy-coverage.sh
+
+  # Reconcile probe unit test (rules.yaml: deploy_reconcile, issue #2020). Guards the
+  # self-heal detection that re-drives a service stranded when the one-shot per-push
+  # auto-deploy run is blocked by a transient can-i-deploy verification lag. Pure git +
+  # jq against a throwaway fixture repo — no Gradle, no network.
+  - id: auto-deploy-reconcile-probe-unit-test
+    name: "auto-deploy reconcile probe unit test"
+    group: supplychain
+    mode: enforced
+    run: |
+      bash .github/scripts/test-auto-deploy-reconcile-lag.sh
+
+  # can-i-deploy block classifier unit test (issue #2549). The reconcile probe above
+  # decides WHICH stranded services to re-drive; this one decides whether a block that
+  # survives the re-drive is a build-queue lag (self-clearing) or a contract regression
+  # (never self-clearing, and therefore something the scheduled tick must NOT silence).
+  # Its ordering case is the load-bearing one — see the file's header.
+  - id: can-i-deploy-block-classifier-unit-test
+    name: "can-i-deploy block classifier unit test"
+    group: supplychain
+    mode: enforced
+    run: |
+      bash .github/scripts/test-classify-can-i-deploy-block.sh
+
+  # can-i-deploy version-selector unit test (#3082). The classifier above labels WHY a block
+  # happened; this decides WHICH VERSION the gate asks about at all, and getting that wrong is
+  # quieter than any block: `--latest main` on a push routinely answers about the PREVIOUS
+  # build, so a green can be inherited from a commit that is not the one being deployed.
+  - id: can-i-deploy-version-selector-unit-test
+    name: "can-i-deploy version selector unit test"
+    group: supplychain
+    mode: enforced
+    run: |
+      bash .github/scripts/test-resolve-can-i-deploy-selector.sh
+
+  # Workflow `run:` step size (#3082). GitHub rejects an oversized run script by making the
+  # WHOLE workflow unparseable — zero jobs, no error message, every contributor's runs of that
+  # file dead until someone reverts. It happened to auto-deploy.yml (#3135 -> #3139) and NOTHING
+  # else here sees it: PyYAML, a strict duplicate-key loader, actionlint and yamllint were all
+  # clean on the very file GitHub refused to read. Measured against GitHub by bisecting pushes to
+  # a throwaway branch: 20054 chars accepted, 20654 rejected; not a whole-file limit (a 95295-byte
+  # control parsed fine while no single step crossed).
+  - id: workflow-run-step-size
+    name: "workflow run-step size"
+    group: lint
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-workflow-run-step-size.py --self-test
+    run: |
+      python3 .github/scripts/check-workflow-run-step-size.py
+
+  # co-deploy set derivation unit test (issue #1985). The classifier above says WHAT KIND
+  # of block a service has; this one says whether the block can be resolved by deploying
+  # that service at all. Two services that name each other never converge one at a time,
+  # and until this landed the set was reconstructed from the broker matrix by hand and
+  # dispatched past the gate — three times in one week, all money-path. Its load-bearing
+  # case is the parser one: the CLI's matrix table TRUNCATES service names, so a parser
+  # that reads it names a co-deploy set no dispatch can satisfy.
+  - id: co-deploy-set-derivation-unit-test
+    name: "co-deploy set derivation unit test"
+    group: supplychain
+    mode: enforced
+    run: |
+      bash .github/scripts/test-derive-codeploy-set.sh
+
+  # quarkus.application.version override guard (ADR-0029 release_invariant).
+  # The convention plugin openbank.quarkus-service reads version.txt into the
+  # Gradle project version and the Quarkus Gradle plugin stamps it into
+  # quarkus.application.version at build time. An explicit value in a service
+  # application.yaml SHADOWS that build-stamped version with a stale literal,
+  # silently breaking version.txt == quarkus.application.version on every
+  # release-please bump (the #2669/#2717 fraud drift, then a 37-service sweep).
+  # The fleet sweep is complete (all services derive the version from version.txt),
+  # so this is a hard gate: a re-introduced override fails the build. ENFORCED.
+  - id: quarkus-application-version-override-guard
+    name: "quarkus.application.version override guard (release_invariant, enforced)"
+    group: supplychain
+    mode: enforced
+    run: |
+      bash .github/scripts/check-app-version-override.sh .
+
+  # Gate graduation (ADR-0144): every advisory/planned rule in rules.yaml
+  # must carry a live target_enforce_date, or CI fails once that date
+  # passes — the forcing function ADR-0034 Phase 5 (money-path OPA
+  # enforce) needed and never had. ENFORCED.
+  - id: gate-graduation-guard
+    name: "gate graduation guard (ADR-0144, enforced)"
+    group: supplychain
+    mode: enforced
+    run: |
+      bash .github/scripts/check-gate-graduation.sh
+
+  # The other half of ADR-0144 (issue #2392). The guard above walks rules.yaml and NOTHING
+  # ELSE, so it can only ever see gates that already opted in: a CI gate with no rules.yaml
+  # rule has no target_enforce_date, and therefore no deadline it can miss. Four gates were in
+  # that state — and the cost was measured, not theoretical. check-prompt-registry.py sat
+  # `continue-on-error: true` and RED on main for a month (#2363), the unregistered file being
+  # the prompt hardened against injection; check-authz-pdp-parity.py cited an
+  # `authz_pdp_parity.target_enforce_date` key that never existed (#2393), reading as governed
+  # while nothing watched it.
+  #
+  # This walks the WORKFLOWS instead and requires every advisory governance gate to name a
+  # rules.yaml rule (via that rule's `ci_producer`) carrying `enforced: advisory|planned` +
+  # `target_enforce_date`. rules.yaml can no longer be the only place that knows a gate exists.
+  # ENFORCED from day one — the tree is clean as of this PR.
+  - id: advisory-gate-registration
+    name: "advisory-gate registration (issue #2392, enforced)"
+    group: supplychain
+    # ENFORCED, despite the word "advisory" in the name — this is the gate ABOUT advisory
+    # gates. Deriving `mode` from the name is exactly the trap #2450 records (this script
+    # once flagged itself for the same reason), which is why `mode:` is declared here
+    # rather than inferred anywhere.
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-advisory-gate-registration.py --expect-manifest
+
+  # ==== registry ==============================================================
+
+  # issue #669 scope item 3 / rules.yaml: slo. Every money_path_services entry needs a
+  # matching availability + latency Pyrra ServiceLevelObjective whose target/window match
+  # the governed values in rules.yaml — pyyaml is already installed by the step above.
+  - id: slo-registry-consistency
+    name: "SLO registry consistency (issue #669, rules.yaml: slo)"
+    group: registry
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-slo-registry.py
+
+  # ADR-0148: the prompt registry (openbank-libs/governance/prompts/) must stay resolvable —
+  # every prompt file names a real charter, uses <name>.v<N>.md, is non-empty, and never
+  # re-uses a shipped version (a prompt is immutable, like a Flyway migration).
+  #
+  # ENFORCED (was advisory). What the advisory period actually bought: nothing. It went red on
+  # main from cffc5ff9 (#2321) until #2363 — the PR that added the injection-hardened
+  # system.v2.md left it unlisted in registry.yaml, so the one prompt written specifically to
+  # resist prompt injection sat outside the reviewed set, and continue-on-error meant no PR
+  # ever saw it. Coverage gaps were never the failing half; they are ::warning by construction
+  # inside the script (`pending` charters), and stay that way after this flip. Everything that
+  # exits non-zero here is structural and fixable in the same PR that breaks it: a prompt for a
+  # charter that does not exist in agents.yaml, a malformed filename, an empty file, a re-used
+  # version, or a registry.yaml claim that contradicts the tree. So the original graduation
+  # condition ("once services load from the registry and a deployed prompt_hash resolves") was
+  # never a precondition for THESE errors — it gates the byte-for-byte parity check, which this
+  # script does not yet perform (2 of 5 registered charters load from the registry today:
+  # devops-agent #2240, control-liveness-sentinel #2321).
+  #
+  # This step runs in `Validate manifests`, a required check, so it now blocks merge — and that
+  # job stops at its first failing gate, leaving later steps `skipped`, not `pass`. Run it
+  # locally before pushing: python3 .github/scripts/check-prompt-registry.py
+  - id: prompt-registry-integrity
+    name: "prompt-registry integrity (ADR-0148, enforced)"
+    group: registry
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-prompt-registry.py
+
+  # ADR-0148 evals gate — structure check. The eval registry
+  # (openbank-libs/governance/evals/<charter>.yaml) declares per-charter scenario success
+  # criteria the promotion ratchet consumes; this guard keeps it well-formed (charter resolves,
+  # version is v<N>, scenarios have id/description/input/assert, assert keys the runner
+  # understands, prompt refs resolve). run-evals.py below is the runner that consumes this
+  # registry.
+  #
+  # ENFORCED (was advisory), same reasoning as the prompt-registry step above (#2363): every
+  # error this script exits non-zero on is structural and fixable in the PR that introduces it —
+  # a suite naming a charter absent from agents.yaml, a filename that is not <charter>.yaml, a
+  # version that is not v<N>, an empty or malformed scenario list, a duplicate scenario id, an
+  # assert key the runner cannot evaluate, or a dangling prompt reference. None of them waits on
+  # the migration backlog. Coverage — charters with no suite yet — is ::warning inside the
+  # script and stays advisory.
+  #
+  # The dangling-prompt-ref check is what makes this worth enforcing rather than watching: it is
+  # the only thing tying a suite to the prompt registry, so an enforced gate here means deleting
+  # or renaming a registered prompt file cannot silently orphan the eval suite that measures it.
+  #
+  # Runs in `Validate manifests`, a required check, so it now blocks merge — and that job stops
+  # at its first failing gate, leaving later steps `skipped`, not `pass`. Run it locally before
+  # pushing: python3 .github/scripts/check-evals-registry.py
+  - id: evals-registry-integrity
+    name: "evals-registry integrity (ADR-0148, enforced)"
+    group: registry
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-evals-registry.py
+
+  # ADR-0148 evals gate — replay. Re-evaluates each charter's `assert` blocks against the
+  # recorded model outputs in evals/recordings/ and hard-fails on a STALE recording (the suite
+  # version moved, or the registered prompt's sha256 changed) or a pass rate below the
+  # baselines.json floor — i.e. a prompt/model promotion cannot land without being re-recorded
+  # and re-passing.
+  #
+  # ENFORCED (was continue-on-error, #2392). The `continue-on-error` was carrying a different
+  # meaning than it looked like: the runner already treats a charter with no recorded run as
+  # ::warning and exits 0 — 4 of the 5 suites are in that state today — so the flag was only
+  # ever suppressing a REAL replay failure (a drifted prompt hash, a model/version move, a pass
+  # rate under the baselines.json floor). That is the one outcome the gate exists to surface.
+  # Remaining graduation step is --require-recordings, once every suite has a committed run;
+  # that is about coverage, not about whether a failure blocks.
+  - id: evals-gate-replay
+    name: "evals gate replay (ADR-0148, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/run-evals.py --self-test
+    run: |
+      python3 .github/scripts/run-evals.py
+
+  # ADR-0160 mechanism 2 / rules.yaml: change_requirements.lineage_code_audit. Fleet-wide scan
+  # (not diff-scoped): every governance.yaml lineage edge — downstream AND, since #2315,
+  # upstream — must be backed by grep-verifiable code, or a one-line-reasoned allowlist entry.
+  # An upstream edge on S naming T is a claim about T's code, so it is checked in T; both
+  # directions collapse to one <source>-><target> key. Reuses mechanism 1's topic map via
+  # importlib. ADVISORY (ADR-0144) — findings are ::warning annotations. Flip to enforced once
+  # the first-scan triage (34 downstream + 24 upstream) lands = add --enforce below.
+  - id: governance-lineage-vs-code-audit
+    name: "governance lineage-vs-code audit (ADR-0160, advisory)"
+    group: registry
+    mode: advisory
+    run: |
+      python3 .github/scripts/check-governance-lineage.py
+
+  # issue #2412 (third residual). openbank-mcp-service masks PII on every tool result
+  # UNCONDITIONALLY — deliberately, since a switch that can turn a declared control off is how
+  # the declaration became fiction to begin with. The cost of that choice is that the charter
+  # in agents.yaml and the code are two unbound sources agreeing by coincidence: flip
+  # `mcp-anonymous`'s data_scope.pii to `full` and nothing anywhere goes red, so the charter
+  # can silently start under-promising what the server does. This pins the declaration to the
+  # implementation at build time instead of reading it at runtime. Enforced: there is no
+  # judgement to exercise — either the two agree or one of them is wrong.
+  - id: mcp-charter-data-scope-binding
+    name: "MCP charter data_scope binding (issue #2412, enforced)"
+    group: registry
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-mcp-charter-data-scope.py --enforce
+
+  # ADR registry integrity (OSS-readiness gate E2 + ADR-0001 schema).
+  #
+  # This replaced `check-adr-status.sh`, which grep'd for a Status field across
+  # five hand-maintained regex variants. That script was a FIFTH parser of the
+  # ADR header, and once the header became a machine-readable block
+  # (docs/adr/SCHEMA.md) it was both redundant and wrong — it started matching
+  # incidental `| Status |` table rows in ADR bodies instead of the real field.
+  # check-adr-registry.sh is a strict superset: it enforces the status field AND
+  # its closed enum AND the rest of the schema, through the single shared parser.
+  #
+  # Deliberately run here as well as in the `adr-registry` workflow: that one is
+  # path-filtered to docs/adr/**, but this gate's dangling-`ADR-NNNN`-reference
+  # check is repo-wide and is most useful on PRs that touch CODE, not ADRs.
+  - id: adr-registry-integrity-check
+    name: "ADR registry integrity check"
+    group: registry
+    mode: enforced
+    run: |
+      bash .github/scripts/check-adr-registry.sh
+
+  # Agent charter parity (ADR-0031 / ADR-0156): every openbank-libs/governance/agents.yaml
+  # id has a docs/agents/<id>.md and vice versa.
+  #
+  # Runs here as well as in the `agent-charter-registry` workflow for the same reason the
+  # ADR gate above does — and, unlike that one, for a reason that has already bitten. That
+  # workflow is path-filtered, and a path-filtered workflow CANNOT be a required status
+  # check: GitHub reports a required context that never runs as permanently "Expected", so
+  # requiring it would block every unrelated PR. So a red run on it is advisory in practice,
+  # and PR #2156 merged over exactly that (see the eu-ai-act step below). This job is
+  # unconditional (`on: pull_request`, no paths filter) and IS required as
+  # `Validate manifests`, so putting the binding copy here is what actually gates the merge.
+  # ENFORCED. Pure bash, ~1 s — no measurable runner cost on a job that already runs.
+  - id: agent-charter-registry-parity
+    name: "agent charter registry parity (ADR-0031/0156, enforced)"
+    group: registry
+    mode: enforced
+    run: |
+      bash .github/scripts/check-agent-charter-registry.sh
+
+  # EU AI Act inventory drift (ADR-0148 rule #7, issue #1918).
+  #
+  # docs/compliance/eu-ai-act.md is DERIVED from openbank-libs/governance/agents.yaml +
+  # ml-systems.yaml by gen-eu-ai-act.py. A stale inventory is worse than none: auditors read
+  # it as a live claim, and Annex III applies from 2026-08-02.
+  #
+  # WHY IT MOVED HERE (2026-07-25). The guard existed and the `eu-ai-act-registry` workflow
+  # ran it, but that workflow is path-filtered and therefore un-requireable (above), so its
+  # verdict was advisory. PR #2156 added the `ap2-anonymous` charter without regenerating the
+  # doc, went red on `eu-ai-act-registry` TWICE, and merged anyway — main then carried an AI
+  # system inventory missing an AI system until #2211 regenerated it. An advisory check over
+  # a GENERATED artifact is a contradiction: red does not mean "someone should look", it means
+  # "the committed document does not match reality", and there is no judgement left to
+  # exercise. ENFORCED, and the pyyaml the generator needs is installed by the
+  # gen-network-policies step above.
+  - id: eu-ai-act-inventory-drift
+    name: "EU AI Act inventory drift (ADR-0148 rule #7, enforced)"
+    group: registry
+    mode: enforced
+    run: |
+      bash .github/scripts/check-eu-ai-act.sh
+
+  # ==== kotlin ================================================================
+
+  # ADR-0160 mechanism 1 / rules.yaml: change_requirements.event_consumer_liveness.
+  # Fleet-wide scan (not diff-scoped): every Kafka topic a service publishes must have a
+  # real @Incoming consumer somewhere in the fleet, or a one-line-reasoned allowlist entry.
+  # ENFORCED (graduated 2026-07-14, ADR-0144): the #996 triage that began with issue #889
+  # brought unallowlisted violations to zero across three rounds.
+  - id: event-consumer-liveness
+    name: "event-consumer liveness (ADR-0160, enforced)"
+    group: kotlin
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-event-consumer-liveness.py --enforce
+
+  # rules.yaml: scheduled_methods.no_runblocking_in_scheduled_body. Fleet-wide scan (not
+  # diff-scoped): `runBlocking` in the body of a @Scheduled method runs the coroutine on a
+  # bare executor-thread with no Vert.x context, so the first reactive Panache call throws
+  # HR000068 and the job silently does nothing. Found live five times (#2148 standing-order;
+  # #2187 ledger tie-out + FX revaluation, fx ČNB ingestion, billing cycle) — none had ever
+  # run. It is a gate rather than a doc because the natural test cannot fail: calling the
+  # method directly supplies the context the scheduler does not. ENFORCED.
+  - id: no-runblocking-in-a-scheduled-body
+    name: "no runBlocking in a @Scheduled body (rules.yaml: scheduled_methods, enforced)"
+    group: kotlin
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-no-runblocking-in-scheduled.py
+
+  # Guard the silent Kotlin+JUnit5 footgun: `fun x() = runBlocking { assert }`
+  # without `: Unit` infers a non-Unit return → JUnit5 silently skips the test.
+  # Bans the bare expression-body form in src/test (the whole fleet is clean as
+  # of this gate's introduction). stdlib-only shell script.
+  - id: test-runblocking-unit-guard
+    name: "test runBlocking ': Unit' guard"
+    group: kotlin
+    mode: enforced
+    run: |
+      bash .github/scripts/check-test-runblocking-unit.sh .
+
+  # No service may register its own ExceptionMapper for a JDK type
+  # openbank-libs-runtime already maps (IllegalArgumentException,
+  # IllegalStateException, NoSuchElementException, Exception,
+  # WebApplicationException) — JAX-RS provider selection between two
+  # mappers for the identical type is not deterministically ordered, so a
+  # second local mapper does not "override" the libs one, it races it
+  # per-request. Found live in ledger-service (422/409 racing libs'
+  # 400/422) and psd2-service (a different response BODY SHAPE racing
+  # libs' generic envelope for the same 400 status), issue #526. 0
+  # violations on origin/main at introduction — this is a regression
+  # guard; see LedgerValidationException/LedgerConflictException and
+  # Psd2RequestFormatException for the dedicated-exception-type fix
+  # pattern. ENFORCED.
+  - id: no-service-local-exceptionmapper-collision-with-libs-runtime
+    name: "no service-local ExceptionMapper collision with libs-runtime (enforced)"
+    group: kotlin
+    mode: enforced
+    run: |
+      bash .github/scripts/check-exception-mapper-collision.sh .
+
+  # openbank.outbox.dispatch-enabled guard (the CLAUDE.md "outbox footgun":
+  # a service whose OutboxDispatcher actually gates on this flag silently
+  # never dispatches if it's left at its false default — no error,
+  # attempt_count stays 0). Scoped to dispatchers that reference the flag
+  # at all; openbank-sepa-instant and openbank-security-scanner ship an
+  # older unconditional @Scheduled dispatcher that never reads it and are
+  # correctly out of scope, not exempted violations. 0 violations on
+  # origin/main at introduction — this is a regression guard. ENFORCED.
+  - id: outbox-dispatch-enabled-guard
+    name: "outbox dispatch-enabled guard (footgun check, enforced)"
+    group: kotlin
+    mode: enforced
+    run: |
+      bash .github/scripts/check-outbox-dispatch-enabled.sh .
+
+  # ADR-0106 identifier intent split (#1699): new code mints identifiers via
+  # com.openbank.libs.domain.identifiers.Ids — Ids.newId() (UUIDv7, time-ordered,
+  # for durable/indexed keys) or Ids.randomId() (UUIDv4, for idempotency keys,
+  # correlation/trace ids, nonces/tokens that must not leak a creation timestamp).
+  # DIFF-SCOPED: fails only if THIS PR adds a bare UUID.randomUUID() in src/main, so
+  # it never trips on the ~100 pre-existing sites (those migrate to Ids as-touched)
+  # nor on unrelated fleet churn. No-ops on non-PR runs. stdlib-only shell.
+  - id: identifier-intent-guard
+    name: "identifier intent guard (ADR-0106, #1699)"
+    group: kotlin
+    mode: enforced
+    # optional, not required: the command reads ${PR_DIFF_BASE:-} and this gate is
+    # `when: always`, so it also runs on push to main where there is no PR and no base.
+    needs_base: optional
+    run: |
+      bash .github/scripts/check-new-random-uuid.sh "${PR_DIFF_BASE:-}"
+
+  # DomainEvent.occurredAt constructor guard (PR #2662 / #2709).
+  # Path-scoped CI only rebuilds changed services — a new DomainEvent subclass
+  # that calls DomainEvent() without occurredAt compiles fine locally but
+  # fails on the next full release build of that service. This grep runs on the
+  # entire source tree on every PR, independent of which services changed.
+  # ENFORCED: three simultaneous release failures (ledger+transaction+consent)
+  # prompted this gate. Fleet is clean (0 occurrences before this guard landed).
+  - id: domainevent-occurredat-constructor-guard
+    name: "DomainEvent.occurredAt constructor guard (#2662)"
+    group: kotlin
+    mode: enforced
+    run: |
+      bash .github/scripts/check-domain-event-occuredat.sh
+
+  # ADR-0100 DST harness — Layer 1 clock-injection gate (#1612).
+  # Domain and application layers of money-path services must never call
+  # Instant.now() / LocalDateTime.now() / LocalDate.now() /
+  # System.currentTimeMillis() directly; all time reads must go through an
+  # injected Clock / ClockProvider so the DST/leap-second test harness can
+  # control time deterministically.
+  #
+  # ENFORCED for the seven money-path services; other services are advisory
+  # until their domain layer has been ported (follow-up Issue #1612).
+  - id: clock-injection-gate
+    name: "clock-injection gate — domain/application layers (ADR-0100, #1612)"
+    group: kotlin
+    mode: enforced
+    run: |
+      bash .github/scripts/check-clock-injection.sh
+
+  # ADR-0207 D1 — accounting-date authority. The gate above could NOT have caught the defect
+  # this one exists for: `Clock.system(ZoneId.of("Europe/Prague"))` is injected-clock-shaped,
+  # so ledger-service ran a UTC ClockProducer bean AND a Prague clock built inside
+  # LedgerService/YearCloseService, disagreeing about the date for two hours a day half the
+  # year, green the whole time. This step bans binding a clock to a locally-chosen zone in the
+  # domain/application layer of any money-path service; the accounting date comes from
+  # com.openbank.libs.domain.calendar.AccountingClock.
+  #
+  # ENFORCED from day one. The three pre-existing sites it surfaced (transaction
+  # SettlementDateResolver, fx CnbRateIngestionService, sanctions SanctionsListService) are
+  # named individually in the script's ALLOWLIST with a reason each, and tracked in #2963 —
+  # rather than shipping the whole gate advisory, which registers as "someone should look"
+  # forever (the failure mode check-advisory-gate-registration.py exists to prevent). The
+  # script FAILS on a stale ALLOWLIST entry, so an exemption and its fix move together.
+  #
+  # Scope is DERIVED from rules.yaml money_path_services, not hand-kept: check-clock-injection
+  # lists 8 of the 20 and reads as passing about the 12 it never looks at.
+  - id: accounting-clock-gate
+    name: "accounting-clock gate — one business-date authority (ADR-0207 D1, enforced)"
+    group: kotlin
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-accounting-clock.py --enforce
+
+  # ADR-0002 / rules.yaml architecture.domain_zero_framework_imports: the
+  # hexagonal invariant was documented in every PR template but never enforced,
+  # and the fleet quietly accumulated violations (Quarkus @RegisterForReflection
+  # on a domain type, Jackson JsonNode in domain models). Baseline-ratcheted
+  # (detekt pattern): the 11 pre-existing violations are grandfathered in
+  # domain-purity-baseline.txt and burn down as touched; any NEW framework
+  # import in a domain layer fails outright. openbank-libs-runtime is module-
+  # exempt (it IS the framework side of the ADR-0122 split; only its package
+  # string says "domain"). ENFORCED from introduction (0 new on main).
+  - id: domain-purity-gate
+    name: "domain-purity gate — hexagonal invariant (ADR-0002, enforced)"
+    group: kotlin
+    mode: enforced
+    run: |
+      bash .github/scripts/check-domain-purity.sh .
+
+  # ==== api ===================================================================
+
+  - id: pact-provider-replay-coverage
+    name: "Pact provider-replay coverage (issue #2338, enforced)"
+    group: api
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-pact-provider-replay.py --selftest
+    run: |
+      python3 .github/scripts/check-pact-provider-replay.py
+
+  # ADR-0048 D5: api-contract gate — classify the API-contract bump from the
+  # OpenAPI diff (oasdiff), independently of the release axis (version.txt):
+  #   breaking  => info.version MAJOR (new URL major /api/v{N+1})
+  #   additive  => info.version MINOR within the same /v{N}
+  #   editorial => info.version PATCH
+  # Also asserts the D2 API invariant on HEAD:
+  #   major(info.version) == openbank.api.version == newest URL major.
+  # ENFORCED (ADR-0144 graduation, ahead of the 2026-08-15 target). The gate is
+  # diff-scoped: it only classifies the spec change in THIS PR, so the fleet's
+  # historical under-bumping is not retroactively a failure — but from here a PR
+  # that changes a spec must move info.version to match what it did. Bumping is
+  # the one-line fix the error message spells out.
+  # oasdiff is a pinned, checksum-verified binary (OpenSSF Pinned-Dependencies),
+  # same direct-CLI pattern as gitleaks (ADR-0040). The gate diffs against the
+  # resolved PR diff base — the CURRENT merge-base, not the creation-time event
+  # base.sha (the #524 × #481 ledger merge race, fixed in #534).
+  #
+  # This step used to end "pushes to main have already been classified". That was
+  # the false premise behind the residual gap described above: a push to main was
+  # classified by the PR that produced it, but only against that PR's base AT ITS
+  # LAST RUN. If a competing spec merged after that run, the classification is
+  # stale and this gate never sees the collision — main takes the second PR's
+  # endpoints under a version the first already claimed, green all the way.
+  # api-contract-post-merge.yml now re-classifies every spec that lands on main
+  # against what main actually was, and raises an issue when one is mis-versioned
+  # (#1465). Detection, not prevention: it cannot block a merge that already
+  # happened — see that workflow's header for why neither prevention was viable.
+  - id: api-contract-gate
+    name: "api-contract gate — OpenAPI diff classification (ADR-0048 D5, enforced)"
+    group: api
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    env:
+      OASDIFF_VERSION: "1.22.0"
+      OASDIFF_SHA256: "8b972accaf49f984cf40702af8b29360126ac9436594ccf6ac1ae662209a5fe6"
+    run: |
+      set -euo pipefail
+      curl -fsSL -o /tmp/oasdiff.tar.gz \
+        "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
+      echo "${OASDIFF_SHA256}  /tmp/oasdiff.tar.gz" | sha256sum -c -
+      tar -xzf /tmp/oasdiff.tar.gz -C /tmp oasdiff
+      sudo install -m 0755 /tmp/oasdiff /usr/local/bin/oasdiff
+      python3 .github/scripts/check-api-contract.py --base "${PR_DIFF_BASE}" --enforce
+
+  # ENFORCED against a declared baseline (#2314). It landed advisory because 104 findings
+  # cannot be a merge blocker on day one — but an advisory check over a GENERATED comparison
+  # is a contradiction (#2216): there is no judgement left to exercise, advisory just makes
+  # the drift mergeable. So it now runs with --enforce against a file that declares those 104
+  # findings verbatim. A finding absent from the baseline fails the build; a baseline line
+  # with no matching finding ALSO fails, so the declaration cannot outlive the debt. The
+  # baseline does not narrow what is compared — every service is compared every run.
+  # Falsified before merge on all three paths (new finding / stale line / debt paid).
+  #
+  # The gate above classifies a spec's version bump against the previous revision of the
+  # same document. Nothing asked whether the document is TRUE, which is how aml-service
+  # published schemas whose fields exist nowhere in the code (#2312) and copilot-service
+  # served an unpublished money-path confirm endpoint (#2323). NOT diff-scoped: the defect
+  # is a missing pair between two trees, so a PR that changes only Kotlin never touches the
+  # spec and a diff-scoped gate would see nothing.
+  #
+  # Route SET only — it does not read schemas or status codes. Do not read a green here as
+  # "this spec is true"; see the script header for the precise limits.
+  - id: openapi-route-conformance
+    name: "openapi-route-conformance — published contract vs served routes (enforced)"
+    group: api
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-openapi-route-conformance.py --enforce \
+        --baseline .github/openapi-route-conformance-baseline.txt
+
+  # OWASP ASVS L3 mechanical subset (security baseline Layer 4): V2.1/V8.1/V10.1 are
+  # zero-tolerance (clean today), V9.1/V13.1 ratchet against the declared baseline —
+  # a NEW plaintext edge or a NEW unspecified resource fails; a paid-off baseline line
+  # fails until deleted (same KNOWN_UNCOVERED shape as the route-conformance gate).
+  - id: asvs-l3-mechanical-subset
+    name: "ASVS L3 mechanical subset (enforced, baseline-ratcheted)"
+    group: api
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-asvs-l3.py --enforce --baseline .github/asvs-l3-baseline.txt
+
+  # The cheapest drift proxy from #2314: the spec's declared dev port must equal the
+  # service's quarkus.http.port. The 21 mismatches measured on 2026-07-29 were corrected
+  # in the same PR that lands this gate, so it enforces from day one with no baseline.
+  - id: openapi-server-port
+    name: "openapi-server-port — spec dev port vs quarkus.http.port (enforced)"
+    group: api
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-openapi-server-port.py --enforce
+
+  # ==== data ==================================================================
+
+  - id: kafka-topic-existence
+    name: "Kafka topic existence (issue #2598, enforced)"
+    group: data
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-kafka-topics-exist.py --selftest
+    run: |
+      python3 .github/scripts/check-kafka-topics-exist.py --enforce
+
+  - id: kafka-acl-coverage
+    name: "Kafka ACL coverage (issue #2598, enforced)"
+    group: data
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-kafka-acl-coverage.py --selftest
+    run: |
+      python3 .github/scripts/check-kafka-acl-coverage.py --enforce
+
+  # Guard the silent SmallRye Config / SnakeYAML footgun: a duplicate mapping
+  # key is NOT merged — the last occurrence wins and earlier ones are silently
+  # dropped to library defaults, so a boot smoke-test never catches it. Flags
+  # duplicate keys at ANY level in every service application.yaml. Prevents
+  # regression of #1170 (dup quarkus.http dropped the port) and #1193 (dup
+  # top-level openbank: blocks dropped rate-limit/resilience fleet-wide). Uses
+  # the yamllint host binary already required by the yamllint step above.
+  #
+  # ENFORCED. The #1193 sweep is complete: the top-level `openbank:` blocks were
+  # merged fleet-wide, and the second layer of duplicate `quarkus.http:` keys
+  # (sca/tpp-registry, earlier consent/pid) was merged too. The guard now reports
+  # 0 fleet-wide (37 application.yaml files), so this is a hard gate — any new
+  # duplicate mapping key at ANY level fails the build (no silent config drop).
+  - id: duplicate-yaml-key-guard
+    name: "duplicate YAML key guard (application.yaml, #1170/#1193, enforced)"
+    group: data
+    mode: enforced
+    run: |
+      bash .github/scripts/check-duplicate-yaml-keys.sh . --enforce
+
+  # Guard a different silent config footgun in the same files: quarkus-config-yaml
+  # unconditionally quotes any mp.messaging.(incoming|outgoing).<channel> leaf key
+  # that contains a literal dot (group.id, auto.offset.reset, dead-letter-queue.topic,
+  # ...) when registering it as a MicroProfile Config property name — Quarkus's Kafka
+  # connector getters read the plain unquoted key, so the value silently falls back to
+  # a default. For group.id this becomes a silent Kafka GroupAuthorizationException if
+  # the fallback (quarkus.application.name) isn't ACL-granted; for auto.offset.reset it
+  # silently skips backlogged messages on first boot. Root-caused via the
+  # openbank-fraud-service boot-crash; a fleet audit (#686) found it live (not just
+  # latent) in audit/notification/kyc/onboarding/card-issuance/agent-service, and this
+  # script additionally finds it in several services never audited by hand. Fix: move
+  # the value to an MP_MESSAGING_INCOMING_<CHANNEL>_<KEY> env var in gitops instead.
+  #
+  # ADVISORY. Unlike the duplicate-key guard above, the fleet is NOT yet clean here —
+  # this pattern predates the guard across most of the fleet. Flip to --enforce once
+  # #686's sweep + any follow-on services are confirmed clean.
+  - id: dotted-mp-messaging-key-guard
+    name: "dotted mp.messaging key guard (application.yaml, #686, advisory)"
+    group: data
+    mode: advisory
+    run: |
+      bash .github/scripts/check-dotted-mp-messaging-keys.sh .
+
+  # ADVISORY until rules.yaml change_classes.db_change flips to enforced
+  # (target 2026-08-15, ADR-0144) — add --enforce to the invocation to flip.
+  # Covers BOTH halves of db_change.require: an added migration carries a
+  # `-- Rollback:` note, and an already-committed migration is not edited
+  # (Flyway checksums the whole file — an edit to an applied migration fails
+  # startup with `checksum mismatch`). PR-only and diff-scoped against the
+  # resolved PR diff base, same as api-contract above.
+  - id: db-migration-gate
+    name: "db-migration gate — rollback note + forward-only (rules.yaml db_change, advisory)"
+    group: data
+    mode: advisory
+    when: pull_request
+    needs_base: required
+    run: |
+      python3 openbank-infra/scripts/check-db-migration.py --base "${PR_DIFF_BASE}"
+
+  # contract is the set of Kotlin data classes extending DomainEvent (JSON on
+  # Kafka via the outbox; no .avsc files exist yet — the script covers those
+  # too for the ADR-0006 Apicurio target state). DIFF-SCOPED: compares each
+  # changed event class's ctor properties against the PR base and flags
+  # removed/renamed props, type changes, non-nullable-no-default additions
+  # (replay break) and eventType renames. A breaking change ships as a NEW
+  # versioned event (-vN topic, ADR-0006), never an in-place edit.
+  # ADVISORY until the rules.yaml schema-compat gate graduates
+  # (target 2026-09-15, ADR-0144) — flip = --enforce. stdlib-only.
+  # ADR-0006 ratchet (#1916). Measured: 36 producer topics, 71 eventType literals, ZERO .avsc,
+  # zero asyncapi.yaml, no openbank-contracts/ directory. The Apicurio registry the ADR calls for
+  # is deployed and running — the runtime half exists, the contract half does not, and every Kafka
+  # event on this platform is raw unversioned JSON.
+  #
+  # Distinct from `schema-compat-gate` above, which checks that an event class does not change
+  # incompatibly. Nothing checked whether an event has a declared contract at all.
+  #
+  # Closing that is a multi-PR programme (#1916 sets the order). This does not attempt it. It
+  # freezes the debt: what exists is grandfathered in .github/event-contract-baseline.txt and
+  # nothing NEW joins it — the same baseline-ratchet used for domain purity and detekt. The gap was
+  # growing; two new services added unversioned topics in one week.
+  #
+  # The baseline is checked in BOTH directions, so a line cannot outlive the debt it records.
+  - id: event-contract-coverage-ratchet
+    name: "event-contract coverage ratchet (ADR-0006, enforced)"
+    group: data
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-event-contract-coverage.py
+
+  - id: schema-compat-gate
+    name: "schema-compat gate — event backward-compatibility (event_change, advisory)"
+    group: data
+    mode: advisory
+    when: pull_request
+    needs_base: required
+    run: |
+      python3 .github/scripts/check-event-schema-compat.py --base "${PR_DIFF_BASE}"
+
+  # External public-feed declaration drift (issue #2204).
+  #
+  # `--offline` on purpose: this is the DRIFT half only — every third-party URL in an
+  # `openbank-*/src/main/resources/application.yaml` is either declared in the watch's FEEDS
+  # (so it gets probed daily) or in NOT_PROBED with a reason. No network, deterministic, ~1 s.
+  # The liveness half lives in the `external-feed-watch` workflow and never gates a merge: a
+  # third party having a bad day must not wedge the repo.
+  #
+  # The binding copy is HERE for the reason spelled out above: `external-feed-watch` is
+  # path-filtered and therefore un-requireable, so its verdict is advisory in practice. What
+  # this step actually buys is that adding a new external dependency to a service's config
+  # cannot silently create a feed nothing ever fetches — which is exactly how the ČNB fixing
+  # URL stayed a 404 for the whole life of openbank-fx-service.
+  #
+  # Self-test first: the matchers are what separate "a server answered 200" from "the answer
+  # is the feed", and one that has only ever passed is unfalsified.
+  # Kafka dotted-key ratchet (issues #686, #2945).
+  #
+  # A `group.id` / `auto.offset.reset` written as a YAML leaf key never reaches the connector —
+  # SmallRye Config quotes any leaf key containing a dot — so the file says one thing and the
+  # consumer does another, silently. Six services survive this on `group.id` only because the
+  # value they wanted happens to equal `quarkus.application.name`; that coincidence dies the day
+  # a service is renamed or a channel wants its own group.
+  #
+  # Ratchet, not a flat fail, and deliberately so: making a baselined `auto.offset.reset:
+  # earliest` actually take effect re-reads the topic from the beginning, which on a money-path
+  # channel is a mass replay, not a config tidy-up. Today's set is baselined with its issue; a
+  # NEW occurrence fails, and a baseline entry that becomes covered is reported too, so the list
+  # cannot rot in either direction.
+  #
+  # Self-test first: the classifier has to allow the harmless cases as well as flag the real
+  # ones, and a guard that flags everything is noise nobody keeps.
+  - id: kafka-dotted-key-ratchet
+    name: "kafka dotted-key ratchet (issues #686/#2945, enforced)"
+    group: data
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-kafka-dotted-keys.py --self-test
+      python3 .github/scripts/check-kafka-dotted-keys.py --root .
+
+  - id: external-feed-declaration-drift
+    name: "external feed declaration drift (issue #2204, enforced)"
+    group: data
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-external-feeds.py --self-test
+      python3 .github/scripts/check-external-feeds.py --root . --offline
+
+  # ==== security ==============================================================
+
+  # rules.yaml: alerting.critical_alerts_must_egress. A severity=critical alert must
+  # reach a receiver that leaves the cluster. Guards the "severity inversion": critical
+  # routed only to GoAlert/ntfy/Holmes — all cluster-internal with no Ingress
+  # (ADR-0056) — while warning escaped to Slack, so the most severe alerts were the
+  # least likely to be seen. Config-inspection alone hides this (the critical path
+  # looks MORE careful), which is why it is a gate. ENFORCED.
+  - id: critical-alert-egress
+    name: "critical-alert egress (rules.yaml: alerting, enforced)"
+    group: security
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-critical-alert-egress.py
+
+  # ADR-0030 D2: every money-path service must ship a structured STRIDE/DFD
+  # threat model. stdlib-only gate, ratchets coverage (a new money-path
+  # service or a deleted/stubbed model fails here). Part of the always-run,
+  # pool-reliable Validate check so it gates every PR (ADR-0042 Phase 1).
+  - id: threat-model-coverage
+    name: "threat-model coverage (ADR-0030 D2)"
+    group: security
+    mode: enforced
+    run: |
+      python3 openbank-infra/scripts/check-threat-models.py
+
+  # ADR-0030 D2, diff-aware half (issue #265): when a PR moves a money-path
+  # service's TRUST BOUNDARIES — inbound REST surface, a new outbound
+  # HTTP/gRPC edge, authn/listener/transport keys in application.yaml, or
+  # its NetworkPolicy / Deployment/Rollout in gitops — the same diff must
+  # update docs/threat-models/<service>.md. ADVISORY until rules.yaml
+  # trust_boundary_diff_change flips to enforced (target 2026-09-15,
+  # ADR-0144) — findings are ::warning annotations; add --enforce to flip.
+  # PR-only: the gate diffs against the resolved PR diff base (see above).
+  - id: threat-model-updated-on-trust-boundary-change
+    name: "threat-model updated on trust-boundary change (ADR-0030 D2, advisory)"
+    group: security
+    mode: advisory
+    when: pull_request
+    needs_base: required
+    run: |
+      python3 openbank-infra/scripts/check-threat-model-diff.py --base "${PR_DIFF_BASE}"
+
+  - id: compliance-page-evidence
+    name: "Compliance-page evidence (issue #2370, enforced)"
+    group: security
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-compliance-evidence.py --selftest
+    run: |
+      python3 .github/scripts/check-compliance-evidence.py --enforce
+
+  - id: scheduler-exercised-in-tests
+    name: "Scheduler exercised in tests (issue #2204, enforced)"
+    group: security
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-scheduler-exercised.py --selftest
+    run: |
+      python3 .github/scripts/check-scheduler-exercised.py --enforce
+
+  # ADR-0067 §3/§5/§7 / issue #419: every *.flagd.json file with an `openbank`
+  # metadata block must satisfy FlagDefinition.validate() — non-blank owner,
+  # MONEY_PATH → fourEyes=true, expiresAt in the future, no prohibited keys.
+  # stdlib-only Python script mirrors the Kotlin FlagDefinition.validate() rules.
+  - id: feature-flag-governance
+    name: "feature-flag governance (ADR-0067, issue #419)"
+    group: security
+    mode: enforced
+    run: |
+      python3 .github/scripts/validate-flags.py .
+
+  # No dead-code SERVICE-principal rego rule (ADR-0034 Phase 5, issue #266,
+  # rules.yaml: authz_policy). AuthorizeInterceptor never emits
+  # principal.type == "SERVICE" and no Keycloak client is ever granted
+  # ROLE_SERVICE, so a rego rule gated on it can never fire — found live in the
+  # shared rest.rego edge-service-notification rule (deployed, AUTHZ_ENFORCE
+  # defaulting true) and pre-merge in the sca/domestic-payment Phase-5 PRs.
+  # Scans standalone .rego, gen-*-opa-bundle.sh generator heredocs, and
+  # committed *-opa-bundle.yaml ConfigMaps — path-unscoped so it also catches
+  # the pattern in a brand-new service's bundle, not just the four wired into
+  # opa-policy.yml. ENFORCED.
+  - id: no-dead-code-service-principal-rego-rule
+    name: "no dead-code SERVICE-principal rego rule (enforced)"
+    group: security
+    mode: enforced
+    run: |
+      bash .github/scripts/check-no-service-principal-type.sh .
+
+  # psd2's ANONYMOUS OPA grant rests on upstream eIDAS mTLS authentication
+  # (issue #2169, rules.yaml: authz_policy). psd2_rest_ext.rego grants
+  # psd2.list/read/create/initiate/delete to an ANONYMOUS principal because a
+  # TPP presents an eIDAS QWAC and no bearer; that is safe ONLY while every
+  # annotated endpoint sits behind EidasMtlsFilter's gated path prefixes. The
+  # guard derives the action set from the rego and the prefixes (with their
+  # negated exclusions) from the filter source — it keeps no copy of either, so
+  # its scope cannot drift from what it checks. Falsified in both directions
+  # before merge: an @Authorize on an ungated path and on the excluded
+  # `open-banking/sandbox/` prefix are both flagged; the same annotation quoted
+  # in a KDoc is not. 0 violations on origin/main at introduction. ENFORCED.
+  - id: psd2-anonymous-grant-stays-behind-eidas-mtls
+    name: "psd2 anonymous grant stays behind eIDAS mTLS (issue #2169, enforced)"
+    group: security
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-psd2-anonymous-grant-paths.py --enforce
+
+  # openbank-mcp-service caller-auth ordering guard (BLOCKER #2206). The MCP
+  # threat model (#2200) established the service authenticates nobody today —
+  # resolveContext() hardcodes the "agent:mcp-anonymous" placeholder and the OPA
+  # PDP authorizes a constant; consent-scoped filtering is delegated to a port
+  # impl that is only StubReadPorts. The stub boundary IS the security control.
+  # Phase-2's "swap the stub for a real @RegisterRestClient adapter" needs no
+  # endpoint and no policy edit, so a real port silently turns get_balance into
+  # an unauthenticated read of any account with every other gate green. This
+  # guard fails if a non-Stub read/proposal port is wired while the placeholder
+  # identity remains — forcing real caller auth to land before/with the port.
+  # 0 violations on origin/main at introduction — a regression guard. ENFORCED.
+  - id: mcp-real-port-requires-caller-auth-first
+    name: "MCP real-port requires caller auth first (BLOCKER #2206, enforced)"
+    group: security
+    mode: enforced
+    run: |
+      bash .github/scripts/check-mcp-stub-ports-vs-caller-auth.sh .
+
+  # authz-enforce ⇒ OPA PDP sidecar parity (issue #1797). A service that enforces
+  # @Authorize with no PDP sidecar bricks every @Authorize endpoint: AuthorizeInterceptor
+  # fails closed on an unreachable PDP (localhost:8181), so the endpoint can only ever
+  # 503/422 — the opposite of the interceptor's "advisory must never brick an endpoint"
+  # invariant. Eight live services were in this state (party fixed per-service in #1798).
+  # Checks each gitops workload per-pod-spec (handles shared payments-services.yaml +
+  # pluralized dirs), not the live pod.
+  #
+  # ENFORCED (was advisory, #2392). It had 10 violations at introduction and the last two —
+  # finrep-service and onboarding-service — were cleared in #2403, so `--enforce` exits 0 on a
+  # clean tree today. The advisory period had no deadline attached because the gate had no
+  # rules.yaml rule at all, and its docstring cited an `authz_pdp_parity.target_enforce_date`
+  # key that never existed (#2393): it read as governed while nothing watched it.
+  - id: authz-enforce-pdp-sidecar-parity
+    name: "authz-enforce ⇒ PDP sidecar parity (enforced, #1797)"
+    group: security
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-authz-pdp-parity.py . --enforce
+
+  # @RolesAllowed ⇒ realm parity (issue #2404). The JWT-role half of the check above: a role
+  # name that exists in no realm never matches, so the endpoint answers 403 to every caller,
+  # silently and forever. finrep's FINREP/COREP shipped that way (#2403), and 39 sites across
+  # 9 services were in the same state at introduction — three invented vocabularies
+  # (`openbank-employee`, `platform-admin`, `SERVICE`) that no Keycloak ever issued.
+  # ENFORCED from day one, on the mechanical half only: it fails when EVERY role in an
+  # @RolesAllowed is unknown (the endpoint is unreachable by construction — a fact, not a
+  # judgement). A single dead name inside an otherwise-live list is ::warning, because
+  # clearing those ~163 sites (ROLE_SERVICE ×152, ROLE_CREDIT_RISK ×9, ROLE_LENDING_OFFICER ×6)
+  # means deciding per service whether to grant the role in Keycloak or delete the path.
+  # A unit test cannot replace this: @TestSecurity mints whatever role string it is handed, so
+  # a test written from the annotation matches the annotation and passes against a resource
+  # that 403s in production — exactly how finrep's stayed green.
+  - id: rolesallowed-realm-parity
+    name: "@RolesAllowed ⇒ realm parity (issue #2404, enforced)"
+    group: security
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-roles-allowed-realm.py
