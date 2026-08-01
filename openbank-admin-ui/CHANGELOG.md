@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.72.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.72.0...admin-ui-v0.72.1) (2026-08-01)
+
+
+### Bug Fixes
+
+* **admin-ui:** register campaign-service in the BFF map, and guard the direction nobody checked ([#2997](https://github.com/JiRaska/open-bank-oss/issues/2997)) ([964a8d8](https://github.com/JiRaska/open-bank-oss/commit/964a8d874bbf33abdca34177dc6a135923f09165))
+
 ## [0.72.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.71.0...admin-ui-v0.72.0) (2026-07-31)
 
 
