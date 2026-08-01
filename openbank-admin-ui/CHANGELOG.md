@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.72.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.72.1...admin-ui-v0.72.2) (2026-08-01)
+
+
+### Bug Fixes
+
+* **admin-ui:** server routes cannot fetch a relative URL — this is why the console said "not responding" ([#3022](https://github.com/JiRaska/open-bank-oss/issues/3022)) ([5d176f6](https://github.com/JiRaska/open-bank-oss/commit/5d176f68c46281e2e2e0c26a2becfe4b86fc29e1))
+
 ## [0.72.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.72.0...admin-ui-v0.72.1) (2026-08-01)
 
 
