@@ -7,7 +7,7 @@
   "openbank-ap2-service": "0.3.0",
   "openbank-audit-service": "0.13.0",
   "openbank-authz-policy-auditor": "0.3.1",
-  "openbank-balance-service": "1.12.1",
+  "openbank-balance-service": "1.12.2",
   "openbank-billing-service": "0.8.0",
   "openbank-card-issuance-service": "0.14.0",
   "openbank-clearing-service": "0.7.4",
