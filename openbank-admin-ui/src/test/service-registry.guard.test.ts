@@ -313,6 +313,35 @@ describe('service registry drift guard', () => {
     ).toEqual([])
   })
 
+  it('no server route calls svcUrl() — a relative URL cannot be fetched server-side', () => {
+    // svcUrl() returns a same-origin RELATIVE path. That is correct for the browser and fatal in a
+    // route handler: Node's fetch answers `Failed to parse URL from /api/svc/…`, which lands in a
+    // catch and surfaces as "the service did not answer" — a healthy service reported as down. It
+    // cost the campaign console three wrong diagnoses before the throw was read (#2749).
+    //
+    // Server code addresses the Service DNS directly via serverSvcUrl(); the proxy exists to give
+    // the BROWSER a same-origin path, which server code does not need.
+    const offenders: string[] = []
+    const walkDir = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap(e => {
+        const full = path.join(dir, e.name)
+        return e.isDirectory() ? walkDir(full) : [full]
+      })
+    for (const file of walkDir(path.join(ADMIN_UI, 'src/app'))) {
+      // Route handlers only: a page.tsx marked 'use client' runs in the browser, where svcUrl is right.
+      if (!/route\.tsx?$/.test(file)) continue
+      const src = readFileSync(file, 'utf8')
+      if (/\bsvcUrl\s*\(/.test(src) && !/\bserverSvcUrl\s*\(/.test(src.match(/\bsvcUrl\s*\(/) ? src : '')) {
+        if (/[^r]\bsvcUrl\s*\(/.test(src)) offenders.push(path.relative(ADMIN_UI, file))
+      }
+    }
+    expect(
+      offenders,
+      'route handlers calling svcUrl(). Node fetch rejects the relative URL it returns; use '
+      + 'serverSvcUrl(name, namespace, port, path) instead.',
+    ).toEqual([])
+  })
+
   it('SERVICE_MAP containers agree with SERVICE_REGISTRY on the module directory', () => {
     const dirs = moduleDirs()
     const src = readFileSync(BFF_ROUTE, 'utf-8')

@@ -8,7 +8,7 @@
 
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
-import { svcUrl } from '@/lib/services/bff'
+import { serverSvcUrl } from '@/lib/services/bff'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,7 +19,7 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   try {
-    const res = await fetch(svcUrl('campaign-service', '/api/v1/campaigns'), {
+    const res = await fetch(serverSvcUrl('campaign-service', 'campaign', 8128, '/api/v1/campaigns'), {
       headers,
       signal: AbortSignal.timeout(4000),
       cache: 'no-store',

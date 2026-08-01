@@ -8,7 +8,7 @@
 
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
-import { svcUrl } from '@/lib/services/bff'
+import { serverSvcUrl } from '@/lib/services/bff'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,7 +16,7 @@ type Part = { data: unknown; state: 'ok' | 'unauthorized' | 'not_deployed' | 'un
 
 async function read(headers: HeadersInit, path: string, fallback: unknown): Promise<Part> {
   try {
-    const res = await fetch(svcUrl('campaign-service', path), {
+    const res = await fetch(serverSvcUrl('campaign-service', 'campaign', 8128, path), {
       headers,
       signal: AbortSignal.timeout(4000),
       cache: 'no-store',
