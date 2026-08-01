@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.4.0
+  version: 1.5.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -83,11 +83,20 @@ paths:
     post:
       tags: [Campaigns]
       summary: Activate after four-eyes approval (approver != creator)
+      description: >-
+        The approver is the authenticated caller, not a request field. It used to arrive in the
+        body, which made the maker/checker check compare a stored value against a string the same
+        caller supplied — one operator could create a campaign and activate it by sending any other
+        name (#3051). Taking it from the token makes `approver != createdBy` a comparison the caller
+        does not control both sides of.
       operationId: activateCampaign
       parameters:
         - $ref: '#/components/parameters/CampaignId'
       requestBody:
-        required: true
+        required: false
+        description: >-
+          Accepted and ignored, kept only so existing callers do not break. `approver` is no longer
+          read from here.
         content:
           application/json:
             schema:
@@ -360,9 +369,15 @@ components:
             $ref: '#/components/schemas/CampaignStep'
     ApprovalRequest:
       type: object
-      required: [approver]
+      deprecated: true
+      description: >-
+        Ignored. The approver is taken from the authenticated caller; this schema remains only so a
+        client that still sends it keeps working. Nothing in it is read.
       properties:
-        approver: { type: string }
+        approver:
+          type: string
+          deprecated: true
+
     SegmentSummary:
       type: object
       properties:

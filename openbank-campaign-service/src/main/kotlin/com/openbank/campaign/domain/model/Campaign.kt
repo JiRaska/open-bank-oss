@@ -82,6 +82,20 @@ data class CampaignStep(
         require(order >= 0) { "step order must be >= 0" }
         require(delaySeconds >= 0) { "step delay must be >= 0" }
         require(channel == Channel.EMAIL) { "first slice is EMAIL-only (ADR-0200 D7)" }
+        // Rejected by construction, not validated at the edge: a step that names a template nobody
+        // renders, or passes a variable nobody declared, is only discovered while composing the
+        // notification — long after the campaign was approved (ADR-0221 D1, ADR-0176 D4).
+        //
+        // Deliberately NOT requiring every declared variable to be present. That is stricter than
+        // the renderer itself (NotificationTemplate.unknownVariables checks only the unknown
+        // direction), and it would make a partially-filled draft unrepresentable. Completeness is
+        // an authoring rule, enforced by the wizard before submit — see TemplateCatalog.
+        require(TemplateCatalog.exists(template)) {
+            "unknown template '$template' — ${TemplateCatalog.MARKETING_ONLY_REASON}"
+        }
+        TemplateCatalog.unknownVariables(template, variables).let {
+            require(it.isEmpty()) { "template '$template' does not declare ${it.sorted()}" }
+        }
     }
 }
 
