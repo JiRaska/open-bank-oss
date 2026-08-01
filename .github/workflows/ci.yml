@@ -416,7 +416,9 @@ jobs:
       # its image, so the only reachable LogQL parser is a real ruler. The self-test runs first and
       # feeds it a file it MUST reject.
       - name: "Loki rule load test self-test"
-        run: python3 .github/scripts/check-loki-rules.py --self-test
+        run: |
+          git fetch origin "${{ github.base_ref || github.ref_name }}:refs/remotes/origin/${{ github.base_ref || github.ref_name }}" --no-tags || true
+          python3 .github/scripts/check-loki-rules.py --self-test --since "origin/${{ github.base_ref || github.ref_name }}"
       # --since scopes the EXPENSIVE half (pull ~100 MB + boot Loki, ~90 s) to PRs that can
       # actually invalidate it. This job is unconditional and required, so an unscoped run charged
       # every PR in the fleet 90 s for a check about files it did not touch. Direct cost is $0

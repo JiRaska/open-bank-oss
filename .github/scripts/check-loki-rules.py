@@ -205,11 +205,31 @@ def run_gate() -> int:
     return 1
 
 
-def self_test() -> int:
-    """A gate that has only ever passed is unfalsified. Feed it a file it MUST reject."""
+def self_test(since: str | None = None) -> int:
+    """A gate that has only ever passed is unfalsified. Feed it a file it MUST reject.
+
+    Scoped by --since for the same reason the gate itself is, and measured the same way: the
+    self-test boots Loki TWICE (a case it must pass, a case it must flag), which cost 1m46s on the
+    first main run after it shipped, against 0s for the enforced step it sits in front of. Scoping
+    only the enforced half — as the first version of this did — moved the cheap step and left the
+    expensive one charging every PR in the fleet. Found by reading the step timings CI printed, not
+    from the design.
+
+    Skipping is safe here in a way it usually is not, because RULE_INPUTS already contains
+    everything that could newly break this self-test: the rule ConfigMaps, apps/loki.yaml, and THIS
+    SCRIPT — which is where LOKI_IMAGE lives. So the self-test runs on exactly the changes that
+    could invalidate it, and stays silent on the ones that cannot.
+    """
     if not shutil.which("docker"):
         print("::warning title=Loki rules::docker not available — cannot run the self-test.")
         return 0
+    if since:
+        changed, detail = rule_inputs_changed(since)
+        if not changed:
+            print(f"check-loki-rules --self-test: SKIPPED — {detail}. The gate is unchanged and "
+                  f"was falsified on the PR that last touched it.")
+            return 0
+        print(f"check-loki-rules --self-test: {detail}")
     failures = []
     good = {"good": yaml.safe_dump({"groups": [{
         "name": "selftest.good", "interval": "5m", "rules": [{
@@ -259,30 +279,48 @@ RULE_INPUTS = [
 
 
 def rule_inputs_changed(base_ref: str) -> tuple[bool, str]:
-    """-> (changed, detail). Fails OPEN: an unanswerable git question runs the check."""
+    """-> (changed, detail). Fails OPEN: an unanswerable git question runs the check.
+
+    Counts UNCOMMITTED work as changed, not just the committed diff. `git diff base...HEAD` compares
+    commits, so a developer who edits a rule and runs this before committing would be told "skipped"
+    and could push a broken rule believing it was checked. CI never hits that (its changes are always
+    committed) which is exactly why it would have gone unnoticed — the local experience is the one
+    that misleads.
+    """
+    files: list[str] = []
     try:
-        out = subprocess.run(
+        files += subprocess.run(
             ["git", "diff", "--name-only", f"{base_ref}...HEAD", "--", *RULE_INPUTS],
-            capture_output=True, text=True, cwd=REPO, check=True).stdout
+            capture_output=True, text=True, cwd=REPO, check=True).stdout.splitlines()
     except (subprocess.CalledProcessError, OSError) as ex:
         # Never skip because git was unhappy — that would turn an infrastructure hiccup into a
         # silently unchecked rule set, which is the failure mode this whole file exists to prevent.
         return True, f"could not diff against {base_ref} ({ex}) — running the load test anyway"
-    files = [f for f in out.splitlines() if f.strip()]
-    if not files:
-        return False, f"no rule inputs changed vs {base_ref}"
-    return True, f"{len(files)} rule input(s) changed vs {base_ref}: {', '.join(files[:5])}"
+    try:
+        # Working tree + index + untracked, so a brand-new rule file counts before its first commit.
+        porcelain = subprocess.run(
+            ["git", "status", "--porcelain", "--", *RULE_INPUTS],
+            capture_output=True, text=True, cwd=REPO, check=True).stdout
+        files += [ln[3:].strip() for ln in porcelain.splitlines() if ln[3:].strip()]
+    except (subprocess.CalledProcessError, OSError):
+        return True, "could not read the working tree — running the load test anyway"
+
+    uniq = sorted({f for f in files if f.strip()})
+    if not uniq:
+        return False, f"no rule inputs changed vs {base_ref} (committed or working tree)"
+    return True, f"{len(uniq)} rule input(s) changed vs {base_ref}: {', '.join(uniq[:5])}"
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--self-test", action="store_true", help="prove the gate can fail")
     ap.add_argument("--since", metavar="REF",
-                    help="skip the load test when no rule input changed vs REF (e.g. origin/main). "
-                         "Omit to always run.")
+                    help="skip when no rule input changed vs REF (e.g. origin/main). Applies to "
+                         "BOTH the gate and --self-test — each boots Loki, and the self-test boots "
+                         "it twice. Omit to always run.")
     args = ap.parse_args()
     if args.self_test:
-        return self_test()
+        return self_test(args.since)
     if args.since:
         changed, detail = rule_inputs_changed(args.since)
         if not changed:
