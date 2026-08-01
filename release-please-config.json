@@ -121,6 +121,9 @@
         "openbank-billing-service/src/test"
       ]
     },
+    "openbank-campaign-service": {
+      "release-type": "simple"
+    },
     "openbank-card-issuance-service": {
       "component": "card-issuance-service",
       "exclude-paths": [
@@ -361,6 +364,9 @@
         "openbank-swift-service/src/test"
       ]
     },
+    "openbank-tax-reporting-service": {
+      "release-type": "simple"
+    },
     "openbank-tpp-registry-service": {
       "component": "tpp-registry-service",
       "exclude-paths": [
@@ -378,9 +384,6 @@
       "exclude-paths": [
         "openbank-vop-service/src/test"
       ]
-    },
-    "openbank-campaign-service": {
-      "release-type": "simple"
     }
   }
 }

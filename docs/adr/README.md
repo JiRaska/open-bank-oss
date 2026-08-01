@@ -188,7 +188,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0177](0177-workload-identity-m2m-auth.md) | Workload-identity service-to-service auth | Proposed | Planned | authn,secrets,kubernetes | — |
 | [0178](0178-value-date-correct-balance-reconciliation-and-projection.md) | Value-date-correct balance reconciliation and projection | Accepted | Shipped | ledger,accounts,transactions | — |
 | [0179](0179-party-identity-merge.md) | Duplicate party identity merge | Proposed | Planned | kyc,accounts,ledger | — |
-| [0180](0180-withholding-tax-statutory-filing-38d-vy-tov-n-owner-cadence-transport.md) | Withholding-tax statutory filing (§38d Vyúčtování) — owner, cadence, transport | Proposed | Planned | tax,regulatory-reporting,compliance | — |
+| [0180](0180-withholding-tax-statutory-filing-38d-vy-tov-n-owner-cadence-transport.md) | Withholding-tax statutory filing (§38d Vyúčtování) — owner, cadence, transport | Accepted | Partial | tax,regulatory-reporting,compliance | — |
 | [0181](0181-mcp-server-exposing-psd2-and-admin-read-apis-to-governed-ai-agents.md) | MCP server exposing PSD2 and admin read APIs to governed AI agents | Proposed | Planned | ai-agents,psd2-api,authz | — |
 | [0182](0182-ap2-agent-payment-mandate-verification-on-the-bank-side.md) | AP2 agent-payment mandate verification on the bank side | Proposed | Planned | payments,ai-agents,sca | — |
 | [0183](0183-pgvector-retrieval-augmentation-for-the-copilot-knowledge-base.md) | pgvector retrieval augmentation for the copilot knowledge base | Proposed | Planned | ai-agents,database,architecture | — |
