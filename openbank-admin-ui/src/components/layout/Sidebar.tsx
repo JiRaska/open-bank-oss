@@ -29,7 +29,12 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 // client-side navigation into the App Router and 404, because no page.tsx backs
 // the path. Same origin, so the session cookie still rides along and the edge
 // gate can read it.
-type NavItem = { nameCs: string; nameEn: string; href: string; icon: React.ElementType; permission?: Permission; lockedPermission?: Permission; badge?: string; external?: boolean }
+// `deniedRole` mirrors the per-tool deny-list in src/app/api/gate/route.ts. The
+// gate is what ENFORCES it; this only decides how the entry renders, so a denied
+// tool shows as a disabled item with the demo-account tooltip instead of a live
+// link that 403s. A link that visibly fails reads as a broken platform, which for
+// the public demo account is the outcome worth avoiding.
+type NavItem = { nameCs: string; nameEn: string; href: string; icon: React.ElementType; permission?: Permission; lockedPermission?: Permission; deniedRole?: string; badge?: string; external?: boolean }
 
 const coreNav: NavItem[] = [
   { nameCs: 'Přehled',      nameEn: 'Dashboard',    href: '/dashboard',    icon: LayoutDashboard },
@@ -118,7 +123,9 @@ const platformNav: NavItem[] = [
 // enforces it, this only decides whether the operator sees the link.
 const toolsNav: NavItem[] = [
   { nameCs: 'Grafana',        nameEn: 'Grafana',        href: '/tools/grafana',      icon: Activity,    permission: 'system:view', external: true },
-  { nameCs: 'Alerty',         nameEn: 'Alertmanager',   href: '/tools/alertmanager', icon: Bell,        permission: 'system:view', external: true },
+  // Denied to the public demo account: Alertmanager has no role model, so anything
+  // that can load its UI can silence alerts platform-wide (gate route.ts).
+  { nameCs: 'Alerty',         nameEn: 'Alertmanager',   href: '/tools/alertmanager', icon: Bell,        permission: 'system:view', external: true, deniedRole: 'ROLE_DEMO' },
   { nameCs: 'SLO (Pyrra)',    nameEn: 'SLO (Pyrra)',    href: '/tools/pyrra',        icon: Scale,       permission: 'system:view', external: true },
 ]
 
@@ -147,7 +154,9 @@ export function Sidebar() {
   const { t, language } = useLanguage()
   const roles: string[] = session?.user?.roles ?? []
   const filter = (items: NavItem[]) => items.filter(i => !i.permission || hasPermission(roles, i.permission))
-  const isLocked = (item: NavItem) => !!item.lockedPermission && !hasPermission(roles, item.lockedPermission)
+  const isLocked = (item: NavItem) =>
+    (!!item.lockedPermission && !hasPermission(roles, item.lockedPermission)) ||
+    (!!item.deniedRole && roles.includes(item.deniedRole))
 
   // ADR-0229 D4 (first cut): the persona's quick links pinned at the top — the full menu below
   // is untouched. Each link inherits its permission from the same destination's nav entry.
@@ -231,7 +240,7 @@ export function Sidebar() {
         <SectionLabel>{t('Dokumentace', 'Documentation')}</SectionLabel>
         <NavSection items={filter(docsNav)} pathname={pathname} />
         <SectionLabel>{t('Nástroje', 'Tools')}</SectionLabel>
-        <NavSection items={filter(toolsNav)} pathname={pathname} />
+        <NavSection items={filter(toolsNav)} pathname={pathname} isLocked={isLocked} />
         <SectionLabel>{t('Systém', 'System')}</SectionLabel>
         <NavSection items={filter(sysNav)} pathname={pathname} isLocked={isLocked} />
       </nav>

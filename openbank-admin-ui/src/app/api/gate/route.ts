@@ -57,6 +57,43 @@ const TOOL_PERMISSIONS: Record<string, Permission> = {
   pyrra: "system:view",
 }
 
+/**
+ * PER-TOOL deny-list: roles refused for a specific tool, whatever else they carry.
+ *
+ * `demo@openbank.local` is a PUBLIC account — its credentials are handed out —
+ * and in the sandbox realm it holds ROLE_ADMIN, ROLE_OPERATOR, ROLE_COMPLIANCE,
+ * ROLE_AUDITOR, ROLE_PAYMENTS and ROLE_VIEWER alongside ROLE_DEMO, so that it can
+ * show every console page. Those roles were harmless while the tools had no route;
+ * ADR-0234 gave them one, and the permission check alone then admits the public
+ * account everywhere.
+ *
+ * The demo account is DELIBERATELY still admitted to Grafana and Pyrra, because a
+ * greyed-out console is a worse outcome than a read-only one — the point of the
+ * account is that a visitor sees a working platform. It is held to the least
+ * privilege each tool can express instead:
+ *
+ *   - Grafana: `role_attribute_path` (kube-prometheus-stack) tests ROLE_DEMO FIRST
+ *     and maps it to Viewer. Viewer sees dashboards; it does not get Explore, which
+ *     is what would otherwise expose the raw Prometheus/Loki/Tempo streams.
+ *   - Pyrra: read-only by construction — there is nothing to restrict.
+ *   - Alertmanager: DENIED, and it is the exception because it has no role model at
+ *     all. Its UI is its API: anything that can load the page can silence or expire
+ *     an alert on the whole platform. There is no read-only Alertmanager to offer,
+ *     so the choice is "can mute production alerting" or "not admitted", and for a
+ *     public account that is not a close call.
+ *
+ * Keyed by tool rather than global so that adding a tool forces the question
+ * "what is the least privilege this one can express?" instead of inheriting an
+ * answer. The Sidebar renders a denied tool as a disabled entry with the
+ * demo-account tooltip, so it reads as deliberate rather than broken.
+ *
+ * 403 rather than 401 — re-authenticating cannot help, and a 401 would loop the
+ * user through login.
+ */
+const TOOL_DENIED_ROLES: Record<string, readonly string[]> = {
+  alertmanager: ["ROLE_DEMO"],
+}
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const tool = req.nextUrl.searchParams.get("tool") ?? ""
   const required = TOOL_PERMISSIONS[tool]
@@ -84,6 +121,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const roles: string[] = user.roles ?? []
+
+  // Deny BEFORE the permission check: the denied roles are carried alongside the
+  // ones that would pass it, so checking permission first would admit them.
+  const denied = TOOL_DENIED_ROLES[tool] ?? []
+  if (roles.some(r => denied.includes(r))) {
+    return new NextResponse(null, { status: 403, headers: { "Cache-Control": "no-store" } })
+  }
+
   if (!hasPermission(roles, required)) {
     return new NextResponse(null, { status: 403, headers: { "Cache-Control": "no-store" } })
   }

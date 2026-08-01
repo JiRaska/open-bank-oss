@@ -294,7 +294,18 @@ spec:
               login_attribute_path: preferred_username
               name_attribute_path: name
               email_attribute_path: email
-              role_attribute_path: contains(realm_access.roles[*], 'ROLE_ADMIN') && 'Admin' || (contains(realm_access.roles[*], 'ROLE_OPERATOR') && 'Editor' || 'Viewer')
+              # ROLE_DEMO is checked FIRST and pins the public demo account to
+              # Viewer. demo@openbank.local's credentials are handed out, and in
+              # the sandbox realm it carries ROLE_ADMIN + ROLE_OPERATOR so that it
+              # can show every console page — which would otherwise make it a
+              # Grafana ADMIN the moment ADR-0234 gave Grafana a route, granting
+              # Explore against Prometheus, Loki and Tempo, i.e. the raw log
+              # stream. jmespath `||` short-circuits, so order is the whole
+              # mechanism here: put ROLE_DEMO after the ADMIN test and it never
+              # fires. The gate (`/api/gate`) already refuses ROLE_DEMO outright;
+              # this is the second, independent layer, so widening the gate later
+              # cannot silently promote the public account.
+              role_attribute_path: contains(realm_access.roles[*], 'ROLE_DEMO') && 'Viewer' || (contains(realm_access.roles[*], 'ROLE_ADMIN') && 'Admin' || (contains(realm_access.roles[*], 'ROLE_OPERATOR') && 'Editor' || 'Viewer'))
           # serve_from_sub_path makes Grafana 301 every root path to the sub-path,
           # and it renders that redirect as an ABSOLUTE URL on root_url — so the
           # chart-default `/metrics` scrape was answered with a redirect out to
