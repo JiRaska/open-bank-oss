@@ -14,6 +14,8 @@ export const dynamic = 'force-dynamic'
 
 type Part = { data: unknown; state: 'ok' | 'unauthorized' | 'not_deployed' | 'unreachable' }
 
+const EMPTY_SENDS = { items: [], total: 0, page: 0, size: 0 }
+
 async function read(headers: HeadersInit, path: string, fallback: unknown): Promise<Part> {
   try {
     const res = await fetch(serverSvcUrl('campaign-service', 'campaign', 8128, path), {
@@ -49,19 +51,31 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const { id } = await ctx.params
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
 
-  const [campaign, enrolments, sends] = await Promise.all([
+  const [campaign, enrolments, sends, sendSummary] = await Promise.all([
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}`, null),
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/enrolments`, []),
-    read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/sends`, []),
+    // First page only. Paging and filtering go through /api/campaigns/[id]/sends so turning a
+    // page does not re-read the campaign and its enrolments.
+    read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/sends?page=0&size=50`, EMPTY_SENDS),
+    // Counts come from the service, not from the page above: a suppressed-total derived from the
+    // rows on screen understates every campaign larger than one page, and that total is the number
+    // an operator acts on.
+    read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/sends/summary`, {}),
   ])
 
   return NextResponse.json({
     campaign: campaign.data,
     enrolments: enrolments.data,
     sends: sends.data,
+    sendSummary: sendSummary.data,
     // Per-part state travels to the client: the send log is the part most likely to be
     // restricted, and an empty send log rendered as "nothing was suppressed" would be the
     // exact misreading this screen exists to prevent.
-    sources: { campaign: campaign.state, enrolments: enrolments.state, sends: sends.state },
+    sources: {
+      campaign: campaign.state,
+      enrolments: enrolments.state,
+      sends: sends.state,
+      sendSummary: sendSummary.state,
+    },
   })
 }
