@@ -106,6 +106,21 @@ class CampaignSendLogTest {
     }
 
     /**
+     * The page metadata is what the REST layer puts in `X-Total-Count` / `X-Page` / `X-Page-Size`,
+     * because the body has to stay an array: wrapping it in a page object would change the response
+     * type and make adding pagination a breaking contract change (ADR-0048 D5). If these stop being
+     * carried, the console silently loses the ability to tell a full log from a first page.
+     */
+    @Test
+    fun `the page carries the metadata the response headers are built from`(): Unit = runBlocking {
+        val page = query.listSends(campaignId, outcome = null, page = 1, size = 2)
+
+        assertEquals(1, page.page)
+        assertEquals(2, page.size)
+        assertEquals(records.size.toLong(), page.total)
+    }
+
+    /**
      * A caller-supplied page size is a caller-supplied amount of work. Clamping rather than
      * rejecting keeps an over-large request useful, and the ceiling is the whole reason paging
      * removes the unbounded read instead of relocating it.

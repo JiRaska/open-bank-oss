@@ -56,7 +56,16 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
         { status: 200 },
       )
     }
-    return NextResponse.json({ ...(await res.json()), state: 'ok' })
+    // The service answers with a bare array plus pagination headers (keeping the response type
+    // additive). The console wants one object, and assembling it here means the page shape lives in
+    // exactly one place rather than in every component that renders a send log.
+    return NextResponse.json({
+      items: await res.json(),
+      total: Number(res.headers.get('x-total-count') ?? 0),
+      page: Number(res.headers.get('x-page') ?? 0),
+      size: Number(res.headers.get('x-page-size') ?? 0),
+      state: 'ok',
+    })
   } catch {
     return NextResponse.json({ ...EMPTY, state: 'unreachable' }, { status: 200 })
   }

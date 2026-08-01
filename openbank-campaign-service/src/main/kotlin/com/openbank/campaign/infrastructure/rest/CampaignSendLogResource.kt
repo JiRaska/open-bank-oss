@@ -48,7 +48,16 @@ class CampaignSendLogResource(private val query: CampaignSendLogQuery) {
         val parsed = outcome?.let {
             runCatching { SendOutcome.valueOf(it.uppercase()) }.getOrElse { return badOutcome(it) }
         }
-        return Response.ok(query.listSends(id, parsed, page, size)).build()
+        val result = query.listSends(id, parsed, page, size)
+        // The body stays an array. Wrapping it in a page object would change the response type from
+        // `array` to `object` — a breaking contract change, and under ADR-0048 a major bump means
+        // serving every path under a new URL major, which is out of all proportion to adding
+        // pagination. The counts ride in headers, where adding them is additive.
+        return Response.ok(result.items)
+            .header("X-Total-Count", result.total)
+            .header("X-Page", result.page)
+            .header("X-Page-Size", result.size)
+            .build()
     }
 
     /**

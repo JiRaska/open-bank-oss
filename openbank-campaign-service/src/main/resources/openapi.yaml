@@ -231,11 +231,26 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
       responses:
         '200':
-          description: One page of send records
+          description: >-
+            One page of send records. The body stays an array; the page metadata travels in headers
+            so that adding pagination is an additive change rather than a new response type.
+          headers:
+            X-Total-Count:
+              description: >-
+                Rows matching the same filter. Without it a client cannot tell "this is everything"
+                from "this is the first page of many" — they render identically and mean opposite
+                things to whoever is judging whether a campaign reached its audience.
+              schema: { type: integer, format: int64 }
+            X-Page:
+              schema: { type: integer }
+            X-Page-Size:
+              schema: { type: integer }
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SendPage'
+                type: array
+                items:
+                  $ref: '#/components/schemas/SendRecord'
         '400':
           description: Unrecognised `outcome`
 
@@ -366,22 +381,6 @@ components:
         size: { type: integer, description: Parties matched at asOf. }
         asOf: { type: string, format: date-time }
 
-    SendPage:
-      type: object
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/SendRecord'
-        total:
-          type: integer
-          format: int64
-          description: >-
-            Rows matching the same filter. Without it a console cannot tell "this is everything"
-            from "this is the first page of many" — they render identically and mean opposite
-            things to whoever is judging whether a campaign reached its audience.
-        page: { type: integer }
-        size: { type: integer }
 
     SendRecord:
       type: object

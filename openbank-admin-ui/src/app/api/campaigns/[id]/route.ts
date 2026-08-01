@@ -43,6 +43,37 @@ async function read(headers: HeadersInit, path: string, fallback: unknown): Prom
   }
 }
 
+/**
+ * The send log answers with a bare array plus pagination headers, so it needs its own reader — the
+ * generic one above only sees the body, and a page without its total renders as "this is
+ * everything" whether or not it is.
+ */
+async function readSends(headers: HeadersInit, id: string): Promise<Part> {
+  try {
+    const res = await fetch(
+      serverSvcUrl('campaign-service', 'campaign', 8128, `/api/v1/campaigns/${encodeURIComponent(id)}/sends?page=0&size=50`),
+      { headers, signal: AbortSignal.timeout(4000), cache: 'no-store' },
+    )
+    if (!res.ok) {
+      return {
+        data: EMPTY_SENDS,
+        state: res.status === 401 || res.status === 403 ? 'unauthorized' : res.status === 404 ? 'not_deployed' : 'unreachable',
+      }
+    }
+    return {
+      data: {
+        items: await res.json(),
+        total: Number(res.headers.get('x-total-count') ?? 0),
+        page: Number(res.headers.get('x-page') ?? 0),
+        size: Number(res.headers.get('x-page-size') ?? 0),
+      },
+      state: 'ok',
+    }
+  } catch {
+    return { data: EMPTY_SENDS, state: 'unreachable' }
+  }
+}
+
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const session = await auth()
   if (!session?.user?.accessToken) {
@@ -56,7 +87,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/enrolments`, []),
     // First page only. Paging and filtering go through /api/campaigns/[id]/sends so turning a
     // page does not re-read the campaign and its enrolments.
-    read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/sends?page=0&size=50`, EMPTY_SENDS),
+    readSends(headers, id),
     // Counts come from the service, not from the page above: a suppressed-total derived from the
     // rows on screen understates every campaign larger than one page, and that total is the number
     // an operator acts on.
