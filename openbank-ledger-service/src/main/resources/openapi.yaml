@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Ledger Service API
-  version: 1.11.0
+  version: 1.12.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -14,6 +14,7 @@ servers:
 tags:
   - name: Ledger
   - name: YearClose
+  - name: AccountingDay
 
 paths:
   /api/v1/journals:
@@ -479,6 +480,142 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/ledger/accounting-days/current:
+    get:
+      tags: [AccountingDay]
+      summary: The current accounting day (ADR-0207 D1)
+      description: >
+        The single supported answer to "what accounting day is it", from the business-date
+        authority (bank zone + cutoff) rather than from a wall clock. Also reports whether that day
+        has been opened, so a caller can tell "today is 2026-07-31 and it is OPEN" from "today is
+        2026-07-31 and nobody has opened it yet".
+      operationId: getCurrentAccountingDay
+      responses:
+        '200':
+          description: The current accounting day and its state, if opened
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentAccountingDayResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/ledger/accounting-days:
+    get:
+      tags: [AccountingDay]
+      summary: List accounting days in a date range
+      operationId: listAccountingDays
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Accounting days ascending by business date
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountingDayResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/ledger/accounting-days/{businessDate}:
+    get:
+      tags: [AccountingDay]
+      summary: Get one accounting day's state
+      operationId: getAccountingDay
+      parameters:
+        - $ref: '#/components/parameters/BusinessDatePath'
+      responses:
+        '200':
+          description: Accounting day state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountingDayResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [AccountingDay]
+      summary: Open an accounting day for posting
+      description: >
+        Creates the day in OPEN. A day is opened once — a repeat is 409, not an idempotent no-op.
+        A future business date is refused (422).
+      operationId: openAccountingDay
+      parameters:
+        - $ref: '#/components/parameters/BusinessDatePath'
+      responses:
+        '201':
+          description: Accounting day opened
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountingDayResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The day is already open
+        '422':
+          description: The business date is in the future
+
+  /api/v1/ledger/accounting-days/{businessDate}/transitions/{to}:
+    post:
+      tags: [AccountingDay]
+      summary: Advance an accounting day one step (ADR-0207 D2)
+      description: >
+        Monotonic single-step progression OPEN → CUTOFF → TIED_OUT → LOCKED. Skipping a stage,
+        repeating the current stage, or moving backwards is 409 — there is deliberately no reopen,
+        because a day that must be corrected after cutoff is corrected forward (a reversal books
+        into the current open day with a link to the original entry), never rewritten in place.
+        Each transition is published on the outbox as AccountingDayTransitioned; consumers react to
+        that rather than polling this service per posting.
+      operationId: transitionAccountingDay
+      parameters:
+        - $ref: '#/components/parameters/BusinessDatePath'
+        - name: to
+          in: path
+          required: true
+          description: The target status; must be the immediate successor of the current one.
+          schema:
+            type: string
+            enum: [CUTOFF, TIED_OUT, LOCKED]
+      responses:
+        '200':
+          description: Accounting day advanced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountingDayResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Illegal transition (not the immediate successor), or a concurrent transition won
+
   /api/v1/journals/approvals/{id}:
     patch:
       tags: [Ledger]
@@ -539,6 +676,15 @@ components:
       schema:
         type: integer
 
+    BusinessDatePath:
+      name: businessDate
+      in: path
+      required: true
+      description: The accounting day, ISO-8601 (ADR-0207).
+      schema:
+        type: string
+        format: date
+
   securitySchemes:
     bearerAuth:
       type: http
@@ -564,6 +710,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+    BadRequest:
+      description: Malformed request (e.g. a path/query value that is not an ISO-8601 date)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
     Conflict:
       description: Conflict (fail-closed close invariant — attested immutability, hash drift, unbalanced GL, open year)
       content:
@@ -572,6 +724,64 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    CurrentAccountingDayResponse:
+      type: object
+      description: The current accounting day per the business-date authority (ADR-0207 D1).
+      required: [businessDate, opened]
+      properties:
+        businessDate:
+          type: string
+          format: date
+        status:
+          type: string
+          nullable: true
+          enum: [OPEN, CUTOFF, TIED_OUT, LOCKED]
+          description: Null when the day has not been opened.
+        opened:
+          type: boolean
+
+    AccountingDayResponse:
+      type: object
+      description: One accounting day's owned, persisted state (ADR-0207 D2).
+      required: [id, businessDate, status, acceptsPostings, openedAt, openedBy, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        businessDate:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [OPEN, CUTOFF, TIED_OUT, LOCKED]
+        acceptsPostings:
+          type: boolean
+          description: True only for OPEN — the day lock's input.
+        openedAt:
+          type: string
+          format: date-time
+        openedBy:
+          type: string
+        cutoffAt:
+          type: string
+          format: date-time
+          nullable: true
+        tiedOutAt:
+          type: string
+          format: date-time
+          nullable: true
+        lockedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastTransitionBy:
+          type: string
+          nullable: true
+        version:
+          type: integer
+          format: int64
+          description: Optimistic-concurrency counter; a transition is conditional on it.
+
     ControlAccountTieOutResponse:
       type: object
       description: Sub-ledger tie-out result for one deposit-control account and one currency.

@@ -125,6 +125,20 @@ openbank:
   outbox:
     dispatch-enabled: true
   ledger:
+    # Day-granular period lock (ADR-0207 D3). Modes: off | shadow | enforce.
+    #
+    # SHIPS IN SHADOW and must stay there until the counter below reads zero (or every hit is
+    # explained). In shadow the check runs and records what it WOULD have refused without
+    # refusing, so the volume of currently-legal backdated postings is measured before any of
+    # them start failing. #1197 is what happens when a new money-path refusal is turned on blind:
+    # five workloads dead for four days.
+    #
+    # Evidence to read before flipping to enforce:
+    #   openbank_ledger_day_lock_decisions_total{outcome="would_refuse"}
+    # and the WARN lines from AccountingDayLock, which carry the entry date so the backdated
+    # postings can be attributed rather than only counted.
+    day-lock:
+      mode: "${LEDGER_DAY_LOCK_MODE:shadow}"
     # journal_entries partition lifecycle (JournalPartitionMaintainer). Roll-forward is always
     # active; retention is DETACH-only and dry-run by default. Flip drop-enabled + dry-run only
     # as a deliberate, archived operator action — DROP is physically destructive.
