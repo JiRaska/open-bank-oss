@@ -40,6 +40,22 @@ spec:
             minAvailable: 1
           alertmanagerSpec:
             replicas: 1
+            # Served as a sub-path of the console behind the identity-aware edge
+            # gate (ADR-0234) — no Ingress of its own, so an unauthenticated
+            # request is still rejected at the edge and never reaches this pod.
+            # Silencing an alert is an operator action that today needs a
+            # port-forward, which is why it effectively never happens.
+            #
+            # routePrefix moves the whole HTTP surface, INCLUDING /api/v2/alerts,
+            # which is how Prometheus delivers alerts. The chart does NOT derive
+            # the Prometheus side from this value — the live CR carries
+            # pathPrefix:"/" hard-coded — so prometheusSpec.alertingEndpoints
+            # below must be set in the same change or every alert silently 404s
+            # on delivery. Same failure shape as the Grafana /metrics scrape in
+            # #3145: nothing goes red, alerts simply stop arriving.
+            routePrefix: /tools/alertmanager
+            # Notification links ("view in Alertmanager") point at the gated URL.
+            externalUrl: https://admin.open-bank.tech/tools/alertmanager
             # Mount the GoAlert integration URL (with its token) from a Secret so the
             # token stays out of git (ADR-0088 D1). Lands at /etc/alertmanager/secrets/
             # goalert-webhook-url/url and is referenced via webhook url_file below.
@@ -145,6 +161,21 @@ spec:
             minAvailable: 1
           prometheusSpec:
             replicas: 1
+            # Alert DELIVERY must follow alertmanagerSpec.routePrefix above. This
+            # list REPLACES the chart's default endpoint rather than amending it,
+            # so every field the default carried has to be repeated — it was
+            # {name: kube-prometheus-stack-alertmanager, namespace: observability,
+            # port: http-web, apiVersion: v2, pathPrefix: "/"} on the live CR, and
+            # only pathPrefix changes here. Verify after deploy with
+            # `curl .../api/v1/alertmanagers` on Prometheus: the discovered URL
+            # must end in /tools/alertmanager/api/v2/alerts and the AM must be
+            # listed as active, NOT merely that the pods are healthy.
+            alertingEndpoints:
+              - name: kube-prometheus-stack-alertmanager
+                namespace: observability
+                port: http-web
+                apiVersion: v2
+                pathPrefix: /tools/alertmanager
             # 12h retention (FinOps per ADR-0027; the 5Gi PVC below is sized for it).
             # GOTCHA (governance-as-code, ADR-0029): for Prometheus >= 3.11 the operator
             # renders this into the Prometheus *config file* (storage.tsdb.retention.time)

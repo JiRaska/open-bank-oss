@@ -145,15 +145,27 @@ describe('ADR-0234 wiring — the halves of the boundary agree', () => {
     expect(matcher).toMatch(/api\/gate/)
   })
 
-  it('the Sidebar link and the gate require the same permission', () => {
-    // A gate wider than the nav hides access nobody finds; a gate narrower than
-    // the nav renders a link that 403s.
-    const navPerm = sidebarSrc.match(/href: '\/tools\/grafana'.*?permission: '([^']+)'/)?.[1]
-    const gatePerm = routeSrc.match(/grafana:\s*"([^"]+)"/)?.[1]
-    expect(navPerm).toBeDefined()
-    expect(gatePerm).toBeDefined()
+  // Every tool, not just the first one. A gate wider than the nav hides access
+  // nobody can find; a gate narrower than the nav renders a link that 403s. This
+  // loops over the gate's own allow-list rather than naming tools, so adding a
+  // tool without a Sidebar entry fails here instead of shipping.
+  it.each(ingressTools)('the Sidebar link and the gate agree on the permission for %s', tool => {
+    const navPerm = sidebarSrc.match(
+      new RegExp(`href: '/tools/${tool}'[^}]*?permission: '([^']+)'`),
+    )?.[1]
+    const gatePerm = routeSrc.match(new RegExp(`\\b${tool}:\\s*"([^"]+)"`))?.[1]
+    expect(navPerm, `no Sidebar entry for /tools/${tool}`).toBeDefined()
+    expect(gatePerm, `no gate entry for ${tool}`).toBeDefined()
     expect(navPerm).toBe(gatePerm)
     expect(Object.keys(PERMISSIONS)).toContain(gatePerm)
+  })
+
+  it('every Sidebar tool link has a gate entry', () => {
+    // The other direction: a nav link pointing at a /tools path the gate does not
+    // know is a dead link — the gate denies an unknown tool with 403 by design.
+    const navTools = [...sidebarSrc.matchAll(/href: '\/tools\/([A-Za-z0-9_-]+)'/g)].map(m => m[1])
+    expect(navTools.length).toBeGreaterThan(0)
+    expect([...new Set(navTools)].sort()).toEqual([...new Set(ingressTools)].sort())
   })
 
   it('the Ingress does not forward gate response headers into the upstream', () => {

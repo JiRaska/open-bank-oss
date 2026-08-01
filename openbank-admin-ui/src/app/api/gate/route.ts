@@ -53,6 +53,8 @@ export const dynamic = "force-dynamic"
  */
 const TOOL_PERMISSIONS: Record<string, Permission> = {
   grafana: "system:view",
+  alertmanager: "system:view",
+  pyrra: "system:view",
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
