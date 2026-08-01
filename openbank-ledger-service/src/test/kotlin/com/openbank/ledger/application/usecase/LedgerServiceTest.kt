@@ -505,19 +505,26 @@ class LedgerServiceTest {
                 // would carry its original posting's timestamp forever. A mutant that removed the
                 // `.copy(createdAt = clock.instant())` override would silently do exactly that, and no
                 // other test here would catch it.
-                val original = postedEntry()
+                // The original is stamped strictly BEFORE the injected clock, deterministically.
+                // This test used to build the original with Instant.now() and Thread.sleep(5) to let a
+                // real clock tick past it — which worked only because LedgerService secretly built its
+                // own Clock.system(Europe/Prague) instead of taking the injected one. ADR-0207 removed
+                // that constructor, so the service now honours the fixed test clock and the sleep-based
+                // version would compare a fixed 2026-07-31 stamp against a real "today". Asserting
+                // equality with the injected clock is also strictly stronger than isAfter(): it proves
+                // the stamp CAME FROM that clock, where isAfter() is satisfied by any later value.
+                val original = postedEntry().copy(createdAt = clock.instant().minusSeconds(3600))
                 coEvery { journalRepository.findById(original.id) } returns original
                 coEvery { journalRepository.nextEntryNumber() } returns 5L
                 val savedReversal = slot<JournalEntry>()
                 coEvery { journalRepository.saveReversal(capture(savedReversal), any(), any(), any()) } answers
                     { firstArg() }
 
-                Thread.sleep(5) // real clock tick to separate original.createdAt from the reversal's stamp
-
                 service.reverseJournal(
                     ReverseJournalCommand(journalId = original.id, reason = "x", reversedBy = UUID.randomUUID()),
                 )
 
+                assertThat(savedReversal.captured.createdAt).isEqualTo(clock.instant())
                 assertThat(savedReversal.captured.createdAt).isAfter(original.createdAt)
             }
 
