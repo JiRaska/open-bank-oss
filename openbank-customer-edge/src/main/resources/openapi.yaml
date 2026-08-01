@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.24.0
+  version: 1.25.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -33,6 +33,7 @@ tags:
   - name: Preferences
   - name: Feedback
   - name: Cards
+  - name: Lending
 
 paths:
   /feedback:
@@ -503,6 +504,39 @@ paths:
           description: Invalid currency code or instant format
         '502':
           description: Malformed upstream history
+
+  /loan-applications:
+    post:
+      tags: [Lending]
+      summary: Apply for a loan (ADR-0211 customer intake)
+      description: >-
+        Submits a loan application for the caller. The party is taken from the JWT and travels to
+        lending-service as X-Customer-Party-Id — never from the body — so a customer can only apply
+        for themselves. Price, jurisdiction and product type are lending-side configuration, so the
+        applicant cannot price their own loan nor choose which compliance pack judges them.
+        Deliberately not fail-soft: the upstream status and reason pass through, because a
+        synthesised success would tell the customer an application was filed when none was.
+        This is the maker leg only — a human four-eyes decision still gates any disbursement.
+      operationId: applyForLoan
+      security:
+        - customerOidc: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, termMonths]
+              properties:
+                amount: {type: number, example: 250000}
+                termMonths: {type: integer, example: 48}
+      responses:
+        '201':
+          description: Application accepted into the origination graph
+        '400':
+          description: Amount or term outside the configured product bounds
+        '403':
+          description: Self-service intake is disabled, unpriced, or the caller is not permitted
 
   /domestic-payments:
     post:

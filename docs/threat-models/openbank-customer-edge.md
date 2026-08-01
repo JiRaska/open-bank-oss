@@ -145,3 +145,15 @@ Trust boundaries:
 | OPA per-resource ownership policies | 🔲 Phase 2 |
 | M2M secret rotation SLA | 🔲 Pre-GA |
 | Mobile certificate pinning | 🔲 ADR-0064 Phase F2 |
+
+## 6. Change log
+
+- **2026-08-01** — ADR-0211 customer intake. `POST /customer/v1/loan-applications` forwards a loan
+  application to lending-service. The party travels as `X-Customer-Party-Id`, derived from the
+  customer JWT here — the app supplies only amount and term, so a customer can only apply for
+  themselves. Deliberately NOT fail-soft (unlike the `/loans` read, which degrades to `[]`): for a
+  write, a synthesised success would tell the customer an application was filed when none was, so
+  the upstream status and reason pass through. The endpoint is inert until lending-service's own
+  `lending.intake.enabled` is turned on, and lending refuses any caller that is not this service's
+  configured principal — see §9 of the `openbank-lending-service` threat model for why the role gate
+  cannot be that control.

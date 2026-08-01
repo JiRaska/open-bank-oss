@@ -442,6 +442,49 @@ class CustomerEdgeResource(
     }
 
     /**
+     * Apply for a loan from the customer app (ADR-0211's "Customer intake" row: customer edge,
+     * ADR-0065). Until this existed the app could only READ loans — `LendingResource.applyForLoan`
+     * is a desk endpoint (`ROLE_LENDING_OFFICER`/`ROLE_CREDIT_RISK`/…), so there was no route by
+     * which a customer could apply at all.
+     *
+     * The party is taken from the JWT and travels as [UpstreamClient.PARTY_HEADER]; the body carries
+     * only what the applicant may legitimately choose (amount, term). Price, jurisdiction and
+     * product type are lending-side configuration — see `CustomerIntakeResource`.
+     *
+     * Deliberately NOT fail-soft. `listLoans` above degrades to `[]` because an empty list is an
+     * honest answer for an unavailable read; for a WRITE, a synthesised success would tell the
+     * customer their application was filed when nothing was. The upstream status and body pass
+     * through, so a 400 (amount out of bounds) reaches the app as a 400 with its reason.
+     */
+    @POST
+    @Path("/loan-applications")
+    @Authorize(action = "customer.profile.write", resource = "")
+    @Blocking
+    fun applyForLoan(request: Map<String, Any?>): Response {
+        val customer = customer()
+        val body = objectMapper.writeValueAsString(
+            mapOf("amount" to request["amount"], "termMonths" to request["termMonths"]),
+        )
+        val resp = upstream.post(
+            "$lendingServiceUrl/api/v1/lending/intake/applications",
+            customer.partyId.toString(),
+            body,
+        )
+        audit.emit(
+            eventType = "LOAN_APPLICATION_SUBMITTED",
+            partyId = customer.partyId.toString(),
+            operation = "loanApplications.create",
+            result = if (resp.statusInfo.family == Response.Status.Family.SUCCESSFUL) "SUCCESS" else "FAILURE",
+            resourceId = extractTextField(objectMapper, (resp.entity as? String).orEmpty(), "id"),
+            details = mapOf("upstreamStatus" to resp.status.toString()),
+        )
+        return Response.status(resp.status)
+            .entity(resp.entity ?: "{}")
+            .type(MediaType.APPLICATION_JSON)
+            .build()
+    }
+
+    /**
      * The repayment schedule for one of the caller's OWN loans. Ownership enforced HERE: the loan is
      * fetched and its partyId compared to the caller (403 otherwise) — lending-service scopes by loan
      * id only. Projects each installment to {number, dueDate, payment, principal, interest, paid}.
