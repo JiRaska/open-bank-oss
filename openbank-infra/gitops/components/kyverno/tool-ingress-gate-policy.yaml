@@ -20,11 +20,36 @@
 # `openbank.io/ungated-machine-callers: "<why>"`, which is a sentence someone
 # had to write, not a default someone inherited.
 #
-# Scope is `observability` only, and CREATE/UPDATE only. Both Ingresses that
-# exist in the namespace today — GlitchTip's ingest ingress and the RUM gateway
-# — carry the exemption annotation as of this policy's own PR, so it is
-# Enforce from the start rather than an Audit rule that would let the first
-# regression through while reading green.
+# Scope is `observability` only, and CREATE/UPDATE only.
+#
+# WHY Audit AND NOT Enforce, TODAY. The precondition for Enforce is "every
+# Ingress in this namespace already carries one of the two annotations". That is
+# true in git as of this PR and FALSE in the cluster, and the gap does not close
+# on merge:
+#
+#   - this policy auto-syncs (the `kyverno-policies` ArgoCD Application watches
+#     components/kyverno with prune+selfHeal), so it lands minutes after merge;
+#   - the two annotations it would look for live in `gitops/apps/glitchtip.yaml`
+#     and `gitops/apps/rum-gateway.yaml`, which NOTHING syncs — those Application
+#     objects reach the cluster only via a manual `kubectl apply`;
+#   - both of those Applications are themselves prune+selfHeal, so ArgoCD keeps
+#     re-applying their rendered Ingress.
+#
+# Enforce would therefore reject ArgoCD's own re-apply of two Ingresses that are
+# correct in git, taking GlitchTip ingest and the RUM gateway to SyncFailed until
+# a human happened to run the apply. Verified 2026-08-01 against the sandbox:
+# both live Ingresses carry NEITHER annotation. That is a false precondition, and
+# this repo has already paid for one — ADR-0030's SBOM policy went Audit→Enforce
+# on exactly this shape and killed five workloads for four days (#1197).
+#
+# FLIP CONDITION, checkable in one command — when this returns two annotated
+# rows, change validationFailureAction to Enforce:
+#
+#   kubectl -n observability get ingress -o custom-columns=\
+#   'NAME:.metadata.name,DECLARED:.metadata.annotations.openbank\.io/ungated-machine-callers'
+#
+# Audit still records a policy report for every violation, so a regression is
+# visible rather than silent — it just does not reject. Tracked as a follow-up.
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -43,7 +68,10 @@ metadata:
       (openbank.io/ungated-machine-callers). Prevents a Helm values edit or a
       chart-default change from silently publishing an internal tool UI.
 spec:
-  validationFailureAction: Enforce
+  # Audit, not Enforce — see the flip condition in the header. Not a permanent
+  # advisory: the condition is one command, and it is met by applying the two
+  # gitops/apps manifests this PR already changed.
+  validationFailureAction: Audit
   background: false
   rules:
     - name: gated-or-declared

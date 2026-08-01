@@ -84,9 +84,23 @@ Four parts:
 4. **Network and admission controls behind the edge.** A NetworkPolicy restricts the
    Grafana pod's ingress to the ingress-nginx controller, the `admin-ui` namespace and
    its own namespace (Prometheus scrape), so the ungated `.svc` path is closed for
-   everything else. A Kyverno `ClusterPolicy` rejects any Ingress in `observability`
-   that neither carries `auth-url` nor is on the machine-caller allow-list — a Helm
-   upgrade that flips `ingress.enabled` cannot quietly re-expose a UI.
+   everything else. A Kyverno `ClusterPolicy` flags any Ingress in `observability`
+   that neither carries `auth-url` nor declares why it must stay open to machine
+   callers — a Helm upgrade that flips `ingress.enabled` cannot quietly re-expose a
+   UI.
+
+   That policy ships as **Audit**, deliberately, and the reason is a general one.
+   Its precondition for Enforce is "every Ingress in the namespace already carries
+   one of the two annotations", which is true in git and false in the cluster: the
+   policy auto-syncs from `components/kyverno`, while the annotations live in
+   `gitops/apps/{glitchtip,rum-gateway}.yaml`, which nothing syncs — those
+   Application objects reach the cluster only by a manual `kubectl apply`. Both are
+   `prune: true, selfHeal: true`, so Enforce would reject ArgoCD's own re-apply of
+   two Ingresses that are correct in git and take GlitchTip ingest and the RUM
+   gateway to SyncFailed. Verified against the sandbox on 2026-08-01: both live
+   Ingresses carry neither annotation. ADR-0030's SBOM policy went Audit→Enforce on
+   exactly this shape and killed five workloads for four days (#1197). The flip
+   condition is one `kubectl get ingress` away and is written into the policy file.
 
 **Split routing is mandatory where a tool has machine callers.** GlitchTip's SDK ingest
 and `sentry-cli` dSYM upload authenticate by DSN or org token and cannot follow a login
