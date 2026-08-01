@@ -103,6 +103,10 @@ jobs:
     outputs:
       services: ${{ steps.detect.outputs.services }}
       any: ${{ steps.detect.outputs.any }}
+      # A BOUNDED stand-in for `services`, for use in a concurrency group. See the step that
+      # computes it, and gitops-pr's `concurrency:` block, for why interpolating the list itself
+      # silently discarded three whole-fleet builds (#3082).
+      services_key: ${{ steps.key.outputs.services_key }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -265,6 +269,44 @@ jobs:
           echo "Services to deploy: $SERVICES_JSON"
           echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
           echo "any=true" >> "$GITHUB_OUTPUT"
+
+      # Why a digest and not the service list itself (issue #3082).
+      #
+      # gitops-pr's concurrency group used to interpolate `needs.changes.outputs.services`
+      # verbatim. For a change under openbank-libs-* that is every service in the fleet, and the
+      # group name reached ~1436 characters — at which point the job is NEVER INSTANTIATED. Not
+      # skipped: absent. No job, no check-run on the commit, and `needs.gitops-pr.result` reads as
+      # a failure to the Deploy signal job downstream.
+      #
+      # That is the worst possible place to lose it. gitops-pr carries
+      # `if: always() && ... != 'cancelled'` precisely so a partial can-i-deploy failure still
+      # deploys the subset that passed (#846) — and a job that never exists cannot honour its own
+      # `if`. So the whole fleet build was built, pushed, signed, attested and then thrown away,
+      # in exactly the highest-stakes case: a shared-library change.
+      #
+      # Measured over the last 20 auto-deploy runs, the correlation is exact:
+      #   53 services (~1436 chars) -> Gitops PR job never created  (000ba2a5, f994c492, fa61b32c)
+      #   12 services (~322  chars) -> created                      (342cf7d7)
+      #    1 service  (~30   chars) -> created                      (ec841cf5, 91e9b2c5)
+      #
+      # The digest keeps the semantics #1332/#1336 established, which is the whole reason the
+      # service set is in the group at all: the same set maps to the same group (two pushes
+      # touching the same services still serialise, newer wins), disjoint sets map to different
+      # groups (billing and lending no longer cancel each other), and workflow_dispatch still uses
+      # run_id so an ops recovery run is never cancelled by a routine push. `jq -S 'sort'` makes it
+      # order-insensitive, so the same set detected in a different order yields the same key.
+      - id: key
+        name: Derive a bounded concurrency key for the changed-service set
+        env:
+          # Via env, not a `${{ }}` splice into the script body: the value is JSON built from repo
+          # paths, and splicing it directly is the shape script injection takes.
+          SERVICES: ${{ steps.detect.outputs.services }}
+        run: |
+          set -euo pipefail
+          KEY="$(printf '%s' "${SERVICES:-[]}" | jq -S -c 'sort' | sha256sum | cut -c1-12)"
+          echo "services_key=$KEY" >> "$GITHUB_OUTPUT"
+          N="$(printf '%s' "${SERVICES:-[]}" | jq -r 'length')"
+          echo "concurrency key for ${N} service(s): ${KEY}"
 
   # ── 2. Build fast-jars, bake images, push to ECR ─────────────────────────────
   build-push:
@@ -1044,7 +1086,7 @@ jobs:
     concurrency:
       group: >-
         auto-deploy-gitops-pr-${{ github.ref }}-${{
-          github.event_name == 'workflow_dispatch' && github.run_id || needs.changes.outputs.services
+          github.event_name == 'workflow_dispatch' && github.run_id || needs.changes.outputs.services_key
         }}
       cancel-in-progress: true
     # `always()` + explicit build-push check, NOT the default "can-i-deploy must succeed":
