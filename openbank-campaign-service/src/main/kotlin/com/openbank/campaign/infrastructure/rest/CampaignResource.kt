@@ -10,12 +10,10 @@ import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.libs.authz.Authorize
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
-import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.jwt.JsonWebToken
 import java.util.UUID
@@ -36,14 +34,20 @@ data class StepRequest(
 )
 
 /**
- * Accepted and ignored. Kept so an existing caller that still posts `{"approver": "..."}` does not
- * break — removing a required body would be a breaking contract change, and under ADR-0048 a major
- * bump means serving every path under a new URL major, which is out of all proportion to deleting a
- * field nothing reads. The value is never looked at; the approver comes from the token.
+ * The old activate body. Retained as a type only so the OpenAPI schema can keep documenting it as
+ * accepted-and-ignored: a client still posting `{"approver": "..."}` should know it is harmless.
  *
- * The URL major is deliberately not spelled out above: the api-contract gate derives "the newest
+ * `activate` declares **no entity parameter at all**, deliberately. Keeping one — even nullable,
+ * even with `@Consumes(WILDCARD)` — makes RESTEasy look for a reader that can turn the request's
+ * media type into this class, so a caller sending `text/plain` (RestAssured's default for a
+ * bodyless POST) gets 415 while one sending no Content-Type at all (curl's default) succeeds. A
+ * method with no entity parameter never reads the body, so every shape works: none, empty, or
+ * legacy JSON. That asymmetry is why the first fix passed a manual curl check and still failed
+ * CampaignRestContractIT.
+ *
+ * The URL major is deliberately not spelled out here: the api-contract gate derives "the newest
  * served URL major" by matching that text in the source, so a comment explaining the rule is read
- * as an endpoint implementing it, and the gate fails on prose.
+ * as an endpoint implementing it, and the gate fails on prose (#3119).
  */
 data class ApprovalRequest(val approver: String? = null)
 
@@ -109,13 +113,8 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
      */
     @POST
     @Path("/{id}/activate")
-    // WILDCARD because the body is genuinely optional. A nullable entity parameter still makes
-    // RESTEasy negotiate a media type, so a POST with no body — which is exactly what the console
-    // sends, having nothing to say — was answered 415 instead of reaching the maker/checker check.
-    // Keeping the parameter for old callers is only backwards-compatible if new callers can omit it.
-    @Consumes(MediaType.WILDCARD)
     @Authorize(action = "campaign.activate", resource = "#id")
-    suspend fun activate(@PathParam("id") id: UUID, @Suppress("UNUSED_PARAMETER") ignored: ApprovalRequest?): Response =
+    suspend fun activate(@PathParam("id") id: UUID): Response =
         runCatching { Response.ok(service.activate(id, jwt.principalName())).build() }
             .getOrElse { Response.status(Response.Status.CONFLICT).entity(mapOf("error" to it.message)).build() }
 
