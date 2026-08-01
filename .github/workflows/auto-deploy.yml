@@ -818,6 +818,13 @@ jobs:
             || echo "::warning::could not ensure sandbox environment (may already exist — continuing)"
           rc=0
           deployable_list=()
+          # Bounded head start for the pact-publish race (#3082, defect 1). Total across ALL
+          # services and a per-service cap, so a fleet-sized push cannot turn this job into a
+          # 45-minute wait — it is a head start, not a synchronisation primitive. Both are
+          # env-overridable so an operator can widen or disable it without a code change;
+          # setting the budget to 0 restores the pre-#3082 behaviour exactly.
+          PACT_WAIT_BUDGET="${PACT_WAIT_BUDGET_SECONDS:-180}"
+          PACT_WAIT_PER_SVC="${PACT_WAIT_PER_SERVICE_SECONDS:-60}"
           # Per-service block classification (#2549): PENDING_BUILD / UNVERIFIED /
           # REGRESSION / UNKNOWN, plus the human reason. Read below by the left-behind
           # summary and by the scheduled-tick silencing rule.
@@ -879,16 +886,66 @@ jobs:
               deployable_list+=("$svc")
               continue
             fi
-            # --latest main: ask "can the latest version tagged 'main' go to sandbox?"
-            # _service-ci.yml publishes every version with tags:[$branch] so the broker
-            # index has a 'main'-tagged entry for each service's last main-branch build.
-            # --version $SHA would error ("No pacts or verifications") when path-scoped CI
-            # skipped this service on the triggering commit (ADR-0092).
-            # record-deployment (gitops-pr job) still pins the exact $GITHUB_SHA so the
-            # broker tracks what is actually deployed.
-            echo "==> can-i-deploy ${svc} (latest/main) → environment sandbox"
+            # WHICH VERSION do we ask about? (issue #3082, defect 1)
+            #
+            # `--latest main` alone asks about the last main-tagged build, which on a push is
+            # very often NOT the commit being deployed: this job needs [changes, build-push],
+            # i.e. auto-deploy's own image build — never services-ci, which is what publishes
+            # pact versions. The two race. Measured on run 30690770972: the gate asked about
+            # account-service at 08:36:49 and that service's build did not START until
+            # 08:39:03. The loud half of that is a PENDING_BUILD red. The quiet half is worse —
+            # if the older main version happens to be verified, the gate goes GREEN and
+            # auto-deploy ships an image built from $GITHUB_SHA whose contracts were never
+            # verified. The broker warns about exactly this on every run ("specify the version
+            # number ... without a version number, this result will not be reliable").
+            #
+            # So: wait briefly for THIS commit's version, then ask about it precisely; and if
+            # it is genuinely absent, fall back to today's exact behaviour. `--version $SHA`
+            # cannot be the unconditional answer — path-scoped CI skips most services on most
+            # commits, and for those the broker rightly has no version for this sha and
+            # `--version` errors with "No pacts or verifications" (ADR-0092). The selector is
+            # chosen by resolve-can-i-deploy-selector.sh, which is unit-tested precisely so
+            # this cannot silently regress to always asking the vaguer question.
+            #
+            # The wait is bounded and only happens on `push`, where the changed set really is
+            # being built right now. On schedule/dispatch the fleet was built at other commits,
+            # so waiting would burn the budget for nothing. It is a best-effort head start, NOT
+            # a synchronisation primitive: the fleet build serialises at ~45 min/service on one
+            # runner, so a 53-service push will still leave most services PENDING_BUILD for the
+            # reconcile tick. It converts the common 1-3 service push from a coin flip into a
+            # correct answer, and never makes any case worse than it is today.
+            vpresent=unknown
+            probe_version() {
+              local code
+              code="$(curl -s -o /dev/null -w '%{http_code}' \
+                -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
+                "${PACT_BROKER_URL}/pacticipants/${svc}/versions/${GITHUB_SHA}" || echo 000)"
+              case "$code" in
+                200) echo yes ;;
+                404) echo no ;;
+                *)   echo unknown ;;
+              esac
+            }
+            vpresent="$(probe_version)"
+            if [ "$vpresent" = "no" ] && [ "${{ github.event_name }}" = "push" ] \
+               && [ "$PACT_WAIT_BUDGET" -gt 0 ]; then
+              waited=0
+              while [ "$waited" -lt "$PACT_WAIT_PER_SVC" ] && [ "$PACT_WAIT_BUDGET" -gt 0 ]; do
+                sleep 10
+                waited=$((waited + 10))
+                PACT_WAIT_BUDGET=$((PACT_WAIT_BUDGET - 10))
+                vpresent="$(probe_version)"
+                [ "$vpresent" = "no" ] || break
+              done
+              [ "$waited" -gt 0 ] && echo "  … waited ${waited}s for ${svc}'s pact version (budget left: ${PACT_WAIT_BUDGET}s) → ${vpresent}" || true
+            fi
+            sel_line="$(PACT_VERSION_PRESENT="$vpresent" \
+              bash .github/scripts/resolve-can-i-deploy-selector.sh "$svc" "$GITHUB_SHA")"
+            read -ra CID_SELECTOR <<< "$(printf '%s' "$sel_line" | cut -f1)"
+            echo "==> can-i-deploy ${svc} (${CID_SELECTOR[*]}) → environment sandbox"
+            echo "    $(printf '%s' "$sel_line" | cut -f2)"
             cid_out=$("$CLI" can-i-deploy \
-                 --pacticipant "$svc" --latest main \
+                 --pacticipant "$svc" "${CID_SELECTOR[@]}" \
                  --to-environment sandbox \
                  --broker-base-url "$PACT_BROKER_URL" \
                  --broker-username "$PACT_BROKER_USERNAME" \
@@ -926,14 +983,11 @@ jobs:
                 # distinguish a queue delay from a regression (issue #2549). Probe the
                 # broker for a version of THIS commit, then classify (the classifier is
                 # unit-tested — .github/scripts/test-classify-can-i-deploy-block.sh).
-                vcode="$(curl -s -o /dev/null -w '%{http_code}' \
-                  -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
-                  "${PACT_BROKER_URL}/pacticipants/${svc}/versions/${GITHUB_SHA}" || echo 000)"
-                case "$vcode" in
-                  404) present=no ;;
-                  2??) present=yes ;;
-                  *)   present=unknown ;;
-                esac
+                # Reuse the probe taken before the can-i-deploy call rather than re-asking.
+                # Not just to save a request: if the version landed between the two calls the
+                # selector and this label would describe different worlds, and the summary
+                # would explain a block that was decided on other evidence.
+                present="$vpresent"
                 cls_line="$(PACT_VERSION_PRESENT="$present" \
                   bash .github/scripts/classify-can-i-deploy-block.sh "$svc" <<< "$cid_out")"
                 cls="$(cut -f1 <<< "$cls_line")"
