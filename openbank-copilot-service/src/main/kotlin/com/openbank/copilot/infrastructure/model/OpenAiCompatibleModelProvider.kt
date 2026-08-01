@@ -17,6 +17,8 @@ import com.openbank.copilot.domain.model.ModelUsage
 import com.openbank.copilot.domain.model.StopReason
 import com.openbank.copilot.domain.model.ToolInvocation
 import com.openbank.copilot.domain.model.ToolSpec
+import com.openbank.libs.llm.LlmCallMetricsPort
+import com.openbank.libs.observability.LlmCallMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.ConfigProvider
@@ -50,6 +52,11 @@ class OpenAiCompatibleModelProvider : ModelProvider {
     @Inject
     lateinit var objectMapper: ObjectMapper
 
+    // Field injection, not a constructor arg: the bean is instantiated by Arc, and detekt's
+    // LongParameterList fires AT constructorThreshold rather than above it.
+    @Inject
+    lateinit var metrics: LlmCallMetrics
+
     // Resolved lazily (NOT @ConfigProperty-injected): an un-seeded/empty key would otherwise fail
     // config load at boot (SmallRye SRCFG00040 on an empty String binding) and CrashLoop the pod.
     // Empty here just degrades the call (require below) until the key is seeded.
@@ -68,6 +75,9 @@ class OpenAiCompatibleModelProvider : ModelProvider {
     override suspend fun complete(model: ModelDescriptor, request: ModelRequest): ModelResponse {
         val base = (model.endpoint ?: error("model '${model.id}' has no endpoint (base URL) configured"))
             .trimEnd('/')
+        if (apiKey.isBlank()) {
+            metrics.recordCall(model.id, LlmCallMetricsPort.OUTCOME_NOT_CONFIGURED, 0, 0, 0)
+        }
         require(apiKey.isNotBlank()) {
             "copilot.model.api-key is empty — set the backend API key to use model '${model.id}'"
         }
@@ -81,13 +91,42 @@ class OpenAiCompatibleModelProvider : ModelProvider {
             .POST(HttpRequest.BodyPublishers.ofString(payload))
             .build()
 
-        val resp = http.send(httpRequest, HttpResponse.BodyHandlers.ofString())
+        // Timed around send AND parse: `usage` is only known after parsing, and a 200 whose body
+        // does not parse is a failed call from the caller's point of view.
+        val startedAt = System.nanoTime()
+        val resp = try {
+            http.send(httpRequest, HttpResponse.BodyHandlers.ofString())
+        } catch (ex: java.io.IOException) {
+            metrics.recordCall(
+                model.id,
+                LlmCallMetricsPort.OUTCOME_EXCEPTION,
+                0,
+                0,
+                System.nanoTime() - startedAt,
+            )
+            throw ex
+        }
         if (resp.statusCode() !in OK_RANGE) {
             // Body may echo the request on some gateways; do not log it wholesale (prompt PII).
             log.warnf("openai-compat backend %s returned HTTP %d for model %s", base, resp.statusCode(), model.id)
+            metrics.recordCall(
+                model.id,
+                LlmCallMetricsPort.OUTCOME_HTTP_ERROR,
+                0,
+                0,
+                System.nanoTime() - startedAt,
+            )
             error("model backend HTTP ${resp.statusCode()} for '${model.id}'")
         }
-        return parseResponse(model, resp.body())
+        val parsed = parseResponse(model, resp.body())
+        metrics.recordCall(
+            model.id,
+            LlmCallMetricsPort.OUTCOME_SUCCESS,
+            parsed.usage.inputTokens,
+            parsed.usage.outputTokens,
+            System.nanoTime() - startedAt,
+        )
+        return parsed
     }
 
     /**

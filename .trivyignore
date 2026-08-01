@@ -71,3 +71,18 @@ AVD-KSV-0109
 # registry-cache) third-party deployments. Security context tightening is a
 # follow-up in the security tier-2 hardening sweep (#850-#854).
 AVD-KSV-0118
+
+# Service with externalName: the `grafana-tools` ExternalName Service in the
+# `admin-ui` namespace (ADR-0234). KSV-0108 exists for CVE-2020-8554, where a
+# Service pointing OUTSIDE the cluster lets a namespace-scoped actor intercept
+# traffic to an arbitrary external IP. This one points at
+# kube-prometheus-stack-grafana.observability.svc.cluster.local — an in-cluster
+# name, resolved by CoreDNS, reachable only through an Ingress that gates every
+# request against the admin-UI session. The check cannot tell the two apart.
+#
+# BLAST RADIUS, stated because a baseline entry is repo-wide: as of this commit
+# that Service is the ONLY `type: ExternalName` in gitops. A second one would be
+# silently exempted by this line, so `tools-gate.test.ts` asserts the count and
+# fails the admin-ui suite if another appears — the exclusion stays a thing
+# someone has to justify, not a default someone inherits.
+AVD-KSV-0108

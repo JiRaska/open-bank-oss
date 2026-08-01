@@ -119,6 +119,11 @@ export const config = {
     // NOTE: /auth/* is intentionally NOT excluded (ADR-0080 P1): the middleware must run there to
     // emit the nonce CSP on the pre-auth login page. The callback short-circuits /auth so the auth
     // gate doesn't loop. api/auth stays excluded (Auth.js owns its own handlers; JSON, no CSP need).
-    "/((?!api/auth|_next/static|_next/image|favicon.ico|robots.txt).*)",
+    // api/gate is excluded for a mechanical reason, NOT as a relaxation (ADR-0234): it is nginx's
+    // `auth_request` target for the /tools/* Ingress, and nginx maps any auth sub-response that is
+    // not 2xx/401/403 to a 500 — so the middleware's 302-to-login would make the gate fail closed on
+    // precisely the unauthenticated request it exists to reject cleanly. The route runs the same
+    // session + role check itself, returns 204/401/403 with no body, and proxies nothing.
+    "/((?!api/auth|api/gate|_next/static|_next/image|favicon.ico|robots.txt).*)",
   ],
 }

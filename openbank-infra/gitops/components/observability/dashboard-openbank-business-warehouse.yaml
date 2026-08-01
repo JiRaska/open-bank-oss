@@ -1,0 +1,783 @@
+# Business reporting over the ClickHouse warehouse (ADR-0022).
+#
+# The warehouse has been fed in production for months (analytics-sink runs with
+# ANALYTICS_SINK_TYPE=clickhouse) and already carries a gold layer — gold_daily_event_volume, the
+# onboarding funnel marts, screen feedback. Its own DDL comment says gold marts are "where
+# Metabase/Superset dashboards point, so BI never touches the operational databases". No BI tool was
+# ever deployed, Grafana had no ClickHouse datasource, and the sole consumer of the entire warehouse
+# was admin-ui's customer-360 route. Business reporting therefore ran on Prometheus: 7-day
+# retention, counters that reset on every pod restart, and `sum(counter)` panels that double-count
+# across replicas. This board is the missing analytical plane.
+#
+# Requires the grafana-clickhouse-datasource plugin and the ClickHouse datasource in
+# apps/kube-prometheus-stack.yaml, and the observability->analytics:8123 edge in
+# components/analytics/clickhouse-grafana-network-policy.yaml. Without the NetworkPolicy the panels
+# fail with a connection timeout that looks exactly like a wrong password.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-business-warehouse
+  namespace: observability
+  labels:
+    grafana_dashboard: '1'
+    app.kubernetes.io/part-of: observability
+data:
+  openbank-business-warehouse.json: |
+    {
+      "id": null,
+      "uid": "openbank-business-warehouse",
+      "title": "OpenBank — Business Reporting (warehouse)",
+      "description": "Business volume, product mix and the onboarding funnel from the ClickHouse warehouse (ADR-0022). Daily grain, 90-day windows — the analytical plane, not the 7-day operational one.",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "5m",
+      "time": {
+        "from": "now-90d",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "browser",
+      "tags": [
+        "openbank",
+        "business",
+        "warehouse"
+      ],
+      "templating": {
+        "list": [
+          {
+            "current": {
+              "selected": false,
+              "text": "ClickHouse",
+              "value": "clickhouse"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "name": "ds_clickhouse",
+            "options": [],
+            "query": "grafana-clickhouse-datasource",
+            "refresh": 1,
+            "type": "datasource",
+            "label": "Warehouse"
+          }
+        ]
+      },
+      "annotations": {
+        "list": []
+      },
+      "links": [],
+      "panels": [
+        {
+          "id": 1,
+          "type": "text",
+          "title": "How to read this board",
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 7
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "**This is the analytical plane, not the operational one.** Every panel reads the ClickHouse warehouse (`openbank_analytics`, ADR-0022), fed from the domain event stream by openbank-analytics-sink. The other OpenBank boards read Prometheus, which holds 7 days and whose counters reset on every pod restart — it cannot answer \"how many accounts did we open last quarter\". This board can, because bronze is the append-only log of record kept for 10 years.\n\n**Freshness first.** The top-left tile is the age of the newest event in the warehouse. If it is hours old, every number below it is stale, and a flat line here means the sink stopped rather than that the business did. Nothing alerts on a table that stops growing — check this tile before reading anything else.\n\n**Grain is a day.** All rollups group by `toDate(occurred_at)`, so today's bar is partial until midnight UTC and always reads low. Compare like-for-like days.\n\nCounts are of *events*, not of reconciled balances. For money that has to foot, use the ledger and the statutory close — this board is for volume, mix and trend."
+          }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Warehouse freshness",
+          "description": "Age of the newest event in bronze. Read this before anything else: a stale warehouse makes every panel below wrong in a way that looks like calm.",
+          "gridPos": {
+            "x": 0,
+            "y": 7,
+            "w": 5,
+            "h": 4
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT dateDiff('second', max(occurred_at), now()) AS value FROM openbank_analytics.bronze_events"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area"
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Events (30d)",
+          "description": null,
+          "gridPos": {
+            "x": 5,
+            "y": 7,
+            "w": 5,
+            "h": 4
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT count() AS value FROM openbank_analytics.bronze_events WHERE occurred_at >= now() - INTERVAL 30 DAY"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area"
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Accounts opened (30d)",
+          "description": "Distinct account aggregates with an opened-type event. uniqExact, not count(): bronze is at-least-once, so duplicates are expected and a raw count overstates.",
+          "gridPos": {
+            "x": 10,
+            "y": 7,
+            "w": 5,
+            "h": 4
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT uniqExact(aggregate_id) AS value FROM openbank_analytics.bronze_events WHERE aggregate_type = 'Account' AND event_type LIKE '%Opened%' AND occurred_at >= now() - INTERVAL 30 DAY"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area"
+          }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Parties onboarded (30d)",
+          "description": null,
+          "gridPos": {
+            "x": 15,
+            "y": 7,
+            "w": 4,
+            "h": 4
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT uniqExact(aggregate_id) AS value FROM openbank_analytics.bronze_events WHERE aggregate_type = 'Party' AND occurred_at >= now() - INTERVAL 30 DAY"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area"
+          }
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Onboarding sessions (30d)",
+          "description": null,
+          "gridPos": {
+            "x": 19,
+            "y": 7,
+            "w": 5,
+            "h": 4
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT uniqExact(session_id) AS value FROM openbank_analytics.gold_onboarding_funnel_events WHERE day >= today() - 30"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area"
+          }
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "Daily event volume by service",
+          "gridPos": {
+            "x": 0,
+            "y": 11,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT day AS time, source_service, sum(events) AS events FROM openbank_analytics.gold_daily_event_volume WHERE day >= today() - 90 GROUP BY day, source_service ORDER BY day"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "description": "From the gold_daily_event_volume mart. 90 days — the window Prometheus cannot offer."
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "Business volume by aggregate type",
+          "gridPos": {
+            "x": 12,
+            "y": 11,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT day AS time, aggregate_type, sum(events) AS events FROM openbank_analytics.gold_daily_event_volume WHERE day >= today() - 90 GROUP BY day, aggregate_type ORDER BY day"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "description": "Product mix over time: which parts of the bank are actually being used."
+        },
+        {
+          "id": 9,
+          "type": "barchart",
+          "title": "Onboarding funnel — sessions by step (30d)",
+          "gridPos": {
+            "x": 0,
+            "y": 19,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT step, sum(sessions_viewed) AS viewed, sum(sessions_completed) AS completed FROM openbank_analytics.gold_onboarding_funnel_daily WHERE day >= today() - 30 GROUP BY step, step_ordinal ORDER BY step_ordinal"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "description": "Viewed vs completed per step. The drop between the two bars is where prospects leave."
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "Framework-agreement signing outcomes",
+          "gridPos": {
+            "x": 12,
+            "y": 19,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT day AS time, sum(attempts) AS attempts, sum(successes) AS successes, sum(failures) AS failures FROM openbank_analytics.gold_onboarding_sign_outcomes WHERE day >= today() - 90 GROUP BY day ORDER BY day"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "description": "The revenue-bearing tail of onboarding: a failed signature is a lost customer."
+        },
+        {
+          "id": 11,
+          "type": "table",
+          "title": "Top signing failure reasons (30d)",
+          "gridPos": {
+            "x": 0,
+            "y": 27,
+            "w": 12,
+            "h": 7
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT reason, sum(failures) AS failures FROM openbank_analytics.gold_onboarding_sign_fail_reasons WHERE day >= today() - 30 GROUP BY reason ORDER BY failures DESC LIMIT 20"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true
+          },
+          "description": "Ranked machine reasons. Empty is the healthy state."
+        },
+        {
+          "id": 12,
+          "type": "piechart",
+          "title": "KYC method mix (30d)",
+          "gridPos": {
+            "x": 12,
+            "y": 27,
+            "w": 12,
+            "h": 7
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT kyc_method, sum(sessions) AS sessions FROM openbank_analytics.gold_onboarding_kyc_method_daily WHERE day >= today() - 30 GROUP BY kyc_method ORDER BY sessions DESC"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "description": "Which identity path prospects choose."
+        },
+        {
+          "id": 13,
+          "type": "barchart",
+          "title": "Median seconds on step (30d)",
+          "gridPos": {
+            "x": 0,
+            "y": 34,
+            "w": 12,
+            "h": 7
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT step, quantile(0.5)(seconds_on_step) AS median_seconds FROM openbank_analytics.gold_onboarding_step_durations WHERE day >= today() - 30 GROUP BY step ORDER BY median_seconds DESC"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "description": "Where the flow is slow, as opposed to where it leaks."
+        },
+        {
+          "id": 14,
+          "type": "timeseries",
+          "title": "Ingest health — dead-lettered events (30d)",
+          "gridPos": {
+            "x": 12,
+            "y": 34,
+            "w": 12,
+            "h": 7
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT toDate(failed_at) AS time, count() AS dead_lettered FROM openbank_analytics.dead_letter_events WHERE failed_at >= now() - INTERVAL 30 DAY GROUP BY time ORDER BY time"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "description": "Events the sink could not project. Non-zero means this board is missing data — the numbers above are a floor, not a total."
+        }
+      ]
+    }

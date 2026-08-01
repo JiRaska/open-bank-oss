@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.15.3...agent-service-v1.16.0) (2026-08-01)
+
+
+### Features
+
+* **observability:** make fleet LLM spend and reliability observable in Prometheus ([#3043](https://github.com/JiRaska/open-bank-oss/issues/3043)) ([000ba2a](https://github.com/JiRaska/open-bank-oss/commit/000ba2a516069ba4c65b50015a76b4086b229b30))
+
 ## [1.15.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.15.2...agent-service-v1.15.3) (2026-07-31)
 
 

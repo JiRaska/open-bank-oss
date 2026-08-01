@@ -13,7 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
-import { svcUrl } from '@/lib/services/bff'
+import { serverSvcUrl } from '@/lib/services/bff'
 import { hasIbanShape, isValidIban, normalizeIban } from '@/lib/validation/iban'
 
 export const dynamic = 'force-dynamic'
@@ -41,7 +41,7 @@ type AccountView = {
 }
 
 async function resolveParties(q: string, headers: HeadersInit): Promise<EntityRef[]> {
-  const res = await fetch(svcUrl('party-service', '/api/v1/parties/search', { q, limit: String(MAX_RESULTS) }), {
+  const res = await fetch(serverSvcUrl('party-service', 'party', 8111, '/api/v1/parties/search', { q, limit: String(MAX_RESULTS) }), {
     headers,
     signal: AbortSignal.timeout(4000),
     cache: 'no-store',
@@ -59,7 +59,7 @@ async function resolveParties(q: string, headers: HeadersInit): Promise<EntityRe
 
 async function resolveAccountByIban(q: string, headers: HeadersInit): Promise<EntityRef[]> {
   if (!hasIbanShape(q) || !isValidIban(q)) return []
-  const res = await fetch(svcUrl('account-service', `/api/v1/accounts/iban/${normalizeIban(q)}`), {
+  const res = await fetch(serverSvcUrl('account-service', 'accounts', 8100, `/api/v1/accounts/iban/${normalizeIban(q)}`), {
     headers,
     signal: AbortSignal.timeout(4000),
     cache: 'no-store',
