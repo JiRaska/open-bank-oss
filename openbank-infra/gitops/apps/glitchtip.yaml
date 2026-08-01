@@ -86,9 +86,13 @@ spec:
               # crashes here). The web UI, Django /admin/ (a superuser password login)
               # and the management REST API have no business on the internet — they're
               # reached in-cluster via port-forward (like Grafana, ArgoCD, et al.).
-              # So the public ingress allow-lists ONLY the per-project ingest verbs;
-              # everything else 404s at the edge. Mirrors the keycloak-admin-block pattern.
+              # So the public ingress allow-lists ONLY the per-project ingest verbs
+              # plus the debug-symbol upload endpoints; everything else 404s at the
+              # edge. Mirrors the keycloak-admin-block pattern.
               nginx.ingress.kubernetes.io/use-regex: "true"
+              # Debug-symbol chunks. sentry-cli sends ~8 MiB chunks and the default
+              # 1m body limit turned every dSYM upload into an nginx 413.
+              nginx.ingress.kubernetes.io/proxy-body-size: 64m
             hosts:
               - host: glitchtip.open-bank.tech
                 paths:
@@ -96,6 +100,25 @@ spec:
                   # security/minidump). project_id is numeric; /api/0/* (management) and
                   # every UI/admin path are intentionally NOT matched → edge 404.
                   - path: /api/[0-9]+/(store|envelope|security|minidump|unreal)/
+                    pathType: ImplementationSpecific
+                  # dSYM upload, and ONLY dSYM upload, out of the /api/0/ management
+                  # surface. Without these two paths `fastlane beta`'s
+                  # upload_debug_symbols was dead code: chunk-upload answers its GET
+                  # with an ABSOLUTE public URL, so sentry-cli posts the chunks back
+                  # through this ingress no matter how it was invoked — a port-forward
+                  # cannot work around it. Every iOS crash therefore arrived with
+                  # <redacted> frames.
+                  #
+                  # Both endpoints require a GlitchTip org auth token (scopes
+                  # project:read/write/releases + org:read), so this exposes an
+                  # authenticated write path, not an open one — and nothing else under
+                  # /api/0/ (users, teams, settings, the Django admin) becomes
+                  # reachable. Keep these regexes anchored to `chunk-upload` and
+                  # `files/(difs|dsyms)`; widening them re-opens the management API.
+                  - path: /api/0/organizations/[^/]+/chunk-upload/
+                    pathType: ImplementationSpecific
+                  # …/files/difs/assemble/ shares this prefix, so it matches too.
+                  - path: /api/0/projects/[^/]+/[^/]+/files/(difs|dsyms)/
                     pathType: ImplementationSpecific
             tls:
               - secretName: glitchtip-tls
