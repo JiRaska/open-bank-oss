@@ -382,6 +382,18 @@ fire from *outside* it, so they stay here:
   the annotation, because comments are stripped *by design* (#2450). Generalize: a guard over source
   text needs an explicit rule for code-about-code, and stale prose naming a dead identifier is
   invisible to it forever — grep the prose separately after any vocabulary rename.
+- **The same collision runs the other way, and that direction is silent: a check greps a file for the
+  string it wants, and matches the COMMENT that explains why the string is there.** A false positive
+  announces itself; this one reads as a pass. On #3072 a test asserted `middleware.ts` excludes
+  `/api/gate` with a whole-file `toMatch(/api\/gate/)` — the exclusion is explained by a five-line
+  comment directly above it that names the path three times, so deleting the exclusion itself left
+  the test green. Fix: strip comments, then assert against the **construct**, not the file
+  (`config.matcher`, the annotation value, the specific key) — a whole-file grep can never
+  distinguish the thing from the prose about the thing. Same PR, same class, second instance: an
+  Ingress/allow-list agreement check built its tool set with `[a-z0-9-]+`, so a typo'd
+  `?tool=grafanaX` matched on the `grafana` prefix and it reported agreement with a tool the gate
+  does not know. Both were found only by feeding the assertions the exact broken input they exist to
+  reject — a new assertion that has only ever seen the correct file is unfalsified.
 - **An "advisory" gate is usually advisory INSIDE the script, not via `continue-on-error`** — 11 of
   12 here print `::warning` and exit 0 unless passed `--enforce`. A sweep for `continue-on-error:
   true` therefore finds one and silently reports the other eleven as enforced. Check both forms
