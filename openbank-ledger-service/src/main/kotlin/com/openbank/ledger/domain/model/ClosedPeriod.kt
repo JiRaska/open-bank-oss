@@ -22,20 +22,29 @@ enum class PeriodType {
     YEAR,
     ;
 
-    /** The period of this type containing [date]. */
-    fun of(date: LocalDate): AccountingPeriod = when (this) {
-        MONTH -> AccountingPeriod(this, date.withDayOfMonth(1), date.withDayOfMonth(date.lengthOfMonth()))
+    /**
+     * The `from..to` boundaries of this type's period containing [date].
+     *
+     * Deliberately returns the pair rather than an [AccountingPeriod]: the latter validates itself
+     * by asking this enum what the boundaries should be, so building one here would recurse through
+     * the constructor forever. Keeping the boundary arithmetic free of the type it validates is
+     * what makes that impossible rather than merely avoided.
+     */
+    fun boundsOf(date: LocalDate): Pair<LocalDate, LocalDate> = when (this) {
+        MONTH -> date.withDayOfMonth(1) to date.withDayOfMonth(date.lengthOfMonth())
         QUARTER -> {
             val firstMonth = ((date.monthValue - 1) / MONTHS_PER_QUARTER) * MONTHS_PER_QUARTER + 1
             val from = LocalDate.of(date.year, firstMonth, 1)
             val lastMonth = from.plusMonths((MONTHS_PER_QUARTER - 1).toLong())
-            AccountingPeriod(this, from, lastMonth.withDayOfMonth(lastMonth.lengthOfMonth()))
+            from to lastMonth.withDayOfMonth(lastMonth.lengthOfMonth())
         }
-        YEAR -> AccountingPeriod(
-            this,
-            LocalDate.of(date.year, 1, 1),
-            LocalDate.of(date.year, DECEMBER, LAST_DAY_OF_DECEMBER),
-        )
+        YEAR -> LocalDate.of(date.year, 1, 1) to LocalDate.of(date.year, DECEMBER, LAST_DAY_OF_DECEMBER)
+    }
+
+    /** The period of this type containing [date]. */
+    fun of(date: LocalDate): AccountingPeriod {
+        val (from, to) = boundsOf(date)
+        return AccountingPeriod(this, from, to)
     }
 }
 
@@ -47,7 +56,7 @@ enum class PeriodType {
 data class AccountingPeriod(val type: PeriodType, val from: LocalDate, val to: LocalDate) {
     init {
         requireValid(!from.isAfter(to)) { "Period from ($from) must not be after to ($to)" }
-        requireValid(type.of(from) == this) {
+        requireValid(type.boundsOf(from) == (from to to)) {
             "$from..$to is not a whole ${type.name.lowercase()} — a statutory period is a whole calendar period"
         }
     }
