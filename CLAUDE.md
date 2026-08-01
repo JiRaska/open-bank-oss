@@ -585,6 +585,16 @@ Rationale + what does *not* cover it: `rules.yaml: dependencies.pr_time_cve_gate
   Pass `-R <owner>/<repo>` explicitly in any script whose working directory is not guaranteed —
   and note a verification command failing this way returns *nothing*, which is easy to misread
   as "the thing I was checking is absent".
+- **`--delete-branch` on a stacked parent CLOSES the child PR, and that is not reversible.**
+  Deleting the base branch makes GitHub close every PR targeting it; a closed PR whose base is gone
+  can be neither reopened nor retargeted — `reopenPullRequest` answers `Could not open the pull
+  request` and `updatePullRequest` answers `Cannot change the base branch of a closed pull request`.
+  The only way back is a rebase onto the new `main` and a **new** PR, losing the number, the review
+  history and the comment thread. The failure is silent at merge time: `gh pr merge` prints nothing
+  about the child and the merge itself succeeds, so it reads as clean from every angle you would
+  normally check. Either retarget each child to `main` *before* merging the parent, or merge without
+  `--delete-branch` and clean up once the whole stack has landed. `--delete-branch` is only safe on a
+  leaf — check `gh pr list --base <branch>` first (#3055 closed #3063, reopened as #3111).
 
 ### API contract (ADR-0048)
 - **Two racing spec PRs can both claim the same `info.version` — and both pass the gate.** The
@@ -595,6 +605,16 @@ Rationale + what does *not* cover it: `rules.yaml: dependencies.pr_time_cve_gate
   when you resolve a merge conflict against `main` — re-check `info.version` against the *current*
   `main` and re-bump; whoever lands second takes the next version. A matching version line merging
   "cleanly" is the trap: git sees identical text, not a taken version.
+- **The same trap fires from an ALREADY-MERGED PR, which is the direction that gets missed.**
+  Anticipating it is not the same as checking for it: the instinct is "am I racing anyone?", and that
+  scans *open* PRs — but the number is just as easily consumed by something that landed while your
+  branch was open and is now invisible in the PR list. Measured on #3055, where the numbering had
+  been guarded carefully between two stacked PRs and the gate still went
+  `1.2.0 -> 1.2.0` because #3037 had merged. Read the version off live `main`, never off your
+  branch's base, and re-read it after every rebase:
+  `git fetch origin main && git show origin/main:<svc>/src/main/resources/openapi.yaml | grep -m1 '^  version:'`.
+  In a stack each PR takes the next number in order — and a child's diff against `main` spans the
+  whole stack, so point its PR base at the parent branch or the gate sees a multi-minor jump.
 
 ## Capturing what we learn
 
