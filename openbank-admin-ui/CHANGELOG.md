@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.78.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.78.0...admin-ui-v0.78.1) (2026-08-01)
+
+
+### Security
+
+* **admin-ui:** hold the public demo account to least privilege in each tool, and deny it Alertmanager ([#3156](https://github.com/JiRaska/open-bank-oss/issues/3156)) ([408caf9](https://github.com/JiRaska/open-bank-oss/commit/408caf9351be7d183257d92a908cc1ba92b09c78)), closes [#3071](https://github.com/JiRaska/open-bank-oss/issues/3071)
+
 ## [0.78.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.77.0...admin-ui-v0.78.0) (2026-08-01)
 
 
