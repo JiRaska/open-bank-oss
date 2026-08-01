@@ -104,3 +104,119 @@ spec:
                 name: grafana-tools
                 port:
                   number: 80
+---
+# Alertmanager (ADR-0234). Silencing an alert is an operator action that needed a
+# port-forward, so in practice it never happened. Alertmanager serves its whole
+# HTTP surface under `routePrefix: /tools/alertmanager` (set in
+# apps/kube-prometheus-stack.yaml), so the edge passes the prefix through
+# unrewritten — and note that same prefix also moves /api/v2/alerts, which is why
+# prometheusSpec.alertingEndpoints.pathPrefix had to move with it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager-tools
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: admin-ui
+    app.kubernetes.io/component: tools-gate
+spec:
+  type: ExternalName
+  externalName: kube-prometheus-stack-alertmanager.observability.svc.cluster.local
+  ports:
+    - name: http
+      port: 9093
+      protocol: TCP
+---
+# Pyrra SLO console (ADR-0234). Read-only, and the natural companion to the SLO
+# dashboard — served under `--route-prefix=/tools/pyrra`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: pyrra-tools
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: admin-ui
+    app.kubernetes.io/component: tools-gate
+spec:
+  type: ExternalName
+  externalName: pyrra-api.observability.svc.cluster.local
+  ports:
+    - name: http
+      port: 9099
+      protocol: TCP
+---
+# ONE INGRESS OBJECT PER TOOL, and that is not accidental: ingress-nginx applies
+# an object's annotations to every location it declares, and the auth-url hard-codes
+# the `?tool=` the gate's allow-list is keyed by. Two tools on one object would
+# both be checked against whichever tool the annotation named — the narrower one
+# would silently gain the wider one's audience. The cost of a tool is therefore
+# one Ingress + one Service + one allow-list entry + one NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: admin-ui-tools-alertmanager
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: admin-ui
+    app.kubernetes.io/component: tools-gate
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/auth-url: "http://admin-ui.admin-ui.svc.cluster.local:3000/api/gate?tool=alertmanager"
+    nginx.ingress.kubernetes.io/auth-signin: "https://admin.open-bank.tech/auth/login?callbackUrl=$escaped_request_uri"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "Strict-Transport-Security: max-age=63072000; includeSubDomains; preload";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+    nginx.ingress.kubernetes.io/upstream-vhost: "admin.open-bank.tech"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - admin.open-bank.tech
+      secretName: admin-ui-tls
+  rules:
+    - host: admin.open-bank.tech
+      http:
+        paths:
+          - path: /tools/alertmanager
+            pathType: Prefix
+            backend:
+              service:
+                name: alertmanager-tools
+                port:
+                  number: 9093
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: admin-ui-tools-pyrra
+  namespace: admin-ui
+  labels:
+    app.kubernetes.io/name: admin-ui
+    app.kubernetes.io/component: tools-gate
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/auth-url: "http://admin-ui.admin-ui.svc.cluster.local:3000/api/gate?tool=pyrra"
+    nginx.ingress.kubernetes.io/auth-signin: "https://admin.open-bank.tech/auth/login?callbackUrl=$escaped_request_uri"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "Strict-Transport-Security: max-age=63072000; includeSubDomains; preload";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+    nginx.ingress.kubernetes.io/upstream-vhost: "admin.open-bank.tech"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - admin.open-bank.tech
+      secretName: admin-ui-tls
+  rules:
+    - host: admin.open-bank.tech
+      http:
+        paths:
+          - path: /tools/pyrra
+            pathType: Prefix
+            backend:
+              service:
+                name: pyrra-tools
+                port:
+                  number: 9099

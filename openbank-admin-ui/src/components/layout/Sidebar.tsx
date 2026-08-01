@@ -117,7 +117,9 @@ const platformNav: NavItem[] = [
 // `src/app/api/gate/route.ts` requires for the tool — the gate is what actually
 // enforces it, this only decides whether the operator sees the link.
 const toolsNav: NavItem[] = [
-  { nameCs: 'Grafana',        nameEn: 'Grafana',        href: '/tools/grafana', icon: Activity, permission: 'system:view', external: true },
+  { nameCs: 'Grafana',        nameEn: 'Grafana',        href: '/tools/grafana',      icon: Activity,    permission: 'system:view', external: true },
+  { nameCs: 'Alerty',         nameEn: 'Alertmanager',   href: '/tools/alertmanager', icon: Bell,        permission: 'system:view', external: true },
+  { nameCs: 'SLO (Pyrra)',    nameEn: 'SLO (Pyrra)',    href: '/tools/pyrra',        icon: Scale,       permission: 'system:view', external: true },
 ]
 
 const sysNav: NavItem[] = [
