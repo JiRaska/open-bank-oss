@@ -324,6 +324,18 @@ fire from *outside* it, so they stay here:
   would be gone. Check the repo setting before promising the protection, not after.
 
 ### CI gates — exercise the failure path before trusting the green
+- **Gates are DECLARED in [`.github/gates/gates.yaml`](.github/gates/gates.yaml), not written as
+  workflow steps.** Add an entry (`id`/`group`/`mode`/`selftest`/`run`) and it runs; there is
+  nothing to edit in `ci.yml`. Run one locally with
+  `python3 .github/scripts/run-gates.py --only <id>`, a whole shard with `--group <g>`, and see
+  the set with `--list`. Two things the manifest fixes that are easy to re-break: `mode:` states
+  advisory-vs-enforced **outright** (inferring it from a step name is how the registration gate
+  once flagged itself, #2450), and `selftest_expect:` states which exit code proves falsifiability
+  — `pass` for a checker's own `--self-test` harness (every one in this repo today), `fail` when
+  the command *is* the known-positive. Guessing that is silent in the safe-looking direction.
+  Shards are wall-time buckets, not a taxonomy — rebalance `group:` when one gets slow, and note
+  that the gate count no longer costs wall time linearly, which is the point (79 serial steps
+  took `ci.yml`'s median 0.7 -> 2.4 min in four weeks on a REQUIRED check every PR pays).
 - **A gate that has only ever passed is unfalsified.** Its failure path is code nobody has run, and
   it fails in ways a green/red signal cannot express. Three independent instances in one week: the
   ADR-0071 governance reporter crashed with a `TypeError` on *every* failure, so it had never once
