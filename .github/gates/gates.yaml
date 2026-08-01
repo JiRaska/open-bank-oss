@@ -25,7 +25,10 @@
 #       python3 .github/scripts/run-gates.py --list
 #       python3 .github/scripts/run-gates.py --group kotlin
 #       python3 .github/scripts/run-gates.py --only domain-purity-gate-hexagonal-invariant
-#       python3 .github/scripts/run-gates.py --selftest-only        # falsify every gate
+#       python3 .github/scripts/run-gates.py --all                  # every gate + its self-test
+#       python3 .github/scripts/run-gates.py --self-test            # falsify the RUNNER itself
+#   (there is no --selftest-only: a gate's self-test always runs immediately before that gate,
+#    so `--all` is what falsifies every gate.)
 #
 # THE CONTRACT — read this before adding an entry
 #   id          stable slug, unique across the file. Used by --only and in the run log.
@@ -249,8 +252,16 @@ gates:
     name: "OIDC client secret wiring (issue #2929, enforced)"
     group: gitops
     mode: enforced
-    run: |
+    # In the `selftest:` field, not folded into `run:`. Chaining them inside `run:` still executes
+    # the harness, but it gives up the two things the field buys: the runner no longer SKIPS the
+    # gate when the self-test verdict is wrong (a gate whose falsification is broken would still
+    # report a verdict), and `selftest_expect` has nothing to attach to. It also stops this
+    # manifest being able to answer "which gates are falsifiable". Default
+    # `selftest_expect: pass`: the command is the checker's own harness, which exits 0 when it has
+    # proved the gate's red is reachable.
+    selftest: |
       python3 .github/scripts/check-oidc-client-secret-wiring.py --selftest
+    run: |
       python3 .github/scripts/check-oidc-client-secret-wiring.py --enforce
 
   - id: gitops-ref-integrity-guard
