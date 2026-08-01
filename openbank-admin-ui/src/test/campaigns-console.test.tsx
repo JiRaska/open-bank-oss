@@ -38,11 +38,19 @@ const DETAIL = {
     { id: 'e1', partyId: '05a02ef1-381c-40e7-b73f-d6855eead42e', state: 'TERMINATED_CONSENT_REVOKED', currentStep: 0 },
     { id: 'e2', partyId: '026289e3-0b80-452a-be01-e69034838549', state: 'ACTIVE', currentStep: 0 },
   ],
-  sends: [
-    { id: 's1', partyId: '05a02ef1-381c-40e7-b73f-d6855eead42e', stepOrder: 1, outcome: 'SENT', occurredAt: '2026-07-31T18:50:09Z' },
-    { id: 's2', partyId: '026289e3-0b80-452a-be01-e69034838549', stepOrder: 1, outcome: 'SUPPRESSED_CONSENT', occurredAt: '2026-07-31T18:50:09Z' },
-  ],
-  sources: { campaign: 'ok', enrolments: 'ok', sends: 'ok' },
+  sends: {
+    items: [
+      { id: 's1', partyId: '05a02ef1-381c-40e7-b73f-d6855eead42e', stepOrder: 1, outcome: 'SENT', occurredAt: '2026-07-31T18:50:09Z' },
+      { id: 's2', partyId: '026289e3-0b80-452a-be01-e69034838549', stepOrder: 1, outcome: 'SUPPRESSED_CONSENT', occurredAt: '2026-07-31T18:50:09Z' },
+    ],
+    total: 2,
+    page: 0,
+    size: 50,
+  },
+  // Counts come from the service, not from the page above — a suppressed headline derived from the
+  // loaded rows understates every campaign larger than one page.
+  sendSummary: { SENT: 1, SUPPRESSED_CONSENT: 1 },
+  sources: { campaign: 'ok', enrolments: 'ok', sends: 'ok', sendSummary: 'ok' },
 }
 
 function Providers({ children }: { children: React.ReactNode }) {
@@ -117,7 +125,12 @@ describe('campaign console', () => {
   }, 15000)
 
   it('a restricted send log is stated, never rendered as "nothing was suppressed"', async () => {
-    const restricted = { ...DETAIL, sends: [], sources: { campaign: 'ok', enrolments: 'ok', sends: 'unauthorized' } }
+    const restricted = {
+      ...DETAIL,
+      sends: { items: [], total: 0, page: 0, size: 50 },
+      sendSummary: {},
+      sources: { campaign: 'ok', enrolments: 'ok', sends: 'unauthorized', sendSummary: 'unauthorized' },
+    }
     vi.stubGlobal('fetch', mockFetch(LIST, restricted))
     render(
       React.createElement(
@@ -131,5 +144,37 @@ describe('campaign console', () => {
     // "Nothing sent yet" for a log the caller may not read would be a lie with the same shape as
     // the truth — the exact misreading this screen exists to prevent.
     expect(screen.queryByText('Nothing sent or attempted yet.')).toBeNull()
+  }, 15000)
+
+  /**
+   * The send log pages, so anything derived from the rows on screen describes the page, not the
+   * campaign. This pins the two numbers that would otherwise silently mean "so far on this page":
+   * the suppressed headline and the suppression breakdown, both of which an operator acts on.
+   *
+   * Falsification: with the previous page-derived implementation the headline reads 1 and the
+   * breakdown reads "1× Consent withdrawn" against the same fixture.
+   */
+  it('headline counts come from the server summary, not from the loaded page', async () => {
+    const bigCampaign = {
+      ...DETAIL,
+      sends: { ...DETAIL.sends, total: 5000 },
+      sendSummary: { SENT: 1000, SUPPRESSED_CONSENT: 4000 },
+    }
+    vi.stubGlobal('fetch', mockFetch(LIST, bigCampaign))
+    render(
+      React.createElement(
+        Providers,
+        null,
+        React.createElement(CampaignDetailPage, { params: Promise.resolve({ id: CAMPAIGN_ID }) }),
+      ),
+    )
+
+    await waitFor(() => expect(screen.getByText('Suppressed sends')).toBeTruthy(), { timeout: 8000 })
+    expect(screen.getByText('4000')).toBeTruthy()
+    expect(screen.getByText(/4000× Consent withdrawn/)).toBeTruthy()
+
+    // And the range states what fraction is on screen: "1–2" alone cannot distinguish the whole
+    // log from the first slice of a much larger one.
+    expect(screen.getByText(/of\s*5,?000/)).toBeTruthy()
   }, 15000)
 })
