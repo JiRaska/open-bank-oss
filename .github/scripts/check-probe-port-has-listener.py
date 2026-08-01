@@ -29,8 +29,10 @@ are not built here):
   * every port named by a `livenessProbe` / `readinessProbe` / `startupProbe`, and
   * every port a `PodMonitor` selecting that workload scrapes
 
-must be opened by the service's own `application.yaml` — `quarkus.http.port`, or
-`quarkus.management.port` when `quarkus.management.enabled` is true.
+must be DECLARED by the service's own `application.yaml` — `quarkus.http.port` or
+`quarkus.management.port`. The check is deliberately about whether the two artifacts name the same
+ports, not about whether Quarkus would bind them: re-deriving the framework's activation rules here
+would just be a second, less accurate copy of them.
 
 Scope is DERIVED: the containers come from the committed manifests and the modules from the tree, so
 a new service is covered the day its component lands. There is no list to keep in step.
@@ -86,16 +88,21 @@ def service_ports(module: str) -> tuple[set[int], list[str]]:
     if isinstance(http_port, int):
         ports.add(http_port)
 
-    management = quarkus.get("management") or {}
-    # Quarkus only binds the management interface when it is explicitly enabled. A `port` with no
-    # `enabled: true` opens nothing — which looks exactly like a correct config at a glance, and is
-    # the shape that made defect #5 invisible in review.
-    if management.get("enabled") is True:
-        mgmt_port = management.get("port")
-        if isinstance(mgmt_port, int):
-            ports.add(mgmt_port)
-    elif management:
-        notes.append(f"{module}: quarkus.management exists but `enabled` is not true — it binds nothing")
+    # Any DECLARED management port counts, with or without an explicit `enabled: true`.
+    #
+    # An earlier version of this gate required `enabled: true` and flagged openbank-customer-edge,
+    # which declares only a port. That was wrong, and it was disproved against the live pod: the
+    # deployed image is built from a commit with no `enabled` key, the pod is 2/2 with zero
+    # restarts, and `/q/health/ready` on 8085 answers UP. Quarkus 3.38 brings the management
+    # interface up without it. Modelling Quarkus's activation rules here would make this gate a
+    # second, worse copy of them — and a gate that is wrong about the framework produces false
+    # positives on correct services, which is how a gate gets ignored.
+    #
+    # Comparing DECLARED ports still catches the defect this exists for: campaign-service had no
+    # `quarkus.management` block at all, so the probed 8085 matched nothing.
+    mgmt_port = (quarkus.get("management") or {}).get("port")
+    if isinstance(mgmt_port, int):
+        ports.add(mgmt_port)
 
     return ports, notes
 
@@ -175,8 +182,8 @@ def main() -> int:
                     failures += 1
                     print(
                         f"::error::{path.relative_to(REPO)}: {module} is probed or scraped on port "
-                        f"{port}, but its application.yaml opens only {sorted(opened)} — nothing "
-                        f"listens there, so the pod never goes ready and liveness restarts it forever.",
+                        f"{port}, but its application.yaml declares only {sorted(opened)} — the manifest and "
+                        f"the service config name different ports, so nothing serves that probe.",
                     )
                     for note in notes:
                         print(f"::error::  {note}")

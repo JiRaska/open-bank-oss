@@ -19,11 +19,6 @@ quarkus:
       proactive: false
 
   management:
-    # `port` alone binds NOTHING — Quarkus requires `enabled: true` to start the management
-    # interface, and the Deployment probes /q/health/{live,ready} on this port. Without this line
-    # the probes hit a closed port, which is defect #5 of the campaign rollout (#2872) in the
-    # public-facing edge service. Every other service in the fleet sets it; this one did not.
-    enabled: true
     port: 8085
 
   # Inbound auth: validate customer JWT from openbank-customers realm (ADR-0065).
