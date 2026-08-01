@@ -1233,6 +1233,20 @@ jobs:
       - name: "EU AI Act inventory drift (ADR-0148 rule #7, enforced)"
         run: bash .github/scripts/check-eu-ai-act.sh
 
+      # ADR-0006 ratchet (#1916). Measured: 36 producer topics, 71 eventType literals, ZERO .avsc,
+      # zero asyncapi.yaml, no openbank-contracts/ directory. The Apicurio registry the ADR calls
+      # for is deployed and running — the runtime half exists, the contract half does not, and every
+      # Kafka event on this platform is raw unversioned JSON.
+      #
+      # Closing that is a multi-PR programme (#1916 sets the order). This does not attempt it. It
+      # freezes the debt: what exists is grandfathered in .github/event-contract-baseline.txt and
+      # nothing NEW joins it — the same baseline-ratchet used for domain purity and detekt. The gap
+      # was growing; two new services added unversioned topics this week alone.
+      #
+      # The baseline is checked in both directions, so a line cannot outlive the debt it records.
+      - name: "event-contract coverage ratchet (ADR-0006, enforced)"
+        run: python3 .github/scripts/check-event-contract-coverage.py
+
       # External public-feed declaration drift (issue #2204).
       #
       # `--offline` on purpose: this is the DRIFT half only — every third-party URL in an
