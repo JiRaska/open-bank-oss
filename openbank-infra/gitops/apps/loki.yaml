@@ -20,8 +20,11 @@
 # this Loki with `trace_id`/`span_id`/`correlationId` lifted into structured
 # metadata.
 #
-# Codified into GitOps (ADR-0027). No root app-of-apps syncs gitops/apps yet, so
-# applied with `kubectl apply` until that is wired (separate follow-up).
+# Codified into GitOps (ADR-0027). The root app-of-apps (`root`, ArgoCD
+# Application over openbank-infra/gitops/apps, prune+selfHeal) syncs this file,
+# so a merge to main IS the deploy. A `kubectl apply` of an UNMERGED change here
+# is reverted within seconds — verified 2026-08-01, three applies in a row
+# reported `configured` and the live object never changed (#3156).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

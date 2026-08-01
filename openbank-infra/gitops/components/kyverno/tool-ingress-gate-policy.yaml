@@ -27,8 +27,10 @@
 # policy first shipped (#3072) that was true in git and FALSE in the cluster, and
 # merging did not close the gap: this policy auto-syncs (`kyverno-policies`
 # watches components/kyverno with prune+selfHeal), while the two declarations
-# live in `gitops/apps/{glitchtip,rum-gateway}.yaml`, which NOTHING syncs — those
-# Application objects reach the cluster only via a manual `kubectl apply`. Both
+# live in `gitops/apps/{glitchtip,rum-gateway}.yaml`, which had not been merged
+# yet. (An earlier revision of this comment said NOTHING syncs that directory.
+# That was wrong — the root app-of-apps does, prune+selfHeal. The ordering hazard
+# was real; the stated cause was not.) Both
 # of those Applications are themselves prune+selfHeal, so Enforce would have
 # rejected ArgoCD's own re-apply of two Ingresses that were correct in git,
 # taking GlitchTip ingest and the RUM gateway to SyncFailed. ADR-0030's SBOM

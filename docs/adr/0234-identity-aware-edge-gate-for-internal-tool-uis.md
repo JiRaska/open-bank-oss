@@ -93,8 +93,10 @@ Four parts:
    Its precondition for Enforce is "every Ingress in the namespace already carries
    one of the two annotations", which is true in git and false in the cluster: the
    policy auto-syncs from `components/kyverno`, while the annotations live in
-   `gitops/apps/{glitchtip,rum-gateway}.yaml`, which nothing syncs — those
-   Application objects reach the cluster only by a manual `kubectl apply`. Both are
+   `gitops/apps/{glitchtip,rum-gateway}.yaml`, which at the time had not been
+   merged. (This paragraph originally said nothing syncs `gitops/apps/`; that was
+   wrong — the root app-of-apps does, with prune and selfHeal. The ordering hazard
+   was real, the stated cause was not.) Both are
    `prune: true, selfHeal: true`, so Enforce would reject ArgoCD's own re-apply of
    two Ingresses that are correct in git and take GlitchTip ingest and the RUM
    gateway to SyncFailed. Verified against the sandbox on 2026-08-01: both live

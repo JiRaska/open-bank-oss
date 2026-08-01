@@ -22,8 +22,9 @@
 # SECRETS: SECRET_KEY + DATABASE_URL come from Vault via ESO
 # (components/external-secrets/es-glitchtip.yaml -> Secret `glitchtip-secrets`).
 # Git holds only the reference. Postgres is external/managed (chart default); the
-# bundled Valkey is a transient cache (no persistence needed). No app-of-apps yet
-# syncs gitops/apps, so this is applied with `kubectl apply` (same as tempo/loki).
+# bundled Valkey is a transient cache (no persistence needed). The root
+# app-of-apps syncs gitops/apps (prune+selfHeal), so a merge to main is the
+# deploy — a hand `kubectl apply` of an unmerged change is reverted (#3156).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
