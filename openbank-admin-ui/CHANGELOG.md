@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.73.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.72.2...admin-ui-v0.73.0) (2026-08-01)
+
+
+### Features
+
+* **admin-ui:** make the campaign console readable by the people who will use it ([#3037](https://github.com/JiRaska/open-bank-oss/issues/3037)) ([b68590e](https://github.com/JiRaska/open-bank-oss/commit/b68590ea4314486bebeb29d6a6a0f14306e23677))
+
 ## [0.72.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.72.1...admin-ui-v0.72.2) (2026-08-01)
 
 
