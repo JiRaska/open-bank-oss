@@ -5,11 +5,14 @@
 package com.openbank.campaign.infrastructure.rest
 
 import com.openbank.campaign.application.usecase.CampaignSendLogQuery
+import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.libs.authz.Authorize
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.Response
 import java.util.UUID
 
@@ -34,5 +37,52 @@ class CampaignSendLogResource(private val query: CampaignSendLogQuery) {
     @GET
     @Path("/{id}/sends")
     @Authorize(action = "campaign.read", resource = "#id")
-    suspend fun sends(@PathParam("id") id: UUID): Response = Response.ok(query.listSends(id)).build()
+    suspend fun sends(
+        @PathParam("id") id: UUID,
+        @QueryParam("outcome") outcome: String?,
+        @QueryParam("page") @DefaultValue("0") page: Int,
+        @QueryParam("size") @DefaultValue("50") size: Int,
+    ): Response {
+        // An unrecognised outcome is a 400, never a silently unfiltered page: answering a filter
+        // the caller did not ask for with every row looks like "no suppressions here".
+        val parsed = outcome?.let {
+            runCatching { SendOutcome.valueOf(it.uppercase()) }.getOrElse { return badOutcome(it) }
+        }
+        val result = query.listSends(id, parsed, page, size)
+        // The body stays an array. Wrapping it in a page object would change the response type from
+        // `array` to `object` — a breaking contract change, and under ADR-0048 a major bump means
+        // serving every path under a new URL major, which is out of all proportion to adding
+        // pagination. The counts ride in headers, where adding them is additive.
+        return Response.ok(result.items)
+            .header("X-Total-Count", result.total)
+            .header("X-Page", result.page)
+            .header("X-Page-Size", result.size)
+            .build()
+    }
+
+    /**
+     * Counts per outcome for the whole campaign, so the console's headline numbers do not depend on
+     * which page happens to be loaded.
+     */
+    @GET
+    @Path("/{id}/sends/summary")
+    @Authorize(action = "campaign.read", resource = "#id")
+    suspend fun sendSummary(@PathParam("id") id: UUID): Response =
+        Response.ok(query.summary(id).mapKeys { it.key.name }).build()
+
+    /** Per-step funnel for the journey view — every number a SQL aggregate, never a page fold. */
+    @GET
+    @Path("/{id}/journey")
+    @Authorize(action = "campaign.read", resource = "#id")
+    suspend fun journey(@PathParam("id") id: UUID): Response = Response.ok(query.funnel(id)).build()
+
+    private fun badOutcome(cause: Throwable): Response = Response.status(Response.Status.BAD_REQUEST)
+        .entity(
+            mapOf(
+                "error" to "unknown outcome",
+                "allowed" to SendOutcome.entries.map { it.name },
+                "detail" to cause.message,
+            ),
+        )
+        .build()
 }

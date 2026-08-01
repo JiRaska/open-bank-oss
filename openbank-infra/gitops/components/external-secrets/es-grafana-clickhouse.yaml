@@ -1,0 +1,27 @@
+# Grafana → ClickHouse `analytics` user password, projected from OpenBao (KV mount openbank/,
+# path analytics-sink, field CLICKHOUSE_PASSWORD — the SAME secret analytics-sink, admin-ui and
+# ClickHouse itself use, so there is one credential to rotate rather than four). Lets the Grafana
+# ClickHouse datasource read the gold marts for the business dashboard (ADR-0022). Never committed
+# in plaintext.
+#
+# Grafana lives in `observability`, so this ExternalSecret targets that namespace — mirroring
+# es-admin-ui-clickhouse.yaml, which does the same for `admin-ui`.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: grafana-clickhouse
+  namespace: observability
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: grafana-clickhouse
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: password
+      remoteRef:
+        key: analytics-sink
+        property: CLICKHOUSE_PASSWORD

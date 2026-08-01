@@ -14,7 +14,10 @@ data:
       "schemaVersion": 39,
       "version": 1,
       "refresh": "30s",
-      "time": { "from": "now-1h", "to": "now" },
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
       "timepicker": {},
       "templating": {
         "list": [
@@ -33,25 +36,42 @@ data:
       "panels": [
         {
           "id": 1,
-          "title": "Accounts Created (cumulative)",
+          "title": "Accounts Created (selected range)",
           "type": "stat",
-          "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 4,
+            "h": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "fieldConfig": {
             "defaults": {
               "unit": "short",
-              "color": { "mode": "thresholds" },
+              "color": {
+                "mode": "thresholds"
+              },
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  { "color": "blue", "value": null }
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
                 ]
               }
             },
             "overrides": []
           },
           "options": {
-            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
             "orientation": "auto",
             "textMode": "auto",
             "colorMode": "background",
@@ -59,34 +79,52 @@ data:
           },
           "targets": [
             {
-              "expr": "sum(openbank_accounts_created_total)",
+              "expr": "sum(increase(openbank_accounts_created_total[$__range]))",
               "legendFormat": "Accounts",
               "refId": "A",
               "instant": true
             }
-          ]
+          ],
+          "description": "Accounts opened within the dashboard's selected time range. NOT a lifetime total — Prometheus keeps 7 days and counters reset on pod restart. For real historical totals use the Business Reporting (warehouse) board, which reads ClickHouse."
         },
         {
           "id": 2,
           "title": "Parties Created",
           "type": "stat",
-          "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": {
+            "x": 4,
+            "y": 0,
+            "w": 4,
+            "h": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "fieldConfig": {
             "defaults": {
               "unit": "short",
-              "color": { "mode": "thresholds" },
+              "color": {
+                "mode": "thresholds"
+              },
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  { "color": "blue", "value": null }
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
                 ]
               }
             },
             "overrides": []
           },
           "options": {
-            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
             "orientation": "auto",
             "textMode": "auto",
             "colorMode": "background",
@@ -94,7 +132,7 @@ data:
           },
           "targets": [
             {
-              "expr": "sum(openbank_parties_created_total)",
+              "expr": "sum(increase(openbank_parties_created_total[$__range]))",
               "legendFormat": "Parties Created",
               "refId": "A",
               "instant": true
@@ -105,23 +143,40 @@ data:
           "id": 3,
           "title": "Parties Verified",
           "type": "stat",
-          "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": {
+            "x": 8,
+            "y": 0,
+            "w": 4,
+            "h": 4
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "fieldConfig": {
             "defaults": {
               "unit": "short",
-              "color": { "mode": "thresholds" },
+              "color": {
+                "mode": "thresholds"
+              },
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
-                  { "color": "green", "value": null }
+                  {
+                    "color": "green",
+                    "value": null
+                  }
                 ]
               }
             },
             "overrides": []
           },
           "options": {
-            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
             "orientation": "auto",
             "textMode": "auto",
             "colorMode": "background",
@@ -129,7 +184,7 @@ data:
           },
           "targets": [
             {
-              "expr": "sum(openbank_parties_verified_total)",
+              "expr": "sum(increase(openbank_parties_verified_total[$__range]))",
               "legendFormat": "Parties Verified",
               "refId": "A",
               "instant": true
@@ -140,64 +195,103 @@ data:
           "id": 4,
           "title": "Party Creation vs Verification Trend",
           "type": "timeseries",
-          "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": {
+            "x": 12,
+            "y": 0,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "fieldConfig": {
             "defaults": {
               "unit": "short",
-              "custom": { "lineWidth": 1, "fillOpacity": 10 }
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] },
-            "tooltip": { "mode": "multi" }
-          },
-          "targets": [
-            {
-              "expr": "sum(openbank_parties_created_total)",
-              "legendFormat": "created",
-              "refId": "A"
-            },
-            {
-              "expr": "sum(openbank_parties_verified_total)",
-              "legendFormat": "verified",
-              "refId": "B"
-            }
-          ]
-        },
-        {
-          "id": 5,
-          "title": "KYC Funnel: Submitted vs Verdicts",
-          "type": "bargauge",
-          "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "color": { "mode": "palette-classic" },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [{ "color": "blue", "value": null }]
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10
               }
             },
             "overrides": []
           },
           "options": {
-            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(openbank_parties_created_total[$__range]))",
+              "legendFormat": "created",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(increase(openbank_parties_verified_total[$__range]))",
+              "legendFormat": "verified",
+              "refId": "B"
+            }
+          ],
+          "description": "Rate of party creation vs verification. Plotted as increase() over the dashboard range, not the raw counter: a Micrometer counter resets on pod restart and is per-replica, so the raw form drew a staircase that fell to zero on every deploy."
+        },
+        {
+          "id": 5,
+          "title": "KYC Funnel: Submitted vs Verdicts",
+          "type": "bargauge",
+          "gridPos": {
+            "x": 0,
+            "y": 8,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
             "orientation": "horizontal",
             "displayMode": "gradient",
             "text": {}
           },
           "targets": [
             {
-              "expr": "sum(openbank_kyc_submissions_total)",
+              "expr": "sum(increase(openbank_kyc_submissions_total[$__range]))",
               "legendFormat": "submitted",
               "refId": "A",
               "instant": true
             },
             {
-              "expr": "sum by (outcome) (openbank_kyc_verdicts_total)",
+              "expr": "sum by (outcome) (increase(openbank_kyc_verdicts_total[$__range]))",
               "legendFormat": "verdict={{outcome}}",
               "refId": "B",
               "instant": true
@@ -208,34 +302,53 @@ data:
           "id": 6,
           "title": "SCA Challenges: Issued vs Resolved by Outcome",
           "type": "bargauge",
-          "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": {
+            "x": 12,
+            "y": 8,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "fieldConfig": {
             "defaults": {
               "unit": "short",
-              "color": { "mode": "palette-classic" },
+              "color": {
+                "mode": "palette-classic"
+              },
               "thresholds": {
                 "mode": "absolute",
-                "steps": [{ "color": "blue", "value": null }]
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
               }
             },
             "overrides": []
           },
           "options": {
-            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
             "orientation": "horizontal",
             "displayMode": "gradient",
             "text": {}
           },
           "targets": [
             {
-              "expr": "sum(openbank_sca_challenges_total)",
+              "expr": "sum(increase(openbank_sca_challenges_total[$__range]))",
               "legendFormat": "issued",
               "refId": "A",
               "instant": true
             },
             {
-              "expr": "sum by (outcome) (openbank_sca_completions_total)",
+              "expr": "sum by (outcome) (increase(openbank_sca_completions_total[$__range]))",
               "legendFormat": "resolved outcome={{outcome}}",
               "refId": "B",
               "instant": true
@@ -246,18 +359,38 @@ data:
           "id": 7,
           "title": "Ledger Postings Rate by Type",
           "type": "timeseries",
-          "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": {
+            "x": 0,
+            "y": 16,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "fieldConfig": {
             "defaults": {
               "unit": "reqps",
-              "custom": { "lineWidth": 1, "fillOpacity": 10 }
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10
+              }
             },
             "overrides": []
           },
           "options": {
-            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] },
-            "tooltip": { "mode": "multi" }
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "mean"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
           },
           "targets": [
             {
@@ -271,31 +404,69 @@ data:
           "id": 8,
           "title": "Sanctions Screening Activity",
           "type": "timeseries",
-          "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": {
+            "x": 12,
+            "y": 16,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "fieldConfig": {
             "defaults": {
               "unit": "reqps",
-              "custom": { "lineWidth": 1, "fillOpacity": 10 }
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10
+              }
             },
             "overrides": [
               {
-                "matcher": { "id": "byName", "options": "hits" },
+                "matcher": {
+                  "id": "byName",
+                  "options": "hits"
+                },
                 "properties": [
-                  { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+                  {
+                    "id": "color",
+                    "value": {
+                      "fixedColor": "red",
+                      "mode": "fixed"
+                    }
+                  }
                 ]
               },
               {
-                "matcher": { "id": "byName", "options": "screenings" },
+                "matcher": {
+                  "id": "byName",
+                  "options": "screenings"
+                },
                 "properties": [
-                  { "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }
+                  {
+                    "id": "color",
+                    "value": {
+                      "fixedColor": "blue",
+                      "mode": "fixed"
+                    }
+                  }
                 ]
               }
             ]
           },
           "options": {
-            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] },
-            "tooltip": { "mode": "multi" }
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "mean"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
           },
           "targets": [
             {

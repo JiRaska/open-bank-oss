@@ -52,7 +52,11 @@ class SctInstResource @Inject constructor(
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
     @Authorize(action = "sctInstPayment.create")
     @Operation(summary = "Submit SCT Inst payment")
-    fun submit(@HeaderParam("Idempotency-Key") idempotencyKey: String?, body: SubmitSctInstRequest): Uni<Response> {
+    fun submit(@HeaderParam("Idempotency-Key") idempotencyKey: String?, body: SubmitSctInstRequest?): Uni<Response> {
+        // A JSON `null` body deserialises to null despite the non-nullable Kotlin type, so the
+        // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
+        // IllegalArgumentException to 400.
+        requireNotNull(body) { "request body is required" }
         val key = idempotencyKey ?: body.idempotencyKey
         val cmd = SubmitSctInstCommand(
             idempotencyKey = key,
@@ -98,8 +102,13 @@ class SctInstResource @Inject constructor(
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
     @Authorize(action = "sctInstPayment.recall", resource = "#paymentId")
     @Operation(summary = "Recall a settled SCT Inst payment")
-    fun recall(@PathParam("paymentId") paymentId: UUID, body: RecallRequest): Uni<Response> =
-        recallUseCase.recall(paymentId, body.reason).map { Response.ok(toResponse(it)).build() }
+    fun recall(@PathParam("paymentId") paymentId: UUID, body: RecallRequest?): Uni<Response> {
+        // A JSON `null` body deserialises to null despite the non-nullable Kotlin type, so the
+        // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
+        // IllegalArgumentException to 400.
+        requireNotNull(body) { "request body is required" }
+        return recallUseCase.recall(paymentId, body.reason).map { Response.ok(toResponse(it)).build() }
+    }
 
     private fun toResponse(p: com.openbank.sepainstant.domain.model.SctInstPayment) = SctInstPaymentResponse(
         paymentId = p.paymentId, status = p.status.name,

@@ -214,11 +214,13 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "protocol": "openid-connect",
-      "rootUrl": "http://localhost:3000",
+      "rootUrl": "https://admin.open-bank.tech/tools/grafana",
       "redirectUris": [
+        "https://admin.open-bank.tech/tools/grafana/login/generic_oauth",
         "http://localhost:3000/login/generic_oauth"
       ],
       "webOrigins": [
+        "https://admin.open-bank.tech",
         "http://localhost:3000"
       ],
       "attributes": {

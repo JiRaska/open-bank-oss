@@ -22,10 +22,17 @@ release version must *not* drag the API version with it.
 ## The release-axis rule in one paragraph
 
 Every module that ships is a **released component iff it has a `version.txt`** (today: 23 services).
-You write a Conventional Commit; you bump nothing by hand. On merge to `main`, release-please opens a
-**Release PR per changed component** proposing the next SemVer (from commit types) and the assembled
-release notes. When **you merge that Release PR**, release-please bumps `version.txt`, writes the
-per-service `CHANGELOG.md`, and cuts the tagged GitHub Release `<component>-v<version>`.
+You write a Conventional Commit; you bump nothing by hand. On merge to `main`, release-please opens
+**one aggregated Release PR** (`chore(main): release main`) holding every component with pending
+changes, each proposing its own next SemVer (from commit types) and its own assembled release notes.
+When **you merge that Release PR**, release-please bumps each `version.txt`, writes each per-service
+`CHANGELOG.md`, and cuts one tagged GitHub Release `<component>-v<version>` per component.
+
+Versioning stays fully per-component — only the *pull request* is shared. It was per-PR until
+2026-08-01 (`separate-pull-requests: true`), which produced 194 release PRs in one week, 26% of every
+PR merged, each carrying the full required-check set. Aggregating also removes a whole conflict class:
+parallel release PRs all edit `.release-please-manifest.json`, and the bot will not rebase a conflict
+another component caused, so they had to be drained by hand.
 
 ## Commit type → release bump (must match [`rules.yaml: commits`](./rules.yaml))
 
@@ -126,8 +133,14 @@ release" — that conflates the two axes ADR-0048 split.
   `released_unit_marker` in `rules.yaml` is `version.txt` — keep that true.
 - **Baseline:** `last-release-sha` pins the point release-please treats as "already released", so the
   first Release PR only contains commits merged *after* Layer B landed.
-- **CI on Release PRs:** the action uses the default `GITHUB_TOKEN`; PRs it opens do not themselves
-  re-trigger other workflows. Per-service CI runs on the feature PRs that feed the release.
+- **CI on Release PRs:** they run the FULL required-check set — 29 checks on #3069, measured
+  2026-08-01. The older claim here ("the action uses the default `GITHUB_TOKEN`; PRs it opens do not
+  themselves re-trigger other workflows") stopped being true when the workflow moved to a GitHub App
+  token for commit signing (#1276): an App token does re-trigger workflows. Since 2026-08-01 the
+  service build is no longer among them — `services-ci.yml`'s PR path treats `version.txt` /
+  `CHANGELOG.md` / the release manifest as inert, exactly as its push path already did, so a bump-only
+  diff builds nothing. Per-service CI still runs on the feature PRs that feed the release, which is
+  where a compile failure would actually come from.
 
 ## Skills
 

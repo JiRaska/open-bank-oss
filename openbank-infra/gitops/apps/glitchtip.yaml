@@ -22,8 +22,9 @@
 # SECRETS: SECRET_KEY + DATABASE_URL come from Vault via ESO
 # (components/external-secrets/es-glitchtip.yaml -> Secret `glitchtip-secrets`).
 # Git holds only the reference. Postgres is external/managed (chart default); the
-# bundled Valkey is a transient cache (no persistence needed). No app-of-apps yet
-# syncs gitops/apps, so this is applied with `kubectl apply` (same as tempo/loki).
+# bundled Valkey is a transient cache (no persistence needed). The root
+# app-of-apps syncs gitops/apps (prune+selfHeal), so a merge to main is the
+# deploy — a hand `kubectl apply` of an unmerged change is reverted (#3156).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -81,14 +82,31 @@ spec:
             className: nginx
             annotations:
               cert-manager.io/cluster-issuer: letsencrypt-prod
+              # ADR-0234: declared exemption from the identity-aware edge gate.
+              # This host carries ONLY machine traffic — a GlitchTip/Sentry SDK
+              # authenticates by DSN and cannot follow a 302 to the console login,
+              # so an auth_request here would break every crash report silently
+              # (the SDK swallows the redirect). The UI is NOT served from this
+              # host; it stays port-forward-only until ADR-0234 phase 2 moves it
+              # to admin.open-bank.tech/tools/glitchtip. Keep the path list below
+              # narrowed to ingest + the two dSYM-upload endpoints — widening it
+              # re-opens the management API on an ungated host, which is exactly
+              # what this annotation waives.
+              openbank.io/ungated-machine-callers: >-
+                SDK event ingest (DSN-authenticated) and sentry-cli dSYM upload
+                (org-token-authenticated); neither can follow a login redirect.
               # ATTACK-SURFACE REDUCTION (ADR-0056): only the event INGEST must be
               # public (devices in the field + the admin-ui operator browser POST
               # crashes here). The web UI, Django /admin/ (a superuser password login)
               # and the management REST API have no business on the internet — they're
               # reached in-cluster via port-forward (like Grafana, ArgoCD, et al.).
-              # So the public ingress allow-lists ONLY the per-project ingest verbs;
-              # everything else 404s at the edge. Mirrors the keycloak-admin-block pattern.
+              # So the public ingress allow-lists ONLY the per-project ingest verbs
+              # plus the debug-symbol upload endpoints; everything else 404s at the
+              # edge. Mirrors the keycloak-admin-block pattern.
               nginx.ingress.kubernetes.io/use-regex: "true"
+              # Debug-symbol chunks. sentry-cli sends ~8 MiB chunks and the default
+              # 1m body limit turned every dSYM upload into an nginx 413.
+              nginx.ingress.kubernetes.io/proxy-body-size: 64m
             hosts:
               - host: glitchtip.open-bank.tech
                 paths:
@@ -96,6 +114,31 @@ spec:
                   # security/minidump). project_id is numeric; /api/0/* (management) and
                   # every UI/admin path are intentionally NOT matched → edge 404.
                   - path: /api/[0-9]+/(store|envelope|security|minidump|unreal)/
+                    pathType: ImplementationSpecific
+                  # dSYM upload, and ONLY dSYM upload, out of the /api/0/ management
+                  # surface. Without these two paths `fastlane beta`'s
+                  # upload_debug_symbols was dead code: chunk-upload answers its GET
+                  # with an ABSOLUTE public URL, so sentry-cli posts the chunks back
+                  # through this ingress no matter how it was invoked — a port-forward
+                  # cannot work around it. Every iOS crash therefore arrived with
+                  # <redacted> frames.
+                  #
+                  # Both endpoints require a GlitchTip org auth token (scopes
+                  # project:read/write/releases + org:read), so this exposes an
+                  # authenticated write path, not an open one — and nothing else under
+                  # /api/0/ (users, teams, settings, the Django admin) becomes
+                  # reachable. Keep these regexes anchored to `chunk-upload` and
+                  # `files/(difs|dsyms)`; widening them re-opens the management API.
+                  #
+                  # The trailing slash is OPTIONAL, and that is the whole point: sentry-cli asks
+                  # GET .../chunk-upload/ (slash) and is answered with a `url` field that has NO
+                  # trailing slash, so it then POSTs the chunks to .../chunk-upload and nginx 404s
+                  # a path that differs from the allowed one by one character. Build 82 and 83
+                  # both died exactly there, after the GET had already succeeded.
+                  - path: /api/0/organizations/[^/]+/chunk-upload/?
+                    pathType: ImplementationSpecific
+                  # …/files/difs/assemble/ shares this prefix, so it matches too.
+                  - path: /api/0/projects/[^/]+/[^/]+/files/(difs|dsyms)/?
                     pathType: ImplementationSpecific
             tls:
               - secretName: glitchtip-tls
