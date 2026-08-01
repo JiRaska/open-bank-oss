@@ -14,6 +14,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
+import java.sql.ResultSet
 import java.util.UUID
 
 /**
@@ -92,21 +93,26 @@ class DelegationExpirationSweepIT {
         }
     }
 
-    private fun statusOf(id: UUID): String? = connect().use { c ->
-        c.prepareStatement("SELECT status FROM delegation_grants WHERE id = ?").use { st ->
-            st.setObject(1, id)
-            st.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+    /** One-row read helper; keeps the callers out of four levels of `use { }`. */
+    private fun <T> queryOne(sql: String, vararg args: Any, read: (ResultSet) -> T): T? {
+        connect().use { connection ->
+            connection.prepareStatement(sql).use { statement ->
+                args.forEachIndexed { index, arg -> statement.setObject(index + 1, arg) }
+                val rs = statement.executeQuery()
+                return if (rs.next()) read(rs) else null
+            }
         }
     }
 
-    private fun outboxCount(id: UUID, eventType: String): Int = connect().use { c ->
-        c.prepareStatement("SELECT COUNT(*) FROM delegation_outbox WHERE aggregate_id = ? AND event_type = ?")
-            .use { st ->
-                st.setObject(1, id)
-                st.setString(2, eventType)
-                st.executeQuery().use { rs -> if (rs.next()) rs.getInt(1) else 0 }
-            }
-    }
+    private fun statusOf(id: UUID): String? =
+        queryOne("SELECT status FROM delegation_grants WHERE id = ?", id) { it.getString(1) }
+
+    private fun outboxCount(id: UUID, eventType: String): Int =
+        queryOne(
+            "SELECT COUNT(*) FROM delegation_outbox WHERE aggregate_id = ? AND event_type = ?",
+            id,
+            eventType,
+        ) { it.getInt(1) } ?: 0
 
     private fun await(ready: () -> Boolean): Boolean {
         val deadline = System.nanoTime() + BUDGET_NANOS

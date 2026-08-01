@@ -65,15 +65,6 @@ class DelegationResource(
     lateinit var identity: SecurityIdentity
 
     /**
-     * The party the customer channel authenticated, stamped by customer-edge on every
-     * customer-scoped upstream call. Absent on an operator/back-office call, which is gated by
-     * role and OPA instead.
-     *
-     * Every party id in a request body or query string is a CLAIM by the caller; this header is
-     * the only identity in the request the caller did not choose. Handlers pass it down so the
-     * use case — not each route — decides whether the claim is allowed.
-     */
-    /**
      * Bank-side actor. NOTE the known limitation: every backend service authenticates on the
      * shared `openbank-services` Keycloak client whose service account carries ROLE_OPERATOR
      * (documented at length in consent_rest_ext.rego), so this predicate alone does not

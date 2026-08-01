@@ -19,6 +19,7 @@ import com.openbank.delegation.application.port.out.OwnershipVerdict
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
 import com.openbank.delegation.application.port.out.ResourceOwnershipClient
 import com.openbank.delegation.application.port.out.ScaChallengeClient
+import com.openbank.delegation.application.port.out.ScaChallengeSnapshot
 import com.openbank.delegation.domain.event.DelegationActivated
 import com.openbank.delegation.domain.event.DelegationDeclined
 import com.openbank.delegation.domain.event.DelegationOffered
@@ -359,24 +360,40 @@ class DelegationService(
         expectedPurpose: String,
         errorPrefix: String,
     ) {
-        val challenge = try {
-            scaChallengeClient.getChallenge(sessionId)
-        } catch (e: NotFoundException) {
-            throw DelegationScaException("$errorPrefix challenge $sessionId not found", e)
-        } catch (e: Exception) {
-            throw DelegationScaException("$errorPrefix challenge $sessionId could not be verified", e)
-        }
+        val challenge = loadChallenge(sessionId, errorPrefix)
+        requireChallengeMatches(challenge, expectedPartyId, expectedPurpose, errorPrefix)
+        spendChallenge(sessionId, expectedPartyId, errorPrefix)
+    }
+
+    @Suppress("TooGenericExceptionCaught") // any failure to reach sca-service must refuse the act
+    private suspend fun loadChallenge(sessionId: UUID, errorPrefix: String): ScaChallengeSnapshot = try {
+        scaChallengeClient.getChallenge(sessionId)
+    } catch (e: NotFoundException) {
+        throw DelegationScaException("$errorPrefix challenge $sessionId not found", e)
+    } catch (e: Exception) {
+        throw DelegationScaException("$errorPrefix challenge $sessionId could not be verified", e)
+    }
+
+    private fun requireChallengeMatches(
+        challenge: ScaChallengeSnapshot,
+        expectedPartyId: UUID,
+        expectedPurpose: String,
+        errorPrefix: String,
+    ) {
         if (challenge.partyId != expectedPartyId || challenge.purpose != expectedPurpose) {
-            throw DelegationScaException("$errorPrefix challenge $sessionId does not match party or purpose")
+            throw DelegationScaException("$errorPrefix challenge ${challenge.id} does not match party or purpose")
         }
         if (challenge.status != "COMPLETED") {
-            throw DelegationScaException("$errorPrefix challenge $sessionId is not completed")
+            throw DelegationScaException("$errorPrefix challenge ${challenge.id} is not completed")
         }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // includes sca-service's 409 for an already-spent challenge
+    private suspend fun spendChallenge(sessionId: UUID, expectedPartyId: UUID, errorPrefix: String) {
         try {
             scaChallengeClient.consumeChallenge(sessionId, expectedPartyId)
         } catch (e: Exception) {
-            // Includes sca-service's 409 for an already-consumed challenge — the replay this
-            // whole path exists to stop.
+            // The 409 is the replay this whole path exists to stop.
             throw DelegationScaException("$errorPrefix challenge $sessionId could not be spent", e)
         }
     }

@@ -4,6 +4,7 @@
 
 package com.openbank.delegation.infrastructure.client
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.delegation.application.port.out.ScaChallengeClient
 import com.openbank.delegation.application.port.out.ScaChallengeSnapshot
 import jakarta.enterprise.context.ApplicationScoped
@@ -19,6 +20,9 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.util.UUID
 
+// sca-service's ScaChallengeResponse carries method/expiresAt/completedAt/consumedAt/attempt
+// counters too; this client only needs four fields and must not break when that DTO grows.
+@JsonIgnoreProperties(ignoreUnknown = true)
 data class ScaChallengeClientResponse(val id: UUID, val partyId: UUID, val purpose: String, val status: String)
 
 /** Mirrors sca-service's ConsumeScaRequest. Only the party is stated: a delegation challenge
