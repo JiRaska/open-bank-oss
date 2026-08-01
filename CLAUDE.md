@@ -469,6 +469,32 @@ fire from *outside* it, so they stay here:
   grep -v '\${'` found the one line that did. Took three attempts on #3024 *after* the bullet
   above was already written, so treat "my grep found it" as a hypothesis until the match shows a
   value the script could not have contained.
+- **An oversized `run:` script makes the WHOLE workflow unparseable — and GitHub says nothing.**
+  Not a size error: the file stops being readable, every push yields a run with ZERO jobs titled
+  after the file PATH, `name:` is never read, and it reads as an ordinary red run. It kills the
+  workflow for everyone, not just the author — #3135 blocked every contributor's deploy until it
+  was reverted (#3139). Ceiling measured by bisecting pushes against GitHub: **20054 chars
+  accepted, 20654 rejected**, per STEP not per file (a 95295-byte control parsed fine while no
+  single step crossed). The first attempt died of PROSE: 3240 characters of added comments took
+  one step from 17414 to 20654; the same logic re-landed at +318 with the reasoning moved into
+  script headers. Nothing here sees this class — PyYAML, a strict duplicate-key loader, actionlint
+  and yamllint were all clean on the very file GitHub refused — so
+  `check-workflow-run-step-size.py` (gate `workflow-run-step-size`) now enforces 19000. Rule:
+  **prose belongs in `.github/scripts/*` headers, never in a `run:` block.**
+- **Validate a workflow against GITHUB, not against a YAML parser — the oracle is free.** On a
+  non-main branch a VALID workflow with `branches: [main]` produces NO run at all; an INVALID one
+  still produces a failed run, because GitHub cannot apply a filter it could not parse. Push the
+  candidate to a throwaway branch and count runs: zero means accepted. Validate the oracle both
+  ways first (a known-bad file MUST produce a run), then bisect with it — that is how the 20054/
+  20654 boundary above was found, in ten pushes, after local tooling had said "clean" three times.
+  Re-run it after any rebase: "it parsed an hour ago on a different base" is a different claim.
+- **`gitleaks` matches the SHAPE `curl -u "$USER:$PASS"`, and it scans the push RANGE, not the
+  tip.** The rule `curl-auth-user` cannot tell a variable reference from a literal, so a NEW
+  occurrence fails the required check even with no secret in it — the identical inline form
+  already in auto-deploy.yml survives only because it predates the scanned diff. Assemble the pair
+  into a variable first. And a fixup commit does NOT clear it: gitleaks reported "2 commits
+  scanned, leaks found: 1" against the already-fixed tip, so the offending commit has to leave the
+  branch history (squash to one commit, force-push with lease, re-sign).
 - **A `concurrency.group` that interpolates a LIST silently stops the job being created once the
   list is big enough — and an absent job cannot honour its own `if:`.** `auto-deploy.yml`'s
   `gitops-pr` keyed its group on `needs.changes.outputs.services` verbatim. A change under
