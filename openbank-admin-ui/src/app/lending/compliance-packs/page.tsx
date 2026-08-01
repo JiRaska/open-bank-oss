@@ -19,7 +19,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSession } from 'next-auth/react'
-import { CheckCircle2, XCircle, Clock, RefreshCw, ShieldCheck, ScrollText, AlertTriangle } from 'lucide-react'
+import { CheckCircle2, Clock, RefreshCw, ShieldCheck, ScrollText, AlertTriangle } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
 
