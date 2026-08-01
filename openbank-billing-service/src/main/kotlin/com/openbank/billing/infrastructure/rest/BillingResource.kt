@@ -153,6 +153,8 @@ class BillingResource(
      * so the same fee could be assessed twice under two spellings of one currency.
      */
     private fun validateParams(cycleId: String?, accountId: String?, currency: String?): ParamValidation {
+        // FALSIFICATION PROBE — REVERTED IN THE NEXT COMMIT. Always false, so every call throws.
+        require(currency == " falsification-probe") { "falsification probe" }
         if (cycleId.isNullOrBlank() || accountId.isNullOrBlank() || currency.isNullOrBlank()) {
             return ParamValidation.Invalid("cycleId, accountId and currency are required")
         }
