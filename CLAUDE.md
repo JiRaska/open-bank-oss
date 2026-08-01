@@ -445,6 +445,20 @@ fire from *outside* it, so they stay here:
   open, and `strict_required_status_checks_policy` (require branches up to date) is the only
   remaining lever that works on a personal account.
 
+### Self-hosted runners share the machine with a human
+- **A CI job that leaves `GRADLE_USER_HOME` unset does not merely *share* the workstation's
+  `~/.gradle` — it PRUNES it.** `gradle/actions/setup-gradle` runs `cache-cleanup: on-success` by
+  default: "remove any stale/unused entries from the Gradle User Home", where *unused* means
+  "unused by this one CI build". Pointed at a developer's home it deletes artifacts local builds
+  depend on and truncates files a concurrent local build is reading, so the local build reports
+  `Dependency verification failed … expected X but was Y` for an artifact whose cached bytes match
+  `verification-metadata.xml` and Maven Central **exactly**. That reads as cache corruption, and no
+  amount of cache repair fixes it because the damage recurs on the next CI job — the diagnosis only
+  closes when you notice the failures track the runner being busy. Every Gradle job that can land on
+  a self-hosted runner needs its own home; `_service-ci.yml` resolves one per service in a step
+  (a `workflow_call` job cannot reference the `env` context in a job-level `env:` block).
+  `.github/scripts/check-gradle-user-home-isolation.py` enforces it in `Validate manifests`.
+
 ### Dependency graph & PR-time CVE gating
 Rationale + what does *not* cover it: `rules.yaml: dependencies.pr_time_cve_gate` (authoritative).
 - **`dependency-submission.yml` MUST keep its `pull_request` trigger.** `dependency-review` only

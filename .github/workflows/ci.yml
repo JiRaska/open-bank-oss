@@ -439,6 +439,21 @@ jobs:
         run: python3 .github/scripts/check-gh-repo-context.py
 
 
+      # The self-hosted Mac runners are also developer workstations, and setup-gradle's
+      # DEFAULT post-job step (`cache-cleanup: on-success`) prunes "unused" entries from
+      # whatever GRADLE_USER_HOME it was given. Pointed at the human's ~/.gradle it deletes
+      # artifacts local builds depend on and truncates files a concurrent local build is
+      # reading — which surfaces as `Dependency verification failed` for artifacts whose
+      # bytes match verification-metadata.xml exactly, i.e. as cache corruption that no
+      # amount of cache repair fixes. Measured 2026-08-01 from the openbank-app runner,
+      # which had five such jobs. _service-ci.yml already resolves a per-service home for
+      # the self-hosted lanes; this gate is what keeps the next Gradle job from forgetting.
+      - name: "Gradle home isolation self-test"
+        run: python3 .github/scripts/check-gradle-user-home-isolation.py --self-test
+      - name: "Gradle home isolation on self-hosted runners (enforced)"
+        run: python3 .github/scripts/check-gradle-user-home-isolation.py
+
+
       # issue #2255. docs/runbooks/svc-*.md are GENERATED from governance.yaml + the gitops
       # manifests, and nothing checked them, so 25 of 30 had silently gone stale: they told
       # an on-call engineer "DR is not achievable today — no backup configured" for services
