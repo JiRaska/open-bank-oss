@@ -56,9 +56,15 @@ jobs:
           # (and Trivy on every PR) still cover them.
           # Per LANGUAGE, because the analysis is per language: a PR that changes only
           # .ts has nothing for the java-kotlin leg to look at, and vice versa.
-          JAVA_RE='(\.(java|kt|kts)$|(^|/)(build|settings)\.gradle|gradle/|(^|/)Dockerfile)'
+          # No Dockerfile here: the java-kotlin extractor cannot read one, so a
+          # Dockerfile-only PR could only ever start a leg with nothing to trace. That is
+          # no longer RED — #3103's fallback forces a real recompile rather than
+          # finalising an empty database — but it is now the expensive shape instead: a
+          # ~30-module `--rerun-tasks` rebuild, 25-30 min, to analyse a diff containing no
+          # Java. Dockerfile stays in the SBOM regex below, which is a separate question
+          # (a base-image bump genuinely does change the dependency graph).
+          JAVA_RE='(\.(java|kt|kts)$|(^|/)(build|settings)\.gradle|gradle/)'
           JS_RE='(\.(js|jsx|ts|tsx|mjs|cjs)$|(^|/)package(-lock)?\.json$)'
-          CODE_RE="($JAVA_RE|$JS_RE)"
           # NOTE: .github/workflows/ is deliberately NOT in either pattern. A workflow-only
           # PR changes no analysable source, so every compile resolves from cache, CodeQL
           # traces nothing, and `analyze` dies with "could not process any code written in
