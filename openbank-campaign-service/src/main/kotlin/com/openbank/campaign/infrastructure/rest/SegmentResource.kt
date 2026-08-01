@@ -10,6 +10,8 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
+import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 
 /**
@@ -20,6 +22,7 @@ import jakarta.ws.rs.core.Response
  * A new segment is a pull request against `SegmentCatalog`.
  */
 @Path("/api/v1/segments")
+@Produces(MediaType.APPLICATION_JSON)
 @ApplicationScoped
 class SegmentResource(private val query: SegmentQuery) {
 
@@ -40,7 +43,11 @@ class SegmentResource(private val query: SegmentQuery) {
     suspend fun preview(@PathParam("name") name: String, @PathParam("version") version: Int): Response =
         query.preview(name, version)
             ?.let { Response.ok(it).build() }
+            // The requested name is deliberately NOT echoed back. Reflecting a caller-supplied
+            // value into a response body is the reflected-XSS shape the moment anything renders it
+            // as markup (CodeQL java/xss, high), and it buys nothing: the caller already knows what
+            // it asked for. The parameters stay in the request, which is where the evidence is.
             ?: Response.status(Response.Status.NOT_FOUND)
-                .entity(mapOf("error" to "unknown segment $name@$version"))
+                .entity(mapOf("error" to "unknown segment"))
                 .build()
 }
