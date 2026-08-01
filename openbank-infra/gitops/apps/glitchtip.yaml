@@ -129,10 +129,16 @@ spec:
                   # /api/0/ (users, teams, settings, the Django admin) becomes
                   # reachable. Keep these regexes anchored to `chunk-upload` and
                   # `files/(difs|dsyms)`; widening them re-opens the management API.
-                  - path: /api/0/organizations/[^/]+/chunk-upload/
+                  #
+                  # The trailing slash is OPTIONAL, and that is the whole point: sentry-cli asks
+                  # GET .../chunk-upload/ (slash) and is answered with a `url` field that has NO
+                  # trailing slash, so it then POSTs the chunks to .../chunk-upload and nginx 404s
+                  # a path that differs from the allowed one by one character. Build 82 and 83
+                  # both died exactly there, after the GET had already succeeded.
+                  - path: /api/0/organizations/[^/]+/chunk-upload/?
                     pathType: ImplementationSpecific
                   # …/files/difs/assemble/ shares this prefix, so it matches too.
-                  - path: /api/0/projects/[^/]+/[^/]+/files/(difs|dsyms)/
+                  - path: /api/0/projects/[^/]+/[^/]+/files/(difs|dsyms)/?
                     pathType: ImplementationSpecific
             tls:
               - secretName: glitchtip-tls
