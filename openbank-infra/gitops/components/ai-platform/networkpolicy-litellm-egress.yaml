@@ -38,3 +38,21 @@ spec:
       ports:
         - protocol: TCP
           port: 443
+    # Its own Postgres (CNPG litellm-db, #3065). MISSING THIS CRASHLOOPED THE GATEWAY: #3065 gave
+    # LiteLLM a DATABASE_URL — the prerequisite for virtual keys and for spend counters that survive
+    # a restart — but this policy is Egress-DENY-by-default for the litellm pod, and 5432 was not on
+    # it. Prisma could not reach the database, so startup failed with "Not connected to the query
+    # engine" and the new ReplicaSet sat in CrashLoopBackOff for 12h / 180 restarts while the old one
+    # kept serving. Nothing went red: the Deployment was simply stuck, the Service still answered
+    # from the old pod, and ArgoCD reported Synced.
+    #
+    # Scoped to the CNPG pods of THIS cluster by label, not to the whole namespace — the choke point
+    # ADR-0175 §4 establishes is about what may leave the cluster, and a same-namespace database
+    # edge does not widen that, but there is no reason to grant more than the one peer it needs.
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: litellm-db
+      ports:
+        - protocol: TCP
+          port: 5432
