@@ -35,7 +35,6 @@ class WithholdingRemittanceResource(private val remitUseCase: RemitWithholdingUs
     fun assemble(@QueryParam("year") year: Int, @QueryParam("month") month: Int): Uni<Response> =
         remitUseCase.assembleRemittance(year, month)
             .map { Response.status(201).entity(it).build() }
-            .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
 
     @GET
     @Authorize(action = "interest.list", resource = "")

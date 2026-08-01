@@ -21,10 +21,19 @@
 #   knows a gate exists.
 #
 # WHAT IT CHECKS
-#   For every workflow step that runs a governance checker (`check-*.py|sh`, `run-evals.py`) AND is
-#   advisory — either `continue-on-error: true`, or "advisory" in the step name — the script it runs
-#   must be named as some rules.yaml rule's `ci_producer:`, and that rule must carry both
+#   For every advisory governance gate — whether declared in .github/gates/gates.yaml or still
+#   living as a workflow step — the checker it runs (`check-*.py|sh`, `run-evals.py`) must be named
+#   as some rules.yaml rule's `ci_producer:`, and that rule must carry both
 #   `enforced: advisory|planned` and a `target_enforce_date`.
+#
+#   TWO SOURCES, deliberately. Most gates now live in .github/gates/gates.yaml, where `mode:` says
+#   advisory-or-enforced OUTRIGHT — no name heuristic, no `continue-on-error` inference. Workflow
+#   steps are still scanned because gates exist outside the manifest (opa-policy.yml, fleet-lint.yml,
+#   the pact workflows). Dropping the workflow scan when the manifest landed would have quietly
+#   narrowed this gate; keeping only the workflow scan would have quietly emptied it, since the 79
+#   steps it used to read moved into the manifest in the same PR. `--expect-manifest` (used in CI)
+#   fails if the manifest yields nothing, so "the manifest moved again" cannot read as "no advisory
+#   gates exist".
 #
 #   Both halves of "advisory" are covered on purpose. `continue-on-error` is the obvious one, but
 #   most advisory gates here are advisory INSIDE the script — it prints ::warning and exits 0 unless
@@ -50,6 +59,7 @@ except ImportError:
     sys.exit(2)
 
 WORKFLOWS = ".github/workflows/*.yml"
+MANIFEST = ".github/gates/gates.yaml"
 RULES = "openbank-libs/governance/rules.yaml"
 
 CHECKER_RE = re.compile(r"((?:\.github|openbank-infra)/scripts/(?:check|run)-[a-z0-9-]+\.(?:py|sh))")
@@ -123,9 +133,36 @@ def advisory_steps(root: pathlib.Path, errors):
                     yield wf.name, job_name, name, script
 
 
+def advisory_manifest_gates(root: pathlib.Path, errors):
+    """Yield (source, group, gate-name, script) for advisory gates in .github/gates/gates.yaml.
+
+    No heuristic here: the manifest states `mode: advisory` outright, which is the whole reason
+    the gates were moved into it. The step-name matching below exists only for the gates that
+    still live in workflows.
+    """
+    f = root / MANIFEST
+    if not f.is_file():
+        return
+    try:
+        doc = yaml.safe_load(f.read_text()) or {}
+    except yaml.YAMLError as e:
+        errors.append(f"{MANIFEST} — not valid YAML: {e}")
+        return
+    for gate in doc.get("gates") or []:
+        if gate.get("mode") != "advisory":
+            continue
+        for script in CHECKER_RE.findall(str(gate.get("run") or "")):
+            yield MANIFEST, gate.get("group", "?"), gate.get("id", "?"), script
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".")
+    ap.add_argument(
+        "--expect-manifest",
+        action="store_true",
+        help="fail if .github/gates/gates.yaml contributes no advisory gate (see header)",
+    )
     args = ap.parse_args()
     root = pathlib.Path(args.root).resolve()
 
@@ -133,7 +170,15 @@ def main() -> int:
     producers = rules_by_producer(root, errors)
     checked = 0
 
-    for wf, job, name, script in advisory_steps(root, errors):
+    from_manifest = list(advisory_manifest_gates(root, errors))
+    if args.expect_manifest and not from_manifest:
+        errors.append(
+            f"{MANIFEST} contributed 0 advisory gates. Either every gate really is enforced now "
+            f"(then drop --expect-manifest in ci.yml, in the same commit), or this script has "
+            f"stopped reading the manifest and is about to report a green over nothing.",
+        )
+
+    for wf, job, name, script in list(from_manifest) + list(advisory_steps(root, errors)):
         checked += 1
         where = f"{wf} :: {job} :: {name or script}"
         if script not in producers:
@@ -167,8 +212,10 @@ def main() -> int:
         return 1
 
     print(
-        f"advisory-gate registration: {checked} advisory governance gate(s) checked against "
-        f"{len(producers)} rules.yaml ci_producer entr(ies); all registered with a deadline.",
+        f"advisory-gate registration: {checked} advisory governance gate(s) checked "
+        f"({len(from_manifest)} from {MANIFEST}, {checked - len(from_manifest)} from workflow "
+        f"steps) against {len(producers)} rules.yaml ci_producer entr(ies); all registered with "
+        f"a deadline.",
     )
     return 0
 

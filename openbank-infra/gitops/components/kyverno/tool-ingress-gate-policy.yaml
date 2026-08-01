@@ -22,34 +22,35 @@
 #
 # Scope is `observability` only, and CREATE/UPDATE only.
 #
-# WHY Audit AND NOT Enforce, TODAY. The precondition for Enforce is "every
-# Ingress in this namespace already carries one of the two annotations". That is
-# true in git as of this PR and FALSE in the cluster, and the gap does not close
-# on merge:
+# ENFORCE, AND WHY IT WAS NOT ENFORCE ON DAY ONE. The precondition is "every
+# Ingress in this namespace already carries one of the two annotations". When the
+# policy first shipped (#3072) that was true in git and FALSE in the cluster, and
+# merging did not close the gap: this policy auto-syncs (`kyverno-policies`
+# watches components/kyverno with prune+selfHeal), while the two declarations
+# live in `gitops/apps/{glitchtip,rum-gateway}.yaml`, which NOTHING syncs — those
+# Application objects reach the cluster only via a manual `kubectl apply`. Both
+# of those Applications are themselves prune+selfHeal, so Enforce would have
+# rejected ArgoCD's own re-apply of two Ingresses that were correct in git,
+# taking GlitchTip ingest and the RUM gateway to SyncFailed. ADR-0030's SBOM
+# policy went Audit→Enforce on exactly that shape and killed five workloads for
+# four days (#1197).
 #
-#   - this policy auto-syncs (the `kyverno-policies` ArgoCD Application watches
-#     components/kyverno with prune+selfHeal), so it lands minutes after merge;
-#   - the two annotations it would look for live in `gitops/apps/glitchtip.yaml`
-#     and `gitops/apps/rum-gateway.yaml`, which NOTHING syncs — those Application
-#     objects reach the cluster only via a manual `kubectl apply`;
-#   - both of those Applications are themselves prune+selfHeal, so ArgoCD keeps
-#     re-applying their rendered Ingress.
+# The precondition is now met — measured 2026-08-01 after applying both
+# Application manifests, not assumed:
 #
-# Enforce would therefore reject ArgoCD's own re-apply of two Ingresses that are
-# correct in git, taking GlitchTip ingest and the RUM gateway to SyncFailed until
-# a human happened to run the apply. Verified 2026-08-01 against the sandbox:
-# both live Ingresses carry NEITHER annotation. That is a false precondition, and
-# this repo has already paid for one — ADR-0030's SBOM policy went Audit→Enforce
-# on exactly this shape and killed five workloads for four days (#1197).
+#   NAME          GATE     DECLARED
+#   glitchtip     <none>   SDK event ingest (DSN-authenticated) and sentry-cli …
+#   rum-gateway   <none>   Mobile OTLP/HTTP export from SDKs in the field; …
 #
-# FLIP CONDITION, checkable in one command — when this returns two annotated
-# rows, change validationFailureAction to Enforce:
+# Re-check it the same way before touching this file again:
 #
 #   kubectl -n observability get ingress -o custom-columns=\
-#   'NAME:.metadata.name,DECLARED:.metadata.annotations.openbank\.io/ungated-machine-callers'
+#   'NAME:.metadata.name,GATE:.metadata.annotations.nginx\.ingress\.kubernetes\.io/auth-url,\
+#   DECLARED:.metadata.annotations.openbank\.io/ungated-machine-callers'
 #
-# Audit still records a policy report for every violation, so a regression is
-# visible rather than silent — it just does not reject. Tracked as a follow-up.
+# Every row must have a non-empty GATE or DECLARED. The generalizable rule: an
+# admission policy's precondition lives in the CLUSTER, not in the repo, so
+# reading it out of git is reading the wrong copy.
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -68,10 +69,7 @@ metadata:
       (openbank.io/ungated-machine-callers). Prevents a Helm values edit or a
       chart-default change from silently publishing an internal tool UI.
 spec:
-  # Audit, not Enforce — see the flip condition in the header. Not a permanent
-  # advisory: the condition is one command, and it is met by applying the two
-  # gitops/apps manifests this PR already changed.
-  validationFailureAction: Audit
+  validationFailureAction: Enforce
   background: false
   rules:
     - name: gated-or-declared

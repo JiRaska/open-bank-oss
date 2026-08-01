@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/v0.7.0...v0.7.1) (2026-08-01)
+
+
+### Bug Fixes
+
+* **campaign:** activate answered 415 to every caller that sent no body ([#3137](https://github.com/JiRaska/open-bank-oss/issues/3137)) ([3abc53e](https://github.com/JiRaska/open-bank-oss/commit/3abc53e84e3f6b732f9fa228e2be6ff79c13da19))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/v0.6.0...v0.7.0) (2026-08-01)
 
 

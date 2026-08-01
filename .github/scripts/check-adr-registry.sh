@@ -335,28 +335,51 @@ done
 # ADR-0132/ADR-0128 defect class (see WHY THIS EXISTS #4) mechanically instead of
 # relying on the next manual audit to find it. Deliberately repo-wide, not just
 # docs/adr/, since that's exactly where both real-world instances were found.
-existing_numbers=$(
-  for f in "${adrs[@]}"; do
-    basename "$f" | sed -E 's/^([0-9]+)-.*/\1/'
-  done
-)
-while IFS=: read -r file num; do
+#
+# Set membership via `comm`, NOT a nested loop. The obvious shape — for each reference,
+# walk the list of ADR numbers — is O(references x ADRs), and this repo has 20 636
+# references against 226 ADRs: ~4.7M bash iterations, measured at 71 s of CPU and the
+# single largest cost in the whole gate job. `git grep` itself takes 1.2 s; all of the
+# rest was this loop.
+#
+# NOT an associative array (`declare -A`), which is the reflex fix and is WRONG here:
+# macOS ships bash 3.2, where `declare -A` fails with "invalid option" and the assignment
+# silently degrades to a sparse INDEXED array. That happens to give the right answer for
+# these particular keys, so it would have looked fixed and measured fast while resting on
+# an error message — and this script runs on the mixed macOS/Linux pool. `comm` is POSIX.
+#
+# Plain string comparison is sound because both sides are exactly four digits by
+# construction: the reference regex is `ADR-[0-9]{4}` and every filename prefix in
+# docs/adr/ is 4-digit (asserted below, so a 5-digit ADR-10000 does not silently make
+# every reference look dangling).
+_adr_tmp=$(mktemp -d)
+trap 'rm -rf "$_adr_tmp"' EXIT
+
+for f in "${adrs[@]}"; do
+  basename "$f"
+done | sed -E 's/^([0-9]+)-.*/\1/' | sort -u > "$_adr_tmp/existing"
+
+if grep -qvE '^[0-9]{4}$' "$_adr_tmp/existing"; then
+  err "docs/adr/ contains an ADR whose number is not 4 digits — check 5 compares reference numbers to filename numbers as fixed-width strings and would mis-report. Renumber it, or widen both sides together."
+fi
+
+# Exclude docs/adr/* (self-references are already covered by checks 1-4 above) and this
+# script itself (its own comments cite ADR-0128/ADR-0132 as worked examples of the defect
+# class this check exists to catch — not real dangling references). Emitted as num:file so
+# the number is sortable in field 1.
+git grep -InoE 'ADR-[0-9]{4}' -- ':!docs/adr/*' ':!.github/scripts/check-adr-registry.sh' 2>/dev/null \
+  | sed -E 's/^([^:]+):[0-9]+:ADR-([0-9]{4})$/\2:\1/' | sort -u > "$_adr_tmp/refs"
+
+# Dangling = referenced numbers minus existing numbers. Report every citing file for
+# each, so the error names where to go, exactly as the per-reference loop did.
+cut -d: -f1 "$_adr_tmp/refs" | sort -u | comm -23 - "$_adr_tmp/existing" > "$_adr_tmp/dangling"
+while IFS= read -r num; do
   [[ -z "$num" ]] && continue
-  n10=$((10#$num))
-  found=0
-  while IFS= read -r existing; do
-    [[ "$((10#$existing))" -eq "$n10" ]] && { found=1; break; }
-  done <<< "$existing_numbers"
-  if [[ "$found" -eq 0 ]]; then
+  while IFS=: read -r _ file; do
     err "$file: references ADR-$num, which has no docs/adr/$num-*.md file — fix the reference or write the ADR."
-  fi
-done < <(
-  # Exclude docs/adr/* (self-references already covered by checks 1-4 above) and
-  # this script itself (its own comments cite ADR-0128/ADR-0132 as worked examples
-  # of the defect class this check exists to catch — not real dangling references).
-  git grep -InoE 'ADR-[0-9]{4}' -- ':!docs/adr/*' ':!.github/scripts/check-adr-registry.sh' 2>/dev/null \
-    | sed -E 's/^([^:]+):[0-9]+:ADR-([0-9]{4})$/\1:\2/'
-)
+  done < <(grep "^${num}:" "$_adr_tmp/refs")
+done < "$_adr_tmp/dangling"
+
 
 if [[ "$fail" -ne 0 ]]; then
   echo "::error::check-adr-registry: ADR registry has integrity violations (see above)." >&2

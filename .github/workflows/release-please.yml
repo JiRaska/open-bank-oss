@@ -1,9 +1,13 @@
 name: Release Please
 
 # Per-service RELEASE-axis automation (ADR-0029 Layer B, refined by ADR-0048).
-# On every push to main, release-please reads merged Conventional Commits, opens/maintains
-# one Release PR per changed component, and — when a Release PR is merged — bumps version.txt,
-# writes the per-service CHANGELOG, and cuts the tagged GitHub Release <component>-v<version>.
+# On every push to main, release-please reads merged Conventional Commits and opens/maintains
+# ONE aggregated Release PR covering every component with pending changes — when it is merged
+# it bumps each version.txt, writes each per-service CHANGELOG, and cuts one tagged GitHub
+# Release <component>-v<version> per component. Versioning is still entirely per-component;
+# only the PR is shared (release-please-config.json: separate-pull-requests: false). The steps
+# below still loop over "release PRs" plural because the filter is by label/title prefix and
+# must keep working while an old per-component PR is still open.
 #
 # Scope: the RELEASE axis only (version.txt == quarkus.application.version == git tag). The API
 # contract version (openapi.yaml:info.version) is a SEPARATE axis governed by ADR-0048 / oasdiff

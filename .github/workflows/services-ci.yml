@@ -222,7 +222,19 @@ jobs:
             # explicitly (#376); this brings services-ci.yml's PR-path trigger in
             # line with it, plus openbank-libs-testing (auto-deploy correctly omits
             # it — it's test-only, never shipped in a runtime image).
-            FILES_CODE=$(grep -vE '^openbank-libs/governance/' <<< "$FILES" || true)
+            # Release-bookkeeping paths are inert here for the SAME reason the push path
+            # above already treats them as inert (the `RELEVANT` filter): version.txt,
+            # CHANGELOG.md and the release-please manifest cannot alter any module's
+            # compile inputs or any pact. Without this the PR lane fanned out per-module
+            # on `^<module>/`, so every release-please PR built the service it bumps —
+            # 194 of them in the week of 2026-07-25, each a build of a two-line diff whose
+            # post-merge push is then skipped as inert anyway. It also makes the single
+            # aggregated Release PR (separate-pull-requests: false) build NOTHING rather
+            # than full-fleet, which is what makes the aggregation affordable.
+            # The version bump is not unchecked: check-app-version-override.sh holds the
+            # quarkus.application.version invariant and check-admin-ui-version-sync.sh the
+            # package.json one, both unconditionally in the gate job.
+            FILES_CODE=$(grep -vE '^openbank-libs/governance/|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
             if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_CODE"; then
               echo "Decision: code-global change -> build all modules."
               CHANGED="$ALL"

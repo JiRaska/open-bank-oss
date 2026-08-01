@@ -311,6 +311,18 @@ fire from *outside* it, so they stay here:
   (#2984): same inputs, same comparison, same cited defect. Merging it would have put two copies
   of one rule in `Validate manifests`, on every PR, to drift apart later. CI cannot see that;
   only looking at what else landed recently can.
+- **Parallel agents land on the SAME artifact routinely — "what else touched this file today" is
+  as load-bearing a question as "are the checks green".** Three instances on 2026-08-01 alone:
+  `check-probe-port-listener.py` vs `check-probe-port-has-listener.py` (#2984/#3009),
+  `security.yml` (#3103/#3079), `api-fuzz-authenticated.yml` (#3024/#3079). None was visible to
+  CI — #3009 was fully green — and each was found only by comparing CONTENT:
+  `git diff origin/main origin/<branch> -- <file>`, or a shasum of the file on both sides.
+  The three outcomes differ, so measure before deciding: identical content (#3103's `security.yml`
+  matched `main` byte for byte, so merging was a no-op), a true duplicate (#3009, close one),
+  or genuine divergence (#3024 differed by 101 lines — an authoring decision, not a merge).
+  Note the file list `gh pr view --json files` shows is computed against the MERGE-BASE, so after
+  a competing PR squash-merges it still lists the overlap as a diff even when the content already
+  agrees. Read the content, not the diff.
 - **A finding from a CI run goes stale in MINUTES while a parallel agent is active — re-check
   before acting on it.** Three times in one session a ktlint/test failure was already fixed by the
   time the fix was written: the branch had moved (`db25c9ac8` -> `629aff176`,
@@ -324,6 +336,18 @@ fire from *outside* it, so they stay here:
   would be gone. Check the repo setting before promising the protection, not after.
 
 ### CI gates — exercise the failure path before trusting the green
+- **Gates are DECLARED in [`.github/gates/gates.yaml`](.github/gates/gates.yaml), not written as
+  workflow steps.** Add an entry (`id`/`group`/`mode`/`selftest`/`run`) and it runs; there is
+  nothing to edit in `ci.yml`. Run one locally with
+  `python3 .github/scripts/run-gates.py --only <id>`, a whole shard with `--group <g>`, and see
+  the set with `--list`. Two things the manifest fixes that are easy to re-break: `mode:` states
+  advisory-vs-enforced **outright** (inferring it from a step name is how the registration gate
+  once flagged itself, #2450), and `selftest_expect:` states which exit code proves falsifiability
+  — `pass` for a checker's own `--self-test` harness (every one in this repo today), `fail` when
+  the command *is* the known-positive. Guessing that is silent in the safe-looking direction.
+  Shards are wall-time buckets, not a taxonomy — rebalance `group:` when one gets slow, and note
+  that the gate count no longer costs wall time linearly, which is the point (79 serial steps
+  took `ci.yml`'s median 0.7 -> 2.4 min in four weeks on a REQUIRED check every PR pays).
 - **A gate that has only ever passed is unfalsified.** Its failure path is code nobody has run, and
   it fails in ways a green/red signal cannot express. Three independent instances in one week: the
   ADR-0071 governance reporter crashed with a `TypeError` on *every* failure, so it had never once
@@ -382,6 +406,18 @@ fire from *outside* it, so they stay here:
   the annotation, because comments are stripped *by design* (#2450). Generalize: a guard over source
   text needs an explicit rule for code-about-code, and stale prose naming a dead identifier is
   invisible to it forever — grep the prose separately after any vocabulary rename.
+- **The same collision runs the other way, and that direction is silent: a check greps a file for the
+  string it wants, and matches the COMMENT that explains why the string is there.** A false positive
+  announces itself; this one reads as a pass. On #3072 a test asserted `middleware.ts` excludes
+  `/api/gate` with a whole-file `toMatch(/api\/gate/)` — the exclusion is explained by a five-line
+  comment directly above it that names the path three times, so deleting the exclusion itself left
+  the test green. Fix: strip comments, then assert against the **construct**, not the file
+  (`config.matcher`, the annotation value, the specific key) — a whole-file grep can never
+  distinguish the thing from the prose about the thing. Same PR, same class, second instance: an
+  Ingress/allow-list agreement check built its tool set with `[a-z0-9-]+`, so a typo'd
+  `?tool=grafanaX` matched on the `grafana` prefix and it reported agreement with a tool the gate
+  does not know. Both were found only by feeding the assertions the exact broken input they exist to
+  reject — a new assertion that has only ever seen the correct file is unfalsified.
 - **An "advisory" gate is usually advisory INSIDE the script, not via `continue-on-error`** — 11 of
   12 here print `::warning` and exit 0 unless passed `--enforce`. A sweep for `continue-on-error:
   true` therefore finds one and silently reports the other eleven as enforced. Check both forms
