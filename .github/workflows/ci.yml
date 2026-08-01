@@ -1218,6 +1218,19 @@ jobs:
       - name: "EU AI Act inventory drift (ADR-0148 rule #7, enforced)"
         run: bash .github/scripts/check-eu-ai-act.sh
 
+      # The other half of the same claim. check-eu-ai-act proves the GENERATED document matches
+      # ml-systems.yaml; nothing proved ml-systems.yaml matches the CODE. So the day model
+      # inference lands in the credit path, `credit-decisioning-engine` stays deployed:false in a
+      # YAML file, the generator keeps rendering "no high-risk system exists", the drift gate stays
+      # green — and the platform is running an undeclared Annex III(5)(b) system from 2026-08-02.
+      #
+      # The whole EU AI Act position rests on the shipped credit engine being ADR-0213's
+      # deterministic decision tables rather than a model. That is true today and nothing was
+      # keeping it true. ENFORCED for the same reason as the step above: over a generated claim,
+      # advisory means "the document does not match reality" and there is no judgement to exercise.
+      - name: "EU AI Act Annex III inventory vs. code (ADR-0142/0216, enforced)"
+        run: python3 .github/scripts/check-ai-act-high-risk-inventory.py
+
       # External public-feed declaration drift (issue #2204).
       #
       # `--offline` on purpose: this is the DRIFT half only — every third-party URL in an
