@@ -9,7 +9,9 @@ import com.openbank.delegation.application.port.`in`.OfferDelegationCommand
 import com.openbank.delegation.application.port.`in`.RevokeDelegationCommand
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.application.port.out.PartyEligibility
+import com.openbank.delegation.application.port.out.OwnershipVerdict
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
+import com.openbank.delegation.application.port.out.ResourceOwnershipClient
 import com.openbank.delegation.application.port.out.ScaChallengeClient
 import com.openbank.delegation.application.port.out.ScaChallengeSnapshot
 import com.openbank.delegation.domain.model.DelegationCapability
@@ -36,6 +38,7 @@ class DelegationServiceTest {
     private val repository: DelegationRepository = mockk()
     private val scaClient: ScaChallengeClient = mockk()
     private val eligibilityClient: PartyEligibilityClient = mockk()
+    private val ownershipClient: ResourceOwnershipClient = mockk()
     private val clock: Clock = Clock.fixed(Instant.parse("2026-07-31T12:00:00Z"), ZoneOffset.UTC)
 
     private lateinit var service: DelegationService
@@ -47,7 +50,11 @@ class DelegationServiceTest {
 
     @BeforeEach
     fun setUp() {
-        service = DelegationService(repository, scaClient, eligibilityClient, clock)
+        service = DelegationService(repository, scaClient, eligibilityClient, ownershipClient, clock)
+        coEvery { ownershipClient.verifyOwnership(grantor, any(), any()) } returns OwnershipVerdict.OWNED
+        coEvery { scaClient.consumeChallenge(any(), any()) } answers {
+            ScaChallengeSnapshot(firstArg(), secondArg(), "CONSUMED", "COMPLETED")
+        }
     }
 
     private fun scaOk(partyId: UUID, purpose: String) {
@@ -67,6 +74,7 @@ class DelegationServiceTest {
     private fun offerCommand(
         capabilities: Set<DelegationCapability> = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
     ) = OfferDelegationCommand(
+        callerPartyId = grantor,
         grantorPartyId = grantor,
         granteePartyId = grantee,
         resourceType = DelegationResourceType.ACCOUNT,
@@ -141,7 +149,7 @@ class DelegationServiceTest {
         scaOk(grantee, "DELEGATION_ACCEPT")
         coEvery { repository.save(any<DelegationGrant>(), any()) } answers { firstArg() }
 
-        val accepted = service.accept(offered.id, grantee, UUID.randomUUID())
+        val accepted = service.accept(offered.id, grantee, UUID.randomUUID(), grantee)
 
         assertThat(accepted.status).isEqualTo(DelegationStatus.ACTIVE)
     }
@@ -151,7 +159,7 @@ class DelegationServiceTest {
         val offered = offeredGrant()
         coEvery { repository.findById(offered.id) } returns offered
 
-        assertThatThrownBy { runBlocking { service.accept(offered.id, UUID.randomUUID(), UUID.randomUUID()) } }
+        assertThatThrownBy { runBlocking { service.accept(offered.id, UUID.randomUUID(), UUID.randomUUID(), null) } }
             .isInstanceOf(DelegationNotGranteeException::class.java)
     }
 
@@ -211,6 +219,147 @@ class DelegationServiceTest {
             ),
         )
         assertThat(result).isInstanceOf(DelegationCheckResult.Denied::class.java)
+    }
+
+
+    // --- P0: the grantor must own the resource -------------------------------------------------
+    // Without this gate two consenting parties mint payment rights over a THIRD party's account
+    // using nothing but their own valid SCA: the product-service projection keys its guard on
+    // (resource, grantee) and treats the grant row as authority in itself.
+
+    @Test
+    fun `offer refuses a resource the grantor does not own`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+        val strangersAccount = UUID.randomUUID()
+        coEvery {
+            ownershipClient.verifyOwnership(grantor, DelegationResourceType.ACCOUNT, strangersAccount)
+        } returns OwnershipVerdict.NOT_OWNED
+
+        assertThatThrownBy {
+            runBlocking { service.offer(offerCommand().copy(resourceId = strangersAccount)) }
+        }.isInstanceOf(DelegationResourceOwnershipException::class.java)
+            .hasMessageContaining("does not own")
+
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `offer fails closed when ownership cannot be established`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+        coEvery { ownershipClient.verifyOwnership(grantor, any(), any()) } returns OwnershipVerdict.UNVERIFIABLE
+
+        assertThatThrownBy { runBlocking { service.offer(offerCommand()) } }
+            .isInstanceOf(DelegationResourceOwnershipException::class.java)
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `a refused offer does not spend the customer's SCA challenge`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+        coEvery { ownershipClient.verifyOwnership(grantor, any(), any()) } returns OwnershipVerdict.NOT_OWNED
+
+        assertThatThrownBy { runBlocking { service.offer(offerCommand()) } }
+            .isInstanceOf(DelegationResourceOwnershipException::class.java)
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+    }
+
+    // --- P0: the caller may only act as the party the edge authenticated -----------------------
+
+    @Test
+    fun `offer refuses a caller acting as another grantor`(): Unit = runBlocking {
+        assertThatThrownBy {
+            runBlocking { service.offer(offerCommand().copy(callerPartyId = UUID.randomUUID())) }
+        }.isInstanceOf(DelegationCallerMismatchException::class.java)
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `accept refuses a caller acting as another grantee`(): Unit = runBlocking {
+        val offered = offeredGrant()
+        assertThatThrownBy {
+            runBlocking { service.accept(offered.id, grantee, UUID.randomUUID(), UUID.randomUUID()) }
+        }.isInstanceOf(DelegationCallerMismatchException::class.java)
+    }
+
+    @Test
+    fun `listByGrantor refuses to enumerate another party's grants`(): Unit = runBlocking {
+        assertThatThrownBy { runBlocking { service.listByGrantor(grantor, UUID.randomUUID()) } }
+            .isInstanceOf(DelegationCallerMismatchException::class.java)
+    }
+
+    @Test
+    fun `getDelegation hides a grant the caller is not party to, as not-found`(): Unit = runBlocking {
+        val offered = offeredGrant()
+        coEvery { repository.findById(offered.id) } returns offered
+
+        // NOT a 403: a stranger must not be able to use this endpoint as an existence oracle for
+        // other people's sharing relationships.
+        assertThatThrownBy { runBlocking { service.getDelegation(offered.id, UUID.randomUUID()) } }
+            .isInstanceOf(DelegationNotFoundException::class.java)
+
+        assertThat(service.getDelegation(offered.id, grantee).id).isEqualTo(offered.id)
+        assertThat(service.getDelegation(offered.id, grantor).id).isEqualTo(offered.id)
+        assertThat(service.getDelegation(offered.id, null).id).isEqualTo(offered.id)
+    }
+
+    // --- P0: revoke is the grantor's right, not everyone's ------------------------------------
+
+    @Test
+    fun `revoke by a party who is not the grantor is forbidden`(): Unit = runBlocking {
+        val active = offeredGrant().accept(UUID.randomUUID(), now)
+        coEvery { repository.findById(active.id) } returns active
+
+        assertThatThrownBy {
+            runBlocking { service.revoke(RevokeDelegationCommand(active.id, UUID.randomUUID(), "not mine")) }
+        }.isInstanceOf(DelegationNotGrantorException::class.java)
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `the bank may revoke any grant and is recorded as the actor`(): Unit = runBlocking {
+        val active = offeredGrant().accept(UUID.randomUUID(), now)
+        val operatorParty = UUID.randomUUID()
+        coEvery { repository.findById(active.id) } returns active
+        coEvery { repository.save(any<DelegationGrant>(), any()) } answers { firstArg() }
+
+        val revoked = service.revoke(
+            RevokeDelegationCommand(active.id, operatorParty, "AML signal", bankInitiated = true),
+        )
+
+        assertThat(revoked.status).isEqualTo(DelegationStatus.REVOKED)
+        assertThat(revoked.closedBy).isEqualTo(operatorParty)
+    }
+
+    // --- P0: the SCA challenge is spent, so it cannot authorise a second grant ------------------
+
+    @Test
+    fun `offer spends the SCA challenge`(): Unit = runBlocking {
+        val command = offerCommand()
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+        coEvery { repository.save(any<DelegationGrant>(), any()) } answers { firstArg() }
+
+        service.offer(command)
+
+        coVerify(exactly = 1) { scaClient.consumeChallenge(command.grantScaSessionId, grantor) }
+    }
+
+    @Test
+    fun `a replayed SCA challenge cannot mint a second grant`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+        // sca-service answers 409 on the second consume (compare-and-set on consumedAt). Reading
+        // `status == COMPLETED` never expressed this: completion stays true forever, which is why
+        // one ceremony used to authorise unlimited grants of arbitrary scope.
+        coEvery { scaClient.consumeChallenge(any(), any()) } throws IllegalStateException("409 already consumed")
+
+        assertThatThrownBy { runBlocking { service.offer(offerCommand()) } }
+            .isInstanceOf(DelegationScaException::class.java)
+            .hasMessageContaining("could not be spent")
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
     }
 
     private fun offeredGrant(

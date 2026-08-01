@@ -138,13 +138,13 @@ data class DelegationGrant(
      * the grant carries the ceilings, the resource owner counts the spend.
      */
     fun withinLimits(amount: Money): Boolean {
-        if (perTransactionLimit != null) {
-            require(perTransactionLimit.currency == amount.currency) {
-                "amount currency ${amount.currency} does not match per-transaction limit currency"
-            }
-            if (amount.amount.compareTo(perTransactionLimit.amount) > 0) return false
-        }
-        return true
+        if (perTransactionLimit == null) return true
+        // A currency the ceiling is not denominated in is a DENIAL, not an error. This used to
+        // `require`, which threw out of covers() and surfaced as a 500 from POST /check — an
+        // authorization question answered with a crash, where a caller retrying gets the same
+        // crash and no product service can distinguish it from an outage.
+        if (perTransactionLimit.currency != amount.currency) return false
+        return amount.amount.compareTo(perTransactionLimit.amount) <= 0
     }
 
     fun accept(scaSessionId: UUID, now: OffsetDateTime): DelegationGrant {

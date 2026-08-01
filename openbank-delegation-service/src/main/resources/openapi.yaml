@@ -5,7 +5,7 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.0.0
+  version: 1.1.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -19,6 +19,7 @@ paths:
         - name: X-Request-ID
           in: header
           schema: { type: string }
+        - $ref: '#/components/parameters/CustomerPartyId'
       requestBody:
         required: true
         content:
@@ -31,28 +32,40 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '400': { description: Validation or SCA failure }
-        '422': { description: Eligibility gate rejection (ADR-0232 D5) }
+        '403': { description: The authenticated party is not the grantor }
+        '422': { description: Eligibility gate, or the grantor does not own the resource (ADR-0232 D5, threat model T1) }
   /api/v1/delegations/{id}:
     get:
       tags: [Delegations]
       summary: Get delegation grant by ID
       parameters:
         - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
       responses:
         '200':
           description: The grant
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
-        '404': { description: Not found }
+        '404': { description: Not found, or the caller is not a party to this grant }
     delete:
       tags: [Delegations]
       summary: Revoke a grant (grantor or bank)
       parameters:
         - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
         - name: revokedBy
           in: query
-          required: true
+          required: false
+          deprecated: true
+          description: |
+            Honoured ONLY for a bank-initiated revoke (operator/admin session, no
+            X-Customer-Party-Id). On a customer-scoped call the acting party is taken from
+            X-Customer-Party-Id and this parameter is ignored.
+
+            It used to be required and trusted: it both authorised the revoke and became the
+            audit field `closedBy`, so any authenticated caller could revoke anyone's grant and
+            sign it with someone else's party id.
           schema: { type: string, format: uuid }
       requestBody:
         required: true
@@ -65,12 +78,14 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
+        '403': { description: Not the grantor, and not a bank-initiated revoke }
   /api/v1/delegations/grantor/{partyId}:
     get:
       tags: [Delegations]
       summary: List grants offered BY a party (Shared by me)
       parameters:
         - $ref: '#/components/parameters/PartyId'
+        - $ref: '#/components/parameters/CustomerPartyId'
       responses:
         '200':
           description: Grants
@@ -79,12 +94,14 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/DelegationResponse' }
+        '403': { description: The authenticated party may only list its own grants }
   /api/v1/delegations/grantee/{partyId}:
     get:
       tags: [Delegations]
       summary: List grants offered TO a party (Shared with me)
       parameters:
         - $ref: '#/components/parameters/PartyId'
+        - $ref: '#/components/parameters/CustomerPartyId'
       responses:
         '200':
           description: Grants
@@ -93,6 +110,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/DelegationResponse' }
+        '403': { description: The authenticated party may only list its own grants }
   /api/v1/delegations/{id}/accept:
     post:
       tags: [Delegations]
@@ -107,12 +125,14 @@ paths:
           in: query
           required: true
           schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
       responses:
         '200':
           description: Grant activated
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
+        '403': { description: The authenticated party is not the grantee }
   /api/v1/delegations/{id}/decline:
     post:
       tags: [Delegations]
@@ -123,12 +143,14 @@ paths:
           in: query
           required: true
           schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
       responses:
         '200':
           description: Grant declined
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
+        '403': { description: The authenticated party is not the grantee }
   /api/v1/delegations/{id}/renounce:
     post:
       tags: [Delegations]
@@ -139,12 +161,14 @@ paths:
           in: query
           required: true
           schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/CustomerPartyId'
       responses:
         '200':
           description: Grant renounced
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
+        '403': { description: The authenticated party is not the grantee }
   /api/v1/delegations/{id}/suspend:
     post:
       tags: [Delegations]
@@ -162,6 +186,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
+        '403': { description: Bank-initiated only — requires an operator/admin session and no X-Customer-Party-Id }
   /api/v1/delegations/{id}/reinstate:
     post:
       tags: [Delegations]
@@ -174,6 +199,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
+        '403': { description: Bank-initiated only — requires an operator/admin session and no X-Customer-Party-Id }
   /api/v1/delegations/check:
     post:
       tags: [Delegations]
@@ -191,6 +217,18 @@ paths:
               schema: { $ref: '#/components/schemas/DelegationCheckResponse' }
 components:
   parameters:
+    CustomerPartyId:
+      name: X-Customer-Party-Id
+      in: header
+      required: false
+      description: |
+        The party the customer channel authenticated, stamped by customer-edge on every
+        customer-scoped call (the fleet's IDOR-guard convention). When present, the service
+        refuses any operation whose claimed party differs from it — a party id in a body or
+        query string is a claim by the caller, this header is not.
+
+        Absent on an operator/back-office call, which is gated by role and OPA instead.
+      schema: { type: string, format: uuid }
     DelegationId:
       name: id
       in: path

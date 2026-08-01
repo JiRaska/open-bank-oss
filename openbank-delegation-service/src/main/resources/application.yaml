@@ -93,6 +93,17 @@ quarkus:
       url: ${PID_SERVICE_URL:http://localhost:8103}
       connect-timeout: 2000
       read-timeout: 2000
+    # Resource-ownership gate (ADR-0232 threat model T1): the only services that can answer
+    # "does this grantor own that resource?". An outage here refuses new offers — it never
+    # affects an existing grant, which is enforced from each product service's own projection.
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      connect-timeout: 2000
+      read-timeout: 2000
+    card-issuance-service:
+      url: ${CARD_ISSUANCE_SERVICE_URL:http://localhost:8118}
+      connect-timeout: 2000
+      read-timeout: 2000
 
   management:
     enabled: true
@@ -146,6 +157,12 @@ mp:
 openbank:
   delegation:
     idempotency-ttl-seconds: 86400
+    # Config expression, not a literal in the annotation: DelegationExpirationSweepIT shrinks it
+    # so a test can observe a REAL scheduler dispatch. A test that calls the method directly
+    # cannot see the defect this sweep had — the direct call supplies the Vert.x context the
+    # scheduler does not.
+    expiration:
+      cron: "0 7 * * * ?"
   outbox:
     dispatch-enabled: true
   rate-limit:
