@@ -77,7 +77,6 @@ class ClearingResource(
     @Operation(summary = "Submit payment for clearing")
     fun submit(request: SubmitPaymentRequest): Uni<Response> = submitUseCase.submit(request)
         .map { Response.status(Response.Status.CREATED).entity(it).build() }
-        .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
 
     @GET
     @Path("/batches")
@@ -112,7 +111,6 @@ class ClearingResource(
     @Operation(summary = "Settle a clearing batch")
     fun settleBatch(@PathParam("id") id: UUID): Uni<Response> = triggerUseCase.settleBatch(id)
         .map { Response.ok(it).build() }
-        .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
 
     @POST
     @Path("/cycle/trigger")
@@ -122,7 +120,6 @@ class ClearingResource(
     fun triggerCycle(@QueryParam("rail") @DefaultValue("SEPA_SCT") rail: String): Uni<Response> =
         triggerUseCase.triggerClearingCycle(PaymentRail.valueOf(rail))
             .map { Response.ok(it).build() }
-            .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
 
     @GET
     @Path("/positions/{cycleId}")

@@ -13,6 +13,7 @@ import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
 import org.jboss.logging.Logger
 import org.jboss.logging.MDC
+import java.time.DateTimeException
 import java.util.UUID
 
 /**
@@ -47,6 +48,31 @@ class IllegalStateExceptionMapper : ExceptionMapper<IllegalStateException> {
             .entity(apiError(422, "BUSINESS_RULE_VIOLATION", exception.message ?: "Business rule violation"))
             .build()
     }
+}
+
+/**
+ * `DateTimeException` (and its `DateTimeParseException` subclass) → **400**.
+ *
+ * It extends `RuntimeException`, **not** `IllegalArgumentException`, so before this it fell all the
+ * way through to [GenericExceptionMapper] and every unparseable date rendered as a 500. Resources
+ * parse dates straight off the query string —
+ * `date?.let { LocalDate.parse(it) }` — and `?date=` or `?date=null` are non-null strings, so the
+ * `?.let` runs and `parse` throws.
+ *
+ * The first full authenticated-fuzz run hit this on five money-path endpoints (#3038): balance
+ * reconciliation, fx CNB ingest, interest accrue-all / capitalize / accruals. A client sending a bad
+ * date is a client error, and reporting it as 5xx inflates the error budget of those services and
+ * keeps the fuzz lane red forever.
+ *
+ * Safe to map globally, unlike a general "bad input" guess: a `DateTimeException` reaching a
+ * *resource boundary* is always a rejected value, never a server fault. A genuine server-side clock
+ * or zone bug would not surface here as an escaping exception from request handling.
+ */
+@Provider
+class DateTimeExceptionMapper : ExceptionMapper<DateTimeException> {
+    override fun toResponse(exception: DateTimeException): Response = Response.status(400)
+        .entity(apiError(400, ErrorCode.VALIDATION_ERROR.code, exception.message ?: "Invalid date or time value"))
+        .build()
 }
 
 @Provider

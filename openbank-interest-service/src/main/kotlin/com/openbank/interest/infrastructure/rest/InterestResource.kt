@@ -77,9 +77,9 @@ class InterestResource(
                 // No rate for this (account/product, currency): a client/config condition, not a 500.
                 Response.status(422).entity(mapOf("error" to e.message)).build()
             }
-            .onFailure().recoverWithItem { e ->
-                Response.serverError().entity(mapOf("error" to e.message)).build()
-            }
+        // The untyped `.onFailure().recoverWithItem { serverError }` that used to sit here is gone
+        // (#3057): it stamped 500 over failures libs-runtime already maps correctly — an
+        // IllegalArgumentException that should be 400, and now DateTimeException too.
     }
 
     @POST
@@ -103,7 +103,6 @@ class InterestResource(
     ): Uni<Response> =
         capitalizeUseCase.capitalize(accountId, productId, toDate?.let { LocalDate.parse(it) } ?: LocalDate.now(clock))
             .map { Response.ok(it).build() }
-            .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
 
     @GET
     @Path("/accruals/{accountId}")
@@ -186,5 +185,4 @@ class InterestResource(
     @Authorize(action = "interest.delete", resource = "#id")
     fun deactivateRateConfig(@PathParam("id") id: UUID): Uni<Response> = rateConfigUseCase.deactivateConfig(id)
         .map { Response.ok(it).build() }
-        .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
 }
