@@ -16,6 +16,18 @@
 # fuzz traffic and shows up here). Authenticated fuzzing (Keycloak dev-service
 # + token) is the tracked follow-up.
 #
+# SCOPE (2026-08-01, #2365): the money-path services are now in. Before this, the default list
+# was five services of which only consent-service was money-path — so eighteen of the twenty
+# money-path services had never been adversarially tested by anything in this repo, and the
+# `pentest` attestation was blocked on an event that could not happen. This is the cheapest way
+# to unblock it: the harness already worked, it was just pointed elsewhere.
+#
+# Sequential-loop -> MATRIX, because the scope change forces it: 23 services through one 45-minute
+# job (postgres + gradle + quarkusDev boot + fuzz, each) does not fit. One runner per service is
+# also strictly better than the loop was — `fail-fast: false` means a service that cannot boot
+# reports itself instead of consuming the budget of everything after it in the list, which the
+# shared `OVERALL=1` used to hide.
+#
 # Batch lane (openbank-batch): weekly + manual, never a PR gate (ADR-0053).
 name: API fuzz
 
@@ -26,10 +38,9 @@ on:
   workflow_dispatch:
     inputs:
       services:
-        description: "Space-separated service modules to fuzz"
+        description: "Space-separated service modules to fuzz (blank = derived money-path + legacy set)"
         required: false
-        # Fleet: self-contained services (no complex DB state). Authenticated fuzzing (Keycloak) tracked in #852.
-        default: "openbank-dispute-service openbank-party-service openbank-kyc-service openbank-notification-service openbank-consent-service"
+        default: ""
       max_examples:
         description: "Hypothesis examples per endpoint"
         required: false
@@ -43,15 +54,74 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  prepare:
+    name: derive fuzz scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      services: ${{ steps.derive.outputs.services }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Scope is DERIVED from rules.yaml money_path_services plus the legacy set, never hand-kept:
+      # a service that becomes money-path is fuzzed the day rules.yaml says so. A service that
+      # cannot be fuzzed is EXCLUDED OUT LOUD with its reason — a silently shortened list reads as
+      # "covered" when it is not, which is the failure this whole issue is about.
+      - name: Derive service list
+        id: derive
+        env:
+          OVERRIDE: ${{ github.event.inputs.services }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, re, yaml
+
+          override = (os.environ.get("OVERRIDE") or "").split()
+          legacy = [
+              "openbank-dispute-service", "openbank-party-service", "openbank-kyc-service",
+              "openbank-notification-service", "openbank-consent-service",
+          ]
+          money = yaml.safe_load(open("openbank-libs/governance/rules.yaml"))["money_path_services"]
+          candidates = override or list(dict.fromkeys(money + legacy))
+
+          keep, skipped = [], []
+          for svc in candidates:
+              app = pathlib.Path(svc) / "src/main/resources/application.yaml"
+              spec = pathlib.Path(svc) / "src/main/resources/openapi.yaml"
+              if not app.is_file() or not spec.is_file():
+                  skipped.append((svc, "no application.yaml or openapi.yaml")); continue
+              raw = app.read_text()
+              port = re.search(r"^  http:\n(?:.*\n)?\s*port:\s*(\d+)", raw, re.M)
+              db = re.search(r"jdbc:postgresql://[^/]+/([A-Za-z0-9_]+)", raw)
+              if not port:
+                  skipped.append((svc, "no derivable quarkus.http.port")); continue
+              if not db:
+                  skipped.append((svc, "no jdbc:postgresql URL — the harness cannot provision its DB")); continue
+              keep.append(svc)
+
+          for svc, why in skipped:
+              print(f"::warning::api-fuzz: {svc} EXCLUDED — {why}")
+          print(f"fuzzing {len(keep)} service(s); {len(skipped)} excluded")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write("services=" + json.dumps(keep) + "\n")
+          PY
+
   fuzz:
-    name: schemathesis
+    name: "schemathesis (${{ matrix.service }})"
+    needs: prepare
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
-    timeout-minutes: 45
+    timeout-minutes: 30
+    strategy:
+      # One service must not mask another. The old sequential loop shared a single OVERALL=1, so a
+      # boot failure early in the list hid every result after it.
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        service: ${{ fromJson(needs.prepare.outputs.services) }}
     env:
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
       # Throwaway credentials for the job-local postgres container only.
       POSTGRES_PASSWORD: "fuzz-ci-throwaway"
-      SERVICES: ${{ github.event.inputs.services || 'openbank-dispute-service openbank-party-service openbank-kyc-service openbank-notification-service openbank-consent-service' }}
+      SERVICES: ${{ matrix.service }}
       MAX_EXAMPLES: ${{ github.event.inputs.max_examples || '75' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -190,6 +260,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: api-fuzz-reports
+          name: api-fuzz-reports-${{ matrix.service }}
           path: fuzz-reports/
           retention-days: 30
