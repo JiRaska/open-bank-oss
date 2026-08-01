@@ -27,14 +27,13 @@ class RequiredBodyTest {
     data class Payload(val value: String)
 
     /**
-     * PUBLIC on purpose. Kotlin can omit `@NotNull` on parameters of non-public declarations, and
-     * production handlers are public resource classes — a private fixture would be testing a
-     * different shape from the one that runs, which is how a guard passes its own tests and fails
-     * in production.
+     * PUBLIC on purpose: production handlers are public resource classes, and a private fixture
+     * would be testing a different shape from the one that runs — which is how a guard passes its
+     * own tests and fails in production.
      */
     @Suppress("UNUSED_PARAMETER")
     class Handlers {
-        // Non-nullable entity: Kotlin emits @NotNull on the JVM parameter.
+        // Non-nullable entity — the shape the fuzz run found 28 500s behind.
         fun requiredBody(request: Payload) = Unit
 
         // Nullable entity: the handler opted into handling null itself (BillingResource.reverse).
@@ -92,7 +91,7 @@ class RequiredBodyTest {
         fun `a non-nullable body parameter is required`() {
             val p = RequiredBody.entityParameter(method("requiredBody"))!!
 
-            assertThat(RequiredBody.isRequired(p.annotations)).isTrue()
+            assertThat(RequiredBody.isRequired(method("requiredBody"), p)).isTrue()
         }
 
         /**
@@ -104,12 +103,32 @@ class RequiredBodyTest {
         fun `a nullable body parameter is NOT required and keeps its own handling`() {
             val p = RequiredBody.entityParameter(method("optionalBody"))!!
 
-            assertThat(RequiredBody.isRequired(p.annotations)).isFalse()
+            assertThat(RequiredBody.isRequired(method("optionalBody"), p)).isFalse()
         }
 
+        /**
+         * The bug this guard shipped with, kept as a test so nobody reinstates it.
+         *
+         * The Kotlin compiler DOES emit `@org.jetbrains.annotations.NotNull` on a non-nullable JVM
+         * parameter — but that annotation is `@Retention(RetentionPolicy.CLASS)`, so it is absent
+         * from `Parameter.getAnnotations()` at runtime. An annotation-based check therefore returns
+         * false for every handler in the fleet and the guard silently does nothing.
+         */
         @Test
-        fun `no annotations at all means not required — degrade to today's behaviour`() {
-            assertThat(RequiredBody.isRequired(emptyArray())).isFalse()
+        fun `the runtime parameter carries NO nullability annotation — why this reads Kotlin metadata`() {
+            val p = RequiredBody.entityParameter(method("requiredBody"))!!
+
+            assertThat(p.annotations.mapNotNull { it.annotationClass.qualifiedName })
+                .doesNotContain("org.jetbrains.annotations.NotNull")
+            assertThat(RequiredBody.isRequired(method("requiredBody"), p)).isTrue()
+        }
+
+        /** A suspend handler's body must still be seen as required — Continuation offsets the index. */
+        @Test
+        fun `a suspend handler's non-nullable body is required`() {
+            val p = RequiredBody.entityParameter(method("suspendWithBody"))!!
+
+            assertThat(RequiredBody.isRequired(method("suspendWithBody"), p)).isTrue()
         }
     }
 

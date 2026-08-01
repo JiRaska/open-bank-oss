@@ -14,6 +14,8 @@ import jakarta.ws.rs.ext.ReaderInterceptor
 import jakarta.ws.rs.ext.ReaderInterceptorContext
 import java.lang.reflect.Method
 import java.lang.reflect.Parameter
+import kotlin.reflect.KParameter
+import kotlin.reflect.jvm.kotlinFunction
 
 /**
  * Turns a **missing or `null` JSON request body into 400 instead of 500**, fleet-wide.
@@ -36,8 +38,14 @@ import java.lang.reflect.Parameter
  * importantly would be deciding a per-handler question globally.
  *
  * So these guards decide per parameter, from the same source of truth the bug comes from: the
- * Kotlin compiler emits `@org.jetbrains.annotations.NotNull` on a non-nullable JVM parameter and
- * `@Nullable` on a nullable one. A body is required **iff the handler said it was**.
+ * handler's own Kotlin nullability. A body is required **iff the handler said it was**.
+ *
+ * Read via `kotlinFunction`, NOT via `@org.jetbrains.annotations.NotNull`. The compiler does emit
+ * that annotation, but it is declared `@Retention(RetentionPolicy.CLASS)` — it exists in the class
+ * file and is invisible to `Parameter.getAnnotations()` at runtime, so an annotation-based check
+ * can never return true. The first version of this guard was written that way and its own unit
+ * test caught it. `kotlinFunction` reads the `@Metadata` annotation, which is RUNTIME-retained;
+ * `AuthorizeInterceptor` and `FeatureFlagInterceptor` already depend on it fleet-wide.
  *
  * ## Why two classes
  *
@@ -62,7 +70,8 @@ internal object RequiredBody {
 
     val BODY_METHODS = setOf("POST", "PUT", "PATCH")
 
-    private const val NOT_NULL = "org.jetbrains.annotations.NotNull"
+    private const val CONTINUATION = "kotlin.coroutines.Continuation"
+
 
     /**
      * The entity parameter of [method], or null when it declares none.
@@ -81,13 +90,30 @@ internal object RequiredBody {
             it.annotationClass.qualifiedName?.startsWith("jakarta.ws.rs.") == true
         }
         !jaxRsAnnotated &&
-            p.type.name != "kotlin.coroutines.Continuation" &&
+            p.type.name != CONTINUATION &&
             !p.type.name.startsWith("jakarta.ws.rs.core.")
     }
 
-    /** True only when the handler declared the body **non-nullable** — i.e. null is a defect here. */
-    fun isRequired(annotations: Array<out Annotation>): Boolean =
-        annotations.any { it.annotationClass.qualifiedName == NOT_NULL }
+    /**
+     * True only when the handler declared the body **non-nullable** — i.e. null is a defect here.
+     *
+     * A Java handler, or any method whose Kotlin metadata cannot be read, returns false: this guard
+     * only ever acts on an intent it can actually see.
+     *
+     * The index mapping is the subtle part. `KFunction.parameters` excludes the `Continuation` that
+     * every `suspend fun` carries at the JVM level, and includes the instance/extension receivers,
+     * so JVM position and Kotlin position do not line up. Both sides are filtered to value
+     * parameters before pairing.
+     */
+    fun isRequired(method: Method, parameter: Parameter): Boolean {
+        val kFunction = runCatching { method.kotlinFunction }.getOrNull() ?: return false
+        val jvmValueParams = method.parameters.filter { it.type.name != CONTINUATION }
+        val index = jvmValueParams.indexOf(parameter).takeIf { it >= 0 } ?: return false
+        val kParam = kFunction.parameters
+            .filter { it.kind == KParameter.Kind.VALUE }
+            .getOrNull(index) ?: return false
+        return !kParam.type.isMarkedNullable
+    }
 }
 
 /**
@@ -110,7 +136,7 @@ class AbsentBodyRequestFilter : ContainerRequestFilter {
 
         val method = runCatching { resourceInfo.resourceMethod }.getOrNull() ?: return
         val entity = RequiredBody.entityParameter(method) ?: return
-        if (!RequiredBody.isRequired(entity.annotations)) return
+        if (!RequiredBody.isRequired(method, entity)) return
 
         throw BadRequestException("request body is required")
     }
@@ -126,11 +152,20 @@ class AbsentBodyRequestFilter : ContainerRequestFilter {
 @Provider
 class NullBodyReaderInterceptor : ReaderInterceptor {
 
+    @Context
+    lateinit var resourceInfo: ResourceInfo
+
     override fun aroundReadFrom(context: ReaderInterceptorContext): Any? {
         val value = context.proceed()
-        if (value == null && RequiredBody.isRequired(context.annotations)) {
+        if (value != null) return value
+
+        // Same reason as the filter: `context.annotations` cannot answer this, because Kotlin's
+        // nullability annotations are CLASS-retained. Go back to the matched method.
+        val method = runCatching { resourceInfo.resourceMethod }.getOrNull() ?: return null
+        val entity = RequiredBody.entityParameter(method) ?: return null
+        if (RequiredBody.isRequired(method, entity)) {
             throw BadRequestException("request body is required")
         }
-        return value
+        return null
     }
 }
