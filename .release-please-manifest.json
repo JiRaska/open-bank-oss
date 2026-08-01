@@ -27,7 +27,7 @@
   "openbank-fraud-service": "0.10.0",
   "openbank-fx-service": "0.9.2",
   "openbank-governance-auditor": "0.3.1",
-  "openbank-interest-service": "0.14.4",
+  "openbank-interest-service": "0.14.5",
   "openbank-kyc-service": "0.10.5",
   "openbank-ledger-service": "1.17.0",
   "openbank-lending-service": "0.20.0",
