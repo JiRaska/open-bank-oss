@@ -1,0 +1,91 @@
+# Audit hash-chain integrity (ADR-0133).
+#
+# audit-service keeps a SHA-256 chain over every audit entry and can prove it intact, but until
+# AuditChainIntegrityGauge shipped, the service emitted no domain metric at all and the only way to
+# ask was a human calling GET /api/v1/audit/integrity. A broken link — the single event the control
+# exists to detect — was therefore silent.
+#
+# The three rules below are deliberately not one rule. `openbank_audit_chain_intact == 0` catches a
+# BROKEN chain; it cannot catch a chain that is never CHECKED, because a gauge that never ran is
+# absent rather than 0, and `absent()` cannot catch a scheduler that ran once at boot and then
+# stopped, because the gauge keeps reporting its last value for as long as the pod lives. Each of
+# the three is blind to what the other two see. That is the same failure this repo has now paid for
+# repeatedly: the control-liveness sentinel with 0 schedules and 0 findings, five @Scheduled methods
+# that had never once run, and a fleet PodMonitor whose green covered eight unscraped namespaces.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-audit-chain-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.audit.chain
+      interval: 5m
+      rules:
+        # 1. The chain is broken. This is the incident.
+        - alert: AuditChainBroken
+          expr: openbank_audit_chain_intact == 0
+          for: 0m
+          labels:
+            severity: critical
+            team: security
+          annotations:
+            summary: "AUDIT HASH CHAIN BROKEN — recomputation failed"
+            description: >-
+              audit-service recomputed the tamper-evident hash chain (ADR-0133) and a link did not
+              match. An in-place edit, a delete or a re-order of the audit log will do this, and so
+              will a bug in the chaining code — treat it as a potential integrity incident until
+              proven otherwise. The failing entry_id is in the audit-service pod log ("AUDIT CHAIN
+              BROKEN after N verified links"); it is not a label here because a UUID is not a
+              low-cardinality label. Re-verify from the last good anchor with
+              GET /api/v1/audit/integrity?fromEntryId=<id>.
+          # `for: 0m` on purpose: this is not a flapping symptom to wait out. The scheduler already
+          # runs hourly, so a single reading IS a sustained condition, and the gauge deliberately
+          # keeps its previous value when the verification cannot RUN (a DB blip must not page as
+          # tampering).
+
+        # 2. The chain has never been verified. Invisible to rule 1 — an absent series is not 0.
+        - alert: AuditChainNeverVerified
+          expr: absent(openbank_audit_chain_last_verified_timestamp_seconds)
+          for: 2h
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            summary: "Audit chain verification has never reported"
+            description: >-
+              No openbank_audit_chain_* series exists. Either audit-service is not scraped, or
+              openbank.audit.chain-verify.enabled is false, or the scheduler is failing before its
+              first completed run. AuditChainBroken cannot fire in this state and its green means
+              nothing. 2h of grace covers a redeploy plus the hourly cadence.
+
+        # 3. It ran once and stopped. Invisible to BOTH rules above: the gauge still publishes its
+        # last value for the life of the pod, so `intact` reads 1 and `absent()` is false while the
+        # verdict quietly ages.
+        - alert: AuditChainVerificationStale
+          expr: (time() - openbank_audit_chain_last_verified_timestamp_seconds) > 10800
+          for: 15m
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            summary: "Audit chain last verified {{ $value | humanizeDuration }} ago"
+            description: >-
+              The hourly verification has not completed for over 3 hours, so
+              openbank_audit_chain_intact is reporting a stale verdict rather than a current one.
+              Check the audit-service log for "audit chain verification failed to run" (the
+              scheduler leaves previous gauge values in place on a DB error, by design, so this
+              alert is the only thing that surfaces it).
+
+        # Not an alert: pre-V5 rows carry no record_hash and cannot be verified retroactively. They
+        # are recorded so that a chain of ZERO verifiable rows — which would report intact=1 and
+        # look perfect — is visible as what it is.
+        - record: openbank:audit_chain_verifiable_ratio
+          expr: |
+            openbank_audit_chain_entries_checked
+            / clamp_min(
+                openbank_audit_chain_entries_checked + openbank_audit_chain_entries_unchained,
+                1
+              )

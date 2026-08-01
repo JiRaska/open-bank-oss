@@ -2,9 +2,13 @@
 # alertmanager (enabled, with the routing tree configured below). Lean FinOps
 # sizing per ADR-0027: single Prometheus replica, 12h retention, gp3 PVC.
 # serviceMonitorSelectorNilUsesHelmValues=false so app ServiceMonitors are
-# picked up regardless of release labels. Grafana has no Ingress — the edge NLB
-# is IP-locked and Grafana keeps the chart-default admin; reach it via
-# `kubectl -n observability port-forward svc/kube-prometheus-stack-grafana 3000:80`.
+# picked up regardless of release labels. Grafana still has no Ingress of its
+# own: it is reached at https://admin.open-bank.tech/tools/grafana, a sub-path of
+# the console served by the admin-ui `admin-ui-tools` Ingress behind an nginx
+# auth_request gate (ADR-0234), so an unauthenticated request is rejected at the
+# edge and never reaches this workload. `openbank-infra/scripts/grafana-local.sh`
+# stays as break-glass (port-forward, local Grafana admin login — SSO does not
+# complete over it, since root_url now carries the public sub-path).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -36,6 +40,22 @@ spec:
             minAvailable: 1
           alertmanagerSpec:
             replicas: 1
+            # Served as a sub-path of the console behind the identity-aware edge
+            # gate (ADR-0234) — no Ingress of its own, so an unauthenticated
+            # request is still rejected at the edge and never reaches this pod.
+            # Silencing an alert is an operator action that today needs a
+            # port-forward, which is why it effectively never happens.
+            #
+            # routePrefix moves the whole HTTP surface, INCLUDING /api/v2/alerts,
+            # which is how Prometheus delivers alerts. The chart does NOT derive
+            # the Prometheus side from this value — the live CR carries
+            # pathPrefix:"/" hard-coded — so prometheusSpec.alertingEndpoints
+            # below must be set in the same change or every alert silently 404s
+            # on delivery. Same failure shape as the Grafana /metrics scrape in
+            # #3145: nothing goes red, alerts simply stop arriving.
+            routePrefix: /tools/alertmanager
+            # Notification links ("view in Alertmanager") point at the gated URL.
+            externalUrl: https://admin.open-bank.tech/tools/alertmanager
             # Mount the GoAlert integration URL (with its token) from a Secret so the
             # token stays out of git (ADR-0088 D1). Lands at /etc/alertmanager/secrets/
             # goalert-webhook-url/url and is referenced via webhook url_file below.
@@ -141,6 +161,21 @@ spec:
             minAvailable: 1
           prometheusSpec:
             replicas: 1
+            # Alert DELIVERY must follow alertmanagerSpec.routePrefix above. This
+            # list REPLACES the chart's default endpoint rather than amending it,
+            # so every field the default carried has to be repeated — it was
+            # {name: kube-prometheus-stack-alertmanager, namespace: observability,
+            # port: http-web, apiVersion: v2, pathPrefix: "/"} on the live CR, and
+            # only pathPrefix changes here. Verify after deploy with
+            # `curl .../api/v1/alertmanagers` on Prometheus: the discovered URL
+            # must end in /tools/alertmanager/api/v2/alerts and the AM must be
+            # listed as active, NOT merely that the pods are healthy.
+            alertingEndpoints:
+              - name: kube-prometheus-stack-alertmanager
+                namespace: observability
+                port: http-web
+                apiVersion: v2
+                pathPrefix: /tools/alertmanager
             # 12h retention (FinOps per ADR-0027; the 5Gi PVC below is sized for it).
             # GOTCHA (governance-as-code, ADR-0029): for Prometheus >= 3.11 the operator
             # renders this into the Prometheus *config file* (storage.tsdb.retention.time)
@@ -215,19 +250,36 @@ spec:
             repository: grafana
             tag: "13.0.2"
           defaultDashboardsTimezone: browser
-          # INTERNAL ONLY — no ingress by decision (ADR-0056: the admin-UI BFF
-          # is the sole public browser->cluster path; Grafana's pre-auth
-          # surface stays off the internet). Access via
-          # openbank-infra/scripts/grafana-local.sh (port-forward :3000).
+          # STILL NO GRAFANA INGRESS. Grafana is reached at
+          # https://admin.open-bank.tech/tools/grafana, and that path is served by
+          # the admin-ui `admin-ui-tools` Ingress (ADR-0234), which puts an nginx
+          # auth_request against the admin-UI session in front of it. So Grafana's
+          # pre-auth surface remains off the internet exactly as ADR-0056 requires
+          # — an unauthenticated request is rejected at the edge and never reaches
+          # this workload. Do NOT set `ingress.enabled` here; a Kyverno policy
+          # rejects an ungated Ingress in this namespace.
+          #
           # Login is still Keycloak SSO (realm openbank, same users/roles as
-          # admin-ui): public+PKCE client with a localhost redirect — the
-          # browser leg reaches kc.open-bank.tech, the token/userinfo
-          # back-channel goes in-cluster like admin-ui's KEYCLOAK_URL split.
+          # admin-ui): public+PKCE client — the browser leg reaches
+          # kc.open-bank.tech, the token/userinfo back-channel goes in-cluster
+          # like admin-ui's KEYCLOAK_URL split. This is a SECOND, independent
+          # layer: the gate decides whether the request reaches Grafana, Grafana
+          # independently decides who the user is. auth.proxy is deliberately NOT
+          # enabled and the gate forwards no identity headers — a header-trust
+          # setup would make any pod that can reach this Service a Grafana admin.
           # Role mapping: ROLE_ADMIN -> Admin, ROLE_OPERATOR -> Editor,
           # everyone else -> Viewer.
           grafana.ini:
             server:
-              root_url: http://localhost:3000
+              # Grafana has exactly ONE root_url, and it must carry the sub-path or
+              # every asset/redirect it renders points at the wrong place.
+              # Consequence: openbank-infra/scripts/grafana-local.sh can no longer
+              # complete an OIDC login (it redirects here); the port-forward stays
+              # usable as break-glass with a local Grafana admin login.
+              root_url: https://admin.open-bank.tech/tools/grafana
+              # The edge does NOT strip /tools/grafana (no rewrite-target on the
+              # Ingress), so Grafana must serve from the sub-path itself.
+              serve_from_sub_path: true
             auth.generic_oauth:
               enabled: true
               name: OpenBank SSO
@@ -243,6 +295,18 @@ spec:
               name_attribute_path: name
               email_attribute_path: email
               role_attribute_path: contains(realm_access.roles[*], 'ROLE_ADMIN') && 'Admin' || (contains(realm_access.roles[*], 'ROLE_OPERATOR') && 'Editor' || 'Viewer')
+          # serve_from_sub_path makes Grafana 301 every root path to the sub-path,
+          # and it renders that redirect as an ABSOLUTE URL on root_url — so the
+          # chart-default `/metrics` scrape was answered with a redirect out to
+          # https://admin.open-bank.tech/tools/grafana/metrics, which Prometheus
+          # followed to the public edge and got the gate's login redirect instead
+          # of metrics. Grafana's own telemetry therefore stopped at the moment
+          # the sub-path landed, with nothing red anywhere: the ServiceMonitor was
+          # healthy, the target was "up", and it was scraping a login page.
+          # Scrape the sub-path directly so no redirect is involved.
+          serviceMonitor:
+            enabled: true
+            path: /tools/grafana/metrics
           # Sentry-protocol datasource plugin so GlitchTip mobile crashes
           # (ADR-0075) sit on the same pane as backend telemetry (ADR-0082).
           plugins:
@@ -251,6 +315,17 @@ spec:
             # (per-service health as colored hexagons). Latest compatible build
             # resolved by Grafana at startup, like the sentry datasource above.
             - grafana-polystat-panel
+            # ClickHouse datasource for the business warehouse (ADR-0022). The
+            # warehouse has been fed in production for months
+            # (ANALYTICS_SINK_TYPE=clickhouse) and carries a gold layer — daily
+            # event volume, the onboarding funnel, screen feedback — whose own DDL
+            # comment says gold marts are "where Metabase/Superset dashboards
+            # point". No BI tool was ever deployed and Grafana had no ClickHouse
+            # datasource, so the only consumer of the whole warehouse was
+            # admin-ui's customer-360 route. Business reporting ran on Prometheus
+            # instead, which is a 7-day-retention TSDB and cannot answer a
+            # question about last quarter.
+            - grafana-clickhouse-datasource
           # GlitchTip API token, injected from the ESO-managed grafana-glitchtip
           # Secret (components/external-secrets/es-grafana-glitchtip.yaml).
           # optional:true → Grafana stays healthy before the token is in Vault;
@@ -260,6 +335,15 @@ spec:
               secretKeyRef:
                 name: grafana-glitchtip
                 key: token
+                optional: true
+            # ClickHouse `analytics` user password, from the ESO-managed
+            # grafana-clickhouse Secret (components/external-secrets/es-grafana-clickhouse.yaml).
+            # Same optional:true trade as above — Grafana boots before the secret
+            # exists, and only the ClickHouse datasource is unable to query.
+            CLICKHOUSE_PASSWORD:
+              secretKeyRef:
+                name: grafana-clickhouse
+                key: password
                 optional: true
           persistence:
             enabled: false
@@ -354,6 +438,26 @@ spec:
                 orgSlug: openbank
               secureJsonData:
                 authToken: $GLITCHTIP_API_TOKEN
+            # Business warehouse (ADR-0022). NOT part of the trace correlation web
+            # above — this is the analytical plane: months of history at daily
+            # grain, answering "how many accounts did we open last quarter", which
+            # Prometheus structurally cannot (7-day retention, ADR-0088 D3) and
+            # which a counter reset by every pod restart cannot either.
+            - name: ClickHouse
+              type: grafana-clickhouse-datasource
+              uid: clickhouse
+              # HTTP protocol on 8123, matching the single port opened by
+              # components/analytics/clickhouse-grafana-network-policy.yaml. The
+              # native protocol on 9000 stays closed.
+              jsonData:
+                host: clickhouse.analytics.svc
+                port: 8123
+                protocol: http
+                secure: false
+                username: analytics
+                defaultDatabase: openbank_analytics
+              secureJsonData:
+                password: $CLICKHOUSE_PASSWORD
         nodeExporter:
           enabled: true
         # Pin node-exporter straight at the ECR pull-through cache rather than letting

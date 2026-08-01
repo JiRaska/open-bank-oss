@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.6](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.14.5...interest-service-v0.14.6) (2026-08-01)
+
+
+### Bug Fixes
+
+* **api:** stop reporting client errors as 500 — unmapped DateTimeException and catch-all recovers ([#3038](https://github.com/JiRaska/open-bank-oss/issues/3038)) ([#3057](https://github.com/JiRaska/open-bank-oss/issues/3057)) ([fafe119](https://github.com/JiRaska/open-bank-oss/commit/fafe1194c56224c98de40be8f4e9dcba018c2f91))
+
+## [0.14.5](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.14.4...interest-service-v0.14.5) (2026-08-01)
+
+
+### Bug Fixes
+
+* **money-path:** a null JSON body returned 500 on 12 handlers ([#3038](https://github.com/JiRaska/open-bank-oss/issues/3038)) ([#3050](https://github.com/JiRaska/open-bank-oss/issues/3050)) ([7af4d19](https://github.com/JiRaska/open-bank-oss/commit/7af4d19aac4a0d75e221fbc64a1a24196e61ce8f))
+
 ## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.14.3...interest-service-v0.14.4) (2026-07-31)
 
 

@@ -75,6 +75,19 @@ out of it (they are path-scoped, not less important — several are live-inciden
   admission for that image (admin-ui outage, 2026-07-09). Producers must call the shared
   `openbank-infra/scripts/lib/cosign-attest.sh` (which passes `--platform` and hard-fails), never
   hand-roll `trivy`+`cosign attest` again.
+- **An inline `#trivy:ignore:<ID>` comment does NOT suppress a Kubernetes misconfig finding — the
+  only lever is `.trivyignore`, which is repo-wide.** `Trivy config (IaC) scan` in `security.yml`
+  runs `trivy config … --ignorefile .trivyignore openbank-infra`, and on trivy 0.72 the inline form
+  was measured against all three plausible spellings (`KSV-0108`, `AVD-KSV-0108`, `KSV0108`) above
+  the resource: the finding still reports in every case. So there is no narrow, in-place way to
+  accept one resource — a baseline entry silently exempts every *future* occurrence too. When you
+  add one, say so in the comment and pair it with something that counts the occurrences, so the
+  second one has to be justified rather than inheriting the exemption. `AVD-KSV-0108` (the ADR-0234
+  `grafana-tools` ExternalName Service, an in-cluster target the CVE-2020-8554 check cannot
+  distinguish from an external one) is the worked example: `tools-gate.test.ts` asserts it stays the
+  only `type: ExternalName` in gitops. Verify a baseline edit the same way — re-run with the OLD
+  ignorefile and confirm it still exits 1, or you cannot tell your new line from the scan going
+  quiet for some unrelated reason.
 - **Kyverno verifies at ADMISSION, not continuously — a running pod is NOT evidence its image is
   attested.** An unattested image keeps running; it is denied only on the next reschedule (node
   roll, eviction, scale-up) and then can never restart, one pod at a time. So "the fleet is
@@ -120,6 +133,37 @@ out of it (they are path-scoped, not less important — several are live-inciden
   workloads), but the reflex stands: verify with
   `kubectl get netpol -n <ns>` / `grep -rl '<workload>-ingress-allow-list' gitops/components/`,
   never with `ls components/<svc>/`.
+- **An allow-list read as a flat set of namespaces has LOST the port dimension, and the flattened
+  answer is the reassuring one.** A NetworkPolicy is a list of rules, each pairing its own `from`
+  with its own `ports`; the same namespace can appear in one rule and be irrelevant to another.
+  `keycloak-ingress-allow-list` names `observability` — on **TCP:9000**, the metrics port, in a rule
+  of its own, while the `:8080` rule lists ~38 other namespaces and not this one. So
+  `jq '.spec.ingress[].from[]'` says "observability is allowed" and Grafana's OIDC token exchange to
+  `keycloak.iam.svc:8080` times out after 20 s anyway (#3145). Dump `ports` WITH `from`, per rule:
+  `kubectl get netpol X -o json | jq -r '.spec.ingress[] | "PORTS=\((.ports//[])|map("\(.protocol//"TCP"):\(.port)")|join(",")) FROM=\([.from[]?|.namespaceSelector.matchLabels["kubernetes.io/metadata.name"]]|join(","))"'`
+  — and prefer an actual connection over any reading of the YAML: a throwaway pod in the caller's
+  namespace `curl`ing the real host:port settles it in one command, where the manifest cannot.
+- **A workload that reaches another namespace from a HELM SUBCHART's config is invisible to
+  `gen-network-policies.py` — it needs a hand-written policy, and nothing will tell you.** The
+  generator reads env URLs off Deployments under `components/`; Grafana's
+  `auth.generic_oauth.token_url` lives in a `grafana.ini` values block inside
+  `apps/kube-prometheus-stack.yaml`, so that edge was never derived and never existed. Same blind
+  spot already forced `networkpolicy-grafana.yaml` and `networkpolicy-rum-gateway.yaml` to be
+  hand-written; policies are additive, so a separate file beside the generated one is the pattern
+  (never edit the generated file). The trap underneath: this had been broken for as long as the
+  config had existed, because Grafana had no Ingress and its SSO was reachable only by port-forward,
+  which nobody had ever completed end-to-end. **Config that no one has exercised is not "working",
+  it is untested** — routing a tool for the first time is exactly when its long-standing config gets
+  its first real test, so expect to find something.
+- **Moving a workload to a sub-path silently breaks every scrape and probe that still asks for a
+  root path.** Grafana's `serve_from_sub_path` answers `/metrics` with a 301 to the sub-path rendered
+  as an ABSOLUTE URL on `root_url`, so the chart-default ServiceMonitor followed it out to the public
+  edge and hit the identity-aware gate's login redirect (ADR-0234). Nothing went red: the
+  ServiceMonitor was healthy, the target was `up`, and it was scraping a login page — the symptom is
+  a metric that stops arriving, and nothing alerts on that. When a sub-path lands, re-point every
+  ServiceMonitor/Probe/readiness URL at it in the same change, and verify by asking for the two paths
+  and comparing (`/metrics` -> 301, `/tools/<x>/metrics` -> 200), never by checking that the target
+  is still `up`.
 - **The generator derives ingress ports from EVERY container's `containerPorts` — a sidecar port
   that only ever serves loopback must be named into `SIDECAR_LOCAL_ONLY_PORT_NAMES`, or it is
   published to the app's whole caller set.** The OPA PDP sidecar is the case that forced the rule:

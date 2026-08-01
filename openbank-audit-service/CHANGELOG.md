@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.12.0...audit-service-v0.13.0) (2026-08-01)
+
+
+### Features
+
+* **audit:** make a broken hash chain loud instead of silent ([#3049](https://github.com/JiRaska/open-bank-oss/issues/3049)) ([692578c](https://github.com/JiRaska/open-bank-oss/commit/692578c0e4108f88f93cd79d304d0f34f3aad24c))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.11.0...audit-service-v0.12.0) (2026-07-31)
 
 

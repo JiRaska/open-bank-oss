@@ -121,6 +121,39 @@ function gitopsWorkloadNames(): Set<string> {
   return names
 }
 
+
+/**
+ * Namespaces that run an openbank-* Deployment/Rollout, derived from the gitops tree.
+ * Derived, not listed: a second hand-kept list is the drift this guard exists to prevent.
+ */
+function gitopsWorkloadNamespaces(): Set<string> {
+  const namespaces = new Set<string>()
+  for (const file of walkYaml(GITOPS)) {
+    const src = readFileSync(file, 'utf-8')
+    for (const doc of src.split(/^---$/m)) {
+      if (!/^kind:\s*(Deployment|Rollout)\s*$/m.test(doc)) continue
+      const name = doc.match(/^\s{2}name:\s*(\S+)/m)?.[1]
+      const ns = doc.match(/^\s{2}namespace:\s*(\S+)/m)?.[1]
+      if (name?.startsWith('openbank-') || /-service$/.test(name ?? '')) {
+        if (ns) namespaces.add(ns)
+      }
+    }
+  }
+  return namespaces
+}
+
+/**
+ * Namespaces deliberately outside the discovery boundary. Kept tight: each entry is a namespace
+ * whose workloads the console never proxies to.
+ */
+const DISCOVERY_EXEMPT_NAMESPACES = new Set<string>([
+  'admin-ui',      // the console itself
+  'temporal',      // infra, reached through its own status route
+  'messaging',     // Kafka/Strimzi
+  'observability', // Prometheus/Tempo, reached directly
+  'argocd', 'external-secrets', 'vault', 'cnpg-system', 'keda', 'iam',
+])
+
 /** BFF SERVICE_MAP keys, read from the route source. */
 function serviceMapKeys(): string[] {
   const src = readFileSync(BFF_ROUTE, 'utf-8')
@@ -213,6 +246,99 @@ describe('service registry drift guard', () => {
       + `In-cluster the key is looked up verbatim against discovery, so these 404 with `
       + `"Unknown service" and every caller of /api/svc/<key> degrades to "not deployed": `
       + `${bogus.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('every svcUrl() key exists in SERVICE_MAP (no caller pointing at an unknown service)', () => {
+    // The OTHER direction of the check above, and the one that was missing: that guard proves no
+    // SERVICE_MAP key is dead, but nothing proved every CALLER has a key. A page calling
+    // svcUrl('campaign-service', …) with no such key gets "Unknown service" from the proxy and
+    // renders as "not responding" — a deployed, healthy service that looks down. That is exactly
+    // what shipped with the campaign console (#2749): unit tests stubbed `fetch`, so the proxy was
+    // never on the path they exercised.
+    const keys = new Set(serviceMapKeys())
+    const callers: { file: string; key: string }[] = []
+    const walkDir = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap(e => {
+        const full = path.join(dir, e.name)
+        return e.isDirectory() ? walkDir(full) : [full]
+      })
+    for (const file of walkDir(path.join(ADMIN_UI, 'src/app'))) {
+      if (!file.endsWith('.ts') && !file.endsWith('.tsx')) continue
+      for (const m of readFileSync(file, 'utf8').matchAll(/svcUrl\(\s*'([^']+)'/g)) {
+        callers.push({ file: path.relative(ADMIN_UI, file), key: m[1] })
+      }
+    }
+    expect(callers.length, 'no svcUrl() callers found — the matcher has drifted').toBeGreaterThan(0)
+    const unknown = callers.filter(c => !keys.has(c.key))
+    expect(
+      unknown.map(c => `${c.file} → ${c.key}`),
+      'svcUrl() callers naming a key SERVICE_MAP does not define. The proxy answers '
+      + '"Unknown service" and the page degrades to "not responding" on a healthy service.',
+    ).toEqual([])
+  })
+
+  it('every namespace with a gitops workload is discoverable (OPENBANK_NAMESPACES + RoleBinding)', () => {
+    // ADR-0051 makes adding a domain namespace a THREE-step change, two of which live in
+    // admin-ui.yaml: the OPENBANK_NAMESPACES filter and a per-namespace RoleBinding for
+    // admin-ui-discovery. Miss either and discovery cannot see the service, so the console renders
+    // "not responding" against a healthy pod — which is exactly what campaign did (#2749).
+    //
+    // The checklist was already written in a comment. A comment cannot fail; this can.
+    const manifest = readFileSync(
+      path.join(GITOPS, 'components/admin-ui/admin-ui.yaml'), 'utf8',
+    )
+    const listed = new Set(
+      (manifest.match(/name: OPENBANK_NAMESPACES\s*\n\s*value:\s*(.+)/)?.[1] ?? '')
+        .split(',').map(n => n.trim()).filter(Boolean),
+    )
+    const bound = new Set(
+      [...manifest.matchAll(/name: admin-ui-discovery\s*\n\s*namespace:\s*(\S+)/g)].map(m => m[1]),
+    )
+
+    // Namespaces that actually run an openbank service, derived from the gitops tree rather than
+    // from a second hand-kept list — the whole point is that the set cannot drift.
+    const serviceNamespaces = new Set<string>()
+    for (const ns of gitopsWorkloadNamespaces()) serviceNamespaces.add(ns)
+
+    const missing = [...serviceNamespaces]
+      .filter(ns => !DISCOVERY_EXEMPT_NAMESPACES.has(ns))
+      .filter(ns => !listed.has(ns) || !bound.has(ns))
+      .map(ns => `${ns}${listed.has(ns) ? '' : ' (not in OPENBANK_NAMESPACES)'}${bound.has(ns) ? '' : ' (no RoleBinding)'}`)
+
+    expect(
+      missing,
+      'namespaces running an openbank service that admin-ui discovery cannot see. The console '
+      + 'will render "not responding" for every service in them, against healthy pods.',
+    ).toEqual([])
+  })
+
+  it('no server route calls svcUrl() — a relative URL cannot be fetched server-side', () => {
+    // svcUrl() returns a same-origin RELATIVE path. That is correct for the browser and fatal in a
+    // route handler: Node's fetch answers `Failed to parse URL from /api/svc/…`, which lands in a
+    // catch and surfaces as "the service did not answer" — a healthy service reported as down. It
+    // cost the campaign console three wrong diagnoses before the throw was read (#2749).
+    //
+    // Server code addresses the Service DNS directly via serverSvcUrl(); the proxy exists to give
+    // the BROWSER a same-origin path, which server code does not need.
+    const offenders: string[] = []
+    const walkDir = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap(e => {
+        const full = path.join(dir, e.name)
+        return e.isDirectory() ? walkDir(full) : [full]
+      })
+    for (const file of walkDir(path.join(ADMIN_UI, 'src/app'))) {
+      // Route handlers only: a page.tsx marked 'use client' runs in the browser, where svcUrl is right.
+      if (!/route\.tsx?$/.test(file)) continue
+      const src = readFileSync(file, 'utf8')
+      if (/\bsvcUrl\s*\(/.test(src) && !/\bserverSvcUrl\s*\(/.test(src.match(/\bsvcUrl\s*\(/) ? src : '')) {
+        if (/[^r]\bsvcUrl\s*\(/.test(src)) offenders.push(path.relative(ADMIN_UI, file))
+      }
+    }
+    expect(
+      offenders,
+      'route handlers calling svcUrl(). Node fetch rejects the relative URL it returns; use '
+      + 'serverSvcUrl(name, namespace, port, path) instead.',
     ).toEqual([])
   })
 

@@ -15,6 +15,13 @@ data:
         litellm_params:
           model: deepinfra/deepseek-ai/DeepSeek-V3.2
           api_key: os.environ/DEEPINFRA_API_KEY
+          # Per-MODEL daily ceiling. Declarative and in git, unlike the per-key budgets, which
+          # exist only in the database because upstream creates keys through /key/generate.
+          # 20 USD/day sits just under the 25 USD/day fleet figure AiFleetDailySpendHigh alerts on,
+          # so the preventive control bites BEFORE the detective one pages — an alert that fires
+          # only after the money is gone is a receipt, not a guardrail.
+          max_budget: 20
+          budget_duration: 1d
       # agent-service's admin-UI assistant model (#1919). It sends `model-gateway.models[].id`
       # verbatim, so the model_name MUST stay `llama-3.3-70b-versatile` — that is what repointing
       # agent-service at this gateway costs: an endpoint + key change, nothing else. The Groq key
@@ -24,7 +31,16 @@ data:
         litellm_params:
           model: groq/llama-3.3-70b-versatile
           api_key: os.environ/GROQ_API_KEY
+          # Lower ceiling: this route serves only agent-service's admin-UI assistant, a single
+          # interactive surface, where the ops models serve every scheduled agent. A shared ceiling
+          # would let a runaway ops loop starve the interactive one, or vice versa.
+          max_budget: 5
+          budget_duration: 1d
     general_settings:
+      # Virtual keys and every budget below persist here. Injected from the CNPG litellm-db-app
+      # secret (components/ai-platform/postgres.yaml) — see the DATABASE_URL note in litellm.yaml
+      # for why it is deliberately NOT optional.
+      database_url: os.environ/DATABASE_URL
       # Callers authenticate to LiteLLM with this virtual key (projected from OpenBao), NOT with the
       # upstream provider key — so the DeepInfra key lives only here, never in an agent pod (ADR-0175).
       master_key: os.environ/LITELLM_MASTER_KEY

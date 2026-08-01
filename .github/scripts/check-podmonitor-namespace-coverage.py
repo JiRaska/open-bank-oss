@@ -51,11 +51,20 @@ PODMON_REL = Path(
 # openbank-infra/scripts/prod_readiness_collector_test.py and the fixtures in --self-test below.
 sys.path.insert(0, str(REPO / "openbank-infra" / "scripts"))
 from gitops_facts import (  # noqa: E402
+    management_port_workloads,
+    management_scraped_namespaces,
     module_dir,
     money_path_services,
     podmonitor_namespaces,
     workload_namespaces,
 )
+
+# Namespaces that declare a `management` port but are deliberately not scraped. An entry needs a
+# reason, and the gate fails on a stale declaration in EITHER direction — an entry for a namespace
+# that is now scraped, or one whose workload is gone. That asymmetry is the point: a new gap is red
+# by default and only a human writing down why can make it green, which is the opposite of the
+# hand-kept matchNames list this check exists to police.
+NOT_SCRAPED: dict[str, str] = {}
 
 
 def audit(repo: Path) -> tuple[dict[str, list[str]], list[str], int]:
@@ -93,14 +102,36 @@ def audit(repo: Path) -> tuple[dict[str, list[str]], list[str], int]:
     return missing, no_workload, ok
 
 
+def audit_fleet(
+    gitops: Path, not_scraped: dict[str, str] | None = None
+) -> tuple[dict[str, set[str]], list[str], int]:
+    """-> ({namespace: workloads} unscraped, [stale NOT_SCRAPED keys], covered_count)
+
+    The population is every workload declaring a `management` container port, NOT the
+    `openbank-*-service` module list [audit] iterates. Those are different questions and they had
+    different answers: the module list covered 32 namespaces while 36 carried a `management`-port
+    workload, and the four-namespace difference was the entire control-plane agent fleet.
+    """
+    declared = NOT_SCRAPED if not_scraped is None else not_scraped
+    workloads = management_port_workloads(gitops)
+    scraped = management_scraped_namespaces(gitops)
+    everywhere = "*" in scraped
+    unscraped = {
+        ns: names
+        for ns, names in workloads.items()
+        if not everywhere and ns not in scraped and ns not in declared
+    }
+    stale = [ns for ns in declared if ns not in workloads or everywhere or ns in scraped]
+    covered = sum(1 for ns in workloads if everywhere or ns in scraped)
+    return unscraped, sorted(stale), covered
+
+
 def run_gate(repo: Path, quiet: bool = False) -> int:
     missing, no_workload, ok = audit(repo)
     say = (lambda *a: None) if quiet else print
     say(f"PodMonitor namespace coverage: {ok} scraped, {len(missing)} missing, {len(no_workload)} not deployed")
     for short in no_workload:
         say(f"  note: {short} has no Deployment/Rollout in gitops (not deployed yet)")
-    if not missing:
-        return 0
     for short, gaps in sorted(missing.items()):
         for ns in gaps:
             say(
@@ -109,7 +140,27 @@ def run_gate(repo: Path, quiet: bool = False) -> int:
                 f"never reach Prometheus and any PrometheusRule over them cannot fire. "
                 f"Add '{ns}' to {PODMON_REL}."
             )
-    return 1
+
+    gitops = repo / "openbank-infra" / "gitops"
+    unscraped, stale, covered = audit_fleet(gitops)
+    say(
+        f"management-port scrape coverage: {covered} namespaces scraped, "
+        f"{len(unscraped)} unscraped, {len(NOT_SCRAPED)} declared not-scraped"
+    )
+    for ns, names in sorted(unscraped.items()):
+        say(
+            f"::error file={PODMON_REL}::namespace '{ns}' runs "
+            f"{', '.join(sorted(names))}, which declare a `management` container port, but no "
+            f"PodMonitor/ServiceMonitor scrapes that port there — /q/metrics never reaches "
+            f"Prometheus. Add '{ns}' to {PODMON_REL}, or declare it in NOT_SCRAPED in "
+            f"{Path(__file__).name} with a reason."
+        )
+    for ns in stale:
+        say(
+            f"::error file={Path(__file__).name}::NOT_SCRAPED declares '{ns}', but it is now "
+            f"scraped or has no `management`-port workload — remove the stale entry."
+        )
+    return 1 if (missing or unscraped or stale) else 0
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +192,30 @@ spec:
       containers:
         - name: {short}-service
           image: openbank-{short}-service:1.0.0
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: management
+              containerPort: 9000
+"""
+
+# The same workload WITHOUT a management port. The scrape contract is the port, not the pod: a
+# workload that never exposes /q/metrics is not a coverage gap, and a fleet check that flagged it
+# would produce permanent noise for admin-ui, external-dns, reposilite and the registry caches.
+SELF_TEST_WORKLOAD_NO_MGMT = """apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {short}-service
+  namespace: {ns}
+spec:
+  template:
+    spec:
+      containers:
+        - name: {short}-service
+          image: openbank-{short}-service:1.0.0
+          ports:
+            - name: http
+              containerPort: 8080
 """
 
 # A NetworkPolicy that only *mentions* the service. If the resolver ever counted a mere
@@ -160,15 +235,25 @@ spec:
 """
 
 
-def build_fixture(root: Path, workloads: list[tuple[str, str]], kustomize_ns: str | None = None):
+def build_fixture(
+    root: Path,
+    workloads: list[tuple[str, str]],
+    kustomize_ns: str | None = None,
+    no_mgmt_port: set[str] | None = None,
+):
     comp = root / "openbank-infra" / "gitops" / "components" / "fixture"
     comp.mkdir(parents=True)
     (root / PODMON_REL).parent.mkdir(parents=True, exist_ok=True)
     (root / PODMON_REL).write_text(SELF_TEST_PODMON)
     for short, ns in workloads:
         (root / f"openbank-{short}-service").mkdir(exist_ok=True)
-        body = SELF_TEST_WORKLOAD.format(short=short, ns=ns) if ns else (
-            SELF_TEST_WORKLOAD.format(short=short, ns="PLACEHOLDER").replace(
+        template = (
+            SELF_TEST_WORKLOAD_NO_MGMT
+            if short in (no_mgmt_port or set())
+            else SELF_TEST_WORKLOAD
+        )
+        body = template.format(short=short, ns=ns) if ns else (
+            template.format(short=short, ns="PLACEHOLDER").replace(
                 "  namespace: PLACEHOLDER\n", ""
             )
         )
@@ -222,6 +307,81 @@ def self_test() -> int:
         [("ledgerish", "")],
         "payments",
         0,
+    )
+
+    # The fleet pass. Its population is the `management` port, so these cases must not be
+    # expressible through the module-name path above — a fixture module that is NOT named
+    # openbank-<short>-service is invisible to audit() and visible to audit_fleet(), which is
+    # exactly the eight-agent blind spot that made the original gate print `0 missing`.
+    def fleet_case(
+        name: str,
+        workloads,
+        want_rc: int,
+        want_in_output: str = "",
+        not_scraped: dict[str, str] | None = None,
+        no_mgmt_port: set[str] | None = None,
+    ):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            build_fixture(tmp, workloads, None, no_mgmt_port)
+            unscraped, stale, _covered = audit_fleet(
+                tmp / "openbank-infra" / "gitops", not_scraped or {}
+            )
+            rc = 1 if (unscraped or stale) else 0
+            rendered = "; ".join(
+                f"{ns}->{','.join(sorted(w))}" for ns, w in sorted(unscraped.items())
+            ) + ("" if not stale else f" stale:{','.join(stale)}")
+            bad = []
+            if rc != want_rc:
+                bad.append(f"exit {rc}, wanted {want_rc}")
+            if want_in_output and want_in_output not in rendered:
+                bad.append(f"output {rendered!r} lacks {want_in_output!r}")
+            print(f"  {'ok  ' if not bad else 'FAIL'} {name}" + (f" — {'; '.join(bad)}" if bad else ""))
+            if bad:
+                failures.append(name)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    print("self-test: fleet pass — cases the gate MUST flag")
+    fleet_case(
+        "management-port workload in an unscraped namespace",
+        [("agentish", "devops-agent")],
+        1,
+        "devops-agent->agentish-service",
+    )
+    fleet_case(
+        "a covered namespace does not mask an uncovered one",
+        [("ledgerish", "ledger"), ("agentish", "devops-agent")],
+        1,
+        "devops-agent->agentish-service",
+    )
+    fleet_case(
+        "NOT_SCRAPED entry for a namespace that IS scraped is stale",
+        [("ledgerish", "ledger")],
+        1,
+        "stale:ledger",
+        not_scraped={"ledger": "reason"},
+    )
+    fleet_case(
+        "NOT_SCRAPED entry for a namespace with no management-port workload is stale",
+        [("ledgerish", "ledger")],
+        1,
+        "stale:ghost",
+        not_scraped={"ghost": "reason"},
+    )
+    print("self-test: fleet pass — cases the gate MUST pass")
+    fleet_case("management-port workload in a scraped namespace", [("ledgerish", "ledger")], 0)
+    fleet_case(
+        "workload with NO management port in an unscraped namespace",
+        [("portless", "developer-portal")],
+        0,
+        no_mgmt_port={"portless"},
+    )
+    fleet_case(
+        "declared NOT_SCRAPED gap",
+        [("agentish", "devops-agent")],
+        0,
+        not_scraped={"devops-agent": "reason"},
     )
 
     if failures:

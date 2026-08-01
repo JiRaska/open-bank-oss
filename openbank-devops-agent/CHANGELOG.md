@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.5.1...devops-agent-v0.6.0) (2026-08-01)
+
+
+### Features
+
+* **observability:** make fleet LLM spend and reliability observable in Prometheus ([#3043](https://github.com/JiRaska/open-bank-oss/issues/3043)) ([000ba2a](https://github.com/JiRaska/open-bank-oss/commit/000ba2a516069ba4c65b50015a76b4086b229b30))
+
 ## [0.5.1](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.5.0...devops-agent-v0.5.1) (2026-07-25)
 
 

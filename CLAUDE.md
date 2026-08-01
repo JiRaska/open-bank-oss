@@ -131,6 +131,24 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   profile: a `QuarkusTestProfile` loads in a **different classloader** from the test class, so a
   companion object initializes twice — a randomized id in `getConfigOverrides()` hands the scheduler
   one value and the assertion another. Use literals.
+- **A Kafka `group.id` / `auto.offset.reset` written as a YAML key never reaches the connector.**
+  SmallRye Config's YAML source quotes any leaf map key containing a literal dot, so
+  `group.id: foo` under `mp.messaging.incoming.<channel>:` registers as the property
+  `…<channel>."group.id"` — quotes included — and `KafkaConnectorIncomingConfiguration`'s plain
+  `getOptionalValue("group.id", …)` never finds it. **Nothing errors**; the connector silently uses
+  its own default. Set it from a real config source instead: a `<svc>-msg-override.yaml` ConfigMap
+  with `override.properties` + `config_ordinal=500` (`openbank-transaction-service` is the worked
+  example, and documents it in place). Do NOT just delete the YAML key — local dev and tests read it
+  fine, and it is only the deployed path that breaks. **The trap is that six services look correct
+  and are not the same kind of correct:** their `group.id` happens to equal
+  `quarkus.application.name`, which is what the fallback produces, so the broken key is a no-op —
+  until someone renames a service or gives a channel its own group. Those same six declare
+  `auto.offset.reset: earliest`, where **no such coincidence is available**, so the effective value
+  is the connector default and not the one in the file. Fixing that is not a config tidy-up: forcing
+  `earliest` onto a consumer group running as the default re-reads the topic from the beginning, a
+  mass replay on money-path channels. `check-kafka-dotted-keys.py` ratchets it (enforced in
+  `Validate manifests`) — new occurrences fail, today's six are baselined against #2945, and a
+  baseline entry that becomes covered is reported too (#686, #2945).
 
 ### ktlint
 - Path-scoped CI only lints changed files, so a pre-existing wildcard import or a latent
@@ -281,8 +299,55 @@ fire from *outside* it, so they stay here:
   references files living only in an unmerged parent PR (e.g. ADR numbers the registry gate
   requires on-branch), merging the parent branch into the child makes the child's CI green
   independently; the shared files drop out of the diff as the parent lands on main.
+- **A PR-queue drain has a CEILING, and "queue empty" is the wrong success measure.** Measured
+  2026-08-01: 21 PRs merged in one session and the queue still went 2 -> 8, because parallel
+  agents open roughly one PR every two minutes. What survives a drain is structural, not
+  incidental — money-path scopes, `governance(...)`/`security(...)` types, auth changes and whole
+  new services all need a human by rule, and the rest is usually someone else's live worktree.
+  Stop when nothing SAFELY mergeable remains and say what is left and why; a drain that keeps
+  going until the list is empty is one that started merging things it should not have.
+- **A green PR can still be the wrong one to merge — classify by category before reading checks.**
+  #3009 had all five required contexts green and duplicated a guard merged an hour earlier
+  (#2984): same inputs, same comparison, same cited defect. Merging it would have put two copies
+  of one rule in `Validate manifests`, on every PR, to drift apart later. CI cannot see that;
+  only looking at what else landed recently can.
+- **Parallel agents land on the SAME artifact routinely — "what else touched this file today" is
+  as load-bearing a question as "are the checks green".** Three instances on 2026-08-01 alone:
+  `check-probe-port-listener.py` vs `check-probe-port-has-listener.py` (#2984/#3009),
+  `security.yml` (#3103/#3079), `api-fuzz-authenticated.yml` (#3024/#3079). None was visible to
+  CI — #3009 was fully green — and each was found only by comparing CONTENT:
+  `git diff origin/main origin/<branch> -- <file>`, or a shasum of the file on both sides.
+  The three outcomes differ, so measure before deciding: identical content (#3103's `security.yml`
+  matched `main` byte for byte, so merging was a no-op), a true duplicate (#3009, close one),
+  or genuine divergence (#3024 differed by 101 lines — an authoring decision, not a merge).
+  Note the file list `gh pr view --json files` shows is computed against the MERGE-BASE, so after
+  a competing PR squash-merges it still lists the overlap as a diff even when the content already
+  agrees. Read the content, not the diff.
+- **A finding from a CI run goes stale in MINUTES while a parallel agent is active — re-check
+  before acting on it.** Three times in one session a ktlint/test failure was already fixed by the
+  time the fix was written: the branch had moved (`db25c9ac8` -> `629aff176`,
+  `a9381b256` -> `13335a859`) and the reported line no longer existed. Reporting a defect that is
+  already gone sends the reader hunting for nothing. Diff the file at the CURRENT head, not the
+  head the run used.
+- **Omitting `--delete-branch` does NOT protect someone else's worktree — the repo sets
+  `delete_branch_on_merge: true`.** That setting deletes the remote ref regardless of the merge
+  flag, so the precaution is theatre. The local branch and working tree survive (verified on
+  #2960), so nothing is lost, but if the branch had unpushed commits their only off-machine copy
+  would be gone. Check the repo setting before promising the protection, not after.
 
 ### CI gates — exercise the failure path before trusting the green
+- **Gates are DECLARED in [`.github/gates/gates.yaml`](.github/gates/gates.yaml), not written as
+  workflow steps.** Add an entry (`id`/`group`/`mode`/`selftest`/`run`) and it runs; there is
+  nothing to edit in `ci.yml`. Run one locally with
+  `python3 .github/scripts/run-gates.py --only <id>`, a whole shard with `--group <g>`, and see
+  the set with `--list`. Two things the manifest fixes that are easy to re-break: `mode:` states
+  advisory-vs-enforced **outright** (inferring it from a step name is how the registration gate
+  once flagged itself, #2450), and `selftest_expect:` states which exit code proves falsifiability
+  — `pass` for a checker's own `--self-test` harness (every one in this repo today), `fail` when
+  the command *is* the known-positive. Guessing that is silent in the safe-looking direction.
+  Shards are wall-time buckets, not a taxonomy — rebalance `group:` when one gets slow, and note
+  that the gate count no longer costs wall time linearly, which is the point (79 serial steps
+  took `ci.yml`'s median 0.7 -> 2.4 min in four weeks on a REQUIRED check every PR pays).
 - **A gate that has only ever passed is unfalsified.** Its failure path is code nobody has run, and
   it fails in ways a green/red signal cannot express. Three independent instances in one week: the
   ADR-0071 governance reporter crashed with a `TypeError` on *every* failure, so it had never once
@@ -341,6 +406,18 @@ fire from *outside* it, so they stay here:
   the annotation, because comments are stripped *by design* (#2450). Generalize: a guard over source
   text needs an explicit rule for code-about-code, and stale prose naming a dead identifier is
   invisible to it forever — grep the prose separately after any vocabulary rename.
+- **The same collision runs the other way, and that direction is silent: a check greps a file for the
+  string it wants, and matches the COMMENT that explains why the string is there.** A false positive
+  announces itself; this one reads as a pass. On #3072 a test asserted `middleware.ts` excludes
+  `/api/gate` with a whole-file `toMatch(/api\/gate/)` — the exclusion is explained by a five-line
+  comment directly above it that names the path three times, so deleting the exclusion itself left
+  the test green. Fix: strip comments, then assert against the **construct**, not the file
+  (`config.matcher`, the annotation value, the specific key) — a whole-file grep can never
+  distinguish the thing from the prose about the thing. Same PR, same class, second instance: an
+  Ingress/allow-list agreement check built its tool set with `[a-z0-9-]+`, so a typo'd
+  `?tool=grafanaX` matched on the `grafana` prefix and it reported agreement with a tool the gate
+  does not know. Both were found only by feeding the assertions the exact broken input they exist to
+  reject — a new assertion that has only ever seen the correct file is unfalsified.
 - **An "advisory" gate is usually advisory INSIDE the script, not via `continue-on-error`** — 11 of
   12 here print `::warning` and exit 0 unless passed `--enforce`. A sweep for `continue-on-error:
   true` therefore finds one and silently reports the other eleven as enforced. Check both forms
@@ -385,6 +462,38 @@ fire from *outside* it, so they stay here:
   a false positive here looks exactly like the success you were hoping for. Prefer structured
   data outright where it exists: step conclusions from
   `gh api .../actions/jobs/<id> --jq '.steps[]'` cannot be spoofed by the script listing.
+  In a MULTI-STEP job the last-`##[endgroup]` trick is not enough — it lands you after the final
+  step, not inside the one that failed. There the discriminator is **substitution**: real output
+  has the variable expanded, the echoed script still has the literal. `grep 'failed to boot'`
+  matched an `echo "::error::[${svc}] failed to boot"` that never ran; `grep 'failed to boot' |
+  grep -v '\${'` found the one line that did. Took three attempts on #3024 *after* the bullet
+  above was already written, so treat "my grep found it" as a hypothesis until the match shows a
+  value the script could not have contained.
+- **A `concurrency.group` that interpolates a LIST silently stops the job being created once the
+  list is big enough — and an absent job cannot honour its own `if:`.** `auto-deploy.yml`'s
+  `gitops-pr` keyed its group on `needs.changes.outputs.services` verbatim. A change under
+  `openbank-libs-*` rebuilds the whole fleet, so that expanded to ~1436 characters, and the job was
+  then **never instantiated**: not skipped, absent — no job, no check-run on the commit, and
+  `needs.gitops-pr.result` reading as a failure downstream. That job carries
+  `if: always() && … != 'cancelled'` precisely so a partial `can-i-deploy` failure still deploys
+  the
+  subset that passed (#846), so the whole fleet build was built, pushed, signed, attested and then
+  discarded — worst in the highest-stakes case. Correlation over 20 runs was exact: 53 services
+  (~1436 chars) → job absent (three separate times); 12 (~322) and 1 (~30) → created. Key the
+  group
+  on a short digest of the **sorted** set (`jq -S -c 'sort' | sha256sum | cut -c1-12`), which keeps
+  the same-set/disjoint-set semantics the list was there for and bounds the name at ~50 chars
+  (#3082, fixed #3084). Generalize: anything interpolated into a `concurrency.group` must be O(1) in
+  the size of the fleet — a group name is not a place to carry data.
+- **`gh pr merge` refuses on `mergeStateStatus=UNSTABLE` even when every REQUIRED check is green.**
+  A non-required check that is red (here `CodeQL (java-kotlin, manual)`, failing with "could not
+  process any code written in Java/Kotlin" on a PR that touches only a workflow YAML — there is no
+  Java to analyse) leaves the PR mergeable by the ruleset but unstable to `gh`, which then suggests
+  `--admin`. Do NOT reach for it: `--squash --auto` is the documented non-override path and merges
+  as soon as the required contexts pass. On this repo that is immediate, since
+  `required_approving_review_count: 0` — it returns with `autoMergeRequest` null and the PR
+  already
+  MERGED, which reads like it did nothing.
 - **Validate the PROBE, not the command inside it — in zsh a `for x in $VAR` loop runs ONCE.**
   zsh does not word-split an unquoted parameter (bash does), so a sweep written as
   `LIST="a b c"; for b in $LIST; do git show-ref --verify --quiet "refs/heads/$b" …` tests one
@@ -445,6 +554,20 @@ fire from *outside* it, so they stay here:
   open, and `strict_required_status_checks_policy` (require branches up to date) is the only
   remaining lever that works on a personal account.
 
+### Self-hosted runners share the machine with a human
+- **A CI job that leaves `GRADLE_USER_HOME` unset does not merely *share* the workstation's
+  `~/.gradle` — it PRUNES it.** `gradle/actions/setup-gradle` runs `cache-cleanup: on-success` by
+  default: "remove any stale/unused entries from the Gradle User Home", where *unused* means
+  "unused by this one CI build". Pointed at a developer's home it deletes artifacts local builds
+  depend on and truncates files a concurrent local build is reading, so the local build reports
+  `Dependency verification failed … expected X but was Y` for an artifact whose cached bytes match
+  `verification-metadata.xml` and Maven Central **exactly**. That reads as cache corruption, and no
+  amount of cache repair fixes it because the damage recurs on the next CI job — the diagnosis only
+  closes when you notice the failures track the runner being busy. Every Gradle job that can land on
+  a self-hosted runner needs its own home; `_service-ci.yml` resolves one per service in a step
+  (a `workflow_call` job cannot reference the `env` context in a job-level `env:` block).
+  `.github/scripts/check-gradle-user-home-isolation.py` enforces it in `Validate manifests`.
+
 ### Dependency graph & PR-time CVE gating
 Rationale + what does *not* cover it: `rules.yaml: dependencies.pr_time_cve_gate` (authoritative).
 - **`dependency-submission.yml` MUST keep its `pull_request` trigger.** `dependency-review` only
@@ -498,6 +621,16 @@ Rationale + what does *not* cover it: `rules.yaml: dependencies.pr_time_cve_gate
   Pass `-R <owner>/<repo>` explicitly in any script whose working directory is not guaranteed —
   and note a verification command failing this way returns *nothing*, which is easy to misread
   as "the thing I was checking is absent".
+- **`--delete-branch` on a stacked parent CLOSES the child PR, and that is not reversible.**
+  Deleting the base branch makes GitHub close every PR targeting it; a closed PR whose base is gone
+  can be neither reopened nor retargeted — `reopenPullRequest` answers `Could not open the pull
+  request` and `updatePullRequest` answers `Cannot change the base branch of a closed pull request`.
+  The only way back is a rebase onto the new `main` and a **new** PR, losing the number, the review
+  history and the comment thread. The failure is silent at merge time: `gh pr merge` prints nothing
+  about the child and the merge itself succeeds, so it reads as clean from every angle you would
+  normally check. Either retarget each child to `main` *before* merging the parent, or merge without
+  `--delete-branch` and clean up once the whole stack has landed. `--delete-branch` is only safe on a
+  leaf — check `gh pr list --base <branch>` first (#3055 closed #3063, reopened as #3111).
 
 ### API contract (ADR-0048)
 - **Two racing spec PRs can both claim the same `info.version` — and both pass the gate.** The
@@ -508,6 +641,16 @@ Rationale + what does *not* cover it: `rules.yaml: dependencies.pr_time_cve_gate
   when you resolve a merge conflict against `main` — re-check `info.version` against the *current*
   `main` and re-bump; whoever lands second takes the next version. A matching version line merging
   "cleanly" is the trap: git sees identical text, not a taken version.
+- **The same trap fires from an ALREADY-MERGED PR, which is the direction that gets missed.**
+  Anticipating it is not the same as checking for it: the instinct is "am I racing anyone?", and that
+  scans *open* PRs — but the number is just as easily consumed by something that landed while your
+  branch was open and is now invisible in the PR list. Measured on #3055, where the numbering had
+  been guarded carefully between two stacked PRs and the gate still went
+  `1.2.0 -> 1.2.0` because #3037 had merged. Read the version off live `main`, never off your
+  branch's base, and re-read it after every rebase:
+  `git fetch origin main && git show origin/main:<svc>/src/main/resources/openapi.yaml | grep -m1 '^  version:'`.
+  In a stack each PR takes the next number in order — and a child's diff against `main` spans the
+  whole stack, so point its PR base at the parent branch or the gate sees a multi-minor jump.
 
 ## Capturing what we learn
 

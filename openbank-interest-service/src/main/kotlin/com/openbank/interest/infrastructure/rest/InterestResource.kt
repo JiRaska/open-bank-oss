@@ -66,13 +66,21 @@ class InterestResource(
     @Operation(summary = "Accrue interest for an account")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "interest.create", resource = "")
-    fun accrue(request: AccrualRequest): Uni<Response> = accrueUseCase.accrue(request)
-        .map { Response.status(201).entity(it).build() }
-        .onFailure(RateConfigNotFoundException::class.java).recoverWithItem { e ->
-            // No rate for this (account/product, currency): a client/config condition, not a 500.
-            Response.status(422).entity(mapOf("error" to e.message)).build()
-        }
-        .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
+    fun accrue(request: AccrualRequest?): Uni<Response> {
+        // A JSON `null` body deserialises to null despite the non-nullable Kotlin type, so the
+        // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
+        // IllegalArgumentException to 400.
+        requireNotNull(request) { "request body is required" }
+        return accrueUseCase.accrue(request)
+            .map { Response.status(201).entity(it).build() }
+            .onFailure(RateConfigNotFoundException::class.java).recoverWithItem { e ->
+                // No rate for this (account/product, currency): a client/config condition, not a 500.
+                Response.status(422).entity(mapOf("error" to e.message)).build()
+            }
+        // The untyped `.onFailure().recoverWithItem { serverError }` that used to sit here is gone
+        // (#3057): it stamped 500 over failures libs-runtime already maps correctly — an
+        // IllegalArgumentException that should be 400, and now DateTimeException too.
+    }
 
     @POST
     @Path("/accrue/all")
@@ -95,7 +103,6 @@ class InterestResource(
     ): Uni<Response> =
         capitalizeUseCase.capitalize(accountId, productId, toDate?.let { LocalDate.parse(it) } ?: LocalDate.now(clock))
             .map { Response.ok(it).build() }
-            .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
 
     @GET
     @Path("/accruals/{accountId}")
@@ -134,8 +141,14 @@ class InterestResource(
     @Operation(summary = "Create interest rate configuration")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "interest.create", resource = "")
-    fun createRateConfig(config: InterestRateConfig): Uni<Response> = rateConfigUseCase.createConfig(config)
-        .map { Response.status(201).entity(it).build() }
+    fun createRateConfig(config: InterestRateConfig?): Uni<Response> {
+        // A JSON `null` body deserialises to null despite the non-nullable Kotlin type, so the
+        // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
+        // IllegalArgumentException to 400.
+        requireNotNull(config) { "request body is required" }
+        return rateConfigUseCase.createConfig(config)
+            .map { Response.status(201).entity(it).build() }
+    }
 
     @GET
     @Path("/rates")
@@ -172,5 +185,4 @@ class InterestResource(
     @Authorize(action = "interest.delete", resource = "#id")
     fun deactivateRateConfig(@PathParam("id") id: UUID): Uni<Response> = rateConfigUseCase.deactivateConfig(id)
         .map { Response.ok(it).build() }
-        .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
 }
