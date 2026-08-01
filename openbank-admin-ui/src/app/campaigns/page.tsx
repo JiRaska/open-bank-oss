@@ -37,7 +37,7 @@ export default function CampaignsPage() {
       .then(r => r.json())
       .then((d: { items: Campaign[]; state: string }) => {
         if (d.state !== 'ok') {
-          setUnavailable(d.state === 'unauthorized' ? 'unauthorized' : 'unreachable')
+          setUnavailable(d.state === 'unauthorized' ? 'unauthorized' : d.state === 'not_deployed' ? 'not_deployed' : 'unreachable')
           return
         }
         setItems(d.items ?? [])

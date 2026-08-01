@@ -216,6 +216,35 @@ describe('service registry drift guard', () => {
     ).toEqual([])
   })
 
+  it('every svcUrl() key exists in SERVICE_MAP (no caller pointing at an unknown service)', () => {
+    // The OTHER direction of the check above, and the one that was missing: that guard proves no
+    // SERVICE_MAP key is dead, but nothing proved every CALLER has a key. A page calling
+    // svcUrl('campaign-service', …) with no such key gets "Unknown service" from the proxy and
+    // renders as "not responding" — a deployed, healthy service that looks down. That is exactly
+    // what shipped with the campaign console (#2749): unit tests stubbed `fetch`, so the proxy was
+    // never on the path they exercised.
+    const keys = new Set(serviceMapKeys())
+    const callers: { file: string; key: string }[] = []
+    const walkDir = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap(e => {
+        const full = path.join(dir, e.name)
+        return e.isDirectory() ? walkDir(full) : [full]
+      })
+    for (const file of walkDir(path.join(ADMIN_UI, 'src/app'))) {
+      if (!file.endsWith('.ts') && !file.endsWith('.tsx')) continue
+      for (const m of readFileSync(file, 'utf8').matchAll(/svcUrl\(\s*'([^']+)'/g)) {
+        callers.push({ file: path.relative(ADMIN_UI, file), key: m[1] })
+      }
+    }
+    expect(callers.length, 'no svcUrl() callers found — the matcher has drifted').toBeGreaterThan(0)
+    const unknown = callers.filter(c => !keys.has(c.key))
+    expect(
+      unknown.map(c => `${c.file} → ${c.key}`),
+      'svcUrl() callers naming a key SERVICE_MAP does not define. The proxy answers '
+      + '"Unknown service" and the page degrades to "not responding" on a healthy service.',
+    ).toEqual([])
+  })
+
   it('SERVICE_MAP containers agree with SERVICE_REGISTRY on the module directory', () => {
     const dirs = moduleDirs()
     const src = readFileSync(BFF_ROUTE, 'utf-8')

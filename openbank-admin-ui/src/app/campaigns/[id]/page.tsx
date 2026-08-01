@@ -132,7 +132,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             <h2 className="text-sm font-semibold">{t('Zařazení', 'Enrolments')}</h2>
             {detail?.sources.enrolments !== 'ok' ? (
               <DataUnavailable
-                kind={detail?.sources.enrolments === 'unauthorized' ? 'unauthorized' : 'unreachable'}
+                kind={detail?.sources.enrolments === 'unauthorized' ? 'unauthorized' : detail?.sources.enrolments === 'not_deployed' ? 'not_deployed' : 'unreachable'}
                 service="Campaign-service"
                 feature={t('Zařazení', 'Enrolments')}
                 dense
@@ -171,7 +171,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             </p>
             {detail?.sources.sends !== 'ok' ? (
               <DataUnavailable
-                kind={detail?.sources.sends === 'unauthorized' ? 'unauthorized' : 'unreachable'}
+                kind={detail?.sources.sends === 'unauthorized' ? 'unauthorized' : detail?.sources.sends === 'not_deployed' ? 'not_deployed' : 'unreachable'}
                 service="Campaign-service"
                 feature={t('Log odeslání', 'Send log')}
                 dense
