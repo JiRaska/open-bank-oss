@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/JiRaska/open-bank-oss/compare/v0.4.1...v0.4.2) (2026-08-01)
+
+
+### Bug Fixes
+
+* **campaign:** start the journey before persisting the enrolment, and keep a bad party local ([#2978](https://github.com/JiRaska/open-bank-oss/issues/2978)) ([ec841cf](https://github.com/JiRaska/open-bank-oss/commit/ec841cf57ba06227e9ad0b333b2b2910c14ebed9)), closes [#2953](https://github.com/JiRaska/open-bank-oss/issues/2953)
+
 ## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/v0.4.0...v0.4.1) (2026-07-31)
 
 
