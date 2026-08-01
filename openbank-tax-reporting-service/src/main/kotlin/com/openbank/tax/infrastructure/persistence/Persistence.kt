@@ -172,7 +172,7 @@ class PanacheTaxFilingRepository : TaxFilingRepository, PanacheRepositoryBase<Ta
         find("periodYear = ?1 and periodMonth = ?2", period.year, period.month).firstResult()
     }.awaitSuspending()?.toDomain()
 
-    override suspend fun findAll(): List<TaxFilingRecord> = Panache.withSession {
+    override suspend fun listFilings(): List<TaxFilingRecord> = Panache.withSession {
         find("order by periodYear desc, periodMonth desc").list()
     }.awaitSuspending().map { it.toDomain() }
 

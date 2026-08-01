@@ -171,7 +171,7 @@ class TaxFilingServiceTest {
             val openJune = TaxFilingRecord.open(june, "CZK")
             val openJuly = TaxFilingRecord.open(july, "CZK") // due 2026-08-31 — not yet due
 
-            coEvery { filings.findAll() } returns listOf(filedMay, openJune, openJuly)
+            coEvery { filings.listFilings() } returns listOf(filedMay, openJune, openJuly)
 
             assertThat(service.overdue().map { it.period }).containsExactly(june)
         }

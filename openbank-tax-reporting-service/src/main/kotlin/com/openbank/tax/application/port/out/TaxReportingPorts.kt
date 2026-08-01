@@ -31,7 +31,12 @@ interface ObservedRemittanceRepository {
 interface TaxFilingRepository {
     suspend fun findByPeriod(period: FilingPeriod): TaxFilingRecord?
 
-    suspend fun findAll(): List<TaxFilingRecord>
+    /**
+     * Named `listFilings`, not `findAll`: the Panache adapter also implements
+     * `PanacheRepositoryBase`, whose own `findAll(): PanacheQuery<Entity>` collides with it —
+     * same name, unrelated return type, so the class does not compile.
+     */
+    suspend fun listFilings(): List<TaxFilingRecord>
 
     /** Insert if absent, else return the existing row — the consumer races itself across partitions. */
     suspend fun openIfAbsent(record: TaxFilingRecord): TaxFilingRecord

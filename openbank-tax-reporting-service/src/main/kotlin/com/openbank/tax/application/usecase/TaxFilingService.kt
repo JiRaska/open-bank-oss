@@ -112,12 +112,12 @@ class TaxFilingService(
     suspend fun remittancesFor(period: FilingPeriod): List<ObservedRemittance> =
         remittanceRepository.findByPeriod(period)
 
-    suspend fun list(): List<TaxFilingRecord> = filingRepository.findAll()
+    suspend fun list(): List<TaxFilingRecord> = filingRepository.listFilings()
 
     /** Filings past their statutory deadline and still not FILED — the thing worth alerting on. */
     suspend fun overdue(): List<TaxFilingRecord> {
         val today = accountingClock.today()
-        return filingRepository.findAll().filter { it.isOverdueAt(today) }
+        return filingRepository.listFilings().filter { it.isOverdueAt(today) }
     }
 
     /**
