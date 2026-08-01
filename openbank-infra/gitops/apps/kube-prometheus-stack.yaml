@@ -251,6 +251,17 @@ spec:
             # (per-service health as colored hexagons). Latest compatible build
             # resolved by Grafana at startup, like the sentry datasource above.
             - grafana-polystat-panel
+            # ClickHouse datasource for the business warehouse (ADR-0022). The
+            # warehouse has been fed in production for months
+            # (ANALYTICS_SINK_TYPE=clickhouse) and carries a gold layer — daily
+            # event volume, the onboarding funnel, screen feedback — whose own DDL
+            # comment says gold marts are "where Metabase/Superset dashboards
+            # point". No BI tool was ever deployed and Grafana had no ClickHouse
+            # datasource, so the only consumer of the whole warehouse was
+            # admin-ui's customer-360 route. Business reporting ran on Prometheus
+            # instead, which is a 7-day-retention TSDB and cannot answer a
+            # question about last quarter.
+            - grafana-clickhouse-datasource
           # GlitchTip API token, injected from the ESO-managed grafana-glitchtip
           # Secret (components/external-secrets/es-grafana-glitchtip.yaml).
           # optional:true → Grafana stays healthy before the token is in Vault;
@@ -260,6 +271,15 @@ spec:
               secretKeyRef:
                 name: grafana-glitchtip
                 key: token
+                optional: true
+            # ClickHouse `analytics` user password, from the ESO-managed
+            # grafana-clickhouse Secret (components/external-secrets/es-grafana-clickhouse.yaml).
+            # Same optional:true trade as above — Grafana boots before the secret
+            # exists, and only the ClickHouse datasource is unable to query.
+            CLICKHOUSE_PASSWORD:
+              secretKeyRef:
+                name: grafana-clickhouse
+                key: password
                 optional: true
           persistence:
             enabled: false
@@ -354,6 +374,26 @@ spec:
                 orgSlug: openbank
               secureJsonData:
                 authToken: $GLITCHTIP_API_TOKEN
+            # Business warehouse (ADR-0022). NOT part of the trace correlation web
+            # above — this is the analytical plane: months of history at daily
+            # grain, answering "how many accounts did we open last quarter", which
+            # Prometheus structurally cannot (7-day retention, ADR-0088 D3) and
+            # which a counter reset by every pod restart cannot either.
+            - name: ClickHouse
+              type: grafana-clickhouse-datasource
+              uid: clickhouse
+              # HTTP protocol on 8123, matching the single port opened by
+              # components/analytics/clickhouse-grafana-network-policy.yaml. The
+              # native protocol on 9000 stays closed.
+              jsonData:
+                host: clickhouse.analytics.svc
+                port: 8123
+                protocol: http
+                secure: false
+                username: analytics
+                defaultDatabase: openbank_analytics
+              secureJsonData:
+                password: $CLICKHOUSE_PASSWORD
         nodeExporter:
           enabled: true
         # Pin node-exporter straight at the ECR pull-through cache rather than letting
