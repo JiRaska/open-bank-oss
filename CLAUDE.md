@@ -426,6 +426,13 @@ fire from *outside* it, so they stay here:
   a false positive here looks exactly like the success you were hoping for. Prefer structured
   data outright where it exists: step conclusions from
   `gh api .../actions/jobs/<id> --jq '.steps[]'` cannot be spoofed by the script listing.
+  In a MULTI-STEP job the last-`##[endgroup]` trick is not enough — it lands you after the final
+  step, not inside the one that failed. There the discriminator is **substitution**: real output
+  has the variable expanded, the echoed script still has the literal. `grep 'failed to boot'`
+  matched an `echo "::error::[${svc}] failed to boot"` that never ran; `grep 'failed to boot' |
+  grep -v '\${'` found the one line that did. Took three attempts on #3024 *after* the bullet
+  above was already written, so treat "my grep found it" as a hypothesis until the match shows a
+  value the script could not have contained.
 - **Validate the PROBE, not the command inside it — in zsh a `for x in $VAR` loop runs ONCE.**
   zsh does not word-split an unquoted parameter (bash does), so a sweep written as
   `LIST="a b c"; for b in $LIST; do git show-ref --verify --quiet "refs/heads/$b" …` tests one
