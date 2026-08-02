@@ -72,8 +72,15 @@ describe('campaign studio', () => {
     vi.stubGlobal('fetch', mockFetch({ '/api/segments': SEGMENTS }))
     render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
 
-    await waitFor(() => expect(screen.getByLabelText('Audience')).toBeTruthy(), { timeout: 8000 })
-    expect((screen.getByLabelText('Audience') as HTMLSelectElement).tagName).toBe('SELECT')
+    await waitFor(
+      () => expect(document.querySelector('[data-segment]')).toBeTruthy(),
+      { timeout: 8000 },
+    )
+    // Tiles, not a text box: the catalogue is the only source of an audience, so the control offers
+    // the choices rather than accepting a name that may not exist (ADR-0201 D1).
+    for (const tile of Array.from(document.querySelectorAll('[data-segment]'))) {
+      expect(tile.tagName).toBe('BUTTON')
+    }
     expect(screen.getByText(/a pull request, not a UI action/)).toBeTruthy()
   }, 15000)
 
@@ -86,10 +93,17 @@ describe('campaign studio', () => {
     vi.stubGlobal('fetch', mockFetch({ '/api/segments': SEGMENTS }))
     render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
 
-    await waitFor(() => expect(screen.getByLabelText('offerTitle')).toBeTruthy(), { timeout: 8000 })
-    expect(screen.getByLabelText('offerText')).toBeTruthy()
-    expect(screen.getByLabelText('ctaText')).toBeTruthy()
+    // The labels are the marketer's words, but the FIELD SET is still exactly the template's
+    // declared variables — asserted by id, which carries the variable name the service knows.
+    await waitFor(() => expect(document.getElementById('var-0-offerTitle')).toBeTruthy(), {
+      timeout: 8000,
+    })
+    expect(document.getElementById('var-0-offerText')).toBeTruthy()
+    expect(document.getElementById('var-0-ctaText')).toBeTruthy()
+    expect(screen.getByLabelText('Headline')).toBeTruthy()
     expect(document.querySelector('textarea')).toBeNull()
+    // No field beyond the declared three, which is what "never a free-text body" means in practice.
+    expect(document.querySelectorAll('[id^="var-0-"]').length).toBe(3)
   }, 15000)
 
   it('a draft can be submitted but not activated from the same screen', async () => {

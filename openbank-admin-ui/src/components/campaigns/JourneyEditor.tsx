@@ -50,6 +50,7 @@ export function JourneyEditor({
   onAdd,
   onRemove,
   templateLabels,
+  attachedBelow = false,
 }: {
   steps: EditorStep[]
   /** `name@version`, or empty while the marketer has not chosen one. */
@@ -60,6 +61,8 @@ export function JourneyEditor({
   onAdd: () => void
   onRemove: (index: number) => void
   templateLabels: Record<string, string>
+  /** True when the step editor renders directly beneath, so the two read as one surface. */
+  attachedBelow?: boolean
 }) {
   const { t, language } = useLanguage()
   const n = (v: number) => v.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')
@@ -100,7 +103,14 @@ export function JourneyEditor({
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border" style={{ background: 'var(--surface)' }}>
+    <div
+      className={
+        attachedBelow
+          ? 'overflow-x-auto rounded-t-xl border-x border-t'
+          : 'overflow-x-auto rounded-xl border'
+      }
+      style={{ background: 'var(--surface)' }}
+    >
       <svg
         viewBox={`0 0 ${width} ${height}`}
         style={{ width: '100%', minWidth: Math.min(width, 760), height: 'auto', display: 'block' }}
