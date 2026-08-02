@@ -1023,6 +1023,18 @@ gates:
       python3 .github/scripts/check-flyway-default-datasource.py --selftest
     run: |
       python3 .github/scripts/check-flyway-default-datasource.py --enforce
+  # A service that INJECTS ObjectStorePort and resolves to the Postgres backend must create the
+  # table it reads (#3081). Not the 36-way "entity visible but unused" gap — that is by design and
+  # inert under `database.generation: none`; this is the pairing that fails at first use, with a
+  # runtime 500 and nothing before it to say so.
+  - id: object-store-blobs-migration
+    name: "object store blobs migration (issue #3081, enforced)"
+    group: data
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-object-store-blobs-migration.py --selftest
+    run: |
+      python3 .github/scripts/check-object-store-blobs-migration.py --enforce
 
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
