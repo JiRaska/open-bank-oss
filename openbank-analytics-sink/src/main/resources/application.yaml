@@ -190,9 +190,19 @@ openbank:
       # When true, an unknown/newer-than-known schema is quarantined to the DLQ instead of written.
       strict: ${ANALYTICS_SCHEMA_STRICT:false}
       # Apicurio registry coordinates (used only when schema.backend=apicurio). Provisioned in
-      # openbank-infra as service schema-registry:8081. group is the Apicurio artifact group.
+      # openbank-infra by the `apicurio` ArgoCD Application as Service `apicurio-registry` on port
+      # 8080 in namespace `messaging` (gitops/components/apicurio/registry.yaml). group is the
+      # Apicurio artifact group.
+      #
+      # This previously read "service schema-registry:8081" and defaulted to
+      # http://localhost:8081 — wrong host AND wrong port, in the prose and in the value. Nothing
+      # could have said so: a unit test stubs the catalogue source and the IT serves a local
+      # fixture, so an in-cluster hostname is unfalsifiable by every test layer here (the same
+      # shape as the fx-service CNB URL that was a 404 for the life of the service). The value is
+      # now checked by .github/scripts/check-incluster-hostnames.py, which resolves it against the
+      # Services gitops actually declares (issue #1916).
       apicurio:
-        url: ${ANALYTICS_SCHEMA_APICURIO_URL:http://localhost:8081}
+        url: ${ANALYTICS_SCHEMA_APICURIO_URL:http://apicurio-registry.messaging.svc:8080}
         group: ${ANALYTICS_SCHEMA_APICURIO_GROUP:default}
     erasure:
       # Selects the CryptoErasure backend at BUILD time. Default (unset) = NoOpCryptoErasure (logs).

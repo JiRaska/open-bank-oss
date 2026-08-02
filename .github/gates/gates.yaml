@@ -344,6 +344,26 @@ gates:
     run: |
       python3 .github/scripts/check-gitops-secret-refs.py
 
+  # The in-cluster twin of external-feed-declaration-drift: a hostname naming another Service in
+  # this cluster is stubbed by the unit test, overridden to localhost by the IT and never sent by
+  # a consumer pact, so it is wrong only once a pod dials it. openbank-analytics-sink pointed at
+  # "schema-registry:8081" for the life of the service; the Service is apicurio-registry:8080 in
+  # `messaging` (issue #1916). Needs no network: the resolvable set is fully declared in gitops.
+  #
+  # ADVISORY (rules.yaml: incluster_hostnames, target_enforce_date 2026-10-31) — 6 pre-existing
+  # findings, all bare `openbank-<svc>` rest-client defaults on services whose pods override them
+  # by env. Four of the owners are money-path, so that cleanup takes the two-approval path rather
+  # than riding along with the guard that found it.
+  - id: incluster-hostname-resolution
+    name: "in-cluster hostnames resolve to a declared Service (issue #1916, advisory)"
+    group: gitops
+    mode: advisory
+    selftest: |
+      python3 .github/scripts/check-incluster-hostnames.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-incluster-hostnames.py --enforce
+
   # rules.yaml event_change / ADR-0006: schema-compat gate. The fleet's event
   # A CNPG cluster gets its S3 backup credentials from an EKS Pod Identity association in
   # db-backups.tf, granted per (namespace, serviceAccount). That list is maintained by hand

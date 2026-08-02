@@ -105,6 +105,30 @@ spec:
                 secretKeyRef:
                   name: kafka-cluster-ca-truststore
                   key: ca.password
+            # Apicurio schema registry (ADR-0023 F7 / issue #1916). Declared here even though
+            # ANALYTICS_SCHEMA_BACKEND is deliberately NOT set yet, for two reasons:
+            #
+            #  1. gen-network-policies.py derives every cross-namespace ingress edge from
+            #     Deployment env URLs and NOTHING else. A URL that lives only in the service's
+            #     application.yaml produces no edge at all, so `analytics` would be absent from
+            #     apicurio-registry's allow-list and the VPC CNI agent (standard mode, ADR-0060)
+            #     would DROP the call the moment the backend was flipped — no manifest error, no
+            #     policy diff, just a hung request. Declaring the URL here is what puts the
+            #     namespace in the derived allow-list; re-run the generator after editing this.
+            #  2. It pins the coordinates in the manifest that actually deploys, so the
+            #     application.yaml default and the deployed value cannot drift apart silently.
+            #
+            # The `.svc` suffix is load-bearing for the generator: its URL_RE requires a literal
+            # `.svc`, so the short `apicurio-registry.messaging:8080` form would match nothing and
+            # the generator would exit 0 having changed nothing — a silent no-op indistinguishable
+            # from "already in sync".
+            #
+            # Flipping ANALYTICS_SCHEMA_BACKEND to "apicurio" is a separate rollout decision and
+            # is NOT done here: no producer registers an Avro artifact yet (issue #1916), so the
+            # catalogue would come back empty and, with ANALYTICS_SCHEMA_STRICT unset, the F7 gate
+            # would accept everything while reporting it had a registry behind it.
+            - name: ANALYTICS_SCHEMA_APICURIO_URL
+              value: http://apicurio-registry.messaging.svc:8080
             - name: QUARKUS_CONFIG_LOCATIONS
               value: /mnt/msg-config/override.properties
           startupProbe:
