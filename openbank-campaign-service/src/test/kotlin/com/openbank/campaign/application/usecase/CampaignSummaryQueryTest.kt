@@ -89,7 +89,11 @@ class CampaignSummaryQueryTest {
                 CampaignOutcomeCount(c1, SendOutcome.SUPPRESSED_QUIET_HOURS, 3),
             ),
         )
-        val q = CampaignSummaryQuery(Campaigns(listOf(campaign(c1, CampaignState.ACTIVE))), Enrolments(emptyList()), sends)
+        val q = CampaignSummaryQuery(
+            Campaigns(listOf(campaign(c1, CampaignState.ACTIVE))),
+            Enrolments(emptyList()),
+            sends,
+        )
 
         val out = q.summaries().single()
 
@@ -137,7 +141,11 @@ class CampaignSummaryQueryTest {
                 CampaignOutcomeCount(c1, SendOutcome.FAILED, 0),
             ),
         )
-        val q = CampaignSummaryQuery(Campaigns(listOf(campaign(c1, CampaignState.ACTIVE))), Enrolments(emptyList()), sends)
+        val q = CampaignSummaryQuery(
+            Campaigns(listOf(campaign(c1, CampaignState.ACTIVE))),
+            Enrolments(emptyList()),
+            sends,
+        )
 
         assertThat(q.summaries().single().outcomes.map { it.outcome }).containsExactly("SENT")
     }

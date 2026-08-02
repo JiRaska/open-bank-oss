@@ -23,10 +23,7 @@ import java.util.UUID
  */
 @Path("/api/v1/campaigns")
 @ApplicationScoped
-class CampaignSendLogResource(
-    private val query: CampaignSendLogQuery,
-    private val summaries: CampaignSummaryQuery,
-) {
+class CampaignSendLogResource(private val query: CampaignSendLogQuery, private val summaries: CampaignSummaryQuery) {
 
     /**
      * Reach and delivery for every campaign in one call (issue #3296).
