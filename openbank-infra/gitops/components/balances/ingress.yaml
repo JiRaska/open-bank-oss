@@ -1,0 +1,56 @@
+# Public API Ingress for balance-service.
+#
+# WHY THIS LIVES HERE AND NOT IN components/accounts/: an Ingress backend resolves only within
+# the Ingress's OWN namespace. `accounts/accounts-api` routed /api/v1/balances to a Service
+# literally named `balance-service` in namespace `accounts` -- and balance-service has always
+# lived in `balances`. So the rule pointed at nothing:
+#
+#   Error obtaining Endpoints for Service "accounts/balance-service":
+#     no object matching key "accounts/balance-service" in local store
+#
+# nginx logged that ~1,700 times an hour for the life of the route, and
+# https://api.open-bank.tech/api/v1/balances answered **503** for ~60 days while
+# /api/v1/accounts on the same host answered 401 (auth-gated, i.e. working). Nothing else
+# noticed: balance-service itself was healthy, its in-cluster callers use
+# `http://balance-service.balances.svc:8103` and were unaffected, and no probe covered the
+# public path -- the Ingress object was `Synced/Healthy` throughout, because a backend that
+# does not resolve is not a manifest error.
+#
+# The cross-namespace fix is NOT an ExternalName Service in `accounts`: `tools-gate.test.ts`
+# asserts the ADR-0234 grafana-tools Service stays the only `type: ExternalName` in gitops
+# (it carries the repo-wide AVD-KSV-0108 trivy baseline, which a second one would silently
+# inherit). Instead this follows the pattern payments-api and sanctions-api already use --
+# one Ingress per owning namespace, all sharing the api.open-bank.tech host, which nginx
+# merges into a single server block. Each declares its own TLS secret so cert-manager issues
+# per-Ingress, exactly as the two siblings do.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: balances-api
+  namespace: balances
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Per-client rate limiting for the public sandbox API (auth-gated, but bound flood/cost).
+    # Kept identical to accounts-api/payments-api/sanctions-api so one host does not present
+    # four different limits depending on which path a client happens to hit.
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "3"
+    nginx.ingress.kubernetes.io/limit-connections: "10"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.open-bank.tech
+      secretName: balances-api-tls
+  rules:
+    - host: api.open-bank.tech
+      http:
+        paths:
+          - path: /api/v1/balances
+            pathType: Prefix
+            backend:
+              service:
+                name: balance-service
+                port:
+                  name: http
