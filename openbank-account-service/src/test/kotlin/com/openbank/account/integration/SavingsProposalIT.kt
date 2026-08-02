@@ -62,7 +62,7 @@ class SavingsProposalIT {
         val status: String = (
             Given {
                 contentType("application/json")
-                queryParam("decidedByPartyId", ownerParty.toString())
+                header("X-Customer-Party-Id", ownerParty.toString())
                 body("""{"approve": true, "scaSessionId": "${UUID.randomUUID()}"}""")
             } When {
                 post("/api/v1/accounts/$accountId/savings-goal/delegation/proposals/$proposalId/decide")
@@ -80,9 +80,32 @@ class SavingsProposalIT {
 
         Given {
             contentType("application/json")
+            // Attributed caller on purpose: without the header this would be 403 for the wrong
+            // reason and would stop testing the grant check at all.
+            header("X-Customer-Party-Id", delegateParty.toString())
             body(
-                """{"delegatePartyId": "$delegateParty", "amountMinor": 1000, "currency": "CZK"}""",
+                """{"amountMinor": 1000, "currency": "CZK"}""",
             )
+        } When {
+            post("/api/v1/accounts/$accountId/savings-goal/delegation/proposals")
+        } Then {
+            statusCode(403)
+        }
+    }
+
+    /**
+     * The caller's party is no longer something the request can assert (#3164 C3). Previously
+     * `decidedByPartyId` was a query parameter, so "only the owner may decide" compared database
+     * state against a value the caller chose.
+     */
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `an unattributed call is refused rather than defaulted`(): Unit = runBlocking {
+        val accountId = openAccount()
+
+        Given {
+            contentType("application/json")
+            body("""{"amountMinor": 1000, "currency": "CZK"}""")
         } When {
             post("/api/v1/accounts/$accountId/savings-goal/delegation/proposals")
         } Then {
@@ -116,8 +139,9 @@ class SavingsProposalIT {
     private fun propose(accountId: String): String {
         val response = Given {
             contentType("application/json")
+            header("X-Customer-Party-Id", delegateParty.toString())
             body(
-                """{"delegatePartyId": "$delegateParty", "amountMinor": 150000, "currency": "CZK", "note": "kolo"}""",
+                """{"amountMinor": 150000, "currency": "CZK", "note": "kolo"}""",
             )
         } When {
             post("/api/v1/accounts/$accountId/savings-goal/delegation/proposals")

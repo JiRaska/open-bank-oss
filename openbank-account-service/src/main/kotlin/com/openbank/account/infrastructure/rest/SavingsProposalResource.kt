@@ -4,6 +4,7 @@
 
 package com.openbank.account.infrastructure.rest
 
+import com.openbank.account.application.usecase.ProposalForbiddenException
 import com.openbank.account.application.usecase.ProposeWithdrawalCommand
 import com.openbank.account.application.usecase.SavingsProposalService
 import com.openbank.account.domain.model.WithdrawalProposal
@@ -14,6 +15,7 @@ import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -26,7 +28,6 @@ import java.time.OffsetDateTime
 import java.util.UUID
 
 data class ProposeWithdrawalRequest(
-    val delegatePartyId: UUID,
     val amountMinor: Long,
     val currency: String,
     val note: String? = null,
@@ -64,6 +65,23 @@ data class ProposalResponse(
  * Propose-only withdrawal flow (ADR-0232 D8 / AC8): the delegate proposes, the owner
  * decides with their own SCA, the approval emits the executable event. The delegate
  * can never decide (store-enforced) and never executes.
+ *
+ * ## Who the caller is comes from the edge, never from the request
+ *
+ * Every party id these endpoints act on is read from [AccountResource.CUSTOMER_PARTY_HEADER],
+ * which customer-edge stamps with the caller's validated party. It used to arrive as a query
+ * parameter (`decidedByPartyId`) and a body field (`delegatePartyId`), which made the service's
+ * own guard — `account.partyId != decidedByPartyId`, "only the owner may decide" — a comparison
+ * between database state and a value the caller chose. That is defect C3 of the #3164 P0 chain,
+ * and `AccountResource` two files away already reads the caller this way.
+ *
+ * The SCA check (`verifyOwnerSca`) did stop the obvious abuse, because it demands a COMPLETED
+ * challenge belonging to the owner. But that made SCA the *authentication*, not the second
+ * factor, and it was the only thing left standing.
+ *
+ * The header is REQUIRED here, unlike on the read paths where its absence means an operator
+ * call: proposing and deciding are inherently customer actions, and an unattributable one must
+ * not resolve to "whoever the body says".
  */
 @Path("/api/v1/accounts/{accountId}/savings-goal/delegation/proposals")
 @Produces(MediaType.APPLICATION_JSON)
@@ -74,12 +92,16 @@ class SavingsProposalResource(private val proposalService: SavingsProposalServic
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.read", resource = "#accountId")
     @Operation(summary = "Propose a savings-goal withdrawal (delegate maker; 202 + approvalId)")
-    suspend fun propose(@PathParam("accountId") accountId: UUID, request: ProposeWithdrawalRequest?): Response {
+    suspend fun propose(
+        @PathParam("accountId") accountId: UUID,
+        @HeaderParam(AccountResource.CUSTOMER_PARTY_HEADER) callerPartyId: UUID?,
+        request: ProposeWithdrawalRequest?,
+    ): Response {
         requireNotNull(request) { "request body is required" }
         val created = proposalService.propose(
             ProposeWithdrawalCommand(
                 accountId = accountId,
-                delegatePartyId = request.delegatePartyId,
+                delegatePartyId = caller(callerPartyId),
                 amountMinor = request.amountMinor,
                 currency = request.currency,
                 note = request.note,
@@ -107,12 +129,18 @@ class SavingsProposalResource(private val proposalService: SavingsProposalServic
     suspend fun decide(
         @PathParam("accountId") accountId: UUID,
         @PathParam("proposalId") proposalId: UUID,
-        @QueryParam("decidedByPartyId") decidedByPartyId: UUID,
+        @HeaderParam(AccountResource.CUSTOMER_PARTY_HEADER) callerPartyId: UUID?,
         request: DecideProposalRequest?,
     ): ProposalResponse {
         requireNotNull(request) { "request body is required" }
         return ProposalResponse.from(
-            proposalService.decide(accountId, proposalId, decidedByPartyId, request.approve, request.scaSessionId),
+            proposalService.decide(
+                accountId,
+                proposalId,
+                caller(callerPartyId),
+                request.approve,
+                request.scaSessionId,
+            ),
         )
     }
 
@@ -124,6 +152,13 @@ class SavingsProposalResource(private val proposalService: SavingsProposalServic
     suspend fun cancel(
         @PathParam("accountId") accountId: UUID,
         @PathParam("proposalId") proposalId: UUID,
-        @QueryParam("delegatePartyId") delegatePartyId: UUID,
-    ): ProposalResponse = ProposalResponse.from(proposalService.cancel(accountId, proposalId, delegatePartyId))
+        @HeaderParam(AccountResource.CUSTOMER_PARTY_HEADER) callerPartyId: UUID?,
+    ): ProposalResponse =
+        ProposalResponse.from(proposalService.cancel(accountId, proposalId, caller(callerPartyId)))
+
+    /** Fail closed: a call with no attributable caller is refused, never defaulted. */
+    private fun caller(callerPartyId: UUID?): UUID = callerPartyId
+        ?: throw ProposalForbiddenException(
+            "${AccountResource.CUSTOMER_PARTY_HEADER} is required — the caller's party cannot come from the request",
+        )
 }

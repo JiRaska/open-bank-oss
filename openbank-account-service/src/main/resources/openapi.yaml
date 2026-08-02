@@ -347,6 +347,15 @@ paths:
       operationId: proposeSavingsWithdrawal
       parameters:
         - $ref: '#/components/parameters/accountId'
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: >-
+            The caller's validated party, stamped by customer-edge. Authoritative — the caller's
+            identity is never taken from the body or the query string on these endpoints.
+          schema:
+            type: string
+            format: uuid
       requestBody:
         required: true
         content:
@@ -397,9 +406,12 @@ paths:
           schema:
             type: string
             format: uuid
-        - name: decidedByPartyId
-          in: query
+        - name: X-Customer-Party-Id
+          in: header
           required: true
+          description: >-
+            The caller's validated party, stamped by customer-edge. Authoritative — the caller's
+            identity is never taken from the body or the query string on these endpoints.
           schema:
             type: string
             format: uuid
@@ -432,9 +444,12 @@ paths:
           schema:
             type: string
             format: uuid
-        - name: delegatePartyId
-          in: query
+        - name: X-Customer-Party-Id
+          in: header
           required: true
+          description: >-
+            The caller's validated party, stamped by customer-edge. Authoritative — the caller's
+            identity is never taken from the body or the query string on these endpoints.
           schema:
             type: string
             format: uuid
@@ -653,9 +668,8 @@ components:
 
     ProposeWithdrawalRequest:
       type: object
-      required: [delegatePartyId, amountMinor, currency]
+      required: [amountMinor, currency]
       properties:
-        delegatePartyId: { type: string, format: uuid }
         amountMinor: { type: integer, format: int64, minimum: 1 }
         currency: { type: string, minLength: 3, maxLength: 3 }
         note: { type: string }
