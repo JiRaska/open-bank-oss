@@ -17,6 +17,7 @@ import io.vertx.mutiny.sqlclient.Tuple
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
 import java.time.Instant
+import java.util.Locale
 import java.util.UUID
 import io.vertx.sqlclient.Tuple as CoreTuple
 
@@ -47,15 +48,32 @@ class SanctionsEntryRepositoryImpl(private val pool: PgPool, private val clock: 
             FROM sanctions_entries
             WHERE list_type IN ($inClause)
               AND active = true
+              AND $1 <% search_text
               AND word_similarity($1, search_text) >= $2
             ORDER BY match_score DESC
             LIMIT $3
         """.trimIndent()
 
-        val rows = pool
-            .preparedQuery(sql)
-            .execute(Tuple.of(normalizedQuery, threshold.toFloat(), limit))
-            .awaitSuspending()
+        // `<%` is what makes idx_entries_search_trgm usable; the word_similarity() call above it is
+        // NOT an indexable predicate, so without the operator this is a parallel sequential scan of
+        // every active row — measured at 4002 ms over 814,705 rows against 134 ms with the index,
+        // on every screen, twice per payment (#3265).
+        //
+        // `<%` takes its cutoff from the session GUC pg_trgm.word_similarity_threshold, never from a
+        // bind parameter, and the default (0.6) is NOT the caller's [threshold]. Leaving it inherited
+        // would make a sanctions screen's matching depend on ambient session state: raised above the
+        // caller's value it silently DROPS true matches, which is the one failure mode here that must
+        // not be possible. So the GUC is set per call, from the same [threshold] the exact filter
+        // uses, inside a transaction so `SET LOCAL` cannot leak to the next borrower of the pooled
+        // connection. The word_similarity() predicate is kept as well: it is the authoritative filter,
+        // and it makes the result set identical whatever the operator admits.
+        val rows = pool.withTransaction { conn ->
+            conn.query("SET LOCAL pg_trgm.word_similarity_threshold = ${threshold.toGucLiteral()}")
+                .execute()
+                .flatMap {
+                    conn.preparedQuery(sql).execute(Tuple.of(normalizedQuery, threshold.toFloat(), limit))
+                }
+        }.awaitSuspending()
 
         return rows.map { row ->
             val score = row.getDouble("match_score") ?: 0.0
@@ -234,4 +252,20 @@ class SanctionsEntryRepositoryImpl(private val pool: PgPool, private val clock: 
             updatedAt = updatedAt,
         )
     }
+
+    /**
+     * Render [this] as a literal for `SET LOCAL pg_trgm.word_similarity_threshold`.
+     *
+     * `SET` does not accept bind parameters, so the value has to be interpolated. It is made safe by
+     * construction rather than by trusting the caller: the receiver is a [Double], it is clamped
+     * into `0.0..1.0` (the operator's own domain), and it is formatted with an explicit `Locale.ROOT`
+     * pattern. A `Double` cannot carry SQL, and the clamp means a nonsensical threshold cannot widen
+     * the match set either.
+     *
+     * `Locale.ROOT` is load-bearing, not decoration: under a comma-decimal default locale
+     * `"%.4f".format(0.85)` yields `0,8500`, which Postgres reads as the integer list `0,8500` and
+     * the statement fails at runtime — in a service that runs with `-Duser.language=en` in CI and
+     * whatever the pod carries in production.
+     */
+    private fun Double.toGucLiteral(): String = String.format(Locale.ROOT, "%.4f", coerceIn(0.0, 1.0))
 }
