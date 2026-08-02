@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.14.0...card-issuance-service-v0.15.0) (2026-08-02)
+
+
+### Features
+
+* **card-issuance:** delegation-grant enforcement projection for cards (ADR-0232 D3) ([#3105](https://github.com/JiRaska/open-bank-oss/issues/3105)) ([9851447](https://github.com/JiRaska/open-bank-oss/commit/9851447f95fb3b4cdafa61d6b5a9811e8581f474))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.13.1...card-issuance-service-v0.14.0) (2026-07-30)
 
 

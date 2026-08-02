@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.16.2...account-service-v0.17.0) (2026-08-02)
+
+
+### Features
+
+* **account:** delegation-grant enforcement projection (ADR-0232 D3) ([#3058](https://github.com/JiRaska/open-bank-oss/issues/3058)) ([d28a787](https://github.com/JiRaska/open-bank-oss/commit/d28a787c842d07e9e7d3c5f2267274e773c6ef7c))
+
 ## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.16.1...account-service-v0.16.2) (2026-08-02)
 
 

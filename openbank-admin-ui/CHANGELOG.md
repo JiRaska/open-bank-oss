@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.87.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.87.0...admin-ui-v0.87.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** make the campaign builder legible to a marketer ([#3373](https://github.com/JiRaska/open-bank-oss/issues/3373)) ([24d01b6](https://github.com/JiRaska/open-bank-oss/commit/24d01b613be2e4d644a0ac515a43408df9d491b5))
+
 ## [0.87.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.86.0...admin-ui-v0.87.0) (2026-08-02)
 
 
