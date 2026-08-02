@@ -54,5 +54,5 @@
   "openbank-vop-service": "0.3.1",
   "openbank-campaign-service": "0.9.0",
   "openbank-tax-reporting-service": "0.9.0",
-  "openbank-delegation-service": "0.2.0"
+  "openbank-delegation-service": "0.3.0"
 }
