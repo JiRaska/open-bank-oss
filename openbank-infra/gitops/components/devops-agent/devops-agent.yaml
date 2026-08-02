@@ -49,17 +49,18 @@ spec:
             - name: TEMPORAL_HOST
               value: temporal-frontend.temporal.svc:7233
             - name: TEMPORAL_ENABLED
+              value: "true"
             # The daily analysis sweep. Set EXPLICITLY here rather than left to the
-            # application.yaml default, because this is the only place an operator looks to answer
-            # "when does this agent run" — and until now the answer was "it doesn't". The agent was
-            # trigger-only: measured 2026-08-02, the openbank-devops Temporal namespace held 0
-            # schedules and 0 workflow executions, and its result table was empty — which renders
-            # as "nothing to act on" rather than "nothing has ever looked".
-            # 03:30 UTC, offset 15 minutes from finops-agent (03:00) and the control-liveness sentinel (03:15): the three share one LiteLLM gateway and
-            # one Prometheus. Six fields (second minute hour day month weekday), Quarkus not crontab.
+            # application.yaml default, because this is the only place an operator looks to
+            # answer "when does this agent run" — and until now the answer was "it doesn't".
+            # The agent was trigger-only: measured 2026-08-02, the openbank-devops Temporal
+            # namespace held 0 schedules and 0 workflow executions, and its result table was
+            # empty — which renders as "nothing to act on" rather than "nothing has looked".
+            # 03:30 UTC, offset 15 minutes from finops-agent (03:00) and the control-liveness sentinel (03:15):
+            # the three share one LiteLLM gateway and one Prometheus.
+            # Six fields (second minute hour day month weekday) — Quarkus, not crontab.
             - name: DEVOPS_ANALYSIS_CRON
               value: "0 30 3 * * ?"
-              value: "true"
             - name: PROMETHEUS_URL
               value: http://prometheus-operated.observability.svc:9090
             - name: ALERTMANAGER_URL
