@@ -77,6 +77,23 @@ quarkus:
       enabled: false
     management:
       enabled: false
+    http:
+      # An ephemeral port, because this module now has TWO @QuarkusTest classes with different
+      # profiles and therefore two application boots per run. On the fixed default test port the
+      # second boot dies with `QuarkusBindException` whenever anything else on the machine holds
+      # it — observed here on a workstation that also hosts self-hosted CI runners. RestAssured
+      # reads the actual port from the test context, so nothing needs to know the number.
+      test-port: 0
+
+  openbank:
+    liveness-sentinel:
+      # A cron that never fires (the 31st of February), NOT `quarkus.scheduler.enabled: false`.
+      # Disabling the scheduler makes the class structurally invisible to every test -- which is
+      # how five schedulers in this fleet reached production having never run (#2148, #2187). With
+      # a real-but-unreachable expression the wiring is still constructed and validated at boot,
+      # and a test profile can override this key with a fast cron to drive the REAL schedule
+      # (LivenessSchedulerCronIT does exactly that).
+      check-cron: "0 0 5 31 2 ?"
 
 openbank:
   temporal:
@@ -85,6 +102,15 @@ openbank:
     namespace: ${TEMPORAL_NAMESPACE:openbank}
     task-queue: control-liveness-sentinel
   liveness-sentinel:
+    # ADR-0163: "runs daily (03:00 UTC, offset from finops-agent/devops-agent) plus reactively".
+    # 03:15 implements that offset: finops-agent runs 03:00 (ADR-0112) and devops-agent 03:30.
+    # The offset is between the three AI AGENTS specifically, because they share one LiteLLM
+    # gateway and one Prometheus, and each now carries its own daily token budget — firing them
+    # together contends on all three. Collisions with unrelated per-service batch jobs are NOT a
+    # consideration and are not avoided here: sdd-service's expiry sweep also runs at 03:15, on a
+    # different pod against a different database, and that costs nothing.
+    # Quarkus cron is SIX fields (second minute hour day month weekday).
+    check-cron: ${LIVENESS_CHECK_CRON:0 15 3 * * ?}
     prometheus-url: ${PROMETHEUS_URL:http://prometheus-operated.observability:9090}
     alertmanager-url: ${ALERTMANAGER_URL:http://alertmanager-operated.observability:9093}
     # OpenAI-compatible model backend — DeepInfra, the same provider devops-agent (ADR-0119) and

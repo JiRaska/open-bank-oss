@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.5](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.7.4...sanctions-service-v0.7.5) (2026-08-02)
+
+
+### Bug Fixes
+
+* **sanctions:** replay the stored check when a concurrent writer wins the idempotency key ([#3340](https://github.com/JiRaska/open-bank-oss/issues/3340)) ([13ec4a1](https://github.com/JiRaska/open-bank-oss/commit/13ec4a145b47ed7a1b00ca780e18519f77957fdc)), closes [#3264](https://github.com/JiRaska/open-bank-oss/issues/3264)
+
 ## [0.7.4](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.7.3...sanctions-service-v0.7.4) (2026-08-01)
 
 
