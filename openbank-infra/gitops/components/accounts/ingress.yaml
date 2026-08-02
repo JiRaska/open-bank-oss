@@ -32,10 +32,10 @@ spec:
                 name: account-service
                 port:
                   number: 8100
-          - path: /api/v1/balances
-            pathType: Prefix
-            backend:
-              service:
-                name: balance-service
-                port:
-                  number: 8103
+          # /api/v1/balances is NOT served from here. An Ingress backend resolves only within
+          # the Ingress's own namespace, and balance-service lives in `balances`, so this rule
+          # named a Service that has never existed: nginx logged `no object matching key
+          # "accounts/balance-service"` ~1,700 times an hour and the public path answered 503
+          # for ~60 days. It now lives in components/balances/ingress.yaml, beside the Service
+          # it routes to -- the same one-Ingress-per-owning-namespace shape payments-api and
+          # sanctions-api use on this host.
