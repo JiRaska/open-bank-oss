@@ -9,11 +9,14 @@ import com.openbank.lending.application.port.out.InstallmentRepository
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.ProvisioningRepository
+import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanProvisioningRecord
+import com.openbank.lending.domain.model.LoanStateSummary
+import com.openbank.lending.domain.model.MoneyTotal
 import com.openbank.lending.infrastructure.persistence.entity.CollateralEntity
 import com.openbank.lending.infrastructure.persistence.entity.InstallmentEntity
 import com.openbank.lending.infrastructure.persistence.entity.LoanApplicationEntity
@@ -25,16 +28,13 @@ import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.lending.origination.LegacyOriginationMigration
 import com.openbank.libs.lending.origination.OriginationState
-import com.openbank.lending.domain.model.ApplicationStateSummary
-import com.openbank.lending.domain.model.LoanStateSummary
-import com.openbank.lending.domain.model.MoneyTotal
-import java.math.BigDecimal
 import io.quarkus.hibernate.reactive.panache.common.WithSession
 import io.quarkus.hibernate.reactive.panache.common.WithTransaction
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.hibernate.reactive.mutiny.Mutiny
+import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.util.UUID
 

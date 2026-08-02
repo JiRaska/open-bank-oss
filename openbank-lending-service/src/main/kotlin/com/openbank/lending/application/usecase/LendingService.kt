@@ -26,6 +26,7 @@ import com.openbank.lending.application.port.out.PostingKind
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
 import com.openbank.lending.domain.model.AccrualOutcome
+import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
@@ -33,11 +34,10 @@ import com.openbank.lending.domain.model.CollateralStatus
 import com.openbank.lending.domain.model.DecisionRequest
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
-import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanInstallment
-import com.openbank.lending.domain.model.LoanStateSummary
 import com.openbank.lending.domain.model.LoanProvisioningRecord
+import com.openbank.lending.domain.model.LoanStateSummary
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import com.openbank.lending.domain.model.ProvisioningSnapshot

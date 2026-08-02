@@ -35,8 +35,4 @@ data class ApplicationStateSummary(
 )
 
 /** One loan status: how many, and the principal behind them. */
-data class LoanStateSummary(
-    val status: String,
-    val count: Long,
-    val principal: List<MoneyTotal>,
-)
+data class LoanStateSummary(val status: String, val count: Long, val principal: List<MoneyTotal>)

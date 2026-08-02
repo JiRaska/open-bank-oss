@@ -11,10 +11,12 @@ import com.openbank.lending.application.port.`in`.ProvisioningUseCase
 import com.openbank.lending.application.port.`in`.RescheduleLoanUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
+import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
 import com.openbank.lending.domain.model.DecisionRequest
 import com.openbank.lending.domain.model.LoanApplicationRequest
+import com.openbank.lending.domain.model.LoanStateSummary
 import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.libs.authz.Authorize
@@ -269,8 +271,7 @@ class LendingResource(
     )
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_LENDING_OFFICER", "ROLE_CREDIT_RISK")
     @Authorize(action = "lending.list", resource = "")
-    fun summariseApplications(): Uni<List<com.openbank.lending.domain.model.ApplicationStateSummary>> =
-        apply.summariseApplications()
+    fun summariseApplications(): Uni<List<ApplicationStateSummary>> = apply.summariseApplications()
 
     @GET
     @Path("/loans/summary")
@@ -287,8 +288,7 @@ class LendingResource(
         "ROLE_ADMIN",
     )
     @Authorize(action = "lending.list", resource = "")
-    fun summariseLoans(): Uni<List<com.openbank.lending.domain.model.LoanStateSummary>> =
-        servicing.summariseLoans()
+    fun summariseLoans(): Uni<List<LoanStateSummary>> = servicing.summariseLoans()
 
     @POST
     @Path("/applications/{id}/disburse")

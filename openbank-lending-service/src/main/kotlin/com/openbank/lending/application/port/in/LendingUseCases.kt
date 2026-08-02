@@ -5,13 +5,13 @@
 package com.openbank.lending.application.port.`in`
 
 import com.openbank.lending.domain.model.AccrualOutcome
+import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
 import com.openbank.lending.domain.model.DecisionRequest
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
-import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanStateSummary
