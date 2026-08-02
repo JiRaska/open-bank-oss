@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.3.0...delegation-service-v0.3.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **delegation:** runtime-only Dockerfile, matching the [#3392](https://github.com/JiRaska/open-bank-oss/issues/3392) convention ([#3424](https://github.com/JiRaska/open-bank-oss/issues/3424)) ([fbdb1dd](https://github.com/JiRaska/open-bank-oss/commit/fbdb1dd8a56905d07e507a498b2acec288900330))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.2.0...delegation-service-v0.3.0) (2026-08-02)
 
 
