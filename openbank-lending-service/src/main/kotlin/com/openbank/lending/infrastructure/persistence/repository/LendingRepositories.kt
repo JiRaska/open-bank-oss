@@ -25,6 +25,10 @@ import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.lending.origination.LegacyOriginationMigration
 import com.openbank.libs.lending.origination.OriginationState
+import com.openbank.lending.domain.model.ApplicationStateSummary
+import com.openbank.lending.domain.model.LoanStateSummary
+import com.openbank.lending.domain.model.MoneyTotal
+import java.math.BigDecimal
 import io.quarkus.hibernate.reactive.panache.common.WithSession
 import io.quarkus.hibernate.reactive.panache.common.WithTransaction
 import io.smallrye.mutiny.Uni
@@ -54,6 +58,27 @@ class LoanApplicationRepositoryImpl @Inject constructor(
         )
             .setParameter("p", partyId).resultList
     }.map { it.map(mapper::toDomain) }
+
+    /**
+     * `GROUP BY status, currency` — one round trip for the whole book (issue #3294).
+     *
+     * Grouped by CURRENCY as well as status because `loan_application.currency` is per row: a single
+     * summed amount would be CZK added to EUR, which looks authoritative and means nothing. The rows
+     * are folded into one entry per status carrying a total per currency.
+     *
+     * `min(createdAt)` is the oldest item in that state — what the desk should act on first.
+     */
+    @WithSession
+    override fun summariseByState(): Uni<List<ApplicationStateSummary>> = sf.withSession { s ->
+        s.createQuery(
+            """
+            SELECT a.status, a.currency, count(a), min(a.createdAt), sum(a.requestedAmount)
+            FROM LoanApplicationEntity a
+            GROUP BY a.status, a.currency
+            """.trimIndent(),
+            Array<Any?>::class.java,
+        ).resultList
+    }.map { rows -> foldApplicationSummaries(rows) }
 
     private fun mapStatusFilter(status: String): OriginationState =
         OriginationState.entries.firstOrNull { it.name == status }
@@ -110,6 +135,20 @@ class LoanRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFacto
             s.persist(e).map { mapper.toDomain(e) }
         }
     }
+
+    /** `GROUP BY status, currency` over the loan book (issue #3294); see the application
+     *  repository's note on why currency is part of the grouping. */
+    @WithSession
+    override fun summariseByState(): Uni<List<LoanStateSummary>> = sf.withSession { s ->
+        s.createQuery(
+            """
+            SELECT l.status, l.currency, count(l), sum(l.principal)
+            FROM LoanEntity l
+            GROUP BY l.status, l.currency
+            """.trimIndent(),
+            Array<Any?>::class.java,
+        ).resultList
+    }.map { rows -> foldLoanSummaries(rows) }
 
     @WithSession override fun findActive(limit: Int): Uni<List<Loan>> = sf.withSession { s ->
         s.createQuery(
@@ -261,4 +300,41 @@ class ProvisioningRepositoryImpl @Inject constructor(
         val e = mapper.toEntity(record)
         return sf.withTransaction { s -> s.persist(e).map { mapper.toDomain(e) } }
     }
+}
+
+/**
+ * Fold `(status, currency, count, oldest, sum)` tuples into one entry per status.
+ *
+ * Pure and file-private on purpose: the SQL is only half the answer, and the half that turns rows
+ * into a per-currency total is the half that can silently add CZK to EUR. Unit-tested directly
+ * (`LendingSummaryFoldTest`) rather than only through a container.
+ */
+internal fun foldApplicationSummaries(rows: List<Array<Any?>>): List<ApplicationStateSummary> {
+    val byStatus = LinkedHashMap<String, MutableList<Array<Any?>>>()
+    for (r in rows) byStatus.getOrPut(r[0].toString()) { mutableListOf() }.add(r)
+    return byStatus.map { (status, group) ->
+        ApplicationStateSummary(
+            status = status,
+            count = group.sumOf { (it[2] as Number).toLong() },
+            oldestCreatedAt = group.mapNotNull { it[3] as? java.time.OffsetDateTime }.minOrNull(),
+            requested = group
+                .map { MoneyTotal(it[1].toString().trim(), (it[4] as? BigDecimal) ?: BigDecimal.ZERO) }
+                .sortedBy { it.currency },
+        )
+    }.sortedBy { it.status }
+}
+
+/** As [foldApplicationSummaries], for `(status, currency, count, sum)` loan tuples. */
+internal fun foldLoanSummaries(rows: List<Array<Any?>>): List<LoanStateSummary> {
+    val byStatus = LinkedHashMap<String, MutableList<Array<Any?>>>()
+    for (r in rows) byStatus.getOrPut(r[0].toString()) { mutableListOf() }.add(r)
+    return byStatus.map { (status, group) ->
+        LoanStateSummary(
+            status = status,
+            count = group.sumOf { (it[2] as Number).toLong() },
+            principal = group
+                .map { MoneyTotal(it[1].toString().trim(), (it[3] as? BigDecimal) ?: BigDecimal.ZERO) }
+                .sortedBy { it.currency },
+        )
+    }.sortedBy { it.status }
 }

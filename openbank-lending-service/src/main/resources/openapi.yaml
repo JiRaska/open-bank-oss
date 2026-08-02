@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.11.0
+  version: 1.12.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -97,6 +97,45 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: Not found }
+  /api/v1/lending/applications/summary:
+    get:
+      tags: [Lending]
+      operationId: summariseApplications
+      summary: Per-state application totals across the whole book
+      description: >-
+        The answer /applications/recent cannot give. That endpoint is a capped list (the server
+        clamps limit to 1..100), so any count taken from it is "of the newest N", never the book —
+        and a console rendering a capped count as a total turns a staffing decision into a guess
+        (issue #3294). Aggregated in the database, one round trip, bounded by the number of
+        (state, currency) pairs rather than by the size of the book.
+      responses:
+        '200':
+          description: One entry per origination state
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ApplicationStateSummary' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/loans/summary:
+    get:
+      tags: [Lending]
+      operationId: summariseLoans
+      summary: Per-status loan-book totals
+      description: >-
+        Companion to /applications/summary for the loan book (issue #3294), so "book size" and
+        "loans in trouble" stop being "of the newest 100".
+      responses:
+        '200':
+          description: One entry per loan status
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LoanStateSummary' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/lending/applications/recent:
     get:
       tags: [Lending]
@@ -674,6 +713,43 @@ components:
       properties:
         amount: { type: number }
         currency: { type: string, description: ISO-4217 currency code }
+    MoneyTotal:
+      type: object
+      required: [currency, amount]
+      description: >-
+        A total for ONE currency. Money is never returned as a single summed number here: the
+        currency column is per row, so one figure would be CZK added to EUR — authoritative-looking
+        and meaningless. A caller wanting one number must say which currency it means.
+      properties:
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        amount: { type: number }
+    ApplicationStateSummary:
+      type: object
+      required: [status, count, requested]
+      properties:
+        status:
+          type: string
+          description: An OriginationState value.
+        count: { type: integer, format: int64 }
+        oldestCreatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Oldest application in this state — the one a desk should act on first. Null only when
+            the state is empty, which `count` already says.
+        requested:
+          type: array
+          items: { $ref: '#/components/schemas/MoneyTotal' }
+    LoanStateSummary:
+      type: object
+      required: [status, count, principal]
+      properties:
+        status: { type: string }
+        count: { type: integer, format: int64 }
+        principal:
+          type: array
+          items: { $ref: '#/components/schemas/MoneyTotal' }
     CustomerIntakeRequest:
       type: object
       required: [amount, termMonths]

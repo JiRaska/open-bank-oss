@@ -258,6 +258,38 @@ class LendingResource(
         @QueryParam("limit") @DefaultValue("50") limit: Int,
     ) = apply.listRecentApplications(status, limit)
 
+    @GET
+    @Path("/applications/summary")
+    @Operation(
+        summary = "Per-state application totals across the whole book (issue #3294)",
+        description = "The answer /applications/recent cannot give: that endpoint is a capped list " +
+            "(1..100), so a count taken from it is 'of the newest N', never the book. Aggregated in " +
+            "the database. Money totals are per CURRENCY — loan_application.currency is per row, so " +
+            "one summed number would be CZK added to EUR.",
+    )
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_LENDING_OFFICER", "ROLE_CREDIT_RISK")
+    @Authorize(action = "lending.list", resource = "")
+    fun summariseApplications(): Uni<List<com.openbank.lending.domain.model.ApplicationStateSummary>> =
+        apply.summariseApplications()
+
+    @GET
+    @Path("/loans/summary")
+    @Operation(
+        summary = "Per-status loan-book totals (issue #3294)",
+        description = "Companion to /applications/summary for the loan book. Totals are per currency.",
+    )
+    @RolesAllowed(
+        "ROLE_VIEWER",
+        "ROLE_OPERATOR",
+        "ROLE_LENDING_OFFICER",
+        "ROLE_CREDIT_RISK",
+        "ROLE_COMPLIANCE",
+        "ROLE_ADMIN",
+    )
+    @Authorize(action = "lending.list", resource = "")
+    fun summariseLoans(): Uni<List<com.openbank.lending.domain.model.LoanStateSummary>> =
+        servicing.summariseLoans()
+
     @POST
     @Path("/applications/{id}/disburse")
     @Operation(summary = "Disburse an approved application, booking the loan and its schedule")
