@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Card Issuance Service API
-  version: 1.3.0
+  version: 1.4.0
   description: Debit/credit card lifecycle — issue, activate, block, suspend, resume, cancel;
     synthetic PAN vault and product-catalog entitlements.
   license:
@@ -82,6 +82,41 @@ paths:
                 $ref: '#/components/schemas/CardResponse'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/cards/{id}/delegation/check:
+    get:
+      tags: [Cards]
+      summary: Whether a party may act on a card via delegation
+      description: >-
+        Machine-readable answer to "may this party VIEW or MANAGE_LIMITS on this card?"
+        (ADR-0232 D3): true when the party is the card holder or holds an ACTIVE,
+        in-window delegation grant from the local event-fed projection. Never reveals
+        the grant itself. Authorize action `card.read`.
+      operationId: checkCardDelegation
+      parameters:
+        - $ref: '#/components/parameters/cardId'
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: intent
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [VIEW, MANAGE_LIMITS]
+      responses:
+        '200':
+          description: The authorization decision
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authorized:
+                    type: boolean
 
   /api/v1/cards/account/{accountId}:
     get:

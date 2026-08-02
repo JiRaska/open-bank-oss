@@ -81,3 +81,15 @@ All mutations require `Idempotency-Key` or `X-Operator-Id` header; resource-leve
 
 - **2026-06-30** — Initial threat model authored (ADR-0113 delivery gate).
   Sandbox: maskedPan synthetic, no real PAN stored, PCI DSS CHD scope not triggered.
+- **2026-08-01** — Card delegation-grant enforcement projection (ADR-0232 D3, issue #2990):
+  `card_delegation_projection` fed by `CardDelegationEventConsumer` from
+  `openbank.delegation.events` (CARD-scoped events only), and a `CardDelegationGuard` answering
+  holder OR an ACTIVE in-window grant for VIEW / MANAGE_LIMITS intents, exposed as
+  `GET /api/v1/cards/{id}/delegation/check` (reuses the existing `card.read` OPA action — no rego
+  change). **Risk class = elevation of privilege** (a delegate seeing card metadata they should
+  not; PAN/secure-details stay outside delegation scope entirely — no CARD capability maps to
+  `secure-details`). Same structural properties as the account slice: local-only enforcement (no
+  synchronous call to delegation-service, tripwire test), additive guard (holder path untouched),
+  DLQ so a close event is never destroyed, idempotent upsert per grant id. Residual: seconds-level
+  revoke propagation per ADR-0232; customer-edge adoption of the check endpoint is its own slice.
+  Rollback: revert; the projection tables are droppable without touching `cards`.
