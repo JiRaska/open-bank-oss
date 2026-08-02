@@ -67,6 +67,13 @@ Labels are code (`.github/labels.yml`, applied by the Label-sync workflow) — d
 ```
 CI is path-scoped (only changed services build). The domain layer has **zero** framework imports.
 
+**Gradle stops at the first failing task, so a green-looking task list is not a list that ran.** In
+that one-liner `test` precedes `ktlintCheck`; a failing `test` means ktlint never executes, and a
+`test` failure can be environmental (a second Gradle build on the same machine takes the port, and
+the run dies with `QuarkusBindException`) — so a genuine lint violation reaches CI while the local
+gate looked like it had merely flaked. Read which tasks actually appear in the output, and re-run
+the cheap checks (`ktlintCheck detekt`, seconds) on their own after fixing a test failure.
+
 ## Skills
 
 - `/ship-check` — authoritative pre-merge preflight; mirrors the CI gates.
@@ -104,6 +111,29 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   (RestAssured + `@TestSecurity`) and assert the row with a plain JDBC read. This is also the only
   way to prove transactional-outbox atomicity (status change + outbox row commit together) — a mocked
   repo can't. Pattern: `LendingOutboxWriteIT`, `ConsentRevocationOutboxIT`.
+- **A Kotlin annotation binds to the NEXT declaration — a top-level function between `@Path` and its
+  class silently steals it.** `McpEndpoint` had `@Path("/mcp")`, then a top-level
+  `private fun String?.sanitizeForLog()`, then `class McpEndpoint`. The `@Path` bound to the
+  *function*; the class carried none, RESTEasy never registered the resource, and **every POST /mcp
+  answered 404 on a running pod** for the whole life of the endpoint. Nothing else changed shape: it
+  compiled, it was still a CDI bean, `McpEndpointIdentityTest` (which calls the class directly) stayed
+  green, and its siblings `/agent/chat` and `/api/v1/proposals` served normally. Downstream, admin-ui
+  maps any error to "not deployed", so a healthy service rendered as *"Agent-service (MCP) is not
+  deployed in this environment"*. **Ask the running app what it serves** — `/q/openapi` on the
+  management port lists the registered paths, and 404-vs-405-vs-401 discriminates "unregistered" from
+  "wrong method" / "needs a token". A unit test that calls a resource class cannot tell a served route
+  from an unserved one; only a `@QuarkusTest` driving real HTTP can (`McpEndpointRoutingIT`, #3371).
+- **An `Error` thrown in a FIELD INITIALIZER fails bean construction, and CDI then fails every
+  injection point of that bean — including endpoints that never use it.** `OnnxFraudModel` documented
+  "a load failure leaves `session` null, so `scoreShadow` returns null", and could not do it: the
+  native library surfaces as `ExceptionInInitializerError` wrapping `UnsatisfiedLinkError` — both
+  `Error`s, not `Exception` — thrown by `OrtEnvironment.getEnvironment()` in a field initializer,
+  outside the `try` that catches `Exception`. So `GET /api/v1/fraud/review-queue`, a read-only analyst
+  query that never touches a model, answered **500 on every call** because the bean is in its graph
+  (#3376). Two rules: anything crossing into native code (`System.load`, JNI, `OrtEnvironment`) must be
+  caught as `Throwable`, and a bean whose construction can fail belongs behind a nullable field, never
+  a direct initializer. Grep for the shape: `private val x: T = SomethingNative...()` in an
+  `@ApplicationScoped` class.
 - **`@ApplicationScoped` is LAZY — an `init {}` guard or warning does not run at boot.** Quarkus
   creates the bean via a client proxy on first use, so a constructor that logs "this config is
   DEV-ONLY" or `check()`s a go-live flag stays silent until the first request that touches it — which
@@ -171,6 +201,18 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
 ### Flyway
 - **Never change a migration after it has been applied to a live DB** — Flyway checksums the whole
   file (comments included), so any edit triggers a `checksum mismatch` startup failure.
+- **Committing migrations does not run them: `migrate-at-start` defaults to FALSE.**
+  security-scanner shipped `db/migration/V2`+`V3` with `quarkus-flyway` on the classpath and the
+  switch set nowhere — not in `application.yaml`, not in its gitops env — so the deployed database
+  held **zero tables and no `flyway_schema_history` at all**, and every write answered
+  `relation "security_outbox" does not exist (42P01)` as a 500. Invisible from every angle you would
+  normally check: the pod is Ready (health probes never touch the schema) and the migrations *are*
+  present in the repo (#3350). `check-flyway-default-datasource.py` now enforces both directions —
+  migrations ⇒ something runs them (the config key, or `QUARKUS_FLYWAY_MIGRATE_AT_START` in that
+  service's own gitops manifest, which is psd2's deliberate shape), and `migrate-at-start` ⇒ a
+  literal `quarkus.datasource.jdbc.url` in the file, since Flyway migrates the DEFAULT (Agroal/JDBC)
+  datasource and a service that only boots because the env supplied one cannot start from this repo
+  alone (#3080).
 
 ### Contract tests (Pact)
 - **One BROKER-sourced `@Provider` test per provider.** Two verification classes with the same
