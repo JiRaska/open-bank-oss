@@ -426,6 +426,7 @@ rules:
       - customer-edge                   # ADR-0086 audit trail + ADR-0072 resume, ns customer-edge (first ESO Kafka client there); missed by the #2665 sweep
       - analytics-sink                  # ADR-0022/0069: analytics bronze consumer (party/kyc/consent/sca/documents/onboarding-funnel), ns analytics (first ESO client there)
       - campaign-service                # ADR-0200: campaign journey delivery requests, ns campaign (first ESO client there); missing entry blocked the whole sandbox rollout at sync-wave -1 (#2749)
+      - delegation-service              # ADR-0232: grant lifecycle producer, ns delegation (first ESO client there); same #2749 failure, observed again — the keystore ExternalSecret sat at SecretSyncedError and ArgoCD never advanced past sync-wave -1, so all 11 wave-0 resources stayed OutOfSync and no pod was ever created
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1
