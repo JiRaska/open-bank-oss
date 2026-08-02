@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.86.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.85.0...admin-ui-v0.86.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** build campaigns on a canvas instead of filling in a form ([#3323](https://github.com/JiRaska/open-bank-oss/issues/3323)) ([bd63976](https://github.com/JiRaska/open-bank-oss/commit/bd6397629292e03e2c0c52595bb384a807ce2384))
+
 ## [0.85.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.84.0...admin-ui-v0.85.0) (2026-08-02)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.8.1...billing-service-v0.8.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **billing:** validate fee query params instead of letting the schema reject them ([#3064](https://github.com/JiRaska/open-bank-oss/issues/3064)) ([0be78ce](https://github.com/JiRaska/open-bank-oss/commit/0be78ce4b5bbd8177715e3d409377355d7f2a3c7))
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.8.0...billing-service-v0.8.1) (2026-08-01)
 
 
