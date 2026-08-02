@@ -1,6 +1,6 @@
 {
   "name": "openbank-admin-ui",
-  "version": "0.80.2",
+  "version": "0.81.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "generate:app-status": "node scripts/generate-app-status.mjs",
     "pretype-check": "node scripts/generate-origination-graph.mjs",
-  "type-check": "tsc --noEmit",
+    "type-check": "tsc --noEmit",
     "pretest": "node scripts/generate-governance.mjs && node scripts/generate-catalog.mjs && node scripts/generate-origination-graph.mjs",
     "test": "vitest run",
     "pretest:coverage": "npm run pretest",

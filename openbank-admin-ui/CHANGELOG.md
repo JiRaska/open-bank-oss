@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.81.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.80.2...admin-ui-v0.81.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** show a loan application's real path through the ADR-0211 lifecycle ([#3236](https://github.com/JiRaska/open-bank-oss/issues/3236)) ([451012a](https://github.com/JiRaska/open-bank-oss/commit/451012a65899851ecec56264b6258ba9b1c4e8c7))
+
 ## [0.80.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.80.1...admin-ui-v0.80.2) (2026-08-02)
 
 
