@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.14.1...mcp-service-v0.14.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **mcp:** key an agent session by the token's sub, not by a name an admin can change ([#3242](https://github.com/JiRaska/open-bank-oss/issues/3242)) ([7ef9ed1](https://github.com/JiRaska/open-bank-oss/commit/7ef9ed198a58ab192742c7ca7ef662bf87325662)), closes [#3182](https://github.com/JiRaska/open-bank-oss/issues/3182)
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.14.0...mcp-service-v0.14.1) (2026-07-31)
 
 
