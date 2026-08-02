@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.89.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.89.0...admin-ui-v0.89.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** convert the enrolment table to the house style too ([#3497](https://github.com/JiRaska/open-bank-oss/issues/3497)) ([3ec520a](https://github.com/JiRaska/open-bank-oss/commit/3ec520a518abd520df095207919412b98d7a7bed))
+
 ## [0.89.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.88.1...admin-ui-v0.89.0) (2026-08-02)
 
 
