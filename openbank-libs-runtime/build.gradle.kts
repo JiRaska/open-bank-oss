@@ -70,6 +70,12 @@ dependencies {
     testImplementation("org.jboss.logging:jboss-logging:3.6.2.Final")
     testImplementation("jakarta.enterprise:jakarta.enterprise.cdi-api:4.1.0")
     testImplementation("io.micrometer:micrometer-core:1.14.5")
+    // RedisApprovalStoreTest drives the REAL store — the four-eyes self-approval guard is the
+    // single fleet-wide enforcement point for segregation of duties (#3349), and until that test
+    // existed deleting it left every suite green. Both are compileOnly above, so the test source
+    // set needs them explicitly; same pattern as quarkus-security and the FT API here.
+    testImplementation("io.quarkus:quarkus-redis-client:3.33.2")
+    testImplementation("io.smallrye.reactive:mutiny-kotlin:3.1.1")
     // ResilientCallMetrics classifies CircuitBreakerOpenException; the API is compileOnly above.
     testImplementation("org.eclipse.microprofile.fault-tolerance:microprofile-fault-tolerance-api:4.1.1")
     // Test-only: WorkflowLivenessMetricNamingTest checks the dotted meter name against Micrometer's
