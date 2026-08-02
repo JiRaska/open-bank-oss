@@ -85,6 +85,23 @@ class AmlCaseRepositoryImpl(private val outboxRepository: AmlOutboxRepositoryImp
 
     // GDPR Art. 17: right of erasure — null out PII fields and replace customerReference with a
     // non-identifying sentinel so the case row itself (required for audit/SAR trails) survives.
+    // #3413: the rails satisfied a NOT NULL `party_id` with the debtor ACCOUNT id, so on every
+    // affected row the two columns are byte-for-byte equal — measured 6 of 6 payment cases. That
+    // equality is the detector; it cannot false-positive, because an account id and a party id are
+    // drawn from different tables and a genuine party is never its own account.
+    override suspend fun findUnresolvedParty(limit: Int): List<Pair<UUID, UUID>> = Panache.withSession {
+        find("partyId = accountId and accountId is not null").range(0, limit - 1).list()
+    }.awaitSuspending().map { it.caseId to it.accountId!! }
+
+    override suspend fun resolveParty(caseId: UUID, partyId: UUID) {
+        Panache.withTransaction {
+            update("partyId = ?1 where caseId = ?2", partyId, caseId)
+        }.awaitSuspending()
+    }
+
+    override suspend fun countUnresolvedParty(): Long =
+        Panache.withSession { count("partyId = accountId and accountId is not null") }.awaitSuspending()
+
     override suspend fun anonymizeByPartyId(partyId: UUID): Int = Panache.withTransaction {
         update(
             "customerReference = concat('ERASED-', cast(partyId as string))," +
