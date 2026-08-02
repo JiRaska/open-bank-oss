@@ -53,11 +53,17 @@ summary: "Add an AI assurance layer: an in-repo versioned prompt registry that e
 > (`compliance-officer`, `ui-assistant`, `customer-copilot`) are extracted into the registry
 > with eval suites, taking coverage from 2 charters to 5.
 >
-> **Still open after this increment:** services load their prompt from the registry rather
-> than an inline `buildString` (so a deployed `prompt_hash` resolves and byte-for-byte parity
-> can be checked); the first *recorded* run for any charter — none exists yet, so replay is
-> advisory and warns rather than gates; the six `pending` stub ops-agents (ADR-0112 P4,
-> ADR-0164–0168).
+> **Update (2026-08-02, issue #1918) — replay graduation ships.** All five suites now have a
+> committed first recording under `openbank-libs/governance/evals/recordings/`,
+> `recordings/backlog.yaml` is empty, and CI runs `run-evals.py --require-recordings`. The
+> ratchet is now blocking for every charter that declares a suite: a new or changed suite cannot
+> land unrecorded, and a prompt/model promotion cannot land stale or regressed. Charters with no
+> suite yet remain structural backlog in `check-evals-registry.py`; the replay gate is scoped only
+> to charters that have crossed that baseline line.
+>
+> **Still open after this increment:** services load their prompt from the registry rather than an
+> inline `buildString` (so a deployed `prompt_hash` resolves and byte-for-byte parity can be
+> checked); the six `pending` stub ops-agents (ADR-0112 P4, ADR-0164–0168).
 
 ## Context
 
