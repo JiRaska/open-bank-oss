@@ -43,6 +43,20 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
 
+// CodeQL java/log-injection: reason/attemptedAgent/method below trace back to the request
+// (an identity claim asserted by the caller). Strip CR/LF so an attacker can't forge
+// additional log lines (log forging, CWE-117). Top-level, not a class member, so it doesn't
+// count against McpEndpoint's detekt TooManyFunctions budget.
+//
+// It lives ABOVE McpEndpoint's KDoc on purpose. A Kotlin annotation binds to the next
+// declaration, so while this function sat between `@Path("/mcp")` and `class McpEndpoint`,
+// the @Path bound to *it*: the class carried no @Path, RESTEasy never registered the
+// resource, and every POST /mcp answered 404 on a running pod while /agent/chat and
+// /api/v1/proposals were served normally. Nothing else changed shape — the class was still
+// a CDI bean, still compiled, still passed every unit test. McpEndpointRoutingIT is what
+// notices now. Never move a top-level declaration in between an annotation and its target.
+private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+
 /**
  * ADR-0031 D3: the MCP surface now requires an authenticated operator (Keycloak bearer from the
  * admin-ui BFF). The bearer proves WHO is calling (a logged-in operator with an agent-capable
@@ -52,12 +66,6 @@ import java.time.Clock
  * %dev/%test profile (no inbound auth there), so the unit/contract tests are unaffected.
  */
 @Path("/mcp")
-// CodeQL java/log-injection: reason/attemptedAgent/method below trace back to the request
-// (an identity claim asserted by the caller). Strip CR/LF so an attacker can't forge
-// additional log lines (log forging, CWE-117). Top-level, not a class member, so it doesn't
-// count against McpEndpoint's detekt TooManyFunctions budget.
-private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
-
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
