@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.tax.infrastructure.kafka
+
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import com.openbank.tax.application.usecase.TaxFilingService
+import com.openbank.tax.domain.model.FilingPeriod
+import com.openbank.tax.domain.model.ObservedRemittance
+import io.micrometer.core.instrument.MeterRegistry
+import jakarta.enterprise.context.ApplicationScoped
+import org.apache.kafka.clients.consumer.ConsumerRecord
+import org.eclipse.microprofile.reactive.messaging.Incoming
+import org.jboss.logging.Logger
+import java.math.BigDecimal
+import java.nio.charset.StandardCharsets
+import java.time.Clock
+import java.time.Instant
+import java.time.LocalDate
+import java.util.UUID
+
+/**
+ * Consumes `interest.withholding.remitted.v1` for the §38d filing (ADR-0180).
+ *
+ * A **second consumer group** on `openbank.interest.accrual.event`, alongside interest-service's
+ * own settlement consumer. No change to interest-service's contract: it already publishes this
+ * event, and until now nothing consumed it for filing purposes — ADR-0038 delegated the statutory
+ * filing to "the downstream payment/reporting consumer" and never named one.
+ *
+ * **Event-type filtering is header-based, and that is not a stylistic choice.** The outbox relay
+ * carries the event type only as the `ce-type` Kafka header (ADR-0003/ADR-0050 N3); the interest
+ * publisher does NOT duplicate `eventType` into the JSON payload. A consumer that filtered on a
+ * payload field would compile, deploy, run, and match nothing — forever, silently, while the topic
+ * carried exactly the events it was written for. Verified against the producer
+ * (`WithholdingRemittanceService.remittedEvent`) and the existing self-consumer rather than assumed.
+ *
+ * A record with no such header is ignored: it cannot have come from the compliant outbox relay.
+ */
+@ApplicationScoped
+class WithholdingRemittedConsumer(
+    private val taxFilingService: TaxFilingService,
+    private val objectMapper: ObjectMapper,
+    private val meterRegistry: MeterRegistry,
+    private val clock: Clock,
+) {
+    private val log = Logger.getLogger(WithholdingRemittedConsumer::class.java)
+
+    @Incoming("withholding-remitted-in")
+    // Poison-pill safety: this boundary must swallow ANY failure and ack, so one malformed event
+    // cannot wedge the consumer group and stall every later filing period behind it.
+    @Suppress("TooGenericExceptionCaught")
+    suspend fun consume(record: ConsumerRecord<String, String>) {
+        try {
+            val eventType = record.headers().lastHeader(OutboxKafkaHeaders.HEADER_EVENT_TYPE)
+                ?.let { String(it.value(), StandardCharsets.UTF_8) }
+            if (eventType != EVENT_WITHHOLDING_REMITTED) {
+                count(OUTCOME_IGNORED)
+                return
+            }
+
+            val remittance = parse(objectMapper.readTree(record.value()))
+            val recorded = taxFilingService.observe(remittance)
+            count(if (recorded) OUTCOME_RECORDED else OUTCOME_DUPLICATE)
+        } catch (e: Exception) {
+            count(OUTCOME_FAILED)
+            log.errorf(e, "[withholding-filing] failed to handle remitted event: %.300s", record.value())
+        }
+    }
+
+    private fun parse(node: JsonNode) = ObservedRemittance(
+        remittanceId = UUID.fromString(node.path("remittanceId").asText()),
+        period = FilingPeriod(node.path("periodYear").asInt(), node.path("periodMonth").asInt()),
+        currency = node.path("currency").asText(),
+        totalTaxAmount = decimalOf(node.path("totalTaxAmount")),
+        itemCount = node.path("itemCount").asInt(),
+        dueDate = LocalDate.parse(node.path("dueDate").asText()),
+        observedAt = Instant.now(clock),
+    )
+
+    /**
+     * Strict decode: the amount is serialised as a JSON *string* by the producer, and a silent
+     * fallback to zero on an unparsable value would file a return understating the tax withheld.
+     */
+    private fun decimalOf(node: JsonNode): BigDecimal {
+        val raw = if (node.isTextual) node.asText() else node.toString()
+        return runCatching { BigDecimal(raw) }.getOrElse {
+            throw IllegalArgumentException("Unparsable totalTaxAmount in remitted event: $raw")
+        }
+    }
+
+    private fun count(outcome: String) {
+        meterRegistry.counter("openbank.tax.withholding_events", "outcome", outcome).increment()
+    }
+
+    companion object {
+        private const val EVENT_WITHHOLDING_REMITTED = "interest.withholding.remitted.v1"
+
+        private const val OUTCOME_RECORDED = "recorded"
+        private const val OUTCOME_DUPLICATE = "duplicate"
+        private const val OUTCOME_IGNORED = "ignored_event_type"
+        private const val OUTCOME_FAILED = "failed"
+    }
+}

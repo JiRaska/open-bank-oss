@@ -1,6 +1,6 @@
 {
   "openbank-account-service": "0.16.2",
-  "openbank-admin-ui": "0.85.0",
+  "openbank-admin-ui": "0.86.0",
   "openbank-agent-service": "1.16.1",
   "openbank-aml-service": "0.7.8",
   "openbank-anacredit-service": "0.9.1",
@@ -8,7 +8,7 @@
   "openbank-audit-service": "0.13.0",
   "openbank-authz-policy-auditor": "0.3.1",
   "openbank-balance-service": "1.12.2",
-  "openbank-billing-service": "0.8.1",
+  "openbank-billing-service": "0.8.2",
   "openbank-card-issuance-service": "0.14.0",
   "openbank-clearing-service": "0.7.6",
   "openbank-clearing-simulator": "0.4.6",
@@ -29,7 +29,7 @@
   "openbank-governance-auditor": "0.3.1",
   "openbank-interest-service": "0.14.6",
   "openbank-kyc-service": "0.10.5",
-  "openbank-ledger-service": "1.17.2",
+  "openbank-ledger-service": "1.18.0",
   "openbank-lending-service": "0.21.0",
   "openbank-mcp-service": "0.14.3",
   "openbank-notification-service": "0.17.2",
@@ -53,5 +53,6 @@
   "openbank-transaction-service": "1.15.4",
   "openbank-vop-service": "0.3.1",
   "openbank-campaign-service": "0.8.0",
-  "openbank-delegation-service": "0.1.0"
+  "openbank-delegation-service": "0.1.0",
+  "openbank-tax-reporting-service": "0.1.0"
 }
