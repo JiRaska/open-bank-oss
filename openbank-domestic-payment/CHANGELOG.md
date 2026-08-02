@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.11.3...domestic-payment-v0.11.4) (2026-08-02)
+
+
+### Bug Fixes
+
+* **domestic-payment:** give a payment held on an unavailable screen a way out ([#3518](https://github.com/JiRaska/open-bank-oss/issues/3518)) ([1ebcda4](https://github.com/JiRaska/open-bank-oss/commit/1ebcda415bf9b8348f354c6bc176c933480a7ea7)), closes [#3266](https://github.com/JiRaska/open-bank-oss/issues/3266)
+
 ## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.11.2...domestic-payment-v0.11.3) (2026-08-02)
 
 
