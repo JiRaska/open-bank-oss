@@ -605,6 +605,32 @@ class AuthorizeInterceptorTest {
     }
 
     @Test
+    fun `four-eyes enforced, an approval granted for a DIFFERENT resource is rejected and re-pends`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+
+        // Approved for grantee-A, replayed against grantee-B by the SAME maker. This is the case
+        // an empty `resource = ""` cannot distinguish: with no resource, every approval that maker
+        // holds satisfies every call, so "approve this one decision" silently becomes "approve any
+        // decision of this kind". sanctions.clear was in exactly that state until the resource
+        // expression was narrowed to the specific check id.
+        val pending = runBlocking { store.create("consent.grant", "grantee-A", "user-42") }
+        runBlocking { store.decide(pending.id, "checker-99", approve = true) }
+        interceptor.httpHeaders = mockk {
+            every { isResolvable } returns true
+            every { get() } returns mockk { every { getRequestHeader("X-Approval-Id") } returns listOf(pending.id) }
+        }
+
+        assertThatThrownBy {
+            interceptor.authorize(makeCtx(annotatedMethodWithDottedResource, DummyRequest("grantee-B", emptyList())))
+        }.isInstanceOf(WebApplicationException::class.java)
+        assertThat(store.created)
+            .describedAs("the mismatched resource must re-issue a fresh pending approval, not proceed")
+            .hasSize(2)
+    }
+
+    @Test
     fun `four-eyes enforced, still-PENDING approval id is rejected and re-pends`() {
         every { identity.roles } returns setOf("ROLE_OPERATOR")
         val store = InMemoryApprovalStore()
