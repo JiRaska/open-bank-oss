@@ -77,6 +77,20 @@ quarkus:
       enabled: false
     management:
       enabled: false
+    http:
+      # Ephemeral: this module now has more than one @QuarkusTest profile, so there is more than
+      # one application boot per run, and on the fixed default the second dies with
+      # QuarkusBindException whenever anything else on the machine holds the port.
+      test-port: 0
+
+  openbank:
+    devops:
+      # A cron that never fires (the 31st of February), NOT `quarkus.scheduler.enabled: false`.
+      # Disabling the scheduler makes the class structurally invisible to every test — which is how
+      # five schedulers in this fleet reached production having never run (#2148, #2187). With a
+      # real-but-unreachable expression the wiring is still built and validated at boot, and a test
+      # profile can override this key with a fast cron to drive the REAL schedule.
+      analysis-cron: "0 0 5 31 2 ?"
 
 openbank:
   temporal:
@@ -90,6 +104,12 @@ openbank:
     # divergence is preserved as config rather than flattened. Flip to true to adopt the fleet norm.
     metrics-enabled: false
   devops:
+    # Daily analysis sweep (ADR-0119). 03:30 UTC — the three AI agents are offset from each
+    # other by 15 minutes because they share ONE LiteLLM gateway and one Prometheus, and each now
+    # carries its own daily token budget: finops-agent (03:00) and the control-liveness sentinel (03:15).
+    # Collisions with unrelated per-service batch jobs are not a consideration — different pods,
+    # different databases. Quarkus cron is SIX fields (second minute hour day month weekday).
+    analysis-cron: ${DEVOPS_ANALYSIS_CRON:0 30 3 * * ?}
     prometheus-url: ${PROMETHEUS_URL:http://prometheus-operated.observability:9090}
     alertmanager-url: ${ALERTMANAGER_URL:http://alertmanager-operated.observability:9093}
     # OpenAI-compatible model backend — DeepInfra + DeepSeek, same provider+model as the copilot

@@ -62,9 +62,9 @@ data class FiscalYearTrialBalance(val fiscalYear: Int, val lines: List<TrialBala
             append("\",\"lines\":[")
             sorted.forEachIndexed { i, line ->
                 if (i > 0) append(',')
-                append("{\"code\":\"").append(escapeJson(line.code))
+                append("{\"code\":\"").append(escapeCanonicalJson(line.code))
                 append("\",\"type\":\"").append(line.type.name)
-                append("\",\"currency\":\"").append(escapeJson(line.currency))
+                append("\",\"currency\":\"").append(escapeCanonicalJson(line.currency))
                 append("\",\"debit\":\"").append(canonicalNumber(line.totalDebit))
                 append("\",\"credit\":\"").append(canonicalNumber(line.totalCredit))
                 append("\"}")
@@ -77,23 +77,6 @@ data class FiscalYearTrialBalance(val fiscalYear: Int, val lines: List<TrialBala
     fun contentHash(): String = MessageDigest.getInstance("SHA-256")
         .digest(canonicalJson().toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it) }
-
-    private fun canonicalNumber(value: BigDecimal): String {
-        val stripped = value.stripTrailingZeros()
-        // stripTrailingZeros leaves 0E-22 forms for zero; normalize to a single canonical "0".
-        return if (stripped.compareTo(BigDecimal.ZERO) == 0) "0" else stripped.toPlainString()
-    }
-
-    private fun escapeJson(value: String): String = buildString {
-        value.forEach { c ->
-            when {
-                c == '"' -> append("\\\"")
-                c == '\\' -> append("\\\\")
-                c < ' ' -> append("\\u%04x".format(c.code))
-                else -> append(c)
-            }
-        }
-    }
 }
 
 enum class YearCloseStatus { DRAFT, ATTESTED }

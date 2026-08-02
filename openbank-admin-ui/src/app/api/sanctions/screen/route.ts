@@ -2,25 +2,14 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-import { NextRequest, NextResponse } from 'next/server'
-
-const BASE = process.env.SANCTIONS_SERVICE_URL ?? 'http://openbank-sanctions-service:8123'
+import { NextRequest } from 'next/server'
+import { forwardToSanctionsService } from '@/lib/sanctions/upstream'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json()
-    const res = await fetch(`${BASE}/api/v1/sanctions/screen`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(body),
-      cache: 'no-store',
-      signal: AbortSignal.timeout(15_000),
-    })
-    const data = await res.json().catch(() => ({ error: 'Invalid JSON' }))
-    return NextResponse.json(data, { status: res.status, headers: { 'Cache-Control': 'no-store' } })
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Screening failed' }, { status: 502 })
-  }
+  const body = await req.json()
+  // A screening run matches the name against every enabled list — give it more headroom
+  // than a plain read.
+  return forwardToSanctionsService('/api/v1/sanctions/screen', 'POST', body, 15_000)
 }

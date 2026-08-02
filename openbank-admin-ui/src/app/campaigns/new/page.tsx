@@ -10,18 +10,27 @@ import Link from 'next/link'
 import { ArrowLeft, Megaphone } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui'
+import { JourneyEditor, MAX_STEPS, type EditorStep } from '@/components/campaigns/JourneyEditor'
+import { StepEditor } from '@/components/campaigns/StepEditor'
 
 /**
- * Campaign Studio — authoring (ADR-0221 D1).
+ * Campaign Studio — authoring on a canvas (ADR-0221 D1).
  *
- * The form IS the domain model: goal, a picker over versioned segment artifacts, steps composed
- * from the template catalogue, the platform contact rules shown read-only, and a summary that
- * submits for approval. There is no free-text body field anywhere, because the engine rejects one
- * by construction (ADR-0176 D4) — a textarea here would be a control the service would refuse.
+ * The form this replaces asked for `template`, `variables` and `delaySeconds`: the engine's
+ * vocabulary in the engine's order. A marketer now sees the journey they are assembling while they
+ * assemble it, and edits one node at a time.
  *
- * What this screen deliberately does NOT do: activate. Submission puts the campaign in
- * PENDING_APPROVAL, and the checker is a different person acting from the campaign's own page.
- * Offering both buttons to one author would render the four-eyes gate as decoration.
+ * On ADR-0221 D5, which rejects "a drag-and-drop journey canvas": the objection is a free-form
+ * 40-node graph, and this is not one. The flow is linear and capped at the domain's five steps
+ * (`Campaign.MAX_STEPS`) — nothing to drag, nothing to branch, nothing to arrange. It is D5's own
+ * "the wizard's step list covers the honest use cases", drawn rather than listed.
+ *
+ * Still absent on purpose, because the service refuses both: any free-text body (only declared
+ * template variables), and any way to author a segment — that is a pull request against the
+ * catalogue (ADR-0201 D1).
+ *
+ * It also stops at "create draft". Activation is a different person's action, and offering both
+ * buttons to one author would render the four-eyes gate decorative.
  */
 
 interface Segment {
@@ -35,21 +44,46 @@ const TEMPLATES: Record<string, string[]> = {
   MARKETING_PRODUCT_OFFER: ['offerTitle', 'offerText', 'ctaText'],
 }
 
+const newStep = (): EditorStep => ({
+  template: Object.keys(TEMPLATES)[0],
+  variables: {},
+  delaySeconds: 0,
+})
+
 export default function NewCampaignPage() {
-  const { t, language } = useLanguage()
+  const { t } = useLanguage()
   const router = useRouter()
 
   const [name, setName] = useState('')
   const [goal, setGoal] = useState('')
   const [segment, setSegment] = useState('')
   const [segments, setSegments] = useState<Segment[]>([])
-  const [template, setTemplate] = useState('MARKETING_PRODUCT_OFFER')
-  const [variables, setVariables] = useState<Record<string, string>>({})
-  const [delayHours, setDelayHours] = useState('0')
+  const [steps, setSteps] = useState<EditorStep[]>([newStep()])
+  const [selected, setSelected] = useState<number | null>(0)
   const [reach, setReach] = useState<number | null>(null)
-  const [reachState, setReachState] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+
+  const templateLabels: Record<string, string> = {
+    MARKETING_PRODUCT_OFFER: t('Nabídka produktu', 'Product offer'),
+  }
+
+  // The template declares `offerTitle`; a marketer writes a headline. Same field, and only one of
+  // those two words belongs on a screen someone uses to write an email.
+  const variableLabels: Record<string, { label: string; example: string }> = {
+    offerTitle: {
+      label: t('Titulek', 'Headline'),
+      example: t('Spoření s úrokem 4 %', 'Savings at 4% interest'),
+    },
+    offerText: {
+      label: t('Text nabídky', 'Offer text'),
+      example: t('Jedna věta, proč to stojí za to.', 'One sentence on why it is worth it.'),
+    },
+    ctaText: {
+      label: t('Text tlačítka', 'Button text'),
+      example: t('Chci spořit', 'Start saving'),
+    },
+  }
 
   useEffect(() => {
     fetch('/api/segments')
@@ -60,26 +94,41 @@ export default function NewCampaignPage() {
       .catch(() => undefined)
   }, [])
 
-  // The reach is the segment's own preview, run by the service — the same evaluation enrolment
-  // runs. A number computed here from a different query would agree with the send only by luck.
+  // The reach is the segment's own preview, run by the service — the same evaluation enrolment runs.
+  // A number computed here from a different query would agree with the send only by luck.
   const previewReach = (ref: string) => {
     setReach(null)
-    setReachState('')
     const [segName, segVersion] = ref.split('@')
     if (!segName) return
-    setReachState('loading')
     fetch(`/api/segments/${encodeURIComponent(segName)}/${encodeURIComponent(segVersion)}/preview`)
       .then(r => r.json())
       .then((d: { size?: number; state: string }) => {
-        setReachState(d.state)
         if (d.state === 'ok') setReach(d.size ?? 0)
       })
-      .catch(() => setReachState('unreachable'))
+      .catch(() => undefined)
   }
 
-  const declared = TEMPLATES[template] ?? []
-  const missing = declared.filter(v => !(variables[v] ?? '').trim())
-  const ready = name.trim() !== '' && goal.trim() !== '' && segment !== '' && missing.length === 0
+  const updateStep = (i: number, next: EditorStep) =>
+    setSteps(prev => prev.map((s, k) => (k === i ? next : s)))
+
+  const addStep = () =>
+    setSteps(prev => {
+      if (prev.length >= MAX_STEPS) return prev
+      setSelected(prev.length)
+      return [...prev, newStep()]
+    })
+
+  const removeStep = (i: number) =>
+    setSteps(prev => {
+      const next = prev.filter((_, k) => k !== i)
+      setSelected(null)
+      return next
+    })
+
+  const incomplete = steps.some(s =>
+    (TEMPLATES[s.template] ?? []).some(v => !(s.variables[v] ?? '').trim()),
+  )
+  const ready = name.trim() !== '' && goal.trim() !== '' && segment !== '' && steps.length > 0 && !incomplete
 
   const submit = () => {
     setSaving(true)
@@ -93,26 +142,25 @@ export default function NewCampaignPage() {
         goal: goal.trim(),
         segmentName: segName,
         segmentVersion: Number(segVersion),
-        steps: [
-          {
-            order: 1,
-            template,
-            variables,
-            delaySeconds: Math.max(0, Number(delayHours) || 0) * 3600,
-          },
-        ],
+        steps: steps.map((s, i) => ({
+          order: i + 1,
+          template: s.template,
+          variables: s.variables,
+          delaySeconds: s.delaySeconds,
+        })),
       }),
     })
       .then(r => r.json())
-      .then((d: { state: string; campaign?: { id: string }; error?: string }) => {
+      .then((d: { state: string; campaign?: { id: string }; error?: string; message?: string }) => {
         if (d.state === 'ok' && d.campaign) {
           router.push(`/campaigns/${d.campaign.id}`)
           return
         }
         // The service's own message names what to change — an unknown template, an undeclared
-        // variable. Replacing it with "could not create" would remove the only actionable part.
+        // variable. Replacing it with "could not create" removes the only actionable part.
         setError(
-          d.error ??
+          d.message ??
+            d.error ??
             (d.state === 'forbidden'
               ? t('Nemáte oprávnění zakládat kampaně.', 'You are not permitted to create campaigns.')
               : t('Campaign-service neodpovídá.', 'Campaign-service is not responding.')),
@@ -121,8 +169,6 @@ export default function NewCampaignPage() {
       .catch(() => setError(t('Campaign-service neodpovídá.', 'Campaign-service is not responding.')))
       .finally(() => setSaving(false))
   }
-
-  const field = 'w-full rounded-md border bg-transparent px-3 py-1.5 text-sm'
 
   return (
     <div className="space-y-6">
@@ -133,118 +179,129 @@ export default function NewCampaignPage() {
       <PageHeader
         title={t('Nová kampaň', 'New campaign')}
         subtitle={t(
-          'Založí koncept. Spustit ji musí někdo jiný — to je ten smysl schvalování ve dvou.',
-          'Creates a draft. Someone else activates it — that is the point of the four-eyes gate.',
+          'Sestavte cestu, kterou lidé projdou. Spustit ji musí někdo jiný — to je smysl schvalování ve dvou.',
+          'Assemble the journey people will take. Someone else activates it — that is the point of the four-eyes gate.',
         )}
         icon={<Megaphone className="h-6 w-6" />}
       />
 
-      <section className="max-w-2xl space-y-4">
-        <div className="space-y-1">
-          <label htmlFor="c-name" className="text-sm font-medium">{t('Název', 'Name')}</label>
-          <input id="c-name" className={field} value={name} onChange={e => setName(e.target.value)} />
+      {/* A marketer names a campaign and picks who gets it. Both were `<label>` + bare box, which is
+          how a database table looks, not how a campaign brief does. The name behaves like a document
+          title; the audience is a set of tiles carrying its plain-language rule and its reach, which
+          is the choice being made — a dropdown hides exactly the number the choice turns on. */}
+      <section className="max-w-3xl space-y-8">
+        <div>
+          <input
+            id="c-name"
+            className="input w-full"
+            style={{ fontSize: '1.5rem', fontWeight: 600, padding: '0.7rem 0.9rem' }}
+            placeholder={t('Pojmenujte kampaň', 'Name this campaign')}
+            value={name}
+            onChange={e => setName(e.target.value)}
+          />
+          <input
+            id="c-goal"
+            className="input w-full"
+            style={{ marginTop: '0.75rem' }}
+            placeholder={t(
+              'Čeho má dosáhnout? Třeba „víc lidí si založí spoření"',
+              'What should it achieve? e.g. "more people open a savings account"',
+            )}
+            value={goal}
+            onChange={e => setGoal(e.target.value)}
+          />
         </div>
 
-        <div className="space-y-1">
-          <label htmlFor="c-goal" className="text-sm font-medium">{t('Cíl', 'Goal')}</label>
-          <input id="c-goal" className={field} value={goal} onChange={e => setGoal(e.target.value)} />
-        </div>
-
-        <div className="space-y-1">
-          <label htmlFor="c-segment" className="text-sm font-medium">{t('Publikum', 'Audience')}</label>
-          <select
-            id="c-segment"
-            className={field}
-            value={segment}
-            onChange={e => {
-              setSegment(e.target.value)
-              previewReach(e.target.value)
-            }}
-          >
-            <option value="">{t('Vyberte segment…', 'Choose a segment…')}</option>
-            {segments.map(s => (
-              <option key={`${s.name}@${s.version}`} value={`${s.name}@${s.version}`}>
-                {s.name} v{s.version} — {s.rules.join('; ')}
-              </option>
-            ))}
-          </select>
-          {/* Segments are code, not something this screen can author (ADR-0201 D1). Saying so here
-              is cheaper than letting someone hunt for an "add segment" button that will never exist. */}
-          <p className="text-xs text-muted-foreground">
+        <div>
+          <h2 className="text-sm font-semibold" style={{ marginBottom: '0.75rem' }}>
+            {t('Komu to půjde', 'Who gets it')}
+          </h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {segments.map(s => {
+              const ref = `${s.name}@${s.version}`
+              const active = segment === ref
+              return (
+                <button
+                  key={ref}
+                  type="button"
+                  data-segment={ref}
+                  data-selected={active ? 'true' : 'false'}
+                  onClick={() => {
+                    setSegment(ref)
+                    previewReach(ref)
+                  }}
+                  className="rounded-xl border text-left"
+                  style={{
+                    padding: '0.9rem 1rem',
+                    background: 'var(--surface)',
+                    borderColor: active ? 'var(--accent)' : 'var(--border)',
+                    boxShadow: active ? '0 0 0 1px var(--accent)' : undefined,
+                  }}
+                >
+                  <p className="text-sm font-semibold">{s.name}</p>
+                  <p className="text-xs text-muted-foreground" style={{ marginTop: '0.25rem' }}>
+                    {s.rules.join('; ')}
+                  </p>
+                  {/* The reach lands on the tile that was chosen, next to the rule that produced it —
+                      the two facts a marketer weighs together. */}
+                  <p className="text-xs text-muted-foreground" style={{ marginTop: '0.5rem' }}>
+                    {active && reach !== null
+                      ? t(`≈ ${reach} lidí`, `≈ ${reach} people`)
+                      : t(`verze ${s.version}`, `version ${s.version}`)}
+                  </p>
+                </button>
+              )
+            })}
+          </div>
+          {/* Segments are code (ADR-0201 D1). Saying so is cheaper than letting someone hunt for an
+              "add segment" button that will never exist. */}
+          <p className="text-xs text-muted-foreground" style={{ marginTop: '0.75rem' }}>
             {t(
               'Segmenty jsou definované v kódu a verzované. Nový segment je pull request, ne akce v UI.',
               'Segments are defined in code and versioned. A new segment is a pull request, not a UI action.',
             )}
           </p>
-          {reachState === 'loading' && (
-            <p className="text-xs text-muted-foreground">{t('Počítám dosah…', 'Counting reach…')}</p>
-          )}
-          {reachState === 'ok' && reach !== null && (
-            <p className="text-xs">
-              {t('Aktuální dosah', 'Current reach')}:{' '}
-              <strong>{reach.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong>{' '}
-              {/* Stated, because reach is a moving number and a stale one drives a wrong decision. */}
-              <span className="text-muted-foreground">
-                {t(
-                  '— před ověřením souhlasu a potlačením; skutečný počet bude nižší.',
-                  '— before consent checks and suppression; the sent-to count will be lower.',
-                )}
-              </span>
-            </p>
-          )}
-          {reachState !== '' && reachState !== 'ok' && reachState !== 'loading' && (
-            <p className="text-xs text-amber-600">
-              {t('Dosah se nepodařilo spočítat.', 'Reach could not be computed.')}
-            </p>
-          )}
         </div>
+      </section>
 
-        <div className="space-y-1">
-          <label htmlFor="c-template" className="text-sm font-medium">{t('Šablona', 'Template')}</label>
-          <select
-            id="c-template"
-            className={field}
-            value={template}
-            onChange={e => {
-              setTemplate(e.target.value)
-              setVariables({})
-            }}
-          >
-            {Object.keys(TEMPLATES).map(tpl => (
-              <option key={tpl} value={tpl}>{tpl}</option>
-            ))}
-          </select>
-        </div>
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold">{t('Cesta', 'The journey')}</h2>
+        {/* space-y-0 around the canvas+panel pair: any gap between them undoes the join. */}
+        <div className="space-y-0">
+        <JourneyEditor
+          attachedBelow={selected !== null && steps[selected] !== undefined}
+          steps={steps}
+          // `savers@2` is how the API refers to a segment. The node says who they are; the tile above
+          // already carries the version, which is the only place it is a decision.
+          audience={segment ? segment.split('@')[0] : ''}
+          audienceSize={reach}
+          selected={selected}
+          onSelect={setSelected}
+          onAdd={addStep}
+          onRemove={removeStep}
+          templateLabels={templateLabels}
+        />
 
-        {declared.map(v => (
-          <div key={v} className="space-y-1">
-            <label htmlFor={`var-${v}`} className="text-sm font-medium">{v}</label>
-            <input
-              id={`var-${v}`}
-              className={field}
-              value={variables[v] ?? ''}
-              onChange={e => setVariables(prev => ({ ...prev, [v]: e.target.value }))}
-            />
-          </div>
-        ))}
-
-        <div className="space-y-1">
-          <label htmlFor="c-delay" className="text-sm font-medium">
-            {t('Zpoždění kroku (hodiny)', 'Step delay (hours)')}
-          </label>
-          <input
-            id="c-delay"
-            type="number"
-            min="0"
-            className={field}
-            value={delayHours}
-            onChange={e => setDelayHours(e.target.value)}
+        {/* No gap and no separate card: the panel is the selected node opened, so it continues the
+            canvas surface rather than sitting under it as an unrelated block. */}
+        {selected !== null && steps[selected] && (
+          <StepEditor
+            attached
+            index={selected}
+            step={steps[selected]}
+            templates={TEMPLATES}
+            templateLabels={templateLabels}
+            variableLabels={variableLabels}
+            onChange={next => updateStep(selected, next)}
+            onClose={() => setSelected(null)}
           />
+        )}
+
         </div>
 
         {/* Read-only on purpose: the contact policy is a single enforcement point, and a per-campaign
             override here would make that point decorative (ADR-0219 D4, ADR-0221 D1 step 4). */}
-        <div className="rounded-lg border p-3 text-xs text-muted-foreground">
+        <div className="max-w-2xl rounded-lg border p-3 text-xs text-muted-foreground">
           <p className="font-medium text-foreground">{t('Pravidla kontaktu', 'Contact rules')}</p>
           <p>
             {t(
@@ -253,24 +310,36 @@ export default function NewCampaignPage() {
             )}
           </p>
         </div>
-
-        {error && <p className="text-sm text-red-600">{error}</p>}
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={submit}
-            disabled={!ready || saving}
-            className="rounded-md border px-3 py-1.5 text-sm disabled:opacity-40"
-          >
-            {saving ? t('Zakládám…', 'Creating…') : t('Založit koncept', 'Create draft')}
-          </button>
-          {!ready && missing.length > 0 && (
-            <span className="text-xs text-muted-foreground">
-              {t('Chybí', 'Missing')}: {missing.join(', ')}
-            </span>
-          )}
-        </div>
       </section>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={submit}
+          disabled={!ready || saving}
+          className="btn btn-primary disabled:opacity-40"
+        >
+          {saving ? t('Zakládám…', 'Creating…') : t('Založit koncept', 'Create draft')}
+        </button>
+        {!ready && (
+          <span className="text-xs text-muted-foreground">
+            {incomplete
+              ? t('Některý krok má nevyplněné hodnoty.', 'A step still has empty values.')
+              : t('Vyplňte název, cíl a publikum.', 'Fill in the name, goal and audience.')}
+          </span>
+        )}
+        {reach !== null && (
+          // Qualified, because an unqualified reach number reads as "people who will get this" —
+          // the single most expensive misreading on an authoring screen.
+          <span className="text-xs text-muted-foreground">
+            {t(
+              `Dosah ${reach} — před ověřením souhlasu a potlačením; doručených bude méně.`,
+              `Reach ${reach} — before consent checks and suppression; fewer will be delivered.`,
+            )}
+          </span>
+        )}
+      </div>
     </div>
   )
 }

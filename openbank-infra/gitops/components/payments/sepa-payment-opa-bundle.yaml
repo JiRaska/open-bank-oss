@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sepa-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "5639cf597aef99da"
+    openbank.tech/policy-checksum: "897cd9c18eb2b02d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -127,10 +127,16 @@ data:
     	# agents.allow call — undefined, silently denying every resource-less AI_AGENT REST call.
     	# The MCP server (openbank-mcp-service) is the first caller to route AI_AGENT through
     	# rest.allow with no resource; agent-service queries agents.allow directly and never hit this.
+    	# attributes MUST be forwarded (ADR-0195 step 5, #3292): the MCP endpoint sends
+    	# {tool, consentId} on every tools/call, and agents.rego's skill_ok else-branch reads
+    	# input.attributes.skill — a bridge that drops them makes consent-state gating impossible
+    	# and denies a chartered run.skill that arrives via REST. Same object.get pattern as
+    	# resource: a caller that sends no attributes key must not make the query undefined.
     	data.openbank.agents.allow with input as {
     		"agent": input.principal.id,
     		"tool": input.action,
     		"resource": object.get(input, "resource", null),
+    		"attributes": object.get(input, "attributes", {}),
     	}
     }
 
@@ -1246,11 +1252,9 @@ data:
           via the GitHub API that rules.yaml's own review rules were actually followed: approval count
           vs. the money-path/default requirement, docs/threat-models/<service>.md presence for a
           money-path change, merge-commit GPG verification, a linked issue in the PR body, and
-          (best-effort) an admin/override-flag bypass. Phase-4 expands its money-path reach to
-          READ-ONLY governance/config/audit metadata only — never transaction payloads, never write
-          or act tools. Proposes a compliance-incident ticket through the HITL queue for a human to
-          triage — a violation on an already-merged PR is a human decision, not a diff. Never merges,
-          approves or re-runs anything.
+          (best-effort) an admin/override-flag bypass. Proposes a compliance-incident ticket through
+          the HITL queue for a human to triage — a violation on an already-merged PR is a human
+          decision, not a diff. Never merges, approves or re-runs anything.
         enabled: true
         enforcement: block
         schedule:
@@ -1261,13 +1265,11 @@ data:
           read:
             - github-prs-readonly        # merged-PR metadata: reviews, merge-commit verification, body, labels
             - read.governance            # rules.yaml review + money_path_services — the compliance bar itself
-            - money-path-config-metadata # rollout/config/policy metadata for services in rules.yaml: money_path_services
-            - audit-metadata             # masked audit/governance evidence only; never raw transaction payloads
-          pii: masked                    # masked metadata may carry identifiers; raw customer/payment payloads stay out of scope
+          pii: none                       # PR/review metadata only; no customer data in scope
         tools:
           allow:
             - tier: read
-              resources: [github, governance, audit]
+              resources: [github, governance]
             - tier: write_proposal
               resources: [github-pr]      # opens draft.ticket (primary) or, rarely, a mechanical fix PR
           deny:
@@ -1864,6 +1866,8 @@ data:
             reason: "psd2-service docs consistently describe this as audit-trail + external TPP-webhook delivery, not an intra-fleet reaction — no OpenBank service is meant to consume it."
           - topic: "openbank.tpp.registry.event"
             reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
+          - topic: "openbank.delegation.events"
+            reason: "Tracked future work (ADR-0232 D3): product-service enforcement projections (account/card/savings) are the next implementation slice and are the intended consumers — the publisher ships first so the event contract is stable before consumers land. Re-triage: remove this entry with the first projection consumer PR."
           - topic: "openbank.pid.events"
             reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
       lineage_code_audit:
@@ -2245,6 +2249,14 @@ data:
                                                 # flipping AUTHZ_FOUR_EYES_ENFORCE here. consent.activate deliberately
                                                 # left ungated: its rego already reserves an M2M grant for a possible
                                                 # SCA-completion-callback caller.
+      - openbank-delegation-service            # ADR-0232: mints payment rights (customer-to-party grants) without moving
+                                                # money itself — money-path for the same reason consent/vop are. Threat
+                                                # model: docs/threat-models/delegation-service.md. four-eyes assessed:
+                                                # delegation.offer/revoke/suspend are self-service or fraud-signal actions
+                                                # with SCA-bound ceremonies on both ends; the bank-side suspend lands via
+                                                # the fraud pipeline, not an operator console, so there is no
+                                                # maker/checker pair to gate yet. Revisit when the operator
+                                                # backoffice surface ships.
       - openbank-fraud-service                # ADR-0084: v4 rule engine live; domestic-payment enforcement gate merged (issue #667, flag default-off pending risk-team threshold calibration)
                                                # four-eyes assessed (issue #938 follow-up): the only REST surface today is a stateless
                                                # POST /fraud/score (fraud.score) — no operator case-decision, rule-config, or manual
@@ -2315,8 +2327,44 @@ data:
 
     review:
       default_approvals: 1
-      money_path_approvals: 2               # CONTRIBUTING.md + branch protection
+      money_path_approvals: 2
       self_merge_forbidden_on: [CODEOWNERS_protected]
+
+      # ENFORCEMENT STATUS: aspirational, NOT enforced. Stated here because a governance file
+      # that describes a control it does not have is worse than one that admits the gap — an
+      # auditor, a threat model, or the next contributor reads the number above as a gate.
+      #
+      # The `main-protection` ruleset carries `required_approving_review_count: 0` and
+      # `require_code_owner_review: false`, so nothing blocks a merge on approvals. The comment
+      # that used to sit on the line above claimed "CONTRIBUTING.md + branch protection"; the
+      # branch-protection half has never been true. Measured 2026-08-02: ALL NINE money-path PRs
+      # merged since issue #2183 was filed (2026-07-25) carried zero approvals — a 0% compliance
+      # rate, not occasional drift. #2183 has the full table.
+      #
+      # WHY IT IS NOT SIMPLY TURNED ON: the repository has exactly one account with write access,
+      # and GitHub does not allow approving your own pull request. Setting the count to 2 — or to
+      # 1 — would make `main` unmergeable except via `gh pr merge --admin`, including the ~half of
+      # all merges opened by `openbank-gitops-bot` (deploys, release-please). The result would not
+      # be a stricter control; it would normalise the admin bypass that this repo's own rules
+      # forbid, and remove even the signal that something was overridden. Enforcing an
+      # unsatisfiable requirement is a worse position than an admitted gap.
+      #
+      # COMPENSATING CONTROLS actually in force on a money-path change (each independently
+      # verifiable, unlike the approval count): the five required status checks; the ADR-0030
+      # threat model requirement; the money-path-only gates in .github/gates/gates.yaml
+      # (clock-injection, SLO registry, OPA bundle sync); and the runtime four-eyes gate on
+      # money-path verbs (`four_eyes.verbs` below), which is a *separate* mechanism from GitHub
+      # review — though note #3349: its self-approval guard has no test that ever feeds it a
+      # maker approving themselves.
+      #
+      # REVISIT TRIGGER — this is a capacity gap, not a policy decision, so it expires on a fact,
+      # not on a date: the moment a second account holds write access, set
+      # `required_approving_review_count: 1` with `require_code_owner_review: true` on
+      # `main-protection`, confirm a bot PR can still merge, and only then raise money-path to 2.
+      # Tracked in #2183.
+      enforcement_status: aspirational_not_enforced
+      enforcement_blocker: single_write_access_account
+      enforcement_tracking_issue: 2183
 
     # ---------------------------------------------------------------------------------------
     # Money-path action-prefix overrides (issue #395). rest.rego derives a scope from each

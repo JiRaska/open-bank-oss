@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/v0.9.0...v0.9.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** make the per-service Dockerfiles honest, and keep them that way ([#3392](https://github.com/JiRaska/open-bank-oss/issues/3392)) ([21f2ff4](https://github.com/JiRaska/open-bank-oss/commit/21f2ff497fffb782162a5f8333ac6fff97d6c171)), closes [#3016](https://github.com/JiRaska/open-bank-oss/issues/3016)
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/v0.8.0...v0.9.0) (2026-08-02)
+
+
+### Features
+
+* **campaign:** reach and delivery for every campaign in one call ([#3311](https://github.com/JiRaska/open-bank-oss/issues/3311)) ([cd2eaa3](https://github.com/JiRaska/open-bank-oss/commit/cd2eaa30355f4824534c86f501746ed0d718ed79))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/v0.7.1...v0.8.0) (2026-08-01)
 
 

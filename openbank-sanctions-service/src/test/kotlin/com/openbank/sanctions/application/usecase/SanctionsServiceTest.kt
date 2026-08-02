@@ -161,7 +161,7 @@ class SanctionsServiceTest {
         val id = UUID.randomUUID()
         val existing = sampleCheck(id = id, status = SanctionsCheckStatus.HIT)
         coEvery { repo.findById(id) } returns existing
-        coEvery { repo.saveWithEvent(any(), any()) } answers { firstArg() }
+        coEvery { repo.updateWithEvent(any(), any()) } answers { firstArg() }
 
         val result = service.review(
             ReviewCommand(
@@ -176,12 +176,18 @@ class SanctionsServiceTest {
         assertThat(result.reviewedBy).isEqualTo("analyst-1")
         assertThat(result.reviewNote).isEqualTo("cleared after manual review")
         assertThat(result.reviewedAt).isNotNull
+        // The UPDATE path specifically. Asserting only "some save was called" is what let this
+        // test pass for the whole life of the service while every real review 500'd on
+        // `sanctions_checks_pkey` — a mock cannot see Hibernate's INSERT-vs-UPDATE decision, so
+        // pinning WHICH port method is called is the only thing this layer can contribute.
+        // SanctionsReviewUpdateIT owns the behaviour itself, against a real database.
         coVerify {
-            repo.saveWithEvent(
+            repo.updateWithEvent(
                 match { it.status == SanctionsCheckStatus.CLEAR && it.reviewedBy == "analyst-1" },
                 eq("SanctionChecked"),
             )
         }
+        coVerify(exactly = 0) { repo.saveWithEvent(any(), any()) }
     }
 
     @Test

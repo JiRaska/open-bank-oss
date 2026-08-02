@@ -107,7 +107,10 @@ class SanctionsService(
             reviewNote = cmd.note,
             reviewedAt = Instant.now(clock),
         )
-        return repo.saveWithEvent(updated, "SanctionChecked")
+        // updateWithEvent, not saveWithEvent: this check already exists, and the aggregate's id is
+        // application-assigned, so the insert path would schedule an INSERT and collide with its
+        // own primary key (ADR-0126 D3).
+        return repo.updateWithEvent(updated, "SanctionChecked")
     }
 
     override suspend fun getById(id: UUID) = repo.findById(id)

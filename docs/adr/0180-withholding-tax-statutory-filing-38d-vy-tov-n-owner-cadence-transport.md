@@ -1,7 +1,7 @@
 ---
 date: 2026-07-22
-decision-status: proposed
-delivery-status: planned
+decision-status: accepted
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -57,7 +57,49 @@ from `finrep-service` and not from `interest-service`.
   schránka), with an attestation of what was filed — the same "render a regulatory artifact + a transmit
   stage" shape ADR-0097 defines for EBA returns, without sharing its source or taxonomy.
 
-This ADR is **Proposed / planned**: it assigns the owner and shape. It does not itself build the service.
+This ADR was **Proposed / planned** when written: it assigned the owner and shape without building the
+service. It is now **Accepted / partial** — see Delivery.
+
+## Delivery
+
+**Increment 1 — the consumer and the aggregation. Shipped as `openbank-tax-reporting-service`.**
+
+The premise was re-checked against the live repo before building, and one part of it had changed:
+issue #999 is **closed**, `InterestCapitalizationScheduler` exists, and
+`interest.withholding.remitted.v1` is genuinely emitted. The "a filing with nothing to file is moot"
+caveat above no longer applies — there is real data to file.
+
+Shipped:
+- `FilingPeriod` — the §38d month, with the statutory deadline derived as the last day of the
+  following month, the same rule `WithholdingRemittancePolicy` uses for the payment, so the return
+  and the cash leg cannot describe different months.
+- `WithholdingRemittedConsumer` — a **second consumer group** on
+  `openbank.interest.accrual.event`, no change to interest-service's contract. Event-type filtering
+  is on the `ce-type` **header**, because the interest publisher does not duplicate `eventType` into
+  the payload (ADR-0050 N3); a payload-field filter would have matched nothing, forever, silently.
+- Idempotency keyed on the producer's remittance id (it is the primary key). Kafka is at-least-once
+  and this is a second group, so redelivery is routine — counting a batch twice would overstate the
+  tax on a statutory return.
+- `TaxFilingRecord` — `OPEN → ASSEMBLED → FILED`, four-eyes at the filing (the assembler may not
+  also record it as filed), a mandatory submission reference, and a `dueDate`/`overdue` view. A late
+  return is a compliance failure that throws nowhere else; `GET /api/v1/tax/filings/overdue` is the
+  alertable set.
+- Assembly refuses a month that has not ended (via the ADR-0207 `AccountingClock` — a filing
+  deadline is an accounting date) and refuses a mixed-currency period rather than summing across
+  currencies, since §38d withholding is CZK-only (ADR-0033 §E).
+
+**Not built: the EPO XML rendering.** `EpoRendererPort` is bound to `UnavailableEpoRenderer`, which
+reports `available = false` and throws if called. The GFŘ EPO XSD for *Vyúčtování daně vybírané
+srážkou* is a specific published schema; a guess at it would produce a file that passes every gate
+in this repo and is wrong at the finanční úřad. A wrong tax return is worse than none — a missing
+filing is a visible gap, a wrong one is a filed falsehood. `GET /export-capability` states this
+rather than letting a caller infer a capability. The rest of the service is useful without it: the
+aggregation is the part that had no owner, and an operator can read the assembled totals and submit
+through the portal today.
+
+**Also not built:** the annual reconciliation this ADR anticipates via ADR-0038's
+`WithholdingTaxStatus.RECONCILED`, and the GitOps deployment (services graduate to a component in a
+separate PR here, as ADR-0181/0193 phase 1 → phase 2 did).
 
 ## Alternatives considered
 

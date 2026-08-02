@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.12](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.8.11...psd2-service-v0.8.12) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** make the per-service Dockerfiles honest, and keep them that way ([#3392](https://github.com/JiRaska/open-bank-oss/issues/3392)) ([21f2ff4](https://github.com/JiRaska/open-bank-oss/commit/21f2ff497fffb782162a5f8333ac6fff97d6c171)), closes [#3016](https://github.com/JiRaska/open-bank-oss/issues/3016)
+
 ## [0.8.11](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.8.10...psd2-service-v0.8.11) (2026-07-31)
 
 

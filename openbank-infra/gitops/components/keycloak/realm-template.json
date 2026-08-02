@@ -413,6 +413,25 @@
       ]
     },
     {
+      "username": "compliance2@openbank.local",
+      "email": "compliance2@openbank.local",
+      "firstName": "Compliance Two",
+      "lastName": "OpenBank",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__COMPLIANCE2_USER_PASSWORD__",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ROLE_COMPLIANCE",
+        "ROLE_VIEWER"
+      ]
+    },
+    {
       "username": "service-account-openbank-edge",
       "enabled": true,
       "serviceAccountClientId": "openbank-edge",

@@ -1,34 +1,28 @@
-FROM eclipse-temurin:25-jdk-alpine@sha256:5ecfde8e5ecde5954ea3721155b345ef56c1d579b940c761318ad4c05959a151 AS build
-WORKDIR /build
-
-# Build from the FULL repo root context, NOT a selective per-module COPY. The root
-# settings.gradle.kts unconditionally `include`s all 30+ modules with an explicit
-# projectDir each, so Gradle configuration fails ("Configuring project ':openbank-
-# ledger-service' without an existing directory") unless every module dir is present.
-# Building from inside the module with its own gradlew instead trips a
-# quarkusGenerateCode -> jar -> classes circular dependency. Mirrors the canonical
-# openbank-infra/docker/services/standalone-service.Dockerfile. .dockerignore strips
-# build/, .gradle/, node_modules/ so the context stays lean.
-COPY . /build
-
-# Kotlin 2.3 + Quarkus 3.33 compile is heap-hungry; size the JVM up front.
-ENV GRADLE_OPTS="-Xmx2g -Xms256m -XX:MaxMetaspaceSize=512m"
-RUN chmod +x gradlew && \
-    ./gradlew :openbank-anacredit-service:quarkusBuild \
-      -Dorg.gradle.java.installations.auto-detect=false \
-      --no-daemon \
-      --console=plain
+# NOT a build recipe — and it never was one.
+#
+# The image is built by .github/workflows/Dockerfile.deploy from a quarkus-app/
+# produced host-side (auto-deploy.yml, ghcr-publish.yml,
+# openbank-infra/scripts/build-push-service.sh). Those three read exactly ONE thing
+# from this file: the EXPOSE line, used to set the container port (falling back to
+# 8080 when absent).
+#
+# Until #3016 this file carried a Gradle build stage that could not run — no
+# COPY build-logic, no ADR-0122 libs siblings, no gradle.properties — so it read as
+# authoritative while being unbuildable. It now mirrors Dockerfile.deploy exactly,
+# so what it says is what actually happens: given a prepared context containing
+# quarkus-app/, this builds the real image.
+#
+# Adding a build stage back here is enforced against by
+# .github/scripts/check-dockerfile-no-build-stage.py.
 
 FROM eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0
 WORKDIR /app
-
 RUN addgroup -S openbank && adduser -S openbank -G openbank
 USER openbank
-
-COPY --from=build /build/openbank-anacredit-service/build/quarkus-app/lib/ /app/lib/
-COPY --from=build /build/openbank-anacredit-service/build/quarkus-app/*.jar /app/
-COPY --from=build /build/openbank-anacredit-service/build/quarkus-app/app/ /app/app/
-COPY --from=build /build/openbank-anacredit-service/build/quarkus-app/quarkus/ /app/quarkus/
+COPY quarkus-app/lib/ /app/lib/
+COPY quarkus-app/*.jar /app/
+COPY quarkus-app/app/ /app/app/
+COPY quarkus-app/quarkus/ /app/quarkus/
 
 EXPOSE 8137
-ENTRYPOINT ["java", "-XX:+UseZGC", "-Djava.util.logging.manager=org.jboss.logmanager.LogManager", "-jar", "/app/quarkus-run.jar"]
+ENTRYPOINT ["java","-XX:+UseZGC","-Djava.util.logging.manager=org.jboss.logmanager.LogManager","-jar","/app/quarkus-run.jar"]

@@ -51,6 +51,7 @@ type Detail = {
   campaign: Campaign | null
   enrolments: Enrolment[]
   sends: SendPage
+  partyNames: Record<string, string>
   sendSummary: Record<string, number>
   journey: StepFunnel[]
   sources: Record<string, string>
@@ -360,7 +361,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
               />
             ) : (
               <SectionBoundary name="People">
-                <PeopleSummary enrolments={detail.enrolments} />
+                <PeopleSummary enrolments={detail.enrolments} partyNames={detail.partyNames ?? {}} />
               </SectionBoundary>
             )}
 
@@ -447,26 +448,30 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
               <p className="text-sm text-muted-foreground">{t('Zatím nic odesláno ani pokusem.', 'Nothing sent or attempted yet.')}</p>
             ) : (
               <div className="overflow-x-auto rounded-lg border">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50 text-left">
+                <table className="data-table">
+                  <thead>
                     <tr>
-                      <th className="px-4 py-2 font-medium">{t('Party', 'Party')}</th>
-                      <th className="px-4 py-2 font-medium">{t('Krok', 'Step')}</th>
-                      <th className="px-4 py-2 font-medium">{t('Výsledek', 'Outcome')}</th>
-                      <th className="px-4 py-2 font-medium">{t('Kdy', 'When')}</th>
+                      <th>{t('Party', 'Party')}</th>
+                      <th>{t('Krok', 'Step')}</th>
+                      <th>{t('Výsledek', 'Outcome')}</th>
+                      <th>{t('Kdy', 'When')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {sends.map(s => (
-                      <tr key={s.id} className="border-t">
-                        <td className="px-4 py-2 font-mono text-xs" title={s.partyId}>{shortId(s.partyId)}</td>
-                        <td className="px-4 py-2">{s.stepOrder}</td>
-                        <td className="px-4 py-2">
+                      <tr key={s.id}>
+                        <td className="text-xs" title={s.partyId}>
+                          {detail?.partyNames?.[s.partyId] ?? (
+                            <span className="font-mono">{shortId(s.partyId)}</span>
+                          )}
+                        </td>
+                        <td>{s.stepOrder}</td>
+                        <td>
                           <span title={s.outcome}>
                             <StatusBadge status={s.outcome} tone={outcomeTone(s.outcome)} label={outcomeLabel(s.outcome)} />
                           </span>
                         </td>
-                        <td className="px-4 py-2 text-xs whitespace-nowrap">{fmtDateTime(s.occurredAt)}</td>
+                        <td className="text-xs whitespace-nowrap">{fmtDateTime(s.occurredAt)}</td>
                       </tr>
                     ))}
                   </tbody>

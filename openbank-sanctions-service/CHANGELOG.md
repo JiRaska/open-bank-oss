@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.7.8](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.7.7...sanctions-service-v0.7.8) (2026-08-02)
+
+
+### Performance
+
+* **sanctions:** let the screening search reach the trigram index it already has ([#3426](https://github.com/JiRaska/open-bank-oss/issues/3426)) ([b5435f3](https://github.com/JiRaska/open-bank-oss/commit/b5435f3af5e3c30d39cca37e317a71f627924a28)), closes [#3265](https://github.com/JiRaska/open-bank-oss/issues/3265) [#3264](https://github.com/JiRaska/open-bank-oss/issues/3264)
+
+## [0.7.7](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.7.6...sanctions-service-v0.7.7) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** make the per-service Dockerfiles honest, and keep them that way ([#3392](https://github.com/JiRaska/open-bank-oss/issues/3392)) ([21f2ff4](https://github.com/JiRaska/open-bank-oss/commit/21f2ff497fffb782162a5f8333ac6fff97d6c171)), closes [#3016](https://github.com/JiRaska/open-bank-oss/issues/3016)
+
+## [0.7.6](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.7.5...sanctions-service-v0.7.6) (2026-08-02)
+
+
+### Bug Fixes
+
+* **sanctions:** merge on the review path, so a screening hit can actually be dispositioned ([#3378](https://github.com/JiRaska/open-bank-oss/issues/3378)) ([216127d](https://github.com/JiRaska/open-bank-oss/commit/216127d53ececfcd3cb76d9ec08d1a869a52b3ef)), closes [#3375](https://github.com/JiRaska/open-bank-oss/issues/3375)
+
+## [0.7.5](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.7.4...sanctions-service-v0.7.5) (2026-08-02)
+
+
+### Bug Fixes
+
+* **sanctions:** replay the stored check when a concurrent writer wins the idempotency key ([#3340](https://github.com/JiRaska/open-bank-oss/issues/3340)) ([13ec4a1](https://github.com/JiRaska/open-bank-oss/commit/13ec4a145b47ed7a1b00ca780e18519f77957fdc)), closes [#3264](https://github.com/JiRaska/open-bank-oss/issues/3264)
+
 ## [0.7.4](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.7.3...sanctions-service-v0.7.4) (2026-08-01)
 
 

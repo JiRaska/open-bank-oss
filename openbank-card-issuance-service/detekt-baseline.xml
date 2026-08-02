@@ -5,10 +5,9 @@
     <ID>MagicNumber:CardOutboxDispatcher.kt$CardOutboxDispatcher$3000</ID>
     <ID>MagicNumber:CardOutboxDispatcher.kt$CardOutboxDispatcher$30000</ID>
     <ID>MagicNumber:CardResource.kt$CardResource$404</ID>
-    <ID>MagicNumber:CardService.kt$CardService$4</ID>
     <ID>MatchingDeclarationName:CardOutboxPort.kt$CardOutboxRepository : OutboxRepository</ID>
     <ID>MatchingDeclarationName:CardPorts.kt$CardRepository</ID>
+    <ID>TooGenericExceptionCaught:CardDelegationEventConsumer.kt$CardDelegationEventConsumer$e: Exception</ID>
     <ID>TooGenericExceptionCaught:PartyEventConsumer.kt$PartyEventConsumer$e: Exception</ID>
-    <ID>TooManyFunctions:CardService.kt$CardService : CardUseCase</ID>
   </CurrentIssues>
 </SmellBaseline>

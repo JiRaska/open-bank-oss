@@ -30,7 +30,19 @@ data class OutboxMessage(
     val aggregateId: UUID,
     val eventType: String,
     val payload: String,
-    val createdAt: Instant = Instant.EPOCH,
+    /**
+     * When the row was created. `Instant.now()` and NOT `Instant.EPOCH`: every service's
+     * `toEntity()` assigns this over the column's `DEFAULT now()`, so an omitted value used to
+     * stamp the row 1970 with nothing raising an error — 388 of ledger's 553 outbox rows (#3272).
+     *
+     * That is not cosmetic. The dispatcher claims work with
+     * `ORDER BY created_at ASC ... FOR UPDATE SKIP LOCKED`, so an epoch row sorts ahead of every
+     * correctly-stamped one permanently and starves real traffic behind a 1970 backlog, while the
+     * `openbank.outbox.backlog` age signal reads a fresh row as 56 years old.
+     *
+     * A caller that needs a fixed clock (tests, replay) still passes it explicitly.
+     */
+    val createdAt: Instant = Instant.now(),
 )
 
 data class OutboxEntry(

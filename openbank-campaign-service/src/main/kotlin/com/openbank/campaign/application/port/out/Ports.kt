@@ -20,12 +20,21 @@ interface CampaignRepository {
 interface EnrolmentRepository {
     suspend fun findByCampaignAndParty(campaignId: UUID, partyId: UUID): Enrolment?
     suspend fun listByCampaign(campaignId: UUID): List<Enrolment>
+
+    /** Enrolment counts for every campaign in one query (issue #3296). */
+    suspend fun countAllByCampaign(): List<CampaignEnrolmentCount>
     suspend fun listByParty(partyId: UUID): List<Enrolment>
     suspend fun save(enrolment: Enrolment): Enrolment
 }
 
 /** A single cell of the per-step funnel: how many sends of [outcome] step [stepOrder] produced. */
 data class StepOutcomeCount(val stepOrder: Int, val outcome: SendOutcome, val count: Long)
+
+/** One (campaign, outcome) cell of the fleet-wide send tally (issue #3296). */
+data class CampaignOutcomeCount(val campaignId: UUID, val outcome: SendOutcome, val count: Long)
+
+/** How many parties are enrolled in one campaign (issue #3296). */
+data class CampaignEnrolmentCount(val campaignId: UUID, val count: Long)
 
 interface SendLogRepository {
     suspend fun record(send: SendRecord)
@@ -51,6 +60,15 @@ interface SendLogRepository {
      * read as the whole picture by definition.
      */
     suspend fun countByStepAndOutcome(campaignId: UUID): List<StepOutcomeCount>
+
+    /**
+     * Sends tallied for EVERY campaign at once (issue #3296).
+     *
+     * One grouped query, deliberately. The per-campaign `summary()` runs one count per
+     * `SendOutcome` value; doing that across the estate would be campaigns × outcomes round trips
+     * against a service that is KEDA scale-to-zero — the N+1 the console refused to make.
+     */
+    suspend fun countAllByCampaignAndOutcome(): List<CampaignOutcomeCount>
 }
 
 /** ADR-0201 D1: segments are versioned artifacts loaded as code/data, never UI-typed SQL. */

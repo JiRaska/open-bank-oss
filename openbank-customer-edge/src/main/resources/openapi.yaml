@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.25.0
+  version: 1.26.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -34,6 +34,7 @@ tags:
   - name: Feedback
   - name: Cards
   - name: Lending
+  - name: Delegation
 
 paths:
   /feedback:
@@ -1407,6 +1408,126 @@ paths:
               schema:
                 $ref: '#/components/schemas/CardError'
         '403': {description: Card does not belong to caller}
+
+
+  /delegations:
+    post:
+      tags: [Delegation]
+      summary: Offer a delegated-access grant over one of the caller's own resources
+      description: >-
+        ADR-0232 D6. SCA-bound (purpose DELEGATION_GRANT, single-use challenge). grantorPartyId is
+        FORCED to the authenticated party: a body naming a different grantor is rejected with 403
+        rather than rewritten, because silently issuing a grant the user did not ask for is worse
+        than failing a client bug loudly. Everything else is passed through — delegation-service
+        owns capability validation and verifies that the grantor actually owns the resource.
+      operationId: offerDelegation
+      security:
+        - customerOidc: [delegations:write]
+      responses:
+        '201': {description: Grant offered}
+        '400': {description: Body is not a JSON object, or upstream validation failed}
+        '403': {description: grantorPartyId is not the authenticated party, or resource not owned}
+
+  /delegations/shared-by-me:
+    get:
+      tags: [Delegation]
+      summary: Grants the caller has issued
+      description: >-
+        Party-scoped server-side from the token; the caller cannot ask about another party. Includes
+        every lifecycle state, so the UI can show pending offers alongside active grants.
+      operationId: listDelegationsSharedByMe
+      security:
+        - customerOidc: [delegations:read]
+      responses:
+        '200': {description: Grants issued by the caller}
+
+  /delegations/shared-with-me:
+    get:
+      tags: [Delegation]
+      summary: Grants the caller has received, including offers awaiting a response
+      operationId: listDelegationsSharedWithMe
+      security:
+        - customerOidc: [delegations:read]
+      responses:
+        '200': {description: Grants received by the caller}
+
+  /delegations/{id}:
+    get:
+      tags: [Delegation]
+      summary: One grant the caller is a party to
+      description: >-
+        404 when the caller is neither grantor nor grantee — deliberately not 403, so a guessed id
+        is not an existence oracle.
+      operationId: getDelegation
+      security:
+        - customerOidc: [delegations:read]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Grant detail}
+        '404': {description: No such grant, or the caller is not a party to it}
+    delete:
+      tags: [Delegation]
+      summary: Revoke a grant the caller issued — unilateral and instant
+      description: >-
+        The actor is DERIVED from the authenticated party, never sent by the client: the upstream
+        query parameter that still exists is the bank-initiated path and is role-gated. No SCA —
+        withdrawing access must never be harder than granting it.
+      operationId: revokeDelegation
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: reason, in: query, required: false, schema: {type: string}}
+      responses:
+        '200': {description: Grant revoked}
+        '403': {description: Caller is not the grantor}
+
+  /delegations/{id}/accept:
+    post:
+      tags: [Delegation]
+      summary: Accept an offered grant (grantee's own SCA)
+      description: >-
+        granteePartyId is the authenticated party, so a caller can only accept an offer addressed to
+        themselves. scaSessionId is the grantee's OWN challenge (purpose DELEGATION_ACCEPT) — the
+        grantor's ceremony does not carry over.
+      operationId: acceptDelegation
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: scaSessionId, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Grant accepted and now ACTIVE}
+        '400': {description: scaSessionId missing}
+        '403': {description: Offer is not addressed to the caller, or SCA invalid}
+
+  /delegations/{id}/decline:
+    post:
+      tags: [Delegation]
+      summary: Decline an offered grant
+      description: No SCA — refusing access never needs a step-up.
+      operationId: declineDelegation
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Offer declined}
+        '403': {description: Offer is not addressed to the caller}
+
+  /delegations/{id}/renounce:
+    post:
+      tags: [Delegation]
+      summary: Give back an active grant the caller holds
+      operationId: renounceDelegation
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Grant renounced}
+        '403': {description: Caller is not the grantee}
 
 components:
   securitySchemes:

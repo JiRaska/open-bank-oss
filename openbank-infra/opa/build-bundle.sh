@@ -114,6 +114,15 @@ rassert "disabling SCA via a flag flip is prohibited outright" \
 rassert "a benign flag flip is not prohibited" \
 	prohibited '{"action":"featureflag.flip","attributes":{"flag":"instant-payments-enabled"}}' false
 
+# ADR-0195 step 5 (#3292): the REST→agents bridge must forward `attributes` into agents.allow.
+# Behaviourally observable via skill_ok's else-branch (input.attributes.skill) through
+# data.openbank.rest.allow with the REAL agents.yaml charters: if the bridge ever drops the
+# attributes map again, the first assertion goes undefined→false and this guard fails.
+rassert "REST bridge forwards attributes: chartered run.skill granted via rest.allow" \
+	allow.allow '{"principal":{"id":"agent:ledger-domain-engineer","type":"AI_AGENT","roles":[]},"action":"run.skill","resource":null,"attributes":{"skill":"ship-check"}}' true
+rassert "REST bridge forwards attributes: unchartered skill denied via rest.allow" \
+	allow.allow '{"principal":{"id":"agent:ledger-domain-engineer","type":"AI_AGENT","roles":[]},"action":"run.skill","resource":null,"attributes":{"skill":"deploy-prod"}}' false
+
 [ "$fail" -eq 0 ] || { echo "==> drift detected: policy and the committed charter/rules disagree"; exit 1; }
 
 echo "==> opa build -> $BUNDLE_TARBALL"

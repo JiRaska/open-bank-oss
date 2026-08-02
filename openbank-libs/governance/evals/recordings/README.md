@@ -33,8 +33,15 @@ python3 .github/scripts/run-evals.py           # replay it back; must exit 0
 Commit the resulting `<charter>.json` in the same PR as the prompt or model change it justifies —
 a recording landing alone is a promotion with no reviewed cause.
 
+## First baseline, now blocking
+
+As of 2026-08-02, every suite in `../` has a committed recording and CI runs
+`run-evals.py --require-recordings`. That makes these files the first recorded baselines for the
+ADR-0148 ratchet: once a suite exists, its first recording is required on the PR that adds or
+changes it, and replay blocks on staleness or regression without needing live model credentials.
+
 ## Do not hand-write one
 
 A fabricated recording is a green gate over behaviour nobody observed, which is strictly worse than
-the honest `::warning` an absent recording produces today. If a charter has no run yet, leave it
-absent.
+the honest gap it pretends to close. If a charter has no run yet, record it off-CI with a real
+model call; once the suite is declared, CI requires that real recording.

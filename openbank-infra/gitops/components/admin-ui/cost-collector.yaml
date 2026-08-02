@@ -77,7 +77,15 @@ spec:
   timeZone: "Europe/Prague"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
+  # failedJobsHistoryLimit: 1 — keep the LATEST failure for triage, not an archive.
+  # kube-prometheus-stack's KubeJobFailed fires per surviving failed Job OBJECT, so a
+  # limit of 3 turns one recurring failure into three permanent alerts. Worse, the pods
+  # are garbage-collected long before the Job object is, so the extra tombstones carry
+  # no diagnostic value at all — only the alert. Measured 2026-08-02: KubeJobFailed was
+  # 11 of the 37 firing alerts, 8 of them with pods=0 and the oldest dating to 07-12.
+  # One failure per CronJob still alerts (a job that keeps failing should), the
+  # duplicates stop.
+  failedJobsHistoryLimit: 1
   startingDeadlineSeconds: 600
   jobTemplate:
     spec:

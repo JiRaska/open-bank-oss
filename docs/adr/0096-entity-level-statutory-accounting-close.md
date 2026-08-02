@@ -1,7 +1,7 @@
 ---
 date: 2026-06-16
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
 authors: [@JiRaska]
 supersedes: []
 superseded-by: []
@@ -71,6 +71,48 @@ the GL-close engine would fork the source of truth) and **render** statements fr
    TBs); it never posts business journals itself (only the ledger does, including the EoY result-
    allocation journals it is asked to post). Statements + attestations surface in the admin-ui
    `regulatory` page. Scope of *this* ADR: statements + attested close. Prudential returns are ADR-0097.
+
+## Delivery
+
+**Increment 1 — the ledger-side period freeze (this ADR's D1). Shipped.**
+
+- `AccountingPeriod` / `PeriodType` — a statutory period is a whole MONTH, QUARTER or YEAR, never an
+  arbitrary window; a partial range is rejected by the aggregate, so two closes cannot overlap and
+  disagree about the same journal.
+- `PeriodTrialBalance` — the trial balance over `[from, to]`, with a deterministic canonical JSON
+  and its SHA-256. This is what replaces "the trial balance is a read API":
+  `/api/v1/journals/trial-balance` answers a point-in-time question and changes under you, whereas a
+  frozen record is the same numbers made reproducible and re-verifiable.
+- `ledger_closed_period` (Flyway `V22`) + `ClosedPeriodRecord` — DRAFT → FROZEN, four-eyes at the
+  freeze (checker != maker, and a draft with no recorded author can never be frozen), with the hash
+  re-verified fail-closed against a fresh computation at freeze time.
+- `PeriodFrozen` on the existing outbox, in the same transaction as the flip. Consumers react rather
+  than polling, for the reason ADR-0207 D4 gives.
+- `PeriodFreezeLock` on the posting path, between the day lock and the fiscal-year lock. The three
+  are not redundant: a day can be LOCKED inside an unfrozen month, and a month FROZEN inside an
+  unattested year, so neither neighbour can express this state. A reversal out of a sealed period is
+  routed forward rather than refused.
+- Operator endpoints under `/api/v1/ledger/periods`; OpenAPI `info.version` 1.12.0 → 1.13.0.
+
+**The period lock ships in `shadow`** (`openbank.ledger.period-lock.mode`), like the day lock and for
+the same reason: it records what it would have refused and refuses nothing, so the volume of
+postings landing in already-frozen periods is measured before any start failing (#1197).
+
+**Prerequisite that had to land first.** The freeze asks "has this period ended", which is an
+accounting-date question — so it consumes ADR-0207's `AccountingClock` rather than a wall clock.
+Before ADR-0207 there was no single answer to that, and the close cutoff would have been decided by
+whichever clock object was asked.
+
+**Not built, and not inferable — this is where the increment deliberately stops.**
+
+Decision point 2 (financial statements: rozvaha / výkaz zisku a ztráty / příloha per vyhláška ČNB
+501/2002 Sb.) needs the real chart-of-accounts → statement-line taxonomy. That is regulatory content,
+not a design choice: a plausible-looking mapping invented here would render an artefact that passes
+every gate in this repo and is wrong, which is the worst failure shape available — a control green
+about nothing. It needs the actual form definitions supplied before it can be built.
+
+Decision point 3 (EoY result allocation and opening-balance roll) builds on the existing fiscal-year
+attestation (ADR-0078 D5 / #868) and is a separate increment.
 
 ## Alternatives considered
 

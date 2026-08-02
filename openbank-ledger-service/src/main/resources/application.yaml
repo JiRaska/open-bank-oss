@@ -146,6 +146,13 @@ openbank:
     # postings can be attributed rather than only counted.
     day-lock:
       mode: "${LEDGER_DAY_LOCK_MODE:shadow}"
+    # Period-granular lock (ADR-0096 D1). Modes: off | shadow | enforce. Same staged rollout and
+    # the same reason as the day lock above — it ships in SHADOW and refuses nothing until the
+    # counter openbank_ledger_period_lock_decisions_total{outcome="would_refuse"} reads zero (or
+    # every hit is explained). The two locks are independent: a month can be FROZEN inside an
+    # unattested year, and a day LOCKED inside an unfrozen month.
+    period-lock:
+      mode: "${LEDGER_PERIOD_LOCK_MODE:shadow}"
     # journal_entries partition lifecycle (JournalPartitionMaintainer). Roll-forward is always
     # active; retention is DETACH-only and dry-run by default. Flip drop-enabled + dry-run only
     # as a deliberate, archived operator action — DROP is physically destructive.

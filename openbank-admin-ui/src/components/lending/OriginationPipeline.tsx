@@ -38,6 +38,13 @@ type Props = {
   items: PipelineItem[]
   /** The server-side cap the list was fetched under — shown, never hidden. */
   cap: number
+  /**
+   * Whole-book totals from `/applications/summary` (#3294). When present the board stops deriving
+   * counts from the capped page and stops warning about the cap, because there is no longer a cap
+   * to warn about. Absent = the aggregate is not in the deployed build, and the old behaviour —
+   * derive and say so — is the honest one.
+   */
+  summary?: { status: string; count: number; oldestCreatedAt?: string | null }[] | null
   lang?: 'cs' | 'en'
   onSelectStage?: (state: string | null) => void
   selected?: string | null
@@ -92,11 +99,21 @@ export function summarise(items: PipelineItem[], now = Date.now()) {
   return byState
 }
 
-export function OriginationPipeline({ items, cap, lang = 'cs', onSelectStage, selected }: Props) {
+export function OriginationPipeline({ items, cap, lang = 'cs', onSelectStage, selected, summary }: Props) {
   const [flow, setFlow] = useFlowAnimation()
   const spine = happyPath(ORIGINATION_GRAPH)
   const exits = exitStates(ORIGINATION_GRAPH)
-  const byState = useMemo(() => summarise(items), [items])
+  const byState = useMemo(() => {
+    if (summary) {
+      const now = Date.now()
+      return new Map(summary.map(r => [r.status, {
+        count: r.count,
+        oldestHours: r.oldestCreatedAt ? (now - new Date(r.oldestCreatedAt).getTime()) / 3_600_000 : null,
+        amount: 0,
+      }]))
+    }
+    return summarise(items)
+  }, [items, summary])
   const max = Math.max(1, ...[...byState.values()].map(v => v.count))
 
   const label = (s: string) => {
@@ -113,19 +130,23 @@ export function OriginationPipeline({ items, cap, lang = 'cs', onSelectStage, se
   const H = 158
   const W = spine.length * COL
 
-  const capped = items.length >= cap
+  // Only meaningful while the counts come from the page. With whole-book totals there is nothing
+  // truncated to disclose, and leaving the warning up would be its own kind of lie.
+  const capped = !summary && items.length >= cap
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
         <div className="section-title" style={{ margin: 0 }}>{t('Pipeline žádostí', 'Application pipeline')}</div>
         <span style={{ fontSize: 11, color: capped ? 'var(--warning)' : 'var(--text-tertiary)' }} data-testid="cap-note">
-          {capped
-            ? t(
-                `zobrazeno nejnovějších ${items.length} — starší žádosti v číslech NEJSOU`,
-                `showing the newest ${items.length} — older applications are NOT in these numbers`,
-              )
-            : t(`${items.length} žádostí (vše, co server vrátil)`, `${items.length} applications (everything the server returned)`)}
+          {summary
+            ? t('celá kniha žádostí', 'the whole application book')
+            : capped
+              ? t(
+                  `zobrazeno nejnovějších ${items.length} — starší žádosti v číslech NEJSOU`,
+                  `showing the newest ${items.length} — older applications are NOT in these numbers`,
+                )
+              : t(`${items.length} žádostí (vše, co server vrátil)`, `${items.length} applications (everything the server returned)`)}
         </span>
         <button
           onClick={() => setFlow(f => !f)}

@@ -53,6 +53,9 @@ spec:
               kubernetes.io/metadata.name: anacredit
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: analytics
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: audit
         - namespaceSelector:
             matchLabels:
@@ -75,6 +78,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: customer-edge
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: delegation
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: devops-agent
@@ -150,6 +156,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: sdd
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: security-scanner
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: statements

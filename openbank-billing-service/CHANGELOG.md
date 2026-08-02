@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.8.2...billing-service-v0.8.3) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** make the per-service Dockerfiles honest, and keep them that way ([#3392](https://github.com/JiRaska/open-bank-oss/issues/3392)) ([21f2ff4](https://github.com/JiRaska/open-bank-oss/commit/21f2ff497fffb782162a5f8333ac6fff97d6c171)), closes [#3016](https://github.com/JiRaska/open-bank-oss/issues/3016)
+
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.8.1...billing-service-v0.8.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **billing:** validate fee query params instead of letting the schema reject them ([#3064](https://github.com/JiRaska/open-bank-oss/issues/3064)) ([0be78ce](https://github.com/JiRaska/open-bank-oss/commit/0be78ce4b5bbd8177715e3d409377355d7f2a3c7))
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.8.0...billing-service-v0.8.1) (2026-08-01)
 
 

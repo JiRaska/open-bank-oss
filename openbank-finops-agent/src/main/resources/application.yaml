@@ -77,6 +77,20 @@ quarkus:
       enabled: false
     management:
       enabled: false
+    http:
+      # Ephemeral: this module now has more than one @QuarkusTest profile, so there is more than
+      # one application boot per run, and on the fixed default the second dies with
+      # QuarkusBindException whenever anything else on the machine holds the port.
+      test-port: 0
+
+  openbank:
+    finops:
+      # A cron that never fires (the 31st of February), NOT `quarkus.scheduler.enabled: false`.
+      # Disabling the scheduler makes the class structurally invisible to every test — which is how
+      # five schedulers in this fleet reached production having never run (#2148, #2187). With a
+      # real-but-unreachable expression the wiring is still built and validated at boot, and a test
+      # profile can override this key with a fast cron to drive the REAL schedule.
+      analysis-cron: "0 0 5 31 2 ?"
 
 openbank:
   temporal:
@@ -85,6 +99,12 @@ openbank:
     namespace: ${TEMPORAL_NAMESPACE:openbank}
     task-queue: finops-agent
   finops:
+    # Daily analysis sweep (ADR-0112). 03:00 UTC — the three AI agents are offset from each
+    # other by 15 minutes because they share ONE LiteLLM gateway and one Prometheus, and each now
+    # carries its own daily token budget: the control-liveness sentinel (03:15) and devops-agent (03:30).
+    # Collisions with unrelated per-service batch jobs are not a consideration — different pods,
+    # different databases. Quarkus cron is SIX fields (second minute hour day month weekday).
+    analysis-cron: ${FINOPS_ANALYSIS_CRON:0 0 3 * * ?}
     prometheus-url: ${PROMETHEUS_URL:http://prometheus-operated.observability:9090}
     alertmanager-url: ${ALERTMANAGER_URL:http://alertmanager-operated.observability:9093}
     llm-gateway-url: ${LLM_GATEWAY_URL:http://litellm.ai-platform:4000}

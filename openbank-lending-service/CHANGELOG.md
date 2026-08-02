@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.22.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.22.0...lending-service-v0.22.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **lending:** compliance-pack activation never worked — three defects behind one 403 ([#3448](https://github.com/JiRaska/open-bank-oss/issues/3448)) ([ffabe8b](https://github.com/JiRaska/open-bank-oss/commit/ffabe8b65c697e8866ebbfa5ba907b0a103803be))
+
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.21.0...lending-service-v0.22.0) (2026-08-02)
+
+
+### Features
+
+* **lending:** per-state and per-status totals for the whole book ([#3309](https://github.com/JiRaska/open-bank-oss/issues/3309)) ([c50795a](https://github.com/JiRaska/open-bank-oss/commit/c50795a62be54ceac6ed375a5d62b559d10928ac))
+
 ## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.20.3...lending-service-v0.21.0) (2026-08-02)
 
 

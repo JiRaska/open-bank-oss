@@ -26,6 +26,7 @@ import com.openbank.lending.application.port.out.PostingKind
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
 import com.openbank.lending.domain.model.AccrualOutcome
+import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
@@ -36,6 +37,7 @@ import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanProvisioningRecord
+import com.openbank.lending.domain.model.LoanStateSummary
 import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import com.openbank.lending.domain.model.ProvisioningSnapshot
@@ -387,6 +389,12 @@ class LendingService(
 
     override fun listRecentApplications(status: String?, limit: Int): Uni<List<LoanApplication>> =
         applications.findRecent(status, limit.coerceIn(1, MAX_LIST_LIMIT))
+
+    // Deliberately UNCAPPED: the point of a summary is that it is not a page. The result set is
+    // bounded by the number of (state, currency) pairs, not by the size of the book.
+    override fun summariseApplications(): Uni<List<ApplicationStateSummary>> = applications.summariseByState()
+
+    override fun summariseLoans(): Uni<List<LoanStateSummary>> = loans.summariseByState()
 
     // --- Disbursement (origination → servicing) -----------------------------------------------------
 

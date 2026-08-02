@@ -11,10 +11,12 @@ import com.openbank.lending.application.port.`in`.ProvisioningUseCase
 import com.openbank.lending.application.port.`in`.RescheduleLoanUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
+import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
 import com.openbank.lending.domain.model.DecisionRequest
 import com.openbank.lending.domain.model.LoanApplicationRequest
+import com.openbank.lending.domain.model.LoanStateSummary
 import com.openbank.lending.domain.model.RescheduleRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.libs.authz.Authorize
@@ -257,6 +259,36 @@ class LendingResource(
         @QueryParam("status") status: String?,
         @QueryParam("limit") @DefaultValue("50") limit: Int,
     ) = apply.listRecentApplications(status, limit)
+
+    @GET
+    @Path("/applications/summary")
+    @Operation(
+        summary = "Per-state application totals across the whole book (issue #3294)",
+        description = "The answer /applications/recent cannot give: that endpoint is a capped list " +
+            "(1..100), so a count taken from it is 'of the newest N', never the book. Aggregated in " +
+            "the database. Money totals are per CURRENCY — loan_application.currency is per row, so " +
+            "one summed number would be CZK added to EUR.",
+    )
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_LENDING_OFFICER", "ROLE_CREDIT_RISK")
+    @Authorize(action = "lending.list", resource = "")
+    fun summariseApplications(): Uni<List<ApplicationStateSummary>> = apply.summariseApplications()
+
+    @GET
+    @Path("/loans/summary")
+    @Operation(
+        summary = "Per-status loan-book totals (issue #3294)",
+        description = "Companion to /applications/summary for the loan book. Totals are per currency.",
+    )
+    @RolesAllowed(
+        "ROLE_VIEWER",
+        "ROLE_OPERATOR",
+        "ROLE_LENDING_OFFICER",
+        "ROLE_CREDIT_RISK",
+        "ROLE_COMPLIANCE",
+        "ROLE_ADMIN",
+    )
+    @Authorize(action = "lending.list", resource = "")
+    fun summariseLoans(): Uni<List<LoanStateSummary>> = servicing.summariseLoans()
 
     @POST
     @Path("/applications/{id}/disburse")

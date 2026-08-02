@@ -129,3 +129,73 @@ spec:
           annotations:
             summary: "No SWIFT messages processed in 1h (business hours)"
             description: "swift-service has not processed any MT/MX messages in 1h during business hours."
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-domestic-payment-alerts
+  namespace: payments
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: domestic-payment
+spec:
+  groups:
+    # domestic-payment had NO rule in this file until #3273, despite the header above listing it.
+    # It was not uncovered though: prometheus-rules-tier1.yaml already carries PaymentServiceDown,
+    # HighErrorRate, HighLatencyP99 and both PaymentSLO*Burn for it. All of them were green while
+    # seven payments sat in RECEIVED, the oldest for six weeks — green *correctly*, because a
+    # fail-closed hold answers 2xx, emits no error span, has normal latency and a healthy pod.
+    # Every rule that existed measured whether the service ANSWERS. None measured whether the work
+    # it accepted PROGRESSES. These rules are that second question.
+    - name: openbank.domestic-payment.progress
+      rules:
+        - alert: DomesticPaymentStrandedBeforeClearing
+          # RECEIVED and VALIDATED are hand-off states: the Temporal workflow drives a payment
+          # through both within seconds. An hour there means the workflow completed without
+          # advancing it (a fail-closed screening hold) or never ran at all — neither of which any
+          # error-rate or latency signal can see.
+          expr: |
+            max by (status) (
+              openbank_domestic_payments_non_terminal_oldest_age_seconds{
+                service="domestic", status=~"RECEIVED|VALIDATED"
+              }
+            ) > 3600
+          for: 10m
+          labels:
+            severity: critical
+            service: domestic-payment
+          annotations:
+            summary: "Domestic payment stranded in {{ $labels.status }} for over an hour"
+            description: >-
+              The oldest domestic payment in {{ $labels.status }} is {{ $value | humanizeDuration }} old.
+              Customer funds are neither moved nor returned and nothing else alerts on this state.
+              Check for an open AML case (alert_code SCREENING_UNAVAILABLE) and whether the Temporal
+              workflow for that payment completed without advancing it.
+        - alert: DomesticPaymentStuckInClearing
+          # SENT_TO_CLEARING legitimately waits for a clearing cycle, so this threshold is a day
+          # rather than an hour — it catches a missed cycle, not a slow one.
+          expr: |
+            openbank_domestic_payments_non_terminal_oldest_age_seconds{
+              service="domestic", status="SENT_TO_CLEARING"
+            } > 86400
+          for: 30m
+          labels:
+            severity: warning
+            service: domestic-payment
+          annotations:
+            summary: "Domestic payment awaiting clearing for over a day"
+            description: >-
+              The oldest domestic payment in SENT_TO_CLEARING is {{ $value | humanizeDuration }} old —
+              at least one clearing cycle has been missed, or settlement is failing silently.
+        - alert: DomesticPaymentOutboxBacklogStuck
+          # The gauge has been published by DomesticPaymentOutboxBacklogGauge all along; nothing
+          # read it. That is why 13 events reaching DEAD on a missing Kafka ACL (#3271) went
+          # unnoticed until a customer asked where their payment was.
+          expr: openbank_outbox_backlog{service="domestic"} > 100
+          for: 15m
+          labels:
+            severity: critical
+            service: domestic-payment
+          annotations:
+            summary: "domestic-payment outbox backlog stuck"
+            description: "domestic-payment outbox has >100 unrelayed rows for >15m — payment events are not being dispatched."

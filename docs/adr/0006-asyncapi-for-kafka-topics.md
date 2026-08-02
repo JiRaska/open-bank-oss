@@ -59,6 +59,45 @@ Every Kafka topic in OpenBank MUST be documented in AsyncAPI 3.0 format:
 - Schema evolution rules: backward-compatible by default; breaking changes require a new topic version (`*-v2-events-out`) and parallel running until migration complete.
 - AsyncAPI specs are linted in CI; missing or stale specs block release.
 
+## Delivery status, measured
+
+As of 2026-08-01, against `origin/main`:
+
+| Element of the decision | State |
+| --- | --- |
+| Schema Registry deployed | **Done** — Apicurio runs in the `messaging` namespace |
+| `openbank-contracts/<service>/asyncapi.yaml` | **None.** The directory does not exist |
+| Avro / JSON Schema per message | **None.** 0 `.avsc` fleet-wide |
+| Registry enforcing schemas at runtime | **No.** Producers emit raw JSON strings |
+| CI blocking release on missing specs | **Now ratcheted, not enforced** — see below |
+
+Scale: **36 distinct topics** (34 with an in-tree producer) and **71 `eventType` literals**. The
+nearest thing to a compatibility check is `check-event-schema-compat.py`, which diffs Kotlin
+data-class constructors at build time and says so itself — it cannot see a payload, so nothing
+validates one at runtime.
+
+So the runtime half of this ADR exists and the contract half does not. Every Kafka event on this
+platform is raw, unversioned JSON.
+
+### What has shipped: a ratchet, not the decision
+
+`check-event-contract-coverage.py` derives every `<service>:<topic>` a service produces to from its
+own config, and requires a contract at `openbank-contracts/<service>/asyncapi.yaml` unless the pair
+is grandfathered in `.github/event-contract-baseline.txt`.
+
+This does **not** advance delivery — the count of contracts is still zero. It stops the debt
+growing, which was a live problem: two new services added unversioned topics in the week before it
+landed. "0 of 34 and drifting" becomes "0 of 34 and frozen", which is the difference between a debt
+and a leak.
+
+The baseline is checked in both directions, so a line cannot outlive the debt it records: it fails on
+a new entry AND on a stale one, and the moment a service gains a contract its line goes stale and
+must be removed. The file only shrinks.
+
+Migration order stays as issue #1916 sets it: money-path topics first, schema-first, BACKWARD
+compatibility enforced at the registry, producer-side serialization before consumer rollout, and
+`check-event-schema-compat.py` retired per-topic once registry compatibility replaces it.
+
 ## Alternatives considered
 
 - **Undocumented Kafka topics as an implicit API (the status quo)** — let services produce and consume events with no formal contract. Rejected: schema changes break downstream consumers without warning, new consumers cannot discover what events exist or what they mean, auditors cannot trace which service emits which event for what reason, and there is no equivalent of OpenAPI for browsing or generating clients.

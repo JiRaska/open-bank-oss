@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.18.0...account-service-v0.18.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** make the per-service Dockerfiles honest, and keep them that way ([#3392](https://github.com/JiRaska/open-bank-oss/issues/3392)) ([21f2ff4](https://github.com/JiRaska/open-bank-oss/commit/21f2ff497fffb782162a5f8333ac6fff97d6c171)), closes [#3016](https://github.com/JiRaska/open-bank-oss/issues/3016)
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.17.0...account-service-v0.18.0) (2026-08-02)
+
+
+### Features
+
+* **account:** savings-goal delegation + propose-only withdrawal flow (ADR-0232 D3/D8) ([#3143](https://github.com/JiRaska/open-bank-oss/issues/3143)) ([18bcac7](https://github.com/JiRaska/open-bank-oss/commit/18bcac75a2b3ea8fccee6f831043607b862586ae))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.16.2...account-service-v0.17.0) (2026-08-02)
+
+
+### Features
+
+* **account:** delegation-grant enforcement projection (ADR-0232 D3) ([#3058](https://github.com/JiRaska/open-bank-oss/issues/3058)) ([d28a787](https://github.com/JiRaska/open-bank-oss/commit/d28a787c842d07e9e7d3c5f2267274e773c6ef7c))
+
 ## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.16.1...account-service-v0.16.2) (2026-08-02)
 
 

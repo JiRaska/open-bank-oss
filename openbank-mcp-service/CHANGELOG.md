@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.14.3...mcp-service-v0.14.4) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** make the per-service Dockerfiles honest, and keep them that way ([#3392](https://github.com/JiRaska/open-bank-oss/issues/3392)) ([21f2ff4](https://github.com/JiRaska/open-bank-oss/commit/21f2ff497fffb782162a5f8333ac6fff97d6c171)), closes [#3016](https://github.com/JiRaska/open-bank-oss/issues/3016)
+
+## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.14.2...mcp-service-v0.14.3) (2026-08-02)
+
+
+### Bug Fixes
+
+* **mcp:** forward attributes through the rest.rego agent-charter bridge ([#3315](https://github.com/JiRaska/open-bank-oss/issues/3315)) ([4d1ef53](https://github.com/JiRaska/open-bank-oss/commit/4d1ef53ce25e705fa215fcab83ac627d4ee449b0))
+
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.14.1...mcp-service-v0.14.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **mcp:** key an agent session by the token's sub, not by a name an admin can change ([#3242](https://github.com/JiRaska/open-bank-oss/issues/3242)) ([7ef9ed1](https://github.com/JiRaska/open-bank-oss/commit/7ef9ed198a58ab192742c7ca7ef662bf87325662)), closes [#3182](https://github.com/JiRaska/open-bank-oss/issues/3182)
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.14.0...mcp-service-v0.14.1) (2026-07-31)
 
 

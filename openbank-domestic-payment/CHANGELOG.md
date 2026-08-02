@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.11.2...domestic-payment-v0.11.3) (2026-08-02)
+
+
+### Bug Fixes
+
+* **libs,domestic:** surface the transport fault a resilient call masks ([#3377](https://github.com/JiRaska/open-bank-oss/issues/3377)) ([c7a78ff](https://github.com/JiRaska/open-bank-oss/commit/c7a78ff10bd99abd4af37434f0351e396d1ad85a))
+
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.11.1...domestic-payment-v0.11.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** make the per-service Dockerfiles honest, and keep them that way ([#3392](https://github.com/JiRaska/open-bank-oss/issues/3392)) ([21f2ff4](https://github.com/JiRaska/open-bank-oss/commit/21f2ff497fffb782162a5f8333ac6fff97d6c171)), closes [#3016](https://github.com/JiRaska/open-bank-oss/issues/3016)
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.11.0...domestic-payment-v0.11.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **domestic:** resolve the debtor's party for an AML case instead of sending the account id ([#3404](https://github.com/JiRaska/open-bank-oss/issues/3404)) ([d949ce9](https://github.com/JiRaska/open-bank-oss/commit/d949ce9ef5ba09e0961159f403fd672fc0e5ca81))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.10.6...domestic-payment-v0.11.0) (2026-08-02)
+
+
+### Features
+
+* **domestic-payment:** alert on payments that stop progressing, not just on the service being down ([#3379](https://github.com/JiRaska/open-bank-oss/issues/3379)) ([02fd8fc](https://github.com/JiRaska/open-bank-oss/commit/02fd8fcd67cca1cbbd0f8ddf0f2220727f696682)), closes [#3273](https://github.com/JiRaska/open-bank-oss/issues/3273) [#3271](https://github.com/JiRaska/open-bank-oss/issues/3271)
+
 ## [0.10.6](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.10.5...domestic-payment-v0.10.6) (2026-08-02)
 
 

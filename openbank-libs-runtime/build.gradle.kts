@@ -70,6 +70,8 @@ dependencies {
     testImplementation("org.jboss.logging:jboss-logging:3.6.2.Final")
     testImplementation("jakarta.enterprise:jakarta.enterprise.cdi-api:4.1.0")
     testImplementation("io.micrometer:micrometer-core:1.14.5")
+    // ResilientCallMetrics classifies CircuitBreakerOpenException; the API is compileOnly above.
+    testImplementation("org.eclipse.microprofile.fault-tolerance:microprofile-fault-tolerance-api:4.1.1")
     // Test-only: WorkflowLivenessMetricNamingTest checks the dotted meter name against Micrometer's
     // REAL PrometheusNamingConvention rather than trusting the hand-rolled dot -> underscore
     // rendering that the sentinel's PromQL depends on. The registry itself is never used at runtime

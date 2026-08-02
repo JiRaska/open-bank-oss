@@ -78,14 +78,30 @@ class CompliancePackActivationService(
             } else {
                 proposal.reject(checker, now(), reason)
             }
-            if (approve) registry.activate(decided)
             entity.state = decided.state
             entity.decidedBy = decided.decidedBy
             entity.decidedAt = decided.decidedAt?.let { OffsetDateTime.ofInstant(it, clock.zone) }
             entity.decisionReason = decided.decisionReason
             entity.updatedAt = OffsetDateTime.now(clock)
-            entity
-        }.flatMap { activations.save(it) }.map { it.toView() }
+            entity to decided
+        }.flatMap { (entity, decided) ->
+            // Persist FIRST, activate only once the row is committed.
+            //
+            // The previous order activated the in-memory registry inside the map above, before the
+            // save. When the save failed, the caller got a 500 and reasonably concluded that nothing
+            // had happened — while THIS pod was already enforcing the pack, with no row to show for
+            // it. That state is invisible and does not survive: a restart loses it (boot rehydrates
+            // from the table), and sibling replicas never had it, so the same application would be
+            // judged against different rules depending on which pod answered.
+            //
+            // Measured, not theorised: with the persist-vs-merge defect still in place, the decide
+            // call returned 500 and `GET /compliance-packs/active` nonetheless listed the pack
+            // (CompliancePackActivationIT step 3 failing while step 4 passed).
+            activations.save(entity).map { saved ->
+                if (approve) registry.activate(decided)
+                saved.toView()
+            }
+        }
 
     fun listPending(): Uni<List<PackActivationView>> =
         activations.findByState(ProposalState.PROPOSED).map { rows -> rows.map { it.toView() } }

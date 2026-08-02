@@ -27,3 +27,12 @@
 # auto-deploy's ALL_SERVICES, so the tag has never been built. Tracked in #1205 alongside the
 # guard that should have refused to merge a released component in this state.
 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-placeholder
+
+# delegation-service: first ArgoCD registration (ADR-0232, #2992). The module, the OPA bundle
+# and the enforcement projections all merged before anything could deploy it — it was absent
+# from auto-deploy's ALL_SERVICES (added in the same PR as this line), so the tag has never
+# been built. Unlike finrep/vop this one has a Dockerfile and an ALL_SERVICES entry from day
+# one, so the fix is a single dispatched build rather than more missing pieces:
+#   gh workflow run auto-deploy.yml -f services=openbank-delegation-service
+# DELETE THIS ENTRY once that build lands and the auto-deploy gitops PR rewrites the pin.
+265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-delegation-service:sandbox-900c64bbf

@@ -20,9 +20,9 @@ SHA="0e32873f8c52d37e1b6530e5bd5e94275e5cefae"
 
 fails=0
 check() {
-  local name="$1" want="$2" present="$3"
+  local name="$1" want="$2" present="$3" event="${4:-}"
   local got
-  got="$(PACT_VERSION_PRESENT="$present" bash "$RESOLVE" openbank-demo-service "$SHA" | cut -f1)"
+  got="$(PACT_VERSION_PRESENT="$present" EVENT_NAME="$event" bash "$RESOLVE" openbank-demo-service "$SHA" | cut -f1)"
   if [ "$got" = "$want" ]; then
     echo "  ok   ${name} → ${got}"
   else
@@ -88,6 +88,41 @@ if bash "$RESOLVE" openbank-demo-service >/dev/null 2>&1; then
 else
   echo "  ok   missing-sha-arg → non-zero exit"
 fi
+
+
+# ── issue #3318: a manual dispatch of a sha with no pact version ────────────────────────
+# 5. THE POINT OF THIS ADDITION. auto-deploy builds sandbox-${GITHUB_SHA::8} from the CURRENT
+#    main tip on a dispatch, a commit services-ci never built for this service — so no version
+#    can exist for it. Falling back to `--latest main` answers about a DIFFERENT commit than
+#    the image being pinned. Measured on openbank-fx-service: five dispatches, five verdicts
+#    about an unrelated commit (#3306). Refuse instead.
+check "dispatch + no version → REFUSE" "REFUSE" no workflow_dispatch
+
+# 6. REGRESSION GUARD. The push path must be untouched: most of the fleet legitimately has no
+#    version on most commits, and refusing there would block every deploy. If someone widens
+#    the refusal to all events, this is what goes red.
+check "push + no version → still latest/main (unchanged)" "--latest main" no push
+
+# 7. Same guard for the implicit case: no EVENT_NAME exported behaves as a push, so a caller
+#    that forgets to pass it keeps today's behaviour rather than blocking the fleet.
+check "no EVENT_NAME + no version → latest/main" "--latest main" no
+
+# 8. A dispatch is only refused when the version is genuinely absent. With the version present
+#    the precise question is still the right one, dispatch or not.
+check "dispatch + version present → ask about THIS commit" "--version ${SHA}" yes workflow_dispatch
+
+# 9. A dispatch with an inconclusive probe must NOT be refused: an unreachable broker is not
+#    evidence that the version is missing, and turning a probe outage into a hard stop would
+#    make the gate fail closed on infrastructure rather than on contracts.
+check "dispatch + probe inconclusive → latest/main, not REFUSE" "--latest main" unknown workflow_dispatch
+
+# The distinction the REFUSE branch got wrong: a service the broker has never heard of has no
+# contracts to verify, so refusing makes its FIRST deploy impossible. Measured on
+# openbank-delegation-service, whose first dispatch was blocked by exactly this.
+check "dispatch + pacticipant absent → latest/main, NOT REFUSE" "--latest main" absent workflow_dispatch
+check "push + pacticipant absent → latest/main" "--latest main" absent push
+# And the #3318 case must still refuse — 'absent' must not have widened it.
+check "dispatch + version missing but pacticipant KNOWN → still REFUSE" "REFUSE" no workflow_dispatch
 
 if [ "$fails" -ne 0 ]; then
   echo "FAILED: ${fails} case(s)"

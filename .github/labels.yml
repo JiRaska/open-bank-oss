@@ -60,6 +60,9 @@ labels:
   - name: fleet-health-lint
     color: "b60205"
     description: "Dedup marker for the full-fleet LINT gate alert (fleet-lint). One open issue at a time."
+  - name: deploy-drift
+    color: "b60205"
+    description: "Dedup marker for the deployed==main drift watch. One open issue per drifted service."
 
   # --- Triage / workflow state ---------------------------------------------------------
   - name: triage

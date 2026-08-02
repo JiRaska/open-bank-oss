@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.7](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.5.6...security-scanner-v0.5.7) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** make the per-service Dockerfiles honest, and keep them that way ([#3392](https://github.com/JiRaska/open-bank-oss/issues/3392)) ([21f2ff4](https://github.com/JiRaska/open-bank-oss/commit/21f2ff497fffb782162a5f8333ac6fff97d6c171)), closes [#3016](https://github.com/JiRaska/open-bank-oss/issues/3016)
+
+## [0.5.6](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.5.5...security-scanner-v0.5.6) (2026-08-02)
+
+
+### Bug Fixes
+
+* **security-scanner:** run Flyway at start — the schema was never created ([#3350](https://github.com/JiRaska/open-bank-oss/issues/3350)) ([0a64027](https://github.com/JiRaska/open-bank-oss/commit/0a64027a12b7bce58ebabc85717efce73423352c))
+
 ## [0.5.5](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.5.4...security-scanner-v0.5.5) (2026-07-31)
 
 
