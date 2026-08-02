@@ -844,6 +844,22 @@ gates:
 
   # ==== api ===================================================================
 
+  # The Pact Broker webhook (openbank-infra/scripts/seed-pact-verification-webhook.sh)
+  # dispatches verify-provider.yml with `service = ${pactbroker.providerName}`, which
+  # only works because every pacticipant name is exactly a module directory — true for
+  # all 55 today, and previously held together by nothing. A drifted name would keep
+  # dispatching, just at a service that does not exist: the run fails inside the build
+  # and the pact stays unverified, which looks identical to the strand the webhook was
+  # built to remove. Reads the committed pacts, so no broker and no credentials.
+  - id: pacticipant-matches-module
+    name: "pacticipant name is a module directory (Pact webhook contract)"
+    group: api
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-pacticipant-matches-module.py --self-test
+    run: |
+      python3 .github/scripts/check-pacticipant-matches-module.py
+
   - id: pact-provider-replay-coverage
     name: "Pact provider-replay coverage (issue #2338, enforced)"
     group: api
