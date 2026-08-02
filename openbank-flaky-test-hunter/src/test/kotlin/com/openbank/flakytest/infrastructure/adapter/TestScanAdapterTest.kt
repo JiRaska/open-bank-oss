@@ -25,6 +25,11 @@ import kotlin.io.path.writeText
 class TestScanAdapterTest {
 
     private fun configFor(root: Path): FlakyTestHunterConfig = object : FlakyTestHunterConfig {
+        // An anonymous implementation, not a mock, so every accessor added to the mapping has to
+        // be answered here — which is why adding the sweep's cron broke this file and not the
+        // four sibling adapter tests, which all use mockk.
+        override fun checkCron() = "0 30 6 ? * SUN"
+
         override fun githubApiUrl() = "https://api.github.com"
 
         override fun githubRepo() = "JiRaska/open-bank-oss"

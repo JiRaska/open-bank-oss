@@ -18,8 +18,7 @@ import java.time.Instant
  */
 class ScheduledWorkflowIdTest {
 
-    private fun id(trigger: RunTrigger, iso: String) =
-        DocsTruthService.scheduledWorkflowId(trigger, Instant.parse(iso))
+    private fun id(trigger: RunTrigger, iso: String) = DocsTruthService.scheduledWorkflowId(trigger, Instant.parse(iso))
 
     @Test
     fun `two fires on the same UTC day produce the same id`() {
