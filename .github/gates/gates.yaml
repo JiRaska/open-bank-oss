@@ -916,6 +916,18 @@ gates:
     run: |
       python3 .github/scripts/check-gitops-duplicate-resources.py --enforce
 
+  - id: scheduler-cron-syntax
+    name: every committed scheduler cron parses (a malformed one is a boot crashloop, not a missed run)
+    group: kotlin
+    mode: enforced
+    run: |
+      # Nothing in the test layers parses the PRODUCTION cron: the cron IT overrides it with a
+      # fast expression and %test overrides it with a never-fire one, so both run against a
+      # different string than the one that ships. Falsified against the real files with three
+      # typo classes (bad day name, unix 5-field, both day fields '*'); 12 self-tests.
+      python3 .github/scripts/check-scheduler-cron-syntax.py --self-test
+      python3 .github/scripts/check-scheduler-cron-syntax.py --enforce
+
   - id: scheduled-trigger-emitted
     name: a declared SCHEDULED trigger must actually be emitted (an unreachable schedule fails silently)
     group: kotlin
