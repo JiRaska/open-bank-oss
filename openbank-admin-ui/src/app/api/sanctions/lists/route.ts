@@ -2,38 +2,15 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-import { NextRequest, NextResponse } from 'next/server'
-
-const BASE = process.env.SANCTIONS_SERVICE_URL ?? 'http://openbank-sanctions-service:8123'
+import { forwardToSanctionsService } from '@/lib/sanctions/upstream'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  try {
-    const res = await fetch(`${BASE}/api/v1/sanctions/lists`, {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(10_000),
-    })
-    const data = await res.json().catch(() => ({ error: 'Invalid JSON' }))
-    if (!res.ok) return NextResponse.json(data, { status: res.status })
-    return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } })
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Lists request failed' }, { status: 502 })
-  }
+  return forwardToSanctionsService('/api/v1/sanctions/lists')
 }
 
-export async function POST(_req: NextRequest) {
-  try {
-    const res = await fetch(`${BASE}/api/v1/sanctions/lists/refresh-all`, {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(20_000),
-    })
-    const data = await res.json().catch(() => ({}))
-    return NextResponse.json(data, { status: res.status })
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Refresh failed' }, { status: 502 })
-  }
+export async function POST() {
+  // Refreshing every enabled list re-downloads and re-indexes the upstream feeds.
+  return forwardToSanctionsService('/api/v1/sanctions/lists/refresh-all', 'POST', {}, 20_000)
 }

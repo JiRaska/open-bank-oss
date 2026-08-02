@@ -15,7 +15,7 @@ import { summarizeReachable, serviceVerdict } from '@/lib/security/summary'
 // maps straight onto <DataUnavailable kind=...>.
 type SecurityEnvelope =
   | { available: true; report: PlatformReport }
-  | { available: false; reason: 'not_deployed' | 'unreachable' | 'error'; detail?: string }
+  | { available: false; reason: 'not_deployed' | 'unreachable' | 'error' | 'unauthorized'; detail?: string }
 
 interface ScanResult {
   serviceName: string; serviceUrl: string
