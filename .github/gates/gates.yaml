@@ -733,6 +733,23 @@ gates:
     run: |
       bash .github/scripts/check-eu-ai-act.sh
 
+  # The other half of the same claim. The gate above proves the GENERATED document matches
+  # ml-systems.yaml; nothing proved ml-systems.yaml matches the CODE. So the day model inference
+  # lands in the credit path, `credit-decisioning-engine` stays `deployed: false` in a YAML file,
+  # the generator keeps rendering "no high-risk system exists", the drift gate above stays green —
+  # and the platform runs an undeclared Annex III(5)(b) system.
+  #
+  # The whole EU AI Act position rests on the shipped credit engine being ADR-0213's deterministic
+  # decision tables rather than a model. That is true today and nothing was keeping it true.
+  # ENFORCED for the same reason as its sibling: over a generated claim, advisory means "the
+  # document does not match reality", and there is no judgement left to exercise.
+  - id: ai-act-high-risk-inventory-vs-code
+    name: "EU AI Act Annex III inventory vs. code (ADR-0142/0216, enforced)"
+    group: registry
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-ai-act-high-risk-inventory.py
+
   # ==== kotlin ================================================================
 
   # ADR-0160 mechanism 1 / rules.yaml: change_requirements.event_consumer_liveness.
