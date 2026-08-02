@@ -28,6 +28,13 @@ interface AccountServiceRestClient {
         @HeaderParam("Authorization") authorization: String,
         @PathParam("iban") iban: String,
     ): io.smallrye.mutiny.Uni<AccountDto>
+
+    @GET
+    @Path("/{accountId}")
+    fun getById(
+        @HeaderParam("Authorization") authorization: String,
+        @PathParam("accountId") accountId: String,
+    ): io.smallrye.mutiny.Uni<AccountDto>
 }
 
 data class AccountDto(val id: String, val partyId: String)
@@ -71,6 +78,21 @@ class AccountServiceClient(
         }
     } catch (ex: Exception) {
         log.warnf(ex, "Account lookup for IBAN %s failed — treating as external", iban)
+        null
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    override suspend fun findPartyByAccountId(accountId: UUID): UUID? = try {
+        val token = oidcClient.get().tokens.awaitSuspending().accessToken
+        val dto = httpClient.getById("Bearer $token", accountId.toString()).awaitSuspending()
+        UUID.fromString(dto.partyId)
+    } catch (ex: jakarta.ws.rs.WebApplicationException) {
+        if (ex.response.status != HTTP_NOT_FOUND) {
+            log.warnf(ex, "Party lookup for account %s failed with HTTP %d", accountId, ex.response.status)
+        }
+        null
+    } catch (ex: Exception) {
+        log.warnf(ex, "Party lookup for account %s failed", accountId)
         null
     }
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.16.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.16.2...agent-service-v1.16.3) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** make the per-service Dockerfiles honest, and keep them that way ([#3392](https://github.com/JiRaska/open-bank-oss/issues/3392)) ([21f2ff4](https://github.com/JiRaska/open-bank-oss/commit/21f2ff497fffb782162a5f8333ac6fff97d6c171)), closes [#3016](https://github.com/JiRaska/open-bank-oss/issues/3016)
+
+## [1.16.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.16.1...agent-service-v1.16.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **agent:** @Path bound to a top-level function, so /mcp was never registered ([#3371](https://github.com/JiRaska/open-bank-oss/issues/3371)) ([644b2cf](https://github.com/JiRaska/open-bank-oss/commit/644b2cf27314dddb852af6b509c72481c52fcea0))
+
 ## [1.16.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.16.0...agent-service-v1.16.1) (2026-08-02)
 
 

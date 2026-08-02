@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.88.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.87.3...admin-ui-v0.88.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** let an operator dispose of a sanctions hit ([#3465](https://github.com/JiRaska/open-bank-oss/issues/3465)) ([3c00e90](https://github.com/JiRaska/open-bank-oss/commit/3c00e90cbd83ddfba2d0d6625f6ff83a01d03fc5)), closes [#3334](https://github.com/JiRaska/open-bank-oss/issues/3334)
+
+## [0.87.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.87.2...admin-ui-v0.87.3) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** restore the three non-Quarkus Dockerfiles and make their exemption falsifiable ([#3439](https://github.com/JiRaska/open-bank-oss/issues/3439)) ([d75c714](https://github.com/JiRaska/open-bank-oss/commit/d75c7146271b7f1fd3e7cf0a7fe223c3c0936be5))
+
+## [0.87.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.87.1...admin-ui-v0.87.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** make the per-service Dockerfiles honest, and keep them that way ([#3392](https://github.com/JiRaska/open-bank-oss/issues/3392)) ([21f2ff4](https://github.com/JiRaska/open-bank-oss/commit/21f2ff497fffb782162a5f8333ac6fff97d6c171)), closes [#3016](https://github.com/JiRaska/open-bank-oss/issues/3016)
+
+## [0.87.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.87.0...admin-ui-v0.87.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** make the campaign builder legible to a marketer ([#3373](https://github.com/JiRaska/open-bank-oss/issues/3373)) ([24d01b6](https://github.com/JiRaska/open-bank-oss/commit/24d01b613be2e4d644a0ac515a43408df9d491b5))
+
 ## [0.87.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.86.0...admin-ui-v0.87.0) (2026-08-02)
 
 

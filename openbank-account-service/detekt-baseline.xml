@@ -11,16 +11,23 @@
     <ID>MagicNumber:IbanGenerator.kt$IbanGenerator$10</ID>
     <ID>MagicNumber:IbanGenerator.kt$IbanGenerator$98</ID>
     <ID>MagicNumber:PartyEventConsumer.kt$PartyEventConsumer$50</ID>
+    <ID>MagicNumber:ProposalExceptionMappers.kt$ProposalForbiddenExceptionMapper$403</ID>
+    <ID>MagicNumber:ProposalExceptionMappers.kt$ProposalNotFoundExceptionMapper$404</ID>
+    <ID>MagicNumber:ProposalExceptionMappers.kt$ProposalScaExceptionMapper$400</ID>
     <ID>MagicNumber:SanctionsScreeningAdapter.kt$SanctionsScreeningAdapter$400</ID>
     <ID>MagicNumber:SanctionsScreeningAdapter.kt$SanctionsScreeningAdapter$499</ID>
-    <ID>MatchingDeclarationName:ExceptionMappers.kt$AccountNotFoundExceptionMapper : ExceptionMapper</ID>
+    <ID>MagicNumber:SavingsProposalResource.kt$SavingsProposalResource$202</ID>
+    <ID>MagicNumber:ScaChallengeClient.kt$ResilientScaChallengeClient$2000</ID>
+    <ID>ThrowsCount:SavingsProposalService.kt$SavingsProposalService$private suspend fun verifyOwnerSca(ownerPartyId: UUID, scaSessionId: UUID)</ID>
+    <ID>ThrowsCount:SavingsProposalService.kt$SavingsProposalService$suspend fun decide( accountId: UUID, proposalId: UUID, decidedByPartyId: UUID, approve: Boolean, scaSessionId: UUID, ): WithdrawalProposal</ID>
+    <ID>TooGenericExceptionCaught:DelegationEventConsumer.kt$DelegationEventConsumer$e: Exception</ID>
     <ID>TooGenericExceptionCaught:PartyEventConsumer.kt$PartyEventConsumer$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SanctionsScreeningAdapter.kt$SanctionsScreeningAdapter$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SavingsProposalService.kt$SavingsProposalService$e: Exception</ID>
     <ID>TooManyFunctions:AccountPorts.kt$AccountUseCase</ID>
     <ID>TooManyFunctions:AccountResource.kt$AccountResource</ID>
     <ID>TooManyFunctions:AccountService.kt$AccountService : AccountUseCase</ID>
     <ID>UnusedParameter:IbanGenerator.kt$IbanGenerator$currency: CurrencyCode</ID>
-    <ID>UseCheckOrError:AccountRepositoryImpl.kt$AccountRepositoryImpl$throw IllegalStateException("Account ${entity.id} not found for update")</ID>
     <ID>UseCheckOrError:CurrencyPocketRepositoryImpl.kt$CurrencyPocketRepositoryImpl$throw IllegalStateException("Pocket ${pocket.id} not found for update")</ID>
   </CurrentIssues>
 </SmellBaseline>

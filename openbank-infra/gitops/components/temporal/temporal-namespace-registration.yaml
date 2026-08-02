@@ -92,8 +92,17 @@ spec:
             # campaign → openbank-campaign (ADR-0200 journeys), added on its first rollout:
             # its Deployment had no OPENBANK_TEMPORAL_NAMESPACE, so the worker defaulted to
             # the bare `openbank` and hit exactly the NOT_FOUND this Job exists to prevent.
+            # lending → openbank-lending, the THIRD time this list has been the thing that
+            # drifted. Measured in the sandbox 2026-08-02: the namespace was absent, so
+            # lending-service's workflow AND activity pollers both retried forever against a
+            # namespace Temporal has never held — ~2,000 ERROR lines/hour into Loki, and no
+            # origination workflow could start. Nothing went red: the pod is 2/2 and its
+            # readiness probe does not touch Temporal, so the only evidence was the log volume.
+            # This list is now DERIVED-checked by check-temporal-namespace-registration.py, on
+            # the repo's rule that a hand-kept list of the thing a gate covers reads as
+            # *passing* when it is short rather than as *unchecked*.
             - name: NAMESPACES
-              value: "openbank-default openbank-payments openbank-fx openbank-statements openbank-settlement openbank-finops openbank-devops openbank-liveness openbank-governance openbank-release openbank-docstruth openbank-authzaudit openbank-flakytest openbank-campaign"
+              value: "openbank-default openbank-payments openbank-fx openbank-statements openbank-settlement openbank-finops openbank-devops openbank-liveness openbank-governance openbank-release openbank-docstruth openbank-authzaudit openbank-flakytest openbank-campaign openbank-lending"
             - name: RETENTION
               value: "168h"
           command:

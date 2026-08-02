@@ -17,10 +17,14 @@ permissions:
 # refs/heads/main, so without it a routine Monday-morning push CANCELS the
 # weekly scheduled audit — the audit posture silently never runs that week.
 concurrency:
-  # A push to main always has github.ref == refs/heads/main, so a constant key made every new
-  # commit cancel the previous commit's run — bot commits land every few minutes, so runs on main
-  # mostly never finished (#3390). Key push-to-main by SHA, as services-ci.yml does for #846;
-  # PR branches keep the superseding behaviour, where a newer push SHOULD cancel the old run.
+  # On a push to main, github.ref is always refs/heads/main regardless of commit, so a
+  # ref-keyed group made every new commit cancel the previous commit's run. Bot commits
+  # (auto-deploy pin bumps, release-please) land every few minutes, so a main run rarely
+  # survived to completion — 9 of 11 CI runs and 9 of 11 Security runs were cancelled on
+  # 2026-08-02 (issue #3390). Give each main commit its own lane and never cancel it;
+  # PR pushes keep the superseding behaviour, which is what that setting is for.
+  # The key stays O(1) — a sha, never a list: interpolating a fleet-sized value here
+  # stops the job being created at all (#3082).
   group: security-${{ github.event_name }}-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci' }}
   cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 

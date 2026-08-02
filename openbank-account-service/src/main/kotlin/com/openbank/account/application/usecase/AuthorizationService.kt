@@ -10,11 +10,13 @@ import com.openbank.account.application.port.`in`.ListAuthorizationsQuery
 import com.openbank.account.application.port.`in`.RevokeAuthorizationCommand
 import com.openbank.account.application.port.out.AccountAuthorizationRepository
 import com.openbank.account.application.port.out.AccountRepository
+import com.openbank.account.application.port.out.DelegationProjectionRepository
 import com.openbank.account.domain.model.AccountAuthorization
 import com.openbank.account.domain.model.AuthorizationRole
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.UUID
 
 class AuthorizationNotFoundException(id: UUID) : RuntimeException("Authorization not found: $id")
@@ -25,6 +27,7 @@ class AuthorizationNotOnAccountException(authId: UUID, accountId: UUID) :
 class AuthorizationService(
     private val accountRepository: AccountRepository,
     private val authorizationRepository: AccountAuthorizationRepository,
+    private val delegationProjectionRepository: DelegationProjectionRepository,
     private val clock: Clock,
 ) : AuthorizationUseCase {
 
@@ -65,6 +68,50 @@ class AuthorizationService(
         val account = accountRepository.findById(accountId) ?: return false
         if (account.partyId == partyId) return true
         val active = authorizationRepository.findActiveByAccountAndParty(accountId, partyId)
-        return active.any { it.role == role || it.role == AuthorizationRole.FULL_ACCESS }
+        if (active.any { it.role == role || it.role == AuthorizationRole.FULL_ACCESS }) return true
+        return hasDelegatedAccess(accountId, partyId, role, account.partyId)
+    }
+
+    override suspend fun isAuthorizedForAmount(
+        accountId: UUID,
+        partyId: UUID,
+        role: AuthorizationRole,
+        amount: com.openbank.libs.domain.money.Money?,
+    ): Boolean {
+        val account = accountRepository.findById(accountId) ?: return false
+        if (account.partyId == partyId) return true
+        val active = authorizationRepository.findActiveByAccountAndParty(accountId, partyId)
+        if (active.any { it.role == role || it.role == AuthorizationRole.FULL_ACCESS }) return true
+        if (amount == null) return hasDelegatedAccess(accountId, partyId, role, account.partyId)
+        val now = OffsetDateTime.now(clock)
+        return delegationProjectionRepository.findActiveByAccountAndParty(accountId, partyId)
+            .filter { it.issuedBy(account.partyId) && it.isActiveOn(now) && it.satisfies(role) }
+            .any { it.withinPerTransactionLimit(amount.amount, amount.currency.code) }
+    }
+
+    /**
+     * ADR-0232 D3: the third disjunct of the guard — an ACTIVE, in-window delegation
+     * grant from the local event-fed projection. Runs after ownership and the legacy
+     * AccountAuthorization table so the 99% path (owner) and the existing grants keep
+     * their exact behavior; delegation only ever ADDS access, never removes it.
+     *
+     * [ownerPartyId] is the account's own owner, and a grant only counts when the party who
+     * ISSUED it is that owner. Without this the disjunct made a grant row authority in itself:
+     * the projection matched on (accountId, granteePartyId) alone, so a grant naming somebody
+     * else's account was enforced against that account — two colluding parties could mint
+     * payment rights over a stranger's money using nothing but their own valid SCA. The
+     * offer-time ownership gate in delegation-service closes the same hole from the other end;
+     * this check is the one that re-evaluates on every request instead of trusting a verdict
+     * reached once, and it is the last line before the money path.
+     */
+    private suspend fun hasDelegatedAccess(
+        accountId: UUID,
+        partyId: UUID,
+        role: AuthorizationRole,
+        ownerPartyId: UUID,
+    ): Boolean {
+        val now = OffsetDateTime.now(clock)
+        return delegationProjectionRepository.findActiveByAccountAndParty(accountId, partyId)
+            .any { it.issuedBy(ownerPartyId) && it.isActiveOn(now) && it.satisfies(role) }
     }
 }

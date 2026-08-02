@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: customer-edge
     app.kubernetes.io/part-of: customer-edge
   annotations:
-    openbank.tech/policy-checksum: "845a1f9cc08dfb62"
+    openbank.tech/policy-checksum: "24d54ba3a8be1db9"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1479,8 +1479,44 @@ data:
 
     review:
       default_approvals: 1
-      money_path_approvals: 2               # CONTRIBUTING.md + branch protection
+      money_path_approvals: 2
       self_merge_forbidden_on: [CODEOWNERS_protected]
+
+      # ENFORCEMENT STATUS: aspirational, NOT enforced. Stated here because a governance file
+      # that describes a control it does not have is worse than one that admits the gap — an
+      # auditor, a threat model, or the next contributor reads the number above as a gate.
+      #
+      # The `main-protection` ruleset carries `required_approving_review_count: 0` and
+      # `require_code_owner_review: false`, so nothing blocks a merge on approvals. The comment
+      # that used to sit on the line above claimed "CONTRIBUTING.md + branch protection"; the
+      # branch-protection half has never been true. Measured 2026-08-02: ALL NINE money-path PRs
+      # merged since issue #2183 was filed (2026-07-25) carried zero approvals — a 0% compliance
+      # rate, not occasional drift. #2183 has the full table.
+      #
+      # WHY IT IS NOT SIMPLY TURNED ON: the repository has exactly one account with write access,
+      # and GitHub does not allow approving your own pull request. Setting the count to 2 — or to
+      # 1 — would make `main` unmergeable except via `gh pr merge --admin`, including the ~half of
+      # all merges opened by `openbank-gitops-bot` (deploys, release-please). The result would not
+      # be a stricter control; it would normalise the admin bypass that this repo's own rules
+      # forbid, and remove even the signal that something was overridden. Enforcing an
+      # unsatisfiable requirement is a worse position than an admitted gap.
+      #
+      # COMPENSATING CONTROLS actually in force on a money-path change (each independently
+      # verifiable, unlike the approval count): the five required status checks; the ADR-0030
+      # threat model requirement; the money-path-only gates in .github/gates/gates.yaml
+      # (clock-injection, SLO registry, OPA bundle sync); and the runtime four-eyes gate on
+      # money-path verbs (`four_eyes.verbs` below), which is a *separate* mechanism from GitHub
+      # review — though note #3349: its self-approval guard has no test that ever feeds it a
+      # maker approving themselves.
+      #
+      # REVISIT TRIGGER — this is a capacity gap, not a policy decision, so it expires on a fact,
+      # not on a date: the moment a second account holds write access, set
+      # `required_approving_review_count: 1` with `require_code_owner_review: true` on
+      # `main-protection`, confirm a bot PR can still merge, and only then raise money-path to 2.
+      # Tracked in #2183.
+      enforcement_status: aspirational_not_enforced
+      enforcement_blocker: single_write_access_account
+      enforcement_tracking_issue: 2183
 
     # ---------------------------------------------------------------------------------------
     # Money-path action-prefix overrides (issue #395). rest.rego derives a scope from each

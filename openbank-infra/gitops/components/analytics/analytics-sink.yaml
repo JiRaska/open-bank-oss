@@ -69,8 +69,14 @@ spec:
           env:
             - name: QUARKUS_HTTP_PORT
               value: "8134"
-            - name: QUARKUS_OIDC_ENABLED
-              value: "false"
+            # Same defect as security-scanner (#3433). `QUARKUS_OIDC_ENABLED=false` is inert —
+            # quarkus.oidc.enabled is a BUILD-TIME property — so OIDC ran here regardless, against
+            # the application.yaml default `http://localhost:8080/realms/openbank` inside this
+            # pod. Verified in the sandbox: `GET /api/v1/info` answers 200 anonymously and 500
+            # with a bearer, and the pod logs `OIDC server is not available at the
+            # 'http://localhost:8080/realms/openbank' URL`.
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
             - name: QUARKUS_OTEL_SDK_DISABLED
               value: "true"
             - name: ANALYTICS_SINK_TYPE

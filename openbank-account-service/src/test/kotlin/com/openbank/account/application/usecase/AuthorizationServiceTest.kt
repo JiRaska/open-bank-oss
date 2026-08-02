@@ -9,6 +9,7 @@ import com.openbank.account.application.port.`in`.ListAuthorizationsQuery
 import com.openbank.account.application.port.`in`.RevokeAuthorizationCommand
 import com.openbank.account.application.port.out.AccountAuthorizationRepository
 import com.openbank.account.application.port.out.AccountRepository
+import com.openbank.account.application.port.out.DelegationProjectionRepository
 import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountAuthorization
 import com.openbank.account.domain.model.AccountStatus
@@ -40,15 +41,19 @@ class AuthorizationServiceTest {
 
     private lateinit var accountRepository: AccountRepository
     private lateinit var authorizationRepository: AccountAuthorizationRepository
+    private lateinit var delegationProjectionRepository: DelegationProjectionRepository
     private lateinit var service: AuthorizationService
 
     @BeforeEach
     fun setUp() {
         accountRepository = mockk()
         authorizationRepository = mockk()
+        delegationProjectionRepository = mockk()
+        coEvery { delegationProjectionRepository.findActiveByAccountAndParty(any(), any()) } returns emptyList()
         service = AuthorizationService(
             accountRepository,
             authorizationRepository,
+            delegationProjectionRepository,
             Clock.fixed(fixedInstant, ZoneOffset.UTC),
         )
     }

@@ -45,3 +45,24 @@ data class AccountClosedEvent(
     override val aggregateType = "Account"
     override val eventType = "AccountClosed"
 }
+
+/**
+ * The executable half of the propose-only flow (ADR-0232 D8 / AC8): the owner
+ * approved a delegate's withdrawal proposal with their own SCA. The payments path
+ * consumes this as the instruction to actually move the money — the approval and
+ * the instruction share one outbox transaction with the proposal's status flip.
+ */
+data class SavingsWithdrawalApproved(
+    override val aggregateId: UUID,
+    val accountId: UUID,
+    val delegatePartyId: UUID,
+    val amountMinor: Long,
+    val currency: String,
+    val approvalId: String,
+    val scaSessionId: UUID,
+    override val occurredAt: Instant,
+) : DomainEvent(occurredAt) {
+    override val aggregateType = "Account"
+    override val eventType = "SavingsWithdrawalApproved"
+    override val version = 1L
+}

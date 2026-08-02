@@ -19,6 +19,9 @@ LENDING_REST_EXT=$(cat << 'REGO'
 #   lending.create              — submit a loan application (maker)
 #   lending.approve             — approve/reject an application (checker; four-eyes in the handler)
 #   lending.intake              — customer self-service application via customer-edge (ADR-0211)
+#   lending.compliance.propose  — propose a jurisdictional compliance pack (maker, ADR-0212 D4)
+#   lending.compliance.decide   — approve/reject a pack activation (checker, must differ from maker)
+#   lending.compliance.read     — list pending proposals / active packs
 #   lending.read                — get application/loan/schedule/collateral/IFRS-9 snapshot (#id)
 #   lending.list                — list a party's applications/loans
 #   lending.disburse            — disburse an approved application (books the loan)
@@ -106,6 +109,20 @@ allowed_reasons contains "compliance-lending-desk" if {
 		"lending.repay",
 		"lending.writeoff",
 		"lending.collateralRegister",
+		# ADR-0212 D4 pack activation. Missing until now, and the omission made the control
+		# UNREACHABLE rather than merely awkward: the endpoints exist, @RolesAllowed admits
+		# ROLE_COMPLIANCE, and OPA denied every attempt with "policy denied" — so no pack had
+		# ever been activated in any environment with AUTHZ_ENFORCE=true, and none could be.
+		# Only the READ half worked, because base rest.rego's compliance-read-any grants `*.read`
+		# and `lending.compliance.read` happens to end in it. That partial grant is what made the
+		# gap invisible: /active answered 200 with `[]`, which reads as "no packs activated yet"
+		# rather than "you cannot activate one".
+		#
+		# maker != checker is NOT enforced here — CompliancePackActivationService raises
+		# MakerCheckerViolation from the JWT subject, the same stance as lending.approve.
+		"lending.compliance.propose",
+		"lending.compliance.decide",
+		"lending.compliance.read",
 	}
 }
 

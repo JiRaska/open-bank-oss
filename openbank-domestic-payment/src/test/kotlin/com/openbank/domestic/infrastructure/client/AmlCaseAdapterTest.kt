@@ -4,6 +4,7 @@
 
 package com.openbank.domestic.infrastructure.client
 
+import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.AmlCaseRiskLevel
 import com.openbank.domestic.application.port.out.OpenAmlCaseCommand
 import io.mockk.every
@@ -21,7 +22,20 @@ class AmlCaseAdapterTest {
 
     private val client: AmlServiceClient = mockk()
 
-    private fun adapter(): AmlCaseAdapter = AmlCaseAdapter(client).also { it.self = it }
+    /** The party that actually owns the debtor account — a DIFFERENT id, which is the whole point. */
+    private val resolvedParty: UUID = UUID.randomUUID()
+
+    private fun adapter(party: UUID? = resolvedParty): AmlCaseAdapter {
+        val accounts = object : AccountLookupPort {
+            override suspend fun findPartyByIban(iban: String): UUID? = null
+            override suspend fun findPartyByAccountId(accountId: UUID): UUID? = party
+            override suspend fun findAccountIdByIban(iban: String): UUID? = null
+        }
+        return AmlCaseAdapter(client).also {
+            it.self = it
+            it.accounts = accounts
+        }
+    }
 
     private fun command(matchedEntity: String? = "Sanctioned Co") = OpenAmlCaseCommand(
         idempotencyKey = "aml-key-1",
@@ -48,7 +62,12 @@ class AmlCaseAdapterTest {
         verify(exactly = 1) { client.createCase(any(), any()) }
         assertThat(keySlot.captured).isEqualTo("aml-key-1")
         val body = bodySlot.captured
-        assertThat(body.partyId).isEqualTo(cmd.debtorAccountId)
+        // This used to assert `partyId == cmd.debtorAccountId`, i.e. it PINNED the defect: an
+        // account id in party_id, which no join to the party register can resolve (#3274).
+        assertThat(body.partyId)
+            .describedAs("the case must carry the party that owns the debtor account, not the account")
+            .isEqualTo(resolvedParty)
+            .isNotEqualTo(cmd.debtorAccountId)
         assertThat(body.accountId).isEqualTo(cmd.debtorAccountId)
         assertThat(body.transactionId).isEqualTo(cmd.paymentId)
         assertThat(body.customerReference).isEqualTo("Payer / 1000/0800")
@@ -68,5 +87,21 @@ class AmlCaseAdapterTest {
         adapter().openCase(command(matchedEntity = null))
 
         assertThat(bodySlot.captured.matchedEntity).isNull()
+    }
+
+    @Test
+    fun `an unresolvable party still opens the case, with the account id and a loud warning`(): Unit = runBlocking {
+        // Losing an AML case over an account-service outage would be worse than an imprecise one,
+        // so the fallback stays — but it is logged, so those rows are identifiable rather than
+        // indistinguishable from correctly-resolved ones (#3274).
+        val cmd = command()
+        val bodySlot = slot<CreateAmlCaseRequest>()
+        every { client.createCase(any(), capture(bodySlot)) } returns
+            Uni.createFrom().item(mockk<Response>())
+
+        adapter(party = null).openCase(cmd)
+
+        assertThat(bodySlot.captured.partyId).isEqualTo(cmd.debtorAccountId)
+        assertThat(bodySlot.captured.accountId).isEqualTo(cmd.debtorAccountId)
     }
 }

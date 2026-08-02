@@ -56,16 +56,32 @@ TASKS = ("testClasses", "quarkusDependenciesBuild")
 # the task for them fails the WHOLE invocation with "Cannot locate tasks that match", so a
 # PR touching one of those build files would take the check down with it. They still get
 # `testClasses`, which is the only graph they have.
-QUARKUS_MARKER = "openbank.quarkus-service"
+# Whether a module owns `quarkusDependenciesBuild` is decided by how it applies the
+# Quarkus plugin, and there are TWO ways in this repo:
+#   id("openbank.quarkus-service")   the convention plugin (55 services)
+#   alias(libs.plugins.quarkus)      the plugin directly (openbank-analytics-sink)
+# Naming the task for a module that has neither fails the WHOLE Gradle invocation
+# with "Cannot locate tasks that match", so this must be exact in both directions.
+#
+# Comments are stripped first, and that is not defensive coding. A plain substring
+# search misfires on prose: openbank-libs-testing says "This module isn't a Quarkus
+# service (no openbank.quarkus-service ...)", and that sentence alone classified it AS
+# one. openbank-libs carries a comment with the same effect. Both were caught by the
+# nightly sweep on its first real run; the over-correction that followed — matching only
+# the convention plugin — then misclassified analytics-sink the other way, which would
+# have silently stopped checking its prod graph rather than failing loudly.
+QUARKUS_PLUGIN_RE = re.compile(
+    r'^\s*(?:id\("openbank\.quarkus-service"\)|alias\(libs\.plugins\.quarkus\))', re.M)
 
 
 def tasks_for(module: str) -> tuple[str, ...]:
     build_file = pathlib.Path(module) / "build.gradle.kts"
     try:
-        is_quarkus = QUARKUS_MARKER in build_file.read_text(encoding="utf-8")
+        text = build_file.read_text(encoding="utf-8")
     except OSError:
-        is_quarkus = False
-    return TASKS if is_quarkus else ("testClasses",)
+        return ("testClasses",)
+    code = "\n".join(l for l in text.split("\n") if not l.lstrip().startswith("//"))
+    return TASKS if QUARKUS_PLUGIN_RE.search(code) else ("testClasses",)
 
 
 def artifact_set(path: pathlib.Path) -> set[str]:

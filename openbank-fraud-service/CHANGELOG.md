@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.10.0...fraud-service-v0.10.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **fraud:** an ONNX native-load Error 500'd the whole resource, not just scoring ([#3376](https://github.com/JiRaska/open-bank-oss/issues/3376)) ([330707c](https://github.com/JiRaska/open-bank-oss/commit/330707ce77347ee8d15bbbbfc8d66d732d920ab2)), closes [#3354](https://github.com/JiRaska/open-bank-oss/issues/3354)
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.9.1...fraud-service-v0.10.0) (2026-07-31)
 
 

@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Fragment } from 'react'
 import {
   ShieldAlert, Search, CheckCircle2, Clock, RefreshCw,
   AlertTriangle, User, Play, List, ChevronDown, ChevronUp,
@@ -32,6 +32,18 @@ interface SanctionsList {
 
 interface ApiError {
   error?: string
+}
+
+// The upstream enum (openapi.yaml ReviewCommand.newStatus). POTENTIAL_HIT is deliberately absent
+// from the picker: a review that leaves the check pending is a no-op that still consumes a
+// four-eyes approval.
+type ReviewStatus = 'CLEAR' | 'HIT' | 'WHITELISTED' | 'ESCALATED'
+
+// 202 + this body is the four-eyes pause, not an error (ADR-0155). `res.ok` covers 202, so the
+// BFF forwards it untouched.
+interface PendingApprovalResponse {
+  status?: string
+  approvalId?: string
 }
 
 const DAYS = ['MON','TUE','WED','THU','FRI','SAT','SUN']
@@ -180,6 +192,21 @@ export default function SanctionsPage() {
   const [selectedListTypes, setSelectedListTypes] = useState<string[]>([])
   const [listScopeInitialised, setListScopeInitialised] = useState(false)
 
+  // Manual disposition of a hit (issue #3334). POST /api/v1/sanctions/review existed, was
+  // publicly routed and had no caller anywhere in the product — so this queue could only grow.
+  const [reviewFor, setReviewFor] = useState<string | null>(null)
+  const [reviewStatus, setReviewStatus] = useState<ReviewStatus>('CLEAR')
+  const [reviewNote, setReviewNote] = useState('')
+  const [reviewBusy, setReviewBusy] = useState(false)
+  const [reviewError, setReviewError] = useState('')
+  // Four-eyes (ADR-0155): a 202 parks the maker's decision until a DIFFERENT operator decides it.
+  // The id has to survive in the UI — it is the only way back to this exact decision, and the
+  // retry must carry it as X-Approval-Id or the interceptor mints a fresh one and 202s forever.
+  const [pendingApproval, setPendingApproval] = useState<{ id: string; checkId: string } | null>(null)
+  const [decideId, setDecideId] = useState('')
+  const [decideBusy, setDecideBusy] = useState(false)
+  const [decideMsg, setDecideMsg] = useState('')
+
   const loadChecks = useCallback(async () => {
     setLoading(true)
     try {
@@ -307,6 +334,98 @@ export default function SanctionsPage() {
     setRefreshingAll(false)
   }
 
+  const openReview = (c: SanctionCheck) => {
+    setReviewFor(c.id)
+    // Pre-select the safer direction: ESCALATED for a confirmed HIT, CLEAR for a potential one.
+    // Never pre-select CLEAR on a HIT — a wrongly-cleared true positive is a real sanctions
+    // violation (rules.yaml), and a default is a decision most people accept.
+    setReviewStatus(c.status === 'HIT' ? 'ESCALATED' : 'CLEAR')
+    setReviewNote('')
+    setReviewError('')
+    setPendingApproval(null)
+  }
+
+  /** Submit a disposition. `approvalId` is set only on the post-approval retry. */
+  const submitReview = async (checkId: string, approvalId?: string) => {
+    if (!reviewNote.trim()) {
+      setReviewError(t('Poznámka je povinná — je to auditní stopa rozhodnutí.', 'A note is required — it is the audit trail for this decision.'))
+      return
+    }
+    setReviewBusy(true)
+    setReviewError('')
+    try {
+      const res = await fetch('/api/sanctions/review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(approvalId ? { 'X-Approval-Id': approvalId } : {}),
+        },
+        body: JSON.stringify({ checkId, note: reviewNote.trim(), newStatus: reviewStatus }),
+      })
+
+      if (res.status === 202) {
+        const parked = await res.json().catch(() => ({})) as PendingApprovalResponse
+        if (parked.approvalId) {
+          setPendingApproval({ id: parked.approvalId, checkId })
+          setReviewError('')
+        } else {
+          // 202 without an id would leave the decision unreachable — say so rather than
+          // rendering a success that never completes.
+          setReviewError(t('Služba vrátila 202 bez approvalId — rozhodnutí nelze dokončit.', 'The service returned 202 with no approvalId — this decision cannot be completed.'))
+        }
+        return
+      }
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({})) as ApiError
+        setReviewError(payload.error === 'unauthorized'
+          ? t('Nemáte oprávnění k tomuto rozhodnutí.', 'You are not authorised to make this decision.')
+          : t(`Rozhodnutí se nepodařilo uložit (HTTP ${res.status}).`, `Could not record the decision (HTTP ${res.status}).`))
+        return
+      }
+
+      setReviewFor(null)
+      setPendingApproval(null)
+      setReviewNote('')
+      await loadChecks()
+    } catch {
+      setReviewError(t('Služba je nedostupná.', 'The service is unreachable.'))
+    } finally {
+      setReviewBusy(false)
+    }
+  }
+
+  /** Checker half of the four-eyes gate. A maker deciding their own request gets 403 upstream. */
+  const decideApproval = async (approve: boolean) => {
+    const id = decideId.trim()
+    if (!id) return
+    setDecideBusy(true)
+    setDecideMsg('')
+    try {
+      const res = await fetch(`/api/sanctions/approvals/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approve }),
+      })
+      if (res.status === 403) {
+        setDecideMsg(t('Zamítnuto: vlastní žádost nelze schválit (oddělení pravomocí).', 'Refused: you cannot decide your own request (segregation of duties).'))
+        return
+      }
+      if (!res.ok) {
+        setDecideMsg(t(`Rozhodnutí selhalo (HTTP ${res.status}).`, `Decision failed (HTTP ${res.status}).`))
+        return
+      }
+      setDecideMsg(approve
+        ? t('Schváleno. Maker nyní může akci zopakovat.', 'Approved. The maker can now retry the action.')
+        : t('Zamítnuto.', 'Rejected.'))
+      setDecideId('')
+    } catch {
+      setDecideMsg(t('Služba je nedostupná.', 'The service is unreachable.'))
+    } finally {
+      setDecideBusy(false)
+    }
+  }
+
   const filtered = checks.filter(c =>
     c.name?.toLowerCase().includes(search.toLowerCase()) ||
     c.status?.toLowerCase().includes(search.toLowerCase()) ||
@@ -412,7 +531,7 @@ export default function SanctionsPage() {
               ) : (
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    {[t('Entita', 'Entity'), t('Typ', 'Type'), t('Seznamy', 'Lists'), t('Skóre', 'Score'), t('Výsledek', 'Result'), t('Zkontrolováno', 'Checked At')].map(h => (
+                    {[t('Entita', 'Entity'), t('Typ', 'Type'), t('Seznamy', 'Lists'), t('Skóre', 'Score'), t('Výsledek', 'Result'), t('Zkontrolováno', 'Checked At'), t('Rozhodnutí', 'Disposition')].map(h => (
                       <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
                     ))}
                   </tr></thead>
@@ -420,7 +539,8 @@ export default function SanctionsPage() {
                     const isHit = c.status === 'HIT'
                     const isPending = c.status === 'POTENTIAL_HIT'
                     return (
-                      <tr key={c.id} style={{ borderBottom: '1px solid var(--border)', background: isHit ? 'rgba(239,68,68,0.03)' : '' }}
+                      <Fragment key={c.id}>
+                      <tr style={{ borderBottom: '1px solid var(--border)', background: isHit ? 'rgba(239,68,68,0.03)' : '' }}
                         onMouseEnter={e => (e.currentTarget.style.background = isHit ? 'rgba(239,68,68,0.06)' : 'var(--surface-2)')}
                         onMouseLeave={e => (e.currentTarget.style.background = isHit ? 'rgba(239,68,68,0.03)' : '')}>
                         <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>
@@ -454,11 +574,132 @@ export default function SanctionsPage() {
                         <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>
                           {c.checkedAt ? new Date(c.checkedAt).toLocaleString('cs-CZ') : '—'}
                         </td>
+                        <td style={{ padding: '12px 16px', fontSize: '12px' }}>
+                          {c.reviewedBy ? (
+                            <span title={c.reviewNote ?? ''} style={{ color: 'var(--text-tertiary)' }}>
+                              {t('Rozhodl', 'By')} {c.reviewedBy}
+                            </span>
+                          ) : (isHit || isPending) ? (
+                            <button onClick={() => openReview(c)} disabled={reviewFor === c.id}
+                              style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-2)',
+                                color: 'var(--text-primary)', fontSize: '11px', fontWeight: 600, cursor: reviewFor === c.id ? 'default' : 'pointer' }}>
+                              {t('Posoudit', 'Review')}
+                            </button>
+                          ) : <span style={{ color: 'var(--text-tertiary)' }}>—</span>}
+                        </td>
                       </tr>
+                      {reviewFor === c.id && (
+                        <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+                          <td colSpan={7} style={{ padding: '16px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '640px' }}>
+                              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                {t('Manuální rozhodnutí', 'Manual disposition')} — {c.name}
+                              </div>
+
+                              {pendingApproval?.checkId === c.id ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', borderRadius: '8px',
+                                  background: 'var(--warning-bg)', border: '1px solid var(--warning-border)' }}>
+                                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--warning-text)' }}>
+                                    {t('Čeká na druhého schvalovatele (čtyři oči, ADR-0155)', 'Awaiting a second approver (four-eyes, ADR-0155)')}
+                                  </div>
+                                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                                    {t('Předejte toto ID jinému operátorovi. Rozhodnutí schválí níže v poli „Schválit žádost“ — vlastní žádost schválit nelze.',
+                                       'Hand this id to another operator. They decide it in the "Decide an approval" box below — nobody can approve their own request.')}
+                                  </div>
+                                  <code style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', wordBreak: 'break-all' }}>
+                                    {pendingApproval.id}
+                                  </code>
+                                  <div style={{ display: 'flex', gap: '8px' }}>
+                                    <button onClick={() => submitReview(c.id, pendingApproval.id)} disabled={reviewBusy}
+                                      style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--accent)', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                                      {reviewBusy ? <Loader2 size={12} className="spin" /> : t('Zopakovat po schválení', 'Retry once approved')}
+                                    </button>
+                                    <button onClick={() => { setReviewFor(null); setPendingApproval(null) }}
+                                      style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: '12px', cursor: 'pointer' }}>
+                                      {t('Zavřít', 'Close')}
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                      <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                        {t('Nový stav', 'New status')}
+                                      </label>
+                                      <select value={reviewStatus} onChange={e => setReviewStatus(e.target.value as ReviewStatus)}
+                                        style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)' }}>
+                                        <option value="CLEAR">{t('CLEAR — falešná shoda', 'CLEAR — false positive')}</option>
+                                        <option value="WHITELISTED">{t('WHITELISTED — trvale povoleno', 'WHITELISTED — permanently allowed')}</option>
+                                        <option value="ESCALATED">{t('ESCALATED — předat compliance', 'ESCALATED — hand to compliance')}</option>
+                                        <option value="HIT">{t('HIT — potvrzená shoda', 'HIT — confirmed match')}</option>
+                                      </select>
+                                    </div>
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                      {t('Odůvodnění *', 'Rationale *')}
+                                    </label>
+                                    <textarea value={reviewNote} onChange={e => setReviewNote(e.target.value)} rows={2}
+                                      placeholder={t('Proč je toto rozhodnutí správné — jde o auditní stopu.', 'Why this decision is correct — this is the audit trail.')}
+                                      style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', resize: 'vertical' }} />
+                                  </div>
+                                  {reviewError && (
+                                    <div style={{ fontSize: '12px', color: 'var(--danger-text)' }}>{reviewError}</div>
+                                  )}
+                                  <div style={{ display: 'flex', gap: '8px' }}>
+                                    <button onClick={() => submitReview(c.id)} disabled={reviewBusy}
+                                      style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', background: 'var(--accent)', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: reviewBusy ? 'default' : 'pointer' }}>
+                                      {reviewBusy ? <Loader2 size={12} className="spin" /> : t('Odeslat rozhodnutí', 'Submit decision')}
+                                    </button>
+                                    <button onClick={() => setReviewFor(null)}
+                                      style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: '12px', cursor: 'pointer' }}>
+                                      {t('Zrušit', 'Cancel')}
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     )
                   })}</tbody>
                 </table>
               )}
+
+              {/* Checker half of the four-eyes gate. It is an id field rather than a queue because
+                  sanctions-service exposes no pending-approvals list endpoint — ApprovalResource
+                  serves only PATCH /{id}, so the id has to be handed over out of band. The
+                  ADR-0227 inbox federates lending and agent only, and is read-only by design. */}
+              <div style={{ padding: '16px', borderTop: '1px solid var(--border)' }}>
+                <div style={{ maxWidth: '560px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {t('Schválit žádost (druhý pár očí)', 'Decide an approval (second pair of eyes)')}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                    {t('Vložte ID žádosti, které vám předal jiný operátor. Vlastní žádost schválit nelze — službu to odmítne.',
+                       'Paste the approval id another operator handed you. You cannot decide your own request — the service refuses it.')}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input value={decideId} onChange={e => setDecideId(e.target.value)} placeholder={t('ID žádosti', 'Approval id')}
+                      style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px',
+                        fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
+                    <button onClick={() => decideApproval(true)} disabled={decideBusy || !decideId.trim()}
+                      style={{ padding: '8px 14px', borderRadius: '6px', border: 'none', background: 'var(--success)', color: '#fff', fontSize: '12px', fontWeight: 600,
+                        cursor: decideBusy || !decideId.trim() ? 'default' : 'pointer', opacity: decideBusy || !decideId.trim() ? 0.6 : 1 }}>
+                      {t('Schválit', 'Approve')}
+                    </button>
+                    <button onClick={() => decideApproval(false)} disabled={decideBusy || !decideId.trim()}
+                      style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: '12px',
+                        cursor: decideBusy || !decideId.trim() ? 'default' : 'pointer', opacity: decideBusy || !decideId.trim() ? 0.6 : 1 }}>
+                      {t('Zamítnout', 'Reject')}
+                    </button>
+                  </div>
+                  {decideMsg && <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{decideMsg}</div>}
+                </div>
+              </div>
             </>
           )}
 

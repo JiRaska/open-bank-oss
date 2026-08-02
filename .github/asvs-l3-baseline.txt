@@ -215,3 +215,7 @@ V13.1 openbank-finops-agent: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-flaky-test-hunter: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-governance-auditor: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-release-steward: serves REST resources but publishes no openapi.yaml
+V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:106: plaintext http:// env value http://sca-service.sca.svc:8110
+V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:108: plaintext http:// env value http://pid-service.pid.svc:8105
+V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:114: plaintext http:// env value http://account-service.accounts.svc:8100
+V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:116: plaintext http:// env value http://card-issuance-service.payments.svc:8118

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""A service with `quarkus.flyway.migrate-at-start` must configure the datasource Flyway migrates.
+"""Flyway must have a datasource to migrate — and committed migrations must have something running them.
 
 Why this exists
 ---------------
@@ -29,6 +29,14 @@ WHAT IT CHECKS, per `openbank-*/src/main/resources/application.yaml`:
      (a `${ENV:default}` expression counts — the literal default is what makes it bootable).
   2. `quarkus.flyway.datasource` must be a NAME (a string), never a mapping. A mapping there is
      the misplaced-definition shape above.
+  3. A service that commits `src/main/resources/db/migration/*.sql` must have SOMETHING that runs
+     them — `quarkus.flyway.migrate-at-start` here, or `QUARKUS_FLYWAY_MIGRATE_AT_START` in its own
+     GitOps manifest (psd2-service's deliberate, documented shape). security-scanner had neither,
+     so its deployed database held zero tables and no flyway_schema_history, and every write
+     answered `relation "security_outbox" does not exist (42P01)` as a 500 — while the pod stayed
+     Ready, because health probes never touch the schema. The inverse of rule 1: that one asks
+     "you migrate, but against what?", this one asks "you wrote migrations, but does anything run
+     them?".
 
 Both are properties of one committed file, so this needs no cluster, no boot and no network.
 It does not replace a real boot test (#2872) — it closes the one failure mode that recurred five
@@ -61,17 +69,72 @@ def configs() -> list[tuple[pathlib.Path, dict]]:
     return out
 
 
+def gitops_migrates(service: str) -> bool:
+    """True when the service's own GitOps manifest exports QUARKUS_FLYWAY_MIGRATE_AT_START.
+
+    psd2-service does exactly that, deliberately and with a comment explaining it, and
+    migrates fine in production — so it must not be flagged. What rule 3 is looking for is
+    "does ANYTHING run these migrations", not "is the switch in one particular file".
+    """
+    component = REPO / "openbank-infra" / "gitops" / "components" / service.removeprefix("openbank-")
+    if not component.is_dir():
+        return False
+    return any(
+        "QUARKUS_FLYWAY_MIGRATE_AT_START" in f.read_text(encoding="utf-8", errors="ignore")
+        for f in component.rglob("*.yaml")
+    )
+
+
+def migration_rule(service: str, rel: object, quarkus: dict, has_migrations: bool,
+                   env_migrates: bool = False) -> list[str]:
+    """Rule 3: committed migrations ⇒ Flyway must be told to run them.
+
+    security-scanner shipped `db/migration/V2__create_security_outbox.sql` and V3, had
+    quarkus-flyway as a build dependency, and never set `migrate-at-start`. It defaults to
+    false, no deployment env set it either, and so the deployed database had ZERO tables and
+    no `flyway_schema_history` at all. Every write answered
+    `ERROR: relation "security_outbox" does not exist (42P01)` as a 500.
+
+    Nothing could see it. The pod is Ready (health probes do not touch the schema), the
+    migrations are present and correct in the repo, and the service's own tests are
+    container-free. It is the exact inverse of the rule above — that one asks "you migrate, but
+    against what?", this one asks "you wrote migrations, but does anything run them?" — and it
+    is decidable from the same committed file plus a directory listing.
+    """
+    if not has_migrations:
+        return []
+    if (quarkus.get("flyway") or {}).get("migrate-at-start") or env_migrates:
+        return []
+    return [
+        f"::error file={rel}::{service} commits Flyway migrations under "
+        f"src/main/resources/db/migration, but nothing runs them: neither "
+        f"quarkus.flyway.migrate-at-start in this file nor QUARKUS_FLYWAY_MIGRATE_AT_START in "
+        f"its GitOps manifest. The switch defaults to FALSE, so the schema is never created — "
+        f"the service starts, passes its health probes, and 500s on the first query with "
+        f"'relation \"<table>\" does not exist'. Set quarkus.flyway.migrate-at-start: true "
+        f"(and declare quarkus.datasource.jdbc.url with it — see the rule above).",
+    ]
+
+
 def findings() -> tuple[list[str], int]:
     messages: list[str] = []
     checked = 0
     for path, doc in configs():
         quarkus = doc.get("quarkus") or {}
         flyway = quarkus.get("flyway") or {}
+        rel = path.relative_to(REPO)
+        service = path.parts[len(REPO.parts)]
+
+        migrations = path.parent / "db" / "migration"
+        messages += migration_rule(
+            service, rel, quarkus,
+            has_migrations=any(migrations.glob("*.sql")) if migrations.is_dir() else False,
+            env_migrates=gitops_migrates(service),
+        )
+
         if not flyway.get("migrate-at-start"):
             continue
         checked += 1
-        rel = path.relative_to(REPO)
-        service = path.parts[len(REPO.parts)]
 
         datasource = quarkus.get("datasource") or {}
         jdbc_url = (datasource.get("jdbc") or {}).get("url")
@@ -122,7 +185,35 @@ def selftest() -> int:
             print(f"selftest FAIL: migrate={migrate} jdbc={jdbc_url!r} flyway.datasource="
                   f"{flyway_ds!r} → {n} finding(s), expected {expected}")
             return 1
-    print(f"selftest OK: {len(cases)} cases, both directions ({len(parsed)} configs parsed).")
+    # Rule 3 is exercised through the REAL function rather than a re-derivation of it. (The
+    # case table above predates this and re-implements rules 1-2 inline; that second copy is
+    # the drift risk this repo warns about, and is worth collapsing separately.)
+    migration_cases = [
+        # (has_migrations, migrate-at-start value, gitops env, expected findings)
+        (True, True, False, 0),    # migrations, and the config runs them
+        (True, None, True, 0),     # migrations, and the GitOps manifest runs them (psd2's shape)
+        (True, None, False, 1),    # migrations nobody runs — the security-scanner defect
+        (True, False, False, 1),   # explicitly disabled is the same outcome
+        (False, None, False, 0),   # no migrations, no rule
+    ]
+    for has_migrations, migrate, env_migrates, expected in migration_cases:
+        quarkus = {} if migrate is None else {"flyway": {"migrate-at-start": migrate}}
+        got = len(migration_rule("svc", "svc/application.yaml", quarkus, has_migrations, env_migrates))
+        if got != expected:
+            print(f"selftest FAIL: migrations={has_migrations} migrate-at-start={migrate!r} "
+                  f"gitops={env_migrates} → {got} finding(s), expected {expected}")
+            return 1
+    # The GitOps lookup itself must be exercised, or the rule above is only ever tested with a
+    # hand-passed boolean: psd2-service must resolve True, and a service with no component dir False.
+    if not gitops_migrates("openbank-psd2-service"):
+        print("selftest FAIL: gitops_migrates(openbank-psd2-service) is False — the lookup is broken.")
+        return 1
+    if gitops_migrates("openbank-not-a-real-service"):
+        print("selftest FAIL: gitops_migrates matched a nonexistent service.")
+        return 1
+
+    print(f"selftest OK: {len(cases) + len(migration_cases)} cases, both directions "
+          f"({len(parsed)} configs parsed).")
     return 0
 
 

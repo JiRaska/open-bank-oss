@@ -118,6 +118,7 @@ openbank:
     vop-service-url: ${VOP_SERVICE_URL:http://vop-service.payments.svc:8149}
     sdd-service-url: ${SDD_SERVICE_URL:http://sdd-service.sdd.svc:8129}
     consent-service-url: ${CONSENT_SERVICE_URL:http://consent-service.consent.svc:8106}
+    delegation-service-url: ${DELEGATION_SERVICE_URL:http://delegation-service.delegation.svc:8126}
     bank-bic: ${OPENBANK_BANK_BIC:OPENCZPPXXX}
     sca-service-url:     ${SCA_SERVICE_URL:http://sca-service.sca.svc:8110}
     party-service-url:   ${PARTY_SERVICE_URL:http://party-service.party.svc:8111}

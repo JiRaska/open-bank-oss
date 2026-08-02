@@ -91,7 +91,31 @@ selftest() {
     echo "selftest FAIL: a governance catalog matched the global paths — that is data, not a compile input" >&2
     fail=1
   fi
-  [ "$fail" -eq 0 ] && echo "selftest OK: declaration matcher and both path matchers verified in both directions."
+  # Exit status, asserted in both directions. The caller reads this script inside a command
+  # substitution under `set -e`, so a non-zero status is fatal REGARDLESS of the output — and the
+  # matcher assertions above cannot see that, which is how a script that could never succeed on a
+  # push kept a green self-test.
+  local me="${BASH_SOURCE[0]}"
+  local svcs="openbank-fx-service openbank-account-service"
+  if ! printf 'openbank-admin-ui/src/x.tsx\n' | bash "$me" "$svcs" >/dev/null 2>&1; then
+    echo "selftest FAIL: a change touching no libs module must exit 0, not report failure" >&2
+    fail=1
+  fi
+  if ! printf 'openbank-libs-domain/src/main/kotlin/X.kt\n' | bash "$me" "$svcs" >/dev/null 2>&1; then
+    echo "selftest FAIL: a real libs change must exit 0 — it printed consumers and still failed" >&2
+    fail=1
+  fi
+  # A libs module changed, but none of its consumers is in ALL_SERVICES — a third route to a
+  # non-zero status, distinct from the two above: the fan-out is non-empty and the intersection is
+  # empty. Found by #3407, which fixed the same defect independently and asserted this case; the
+  # merged fix already handles it, and an untested route is one refactor away from returning.
+  if ! printf 'openbank-libs-domain/src/main/kotlin/X.kt\n' \
+    | bash "$me" "openbank-not-a-real-service" >/dev/null 2>&1; then
+    echo "selftest FAIL: a fan-out with no consumer inside ALL_SERVICES must exit 0" >&2
+    fail=1
+  fi
+
+  [ "$fail" -eq 0 ] && echo "selftest OK: matchers verified in both directions, and the exit status on all three routes — empty fan-out, non-empty fan-out, and a fan-out that intersects nothing."
   return "$fail"
 }
 
@@ -122,8 +146,14 @@ done
 
 # Intersect with ALL_SERVICES: a consumer that this pipeline cannot build (a different pipeline
 # owns it, or it has no gitops manifest) must never enter the build set.
-printf '%s\n' $DEPENDENTS | command grep -v '^$' | sort -u | while read -r svc; do
-  for known in $ALL_SERVICES; do
-    [ "$svc" = "$known" ] && echo "$svc" && break
-  done
-done
+#
+# The `|| true` is load-bearing, not defensive noise. An empty result is the COMMON case — most
+# pushes touch no libs module — and `grep` reports "nothing matched" as exit 1. Under the
+# `set -euo pipefail` at the top, and again in the caller's `SERVICES_JSON="$(...)"`, that status
+# killed the whole auto-deploy detect step with no message at all, so every push-triggered run
+# after this script landed detected nothing and deployed nothing. It failed even on the path that
+# WORKS: a libs change printed the right consumers and still exited 1, because a `while` loop's
+# status is the last thing it ran — here a non-matching `[` test.
+printf '%s\n' $DEPENDENTS \
+  | sort -u \
+  | command grep -Fxf <(printf '%s\n' $ALL_SERVICES) || true

@@ -37,7 +37,7 @@
 # its own, so test-classify-can-i-deploy-block.sh can drive every branch.
 #
 # Usage:
-#   PACT_VERSION_PRESENT=yes|no|unknown classify-can-i-deploy-block.sh <service> < cli-output
+#   PACT_VERSION_PRESENT=yes|no|absent|unknown classify-can-i-deploy-block.sh <service> < cli-output
 #
 #   PACT_VERSION_PRESENT — the caller's probe of
 #     GET <broker>/pacticipants/<svc>/versions/<sha>:
@@ -59,7 +59,7 @@ set -uo pipefail
 
 SVC="${1:-}"
 if [ -z "$SVC" ]; then
-  echo "usage: PACT_VERSION_PRESENT=yes|no|unknown $0 <service> < cli-output" >&2
+  echo "usage: PACT_VERSION_PRESENT=yes|no|absent|unknown $0 <service> < cli-output" >&2
   exit 2
 fi
 
@@ -90,6 +90,14 @@ case "$PRESENT" in
       exit 0
     fi
     emit UNKNOWN "blocked with a version present and no recognised reason in the CLI output — read the job log for ${SVC}"
+    exit 0
+    ;;
+  absent)
+    # The probe SUCCEEDED and the answer was "no such pacticipant". Distinct from the `*` branch
+    # below, which means the probe itself failed — labelling this one "could not probe" would
+    # describe an outage that did not happen, and hide the real state: a service with no
+    # contracts at all. No reconcile tick can change this; publishing a pact can.
+    emit NO_CONTRACTS "the broker does not know ${SVC} — it publishes no consumer pact and verifies no provider pact, so no reconcile tick will clear this; the fix is a contract (#2991), not a retry"
     exit 0
     ;;
   *)

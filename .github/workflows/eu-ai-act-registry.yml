@@ -56,8 +56,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: eu-ai-act-registry-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # On a push to main, github.ref is always refs/heads/main regardless of commit, so a
+  # ref-keyed group made every new commit cancel the previous commit's run. Bot commits
+  # (auto-deploy pin bumps, release-please) land every few minutes, so a main run rarely
+  # survived to completion — 9 of 11 CI runs and 9 of 11 Security runs were cancelled on
+  # 2026-08-02 (issue #3390). Give each main commit its own lane and never cancel it;
+  # PR pushes keep the superseding behaviour, which is what that setting is for.
+  # The key stays O(1) — a sha, never a list: interpolating a fleet-sized value here
+  # stops the job being created at all (#3082).
+  group: eu-ai-act-registry-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci' }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:
   eu-ai-act-registry:

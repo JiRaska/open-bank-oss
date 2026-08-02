@@ -39,6 +39,8 @@ dependencies {
     implementation(project(":openbank-libs-runtime"))
     implementation(libs.quarkus.scheduler)
     testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
