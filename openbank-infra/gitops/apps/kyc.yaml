@@ -29,8 +29,16 @@ spec:
         duration: 15s
         factor: 2
         maxDuration: 5m
+      # ServerSideApply: the OPA bundle ConfigMap is ~260 KB, and client-side apply
+      # stores the whole object in kubectl.kubernetes.io/last-applied-configuration,
+      # which Kubernetes caps at 262144 bytes for all annotations combined. Past that
+      # the ConfigMap is REJECTED and Argo retries forever ("Too long"), so the policy
+      # in the cluster silently freezes at the last version that fitted while git moves
+      # on. Server-side apply tracks ownership in metadata.managedFields instead and
+      # writes no such annotation, so it has no size ceiling of this kind.
     syncOptions:
       - CreateNamespace=false
+      - ServerSideApply=true
   # Argo Rollouts (ADR-0098) sets spec.selector.rollouts-pod-template-hash on the
   # stable and canary Services at runtime; git holds only the base selector, so
   # without this every Rollout-backed Service reads as permanently OutOfSync.
