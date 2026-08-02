@@ -492,6 +492,12 @@ jobs:
             # EXPOSE is written dynamically after the static COPY/ENTRYPOINT lines.
             echo "EXPOSE ${port}" >> "${ctx}/Dockerfile"
 
+            # A new service's ECR repository is declared nowhere, so its first build compiles
+            # and then dies here (#3423). Reasoning lives in the script header, not in this
+            # run: block — prose here costs the whole workflow (#3135).
+            bash "${GITHUB_WORKSPACE}/.github/scripts/ensure-ecr-repository.sh" "${svc}" \
+              2>&1 | sed "s/^/[${svc}] /" || return 1
+
             echo "==> [${svc}] docker push → ${image}"
             docker buildx build \
               --platform linux/arm64 \
