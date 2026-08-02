@@ -36,6 +36,17 @@ import { OriginationPipeline, type PipelineItem } from '@/components/lending/Ori
 
 type Application = PipelineItem & { partyId: string }
 
+/** `/applications/summary` and `/loans/summary` (#3294). Money is a list per currency, never one
+ *  number — the service refuses to add CZK to EUR and so must the console. */
+type MoneyTotal = { currency: string; amount: number }
+type StateSummary = {
+  status: string
+  count: number
+  oldestCreatedAt?: string | null
+  requested?: MoneyTotal[]
+  principal?: MoneyTotal[]
+}
+
 type Loan = {
   id: string
   partyId: string
@@ -61,6 +72,10 @@ export default function LendingPage() {
   const { t, language } = useLanguage()
   const [applications, setApplications] = useState<Application[]>([])
   const [loans, setLoans] = useState<Loan[]>([])
+  // Absent = the aggregate endpoints are not in the deployed build yet. The page then falls back to
+  // deriving from the capped lists AND keeps saying so, which is what it did before they existed.
+  const [appSummary, setAppSummary] = useState<StateSummary[] | null>(null)
+  const [loanSummary, setLoanSummary] = useState<StateSummary[] | null>(null)
   const [stage, setStage] = useState<string | null>(null)
   const [tab, setTab] = useState<'queue' | 'portfolio'>('queue')
   const [loading, setLoading] = useState(true)
@@ -69,15 +84,26 @@ export default function LendingPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [appsRes, loansRes] = await Promise.all([
+      // The lists still load: the rows are the drill-down, and the summaries carry no identities.
+      // The two summary calls are allowed to fail independently — they are newer than the deployed
+      // service in an environment that has not rolled forward, and a missing aggregate must not
+      // take the console with it.
+      const okJson = (r: Response) => (r.ok ? r.json() : null)
+      const [appsRes, loansRes, appSum, loanSum] = await Promise.all([
         fetch(svcUrl('lending-service', '/api/v1/lending/applications/recent', { limit: String(LIMIT) }), { cache: 'no-store' }),
         fetch(svcUrl('lending-service', '/api/v1/lending/loans/active', { limit: String(LIMIT) }), { cache: 'no-store' }),
+        fetch(svcUrl('lending-service', '/api/v1/lending/applications/summary'), { cache: 'no-store' })
+          .then(okJson).catch(() => null),
+        fetch(svcUrl('lending-service', '/api/v1/lending/loans/summary'), { cache: 'no-store' })
+          .then(okJson).catch(() => null),
       ])
       if (!appsRes.ok || !loansRes.ok) throw new Error(`${appsRes.status}/${loansRes.status}`)
       const apps = await appsRes.json()
       const ln = await loansRes.json()
       setApplications(Array.isArray(apps) ? apps : [])
       setLoans(Array.isArray(ln) ? ln : [])
+      setAppSummary(Array.isArray(appSum) ? appSum : null)
+      setLoanSummary(Array.isArray(loanSum) ? loanSum : null)
       setError(null)
     } catch {
       setError('unreachable')
@@ -100,16 +126,55 @@ export default function LendingPage() {
 
   /** Headline figures, all computed from the SAME capped lists the tables show — so the page can
    *  never claim more than it fetched. */
+  /** Headline figures. When the aggregate endpoints answer, these are the WHOLE book; otherwise
+   *  they are derived from the capped lists and the page says so. The two are never mixed — a
+   *  half-real total is worse than an honestly capped one, because nothing on screen distinguishes
+   *  them. */
   const kpi = useMemo(() => {
     const ccy = loans[0]?.principal?.currency ?? applications[0]?.requestedAmount?.currency ?? 'CZK'
+    const sumFor = (rows: StateSummary[], pick: (r: StateSummary) => MoneyTotal[] | undefined) =>
+      rows.flatMap(r => pick(r) ?? []).filter(m => m.currency === ccy).reduce((s, m) => s + m.amount, 0)
+
+    if (appSummary && loanSummary) {
+      const openStates = appSummary.filter(r => !TERMINAL.has(r.status))
+      const now = Date.now()
+      return {
+        exact: true,
+        ccy,
+        // The label says "active", so count ACTIVE — the aggregate carries every status, and
+        // silently folding delinquent and defaulted loans in here would both change what the tile
+        // means and double-count them against the "in trouble" tile beside it.
+        loanCount: loanSummary.filter(r => !LOAN_TROUBLE.has(r.status)).reduce((s, r) => s + r.count, 0),
+          // Exposure, in contrast, IS the whole book: a delinquent loan is still money lent out.
+      book: sumFor(loanSummary, r => r.principal),
+        openCount: openStates.reduce((s, r) => s + r.count, 0),
+        requested: sumFor(openStates, r => r.requested),
+        // Aging is per STATE here, not per application: the aggregate carries the oldest timestamp
+        // per state, which is enough to say "something has been waiting too long" and is honest
+        // about not being a row count.
+        staleStates: openStates.filter(
+          r => r.oldestCreatedAt && now - new Date(r.oldestCreatedAt).getTime() > STALE_HOURS * 3_600_000,
+        ).length,
+        trouble: loanSummary.filter(r => LOAN_TROUBLE.has(r.status)).reduce((s, r) => s + r.count, 0),
+      }
+    }
+
     const book = loans.reduce((s, l) => s + (l.principal?.amount ?? 0), 0)
     const trouble = loans.filter(l => LOAN_TROUBLE.has(l.status))
     const now = Date.now()
     const open = applications.filter(a => !TERMINAL.has(a.status))
     const stale = open.filter(a => a.createdAt && now - new Date(a.createdAt).getTime() > STALE_HOURS * 3_600_000)
-    const requested = open.reduce((s, a) => s + (a.requestedAmount?.amount ?? 0), 0)
-    return { ccy, book, trouble, open, stale, requested }
-  }, [loans, applications])
+    return {
+      exact: false,
+      ccy,
+      loanCount: loans.length,
+      book,
+      openCount: open.length,
+      requested: open.reduce((s, a) => s + (a.requestedAmount?.amount ?? 0), 0),
+      staleStates: stale.length,
+      trouble: trouble.length,
+    }
+  }, [loans, applications, appSummary, loanSummary])
 
   const visibleApps = useMemo(
     () => (stage ? applications.filter(a => a.status === stage) : applications),
@@ -144,27 +209,29 @@ export default function LendingPage() {
       <div className="grid-4" style={{ marginBottom: 20 }}>
         <StatCard
           label={t('Aktivní úvěry', 'Active loans')}
-          value={loans.length}
+          value={kpi.loanCount}
           hint={t(`jistina ${money(kpi.book, kpi.ccy)}`, `principal ${money(kpi.book, kpi.ccy)}`)}
           icon={<Wallet size={13} />}
         />
         <StatCard
           label={t('Žádosti v běhu', 'Applications in flight')}
-          value={kpi.open.length}
+          value={kpi.openCount}
           hint={t(`požadováno ${money(kpi.requested, kpi.ccy)}`, `requested ${money(kpi.requested, kpi.ccy)}`)}
           icon={<Layers size={13} />}
         />
         <StatCard
           label={t('Čeká přes 72 h', 'Waiting over 72h')}
-          value={kpi.stale.length}
-          tone={kpi.stale.length > 0 ? 'warning' : undefined}
-          hint={t('nerozhodnuté a stárnoucí', 'undecided and aging')}
+          value={kpi.staleStates}
+          tone={kpi.staleStates > 0 ? 'warning' : undefined}
+          hint={kpi.exact
+            ? t('stavů se stárnoucí frontou', 'states with an aging queue')
+            : t('nerozhodnuté a stárnoucí', 'undecided and aging')}
           icon={<Clock size={13} />}
         />
         <StatCard
           label={t('Problémové úvěry', 'Loans in trouble')}
-          value={kpi.trouble.length}
-          tone={kpi.trouble.length > 0 ? 'danger' : undefined}
+          value={kpi.trouble}
+          tone={kpi.trouble > 0 ? 'danger' : undefined}
           hint={t('po splatnosti / default / odpis', 'delinquent / default / written off')}
           icon={<AlertTriangle size={13} />}
         />
@@ -174,6 +241,7 @@ export default function LendingPage() {
         <OriginationPipeline
           items={applications}
           cap={LIMIT}
+          summary={appSummary}
           lang={language}
           selected={stage}
           onSelectStage={s => { setStage(s); setTab('queue') }}
