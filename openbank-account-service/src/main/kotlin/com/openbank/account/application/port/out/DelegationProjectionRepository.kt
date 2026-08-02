@@ -17,4 +17,11 @@ interface DelegationProjectionRepository {
     suspend fun closeById(grantId: UUID): Boolean
 
     suspend fun findActiveByAccountAndParty(accountId: UUID, partyId: UUID): List<DelegatedAccessGrant>
+
+    /** Same lookup restricted to one resource type (ACCOUNT guard vs SAVINGS_GOAL guard). */
+    suspend fun findActiveByAccountPartyAndType(
+        accountId: UUID,
+        partyId: UUID,
+        resourceType: String,
+    ): List<DelegatedAccessGrant>
 }

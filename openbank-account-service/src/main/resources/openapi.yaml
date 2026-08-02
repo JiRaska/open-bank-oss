@@ -5,7 +5,7 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  version: 1.5.0
+  version: 1.7.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -298,6 +298,169 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/accounts/{accountId}/savings-goal/delegation/check:
+    get:
+      tags: [Accounts]
+      summary: Whether a party may act on the account's savings goal via delegation
+      description: >-
+        Machine-readable answer to "may this party DEPOSIT / WITHDRAW /
+        PROPOSE_WITHDRAW on this account's savings goal?" (ADR-0232 D3): true when
+        the party owns the account or holds an ACTIVE, in-window SAVINGS_GOAL
+        delegation grant from the local event-fed projection. Savings goals are
+        account metadata (ADR-0153), so the grant keys on the account id. Authorize
+        action `account.read`.
+      operationId: checkSavingsGoalDelegation
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: intent
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [DEPOSIT, WITHDRAW, PROPOSE_WITHDRAW]
+      responses:
+        '200':
+          description: The authorization decision
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authorized:
+                    type: boolean
+
+  /api/v1/accounts/{accountId}/savings-goal/delegation/proposals:
+    post:
+      tags: [Accounts]
+      summary: Propose a savings-goal withdrawal (delegate maker)
+      description: >-
+        The propose-only flow (ADR-0232 D8): a delegate holding SAVINGS_PROPOSE_WITHDRAW
+        creates a withdrawal proposal. Returns 202 with the proposal and the approvalId
+        of the paired pending approval — the owner's SCA-bound decision is the only
+        path to execution. Authorize action `account.read`.
+      operationId: proposeSavingsWithdrawal
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: >-
+            The caller's validated party, stamped by customer-edge. Authoritative — the caller's
+            identity is never taken from the body or the query string on these endpoints.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposeWithdrawalRequest'
+      responses:
+        '202':
+          description: Proposal created, pending owner approval
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    get:
+      tags: [Accounts]
+      summary: List withdrawal proposals for the account (the owner's inbox)
+      operationId: listSavingsWithdrawalProposals
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+      responses:
+        '200':
+          description: Proposals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProposalResponse'
+
+  /api/v1/accounts/{accountId}/savings-goal/delegation/proposals/{proposalId}/decide:
+    post:
+      tags: [Accounts]
+      summary: Owner decides a withdrawal proposal (SCA-bound)
+      description: >-
+        The owner approves or rejects with a COMPLETED SCA challenge
+        (purpose SAVINGS_WITHDRAW_APPROVAL bound to the owner). An approval flips the
+        proposal to APPROVED and emits SavingsWithdrawalApproved — the executable
+        instruction for the payments path. Authorize action `account.authorize`.
+      operationId: decideSavingsWithdrawalProposal
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: proposalId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: >-
+            The caller's validated party, stamped by customer-edge. Authoritative — the caller's
+            identity is never taken from the body or the query string on these endpoints.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecideProposalRequest'
+      responses:
+        '200':
+          description: The decided proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProposalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/savings-goal/delegation/proposals/{proposalId}:
+    delete:
+      tags: [Accounts]
+      summary: Delegate cancels their own PENDING proposal
+      operationId: cancelSavingsWithdrawalProposal
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: proposalId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: >-
+            The caller's validated party, stamped by customer-edge. Authoritative — the caller's
+            identity is never taken from the body or the query string on these endpoints.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The cancelled proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProposalResponse'
+
   /api/v1/accounts/{accountId}/goal:
     put:
       tags: [Accounts]
@@ -503,6 +666,33 @@ components:
           format: date
           nullable: true
 
+    ProposeWithdrawalRequest:
+      type: object
+      required: [amountMinor, currency]
+      properties:
+        amountMinor: { type: integer, format: int64, minimum: 1 }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        note: { type: string }
+    DecideProposalRequest:
+      type: object
+      required: [approve, scaSessionId]
+      properties:
+        approve: { type: boolean }
+        scaSessionId: { type: string, format: uuid }
+    ProposalResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        delegatePartyId: { type: string, format: uuid }
+        amountMinor: { type: integer, format: int64 }
+        currency: { type: string }
+        note: { type: string }
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+        approvalId: { type: string }
+        createdAt: { type: string, format: date-time }
     SavingsGoalRequest:
       type: object
       required: [name, targetMinorUnits]

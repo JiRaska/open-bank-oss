@@ -263,3 +263,33 @@ not change any existing request's outcome until explicitly flipped.
   activates are idempotent. Residual: seconds-level revoke propagation documented in ADR-0232;
   card/savings/propose-only scopes land in their owning services' slices. Rollback: revert the
   commits; the projection table is droppable without touching `account_authorizations`.
+- **2026-08-01 (savings slice)** — SAVINGS_GOAL grants join the delegation projection
+  (issue #2990): the projection gains `resource_type` (V17), the consumer projects
+  ACCOUNT and SAVINGS_GOAL events into typed rows, and `SavingsGoalDelegationGuard`
+  answers DEPOSIT / WITHDRAW / PROPOSE_WITHDRAW as owner OR an ACTIVE in-window grant
+  via `GET /api/v1/accounts/{id}/savings-goal/delegation/check` (reuses `account.read`
+  OPA action). **Risk class = elevation of privilege across resource types**: a savings
+  grant must never satisfy an account question — enforced by resource-type filtering in
+  every guard query and proven by the IT (savings grant → account READ_ONLY stays
+  denied). Savings goals are account metadata (ADR-0153), so SAVINGS_GOAL grants key on
+  the owning account id by convention — which means a grant naming a stranger's account
+  reaches this guard exactly as it reached the account guard, and `SAVINGS_WITHDRAW`
+  moves money. The same issuer-must-own-the-account check therefore applies here:
+  `grant.grantorPartyId == account.partyId`, evaluated per request.
+  PROPOSE_WITHDRAW answers the maker-half of the propose-only flow only; the
+  approval-inbox execution half is the AC8 follow-up.
+  Rollback: revert; V17 is a droppable column.
+- **2026-08-01 (propose-only slice)** — AC8 propose-only withdrawal flow (ADR-0232 D8,
+  issue #2990): a delegate holding only SAVINGS_PROPOSE_WITHDRAW creates a
+  `WithdrawalProposal` (V18) paired with an ADR-0155 `PendingApproval`; the owner's
+  SCA-bound decision (purpose `SAVINGS_WITHDRAW_APPROVAL`, party-bound to the owner)
+  is the ONLY path to APPROVED, which emits `SavingsWithdrawalApproved` as the
+  executable instruction for the payments path. **Risk class = social-engineering /
+  maker-checker bypass.** Structural properties: the delegate can never decide (owner
+  check at the service + store-enforced segregation of duties), never executes (no
+  execution endpoint exists for delegates at all — approval IS the execution
+  trigger), approval and instruction share one outbox transaction (no
+  approved-but-uninstructed state), SCA is purpose- and party-bound (a stolen or
+  cross-purpose challenge fails). Residual: the Redis PendingApproval TTL (24h) is
+  the proposal's effective expiry — a decided-late approval still fails at the store
+  (PENDING-only decide). Rollback: revert; V18 is a droppable table.
