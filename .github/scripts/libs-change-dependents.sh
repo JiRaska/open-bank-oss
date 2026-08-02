@@ -105,8 +105,17 @@ selftest() {
     echo "selftest FAIL: a real libs change must exit 0 — it printed consumers and still failed" >&2
     fail=1
   fi
+  # A libs module changed, but none of its consumers is in ALL_SERVICES — a third route to a
+  # non-zero status, distinct from the two above: the fan-out is non-empty and the intersection is
+  # empty. Found by #3407, which fixed the same defect independently and asserted this case; the
+  # merged fix already handles it, and an untested route is one refactor away from returning.
+  if ! printf 'openbank-libs-domain/src/main/kotlin/X.kt\n' \
+    | bash "$me" "openbank-not-a-real-service" >/dev/null 2>&1; then
+    echo "selftest FAIL: a fan-out with no consumer inside ALL_SERVICES must exit 0" >&2
+    fail=1
+  fi
 
-  [ "$fail" -eq 0 ] && echo "selftest OK: matchers verified in both directions, and the exit status on both an empty and a non-empty result."
+  [ "$fail" -eq 0 ] && echo "selftest OK: matchers verified in both directions, and the exit status on all three routes — empty fan-out, non-empty fan-out, and a fan-out that intersects nothing."
   return "$fail"
 }
 
