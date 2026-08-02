@@ -303,12 +303,21 @@ Full pitfalls — node livelock, `optional: true` secret refs, Argo Rollout dead
 Kyverno admission-vs-runtime, `cosign attest` being additive — live in
 [`openbank-infra/CLAUDE.md`](openbank-infra/CLAUDE.md); they load when you touch that tree. Two
 fire from *outside* it, so they stay here:
-- **Editing `rules.yaml` or any `.rego` restamps EVERY service's OPA bundle + pod-roll annotation.**
-  25 of the 26 `gen-*opa-bundle*.sh` embed `rules.yaml` verbatim and hash it, so a one-line
-  governance edit produces ~44 changed files and the OPA gate regenerates all of them. Run
-  `find openbank-infra/gitops/components -name 'gen-*opa-bundle*.sh' | sort | xargs -n1 bash` and
-  commit the lot; never hand-edit a bundle or an annotation to dodge the diff. Such a PR has a short
-  shelf life — merge with `--auto` (not `--admin`), or a competing governance PR conflicts it.
+- **Editing any `.rego`, or a `rules.yaml` key the policy READS, restamps every service's OPA
+  bundle + pod-roll annotation.** The bundles no longer embed `rules.yaml` itself (#3357) — they
+  embed `openbank-libs/governance/rules-opa-data.yaml`, the derived subset of top-level keys some
+  `.rego` reads as `data.rules.<key>`, and hash that. So an edit to one of the ~30 keys OPA never
+  reads now changes **nothing** under `gitops/` (16 of the last 80 `rules.yaml` revisions touched
+  the read set; the other 64 used to restamp ~78 files for nothing). When you DO touch the read
+  set, or any `.rego`, regenerate — the derived file FIRST, then every bundle:
+  ```
+  python3 .github/scripts/gen-rules-opa-data.py
+  find openbank-infra/gitops/components -name 'gen-*opa-bundle*.sh' | sort | xargs -n1 bash
+  ```
+  Commit the lot; never hand-edit a bundle or an annotation to dodge the diff. Such a PR has a
+  short shelf life — merge with `--auto` (not `--admin`), or a competing governance PR conflicts it.
+  Adding `data.rules.<newkey>` to a policy needs no list edit anywhere: the key set is derived from
+  the `.rego` sources, and the gate fails until the subset is regenerated.
 - **Never hand-roll `trivy` + `cosign attest`/`verify` in a workflow** — source
   `openbank-infra/scripts/lib/cosign-attest.sh`. It passes `--platform` (remote scans default to
   amd64 and silently miss an arm64-only image) and checks the SBOM *before* attesting; `cosign
