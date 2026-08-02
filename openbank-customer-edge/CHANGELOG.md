@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.54.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.53.0...customer-edge-v0.54.0) (2026-08-02)
+
+
+### Features
+
+* **customer-edge:** customer routes for delegated access (ADR-0232 D6) ([#3412](https://github.com/JiRaska/open-bank-oss/issues/3412)) ([e6a4652](https://github.com/JiRaska/open-bank-oss/commit/e6a4652c45a4142236d294951141d0e34dd033df))
+
 ## [0.53.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.52.1...customer-edge-v0.53.0) (2026-08-02)
 
 
