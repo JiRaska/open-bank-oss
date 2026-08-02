@@ -9,6 +9,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { serverSvcUrl } from '@/lib/services/bff'
+import { resolvePartyNames } from '@/lib/campaigns/party-names'
 
 export const dynamic = 'force-dynamic'
 
@@ -103,7 +104,21 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/journey`, []),
   ])
 
+  // Names for every party on this screen, resolved once and deduplicated. Done here rather than in
+  // the component so the client never fans out one request per row, and so an unresolved name
+  // degrades to the id instead of blanking the screen (lib/campaigns/party-names).
+  const enrolmentRows = (Array.isArray(enrolments.data) ? enrolments.data : []) as Array<{ partyId?: string }>
+  // Array.isArray, not `?? []`: a degraded `sends` part can carry a non-array `items`, and `.map`
+  // on it throws — the exact defect the bundle test exists for, reproduced here in new code.
+  const rawSendItems = (sends.data as { items?: unknown } | null)?.items
+  const sendRows = (Array.isArray(rawSendItems) ? rawSendItems : []) as Array<{ partyId?: string }>
+  const partyNames = await resolvePartyNames(headers, [
+    ...enrolmentRows.map(e => e.partyId ?? ''),
+    ...sendRows.map(r => r.partyId ?? ''),
+  ])
+
   return NextResponse.json({
+    partyNames,
     campaign: campaign.data,
     enrolments: enrolments.data,
     sends: sends.data,

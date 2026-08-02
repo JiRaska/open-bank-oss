@@ -33,8 +33,9 @@
 # THE RUNNER MUST BE ABLE TO FAIL
 #   `--self-test` runs the assertion engine, the staleness detector and the ratchet against built-in
 #   fixtures that MUST fail and fixtures that MUST pass, and exits non-zero if any of them behaves
-#   the other way round. It is wired into CI as an ENFORCED step, ahead of the (advisory) replay, so
-#   a gate that has quietly stopped being able to go red takes the build down with it. This repo has
+#   the other way round. It is wired into CI as an ENFORCED step, ahead of the blocking replay it
+#   protects, so a gate that has quietly stopped being able to go red takes the build down with it.
+#   This repo has
 #   shipped two gates that could not fail — a reporter that crashed on every finding and a scanner
 #   that printed nothing — and both read as green for weeks.
 #
@@ -255,8 +256,9 @@ def run_replay(args, evals_dir=EVALS, recordings_dir=RECORDINGS, prompts_dir=PRO
     if pending:
         stream.write(
             f"::warning title=Evals gate::{len(pending)} charter(s) have an eval suite but no "
-            f"recorded run yet, so nothing is being replayed for them: {', '.join(sorted(pending))}. "
-            f"Record one with `run-evals.py --record <charter>` against the charter's live model.\n")
+            f"recorded run yet, so replay is advisory for them only: {', '.join(sorted(pending))}. "
+            f"Charters with a committed recording are still blocking. Record one with "
+            f"`run-evals.py --record <charter>` against the charter's live model.\n")
         if args.require_recordings:
             failed.extend(pending)
 
@@ -290,8 +292,11 @@ def run_replay(args, evals_dir=EVALS, recordings_dir=RECORDINGS, prompts_dir=PRO
         stream.write(f"::error::run-evals: {len(problems)} charter(s) failed the evals gate.\n")
         return 1
 
-    stream.write(f"evals-gate: {len(ok)} charter(s) replayed clean, {len(pending)} awaiting a "
-                 f"first recording, {len(suites)} suite(s) total.\n")
+    stream.write(
+        f"evals-gate: blocking replay passed for {len(ok)} charter(s) with recorded baselines; "
+        f"{len(pending)} charter(s) remain advisory awaiting a first recording; "
+        f"{len(suites)} suite(s) total.\n"
+    )
     return 0
 
 

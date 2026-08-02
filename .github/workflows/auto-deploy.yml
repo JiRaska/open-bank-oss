@@ -897,9 +897,16 @@ jobs:
             # and both scripts' headers. Keep this comment SHORT: an oversized `run:` makes the
             # whole workflow unparseable (check-workflow-run-step-size.py).
             vpresent="$(bash .github/scripts/probe-pact-version.sh "$svc" "$GITHUB_SHA")"
-            sel_line="$(PACT_VERSION_PRESENT="$vpresent" \
+            sel_line="$(PACT_VERSION_PRESENT="$vpresent" EVENT_NAME="$GITHUB_EVENT_NAME" \
               bash .github/scripts/resolve-can-i-deploy-selector.sh "$svc" "$GITHUB_SHA")"
             read -ra CID_SELECTOR <<< "$(printf '%s' "$sel_line" | cut -f1)"
+            # REFUSE (#3318): a manual dispatch of a sha with no pact version. Stop rather
+            # than gate it on a different commit — see the selector script's header.
+            if [ "${CID_SELECTOR[0]}" = "REFUSE" ]; then
+              echo "::error::can-i-deploy: $(printf '%s' "$sel_line" | cut -f2)"
+              echo "deployable=[]" >> "$GITHUB_OUTPUT"
+              exit 1
+            fi
             echo "==> can-i-deploy ${svc} (${CID_SELECTOR[*]}) → environment sandbox"
             echo "    $(printf '%s' "$sel_line" | cut -f2)"
             cid_out=$("$CLI" can-i-deploy \

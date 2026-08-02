@@ -69,18 +69,19 @@ model swap cannot land without re-recording, and a re-recording that drops below
 PR. That is ADR-0148's decision expressed as a check: replaying yesterday's answers proves nothing
 about a model you did not change, and everything about one you did.
 
-**A charter with no recording yet** is an advisory `::warning`, not a pass — nothing is being
-replayed for it. `--require-recordings` graduates that to a hard failure once every suite has a run
-(ADR-0144's advisory→enforced path). Never hand-write a recording to clear the warning: a fabricated
-recording is a green gate over behaviour nobody observed.
+**Graduated behavior (2026-08-02).** Every suite currently in this tree has a committed recording,
+so CI runs replay with `--require-recordings`: for any charter that has a suite, a missing first
+recording is now a hard failure, not a warning. The ratchet is still scoped to declared suites only,
+so a charter with no suite yet remains backlog in `check-evals-registry.py`; once a suite exists,
+it must land with a real recording in the same PR. Never hand-write a recording to clear the gate:
+a fabricated recording is a green gate over behaviour nobody observed.
 
 **Proving the gate can go red.** `run-evals.py --self-test` runs the assertion engine, the staleness
-detector and the ratchet against twelve fixtures that each declare the exit code they must produce —
-one must-pass, eleven must-fail (empty output, missing substring, an obeyed prompt injection, a
-dropped scenario, a bumped suite version, an edited prompt, a missing `model_id`, an unevaluatable
-assertion key, …) — and exits non-zero if any behaves the other way round. It is wired into CI as an
-**enforced** step *ahead of* the advisory replay, so a runner that has quietly lost the ability to
-fail takes the build down with it rather than reporting green.
+detector and the ratchet against fixtures that each declare the exit code they must produce — both
+must-pass and must-fail cases, including the `--require-recordings` graduation path — and exits
+non-zero if any behaves the other way round. It is wired into CI as an **enforced** step *ahead of*
+the blocking replay, so a runner that has quietly lost the ability to fail takes the build down with
+it rather than reporting green.
 
 ## Which charters count as coverage backlog
 

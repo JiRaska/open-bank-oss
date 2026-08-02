@@ -66,3 +66,25 @@ kover {
         }
     }
 }
+
+// Pact Broker verification (ADR-0092): forward the broker config CI passes with `-D` into the
+// (forked) test JVM. Without this the properties reach the Gradle daemon and stop there, so the
+// @PactBroker provider test is @EnabledIfSystemProperty(pactbroker.url)-skipped and pact-jvm
+// logs "Skipping publishing of verification results ... not 'true'" — even on a main push where
+// the workflow set PUBLISH_RESULTS=true. That is exactly how this module ended up with a Pact
+// Broker version carrying no branch and no verification result, leaving its consumers
+// permanently UNVERIFIED and undeployable (issue #3285). 14 of 17 providers already had this
+// block; the correlation with the three that did not was exact.
+tasks.withType<Test> {
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+}

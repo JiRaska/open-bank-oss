@@ -86,13 +86,23 @@ class CallerContextResolver @Inject constructor(
         // ADR-0224 D2: the token's `jti` must be bound to a live session of THIS subject (never
         // the SSO `sid` — an exchange mints a fresh one, which is exactly why jti is the binding),
         // and the effective roles are bounded by BOTH the token and the session ceiling. A missing
-        // store row or a mismatch is anonymous — revocation takes effect immediately. The session
-        // row's subject is the REST-layer principal name (Quarkus resolves preferred_username
-        // before sub), while Keycloak's `sub` is the stable UUID — match the name the store wrote,
-        // not the claim (E2E #2750: a UUID-vs-email mismatch here denied every bound call).
+        // store row or a mismatch is anonymous — revocation takes effect immediately.
+        //
+        // Matched on `sub`, which is what McpSessionResource now writes. It used to be the
+        // REST-layer principal name (Quarkus resolves preferred_username before sub) on BOTH
+        // sides — correct as a pair, but keyed on a claim a Keycloak admin can change. After a
+        // rename no token could match the live row again: null here, anonymous downstream, and
+        // under `mcp.obo.enabled` a fail-closed "Authorization unavailable" while the row still
+        // reads live (#3182). `sub` is the identifier Keycloak guarantees is immutable.
+        //
+        // Both sides move together or the pair breaks in the other direction — that is what
+        // #2955 did (reader only) and why E2E #2750 pins a real exchanged token end to end.
         val session = sessions?.findActiveByJti(jti, Instant.now(clock)) ?: return null
+        if (session.subject != subject) return null
+        // preferred_username stays the HUMAN-READABLE label on the audit trail — `sub` is a UUID
+        // and reads as nothing in a log. It is deliberately not what the line above matches on:
+        // display may drift with a rename, identity may not.
         val principalName = jwt.getClaim<String?>(CLAIM_PREFERRED_USERNAME)?.takeIf { it.isNotBlank() } ?: subject
-        if (session.subject != principalName) return null
         val ceiling = parseCeiling(session.roleCeiling)
         val bounded = roles.filter { it in ceiling }
         if (bounded.isEmpty()) return null
