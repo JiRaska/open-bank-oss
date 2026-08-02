@@ -80,17 +80,40 @@ if ! curl -sf --max-time 10 http://127.0.0.1:14001/key/list \
   exit 1
 fi
 
-EXISTING="$(curl -s --max-time 10 http://127.0.0.1:14001/key/list \
-  -H "Authorization: Bearer $MASTER_KEY" | jq -r '[.keys[]?.key_alias // empty] | join(" ")')"
+# `?return_full_object=true` is REQUIRED: without it LiteLLM answers with a bare array of key
+# STRINGS, and `.keys[].key_alias` then aborts jq with
+#   jq: error (at <stdin>:0): Cannot index string with string ("key_alias")
+# That failure could not happen on the run that created the keys — an empty `.keys[]` yields
+# nothing and exits 0 — so the idempotency branch this feeds was only ever exercised in the one
+# state where it had nothing to do. The `if type=="object"` arm keeps it working against both
+# shapes rather than pinning the script to today's response format.
+EXISTING="$(curl -s --max-time 10 "http://127.0.0.1:14001/key/list?return_full_object=true" \
+  -H "Authorization: Bearer $MASTER_KEY" \
+  | jq -r '[.keys[]? | if type=="object" then (.key_alias // empty) else empty end] | join(" ")')"
 
 echo "[4/4] Seeding per-agent keys ..."
 for entry in "${AGENT_BUDGETS[@]}"; do
   alias="${entry%%:*}"
   budget="${entry##*:}"
 
-  if [[ " $EXISTING " == *" $alias "* && "$ROTATE" -eq 0 ]]; then
-    echo "      = $alias already has a key (budget unchanged) — skipping. Use --rotate to replace."
-    continue
+  if [[ " $EXISTING " == *" $alias "* ]]; then
+    if [[ "$ROTATE" -eq 0 ]]; then
+      echo "      = $alias already has a key (budget unchanged) — skipping. Use --rotate to replace."
+      continue
+    fi
+    # /key/generate REFUSES a duplicate alias outright:
+    #   "Key with alias '<alias>' already exists. Unique key aliases across all keys are required."
+    # so --rotate cannot mean "generate over the top" — the old key has to go first. Like the
+    # listing bug above, this path was unreachable until a key existed, so --rotate had never once
+    # run against the state it exists for.
+    echo "      - $alias: deleting the existing key before re-issuing (--rotate) ..."
+    del="$(curl -s --max-time 20 -X POST http://127.0.0.1:14001/key/delete \
+      -H "Authorization: Bearer $MASTER_KEY" -H 'Content-Type: application/json' \
+      -d "{\"key_aliases\":[\"$alias\"]}")"
+    echo "$del" | jq -e --arg a "$alias" '.deleted_keys | index($a)' >/dev/null 2>&1 || {
+      echo "ERROR: could not delete the existing key for $alias. Response: $del" >&2
+      exit 1
+    }
   fi
 
   resp="$(curl -s --max-time 20 -X POST http://127.0.0.1:14001/key/generate \
