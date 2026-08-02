@@ -172,13 +172,14 @@ class McpEndpointTest {
     }
 
     @Test
-    fun `a staff token matches its session by preferred_username when sub is a uuid (E2E #2750)`() {
+    fun `a Keycloak-shaped staff token matches its session by sub, and is still LABELLED by name (E2E #2750, #3182)`() {
+        // #2750's defect was writer and reader disagreeing — the session row held one identifier
+        // and the resolver compared another, so every bound call was denied. That is what this
+        // pins, now on `sub`: a real Keycloak token has a UUID `sub` and a human
+        // `preferred_username`, and the pair must still meet. The username survives as the audit
+        // LABEL only (#3182) — matching on it made a rename strand the session.
         val pdp = RecordingPdp()
-        val kcShaped = staffClaims + mapOf(
-            "sub" to "ff90e87e-e7fc-4768-9e41-8b0474deb78d",
-            "preferred_username" to "jane.operator",
-        )
-        endpoint(pdp, jwt = TestJsonWebToken(kcShaped), oboEnabled = true).handle(
+        endpoint(pdp, jwt = staffOboJwt(), oboEnabled = true).handle(
             rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
         )
         val principal = pdp.queries.single().principal
@@ -187,9 +188,26 @@ class McpEndpointTest {
     }
 
     @Test
-    fun `a staff token whose preferred_username owns no session is anonymous`() {
+    fun `a renamed operator still matches the session they created (#3182)`() {
+        // Same human, same `sub`, new preferred_username after an admin rename. Keyed on the
+        // display name this resolved to null and the call fell through to a fail-closed
+        // "Authorization unavailable" against a row that still reads live.
+        val pdp = RecordingPdp()
+        val renamed = staffClaims + mapOf("preferred_username" to "jane.smith")
+        endpoint(pdp, jwt = TestJsonWebToken(renamed), oboEnabled = true).handle(
+            rpc("tools/call", mapOf("name" to "list_accounts", "arguments" to emptyMap<String, Any>())),
+        )
+        val principal = pdp.queries.single().principal
+        assertThat(principal.type).isEqualTo("HUMAN")
+        assertThat(principal.id).isEqualTo("jane.smith")
+    }
+
+    @Test
+    fun `a staff token whose sub owns no session is anonymous`() {
+        // Another human reusing the same jti gets nothing: the session is bound to a `sub`, and
+        // a matching display name would not help them either.
         val kcShaped = staffClaims + mapOf(
-            "sub" to "ff90e87e-e7fc-4768-9e41-8b0474deb78d",
+            "sub" to "00000000-0000-0000-0000-0000deadbeef",
             "preferred_username" to "mallory.operator",
         )
         val resp = body(
@@ -223,8 +241,12 @@ class McpEndpointTest {
 
     private val staffSessionId = "3f2a9c41-7b5e-4c8d-9e0f-1a2b3c4d5e6f"
 
+    /** Keycloak's `sub`: an immutable UUID, and what a session is keyed on (#3182). */
+    private val staffSubject = "ff90e87e-e7fc-4768-9e41-8b0474deb78d"
+
     private val staffClaims = mapOf(
-        "sub" to "jane.operator",
+        "sub" to staffSubject,
+        "preferred_username" to "jane.operator",
         "azp" to "openbank-admin-ui",
         "jti" to staffSessionId,
         "aud" to "openbank-mcp-service",
@@ -234,10 +256,10 @@ class McpEndpointTest {
     private fun staffOboJwt() = TestJsonWebToken(staffClaims)
 
     // ADR-0224 D2 live check: a fake session store holding one ACTIVE session bound to the token's jti.
-    private fun fakeSessionRepo() = object : AgentSessionRepository() {
+    private fun fakeSessionRepo(subject: String = staffSubject) = object : AgentSessionRepository() {
         override suspend fun findActiveByJti(jti: String, asOf: java.time.Instant) = if (jti == staffSessionId) {
             AgentSessionEntity().also {
-                it.subject = "jane.operator"
+                it.subject = subject
                 it.roleCeiling = "[\"ROLE_OPERATOR\"]"
                 it.clientId = "admin-ui"
                 it.jti = staffSessionId

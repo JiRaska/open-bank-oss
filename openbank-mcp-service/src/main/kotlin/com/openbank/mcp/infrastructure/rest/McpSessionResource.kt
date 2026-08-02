@@ -22,6 +22,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import org.jboss.logging.Logger
@@ -48,6 +49,22 @@ class McpSessionResource(
     @Inject
     lateinit var identity: SecurityIdentity
 
+    @Inject
+    lateinit var jwt: JsonWebToken
+
+    /**
+     * The key a session is stored and matched under: Keycloak's `sub`, the one identifier it
+     * guarantees is immutable.
+     *
+     * NOT `identity.principal.name` — Quarkus resolves that to `preferred_username`, which an
+     * admin can change. A rename then made the live session unmatchable: `resolveOboHuman`
+     * returned null, the call fell through to anonymous, and under `mcp.obo.enabled` that fails
+     * closed with "Authorization unavailable" while the row still reads as live in the store
+     * (#3182). Writer, reader ([owns]) and CallerContextResolver must agree on this — moving one
+     * alone breaks the pair in the other direction, which is what #2955 did.
+     */
+    private fun callerKey(): String = jwt.subject ?: identity.principal.name
+
     private val log = Logger.getLogger(McpSessionResource::class.java)
 
     @POST
@@ -67,7 +84,7 @@ class McpSessionResource(
         val now = Instant.now(clock)
         val session = AgentSessionEntity().also {
             it.id = Ids.newId()
-            it.subject = identity.principal.name
+            it.subject = callerKey()
             it.roleCeiling = ceiling.joinToString(",", prefix = "[", postfix = "]") { r -> "\"$r\"" }
             it.clientId = request.clientId
             it.purpose = request.purpose
@@ -137,7 +154,7 @@ class McpSessionResource(
     // Broken-access-control guard: the role grant admits every operator, but a session row is
     // its owner's alone — reading or revoking another operator's session needs ROLE_ADMIN.
     private fun owns(session: AgentSessionEntity): Boolean =
-        identity.roles.contains("ROLE_ADMIN") || session.subject == identity.principal.name
+        identity.roles.contains("ROLE_ADMIN") || session.subject == callerKey()
 
     private fun forbidden(): Response =
         Response.status(Response.Status.FORBIDDEN).entity(mapOf("error" to "not your session")).build()
