@@ -386,6 +386,10 @@ class ScaService(
             "Potvrďte podpis dokumentu"
         ScaPurpose.CARD_MANAGEMENT ->
             "Potvrďte operaci s platební kartou"
+        ScaPurpose.DELEGATION_GRANT ->
+            "Potvrďte sdílení přístupu k vašemu produktu"
+        ScaPurpose.DELEGATION_ACCEPT ->
+            "Potvrďte přijetí sdíleného přístupu"
     }
 
     private fun buildIdempotencyKey(command: InitiateScaCommand, method: ScaMethod): String {
