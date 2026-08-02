@@ -188,14 +188,54 @@ resource "kubectl_manifest" "nodepool_default" {
             { key = "kubernetes.io/arch", operator = "In", values = ["arm64"] },
             { key = "kubernetes.io/os", operator = "In", values = ["linux"] },
             { key = "karpenter.sh/capacity-type", operator = "In", values = ["spot", "on-demand"] },
-            { key = "karpenter.k8s.aws/instance-category", operator = "In", values = ["c", "m", "r"] },
+            # `c` dropped (2026-08-02): c-family is 2 GiB/vCPU, which after the
+            # fixed per-node tax below leaves ~1.2 GiB of usable memory per vCPU
+            # — less than this fleet's own request ratio (55.3 GiB of memory
+            # requests against 25.0 vCPU ≈ 2.2 GiB/vCPU). A c-family node is
+            # therefore memory-exhausted while still half-idle on CPU, which is
+            # exactly the state the evictions came from. m (4 GiB/vCPU) and r
+            # (8 GiB/vCPU) both clear the ratio; Karpenter still price-sorts
+            # within them.
+            { key = "karpenter.k8s.aws/instance-category", operator = "In", values = ["m", "r"] },
             { key = "karpenter.k8s.aws/instance-generation", operator = "Gt", values = ["5"] },
-            # Cap at 4xlarge: DaemonSet overhead (Alloy + Falco + node-exporter +
-            # kube-proxy + aws-node ≈ 350m CPU / 400Mi RAM) justifies large minimum.
-            # Without an upper bound Karpenter picked c6g.12xlarge (48 vCPU spot) for
-            # ~20 pods — grossly over-provisioned and expensive even at spot pricing.
-            # large–4xlarge gives good bin-packing while keeping per-node cost sane.
-            { key = "karpenter.k8s.aws/instance-size", operator = "In", values = ["large", "xlarge", "2xlarge", "4xlarge"] }
+            # xlarge–2xlarge (2026-08-02). `large` removed; `4xlarge` removed.
+            #
+            # WHY `large` HAD TO GO. The previous comment justified a `large`
+            # MINIMUM with "DaemonSet overhead ≈ 350m CPU / 400Mi RAM". That
+            # figure is stale by ~2.4x. Measured on the live `default` pool
+            # (21 nodes, Prometheus `container_memory_working_set_bytes`,
+            # max_over_time[12h], 2026-08-02):
+            #
+            #   alloy 636Mi | aws-node 167Mi | falco 77Mi | kube-proxy 32Mi
+            #   ebs-csi-node 28Mi | node-exporter 13Mi | pod-identity-agent 9Mi
+            #   -> 962Mi and 0.26 vCPU of DaemonSet, on EVERY node.
+            #
+            # Stack that on a 4 GiB `large`: capacity 4.00 GiB, allocatable
+            # 2.87 GiB (kubelet/system reserved eats 1.13 GiB), minus 962Mi of
+            # DaemonSet = ~1.93 GiB actually available to workloads. ~52% of the
+            # machine is overhead, and the EC2NodeClass evicts at
+            # memory.available < 500Mi soft / 300Mi hard — thresholds that sit
+            # inside the noise band of what is left. Measured peak headroom on
+            # the 17 `large` nodes ran 19Mi–1165Mi; the node at 19Mi is where
+            # kyc-service and sdd-service were evicted.
+            #
+            # The same 962Mi on an xlarge (16 GiB, m-family) is ~7% of the node,
+            # and usable memory per node goes 1.93 GiB -> ~12.8 GiB. This is a
+            # pure win, not a trade: price per USABLE vCPU is a wash
+            # (c8g.large $0.0159/hr vs m7g.xlarge $0.0156/hr, eu-north-1 spot,
+            # 2026-08-02) because the tax is per node, not per vCPU.
+            #
+            # WHY `4xlarge` ALSO WENT. r8g.4xlarge is 128 GiB — a single node
+            # would consume the entire `limits.memory` below, so one greedy
+            # provisioning decision could wedge the pool at 1 node. 2xlarge caps
+            # a single node at 8 vCPU / 64 GiB, which is still 2x the largest
+            # bin-packing group this pool has ever needed. The original hazard
+            # the upper bound was written for (Karpenter reaching for
+            # c6g.12xlarge) is unchanged and still guarded.
+            #
+            # Spot diversity is not a casualty: m/r, gen>5, xlarge–2xlarge is
+            # 22 instance types x 3 AZs = 66 spot pools.
+            { key = "karpenter.k8s.aws/instance-size", operator = "In", values = ["xlarge", "2xlarge"] }
           ]
           nodeClassRef = {
             group = "karpenter.k8s.aws"
@@ -255,9 +295,27 @@ resource "kubectl_manifest" "nodepool_default" {
       # leaving the deploy backbone Pending and stalling the drift roll. 48
       # gives the roll surge + honest requests room while still capping
       # runaway cost.
+      #
+      # 128Gi → 192Gi memory (2026-08-02), cpu unchanged at 48. The memory cap
+      # was calibrated to `large` nodes at ~2.7 GiB of capacity per vCPU. With
+      # the xlarge/2xlarge m|r floor above, 48 vCPU of m-family is 192 GiB of
+      # CAPACITY — so leaving the cap at 128Gi would make memory bind at 32
+      # vCPU and re-create the #809 stall (pool pinned, "all available instance
+      # types exceed limits for nodepool", pods Pending) with no CPU pressure
+      # anywhere. Setting memory to 4x the CPU cap makes CPU the single binding
+      # guardrail, which is what this block was always meant to be.
+      #
+      # This raises the CEILING, not the spend. Ceiling: 48 vCPU as m7g.xlarge
+      # spot = 12 x $0.0568/hr = $497/mo, against $455/mo for 48 vCPU of
+      # c8g.large — +$42/mo on a ceiling that is not approached. ACTUAL
+      # `default`-pool instance spend is ~$61/mo (Cost Explorer, 7d annualised,
+      # 2026-08-02) out of an $853/mo account total, and the shape change is
+      # expected to move it by less than $10/mo in either direction because
+      # price per usable vCPU is unchanged. For scale: cross-AZ data transfer
+      # (EUN1-DataTransfer-Regional-Bytes) is ~$809/mo on the same bill.
       limits = {
         cpu    = "48"
-        memory = "128Gi"
+        memory = "192Gi"
       }
     }
   })
