@@ -46,14 +46,25 @@ interface OutboxRepository {
      */
     suspend fun countProcessable(): Long = listProcessable(Int.MAX_VALUE).size.toLong()
 
-    suspend fun markSent(eventId: UUID, sentAt: Instant = Instant.EPOCH)
+    /**
+     * `Instant.now()` and NOT `Instant.EPOCH` — the shared [OutboxDispatch] calls this with no
+     * timestamp, so the default is what every dispatched row in the fleet actually got. Repository
+     * implementations assign it to BOTH `sent_at` and `updated_at`, so an epoch default stamped
+     * both 1970 (#3272, same family as the `createdAt` default).
+     */
+    suspend fun markSent(eventId: UUID, sentAt: Instant = Instant.now())
 
     /**
      * Record a failed publish: increment the attempt counter, store the (truncated) error,
      * and apply [OutboxFailurePolicy] so an exhausted row transitions to terminal
      * [OutboxStatus.DEAD] instead of being retried forever (ADR-0050 N5).
+     *
+     * `failedAt` defaults to `Instant.now()` for the same reason as [markSent]: [OutboxDispatch]
+     * passes none, and it lands in `updated_at` — which the dead-letter janitor prunes on
+     * (`status = DEAD and updatedAt < threshold`). At 1970 every DEAD row is instantly older than
+     * any retention window (#3272).
      */
-    suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant = Instant.EPOCH)
+    suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant = Instant.now())
 }
 
 interface OutboxEventPublisher {
