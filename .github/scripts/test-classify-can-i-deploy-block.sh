@@ -63,6 +63,11 @@ check "404 on the sha BUT latest-main verification failed" REGRESSION no "$VERIF
 # 6. Version present, blocked, but no recognised explanation — must not be guessed at.
 check "version present + unrecognised output" UNKNOWN yes "Computer says no ¯\\_(ツ)_/¯"
 
+# `absent` must NOT read as a probe failure: the probe worked, the pacticipant does not exist.
+# Different remedy — a contract, not a retry — so it needs its own label, and UNKNOWN's text
+# ("could not probe the broker") would describe an outage that never happened.
+check "pacticipant absent" NO_CONTRACTS absent "no versions for openbank-demo-service"
+
 # 7. Missing argument is a usage error, not a silent classification.
 if PACT_VERSION_PRESENT=no bash "$CLASSIFY" </dev/null >/dev/null 2>&1; then
   echo "  FAIL missing-service-arg: expected non-zero exit"

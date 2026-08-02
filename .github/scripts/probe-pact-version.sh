@@ -74,7 +74,23 @@ probe() {
     "${PACT_BROKER_URL:-}/pacticipants/${SVC}/versions/${SHA}" 2>/dev/null || echo 000)"
   case "$code" in
     200) echo yes ;;
-    404) echo no ;;
+    # A 404 here is AMBIGUOUS: the broker answers it both when this sha has no version and
+    # when it has never heard of the pacticipant at all. Collapsing the two is what blocked
+    # openbank-delegation-service's first deploy (#3423-adjacent): the REFUSE branch fired on
+    # a service that has no pacts to publish, where there is nothing for can-i-deploy to
+    # verify. Ask the second question before answering.
+    404)
+      pcode="$(curl -s -o /dev/null -w '%{http_code}' \
+        -u "$auth" \
+        "${PACT_BROKER_URL:-}/pacticipants/${SVC}" 2>/dev/null || echo 000)"
+      case "$pcode" in
+        404) echo absent ;;
+        200) echo no ;;
+        # Second probe inconclusive — do NOT upgrade to `absent`, which would wave a service
+        # through. Fall back to the pre-existing meaning.
+        *)   echo no ;;
+      esac
+      ;;
     # Anything else — 5xx, a proxy error, no network — is deliberately NOT "no". Reporting a
     # broker outage as "this commit has published nothing" would send the caller down the
     # PENDING_BUILD path and quietly relabel an infrastructure failure as a build queue.
