@@ -96,6 +96,10 @@ EOF
 
 echo "==> ECR login + buildx push"
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY" >/dev/null
+# A new service's ECR repository is declared nowhere, so its first push fails with
+# `name unknown` after the whole build has already run (#3423). Shared with auto-deploy.yml's
+# inline push path — the one where it was measured — so both producers behave identically.
+AWS_REGION="$AWS_REGION" bash "${REPO_ROOT}/.github/scripts/ensure-ecr-repository.sh" "$ECR_REPO"
 docker buildx build --platform "$PLATFORM" -t "$IMAGE" --push "$CTX"
 echo "==> pushed ${IMAGE}"
 

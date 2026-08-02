@@ -651,6 +651,32 @@ data "aws_iam_policy_document" "arc_deploy_ecr" {
       "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/openbank-*"
     ]
   }
+  # A new service's ECR repository is declared nowhere — every one of the ~32 existing repos was
+  # created by hand — so the first build of a new service compiles, runs the whole cold-cache
+  # Gradle build, and dies at the push with `name unknown` (issue #3423, measured on
+  # openbank-delegation-service). Nothing upstream can see it: the drift declaration checks only
+  # the pin's SHAPE, and the attestation gate reports the image as ABSENT, which is the correct
+  # state for a first registration.
+  #
+  # Scoped to openbank-* deliberately. CreateRepository already exists on this role for
+  # repository/docker-hub/* (the pull-through cache); widening it to `*` would let a build create
+  # anything in the registry, and the naming prefix is the whole boundary.
+  #
+  # Describe is here for a reason of its own: without it the caller cannot tell
+  # RepositoryNotFoundException from AccessDenied, and reading the latter as the former is what
+  # made #3444 fail builds for repositories that already existed (reverted by #3453).
+  # ensure-ecr-repository.sh now fails OPEN when it cannot observe the registry, so it is inert
+  # until this statement applies rather than dependent on it.
+  statement {
+    sid = "EcrCreateServiceRepository"
+    actions = [
+      "ecr:DescribeRepositories",
+      "ecr:CreateRepository",
+    ]
+    resources = [
+      "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/openbank-*"
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "arc_deploy_ecr" {
