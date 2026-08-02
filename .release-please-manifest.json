@@ -52,6 +52,6 @@
   "openbank-tpp-registry-service": "0.6.11",
   "openbank-transaction-service": "1.15.4",
   "openbank-vop-service": "0.3.1",
-  "openbank-campaign-service": "0.8.0",
-  "openbank-tax-reporting-service": "0.3.0"
+  "openbank-campaign-service": "0.9.0",
+  "openbank-tax-reporting-service": "0.4.0"
 }
