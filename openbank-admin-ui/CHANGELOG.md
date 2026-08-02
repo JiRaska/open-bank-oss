@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.80.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.80.0...admin-ui-v0.80.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** the campaign detail bundle handed journey the summary result ([#3213](https://github.com/JiRaska/open-bank-oss/issues/3213)) ([37a132a](https://github.com/JiRaska/open-bank-oss/commit/37a132a6fd568e292d9401f71b742f6515ef6d4b))
+
 ## [0.80.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.79.0...admin-ui-v0.80.0) (2026-08-01)
 
 
