@@ -83,7 +83,12 @@ describe('campaign console', () => {
     render(React.createElement(Providers, null, React.createElement(CampaignsPage)))
 
     await waitFor(() => expect(screen.getByText('smoke-offer')).toBeTruthy())
-    expect(screen.getByText('ACTIVE')).toBeTruthy()
+    // The state is now rendered as a human label ("Running"), because a marketer should not have to
+    // know what ACTIVE means. Both halves are asserted on purpose: the label is what the reader
+    // sees, and the raw enum stays reachable as the title so the screen and the state machine can
+    // never end up describing different things. Asserting only the label would let the two drift.
+    expect(screen.getAllByText('Running').length).toBeGreaterThan(0)
+    expect(screen.getByTitle('ACTIVE')).toBeTruthy()
     // The checker is shown next to the maker: for an ACTIVE campaign that pair is the
     // audit-relevant fact, and a console that hides it makes four-eyes unverifiable by eye.
     expect(screen.getByText('ops-checker@openbank.local')).toBeTruthy()
