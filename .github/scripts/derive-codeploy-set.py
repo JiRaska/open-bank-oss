@@ -49,14 +49,19 @@ Usage:
   derive-codeploy-set.py <changed-services-space-separated> < blocks
 
   stdin is a stream of records, one per blocked service:
-      ===SERVICE <name>
+      ===SERVICE <name>[\t<block-class>]
       <that service's verbatim can-i-deploy CLI output>
+
+  The block class is what classify-can-i-deploy-block.sh decided. It is OPTIONAL: without
+  it every blocked service is eligible for a set (the original behaviour). With it, only a
+  DURABLE block counts — see CODEPLOY_CLASSES.
 
   <changed-services> is every service in THIS run (deployable or not), so a counterpart
   can be told apart from one outside the run.
 
 Prints, one finding per line, TAB-separated. Two record types:
     CODEPLOY\t<svc> <svc> ...        a mutually-blocking set that must deploy together
+    PENDING\t<svc> <svc> ...         blocked only because their builds have not finished
     EXTERNAL\t<svc>\t<counterpart>   blocked on a service this run cannot move
 
 Always exits 0 — this is a reporter, not a gate.
@@ -80,17 +85,46 @@ SERVICE_TOKEN = re.compile(r"openbank-[a-z0-9][a-z0-9-]*")
 # co-deploy set no dispatch can satisfy. Read the prose lines only.
 PAIR_LINE = ("There is no verified pact", "The verification for the pact between")
 
+# A co-deploy is a WEAKER check over (usually) money-path services, so recommending one needs
+# positive evidence of a block that will not clear on its own. Only these two qualify.
+#
+# PENDING_BUILD emphatically does not. It means "no pact version published for this commit yet
+# — the main-push build has not finished"; probe-pact-version.sh's own header calls that class
+# self-clearing and expects the 3-hourly reconcile to absorb it. But this script never saw the
+# class, so a set of services that were merely WAITING TO BE BUILT looked exactly like a set
+# that mutually deadlocks — and the run then printed, with full authority, the command to
+# co-deploy them. Observed on run 30761740836 (2026-08-02 18:42Z): eight services blocked, all
+# eight PENDING_BUILD, and the output was
+#   CO-DEPLOY SET — [account domestic-payment fraud sepa-instant sepa-payment swift
+#   transaction] block each other; no per-service deploy order converges.
+# Seven of those are money-path. The hand-driven bypass this script exists to REPLACE is
+# exactly what that advice invites, on evidence that means only "CI is behind".
+#
+# UNKNOWN is excluded for the same reason from the other direction: an unclassified block is
+# not positive evidence of anything, and the safe default is to say so rather than to name a
+# set. Records with no class at all keep today's behaviour, so older captures still parse.
+CODEPLOY_CLASSES = ("UNVERIFIED", "REGRESSION")
+TRANSIENT_CLASSES = ("PENDING_BUILD",)
+
 
 def derive(changed: set[str], stream) -> list[str]:
     blocked: list[str] = []
     edges: dict[str, set[str]] = {}
     external: set[tuple[str, str]] = set()
+    cls_of: dict[str, str] = {}
 
     svc: str | None = None
     for raw in stream:
         line = raw.rstrip("\n")
         if line.startswith("===SERVICE "):
-            svc = line[len("===SERVICE "):].strip()
+            # "===SERVICE <name>" or "===SERVICE <name>\t<block-class>"; the class is optional
+            # so a capture taken before auto-deploy.yml recorded it still reads correctly.
+            header = line[len("===SERVICE "):].strip()
+            svc, _, cls = header.partition("\t")
+            svc = svc.strip()
+            cls = cls.strip()
+            if cls:
+                cls_of[svc] = cls
             if svc not in blocked:
                 blocked.append(svc)
                 edges.setdefault(svc, set())
@@ -106,10 +140,16 @@ def derive(changed: set[str], stream) -> list[str]:
             else:
                 external.add((svc, token))
 
+    # Eligible for a co-deploy set: blocked, and blocked for a reason that will not clear by
+    # itself. A record carrying no class is eligible (older captures), one carrying a class
+    # must carry a durable one.
+    def eligible(name: str) -> bool:
+        return name not in cls_of or cls_of[name] in CODEPLOY_CLASSES
+
     findings: list[str] = []
     seen: set[str] = set()
     for root in blocked:
-        if root in seen:
+        if root in seen or not eligible(root):
             continue
         component = [root]
         seen.add(root)
@@ -119,12 +159,20 @@ def derive(changed: set[str], stream) -> list[str]:
             i += 1
             for peer in sorted(edges.get(node, ())):
                 # Only BLOCKED services can be part of a co-deploy set: a counterpart that
-                # is in this run and already deployable needs nothing done to it.
-                if peer in blocked and peer not in seen:
+                # is in this run and already deployable needs nothing done to it — and one
+                # whose block is transient needs only time, not a weaker gate.
+                if peer in blocked and eligible(peer) and peer not in seen:
                     seen.add(peer)
                     component.append(peer)
         if len(component) > 1:
             findings.append("CODEPLOY\t" + " ".join(sorted(component)))
+
+    # Say what was set aside, so a transient block is never silently dropped: an operator
+    # reading "no co-deploy set" must be able to tell "nothing is deadlocked" apart from
+    # "the answer is not knowable yet".
+    pending = sorted(s for s in blocked if cls_of.get(s) in TRANSIENT_CLASSES)
+    if pending:
+        findings.append("PENDING\t" + " ".join(pending))
 
     for svc_name, counterpart in sorted(external):
         findings.append(f"EXTERNAL\t{svc_name}\t{counterpart}")
