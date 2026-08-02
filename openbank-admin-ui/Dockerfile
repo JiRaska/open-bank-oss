@@ -160,6 +160,28 @@ RUN set -e; \
 # node_modules contains only JS/JSON — no arch-specific binaries — so it
 # is safe to copy into the arm64 runtime stage unchanged.
 # ──────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────
+# Stage 1g: Stage the ADR-0211 origination Kotlin so `prebuild` can derive the state graph.
+#
+# `generate-origination-graph.mjs` reads openbank-libs-domain/.../origination/*.kt — deliberately,
+# because a console that carried its own copy of the state machine would drift from the code that
+# runs it. But the build stage copies ONLY `openbank-admin-ui/`, so inside the image that path does
+# not exist: the script exited 1 and every admin-ui image build failed for six runs while local
+# builds and `npm test` stayed green, because they run with the repo root present (#3283).
+#
+# Staged as its own collector rather than widening the build COPY: the image context stays the
+# admin-ui directory plus explicitly named bundles, which is what every other input here does.
+# ──────────────────────────────────────────────────────────────────────
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS origination-collector
+WORKDIR /collect
+COPY . /repo
+RUN set -e; \
+    mkdir -p /origination-src/openbank-libs-domain/src/main/kotlin/com/openbank/libs/lending/origination; \
+    cp /repo/openbank-libs-domain/src/main/kotlin/com/openbank/libs/lending/origination/*.kt \
+       /origination-src/openbank-libs-domain/src/main/kotlin/com/openbank/libs/lending/origination/ 2>/dev/null || true; \
+    echo "── origination sources: $(ls /origination-src/openbank-libs-domain/src/main/kotlin/com/openbank/libs/lending/origination | wc -l) file(s) ──"; \
+    ls /origination-src/openbank-libs-domain/src/main/kotlin/com/openbank/libs/lending/origination
+
 FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:725aeba2364a9b16beae49e180d83bd597dbd0b15c47f1f28875c290bfd255b9 AS deps
 WORKDIR /app
 COPY openbank-admin-ui/package.json openbank-admin-ui/package-lock.json* ./
@@ -201,6 +223,9 @@ ENV NEXT_PUBLIC_BUILD_VERSION=$BUILD_VERSION \
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY openbank-admin-ui/ ./
+# The origination Kotlin, at the repo-relative path the generator expects (#3283). It resolves
+# against --repo, which defaults to the parent of the admin-ui directory — here, /.
+COPY --from=origination-collector /origination-src/openbank-libs-domain /openbank-libs-domain
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_STANDALONE=true
 # Source-map upload to GlitchTip (#3235). The token arrives as a BuildKit SECRET, not a build arg:
