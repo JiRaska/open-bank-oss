@@ -4,6 +4,13 @@
 # credentials come from the ESO-synced `pact-broker-basic-auth` secret
 # (es-pact-broker.yaml ← OpenBao openbank/pact-broker).
 #
+# Webhooks: NONE, deliberately. Making a provider verify a newly published pact is done
+# by polling from CI (.github/workflows/pact-verification-reconcile.yml) rather than by a
+# broker webhook, because a webhook would need a GitHub token stored HERE — in a service
+# that is internet-facing by the exception above. The reconciler needs no credential in
+# the cluster at all. If you are about to add a webhook that calls out with a secret,
+# that trade is the thing to weigh first.
+#
 # Exposure (ADR-0092, documented ADR-0056 exception): reached via the nginx
 # Ingress at https://pact.open-bank.tech (ingress.yaml) because the openbank-build
 # runner pool is mixed (ARC + external Hetzner/Mac) and external runners can't use

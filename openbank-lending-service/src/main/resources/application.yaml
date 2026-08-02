@@ -143,6 +143,22 @@ lending:
     # after the CZ reference pack is seeded and four-eyes-activated — with enforcement on and no
     # active pack for the request's (jurisdiction, productType), origination is REFUSED.
     enforce-pack: ${LENDING_ENFORCE_PACK:false}
+  # Customer self-service origination intake (ADR-0211 "Customer intake" row; CustomerIntakeResource).
+  # Default OFF. `caller-principal` is the ONLY identity permitted to submit on a customer's behalf —
+  # left blank, EVERY call is refused, deliberately: customer-edge's M2M token carries ROLE_OPERATOR
+  # and nothing else, so "unset means any operator" would be an over-grant arriving by omission.
+  # There is no default price: an unpriced product refuses rather than guessing a rate.
+  intake:
+    enabled: ${LENDING_INTAKE_ENABLED:false}
+    caller-principal: ${LENDING_INTAKE_CALLER_PRINCIPAL:}
+    jurisdiction: ${LENDING_INTAKE_JURISDICTION:CZ}
+    product-type: ${LENDING_INTAKE_PRODUCT_TYPE:CONSUMER_CREDIT}
+    currency: ${LENDING_INTAKE_CURRENCY:CZK}
+    nominal-annual-rate: ${LENDING_INTAKE_NOMINAL_ANNUAL_RATE:}
+    min-amount: ${LENDING_INTAKE_MIN_AMOUNT:5000}
+    max-amount: ${LENDING_INTAKE_MAX_AMOUNT:1000000}
+    min-term-months: ${LENDING_INTAKE_MIN_TERM_MONTHS:6}
+    max-term-months: ${LENDING_INTAKE_MAX_TERM_MONTHS:120}
   origination:
     # Sandbox straight-through (ADR-0211 D5, ADR-0116 pattern): a submitted application is driven to
     # READY_TO_DISBURSE by the 'sandbox-auto-approval' actor so sandbox e2e runs without an operator.

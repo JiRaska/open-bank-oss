@@ -44,7 +44,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: agent-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-agent-service:sandbox-fafe1194
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-agent-service:sandbox-b52f989b
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -89,7 +89,7 @@ spec:
               value: llama-3.3-70b-versatile
             - name: AGENT_MODEL_ENDPOINT
               value: http://litellm.ai-platform.svc:4000/v1
-            # LiteLLM virtual key (OpenBao litellm/LITELLM_MASTER_KEY via ESO), not a provider key.
+            # LiteLLM virtual key (OpenBao litellm/KEY_AGENT_SERVICE via ESO), not a provider key.
             # Optional so an un-seeded key degrades the chat call instead of CrashLooping the pod.
             - name: AGENT_MODEL_API_KEY
               valueFrom:

@@ -233,38 +233,45 @@ jobs:
           # exit SIGPIPEs the echo and the match is racily mis-read as false
           # (same footgun documented in services-ci.yml).
           CODE_FILES="$(grep -vE '^openbank-libs/governance/' <<< "$CHANGED_FILES" || true)"
-          SHARED_CHANGED=0
-          # Precise per-module match (src/main + build file), not a bare "openbank-libs"
-          # prefix — that also matched openbank-libs/docs/** (non-compiled) and silently
-          # triggered a 37-service rebuild on doc-only changes (issue #375).
-          grep -qE '^(openbank-libs/(src/main|build\.gradle\.kts|gradle/)|openbank-libs-domain/(src/main|build\.gradle\.kts)|openbank-libs-runtime/(src/main|build\.gradle\.kts)|build-logic|gradle/|settings\.gradle\.kts)' <<< "$CODE_FILES" && SHARED_CHANGED=1 || true
+          # Services to rebuild because a SHARED library changed, derived from the
+          # `project(":openbank-libs-*")` declarations in each consumer's build.gradle.kts
+          # (issue #2983). The old shape was a hardcoded path regex naming only openbank-libs,
+          # -domain and -runtime, so the ADR-0122 siblings matched NOTHING: #2949 fixed the
+          # Temporal payload converter and rebuilt zero consumers, leaving fx-service and
+          # statement-service running pre-fix images while their pods read green.
+          #
+          # Deriving it also narrows the blast radius rather than widening it: a libs-temporal
+          # change rebuilds its 16 consumers, not the whole fleet, and libs-testing
+          # (testImplementation everywhere) rebuilds nobody.
+          LIBS_DEPENDENTS="$(printf '%s\n' "$CODE_FILES" \
+            | bash .github/scripts/libs-change-dependents.sh "$ALL_SERVICES")"
 
-          if [ "$SHARED_CHANGED" = "1" ]; then
-            echo "Shared dependency changed → rebuilding all services."
-            SERVICES_JSON="$(echo "$ALL_SERVICES" | tr ' ' '\n' | jq -R . | jq -sc .)"
-          else
-            # Pick only services whose src/main or build file changed.
-            SERVICES=()
-            for svc in $ALL_SERVICES; do
-              if grep -qE "^${svc}/(src/main|build\.gradle\.kts)" <<< "$CHANGED_FILES"; then
-                # Only deploy services that have a gitops manifest (not lending, pid, etc.).
-                if grep -rlq "${svc}:sandbox-" openbank-infra/gitops/components 2>/dev/null; then
-                  SERVICES+=("$svc")
-                else
-                  echo "  skip ${svc} — no gitops manifest found"
-                fi
-              fi
-            done
-
-            if [ "${#SERVICES[@]}" -eq 0 ]; then
-              echo "No deployable services changed."
-              echo "services=[]" >> "$GITHUB_OUTPUT"
-              echo "any=false" >> "$GITHUB_OUTPUT"
-              exit 0
+          # Services changed directly in this push.
+          SERVICES=()
+          for svc in $ALL_SERVICES; do
+            if grep -qE "^${svc}/(src/main|build\.gradle\.kts)" <<< "$CHANGED_FILES"; then
+              SERVICES+=("$svc")
             fi
+          done
+          # ...unioned with the libs consumers, then filtered ONCE on the gitops manifest, so a
+          # library fan-out cannot try to deploy a service this pipeline has no manifest for.
+          DEPLOYABLE=()
+          for svc in $(printf '%s\n' "${SERVICES[@]+"${SERVICES[@]}"}" $LIBS_DEPENDENTS | grep -v '^$' | sort -u); do
+            if grep -rlq "${svc}:sandbox-" openbank-infra/gitops/components 2>/dev/null; then
+              DEPLOYABLE+=("$svc")
+            else
+              echo "  skip ${svc} — no gitops manifest found"
+            fi
+          done
 
-            SERVICES_JSON="$(printf '%s\n' "${SERVICES[@]}" | jq -R . | jq -sc .)"
+          if [ "${#DEPLOYABLE[@]}" -eq 0 ]; then
+            echo "No deployable services changed."
+            echo "services=[]" >> "$GITHUB_OUTPUT"
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          SERVICES_JSON="$(printf '%s\n' "${DEPLOYABLE[@]}" | jq -R . | jq -sc .)"
 
           echo "Services to deploy: $SERVICES_JSON"
           echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
@@ -772,6 +779,8 @@ jobs:
           path: /tmp/pact
           key: pact-standalone-${{ env.PACT_STANDALONE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
       - name: can-i-deploy (per changed service)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         id: check
         if: ${{ vars.PACT_BROKER_URL != '' }}
         run: |
@@ -818,6 +827,9 @@ jobs:
             || echo "::warning::could not ensure sandbox environment (may already exist — continuing)"
           rc=0
           deployable_list=()
+          # Shared wait budget for probe-pact-version.sh (#3082). See that script's header.
+          PACT_WAIT_BUDGET_FILE="$(mktemp)"; export PACT_WAIT_BUDGET_FILE
+          echo "${PACT_WAIT_BUDGET_SECONDS:-180}" > "$PACT_WAIT_BUDGET_FILE"
           # Per-service block classification (#2549): PENDING_BUILD / UNVERIFIED /
           # REGRESSION / UNKNOWN, plus the human reason. Read below by the left-behind
           # summary and by the scheduled-tick silencing rule.
@@ -879,16 +891,19 @@ jobs:
               deployable_list+=("$svc")
               continue
             fi
-            # --latest main: ask "can the latest version tagged 'main' go to sandbox?"
-            # _service-ci.yml publishes every version with tags:[$branch] so the broker
-            # index has a 'main'-tagged entry for each service's last main-branch build.
-            # --version $SHA would error ("No pacts or verifications") when path-scoped CI
-            # skipped this service on the triggering commit (ADR-0092).
-            # record-deployment (gitops-pr job) still pins the exact $GITHUB_SHA so the
-            # broker tracks what is actually deployed.
-            echo "==> can-i-deploy ${svc} (latest/main) → environment sandbox"
+            # WHICH version to ask about is decided by resolve-can-i-deploy-selector.sh from a
+            # broker probe (probe-pact-version.sh, which also does the bounded wait). Asking
+            # `--latest main` on a push routinely answers about the PREVIOUS build — see #3082
+            # and both scripts' headers. Keep this comment SHORT: an oversized `run:` makes the
+            # whole workflow unparseable (check-workflow-run-step-size.py).
+            vpresent="$(bash .github/scripts/probe-pact-version.sh "$svc" "$GITHUB_SHA")"
+            sel_line="$(PACT_VERSION_PRESENT="$vpresent" \
+              bash .github/scripts/resolve-can-i-deploy-selector.sh "$svc" "$GITHUB_SHA")"
+            read -ra CID_SELECTOR <<< "$(printf '%s' "$sel_line" | cut -f1)"
+            echo "==> can-i-deploy ${svc} (${CID_SELECTOR[*]}) → environment sandbox"
+            echo "    $(printf '%s' "$sel_line" | cut -f2)"
             cid_out=$("$CLI" can-i-deploy \
-                 --pacticipant "$svc" --latest main \
+                 --pacticipant "$svc" "${CID_SELECTOR[@]}" \
                  --to-environment sandbox \
                  --broker-base-url "$PACT_BROKER_URL" \
                  --broker-username "$PACT_BROKER_USERNAME" \
@@ -926,15 +941,10 @@ jobs:
                 # distinguish a queue delay from a regression (issue #2549). Probe the
                 # broker for a version of THIS commit, then classify (the classifier is
                 # unit-tested — .github/scripts/test-classify-can-i-deploy-block.sh).
-                vcode="$(curl -s -o /dev/null -w '%{http_code}' \
-                  -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
-                  "${PACT_BROKER_URL}/pacticipants/${svc}/versions/${GITHUB_SHA}" || echo 000)"
-                case "$vcode" in
-                  404) present=no ;;
-                  2??) present=yes ;;
-                  *)   present=unknown ;;
-                esac
-                cls_line="$(PACT_VERSION_PRESENT="$present" \
+                # Reuse the probe taken above: a second call could disagree if the version
+                # landed in between, and the label would then explain a block decided on
+                # other evidence.
+                cls_line="$(PACT_VERSION_PRESENT="$vpresent" \
                   bash .github/scripts/classify-can-i-deploy-block.sh "$svc" <<< "$cid_out")"
                 cls="$(cut -f1 <<< "$cls_line")"
                 cls_why="$(cut -f2- <<< "$cls_line")"

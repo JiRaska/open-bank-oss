@@ -20,8 +20,11 @@
 # this Loki with `trace_id`/`span_id`/`correlationId` lifted into structured
 # metadata.
 #
-# Codified into GitOps (ADR-0027). No root app-of-apps syncs gitops/apps yet, so
-# applied with `kubectl apply` until that is wired (separate follow-up).
+# Codified into GitOps (ADR-0027). The root app-of-apps (`root`, ArgoCD
+# Application over openbank-infra/gitops/apps, prune+selfHeal) syncs this file,
+# so a merge to main IS the deploy. A `kubectl apply` of an UNMERGED change here
+# is reverted within seconds — verified 2026-08-01, three applies in a row
+# reported `configured` and the live object never changed (#3156).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -142,7 +145,27 @@ spec:
               effect: NoSchedule
           persistence:
             enabled: true
-            size: 10Gi
+            # 10Gi → 30Gi (2026-08-02). The PVC hit 100% (9.73/9.75 GiB) and Loki
+            # entered a self-sustaining crashloop: no space to replay the WAL → it
+            # never started → nothing drained to S3 → the disk stayed full. 339
+            # restarts, and the platform had NO logs for seven days (last S3 index
+            # was index_20660 = 26 Jul; the whole bucket held 119 MB).
+            #
+            # This disk is not where chunks live — those go to S3 (storage.type
+            # above). It holds the WAL and the TSDB index scratch, and 10Gi was too
+            # little for that at 7d retention across ~120 pods.
+            #
+            # DEPLOY NOTE: volumeClaimTemplates is IMMUTABLE on a StatefulSet, so
+            # this change alone cannot resize the existing PVC and a plain sync is
+            # rejected. The live PVC was expanded in place first (gp3 has
+            # allowVolumeExpansion: true, online, no data loss); this commit makes
+            # it the declared state. To apply on a fresh cluster nothing special is
+            # needed; to reconcile THIS cluster the StatefulSet must be recreated
+            # with `kubectl delete sts loki --cascade=orphan` so pods and PVCs
+            # survive and ArgoCD rebuilds it from the new template.
+            #
+            # FinOps: +20Gi gp3 ≈ +$1.60/month.
+            size: 30Gi
             storageClass: gp3
           # 768Mi OOMKilled the SingleBinary loki (exit 137, crashloop) — TSDB +
           # ingester + querier + distributor in one process need real headroom, and

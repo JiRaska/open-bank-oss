@@ -1,5 +1,76 @@
 # Changelog
 
+## [0.83.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.82.1...admin-ui-v0.83.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** give the campaign list a lifecycle board instead of an inventory table ([#3287](https://github.com/JiRaska/open-bank-oss/issues/3287)) ([d98c6a3](https://github.com/JiRaska/open-bank-oss/commit/d98c6a34176dca188cfcc3520bb0fa96d902386c))
+* **admin-ui:** make the lending console a credit desk, not a table dump ([#3279](https://github.com/JiRaska/open-bank-oss/issues/3279)) ([118021d](https://github.com/JiRaska/open-bank-oss/commit/118021d8c2089a38cccf4f5c66b4eb976de15bf0))
+
+## [0.82.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.82.0...admin-ui-v0.82.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** stage the origination Kotlin so the image build can derive its graph ([#3286](https://github.com/JiRaska/open-bank-oss/issues/3286)) ([a585898](https://github.com/JiRaska/open-bank-oss/commit/a5858989fdeab10f447e41ad5dfba26934802f36))
+
+## [0.82.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.81.0...admin-ui-v0.82.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** draw the campaign journey as a flow, not a bar ([#3262](https://github.com/JiRaska/open-bank-oss/issues/3262)) ([9bbec95](https://github.com/JiRaska/open-bank-oss/commit/9bbec95dca6cff2f0c1c0abd95c0363facc3253b))
+
+## [0.81.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.80.2...admin-ui-v0.81.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** show a loan application's real path through the ADR-0211 lifecycle ([#3236](https://github.com/JiRaska/open-bank-oss/issues/3236)) ([451012a](https://github.com/JiRaska/open-bank-oss/commit/451012a65899851ecec56264b6258ba9b1c4e8c7))
+
+## [0.80.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.80.1...admin-ui-v0.80.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop tagging every GlitchTip event with a release nobody ships ([#3243](https://github.com/JiRaska/open-bank-oss/issues/3243)) ([8d321a8](https://github.com/JiRaska/open-bank-oss/commit/8d321a801c5cefa93f3f3a44bf2e77ab5aaf455a))
+
+## [0.80.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.80.0...admin-ui-v0.80.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** the campaign detail bundle handed journey the summary result ([#3213](https://github.com/JiRaska/open-bank-oss/issues/3213)) ([37a132a](https://github.com/JiRaska/open-bank-oss/commit/37a132a6fd568e292d9401f71b742f6515ef6d4b))
+
+## [0.80.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.79.0...admin-ui-v0.80.0) (2026-08-01)
+
+
+### Features
+
+* **admin-ui:** a four-eyes console for credit compliance pack activation ([#3190](https://github.com/JiRaska/open-bank-oss/issues/3190)) ([8642767](https://github.com/JiRaska/open-bank-oss/commit/86427672456506b28894536d47a0b6db20cbcd90))
+
+## [0.79.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.78.2...admin-ui-v0.79.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** show the journey as a funnel, not a table of enums ([#3191](https://github.com/JiRaska/open-bank-oss/issues/3191)) ([6bc3dda](https://github.com/JiRaska/open-bank-oss/commit/6bc3dda5b1ec1ab094335dfcf23e6c6337552aa4))
+
+## [0.78.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.78.1...admin-ui-v0.78.2) (2026-08-01)
+
+
+### Bug Fixes
+
+* **ci:** make the customer-app dossier check actually enforce, and refresh it ([#3179](https://github.com/JiRaska/open-bank-oss/issues/3179)) ([6bb6bdf](https://github.com/JiRaska/open-bank-oss/commit/6bb6bdfc9253302c51502c96c74a7766a0b94500))
+
+## [0.78.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.78.0...admin-ui-v0.78.1) (2026-08-01)
+
+
+### Security
+
+* **admin-ui:** hold the public demo account to least privilege in each tool, and deny it Alertmanager ([#3156](https://github.com/JiRaska/open-bank-oss/issues/3156)) ([408caf9](https://github.com/JiRaska/open-bank-oss/commit/408caf9351be7d183257d92a908cc1ba92b09c78)), closes [#3071](https://github.com/JiRaska/open-bank-oss/issues/3071)
+
 ## [0.78.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.77.0...admin-ui-v0.78.0) (2026-08-01)
 
 

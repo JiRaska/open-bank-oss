@@ -82,7 +82,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const { id } = await ctx.params
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
 
-  const [campaign, enrolments, sends, sendSummary] = await Promise.all([
+  const [campaign, enrolments, sends, sendSummary, journey] = await Promise.all([
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}`, null),
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/enrolments`, []),
     // First page only. Paging and filtering go through /api/campaigns/[id]/sends so turning a
@@ -92,6 +92,15 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     // rows on screen understates every campaign larger than one page, and that total is the number
     // an operator acts on.
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/sends/summary`, {}),
+    // The journey funnel: per-step SQL aggregates. Bundled with the first paint because the flow is
+    // the first thing on the screen, not something you scroll to.
+    //
+    // ORDER IS THE CONTRACT. This array is positional and the destructuring above names the
+    // positions; adding a read in the middle silently hands every later name someone else's result.
+    // That is how the journey slot came to hold the summary object: `funnel` was no longer an array,
+    // and the screen died on `.map` with the 404 on /journey never surfacing, because its state had
+    // landed under `sendSummary`.
+    read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/journey`, []),
   ])
 
   return NextResponse.json({
@@ -99,6 +108,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     enrolments: enrolments.data,
     sends: sends.data,
     sendSummary: sendSummary.data,
+    journey: journey.data,
     // Per-part state travels to the client: the send log is the part most likely to be
     // restricted, and an empty send log rendered as "nothing was suppressed" would be the
     // exact misreading this screen exists to prevent.
@@ -107,6 +117,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       enrolments: enrolments.state,
       sends: sends.state,
       sendSummary: sendSummary.state,
+      journey: journey.state,
     },
   })
 }

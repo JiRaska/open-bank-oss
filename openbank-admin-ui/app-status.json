@@ -9,10 +9,10 @@
     "owner": "customer-app team",
     "repo": "JiRaska/openbank-app"
   },
-  "asOf": "2026-06-08",
+  "asOf": "2026-07-29",
   "appRepo": "JiRaska/openbank-app",
   "derived": {
-    "version": "0.4.0",
+    "version": "0.12.0",
     "useFakeData": false,
     "edgeBaseUrl": "https://customer.open-bank.tech",
     "keycloakIssuer": "https://kc.open-bank.tech/realms/openbank-customers",
@@ -136,8 +136,8 @@
         "ADR-0066"
       ],
       "gap": {
-        "cs": "Kompletní Authorization Code + PKCE flow ve sdíleném AuthService (commonMain, unit-testováno): S256 challenge, state proti CSRF, OIDC nonce, výměna kódu, persistnce tokenů s expirací, proaktivní refresh (refresh_token) a RP-initiated logout. Platformy dodávají jen systémový prohlížeč (ASWebAuthenticationSession / Custom Tabs + redirect Activity). Zbývá: ověření na fyzickém zařízení (deeplink round-trip).",
-        "en": "Complete Authorization Code + PKCE flow in the shared AuthService (commonMain, unit-tested): S256 challenge, CSRF state, OIDC nonce, code exchange, token persistence with expiry, proactive refresh (refresh_token) and RP-initiated logout. Platforms contribute only the system browser (ASWebAuthenticationSession / Custom Tabs + redirect Activity). Remaining: on-device verification of the deeplink round-trip."
+        "cs": "Kompletní Authorization Code + PKCE flow ve sdíleném AuthService (commonMain, unit-testováno): S256 challenge, state proti CSRF, OIDC nonce, výměna kódu, persistnce tokenů s expirací, proaktivní refresh (refresh_token) a RP-initiated logout. P0 zpevnění je PŘIPRAVENÉ, ale ZATÍM NEAKTIVNÍ: claimed HTTPS app/universal link (https://open-bank.tech/app/oauth/callback) má hotové AASA i assetlinks.json, ale realm ho ještě neregistruje (open-bank-oss #2814 je otevřený) — živý authorize endpoint na něj vrací 400 invalid redirect_uri, takže app zatím používá privátní scheme. Přepnout až po merge #2814 a nasazení realmu.",
+        "en": "Complete Authorization Code + PKCE flow in the shared AuthService (commonMain, unit-tested): S256 challenge, CSRF state, OIDC nonce, code exchange, token persistence with expiry, proactive refresh (refresh_token) and RP-initiated logout. The P0 hardening is BUILT but NOT YET ACTIVE: the claimed HTTPS app/universal link (https://open-bank.tech/app/oauth/callback) has its AASA and assetlinks.json served, but the realm does not register it yet (open-bank-oss #2814 is still open) — the live authorize endpoint answers it with 400 invalid redirect_uri, so the app still uses the private scheme. Flip it once #2814 merges and the realm is deployed."
       },
       "derivedStatus": "live"
     },
@@ -155,8 +155,8 @@
         "ADR-0073"
       ],
       "gap": {
-        "cs": "Android: tokeny šifrované AES-256-GCM klíčem v AndroidKeyStore (StrongBox fallback) — už ne in-memory. iOS: tokeny v Keychain (WhenUnlockedThisDeviceOnly). Zbývající mezera: iOS PIN může degradovat na nešifrovaný NSUserDefaults, když selže Keychain bridge (zpevnění ADR-0073).",
-        "en": "Android: tokens encrypted with an AES-256-GCM key in AndroidKeyStore (StrongBox fallback) — no longer in-memory. iOS: tokens in the Keychain (WhenUnlockedThisDeviceOnly). Residual gap: the iOS PIN can degrade to unencrypted NSUserDefaults if the Keychain bridge fails (hardening tracked by ADR-0073)."
+        "cs": "Android: tokeny šifrované AES-256-GCM klíčem v AndroidKeyStore (StrongBox fallback). iOS: tokeny v Keychain (WhenUnlockedThisDeviceOnly) — P0 zpevnění: plaintext NSUserDefaults fallback pro tokeny i PIN odstraněn, úložiště je fail-closed (chyba Keychainu = konec relace, ne degradace), staré plaintext kopie se při prvním spuštění mažou.",
+        "en": "Android: tokens encrypted with an AES-256-GCM key in AndroidKeyStore (StrongBox fallback). iOS: tokens in the Keychain (WhenUnlockedThisDeviceOnly) — P0 hardening: the plaintext NSUserDefaults fallback for tokens and the PIN is removed, the store is fail-closed (Keychain failure = session ends, no downgrade), legacy plaintext copies are wiped on first launch."
       },
       "derivedStatus": "live"
     },
@@ -174,8 +174,8 @@
         "ADR-0021"
       ],
       "gap": {
-        "cs": "iOS: Secure Enclave (P-256, gated biometrikou). Android: P-256 v AndroidKeyStore (StrongBox/TEE), ECDSA podpis, export X.509 SPKI — už ne stub. Zbývá: per-signature biometrika (zatím per-key-creation, F2).",
-        "en": "iOS: Secure Enclave (P-256, biometric-gated). Android: P-256 in AndroidKeyStore (StrongBox/TEE), ECDSA signing, X.509 SPKI export — no longer a stub. Remaining: per-signature biometrics (currently per-key-creation, F2)."
+        "cs": "iOS: Secure Enclave (P-256, gated biometrikou). Android: P-256 v AndroidKeyStore (StrongBox/TEE), ECDSA podpis, export X.509 SPKI. P0 zpevnění: per-signature biometrika na obou platformách — Android klíč má setUserAuthenticationRequired s nulovým oknem, každý podpis vyžaduje čerstvý BiometricPrompt nad částkou/měnou/příjemcem (dynamic linking, RTS Art. 5); staré klíče bez auth požadavku jsou vyřazeny (v2 alias, jednorázová re-enrolace).",
+        "en": "iOS: Secure Enclave (P-256, biometric-gated). Android: P-256 in AndroidKeyStore (StrongBox/TEE), ECDSA signing, X.509 SPKI export. P0 hardening: per-signature biometrics on both platforms — the Android key requires user authentication with a zero validity window, every signature passes a fresh BiometricPrompt over amount/currency/payee (dynamic linking, RTS Art. 5); legacy keys without the auth requirement are retired (v2 alias, one-time re-enrolment)."
       },
       "derivedStatus": "live"
     },
@@ -257,6 +257,100 @@
       }
     },
     {
+      "id": "contract-gates",
+      "title": {
+        "cs": "Kontraktové brány edge ↔ app",
+        "en": "Edge ↔ app contract gates"
+      },
+      "lens": [
+        "technology",
+        "governance"
+      ],
+      "status": "live",
+      "adr": [
+        "ADR-0074"
+      ],
+      "gap": {
+        "cs": "Snapshot edge OpenAPI je 1.21.0 (35 schémat, 48 cest); EdgeContractTest kryje 14 DTO, EdgeRouteCoverageTest drží ratchet nad všemi 77 app-volánými routami (36 covered, 41 známých gapů — seznam se jen zmenšuje). PR gate (edge-contract-gate.yml) blokuje merge při driftu proti živému OpenAPI. Test odhalil reálný drift: phantom pole TxDto odstraněna, schémata Balance/Pagination opravena v open-bank-oss. Zbývá: dospecifikovat 41 rout na backendu a vygenerovat klienta z OpenAPI.",
+        "en": "The edge OpenAPI snapshot is 1.21.0 (35 schemas, 48 paths); EdgeContractTest covers 14 DTOs, EdgeRouteCoverageTest holds a ratchet over all 77 app-called routes (36 covered, 41 known gaps — the list only shrinks). A PR gate (edge-contract-gate.yml) blocks merges on drift against the live OpenAPI. The test caught real drift: phantom TxDto fields removed, Balance/Pagination schemas fixed in open-bank-oss. Remaining: spec the 41 routes on the backend and generate the client from OpenAPI."
+      }
+    },
+    {
+      "id": "fail-closed-reads",
+      "title": {
+        "cs": "Fail-closed čtení dat (DataResult)",
+        "en": "Fail-closed data reads (DataResult)"
+      },
+      "lens": [
+        "technology",
+        "governance"
+      ],
+      "status": "partial",
+      "adr": [
+        "ADR-0074"
+      ],
+      "gap": {
+        "cs": "Loans/Cards/SDD/StandingOrder/Consents/Disputes list API vracejí DataResult (Ok / Failed: UNAUTHORIZED/NETWORK/SERVER) místo spolknutí chyby do prázdného seznamu — „nemáte půjčky“ ≠ „banka je nedostupná“; každá obrazovka má poctivý error stav. Hard-401 hlásí API vrstva přes SessionGuard → forced re-auth. Zbývá: rozšířit DataResult na zbylé čtecí API (pockets, fees, instant payments, documents, notifications) a odstranit ~15 zbývajících error-swallow míst.",
+        "en": "Loans/Cards/SDD/StandingOrder/Consents/Disputes list APIs return DataResult (Ok / Failed: UNAUTHORIZED/NETWORK/SERVER) instead of swallowing errors into empty lists — \"no loans\" ≠ \"bank unreachable\"; every screen has an honest error state. Hard 401s are reported by the API layer via SessionGuard → forced re-auth. Remaining: extend DataResult to the other read APIs (pockets, fees, instant payments, documents, notifications) and remove the ~15 remaining error-swallow sites."
+      }
+    },
+    {
+      "id": "native-tests",
+      "title": {
+        "cs": "Nativní testy iOS v CI",
+        "en": "Native iOS tests in CI"
+      },
+      "lens": [
+        "technology"
+      ],
+      "status": "live",
+      "adr": [
+        "ADR-0075"
+      ],
+      "gap": {
+        "cs": "iOS unit testy se linkují a běží na simulátoru: :shared:downloadSentryCocoa stáhne verzově párovaný Sentry.xcframework (8.58.2 = SPM v project.yml) a test link dostane jeho slice + Swift back-compat lib dir. iosSimulatorArm64Test pro :shared i :composeApp je krok v app-build.yml (runner potřebuje dostupný iPhone simulátor).",
+        "en": "iOS unit tests link and run on the simulator: :shared:downloadSentryCocoa fetches the version-matched Sentry.xcframework (8.58.2 = the SPM pin in project.yml) and the test link gets its slice + the Swift back-compat lib dir. iosSimulatorArm64Test for :shared and :composeApp is a step in app-build.yml (the runner needs an available iPhone simulator)."
+      }
+    },
+    {
+      "id": "security-pipeline",
+      "title": {
+        "cs": "Bezpečnostní CI pipeline",
+        "en": "Security CI pipeline"
+      },
+      "lens": [
+        "security",
+        "governance"
+      ],
+      "status": "live",
+      "adr": [
+        "ADR-0066"
+      ],
+      "gap": {
+        "cs": "app-security.yml: dependency CVE gate (High+ blokuje merge), gitleaks secret scan (PR + týdenní full-history), explicitní pinning/auth/contract unit gate. MoneyPathChaosTest hlídá money-path invarianty (idempotence, žádné tiché retry). Zbývá P2: MobSF/MASTG binární scan store artefaktů a MITM pinning test přes proxy.",
+        "en": "app-security.yml: dependency CVE gate (High+ blocks merges), gitleaks secret scan (per-PR + weekly full-history), explicit pinning/auth/contract unit gate. MoneyPathChaosTest guards money-path invariants (idempotency, no silent retries). Remaining P2: MobSF/MASTG binary scanning of store artifacts and a MITM pinning test via proxy."
+      }
+    },
+    {
+      "id": "accessibility",
+      "title": {
+        "cs": "Přístupnost (WCAG 2.2 AA)",
+        "en": "Accessibility (WCAG 2.2 AA)"
+      },
+      "lens": [
+        "technology",
+        "governance"
+      ],
+      "status": "partial",
+      "adr": [
+        "ADR-0074"
+      ],
+      "gap": {
+        "cs": "Zahájeno u kritických flow: PIN klávesnice (číslice/delete/biometrika s contentDescription + Button rolí), stav PIN teček („N z 6 číslic“), hold-to-confirm tlačítko s semantics. Zbývá: program přes všech 42 obrazovek — TalkBack/VoiceOver průchod kritickými cestami, Dynamic Type, kontrasty, focus order, touch targets — cíl WCAG 2.2 AA.",
+        "en": "Started with the critical flows: the PIN pad (digits/delete/biometrics with contentDescription + Button role), the PIN dots state (\"N of 6 digits\"), the hold-to-confirm button semantics. Remaining: a program across all 42 screens — TalkBack/VoiceOver walkthroughs of critical paths, Dynamic Type, contrast, focus order, touch targets — targeting WCAG 2.2 AA."
+      }
+    },
+    {
       "id": "dossier",
       "title": {
         "cs": "Living dossier (plán vs realita)",
@@ -276,10 +370,10 @@
     }
   ],
   "summary": {
-    "total": 13,
+    "total": 18,
     "byStatus": {
-      "live": 10,
-      "partial": 2,
+      "live": 13,
+      "partial": 4,
       "planned": 1
     },
     "decisionMissing": []

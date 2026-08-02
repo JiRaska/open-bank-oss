@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.6.0...control-liveness-sentinel-v0.6.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **liveness-sentinel:** the assert was right — the prompt never said whether refusing may quote ([#3245](https://github.com/JiRaska/open-bank-oss/issues/3245)) ([29ed626](https://github.com/JiRaska/open-bank-oss/commit/29ed6263a230c685edf6d05a753534a7f7163762))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.5.2...control-liveness-sentinel-v0.6.0) (2026-08-01)
 
 

@@ -25,7 +25,10 @@
 #       python3 .github/scripts/run-gates.py --list
 #       python3 .github/scripts/run-gates.py --group kotlin
 #       python3 .github/scripts/run-gates.py --only domain-purity-gate-hexagonal-invariant
-#       python3 .github/scripts/run-gates.py --selftest-only        # falsify every gate
+#       python3 .github/scripts/run-gates.py --all                  # every gate + its self-test
+#       python3 .github/scripts/run-gates.py --self-test            # falsify the RUNNER itself
+#   (there is no --selftest-only: a gate's self-test always runs immediately before that gate,
+#    so `--all` is what falsifies every gate.)
 #
 # THE CONTRACT — read this before adding an entry
 #   id          stable slug, unique across the file. Used by --only and in the run log.
@@ -156,6 +159,17 @@ gates:
   # PyYAML is not stdlib: try multiple install paths for portability across
   # macOS (system python3 without pip, Homebrew pip3) and Linux ARC runners
   # (pip/pip3 not in PATH). Fall back to checking if pyyaml is already present.
+  - id: agent-virtual-keys
+    name: every agent authenticates with its OWN LiteLLM virtual key, not the shared master key
+    group: gitops
+    mode: enforced
+    run: |
+      # Falsified in both directions before it was wired in: 4 findings against the
+      # pre-fix tree, 0 after, plus 7 self-test cases covering the exemption and the
+      # near-misses. A gate that has only ever passed is unfalsified.
+      python3 .github/scripts/check-agent-virtual-keys.py --self-test
+      python3 .github/scripts/check-agent-virtual-keys.py --enforce
+
   - id: gen-network-policies-drift-gate
     name: "gen-network-policies drift gate (ADR-0081, issue #854)"
     group: gitops
@@ -236,6 +250,31 @@ gates:
   # YAML validation, ArgoCD sync and Kyverno admission alike — the pod then sits in
   # CreateContainerConfigError forever with no signal but `kubectl describe`. vop-service
   # burned an hour on exactly this (#1232) right after #1229 fixed its ALL_SERVICES gap.
+  # issue #2929 — four services mint an OIDC client_credentials token at startup, and the client
+  # secret they read was never provisioned. The three halves of the wiring live in three separate
+  # artifacts (the service's config names a secret, an ExternalSecret must create it, and the
+  # Keycloak realm must define the client), so nothing compared them and each looked fine alone.
+  # All three are committed, so this needs no cluster access.
+  #
+  # --selftest runs first on purpose: a gate whose failure path has never executed is unfalsified,
+  # and this one's red is the only thing standing between a missing secret and a service that
+  # authenticates as nobody.
+  - id: oidc-client-secret-wiring
+    name: "OIDC client secret wiring (issue #2929, enforced)"
+    group: gitops
+    mode: enforced
+    # In the `selftest:` field, not folded into `run:`. Chaining them inside `run:` still executes
+    # the harness, but it gives up the two things the field buys: the runner no longer SKIPS the
+    # gate when the self-test verdict is wrong (a gate whose falsification is broken would still
+    # report a verdict), and `selftest_expect` has nothing to attach to. It also stops this
+    # manifest being able to answer "which gates are falsifiable". Default
+    # `selftest_expect: pass`: the command is the checker's own harness, which exits 0 when it has
+    # proved the gate's red is reachable.
+    selftest: |
+      python3 .github/scripts/check-oidc-client-secret-wiring.py --selftest
+    run: |
+      python3 .github/scripts/check-oidc-client-secret-wiring.py --enforce
+
   - id: gitops-ref-integrity-guard
     name: "gitops ref-integrity guard (referenced Secret/ConfigMap => declared)"
     group: gitops
@@ -407,6 +446,33 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/test-classify-can-i-deploy-block.sh
+
+  # can-i-deploy version-selector unit test (#3082). The classifier above labels WHY a block
+  # happened; this decides WHICH VERSION the gate asks about at all, and getting that wrong is
+  # quieter than any block: `--latest main` on a push routinely answers about the PREVIOUS
+  # build, so a green can be inherited from a commit that is not the one being deployed.
+  - id: can-i-deploy-version-selector-unit-test
+    name: "can-i-deploy version selector unit test"
+    group: supplychain
+    mode: enforced
+    run: |
+      bash .github/scripts/test-resolve-can-i-deploy-selector.sh
+
+  # Workflow `run:` step size (#3082). GitHub rejects an oversized run script by making the
+  # WHOLE workflow unparseable — zero jobs, no error message, every contributor's runs of that
+  # file dead until someone reverts. It happened to auto-deploy.yml (#3135 -> #3139) and NOTHING
+  # else here sees it: PyYAML, a strict duplicate-key loader, actionlint and yamllint were all
+  # clean on the very file GitHub refused to read. Measured against GitHub by bisecting pushes to
+  # a throwaway branch: 20054 chars accepted, 20654 rejected; not a whole-file limit (a 95295-byte
+  # control parsed fine while no single step crossed).
+  - id: workflow-run-step-size
+    name: "workflow run-step size"
+    group: lint
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-workflow-run-step-size.py --self-test
+    run: |
+      python3 .github/scripts/check-workflow-run-step-size.py
 
   # co-deploy set derivation unit test (issue #1985). The classifier above says WHAT KIND
   # of block a service has; this one says whether the block can be resolved by deploying
@@ -817,6 +883,23 @@ gates:
 
   # ==== api ===================================================================
 
+  # The verification reconciler (.github/scripts/pact-reconcile-verifications.py)
+  # dispatches verify-provider.yml with the PACTICIPANT NAME as its `service` input,
+  # which only works because every pacticipant name is exactly a module directory —
+  # true for all 55 today, and previously held together by nothing. A drifted name
+  # would keep dispatching, just at a service that does not exist: the run fails
+  # inside the build and the pact stays unverified, which looks identical to the
+  # strand the reconciler was built to remove. Reads the committed pacts, so no
+  # broker and no credentials.
+  - id: pacticipant-matches-module
+    name: "pacticipant name is a module directory (Pact webhook contract)"
+    group: api
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-pacticipant-matches-module.py --self-test
+    run: |
+      python3 .github/scripts/check-pacticipant-matches-module.py
+
   - id: pact-provider-replay-coverage
     name: "Pact provider-replay coverage (issue #2338, enforced)"
     group: api
@@ -862,6 +945,13 @@ gates:
     env:
       OASDIFF_VERSION: "1.22.0"
       OASDIFF_SHA256: "8b972accaf49f984cf40702af8b29360126ac9436594ccf6ac1ae662209a5fe6"
+    # Falsifies the URL-major scan, which had no self-test and shipped a false positive for months:
+    # it read /api/v{N} out of RAW file text, so a comment explaining the URL-major rule read as an
+    # endpoint implementing it and failed a service whose every @Path says /api/v1 (#3119). Needs no
+    # oasdiff — it exercises url_majors / own_api_majors directly, including against the two real
+    # services (psd2, customer-edge) whose distinction a naive fix breaks.
+    selftest: |
+      python3 .github/scripts/check-api-contract.py --self-test
     run: |
       set -euo pipefail
       curl -fsSL -o /tmp/oasdiff.tar.gz \
@@ -928,6 +1018,47 @@ gates:
       python3 .github/scripts/check-kafka-topics-exist.py --selftest
     run: |
       python3 .github/scripts/check-kafka-topics-exist.py --enforce
+
+  # Five money-path services could not start from their committed configuration: each declared
+  # only a REACTIVE datasource URL, so the default Agroal (JDBC) datasource Flyway migrates was
+  # never configured and the boot died with "Unable to find datasource '<default>'". They ran in
+  # the cluster only because the gitops env supplied QUARKUS_DATASOURCE_JDBC_URL; `quarkusDev`
+  # and the fuzz harness (#3039) got the failure. Three carried a `quarkus.flyway.datasource:`
+  # MAPPING that reads as the fix and is not — that key names which datasource to use, it does
+  # not define one. Decidable from one committed file, so no boot and no cluster.
+  - id: flyway-default-datasource
+    name: "Flyway default datasource (issue #3080, enforced)"
+    group: data
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-flyway-default-datasource.py --selftest
+    run: |
+      python3 .github/scripts/check-flyway-default-datasource.py --enforce
+  # A service that INJECTS ObjectStorePort and resolves to the Postgres backend must create the
+  # table it reads (#3081). Not the 36-way "entity visible but unused" gap — that is by design and
+  # inert under `database.generation: none`; this is the pairing that fails at first use, with a
+  # runtime 500 and nothing before it to say so.
+  - id: object-store-blobs-migration
+    name: "object store blobs migration (issue #3081, enforced)"
+    group: data
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-object-store-blobs-migration.py --selftest
+    run: |
+      python3 .github/scripts/check-object-store-blobs-migration.py --enforce
+
+  # auto-deploy derives its libs fan-out from the `project(":openbank-libs-*")` declarations
+  # (#2983). A hardcoded path regex missed the ADR-0122 siblings entirely, so a libs-temporal fix
+  # rebuilt zero consumers and left services running pre-fix images while their pods read green.
+  # The self-test pins the declaration matcher and both path matchers in both directions.
+  - id: libs-change-dependents
+    name: "libs change fan-out is derived (issue #2983, enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      bash .github/scripts/libs-change-dependents.sh --selftest
+    run: |
+      bash .github/scripts/libs-change-dependents.sh --selftest
 
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
