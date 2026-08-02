@@ -32,6 +32,22 @@ spec:
   authorization:
     type: simple
     acls:
+      # It CONSUMES this topic too and had no Read grant (#2598 → #3271). The effective consumer
+      # group is `openbank-interest-service`: application.yaml deliberately omits `group.id` as a YAML key
+      # (SmallRye's dotted-key footgun, #686/#703), so the fallback — quarkus.application.name —
+      # is what Kafka sees. Granting any other name here would deny just as silently.
+      - resource:
+          type: topic
+          name: openbank.interest.accrual.event
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-interest-service
+          patternType: literal
+        operations: [Read]
+        host: "*"
       - resource:
           type: topic
           name: openbank.interest.accrual.event

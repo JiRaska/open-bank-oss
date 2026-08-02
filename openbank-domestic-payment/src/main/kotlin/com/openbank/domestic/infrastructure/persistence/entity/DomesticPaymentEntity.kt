@@ -81,7 +81,10 @@ class DomesticPaymentEntity : PanacheEntity() {
     @Column(name = "reject_reason")
     var rejectReason: String? = null
 
-    @Column(name = "reject_detail")
+    // V1 declares this TEXT; without columnDefinition Hibernate maps a String to varchar(255) and
+    // schema validation reports "wrong column type encountered in column [reject_detail]" (#3081).
+    // The migration is applied, so its checksum is frozen — the entity is what moves.
+    @Column(name = "reject_detail", columnDefinition = "text")
     var rejectDetail: String? = null
 
     @Column(name = "submitted_at")

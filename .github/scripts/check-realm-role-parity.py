@@ -72,8 +72,23 @@ SIBLING_GATE = ".github/scripts/check-roles-allowed-realm.py"
 
 
 def keycloak_builtins(realm: str) -> set:
-    """Roles the Keycloak server creates itself; never declared in a template."""
-    return {"offline_access", "uma_authorization", f"default-roles-{realm.lower()}"}
+    """Roles the Keycloak server creates itself; never declared in a template.
+
+    `uma_protection` is CLIENT-scoped, unlike the other three: Keycloak adds it to any
+    client that enables authorization services, including our own. It only became
+    reachable here once the capture started including client roles (the realm-roles-only
+    capture reported every client role as declared-not-live — that is what kept
+    `mcp-caller` red). Keycloak's own clients — realm-management, account,
+    account-console, broker — are excluded at capture time by clientId instead of by
+    role name, so that a role we define that happens to share a built-in's name is still
+    compared rather than silently skipped.
+    """
+    return {
+        "offline_access",
+        "uma_authorization",
+        "uma_protection",
+        f"default-roles-{realm.lower()}",
+    }
 
 
 def template_roles(root: pathlib.Path) -> dict:

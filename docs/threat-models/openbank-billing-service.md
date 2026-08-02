@@ -123,6 +123,17 @@ Trust boundaries: every inbound/outbound hop is service↔service over mTLS with
   assessed fee with that idempotencyKey", or 409 "fee exists but was never POSTED — nothing to
   reverse") rather than fabricating a compensating journal against nothing, or against a
   waived/still-pending/failed fee that never moved money in the first place.
+- **Unvalidated input reaching persistence as a 500, and one currency stored under two
+  spellings** → the fee endpoints validated only blankness, so the column definitions in
+  `V1__init_billing.sql` (`currency CHAR(3)`, `cycle_id`/`account_id VARCHAR(64)`) were the only
+  thing asserting the shape of caller input; Postgres' rejection is unmapped, so a client error
+  surfaced as a 500 (found by the authenticated fuzz run, #3038). Two consequences beyond the
+  status code: the error class leaked that the failure came from the database, and a currency
+  differing only in case would have been a *distinct* value in both the column and the
+  `(cycleId, accountId, currency)` idempotency key — a second assessment of the same fee under a
+  second spelling, which the double-charge control above does not catch because the keys differ.
+  Both endpoints now parse currency through `CurrencyCode` (validating + case-normalising) and
+  bound the ids at the column width before anything is persisted.
 
 ## 5. Residual risks / assumptions
 
@@ -176,3 +187,7 @@ Trust boundaries: every inbound/outbound hop is service↔service over mTLS with
   No new trust boundary (same billing→account-service OIDC M2M client as the existing account
   read). Double-gated opt-in (`discovery-enabled` on top of `enabled`, both default off); CSV
   override wins; fail-closed page reads. Rewrote the §5 "no discovery port" residual accordingly.
+- 2026-08-01 — input validation on `POST /api/v1/fees/assess` and `/fees/post` (#3038). No trust
+  boundary change: same callers, same authn/authz, same downstream calls. The change is that
+  caller input is now validated *before* persistence rather than by the schema, closing a 500 and
+  the case-variant idempotency-key gap described in §4.

@@ -9,6 +9,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { serverSvcUrl } from '@/lib/services/bff'
+import { resolvePartyNames } from '@/lib/campaigns/party-names'
 
 export const dynamic = 'force-dynamic'
 
@@ -82,7 +83,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const { id } = await ctx.params
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
 
-  const [campaign, enrolments, sends, sendSummary] = await Promise.all([
+  const [campaign, enrolments, sends, sendSummary, journey] = await Promise.all([
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}`, null),
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/enrolments`, []),
     // First page only. Paging and filtering go through /api/campaigns/[id]/sends so turning a
@@ -92,13 +93,37 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     // rows on screen understates every campaign larger than one page, and that total is the number
     // an operator acts on.
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/sends/summary`, {}),
+    // The journey funnel: per-step SQL aggregates. Bundled with the first paint because the flow is
+    // the first thing on the screen, not something you scroll to.
+    //
+    // ORDER IS THE CONTRACT. This array is positional and the destructuring above names the
+    // positions; adding a read in the middle silently hands every later name someone else's result.
+    // That is how the journey slot came to hold the summary object: `funnel` was no longer an array,
+    // and the screen died on `.map` with the 404 on /journey never surfacing, because its state had
+    // landed under `sendSummary`.
+    read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/journey`, []),
+  ])
+
+  // Names for every party on this screen, resolved once and deduplicated. Done here rather than in
+  // the component so the client never fans out one request per row, and so an unresolved name
+  // degrades to the id instead of blanking the screen (lib/campaigns/party-names).
+  const enrolmentRows = (Array.isArray(enrolments.data) ? enrolments.data : []) as Array<{ partyId?: string }>
+  // Array.isArray, not `?? []`: a degraded `sends` part can carry a non-array `items`, and `.map`
+  // on it throws — the exact defect the bundle test exists for, reproduced here in new code.
+  const rawSendItems = (sends.data as { items?: unknown } | null)?.items
+  const sendRows = (Array.isArray(rawSendItems) ? rawSendItems : []) as Array<{ partyId?: string }>
+  const partyNames = await resolvePartyNames(headers, [
+    ...enrolmentRows.map(e => e.partyId ?? ''),
+    ...sendRows.map(r => r.partyId ?? ''),
   ])
 
   return NextResponse.json({
+    partyNames,
     campaign: campaign.data,
     enrolments: enrolments.data,
     sends: sends.data,
     sendSummary: sendSummary.data,
+    journey: journey.data,
     // Per-part state travels to the client: the send log is the part most likely to be
     // restricted, and an empty send log rendered as "nothing was suppressed" would be the
     // exact misreading this screen exists to prevent.
@@ -107,6 +132,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       enrolments: enrolments.state,
       sends: sends.state,
       sendSummary: sendSummary.state,
+      journey: journey.state,
     },
   })
 }

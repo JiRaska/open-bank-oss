@@ -7,6 +7,9 @@ package com.openbank.ledger.infrastructure.rest
 import com.openbank.ledger.application.usecase.AccountingDayNotFoundException
 import com.openbank.ledger.application.usecase.ClosedAccountingDayException
 import com.openbank.ledger.application.usecase.ClosedFiscalPeriodException
+import com.openbank.ledger.application.usecase.ClosedPeriodConflictException
+import com.openbank.ledger.application.usecase.ClosedPeriodNotFoundException
+import com.openbank.ledger.application.usecase.FrozenPeriodException
 import com.openbank.ledger.application.usecase.GlAccountValidationException
 import com.openbank.ledger.application.usecase.JournalNotFoundException
 import com.openbank.ledger.application.usecase.JournalReversalConflictException
@@ -125,6 +128,37 @@ class AccountingDayNotFoundExceptionMapper : ExceptionMapper<AccountingDayNotFou
 class ClosedAccountingDayExceptionMapper : ExceptionMapper<ClosedAccountingDayException> {
     override fun toResponse(exception: ClosedAccountingDayException): Response = Response.status(CONFLICT)
         .entity(mapOf("error" to (exception.message ?: "Accounting day is closed")))
+        .type(MediaType.APPLICATION_JSON)
+        .build()
+}
+
+// 404 (ADR-0096 D1): no statutory close record for the requested period.
+@Provider
+class ClosedPeriodNotFoundExceptionMapper : ExceptionMapper<ClosedPeriodNotFoundException> {
+    override fun toResponse(exception: ClosedPeriodNotFoundException): Response = Response.status(NOT_FOUND)
+        .entity(mapOf("error" to (exception.message ?: "Closed period not found")))
+        .type(MediaType.APPLICATION_JSON)
+        .build()
+}
+
+// 409 fail-closed (ADR-0096 D1): frozen immutability, hash drift at freeze, unbalanced GL,
+// or an attempt to close a period that has not ended.
+@Provider
+class ClosedPeriodConflictExceptionMapper : ExceptionMapper<ClosedPeriodConflictException> {
+    override fun toResponse(exception: ClosedPeriodConflictException): Response = Response.status(CONFLICT)
+        .entity(mapOf("error" to (exception.message ?: "Conflict")))
+        .type(MediaType.APPLICATION_JSON)
+        .build()
+}
+
+// 409 period lock (ADR-0096 D1): a posting targeted a FROZEN statutory period. A third distinct
+// 409 type alongside ClosedAccountingDayException (day) and ClosedFiscalPeriodException (year) --
+// same status, different granularity and different remedy, and the caller can only tell them
+// apart if the exception does.
+@Provider
+class FrozenPeriodExceptionMapper : ExceptionMapper<FrozenPeriodException> {
+    override fun toResponse(exception: FrozenPeriodException): Response = Response.status(CONFLICT)
+        .entity(mapOf("error" to (exception.message ?: "Accounting period is frozen")))
         .type(MediaType.APPLICATION_JSON)
         .build()
 }

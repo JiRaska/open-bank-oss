@@ -25,7 +25,10 @@
 #       python3 .github/scripts/run-gates.py --list
 #       python3 .github/scripts/run-gates.py --group kotlin
 #       python3 .github/scripts/run-gates.py --only domain-purity-gate-hexagonal-invariant
-#       python3 .github/scripts/run-gates.py --selftest-only        # falsify every gate
+#       python3 .github/scripts/run-gates.py --all                  # every gate + its self-test
+#       python3 .github/scripts/run-gates.py --self-test            # falsify the RUNNER itself
+#   (there is no --selftest-only: a gate's self-test always runs immediately before that gate,
+#    so `--all` is what falsifies every gate.)
 #
 # THE CONTRACT — read this before adding an entry
 #   id          stable slug, unique across the file. Used by --only and in the run log.
@@ -156,6 +159,27 @@ gates:
   # PyYAML is not stdlib: try multiple install paths for portability across
   # macOS (system python3 without pip, Homebrew pip3) and Linux ARC runners
   # (pip/pip3 not in PATH). Fall back to checking if pyyaml is already present.
+  - id: litellm-model-costs
+    name: every gateway model declares a per-token price (an unpriced model costs $0 and voids every budget)
+    group: gitops
+    mode: enforced
+    run: |
+      # Falsified both ways before wiring in: 4 findings against the unpriced tree, 0 after,
+      # 9 self-test cases including an explicit zero (which must NOT be treated as a price).
+      python3 .github/scripts/check-litellm-model-costs.py --self-test
+      python3 .github/scripts/check-litellm-model-costs.py --enforce
+
+  - id: agent-virtual-keys
+    name: every agent authenticates with its OWN LiteLLM virtual key, not the shared master key
+    group: gitops
+    mode: enforced
+    run: |
+      # Falsified in both directions before it was wired in: 4 findings against the
+      # pre-fix tree, 0 after, plus 7 self-test cases covering the exemption and the
+      # near-misses. A gate that has only ever passed is unfalsified.
+      python3 .github/scripts/check-agent-virtual-keys.py --self-test
+      python3 .github/scripts/check-agent-virtual-keys.py --enforce
+
   - id: gen-network-policies-drift-gate
     name: "gen-network-policies drift gate (ADR-0081, issue #854)"
     group: gitops
@@ -236,6 +260,31 @@ gates:
   # YAML validation, ArgoCD sync and Kyverno admission alike — the pod then sits in
   # CreateContainerConfigError forever with no signal but `kubectl describe`. vop-service
   # burned an hour on exactly this (#1232) right after #1229 fixed its ALL_SERVICES gap.
+  # issue #2929 — four services mint an OIDC client_credentials token at startup, and the client
+  # secret they read was never provisioned. The three halves of the wiring live in three separate
+  # artifacts (the service's config names a secret, an ExternalSecret must create it, and the
+  # Keycloak realm must define the client), so nothing compared them and each looked fine alone.
+  # All three are committed, so this needs no cluster access.
+  #
+  # --selftest runs first on purpose: a gate whose failure path has never executed is unfalsified,
+  # and this one's red is the only thing standing between a missing secret and a service that
+  # authenticates as nobody.
+  - id: oidc-client-secret-wiring
+    name: "OIDC client secret wiring (issue #2929, enforced)"
+    group: gitops
+    mode: enforced
+    # In the `selftest:` field, not folded into `run:`. Chaining them inside `run:` still executes
+    # the harness, but it gives up the two things the field buys: the runner no longer SKIPS the
+    # gate when the self-test verdict is wrong (a gate whose falsification is broken would still
+    # report a verdict), and `selftest_expect` has nothing to attach to. It also stops this
+    # manifest being able to answer "which gates are falsifiable". Default
+    # `selftest_expect: pass`: the command is the checker's own harness, which exits 0 when it has
+    # proved the gate's red is reachable.
+    selftest: |
+      python3 .github/scripts/check-oidc-client-secret-wiring.py --selftest
+    run: |
+      python3 .github/scripts/check-oidc-client-secret-wiring.py --enforce
+
   - id: gitops-ref-integrity-guard
     name: "gitops ref-integrity guard (referenced Secret/ConfigMap => declared)"
     group: gitops
@@ -576,12 +625,15 @@ gates:
   # and re-passing.
   #
   # ENFORCED (was continue-on-error, #2392). The `continue-on-error` was carrying a different
-  # meaning than it looked like: the runner already treats a charter with no recorded run as
-  # ::warning and exits 0 — 4 of the 5 suites are in that state today — so the flag was only
-  # ever suppressing a REAL replay failure (a drifted prompt hash, a model/version move, a pass
-  # rate under the baselines.json floor). That is the one outcome the gate exists to surface.
-  # Remaining graduation step is --require-recordings, once every suite has a committed run;
-  # that is about coverage, not about whether a failure blocks.
+  # meaning than it looked like: the runner already treated a charter with no recorded run as
+  # ::warning and exited 0, so the flag was only suppressing a REAL replay failure (a drifted
+  # prompt hash, a model/version move, a pass rate under the baselines.json floor). That is the
+  # one outcome the gate exists to surface.
+  #
+  # GRADUATED to full ratchet-on-replay coverage (#1918). Every suite now has a committed
+  # recording in evals/recordings/, backlog.yaml is empty, and CI runs with --require-recordings.
+  # The ratchet is therefore blocking for every charter with a declared suite: a new or changed
+  # suite cannot land unrecorded, and a prompt/model promotion cannot land stale or regressed.
   - id: evals-gate-replay
     name: "evals gate replay (ADR-0148, enforced)"
     group: registry
@@ -589,7 +641,7 @@ gates:
     selftest: |
       python3 .github/scripts/run-evals.py --self-test
     run: |
-      python3 .github/scripts/run-evals.py
+      python3 .github/scripts/run-evals.py --require-recordings
 
   # ADR-0160 mechanism 2 / rules.yaml: change_requirements.lineage_code_audit. Fleet-wide scan
   # (not diff-scoped): every governance.yaml lineage edge — downstream AND, since #2315,
@@ -680,6 +732,23 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/check-eu-ai-act.sh
+
+  # The other half of the same claim. The gate above proves the GENERATED document matches
+  # ml-systems.yaml; nothing proved ml-systems.yaml matches the CODE. So the day model inference
+  # lands in the credit path, `credit-decisioning-engine` stays `deployed: false` in a YAML file,
+  # the generator keeps rendering "no high-risk system exists", the drift gate above stays green —
+  # and the platform runs an undeclared Annex III(5)(b) system.
+  #
+  # The whole EU AI Act position rests on the shipped credit engine being ADR-0213's deterministic
+  # decision tables rather than a model. That is true today and nothing was keeping it true.
+  # ENFORCED for the same reason as its sibling: over a generated claim, advisory means "the
+  # document does not match reality", and there is no judgement left to exercise.
+  - id: ai-act-high-risk-inventory-vs-code
+    name: "EU AI Act Annex III inventory vs. code (ADR-0142/0216, enforced)"
+    group: registry
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-ai-act-high-risk-inventory.py
 
   # ==== kotlin ================================================================
 
@@ -844,6 +913,23 @@ gates:
 
   # ==== api ===================================================================
 
+  # The verification reconciler (.github/scripts/pact-reconcile-verifications.py)
+  # dispatches verify-provider.yml with the PACTICIPANT NAME as its `service` input,
+  # which only works because every pacticipant name is exactly a module directory —
+  # true for all 55 today, and previously held together by nothing. A drifted name
+  # would keep dispatching, just at a service that does not exist: the run fails
+  # inside the build and the pact stays unverified, which looks identical to the
+  # strand the reconciler was built to remove. Reads the committed pacts, so no
+  # broker and no credentials.
+  - id: pacticipant-matches-module
+    name: "pacticipant name is a module directory (Pact webhook contract)"
+    group: api
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-pacticipant-matches-module.py --self-test
+    run: |
+      python3 .github/scripts/check-pacticipant-matches-module.py
+
   - id: pact-provider-replay-coverage
     name: "Pact provider-replay coverage (issue #2338, enforced)"
     group: api
@@ -963,6 +1049,47 @@ gates:
     run: |
       python3 .github/scripts/check-kafka-topics-exist.py --enforce
 
+  # Five money-path services could not start from their committed configuration: each declared
+  # only a REACTIVE datasource URL, so the default Agroal (JDBC) datasource Flyway migrates was
+  # never configured and the boot died with "Unable to find datasource '<default>'". They ran in
+  # the cluster only because the gitops env supplied QUARKUS_DATASOURCE_JDBC_URL; `quarkusDev`
+  # and the fuzz harness (#3039) got the failure. Three carried a `quarkus.flyway.datasource:`
+  # MAPPING that reads as the fix and is not — that key names which datasource to use, it does
+  # not define one. Decidable from one committed file, so no boot and no cluster.
+  - id: flyway-default-datasource
+    name: "Flyway default datasource (issue #3080, enforced)"
+    group: data
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-flyway-default-datasource.py --selftest
+    run: |
+      python3 .github/scripts/check-flyway-default-datasource.py --enforce
+  # A service that INJECTS ObjectStorePort and resolves to the Postgres backend must create the
+  # table it reads (#3081). Not the 36-way "entity visible but unused" gap — that is by design and
+  # inert under `database.generation: none`; this is the pairing that fails at first use, with a
+  # runtime 500 and nothing before it to say so.
+  - id: object-store-blobs-migration
+    name: "object store blobs migration (issue #3081, enforced)"
+    group: data
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-object-store-blobs-migration.py --selftest
+    run: |
+      python3 .github/scripts/check-object-store-blobs-migration.py --enforce
+
+  # auto-deploy derives its libs fan-out from the `project(":openbank-libs-*")` declarations
+  # (#2983). A hardcoded path regex missed the ADR-0122 siblings entirely, so a libs-temporal fix
+  # rebuilt zero consumers and left services running pre-fix images while their pods read green.
+  # The self-test pins the declaration matcher and both path matchers in both directions.
+  - id: libs-change-dependents
+    name: "libs change fan-out is derived (issue #2983, enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      bash .github/scripts/libs-change-dependents.sh --selftest
+    run: |
+      bash .github/scripts/libs-change-dependents.sh --selftest
+
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
     group: data
@@ -1040,6 +1167,27 @@ gates:
   # versioned event (-vN topic, ADR-0006), never an in-place edit.
   # ADVISORY until the rules.yaml schema-compat gate graduates
   # (target 2026-09-15, ADR-0144) — flip = --enforce. stdlib-only.
+  # ADR-0006 ratchet (#1916). Measured: 36 producer topics, 71 eventType literals, ZERO .avsc,
+  # zero asyncapi.yaml, no openbank-contracts/ directory. The Apicurio registry the ADR calls for
+  # is deployed and running — the runtime half exists, the contract half does not, and every Kafka
+  # event on this platform is raw unversioned JSON.
+  #
+  # Distinct from `schema-compat-gate` above, which checks that an event class does not change
+  # incompatibly. Nothing checked whether an event has a declared contract at all.
+  #
+  # Closing that is a multi-PR programme (#1916 sets the order). This does not attempt it. It
+  # freezes the debt: what exists is grandfathered in .github/event-contract-baseline.txt and
+  # nothing NEW joins it — the same baseline-ratchet used for domain purity and detekt. The gap was
+  # growing; two new services added unversioned topics in one week.
+  #
+  # The baseline is checked in BOTH directions, so a line cannot outlive the debt it records.
+  - id: event-contract-coverage-ratchet
+    name: "event-contract coverage ratchet (ADR-0006, enforced)"
+    group: data
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-event-contract-coverage.py
+
   - id: schema-compat-gate
     name: "schema-compat gate — event backward-compatibility (event_change, advisory)"
     group: data

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.53.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.52.1...customer-edge-v0.53.0) (2026-08-02)
+
+
+### Features
+
+* **lending:** customer self-service loan application intake (ADR-0211) ([#3197](https://github.com/JiRaska/open-bank-oss/issues/3197)) ([3848b5c](https://github.com/JiRaska/open-bank-oss/commit/3848b5c25ab638765c355414fd04c773997d43c5))
+
 ## [0.52.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.52.0...customer-edge-v0.52.1) (2026-07-31)
 
 

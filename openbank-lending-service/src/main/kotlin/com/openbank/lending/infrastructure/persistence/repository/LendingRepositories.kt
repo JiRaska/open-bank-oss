@@ -9,11 +9,14 @@ import com.openbank.lending.application.port.out.InstallmentRepository
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.ProvisioningRepository
+import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanProvisioningRecord
+import com.openbank.lending.domain.model.LoanStateSummary
+import com.openbank.lending.domain.model.MoneyTotal
 import com.openbank.lending.infrastructure.persistence.entity.CollateralEntity
 import com.openbank.lending.infrastructure.persistence.entity.InstallmentEntity
 import com.openbank.lending.infrastructure.persistence.entity.LoanApplicationEntity
@@ -31,6 +34,7 @@ import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.hibernate.reactive.mutiny.Mutiny
+import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -54,6 +58,27 @@ class LoanApplicationRepositoryImpl @Inject constructor(
         )
             .setParameter("p", partyId).resultList
     }.map { it.map(mapper::toDomain) }
+
+    /**
+     * `GROUP BY status, currency` — one round trip for the whole book (issue #3294).
+     *
+     * Grouped by CURRENCY as well as status because `loan_application.currency` is per row: a single
+     * summed amount would be CZK added to EUR, which looks authoritative and means nothing. The rows
+     * are folded into one entry per status carrying a total per currency.
+     *
+     * `min(createdAt)` is the oldest item in that state — what the desk should act on first.
+     */
+    @WithSession
+    override fun summariseByState(): Uni<List<ApplicationStateSummary>> = sf.withSession { s ->
+        s.createQuery(
+            """
+            SELECT a.status, a.currency, count(a), min(a.createdAt), sum(a.requestedAmount)
+            FROM LoanApplicationEntity a
+            GROUP BY a.status, a.currency
+            """.trimIndent(),
+            Array<Any?>::class.java,
+        ).resultList
+    }.map { rows -> foldApplicationSummaries(rows) }
 
     private fun mapStatusFilter(status: String): OriginationState =
         OriginationState.entries.firstOrNull { it.name == status }
@@ -110,6 +135,20 @@ class LoanRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFacto
             s.persist(e).map { mapper.toDomain(e) }
         }
     }
+
+    /** `GROUP BY status, currency` over the loan book (issue #3294); see the application
+     *  repository's note on why currency is part of the grouping. */
+    @WithSession
+    override fun summariseByState(): Uni<List<LoanStateSummary>> = sf.withSession { s ->
+        s.createQuery(
+            """
+            SELECT l.status, l.currency, count(l), sum(l.principal)
+            FROM LoanEntity l
+            GROUP BY l.status, l.currency
+            """.trimIndent(),
+            Array<Any?>::class.java,
+        ).resultList
+    }.map { rows -> foldLoanSummaries(rows) }
 
     @WithSession override fun findActive(limit: Int): Uni<List<Loan>> = sf.withSession { s ->
         s.createQuery(
@@ -261,4 +300,61 @@ class ProvisioningRepositoryImpl @Inject constructor(
         val e = mapper.toEntity(record)
         return sf.withTransaction { s -> s.persist(e).map { mapper.toDomain(e) } }
     }
+}
+
+// Column positions of the aggregate SELECTs. Named because the query and the fold that reads it sit
+// far apart in this file: `row[4]` says nothing at the point of use, and a column added to the
+// SELECT silently shifts every later index.
+private const val COL_STATUS = 0
+private const val COL_CURRENCY = 1
+private const val COL_COUNT = 2
+private const val COL_APP_OLDEST = 3
+private const val COL_APP_SUM = 4
+private const val COL_LOAN_SUM = 3
+
+/**
+ * Fold `(status, currency, count, oldest, sum)` tuples into one entry per status.
+ *
+ * Pure and file-private on purpose: the SQL is only half the answer, and the half that turns rows
+ * into a per-currency total is the half that can silently add CZK to EUR. Unit-tested directly
+ * (`LendingSummaryFoldTest`) rather than only through a container.
+ */
+internal fun foldApplicationSummaries(rows: List<Array<Any?>>): List<ApplicationStateSummary> {
+    val byStatus = LinkedHashMap<String, MutableList<Array<Any?>>>()
+    for (r in rows) byStatus.getOrPut(r[COL_STATUS].toString()) { mutableListOf() }.add(r)
+    return byStatus.map { (status, group) ->
+        ApplicationStateSummary(
+            status = status,
+            count = group.sumOf { (it[COL_COUNT] as Number).toLong() },
+            oldestCreatedAt = group.mapNotNull { it[COL_APP_OLDEST] as? java.time.OffsetDateTime }.minOrNull(),
+            requested = group
+                .map {
+                    MoneyTotal(
+                        it[COL_CURRENCY].toString().trim(),
+                        (it[COL_APP_SUM] as? BigDecimal) ?: BigDecimal.ZERO,
+                    )
+                }
+                .sortedBy { it.currency },
+        )
+    }.sortedBy { it.status }
+}
+
+/** As [foldApplicationSummaries], for `(status, currency, count, sum)` loan tuples. */
+internal fun foldLoanSummaries(rows: List<Array<Any?>>): List<LoanStateSummary> {
+    val byStatus = LinkedHashMap<String, MutableList<Array<Any?>>>()
+    for (r in rows) byStatus.getOrPut(r[COL_STATUS].toString()) { mutableListOf() }.add(r)
+    return byStatus.map { (status, group) ->
+        LoanStateSummary(
+            status = status,
+            count = group.sumOf { (it[COL_COUNT] as Number).toLong() },
+            principal = group
+                .map {
+                    MoneyTotal(
+                        it[COL_CURRENCY].toString().trim(),
+                        (it[COL_LOAN_SUM] as? BigDecimal) ?: BigDecimal.ZERO,
+                    )
+                }
+                .sortedBy { it.currency },
+        )
+    }.sortedBy { it.status }
 }

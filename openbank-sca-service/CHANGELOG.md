@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.4](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.12.3...sca-service-v0.12.4) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** give the five money-path services the JDBC datasource Flyway migrates ([#3192](https://github.com/JiRaska/open-bank-oss/issues/3192)) ([d9b31d5](https://github.com/JiRaska/open-bank-oss/commit/d9b31d5d2cccd169ec6ce7e8e971d5853ef952f1)), closes [#3080](https://github.com/JiRaska/open-bank-oss/issues/3080)
+
 ## [0.12.3](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.12.2...sca-service-v0.12.3) (2026-07-31)
 
 

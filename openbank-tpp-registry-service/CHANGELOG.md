@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.11](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.6.10...tpp-registry-service-v0.6.11) (2026-08-02)
+
+
+### Bug Fixes
+
+* **ci:** forward the Pact Broker properties into the test JVM for the last three providers ([#3301](https://github.com/JiRaska/open-bank-oss/issues/3301)) ([cf00673](https://github.com/JiRaska/open-bank-oss/commit/cf0067340539a88f16d9455095735aa6211839d6))
+
 ## [0.6.10](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.6.9...tpp-registry-service-v0.6.10) (2026-07-31)
 
 

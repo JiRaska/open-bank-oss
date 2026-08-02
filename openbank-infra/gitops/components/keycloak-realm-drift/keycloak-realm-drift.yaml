@@ -119,7 +119,15 @@ spec:
   timeZone: "UTC"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
+  # failedJobsHistoryLimit: 1 — keep the LATEST failure for triage, not an archive.
+  # kube-prometheus-stack's KubeJobFailed fires per surviving failed Job OBJECT, so a
+  # limit of 3 turns one recurring failure into three permanent alerts. Worse, the pods
+  # are garbage-collected long before the Job object is, so the extra tombstones carry
+  # no diagnostic value at all — only the alert. Measured 2026-08-02: KubeJobFailed was
+  # 11 of the 37 firing alerts, 8 of them with pods=0 and the oldest dating to 07-12.
+  # One failure per CronJob still alerts (a job that keeps failing should), the
+  # duplicates stop.
+  failedJobsHistoryLimit: 1
   startingDeadlineSeconds: 600
   jobTemplate:
     spec:
@@ -194,8 +202,77 @@ spec:
                     curl -sS --fail-with-body \
                       -H "Authorization: Bearer ${TOKEN}" \
                       "${KC_URL}/admin/realms/${REALM}/roles?briefRepresentation=true&first=0&max=2000" \
-                      > "/work/${REALM}-roles.json"
-                    echo "  $(python3 -c "import json;print(len(json.load(open('/work/${REALM}-roles.json'))))") role(s)"
+                      > "/work/${REALM}-realm-roles.json"
+
+                    # CLIENT roles too. check-realm-role-parity.py's template_roles()
+                    # flattens `roles.realm` AND `roles.client[*]` into ONE name set, so a
+                    # capture of realm roles alone reports every client role as
+                    # declared-not-live — permanently, and by construction rather than
+                    # because anything drifted. `mcp-caller` (a client role on
+                    # openbank-mcp-service, ADR-0224) sat that way: present in the live
+                    # realm the whole time, reported missing on every run, and the
+                    # CronJob failing on its own false positive took the ArgoCD app to
+                    # Degraded for a day. The two sides of a comparison have to agree on
+                    # scope; that is what actually broke here, not the realm.
+                    #
+                    # SKIP KEYCLOAK'S OWN CLIENTS. Measured on the sandbox 2026-08-02:
+                    # the realm has 29 client roles and exactly ONE (`mcp-caller`) is ours
+                    # — the other 28 come from realm-management, account, account-console
+                    # and broker. Capturing them unfiltered trades one false
+                    # declared-not-live for 28 false live-not-declared, which is worse.
+                    # Filter by CLIENT IDENTITY rather than by role name, so a role we
+                    # later define that happens to be called `view-users` is still checked
+                    # instead of silently matching a built-in's name.
+                    curl -sS --fail-with-body \
+                      -H "Authorization: Bearer ${TOKEN}" \
+                      "${KC_URL}/admin/realms/${REALM}/clients?briefRepresentation=true&first=0&max=2000" \
+                      > "/work/${REALM}-clients.json"
+                    rm -rf "/work/${REALM}-cr" && mkdir -p "/work/${REALM}-cr"
+                    for CID in $(python3 -c "import json;B={'account','account-console','admin-cli','broker','realm-management','security-admin-console'};print(' '.join(c['id'] for c in json.load(open('/work/${REALM}-clients.json')) if c.get('clientId') not in B))"); do
+                      curl -sS --fail-with-body \
+                        -H "Authorization: Bearer ${TOKEN}" \
+                        "${KC_URL}/admin/realms/${REALM}/clients/${CID}/roles?briefRepresentation=true&first=0&max=2000" \
+                        > "/work/${REALM}-cr/${CID}.json"
+                    done
+
+                    # Merge into the single array load_live() expects. `uma_protection` is
+                    # still expected here — Keycloak creates it on any of OUR clients that
+                    # enables authorization services — so the checker's builtins filter
+                    # carries it; see keycloak_builtins() in the script.
+                    python3 -c "import glob,json;r=json.load(open('/work/${REALM}-realm-roles.json'));[r.extend(json.load(open(f))) for f in sorted(glob.glob('/work/${REALM}-cr/*.json'))];json.dump(r,open('/work/${REALM}-roles.json','w'));print('  %d role(s) (realm + client)' % len(r))"
+
+                    # WHO holds those roles (#2540 follow-up). Role EXISTENCE and role
+                    # ASSIGNMENT drift independently, and only the first is loud: a misplaced
+                    # role leaves every gate green because both sides still define it.
+                    # Service accounts are fetched separately on purpose — Keycloak never
+                    # returns them from /users, so a capture that only walks /users leaves the
+                    # checker unable to tell "absent" from "not looked at". It reports them as
+                    # unchecked rather than as missing; that distinction is why they are here.
+                    curl -sS --fail-with-body \
+                      -H "Authorization: Bearer ${TOKEN}" \
+                      "${KC_URL}/admin/realms/${REALM}/users?briefRepresentation=true&first=0&max=5000" \
+                      > "/work/${REALM}-users.json"
+                    REALM="${REALM}" TOKEN="${TOKEN}" KC_URL="${KC_URL}" python3 - <<'CAPTURE' > "/work/${REALM}-user-roles.json"
+                    import json, os, urllib.request
+                    realm, tok, url = os.environ["REALM"], os.environ["TOKEN"], os.environ["KC_URL"]
+                    def get(path):
+                        req = urllib.request.Request(f"{url}{path}", headers={"Authorization": f"Bearer {tok}"})
+                        return json.load(urllib.request.urlopen(req))
+                    out = {}
+                    for u in json.load(open(f"/work/{realm}-users.json")):
+                        out[u["username"]] = sorted(r["name"] for r in get(f"/admin/realms/{realm}/users/{u['id']}/role-mappings/realm"))
+                    builtin = {"account", "account-console", "admin-cli", "broker", "realm-management", "security-admin-console"}
+                    for c in json.load(open(f"/work/{realm}-clients.json")):
+                        if c.get("clientId") in builtin or not c.get("serviceAccountsEnabled"):
+                            continue
+                        try:
+                            sa = get(f"/admin/realms/{realm}/clients/{c['id']}/service-account-user")
+                        except Exception:
+                            continue
+                        out[sa["username"]] = sorted(r["name"] for r in get(f"/admin/realms/{realm}/users/{sa['id']}/role-mappings/realm"))
+                    json.dump(out, __import__("sys").stdout, indent=1, sort_keys=True)
+                    CAPTURE
+                    python3 -c "import json;print('  %d principal(s) with role mappings' % len(json.load(open('/work/${REALM}-user-roles.json'))))"
                   done
 
                   # --skip-annotations is NOT passed: the clone is a full checkout, so the
@@ -209,6 +286,17 @@ spec:
                     > /work/final.json 2> /work/findings.txt \
                     || echo "findings" > /work/findings
                   cat /work/findings.txt
+
+                  # Kept as a SECOND invocation rather than folded into the first: the two
+                  # answer different questions and fail independently, and a combined exit code
+                  # would make "which one went red" a log-reading exercise.
+                  python3 .github/scripts/check-realm-user-role-parity.py \
+                    --root /tmp/repo \
+                    --live "openbank=/work/openbank-user-roles.json" \
+                    --live "openbank-customers=/work/openbank-customers-user-roles.json" \
+                    > /work/final-users.json 2> /work/findings-users.txt \
+                    || echo "findings" > /work/findings
+                  cat /work/findings-users.txt
               volumeMounts:
                 - name: work
                   mountPath: /work
@@ -238,10 +326,15 @@ spec:
                   report = json.loads(raw) if raw else {"realms": {}, "captureFailed": True}
                   report["scannedAt"] = datetime.datetime.now(datetime.timezone.utc).strftime(
                       "%Y-%m-%dT%H:%M:%SZ")
-                  report["checkScope"] = "keycloak realm ROLE EXISTENCE, template vs live"
-                  report["doesNotVerify"] = "role ASSIGNMENTS to users/service accounts (#2540 follow-up)"
+                  report["checkScope"] = "keycloak realm ROLE EXISTENCE + ROLE ASSIGNMENTS, template vs live"
+                  report["doesNotVerify"] = "client-role assignments; group membership"
                   findings = pathlib.Path("/work/findings.txt")
                   report["findings"] = findings.read_text().splitlines() if findings.is_file() else []
+                  users_raw = pathlib.Path("/work/final-users.json")
+                  raw_u = users_raw.read_text().strip() if users_raw.is_file() else ""
+                  report["userRoleParity"] = json.loads(raw_u) if raw_u else {"captureFailed": True}
+                  uf = pathlib.Path("/work/findings-users.txt")
+                  report["userRoleFindings"] = uf.read_text().splitlines() if uf.is_file() else []
                   print(json.dumps(report, indent=2, sort_keys=True))
                   PY
 

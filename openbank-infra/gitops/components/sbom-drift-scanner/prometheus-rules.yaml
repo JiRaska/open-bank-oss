@@ -31,8 +31,30 @@ spec:
         # Fires when the scanner found real drift (running image != declared image) or a
         # money-path service with no running pod at all.
         - alert: SbomDriftScannerFailing
-          expr: kube_job_failed{namespace="admin-ui", job_name=~"sbom-drift-scanner-.*"} > 0
-          for: 5m
+          # Keyed on the LATEST scheduled run, not on "a failed Job exists somewhere in
+          # history". The previous expression was
+          #   kube_job_failed{namespace="admin-ui", job_name=~"sbom-drift-scanner-.*"} > 0
+          # which cannot self-clear: a Job object stays in `failedJobsHistoryLimit` after its
+          # pods are garbage-collected, so the series persists and the alert fires forever.
+          #
+          # Measured 2026-08-02: this had been firing `critical` for 27.8h off
+          # sbom-drift-scanner-29757790 (failed 07-31 03:10), while the two runs SINCE then
+          # both completed and the scanner reported `"ok": true, "driftedServices": []`. The
+          # failed Job's pods were already gone, so the alert pointed at an incident nobody
+          # could investigate any more, and no operator action could clear it short of
+          # deleting the object by hand.
+          #
+          # `last_schedule_time > last_successful_time` means the most recent scheduled run has
+          # not succeeded — it goes quiet the moment one does. `for: 15m` comfortably exceeds
+          # the observed run time (10-20s), so a run merely in flight does not trip it. The
+          # sibling SbomDriftScannerStale below already used this metric family; only this
+          # alert was left on the sticky one.
+          expr: >-
+            kube_cronjob_status_last_schedule_time{namespace="admin-ui",
+            cronjob="sbom-drift-scanner"}
+            > kube_cronjob_status_last_successful_time{namespace="admin-ui",
+            cronjob="sbom-drift-scanner"}
+          for: 15m
           labels:
             severity: critical
             component: supply-chain

@@ -55,6 +55,7 @@ class LedgerServiceTest {
     private lateinit var metrics: DomainMetrics
     private lateinit var yearCloseRepository: YearCloseRepository
     private lateinit var accountingDayLock: AccountingDayLock
+    private lateinit var periodFreezeLock: PeriodFreezeLock
     private lateinit var service: LedgerService
 
     // A fixed clock so every emitted timestamp is deterministic (ADR-0100 Layer 1). Since ADR-0207
@@ -93,6 +94,7 @@ class LedgerServiceTest {
         metrics = mockk(relaxed = true)
         yearCloseRepository = mockk()
         accountingDayLock = mockk(relaxed = true)
+        periodFreezeLock = mockk(relaxed = true)
         service = LedgerService(
             journalRepository,
             glAccountRepository,
@@ -100,6 +102,7 @@ class LedgerServiceTest {
             metrics,
             yearCloseRepository,
             accountingDayLock,
+            periodFreezeLock,
             clock,
         )
 
@@ -113,6 +116,12 @@ class LedgerServiceTest {
         coEvery { accountingDayLock.requireOpen(any(), any()) } returns Unit
         coEvery { accountingDayLock.evaluate(any(), any()) } answers { DayLockDecision.unknownDay(firstArg()) }
         every { accountingDayLock.enforcing } returns false
+
+        // Period lock neutral by default (ADR-0096): no frozen period covers any test date.
+        // PeriodFreezeLockTest owns the lock's own semantics.
+        coEvery { periodFreezeLock.requireOpen(any(), any()) } returns Unit
+        coEvery { periodFreezeLock.evaluate(any(), any()) } returns null
+        every { periodFreezeLock.enforcing } returns false
     }
 
     private fun mockGlAccounts(currency: String = "CZK") {

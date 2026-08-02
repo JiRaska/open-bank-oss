@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.6](https://github.com/JiRaska/open-bank-oss/compare/clearing-simulator-v0.4.5...clearing-simulator-v0.4.6) (2026-08-02)
+
+
+### Bug Fixes
+
+* **ci:** forward the Pact Broker properties into the test JVM for the last three providers ([#3301](https://github.com/JiRaska/open-bank-oss/issues/3301)) ([cf00673](https://github.com/JiRaska/open-bank-oss/commit/cf0067340539a88f16d9455095735aa6211839d6))
+
 ## [0.4.5](https://github.com/JiRaska/open-bank-oss/compare/clearing-simulator-v0.4.4...clearing-simulator-v0.4.5) (2026-07-26)
 
 

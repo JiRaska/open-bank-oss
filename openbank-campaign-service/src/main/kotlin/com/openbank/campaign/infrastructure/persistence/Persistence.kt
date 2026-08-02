@@ -10,6 +10,7 @@ import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.port.out.SendLogRepository
+import com.openbank.campaign.application.port.out.StepOutcomeCount
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
@@ -267,6 +268,26 @@ class PanacheSendLogRepository :
             occurredAt = it.occurredAt,
         )
     }
+
+    override suspend fun countByStepAndOutcome(campaignId: UUID): List<StepOutcomeCount> = Panache
+        .withSession {
+            Panache.getSession().flatMap { session ->
+                session.createQuery(
+                    "select s.stepOrder, s.outcome, count(s) from SendLogEntity s " +
+                        "where s.campaignId = :cid group by s.stepOrder, s.outcome " +
+                        "order by s.stepOrder",
+                    Array<Any>::class.java,
+                ).setParameter("cid", campaignId).resultList
+            }
+        }
+        .awaitSuspending()
+        .map { row ->
+            StepOutcomeCount(
+                stepOrder = row[0] as Int,
+                outcome = SendOutcome.valueOf(row[1] as String),
+                count = row[2] as Long,
+            )
+        }
 
     override suspend fun countByCampaign(campaignId: UUID, outcome: SendOutcome?): Long =
         Panache.withSession { query(campaignId, outcome).count() }.awaitSuspending()

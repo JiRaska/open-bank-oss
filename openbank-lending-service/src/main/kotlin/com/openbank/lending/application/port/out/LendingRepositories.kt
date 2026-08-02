@@ -4,11 +4,13 @@
 
 package com.openbank.lending.application.port.out
 
+import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanInstallment
 import com.openbank.lending.domain.model.LoanProvisioningRecord
+import com.openbank.lending.domain.model.LoanStateSummary
 import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
@@ -22,6 +24,13 @@ interface LoanApplicationRepository {
 
     /** Backoffice queue (ADR-0230 D1): newest applications fleet-wide, optionally one status. */
     fun findRecent(status: String?, limit: Int): Uni<List<LoanApplication>>
+
+    /**
+     * Per-state totals for the whole book (issue #3294) — the answer [findRecent] cannot give,
+     * because it is capped and a capped count is not a count. Aggregated in the database; walking
+     * pages to add up rows would be the same wrong answer, slower.
+     */
+    fun summariseByState(): Uni<List<ApplicationStateSummary>>
     fun update(application: LoanApplication): Uni<LoanApplication>
 }
 
@@ -33,6 +42,10 @@ interface LoanRepository {
 
     /** ACTIVE loans still on the books, ordered deterministically — drives the provisioning cycle scan. */
     fun findActive(limit: Int): Uni<List<Loan>>
+
+    /** Per-status totals across the whole loan book (issue #3294). See the note on
+     *  [LoanApplicationRepository.summariseByState]. */
+    fun summariseByState(): Uni<List<LoanStateSummary>>
 }
 
 interface InstallmentRepository {
