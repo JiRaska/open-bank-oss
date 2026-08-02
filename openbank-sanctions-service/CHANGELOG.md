@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.6](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.7.5...sanctions-service-v0.7.6) (2026-08-02)
+
+
+### Bug Fixes
+
+* **sanctions:** merge on the review path, so a screening hit can actually be dispositioned ([#3378](https://github.com/JiRaska/open-bank-oss/issues/3378)) ([216127d](https://github.com/JiRaska/open-bank-oss/commit/216127d53ececfcd3cb76d9ec08d1a869a52b3ef)), closes [#3375](https://github.com/JiRaska/open-bank-oss/issues/3375)
+
 ## [0.7.5](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.7.4...sanctions-service-v0.7.5) (2026-08-02)
 
 
