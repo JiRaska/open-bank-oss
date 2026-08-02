@@ -10,8 +10,11 @@ trust-boundary change for service S is any changed file matching:
   - S/src/main/**/adapter{,s}/**.kt|.java with an HTTP/gRPC client hint in the file
   - S/src/main/resources/application.yaml with (oidc|auth|authz|opa|http|kafka|
     security) keys in the diff hunks                 (listeners / authn / transport)
-  - openbank-infra/gitops/components/**: S's network-policies.yaml or its
-    Deployment/Rollout manifest                      (new ingress/egress)
+  - openbank-infra/gitops/components/**: S's network-policies.yaml (any change —
+    a NetworkPolicy is reach by construction), or its Deployment/Rollout manifest
+    when the DIFF HUNKS touch a boundary key (ports, serviceAccountName,
+    securityContext, auth-shaped env) rather than generated churn — a
+    policy-checksum restamp or an image tag is not a boundary change (#3431)
 
 When any of those change for a money-path service (rules.yaml:
 money_path_services, parsed by check-threat-models.py's parser) and
@@ -26,7 +29,11 @@ Usage:
                             <ref>...HEAD` (3-dot = the actual squash delta).
                             Default: origin/main.
     --changed-files <path>  newline-separated changed-file list — bypasses git
-                            entirely (testable with a synthetic diff).
+                            entirely. Hunks cannot be inspected this way, so the
+                            manifest rule stays conservative and flags on the path.
+    --head <ref>            head ref/sha (default HEAD); lets a measurement replay a
+                            past commit with `--base <sha>^ --head <sha>`.
+    --self-test             run the classifier against known-positive/negative diffs.
 
 Modes (ADR-0144 gate graduation):
     default    advisory — findings are ::warning annotations, exit 0
@@ -60,6 +67,29 @@ SECURITY_KEY = re.compile(r"\b(oidc|authz?|opa|http|kafka|security)[\w.-]*\s*:",
 # Only these manifest kinds define ingress/egress or the runtime env of a service.
 GITOPS_KIND = re.compile(r"^kind:\s*(NetworkPolicy|Deployment|Rollout)\s*$", re.MULTILINE)
 
+# Generated lines in a Deployment/Rollout that are never a trust-boundary change:
+# the OPA pod-roll annotation (restamped fleet-wide by any rules.yaml edit) and the
+# image reference (rewritten by auto-deploy on every push). Matched BEFORE the
+# boundary keys below, since an image line contains ':' and digests look like config.
+MANIFEST_GENERATED = re.compile(
+    r"^(openbank\.tech/policy-checksum|image|imagePullPolicy)\s*:",
+    re.IGNORECASE,
+)
+
+# Keys in a Deployment/Rollout/NetworkPolicy hunk that CAN move a trust boundary:
+# who can reach the pod, what identity it runs as, what it may talk to.
+MANIFEST_BOUNDARY_KEY = re.compile(
+    r"\b("
+    r"ports?|containerPort|hostPort|nodePort|targetPort|"          # listeners
+    r"ingress|egress|policyTypes|podSelector|namespaceSelector|"    # NetworkPolicy reach
+    r"serviceAccountName|automountServiceAccountToken|"            # workload identity
+    r"securityContext|runAsUser|runAsNonRoot|privileged|"          # privilege
+    r"capabilities|hostNetwork|hostPID|hostIPC|"
+    r"[A-Z_]*(OIDC|AUTHZ?|OPA|TLS|MTLS|ISSUER|TOKEN|SECRET|KEYCLOAK)[A-Z_]*"  # env names
+    r")\b",
+    re.IGNORECASE,
+)
+
 
 def load_money_path_services() -> list[str]:
     """Reuse check-threat-models.py's rules.yaml parser — one parser, one truth."""
@@ -70,9 +100,9 @@ def load_money_path_services() -> list[str]:
     return mod.money_path_services()
 
 
-def changed_files(base: str) -> list[str]:
+def changed_files(base: str, head: str = "HEAD") -> list[str]:
     res = subprocess.run(
-        ["git", "diff", "--name-only", f"{base}...HEAD"],  # 3-dot: the squash delta
+        ["git", "diff", "--name-only", f"{base}...{head}"],  # 3-dot: the squash delta
         capture_output=True, text=True, cwd=REPO,
     )
     if res.returncode != 0 and "no merge base" in res.stderr:
@@ -81,7 +111,7 @@ def changed_files(base: str) -> list[str]:
         # 2-dot diff against the base sha IS the squash delta there (same reason
         # check-api-contract.py diffs 2-dot) — fall back to it.
         res = subprocess.run(
-            ["git", "diff", "--name-only", base, "HEAD"],
+            ["git", "diff", "--name-only", base, head],
             capture_output=True, text=True, cwd=REPO,
         )
     if res.returncode != 0:
@@ -110,27 +140,63 @@ def token_in(tokens: set[str], text: str) -> bool:
     )
 
 
-def yaml_security_keys_changed(base: str | None, rel: str) -> bool:
+def changed_body_lines(diff_text: str) -> list[str]:
+    """The added/removed content lines of a unified diff, comments and headers dropped."""
+    out: list[str] = []
+    for line in diff_text.splitlines():
+        if line.startswith(("+++", "---")) or line[:1] not in "+-":
+            continue
+        body = line[1:].strip()
+        if body and not body.startswith("#"):
+            out.append(body)
+    return out
+
+
+def hunk_moves_boundary(diff_text: str) -> bool:
+    """True if a Deployment/Rollout diff changes something that can move a trust boundary.
+
+    The manifest FILENAME is not evidence. A single `rules.yaml` edit restamps the
+    `openbank.tech/policy-checksum` pod-roll annotation on ~29 service manifests at once, and
+    auto-deploy rewrites an image tag on every push — neither opens a port, grants an identity
+    or changes who may reach the pod. Treating those as boundary changes lit up the whole
+    money-path fleet on 7 of 60 commits (issue #3431) and is exactly the generated churn that
+    teaches people to ignore a gate.
+
+    So: drop the known-generated lines first, then require a key that actually describes the
+    boundary. Mirrors what this script already does for application.yaml — the gitops rule was
+    the one place trusting the path instead of the hunk.
+    """
+    for body in changed_body_lines(diff_text):
+        if MANIFEST_GENERATED.search(body):
+            continue
+        if MANIFEST_BOUNDARY_KEY.search(body):
+            return True
+    return False
+
+
+def file_diff(base: str | None, head: str, rel: str) -> str | None:
+    """Unified diff of one path, or None when it cannot be inspected."""
+    if base is None:
+        return None
+    res = subprocess.run(
+        ["git", "diff", f"{base}...{head}", "--", rel],
+        capture_output=True, text=True, cwd=REPO,
+    )
+    if res.returncode != 0 or not res.stdout:
+        return None
+    return res.stdout
+
+
+def yaml_security_keys_changed(base: str | None, head: str, rel: str) -> bool:
     """True if the application.yaml diff touches a trust-boundary key.
 
     Without git (--changed-files synthetic list) the hunks cannot be inspected —
     be conservative and treat the touch as boundary-relevant (advisory gate).
     """
-    if base is None:
-        return True
-    res = subprocess.run(
-        ["git", "diff", f"{base}...HEAD", "--", rel],
-        capture_output=True, text=True, cwd=REPO,
-    )
-    if res.returncode != 0 or not res.stdout:
+    diff_text = file_diff(base, head, rel)
+    if diff_text is None:
         return True  # can't inspect — stay conservative
-    for line in res.stdout.splitlines():
-        if line.startswith(("+++", "---")) or line[:1] not in "+-":
-            continue
-        body = line[1:].strip()
-        if not body.startswith("#") and SECURITY_KEY.search(body):
-            return True
-    return False
+    return any(SECURITY_KEY.search(b) for b in changed_body_lines(diff_text))
 
 
 def adapter_is_client(rel: str) -> bool:
@@ -143,8 +209,14 @@ def adapter_is_client(rel: str) -> bool:
         return False
 
 
-def gitops_hit(service: str, comp: str, fname: str) -> str | None:
-    """Reason string if this gitops file is S's NetworkPolicy or Deployment/Rollout."""
+def gitops_hit(
+    service: str, comp: str, fname: str, base: str | None = None, head: str = "HEAD",
+) -> str | None:
+    """Reason string if this gitops file is S's NetworkPolicy or Deployment/Rollout.
+
+    A NetworkPolicy is a boundary by construction — its entire content is reach — so any
+    change to one counts. A Deployment/Rollout is not: see hunk_moves_boundary.
+    """
     tokens = gitops_tokens(service)
     if not (token_in(tokens, comp) or token_in(tokens, fname)):
         return None
@@ -158,11 +230,18 @@ def gitops_hit(service: str, comp: str, fname: str) -> str | None:
         except OSError:
             return None
         if GITOPS_KIND.search(text) and token_in(tokens, text):
+            diff_text = file_diff(base, head, rel)
+            if diff_text is None:
+                # Cannot inspect hunks (synthetic --changed-files list): stay conservative,
+                # same contract as yaml_security_keys_changed.
+                return f"{rel} (Deployment/Rollout)"
+            if not hunk_moves_boundary(diff_text):
+                return None
             return f"{rel} (Deployment/Rollout)"
     return None
 
 
-def boundary_reasons(service: str, changed: list[str], base: str | None) -> list[str]:
+def boundary_reasons(service: str, changed: list[str], base: str | None, head: str = "HEAD") -> list[str]:
     reasons: list[str] = []
     for rel in changed:
         m = REST_RE.match(rel)
@@ -178,23 +257,89 @@ def boundary_reasons(service: str, changed: list[str], base: str | None) -> list
             reasons.append(f"{rel} (HTTP/gRPC adapter)")
             continue
         m = APP_YAML_RE.match(rel)
-        if m and m.group(1) == service and yaml_security_keys_changed(base, rel):
+        if m and m.group(1) == service and yaml_security_keys_changed(base, head, rel):
             reasons.append(f"{rel} (authn/listener/transport keys)")
             continue
         m = GITOPS_RE.match(rel)
         if m:
-            hit = gitops_hit(service, m.group(1), m.group(2))
+            hit = gitops_hit(service, m.group(1), m.group(2), base, head)
             if hit:
                 reasons.append(hit)
     return reasons
 
 
+SELF_TEST_CASES: list[tuple[str, str, bool]] = [
+    (
+        "pod-roll annotation restamp only (a rules.yaml edit does this fleet-wide)",
+        "@@\n-        openbank.tech/policy-checksum: \"8f455914ec6024b2\"\n"
+        "+        openbank.tech/policy-checksum: \"6ef160b0682ff4d9\"\n",
+        False,
+    ),
+    (
+        "image tag bump only (auto-deploy rewrites this on every push)",
+        "@@\n-        image: ghcr.io/jiraska/openbank-ledger-service:sandbox-8992de5\n"
+        "+        image: ghcr.io/jiraska/openbank-ledger-service:sandbox-2b8a7cf\n",
+        False,
+    ),
+    (
+        "a new container port IS a boundary change",
+        "@@\n         ports:\n+          - containerPort: 9443\n",
+        True,
+    ),
+    (
+        "a changed service account IS a boundary change",
+        "@@\n-      serviceAccountName: ledger\n+      serviceAccountName: ledger-privileged\n",
+        True,
+    ),
+    (
+        "a new OIDC issuer env var IS a boundary change",
+        "@@\n+            - name: QUARKUS_OIDC_AUTH_SERVER_URL\n"
+        "+              value: https://keycloak.example/realms/openbank\n",
+        True,
+    ),
+    (
+        "a replica count is not a boundary change",
+        "@@\n-  replicas: 2\n+  replicas: 3\n",
+        False,
+    ),
+    (
+        "an annotation restamp AND a port change still flags",
+        "@@\n-        openbank.tech/policy-checksum: \"aaaa\"\n"
+        "+        openbank.tech/policy-checksum: \"bbbb\"\n+          - containerPort: 8443\n",
+        True,
+    ),
+]
+
+
+def self_test() -> int:
+    """Feed the classifier diffs it MUST flag and diffs it MUST NOT.
+
+    This gate shipped advisory with no self-test, so its failure path had never run —
+    the 7-of-60 false-positive rate in #3431 was found by hand, not by CI. A gate whose
+    only demonstrated behaviour is passing cannot be graduated to enforced.
+    """
+    ok = True
+    for name, diff_text, expected in SELF_TEST_CASES:
+        got = hunk_moves_boundary(diff_text)
+        mark = "ok" if got == expected else "FAIL"
+        if got != expected:
+            ok = False
+        print(f"  [{mark}] {name}: flagged={got} expected={expected}")
+    print(f"self-test: {'PASS' if ok else 'FAIL'}")
+    return 0 if ok else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="origin/main", help="PR base ref/sha (3-dot diff)")
+    ap.add_argument("--head", default="HEAD", help="head ref/sha; lets a measurement replay a past commit")
     ap.add_argument("--changed-files", help="file with a newline-separated changed-file list (skips git)")
     ap.add_argument("--enforce", action="store_true")
+    ap.add_argument("--self-test", action="store_true", help="run the classifier's known-positive/negative cases")
     args = ap.parse_args()
+
+    if args.self_test:
+        return self_test()
 
     if args.changed_files:
         changed = [
@@ -204,7 +349,7 @@ def main() -> int:
         ]
         base = None
     else:
-        changed = changed_files(args.base)
+        changed = changed_files(args.base, args.head)
         base = args.base
 
     level = "error" if args.enforce else "warning"
@@ -213,7 +358,7 @@ def main() -> int:
     findings: list[tuple[str, list[str]]] = []
 
     for service in services:
-        reasons = boundary_reasons(service, changed, base)
+        reasons = boundary_reasons(service, changed, base, args.head)
         if not reasons:
             continue
         tm_rel = f"docs/threat-models/{service}.md"
