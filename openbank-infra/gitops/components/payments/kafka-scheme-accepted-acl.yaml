@@ -385,6 +385,11 @@ rules:
   - apiGroups: [""]
     resources: [secrets]
     verbs: [get]
+    # DERIVED-CHECKED, not trusted: check-kafka-cert-reader-grant.py (gate
+    # kafka-cert-reader-grant, enforced) compares this list BOTH ways against every
+    # ExternalSecret that reads the kafka cert store. Adding a service without adding it
+    # here is now a build failure rather than a pod that will not start (#2872/#2851);
+    # a grant nothing reads fails too.
     resourceNames:
       - transaction-service
       - sepa-payment
