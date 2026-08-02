@@ -26,10 +26,15 @@ bundle" but "apply it server-side", and this check enforces exactly that pairing
     a bundle over the ceiling is fine  IF AND ONLY IF  its Application uses
     ServerSideApply=true.
 
-WHY THE SIZE ALONE IS NOT THE RULE. Every bundle embeds `rules.yaml` verbatim, so they
-all sit within a few kilobytes of each other and of the ceiling. A pure size limit would
-either fire on the whole fleet or be set so high it never fires. What actually matters is
-whether the apply mechanism can carry the object, and that is a property of the pair.
+WHY THE SIZE ALONE IS NOT THE RULE. The bundles all carry the same shared policy sources,
+so they sit within a few kilobytes of each other. A pure size limit would either fire on
+the whole fleet or be set so high it never fires. What actually matters is whether the
+apply mechanism can carry the object, and that is a property of the pair.
+
+(Until #3357 they also embedded all 168 KB of `rules.yaml` verbatim, which is what put
+them against the ceiling in the first place. They now embed the ~21 KB derived subset
+`openbank-libs/governance/rules-opa-data.yaml`. That buys headroom, not an exemption —
+the pairing rule below is what holds, and it is deliberately unchanged.)
 
 DELIBERATELY NOT CHECKED: whether the live cluster matches. This runs on a PR, where
 there is no cluster to ask, and a gate that quietly degrades to "could not check" is

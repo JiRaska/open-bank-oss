@@ -1311,6 +1311,22 @@ opa_bundle_sync:
   # data.rules.* / data.agents.* for months with CI green.
   generators_discovered_not_listed: true
   generator_glob: "openbank-infra/gitops/components/**/gen-*opa-bundle*.sh"
+  # What the bundles embed is NOT this file: it is the derived subset
+  # openbank-libs/governance/rules-opa-data.yaml — the top-level keys some
+  # .rego reads as data.rules.<key>, copied out verbatim. Embedding all 168 KB
+  # meant a one-line edit to any of the ~30 keys OPA never reads restamped 39
+  # ConfigMaps and 39 pod-roll annotations, in the same *-service.yaml files the
+  # auto-deploy bot bumps image pins in, so governance PRs re-conflicted faster
+  # than they could be resolved (#3357; only 16 of the last 80 revisions of this
+  # file changed anything OPA reads). It also put every bundle over 200 KB
+  # against the 262144-byte annotation ceiling that had already frozen five
+  # Applications' policy. The key set is DERIVED from the .rego sources, never
+  # listed — a hand-kept list goes stale, and a missing key makes
+  # data.rules.<key> undefined, which in Rego is a rule that silently stops
+  # firing rather than an error.
+  policy_input_subset: "openbank-libs/governance/rules-opa-data.yaml"
+  policy_input_generator: ".github/scripts/gen-rules-opa-data.py"
+  policy_input_keys_derived_not_listed: true
   # A 100644 generator no-ops a ./... loop and is indistinguishable from "in sync" —
   # gen-ledger-opa-bundle.sh shipped that way and had never once run.
   generators_must_be_executable: true
