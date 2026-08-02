@@ -5,7 +5,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { Cloud, Info, CheckCircle2, CircleDashed, Circle, X, RefreshCw, Wifi, WifiOff, Minus } from 'lucide-react'
-import type { InfraStatusResult } from '@/app/api/infra/status/route'
+import type { InfraStatusResult } from '@/lib/infra/probes'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 // Bilingual string tuple: [Czech, English] — spread into t(cs, en) at render.
