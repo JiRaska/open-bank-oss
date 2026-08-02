@@ -80,7 +80,16 @@ export async function GET() {
         { status: 200 },
       )
     }
-    return NextResponse.json({ items: await res.json(), state: 'ok' })
+    // Reach and delivery (#3296). Fetched alongside the list rather than folded into it: the
+    // endpoint is NEWER than the deployed service in any environment that has not rolled forward
+    // yet, so a 404 here has to degrade to "no reach data" and leave the list intact. Coupling the
+    // two would take the whole page down for a feature that is additive.
+    const summary = await fetch(
+      serverSvcUrl('campaign-service', 'campaign', 8128, '/api/v1/campaigns/summary'),
+      { headers, signal: AbortSignal.timeout(4000), cache: 'no-store' },
+    ).then(r => (r.ok ? r.json() : null)).catch(() => null)
+
+    return NextResponse.json({ items: await res.json(), state: 'ok', summary })
   } catch {
     return NextResponse.json({ items: [], state: 'unreachable' }, { status: 200 })
   }
