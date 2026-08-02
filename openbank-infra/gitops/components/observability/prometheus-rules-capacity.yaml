@@ -61,15 +61,35 @@ spec:
         # The cap is binding NOW: usage has reached the declared limit. The next
         # scale-up or node-drain stalls. Critical — this is the #809 state.
         - alert: KarpenterNodePoolAtLimit
+          # EXCLUDES runners-warm. `karpenter_nodepools_usage` measures the capacity
+          # Karpenter has PROVISIONED, not the demand placed on it — so "usage == limit"
+          # means "the pool is provisioned up to its cap", which for a fixed-size pool is
+          # the resting state, not an incident.
+          #
+          # runners-warm is exactly that: 2 on-demand nodes with `expireAfter: Never`
+          # (arc-runners.tf) against a limit of 8 CPU, so usage is pinned at 8/8 forever.
+          # Measured 2026-08-02 while it had been paging `critical` for 19h: the two nodes
+          # carried 2 runner pods and 2 node-exporters — essentially idle. Nothing was
+          # constrained; the alert was reporting the pool's own shape back at us.
+          #
+          # Do NOT read the nodepool status as occupancy either: its `pods: 116` is the
+          # max-pods capacity of the two nodes, not pods running (12 were). Same trap as
+          # the cpu figure — both are capacity, and both look like utilisation.
+          #
+          # `default` is deliberately still covered: there the same expression fires on a
+          # pool that genuinely could not place work, evidenced the same day by 8
+          # `FailedScheduling ... exceed limits for nodepool` events for ledger/payments.
+          # The distinction this exclusion draws is fixed-size pool vs elastic pool, not
+          # "noisy alert vs quiet one".
           expr: |
             (
-              karpenter_nodepools_usage{resource_type="cpu"}
+              karpenter_nodepools_usage{resource_type="cpu", nodepool!="runners-warm"}
               >= on(nodepool) group_left()
               karpenter_nodepools_limit{resource_type="cpu"}
             )
             or
             (
-              karpenter_nodepools_usage{resource_type="memory"}
+              karpenter_nodepools_usage{resource_type="memory", nodepool!="runners-warm"}
               >= on(nodepool) group_left()
               karpenter_nodepools_limit{resource_type="memory"}
             )

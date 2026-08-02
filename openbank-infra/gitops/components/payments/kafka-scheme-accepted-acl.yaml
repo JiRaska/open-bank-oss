@@ -275,8 +275,27 @@ spec:
         operations: [Read, Describe]
         host: "*"
       - resource:
+          type: topic
+          name: openbank.delegation.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # DLQ for the delegation-events-in channel — same #1476 class as party-events-in.
+      - resource:
+          type: topic
+          name: dead-letter-topic-delegation-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
           type: group
           name: cardissuance-party
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: group
+          name: cardissuance-delegation
           patternType: literal
         operations: [Read]
         host: "*"

@@ -8,6 +8,7 @@ import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepository
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -35,6 +36,18 @@ interface DomesticPaymentRepository {
 
     /** Update a payment and enqueue a domain-event outbox message, atomically. */
     suspend fun update(payment: DomesticPayment, outboxMessage: OutboxMessage): DomesticPayment
+
+    /** How many payments currently sit in [status]. */
+    suspend fun countByStatus(status: DomesticPaymentStatus): Long
+
+    /**
+     * When the oldest payment still in [status] was created, or `null` if none is.
+     *
+     * Feeds the stranded-payment age gauge (#3273): a payment held in a non-terminal state is a
+     * successful-looking 2xx that never progressed, so no error-rate or latency signal can see it —
+     * only its age can.
+     */
+    suspend fun oldestCreatedAt(status: DomesticPaymentStatus): Instant?
 }
 
 /** Outbound port for draining the transactional outbox (read pending, mark sent/failed). */

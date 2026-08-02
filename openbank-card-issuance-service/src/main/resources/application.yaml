@@ -112,6 +112,15 @@ mp:
         connector: smallrye-kafka
         topic: openbank.party.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # Delegation-grant enforcement projection for cards (ADR-0232 D3): CARD-scoped
+      # lifecycle events feed card_delegation_projection; the guard answers holder OR
+      # grant locally, never calling delegation-service on the request path. group.id
+      # comes from the msg-override ConfigMap (same dotted-key trap as party-events-in).
+      delegation-events-in:
+        connector: smallrye-kafka
+        topic: openbank.delegation.events
+        failure-strategy: dead-letter-queue
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         # client.id / group.id / auto.offset.reset are deliberately NOT set as YAML keys here.
         # SmallRye Config's YAML source unconditionally quotes any leaf map key containing a
         # literal dot (`group.id` registers only as the literal property name `"group.id"`,
@@ -211,3 +220,15 @@ openbank:
       retention-years: "${RETENTION_CARD_PII_YEARS:5}"
       cron: "${RETENTION_CARD_PII_CRON:0 0 3 * * ?}"
       dry-run: "${RETENTION_CARD_PII_DRY_RUN:false}"
+
+# OPA sidecar (ADR-0034). Advisory mode by default — without this block the
+# AuthorizeInterceptor's enforce=true default turns an unreachable sidecar into
+# 503s on every @Authorize endpoint (surfaced by the first REST IT in this service).
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  enforce: "${AUTHZ_ENFORCE:false}"
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"

@@ -24,21 +24,42 @@ export function StepEditor({
   step,
   templates,
   templateLabels,
+  variableLabels,
   onChange,
   onClose,
+  attached = false,
 }: {
   index: number
   step: EditorStep
   /** template id → the variables it declares. Mirrors the service's catalogue. */
   templates: Record<string, string[]>
   templateLabels: Record<string, string>
+  /**
+   * variable id → what to call it, and what a filled-in one looks like.
+   *
+   * `offerTitle` is the engine's name for the field. Printing it as the label made a marketer read
+   * an API contract; the example matters as much as the name, because "what goes in here" is the
+   * actual question and a bare box does not answer it.
+   */
+  variableLabels: Record<string, { label: string; example: string }>
   onChange: (next: EditorStep) => void
   onClose: () => void
+  /**
+   * Rendered as a continuation of the canvas rather than a card of its own.
+   *
+   * Separated, it read as a block that had fallen off the page: a narrower box under a full-width
+   * canvas, with nothing tying it to the node it edits. The relationship is structural — this panel
+   * IS the selected node, opened — so it is expressed with layout rather than with a caption saying
+   * so.
+   */
+  attached?: boolean
 }) {
   const { t } = useLanguage()
   const declared = templates[step.template] ?? []
   const missing = declared.filter(v => !(step.variables[v] ?? '').trim())
-  const field = 'w-full rounded-md border bg-transparent px-3 py-1.5 text-sm'
+  // `.input` is the console's own field style — hover, focus ring, sizing — and I had hand-rolled a
+  // worse copy of it. Reinventing a house primitive is the same failure ADR-0208 D2 names for colour.
+  const field = 'input w-full'
 
   const setDelayDays = (raw: string) => {
     const days = Math.max(0, Number(raw) || 0)
@@ -46,7 +67,14 @@ export function StepEditor({
   }
 
   return (
-    <div className="rounded-xl border p-4 space-y-4" data-step-editor={index}>
+    <div
+      className={
+        attached
+          ? 'border-x border-b rounded-b-xl p-5 space-y-5'
+          : 'rounded-xl border p-4 space-y-4'
+      }
+      data-step-editor={index}
+    >
       <div className="flex items-baseline justify-between">
         <h3 className="text-sm font-semibold">
           {t('Krok', 'Step')} {index + 1}
@@ -56,7 +84,7 @@ export function StepEditor({
         </button>
       </div>
 
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         <label htmlFor={`tpl-${index}`} className="text-sm font-medium">
           {t('Co se pošle', 'What gets sent')}
         </label>
@@ -82,20 +110,21 @@ export function StepEditor({
       </div>
 
       {declared.map(v => (
-        <div key={v} className="space-y-1">
+        <div key={v} className="space-y-1.5">
           <label htmlFor={`var-${index}-${v}`} className="text-sm font-medium">
-            {v}
+            {variableLabels[v]?.label ?? v}
           </label>
           <input
             id={`var-${index}-${v}`}
             className={field}
+            placeholder={variableLabels[v]?.example ?? ''}
             value={step.variables[v] ?? ''}
             onChange={e => onChange({ ...step, variables: { ...step.variables, [v]: e.target.value } })}
           />
         </div>
       ))}
 
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         <label htmlFor={`delay-${index}`} className="text-sm font-medium">
           {t('Poslat po', 'Send after')}
         </label>
@@ -104,7 +133,8 @@ export function StepEditor({
             id={`delay-${index}`}
             type="number"
             min="0"
-            className={`${field} w-28`}
+            className={field}
+            style={{ width: '5.5rem' }}
             value={Math.round(step.delaySeconds / 86400)}
             onChange={e => setDelayDays(e.target.value)}
           />
@@ -116,7 +146,8 @@ export function StepEditor({
 
       {missing.length > 0 && (
         <p className="text-xs text-amber-600">
-          {t('Ještě chybí', 'Still missing')}: {missing.join(', ')}
+          {t('Ještě chybí', 'Still missing')}:{' '}
+          {missing.map(v => variableLabels[v]?.label ?? v).join(', ')}
         </p>
       )}
     </div>

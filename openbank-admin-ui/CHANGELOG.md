@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.87.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.86.0...admin-ui-v0.87.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** read the aggregate endpoints, and stop apologising for a cap ([#3372](https://github.com/JiRaska/open-bank-oss/issues/3372)) ([7faebec](https://github.com/JiRaska/open-bank-oss/commit/7faebec84eb4a5a5a65f7ec2556824ec2e5696b0))
+
 ## [0.86.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.85.0...admin-ui-v0.86.0) (2026-08-02)
 
 

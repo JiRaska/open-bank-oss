@@ -46,3 +46,5 @@ data:
     mp.messaging.incoming.party-events-in.client.id=cardissuance-party-${quarkus.uuid}
     mp.messaging.incoming.party-events-in.group.id=cardissuance-party
     mp.messaging.incoming.party-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.delegation-events-in.group.id=cardissuance-delegation
+    mp.messaging.incoming.delegation-events-in.auto.offset.reset=earliest

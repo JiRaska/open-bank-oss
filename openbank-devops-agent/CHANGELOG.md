@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.6.0...devops-agent-v0.7.0) (2026-08-02)
+
+
+### Features
+
+* **devops,finops:** run the daily analysis sweep on a schedule, not only when asked ([#3370](https://github.com/JiRaska/open-bank-oss/issues/3370)) ([a8c49ef](https://github.com/JiRaska/open-bank-oss/commit/a8c49ef392c021be8851d2e500c2af8a7643f8e9))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.5.1...devops-agent-v0.6.0) (2026-08-01)
 
 

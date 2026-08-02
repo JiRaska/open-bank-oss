@@ -13,6 +13,17 @@ import jakarta.enterprise.context.ApplicationScoped
 @ApplicationScoped
 @Suppress("TooManyFunctions") // flat config mapping: one accessor per tunable (model, GitHub, detector thresholds)
 interface DevOpsConfig {
+    /**
+     * Cron for the daily analysis sweep (ADR-0119).
+     *
+     * Declared here because it lives under this mapping's prefix: SmallRye validates a
+     * `@ConfigMapping` prefix as a CLOSED set, so a key added to `application.yaml` with no
+     * matching accessor fails the whole application at boot with `ConfigValidationException` —
+     * not a warning about one property, a dead service.
+     */
+    @WithDefault("0 30 3 * * ?")
+    fun analysisCron(): String
+
     @WithDefault("http://prometheus-operated.observability:9090")
     fun prometheusUrl(): String
 
