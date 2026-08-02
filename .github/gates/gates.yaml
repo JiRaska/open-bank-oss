@@ -183,6 +183,18 @@ gates:
       python3 .github/scripts/check-litellm-model-costs.py --self-test
       python3 .github/scripts/check-litellm-model-costs.py --enforce
 
+  - id: scheduled-trigger-emitted
+    name: a declared SCHEDULED trigger must actually be emitted (an unreachable schedule fails silently)
+    group: kotlin
+    mode: enforced
+    run: |
+      # Falsified in three directions before wiring in: a new unemitted service fails, a
+      # baselined service that becomes covered ALSO fails (so the list cannot rot), and the
+      # tree as committed passes. 9 self-test cases, including comment-only mentions and
+      # Kotlin's NESTED block comments.
+      python3 .github/scripts/check-scheduled-trigger-emitted.py --self-test
+      python3 .github/scripts/check-scheduled-trigger-emitted.py --enforce
+
   - id: agent-virtual-keys
     name: every agent authenticates with its OWN LiteLLM virtual key, not the shared master key
     group: gitops
@@ -217,6 +229,15 @@ gates:
         exit 1
       fi
 
+  - id: gitops-duplicate-resources
+    name: "No duplicate resource or env-list entry in a gitops manifest (issues #3450/#3460, enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-gitops-duplicate-resources.py --self-test
+    run: |
+      python3 .github/scripts/check-gitops-duplicate-resources.py --enforce
+
   - id: podmonitor-namespace-coverage
     name: "PodMonitor namespace coverage (issue #2255, enforced)"
     group: gitops
@@ -225,6 +246,23 @@ gates:
       python3 .github/scripts/check-podmonitor-namespace-coverage.py --self-test
     run: |
       python3 .github/scripts/check-podmonitor-namespace-coverage.py
+
+  # The Temporal registration Job's NAMESPACES list is hand-written, and it has now been the
+  # thing that drifted THREE times (settlement, campaign, lending). A missing namespace is
+  # invisible to every signal that is normally checked: the worker connects fine and only the
+  # POLL is refused, so the pod stays Ready, ArgoCD stays Synced/Healthy, and the service simply
+  # never runs a workflow — lending burned ~2,000 ERROR lines/hour into Loki for the whole time,
+  # with no origination possible. The checker derives the required set from the gitops
+  # OPENBANK_TEMPORAL_NAMESPACE env (which wins) falling back to the application.yaml default,
+  # so the list can no longer be shorter than reality without going red. ENFORCED.
+  - id: temporal-namespace-registration
+    name: "Temporal namespaces a worker polls are registered (enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-temporal-namespace-registration.py --self-test
+    run: |
+      python3 .github/scripts/check-temporal-namespace-registration.py
 
   # --since scopes the EXPENSIVE half (pull ~100 MB + boot Loki, ~90 s) to PRs that can
   # actually invalidate it. This job is unconditional and required, so an unscoped run charged
@@ -315,13 +353,30 @@ gates:
   # in exactly that state (issue #1444); sdd-db had been failing every WAL archive for three
   # days. NOT diff-scoped: it runs against whole repo state, because the gap is a MISSING
   # pair, and a PR that adds only the gitops half would not touch the .tf side at all.
-  # ADVISORY for now — add --enforce to flip.
+  #
+  # ENFORCED since 2026-08-02, and the reason is that advisory demonstrably did not work: on
+  # that day delegation-db shipped in exactly this state, the gate printed the warning naming
+  # the cluster and the one-line fix, and the change merged anyway. That is the fourth
+  # occurrence of a defect this gate was built to end.
+  #
+  # An advisory verdict is right where a human still has judgement to exercise. Here there is
+  # none left: "this database declares a backup and cannot possibly authenticate to perform
+  # it" is not a style opinion, it is a database with no recovery point, and the failure is
+  # invisible until someone needs a restore. Advisory only made it mergeable.
+  #
+  # Scope note — `mode: enforced` ALONE is vacuous for this checker (the repo has paid for
+  # that once already): it prints ::warning and exits 0 unless passed --enforce, so both
+  # halves are needed and both are set below. Verified falsifiable against the real defect,
+  # not a fixture: --enforce exits 1 on the unfixed tree and 0 with delegation added. The
+  # goalert-db finding stays a ::warning under --enforce by design — a cluster backing up to
+  # a bucket outside Terraform is a governance question with a real choice in it, which is
+  # exactly where advisory belongs.
   - id: db-backup-association-gate
-    name: "db-backup association gate — every backed-up CNPG cluster has pod identity (advisory)"
+    name: "db-backup association gate — every backed-up CNPG cluster has pod identity (enforced)"
     group: gitops
-    mode: advisory
+    mode: enforced
     run: |
-      python3 openbank-infra/scripts/check-db-backup-associations.py
+      python3 openbank-infra/scripts/check-db-backup-associations.py --enforce
 
   # A probed or scraped port must be a port the service opens (issue #2872, item 1).
   #
@@ -776,6 +831,27 @@ gates:
   # evidence citation is mechanical, and advisory over a published claim means "the page
   # says something the code does not support" is mergeable. Green on the current tree, and
   # `--self-test` (added with this registration) proves the red is reachable.
+  # The meta-gate: every check-* script must be run by SOMETHING. #3240 found two that were not —
+  # check-compliance-matrix.py, written for #2370 with a docstring naming the exact regulatory
+  # drift it prevents and referenced from nowhere, and check-operator-write-naming.py, which
+  # rules.yaml names as its own ci_producer while nothing invoked it. Both had never executed.
+  #
+  # That is worse than an unfalsified gate: a check that has never run cannot go red, never
+  # appears in a run list, and its presence in the tree reads as coverage to anyone grepping for
+  # it. Registering those two was the fix; this is what stops the third.
+  #
+  # ENFORCED and clean at registration. It flags ITSELF until registered — the same
+  # self-reference check-advisory-gate-registration.py hit in #2450 — which is the cheapest
+  # possible demonstration that its red is reachable.
+  - id: gate-script-registration
+    name: "every check-* script is actually run (#3240, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-gate-script-registration.py --self-test
+    run: |
+      python3 .github/scripts/check-gate-script-registration.py --enforce
+
   - id: compliance-matrix
     name: "compliance-page evidence citations (#2370, enforced)"
     group: registry
