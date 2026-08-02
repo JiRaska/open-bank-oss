@@ -26,7 +26,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: finops-agent
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-finops-agent:sandbox-a499cad1
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-finops-agent:sandbox-95b652dd
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -34,6 +34,32 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # Datasource. Without these the pod CrashLoopBackOffs: application.yaml
+            # defaults every URL to localhost:5432, so Flyway's migrate-at-start
+            # fails with `Connection refused` before the app ever serves. It sat
+            # that way while postgres.yaml provisioned a healthy CNPG cluster for a
+            # client that could not dial it — the file's own comment says the
+            # Deployment uses finops-db-rw, and it did not.
+            #
+            # NOTE THE VARIABLE NAMES. This service reads JDBC_URL / REACTIVE_URL /
+            # POSTGRES_USER / POSTGRES_PASSWORD (see its application.yaml), NOT the
+            # QUARKUS_DATASOURCE_* names most siblings use. Copying the campaign
+            # block verbatim would set variables nothing reads, leave the localhost
+            # defaults in place, and look like a fix while changing nothing.
+            #
+            # Reactive is the app's own client (Panache); the JDBC leg exists only
+            # for Flyway. Both point at the CNPG primary.
+            - name: JDBC_URL
+              value: jdbc:postgresql://finops-db-rw.finops-agent.svc:5432/openbank_finops
+            - name: REACTIVE_URL
+              value: postgresql://finops-db-rw.finops-agent.svc:5432/openbank_finops
+            - name: POSTGRES_USER
+              value: openbank
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: finops-db-app
+                  key: password
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: TEMPORAL_HOST

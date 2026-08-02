@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.17.1...ledger-service-v1.17.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** give the five money-path services the JDBC datasource Flyway migrates ([#3192](https://github.com/JiRaska/open-bank-oss/issues/3192)) ([d9b31d5](https://github.com/JiRaska/open-bank-oss/commit/d9b31d5d2cccd169ec6ce7e8e971d5853ef952f1)), closes [#3080](https://github.com/JiRaska/open-bank-oss/issues/3080)
+
 ## [1.17.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.17.0...ledger-service-v1.17.1) (2026-08-01)
 
 

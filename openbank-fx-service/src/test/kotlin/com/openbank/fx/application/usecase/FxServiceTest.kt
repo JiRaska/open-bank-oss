@@ -107,13 +107,59 @@ class FxServiceTest {
     }
 
     @Test
-    fun `convert throws error when no FX rate available`() = runBlocking<Unit> {
+    fun `convert throws error when no FX rate available in either direction`() = runBlocking<Unit> {
         val command = convertCommand()
-        coEvery { rateRepo.findLatest(command.fromCurrency, command.toCurrency, RateType.SPOT) } returns null
+        // Both directions must be absent now: a pair quoted the other way round is priceable.
+        coEvery { rateRepo.findLatest(any(), any(), RateType.SPOT) } returns null
 
         val ex = assertThrows<IllegalStateException> { runBlocking { service.convert(command) } }
 
         assertThat(ex).hasMessage("No FX rate available for EUR/CZK")
+    }
+
+    // --- pricing from the reverse quote ------------------------------------------------------
+    // The ČNB fixing publishes FOREIGN→CZK only, so every stored pair is X/CZK. Before this,
+    // CZK→EUR had no answer at all: not a transient failure but every customer-initiated
+    // CZK→foreign exchange, permanently, surfacing in the app as HTTP 502.
+
+    @Test
+    fun `getRate answers from the reverse quote when only that direction is stored`() = runBlocking<Unit> {
+        coEvery { rateRepo.findLatest("CZK", "EUR", RateType.SPOT) } returns null
+        coEvery { rateRepo.findLatest("EUR", "CZK", RateType.SPOT) } returns fxRate()
+
+        val rate = service.getRate(GetRateQuery("CZK", "EUR", RateType.SPOT))
+
+        assertThat(rate).isNotNull
+        assertThat(rate!!.baseCurrency).isEqualTo("CZK")
+        assertThat(rate.quoteCurrency).isEqualTo("EUR")
+        // 1/25.10 (the ask side), not 1/24.90.
+        assertThat(rate.bidRate).isEqualByComparingTo("0.03984064")
+    }
+
+    @Test
+    fun `a directly stored pair is never overridden by an inverse`() = runBlocking<Unit> {
+        coEvery { rateRepo.findLatest("EUR", "CZK", RateType.SPOT) } returns fxRate()
+
+        val rate = service.getRate(GetRateQuery("EUR", "CZK", RateType.SPOT))
+
+        assertThat(rate!!.bidRate).isEqualByComparingTo("24.90")
+        coVerify(exactly = 0) { rateRepo.findLatest("CZK", "EUR", RateType.SPOT) }
+    }
+
+    @Test
+    fun `convert prices a reverse-quoted pair instead of refusing it`() = runBlocking<Unit> {
+        val command = convertCommand().copy(fromCurrency = "CZK", toCurrency = "EUR")
+        coEvery { rateRepo.findLatest("CZK", "EUR", RateType.SPOT) } returns null
+        coEvery { rateRepo.findLatest("EUR", "CZK", RateType.SPOT) } returns fxRate()
+        coEvery { convRepo.saveWithOutbox(any(), any()) } answers { firstArg() }
+        clear()
+
+        val conv = service.convert(command)
+
+        // convert() charges the ASK side, and after inversion the ask is 1/24.90 — the customer
+        // buying EUR pays the bank's selling price, exactly as they would on a directly quoted
+        // pair. (The inverted BID, 1/25.10, is what a customer SELLING EUR would receive.)
+        assertThat(conv.appliedRate).isEqualByComparingTo("0.04016064")
     }
 
     @Test

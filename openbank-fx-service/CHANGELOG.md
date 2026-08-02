@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.4](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.9.3...fx-service-v0.9.4) (2026-08-02)
+
+
+### Bug Fixes
+
+* **fx:** price a pair from its reverse quote instead of answering 404 ([#3189](https://github.com/JiRaska/open-bank-oss/issues/3189)) ([53b769f](https://github.com/JiRaska/open-bank-oss/commit/53b769f0351c550cb833268dcaa86b265ebbffbf)), closes [#2314](https://github.com/JiRaska/open-bank-oss/issues/2314)
+
 ## [0.9.3](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.9.2...fx-service-v0.9.3) (2026-08-01)
 
 
