@@ -96,7 +96,7 @@ class CardIssuancePactFolderProviderVerificationTest {
     @State("a card held by a known party exists")
     fun stateCardHeldByKnownParty() {
         val existing = VertxContextSupport.subscribeAndAwait {
-            Panache.withSession { cardRepository.find("id", CARD_ID).firstResult<CardEntity>() }
+            Panache.withSession { cardRepository.find("id", CARD_ID).firstResult() }
         }
         if (existing != null) return
         val entity = CardEntity().apply {
