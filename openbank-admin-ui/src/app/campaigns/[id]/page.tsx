@@ -11,6 +11,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import { JourneyFlow, type StepFunnel } from '@/components/campaigns/JourneyFlow'
+import { SectionBoundary } from '@/components/feedback/SectionBoundary'
 
 interface Campaign {
   id: string
@@ -321,19 +322,21 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 showed the campaign's DEFINITION; a marketer needs its RESULT — who it reached and
                 where the rest went — and had to correlate it against the send log by eye to get
                 there. The definition is still visible, just drawn as the flow it describes. */}
-            {detail?.sources.journey !== 'ok' ? (
+            {detail?.sources?.journey !== 'ok' ? (
               <DataUnavailable
-                kind={detail?.sources.journey === 'unauthorized' ? 'unauthorized' : 'unreachable'}
+                kind={detail?.sources?.journey === 'unauthorized' ? 'unauthorized' : 'unreachable'}
                 service="Campaign-service"
                 feature={t('Průchod kampaní', 'Journey')}
                 dense
               />
             ) : (
-              <JourneyFlow
-                steps={c.steps ?? []}
-                funnel={detail?.journey ?? []}
-                audienceSize={(detail?.enrolments?.length ?? 0) > 0 ? (detail?.enrolments?.length ?? 0) : null}
-              />
+              <SectionBoundary name="Journey">
+                <JourneyFlow
+                  steps={c.steps ?? []}
+                  funnel={detail?.journey ?? []}
+                  audienceSize={(detail?.enrolments?.length ?? 0) > 0 ? (detail?.enrolments?.length ?? 0) : null}
+                />
+              </SectionBoundary>
             )}
           </section>
 
@@ -347,9 +350,9 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
 
           <section className="space-y-2">
             <h2 className="text-sm font-semibold">{t('Zařazení', 'Enrolments')}</h2>
-            {detail?.sources.enrolments !== 'ok' ? (
+            {detail?.sources?.enrolments !== 'ok' ? (
               <DataUnavailable
-                kind={detail?.sources.enrolments === 'unauthorized' ? 'unauthorized' : detail?.sources.enrolments === 'not_deployed' ? 'not_deployed' : 'unreachable'}
+                kind={detail?.sources?.enrolments === 'unauthorized' ? 'unauthorized' : detail?.sources?.enrolments === 'not_deployed' ? 'not_deployed' : 'unreachable'}
                 service="Campaign-service"
                 feature={t('Zařazení', 'Enrolments')}
                 dense
@@ -445,12 +448,12 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
               {sendsLoading && <span className="text-xs text-muted-foreground">{t('Načítám…', 'Loading…')}</span>}
             </div>
 
-            {detail?.sources.sends !== 'ok' || sendState !== 'ok' ? (
+            {detail?.sources?.sends !== 'ok' || sendState !== 'ok' ? (
               <DataUnavailable
                 kind={
-                  detail?.sources.sends === 'unauthorized' || sendState === 'unauthorized'
+                  detail?.sources?.sends === 'unauthorized' || sendState === 'unauthorized'
                     ? 'unauthorized'
-                    : detail?.sources.sends === 'not_deployed'
+                    : detail?.sources?.sends === 'not_deployed'
                       ? 'not_deployed'
                       : 'unreachable'
                 }

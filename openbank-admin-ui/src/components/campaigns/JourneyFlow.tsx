@@ -96,11 +96,16 @@ export function JourneyFlow({
       MARKETING_PRODUCT_OFFER: t('Nabídka produktu', 'Product offer'),
     })[template] ?? template
 
-  const byStep = new Map(funnel.map(f => [f.stepOrder, f]))
-  const ordered = [...steps].sort((a, b) => a.order - b.order)
+  // Defensive despite the BFF contract: this component died on `.map` in front of a user when the
+  // journey slot briefly held an object, and a funnel that renders empty is a far cheaper failure
+  // than one that takes the whole screen with it. The route test asserts the contract; this makes
+  // breaking it survivable.
+  const rows = Array.isArray(funnel) ? funnel : []
+  const byStep = new Map(rows.map(f => [f.stepOrder, f]))
+  const ordered = Array.isArray(steps) ? [...steps].sort((a, b) => a.order - b.order) : []
 
   // Nothing has run yet: say so, rather than drawing an empty funnel that reads as "nobody matched".
-  const anyActivity = funnel.some(f => f.reached > 0)
+  const anyActivity = rows.some(f => f.reached > 0)
 
   return (
     <div className="space-y-4">
