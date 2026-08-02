@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.15.0...card-issuance-service-v0.15.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** make the per-service Dockerfiles honest, and keep them that way ([#3392](https://github.com/JiRaska/open-bank-oss/issues/3392)) ([21f2ff4](https://github.com/JiRaska/open-bank-oss/commit/21f2ff497fffb782162a5f8333ac6fff97d6c171)), closes [#3016](https://github.com/JiRaska/open-bank-oss/issues/3016)
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.14.0...card-issuance-service-v0.15.0) (2026-08-02)
 
 
