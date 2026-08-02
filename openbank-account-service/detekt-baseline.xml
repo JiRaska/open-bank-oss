@@ -13,14 +13,13 @@
     <ID>MagicNumber:PartyEventConsumer.kt$PartyEventConsumer$50</ID>
     <ID>MagicNumber:SanctionsScreeningAdapter.kt$SanctionsScreeningAdapter$400</ID>
     <ID>MagicNumber:SanctionsScreeningAdapter.kt$SanctionsScreeningAdapter$499</ID>
-    <ID>MatchingDeclarationName:ExceptionMappers.kt$AccountNotFoundExceptionMapper : ExceptionMapper</ID>
+    <ID>TooGenericExceptionCaught:DelegationEventConsumer.kt$DelegationEventConsumer$e: Exception</ID>
     <ID>TooGenericExceptionCaught:PartyEventConsumer.kt$PartyEventConsumer$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SanctionsScreeningAdapter.kt$SanctionsScreeningAdapter$e: Exception</ID>
     <ID>TooManyFunctions:AccountPorts.kt$AccountUseCase</ID>
     <ID>TooManyFunctions:AccountResource.kt$AccountResource</ID>
     <ID>TooManyFunctions:AccountService.kt$AccountService : AccountUseCase</ID>
     <ID>UnusedParameter:IbanGenerator.kt$IbanGenerator$currency: CurrencyCode</ID>
-    <ID>UseCheckOrError:AccountRepositoryImpl.kt$AccountRepositoryImpl$throw IllegalStateException("Account ${entity.id} not found for update")</ID>
     <ID>UseCheckOrError:CurrencyPocketRepositoryImpl.kt$CurrencyPocketRepositoryImpl$throw IllegalStateException("Pocket ${pocket.id} not found for update")</ID>
   </CurrentIssues>
 </SmellBaseline>

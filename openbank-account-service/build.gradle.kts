@@ -56,6 +56,7 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.redpanda)
+    testImplementation(libs.smallrye.reactive.messaging.inmemory)
 }
 
 kover {

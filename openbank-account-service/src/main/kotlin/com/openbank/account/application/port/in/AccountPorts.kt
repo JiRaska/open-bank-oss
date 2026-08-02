@@ -129,4 +129,15 @@ interface AuthorizationUseCase {
         partyId: UUID,
         role: com.openbank.account.domain.model.AuthorizationRole,
     ): Boolean
+
+    /**
+     * Amount-aware variant for the payment path (ADR-0232 D3 / AC6): a delegated
+     * PAYMENT_ONLY answer also checks the grant's per-transaction ceiling.
+     */
+    suspend fun isAuthorizedForAmount(
+        accountId: UUID,
+        partyId: UUID,
+        role: com.openbank.account.domain.model.AuthorizationRole,
+        amount: com.openbank.libs.domain.money.Money?,
+    ): Boolean
 }

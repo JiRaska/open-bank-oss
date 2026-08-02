@@ -39,6 +39,21 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # Delegation-grant enforcement projection (ADR-0232 D3): the delegation-events-in
+      # channel consumes ACCOUNT-scoped grant lifecycle events. DLQ gets its own Write ACL
+      # below for the same reason as party-events-in (#1476).
+      - resource:
+          type: topic
+          name: openbank.delegation.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: dead-letter-topic-delegation-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
       # SmallRye dead-letter topic for the party-events-in channel (failure-strategy:
       # dead-letter-queue). Without Write here, the DLQ send itself fails and the consumer
       # wedges on the very failure it was meant to park — the same ANONYMOUS-vs-ACL lockout
