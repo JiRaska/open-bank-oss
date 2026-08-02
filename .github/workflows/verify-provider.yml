@@ -22,7 +22,7 @@ permissions:
   id-token: write
 
 # Collapse duplicate dispatches for the SAME provider. The Pact Broker webhook
-# (openbank-infra/scripts/seed-pact-verification-webhook.sh) fires once per pact
+# (.github/workflows/pact-verification-reconcile.yml) dispatches once per provider
 # requiring verification, so a fleet-wide libs change that makes twenty consumers
 # republish would dispatch twenty runs — at most a handful of which are distinct
 # work — onto a six-runner ARC pool that already wedges for hours (#2039). Without

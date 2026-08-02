@@ -872,13 +872,14 @@ gates:
 
   # ==== api ===================================================================
 
-  # The Pact Broker webhook (openbank-infra/scripts/seed-pact-verification-webhook.sh)
-  # dispatches verify-provider.yml with `service = ${pactbroker.providerName}`, which
-  # only works because every pacticipant name is exactly a module directory — true for
-  # all 55 today, and previously held together by nothing. A drifted name would keep
-  # dispatching, just at a service that does not exist: the run fails inside the build
-  # and the pact stays unverified, which looks identical to the strand the webhook was
-  # built to remove. Reads the committed pacts, so no broker and no credentials.
+  # The verification reconciler (.github/scripts/pact-reconcile-verifications.py)
+  # dispatches verify-provider.yml with the PACTICIPANT NAME as its `service` input,
+  # which only works because every pacticipant name is exactly a module directory —
+  # true for all 55 today, and previously held together by nothing. A drifted name
+  # would keep dispatching, just at a service that does not exist: the run fails
+  # inside the build and the pact stays unverified, which looks identical to the
+  # strand the reconciler was built to remove. Reads the committed pacts, so no
+  # broker and no credentials.
   - id: pacticipant-matches-module
     name: "pacticipant name is a module directory (Pact webhook contract)"
     group: api
