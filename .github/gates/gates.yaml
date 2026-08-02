@@ -861,6 +861,96 @@ gates:
     run: |
       bash .github/scripts/ensure-ecr-repository.sh --self-test
 
+  # campaign-service's rollout died on `/bundle/rules-data.yaml: merge error` (#2872 defect 4).
+  # The sidecar runs `opa run --bundle /bundle` — DIRECTORY mode, where OPA derives a data
+  # document's path from its location in the tree. The bundle files were bit-identical to every
+  # healthy service's; only the MOUNTS differed. Mounted flat instead of at /bundle/<root>/data.yaml,
+  # two documents claim the same root, the bundle fails to load, and the container dies at boot.
+  #
+  # Nothing could see it: the ConfigMap is right, the args are right, the bundle drift gate compares
+  # CONTENT, and the service build knows nothing about mounts. The contradiction lives strictly
+  # between a Deployment's volumeMounts and the bundle's own manifest.json.
+  #
+  # The rule worth the effort is the quiet one: a data file under an UNDECLARED root is silently
+  # IGNORED by OPA rather than rejected, so the policy evaluates against absent data and no log
+  # explains the decision. Roots come from each bundle's own manifest.json — no per-service list.
+  #
+  # ENFORCED: 40 sidecars, 0 findings, 0 exceptions. Proven by flattening one real mount and
+  # watching it reproduce the campaign message.
+  # RESTORED. This entry was silently lost: #3486 added it and #3492 (branched from an older main,
+  # inserting at the SAME anchor in this file) squash-merged afterwards and took the file with its
+  # own version. GitHub reported both PRs MERGEABLE/CLEAN — a textbook semantic merge conflict, and
+  # the exact hazard this repo documents for parallel agents. The script survived on main
+  # registered nowhere, i.e. the meta-gate became the orphan it exists to detect. It is registered
+  # here again, and from now on its own rule makes that loss a build failure rather than silence.
+  #
+  # Every check-* script must be in this manifest, invoked from a tracked file, or a declared
+  # HELPER. #3240 found two that had never executed — one of them written to stop a regulatory
+  # drift, referenced from nowhere for its whole life.
+  - id: gitops-duplicate-resources
+    name: "No duplicate resource or env-list entry in a gitops manifest (issues #3450/#3460, enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-gitops-duplicate-resources.py --self-test
+    run: |
+      python3 .github/scripts/check-gitops-duplicate-resources.py --enforce
+
+  - id: scheduled-trigger-emitted
+    name: a declared SCHEDULED trigger must actually be emitted (an unreachable schedule fails silently)
+    group: kotlin
+    mode: enforced
+    run: |
+      # Falsified in three directions before wiring in: a new unemitted service fails, a
+      # baselined service that becomes covered ALSO fails (so the list cannot rot), and the
+      # tree as committed passes. 9 self-test cases, including comment-only mentions and
+      # Kotlin's NESTED block comments.
+      python3 .github/scripts/check-scheduled-trigger-emitted.py --self-test
+      python3 .github/scripts/check-scheduled-trigger-emitted.py --enforce
+
+  # On 2026-08-02 PR #3492 squash-merged and silently removed THREE enforced gates from this file
+  # — scheduled-trigger-emitted (#3484), gitops-duplicate-resources (#3474) and
+  # gate-script-registration (#3486), all added hours earlier. Nobody removed them: #3492 was
+  # branched from an older main and every new gate is appended near the same anchor, so its copy of
+  # this file replayed over the others'. GitHub reported MERGEABLE/CLEAN and all five required
+  # checks green. Three enforced gates stopped running and nothing said anything.
+  #
+  # gates.yaml is the highest-collision file in the tree precisely BECAUSE the manifest design
+  # worked: adding a gate is one entry in one file, so every agent edits the same region.
+  #
+  # gate-script-registration catches the SYMPTOM (an unrun check-* script) and did catch two of the
+  # three. It cannot see a lost entry whose script is invoked elsewhere, a gate whose run: is an
+  # inline command, or a silent enforced -> advisory downgrade. This compares the manifest with its
+  # own merge-base. Removal stays possible — it just has to be written down.
+  #
+  # Verified by replaying the real incident through it: 3 findings, one per lost gate.
+  - id: gates-not-deregistered
+    name: "no gate disappears from the manifest silently (enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-gates-not-deregistered.py --self-test
+    run: |
+      python3 .github/scripts/check-gates-not-deregistered.py --enforce
+
+  - id: gate-script-registration
+    name: "every check-* script is actually run (#3240, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-gate-script-registration.py --self-test
+    run: |
+      python3 .github/scripts/check-gate-script-registration.py --enforce
+
+  - id: opa-sidecar-bundle-shape
+    name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-opa-sidecar-bundle-shape.py --self-test
+    run: |
+      python3 .github/scripts/check-opa-sidecar-bundle-shape.py --enforce
+
   - id: compliance-matrix
     name: "compliance-page evidence citations (#2370, enforced)"
     group: registry
