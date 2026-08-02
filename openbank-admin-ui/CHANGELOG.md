@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.82.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.81.0...admin-ui-v0.82.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** draw the campaign journey as a flow, not a bar ([#3262](https://github.com/JiRaska/open-bank-oss/issues/3262)) ([9bbec95](https://github.com/JiRaska/open-bank-oss/commit/9bbec95dca6cff2f0c1c0abd95c0363facc3253b))
+
 ## [0.81.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.80.2...admin-ui-v0.81.0) (2026-08-02)
 
 
