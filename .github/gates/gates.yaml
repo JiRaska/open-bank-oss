@@ -1804,3 +1804,17 @@ gates:
       # OutOfSync/Progressing rather than failed. Five services, four money-path,
       # were drifted this way before the check existed.
       python3 .github/scripts/check-opa-bundle-apply-size.py
+  - id: configproperty-kotlin-defaults
+    name: "@ConfigProperty constructor params must not carry a Kotlin default"
+    group: kotlin
+    mode: enforced
+    selftest: python3 .github/scripts/check-configproperty-kotlin-defaults.py --self-test
+    selftest_expect: pass
+    run: |
+      # A Kotlin default on a @ConfigProperty constructor parameter generates a synthetic
+      # constructor; Arc builds the bean through it and the annotation is never applied, so
+      # the field silently keeps its fallback whatever the environment says. Measured: the
+      # lending pod had LENDING_INTAKE_ENABLED=true and the endpoint answered 403 "intake is
+      # disabled". Ratcheted against a baseline — new occurrences fail, today's are frozen
+      # because removing a default makes config START applying and can flip live behaviour.
+      python3 .github/scripts/check-configproperty-kotlin-defaults.py

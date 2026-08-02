@@ -16,7 +16,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 @ApplicationScoped
 class OriginationConfig(
     @param:ConfigProperty(name = "lending.origination.auto-approve", defaultValue = "false")
-    val autoApprove: Boolean = false,
+    val autoApprove: Boolean,
 ) {
     companion object {
         const val SANDBOX_ACTOR = "sandbox-auto-approval"
