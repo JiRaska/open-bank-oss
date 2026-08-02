@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/v0.7.1...v0.8.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** show the journey as a funnel, not a table of enums ([#3191](https://github.com/JiRaska/open-bank-oss/issues/3191)) ([6bc3dda](https://github.com/JiRaska/open-bank-oss/commit/6bc3dda5b1ec1ab094335dfcf23e6c6337552aa4))
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/v0.7.0...v0.7.1) (2026-08-01)
 
 

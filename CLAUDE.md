@@ -442,6 +442,18 @@ fire from *outside* it, so they stay here:
   fast echo — what `adr-registry` already did, and what `agent-charter-registry` and `eu-ai-act` now
   do too. Corollary: reaching for the ruleset is usually the wrong instinct here, since the in-repo
   fix ships in the same PR as the gate and needs no GitHub-side config change.
+- **A PR that is conflicted AT CREATION never gets `refs/pull/<n>/merge`, so NO `pull_request`
+  workflow is ever created — and zero checks renders as "waiting", never as broken.** Not skipped:
+  absent. Nothing reports, the required contexts can never be satisfied, and there is no run to
+  re-run, so the PR is unmergeable forever and eventually gets closed by whoever supersedes it.
+  `DIRTY` alone is NOT the predictor and that is what makes it hard to see — a PR that became
+  conflicted *later* keeps the merge ref it was born with along with its full check set (#3058:
+  DIRTY, 13 runs). Measured 2026-08-01: four admin-ui deploy PRs with 0 runs, three closed having
+  deployed nothing, while every one that merged had 18. The fix on an affected PR is any new head —
+  merging `main` in took #3183 from `merge ref 0 / 0 runs` to `1 / 12`, and it then merged. Root
+  cause class: a bot that checks out `github.sha` and branches from it while `main` moves under it
+  (#3194). Probe with `git ls-remote origin refs/pull/<n>/merge` and a run count per head SHA —
+  a PR list, a check list and `gh pr view` all look normal.
 - **`/actions/runs/<id>/jobs` returns the LATEST attempt — anything reacting to `workflow_run`
   must query `/actions/runs/<id>/attempts/<n>/jobs`.** The unscoped endpoint silently answers
   about a *different* run than the event fired for, so a guard that inspects job or step

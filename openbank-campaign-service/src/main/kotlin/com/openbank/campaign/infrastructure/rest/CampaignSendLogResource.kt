@@ -70,6 +70,12 @@ class CampaignSendLogResource(private val query: CampaignSendLogQuery) {
     suspend fun sendSummary(@PathParam("id") id: UUID): Response =
         Response.ok(query.summary(id).mapKeys { it.key.name }).build()
 
+    /** Per-step funnel for the journey view — every number a SQL aggregate, never a page fold. */
+    @GET
+    @Path("/{id}/journey")
+    @Authorize(action = "campaign.read", resource = "#id")
+    suspend fun journey(@PathParam("id") id: UUID): Response = Response.ok(query.funnel(id)).build()
+
     private fun badOutcome(cause: Throwable): Response = Response.status(Response.Status.BAD_REQUEST)
         .entity(
             mapOf(

@@ -28,6 +28,36 @@ data class FxRate(
     val midRate: BigDecimal get() = (bidRate + askRate).divide(BigDecimal.TWO)
     val spread: BigDecimal get() = askRate - bidRate
     fun isValid(at: Instant = Instant.EPOCH) = at.isAfter(validFrom) && at.isBefore(validTo)
+
+    /**
+     * The same quote read from the other side: CZK/EUR out of EUR/CZK.
+     *
+     * Needed because the ČNB fixing — the only live source this platform ingests — publishes
+     * FOREIGN→CZK exclusively. Every stored pair is therefore `X/CZK`, and a customer selling
+     * CZK to buy EUR asks for a pair that has never existed and never will. There is no amount
+     * of retrying that fixes that.
+     *
+     * **The sides swap, and that is the whole point.** The bank BUYS the base at [bidRate] and
+     * SELLS it at [askRate]; in the inverted pair those roles trade places, so
+     * `inverted().bidRate = 1 / askRate` and `inverted().askRate = 1 / bidRate`. Taking a naive
+     * `1 / bidRate` for both would quote the customer the wrong side of the spread on every
+     * CZK→foreign exchange — a systematic loss, in the customer's favour on one leg and the
+     * bank's on the other, which is exactly the kind of error that does not announce itself.
+     *
+     * [id] is carried over unchanged: this is a view of the SAME quote, not a new one, and
+     * FxConversion.rateId must keep pointing at the row the price came from.
+     */
+    fun inverted(): FxRate = copy(
+        baseCurrency = quoteCurrency,
+        quoteCurrency = baseCurrency,
+        bidRate = BigDecimal.ONE.divide(askRate, INVERSE_SCALE, RoundingMode.HALF_UP),
+        askRate = BigDecimal.ONE.divide(bidRate, INVERSE_SCALE, RoundingMode.HALF_UP),
+    )
+
+    private companion object {
+        /** Matches the numeric(18,8) the rates are stored at, so a round trip does not drift. */
+        const val INVERSE_SCALE = 8
+    }
 }
 
 data class FxConversion(

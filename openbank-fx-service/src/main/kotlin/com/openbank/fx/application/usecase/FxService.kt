@@ -67,7 +67,23 @@ class FxService(
     }
 
     override suspend fun getRate(query: GetRateQuery) =
-        rateRepo.findLatest(query.baseCurrency, query.quoteCurrency, query.rateType)
+        resolveRate(query.baseCurrency, query.quoteCurrency, query.rateType)
+
+    /**
+     * The quote for base/quote, falling back to the inverse of quote/base when only that
+     * direction is stored.
+     *
+     * The ČNB fixing — the only live source ingested here — publishes FOREIGN→CZK exclusively, so
+     * every stored pair is `X/CZK`. Without this fallback `CZK/EUR` has no answer, which is not a
+     * transient failure: it is every customer-initiated CZK→foreign exchange, permanently. The
+     * customer edge turns the resulting null into `fx_rate_unavailable` + HTTP 502, so the app
+     * reports a gateway error for what is really a missing derivation.
+     *
+     * Inversion swaps bid and ask — see [FxRate.inverted].
+     */
+    private suspend fun resolveRate(base: String, quote: String, type: RateType): FxRate? =
+        rateRepo.findLatest(base, quote, type)
+            ?: rateRepo.findLatest(quote, base, type)?.inverted()
 
     override suspend fun getAllRates() = rateRepo.findAll()
 
@@ -83,7 +99,9 @@ class FxService(
 
     override suspend fun convert(cmd: ConvertCommand): FxConversion {
         convRepo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return it }
-        val rate = rateRepo.findLatest(cmd.fromCurrency, cmd.toCurrency, RateType.SPOT)
+        // Same resolution as the read path: a conversion must not be refused for a pair the bank
+        // can price perfectly well from the other side.
+        val rate = resolveRate(cmd.fromCurrency, cmd.toCurrency, RateType.SPOT)
             ?: error("No FX rate available for ${cmd.fromCurrency}/${cmd.toCurrency}")
         require(rate.isValid(Instant.now(clock))) { "FX rate expired for ${cmd.fromCurrency}/${cmd.toCurrency}" }
 
