@@ -51,6 +51,22 @@ ARTIFACT_RE = re.compile(r'<artifact name="([^"]*)"')
 # without the cost of a full quarkusBuild — see #3199.
 TASKS = ("testClasses", "quarkusDependenciesBuild")
 
+# `quarkusDependenciesBuild` only exists on modules applying the `openbank.quarkus-service`
+# convention plugin. Three do not — openbank-libs-{domain,runtime,temporal} — and naming
+# the task for them fails the WHOLE invocation with "Cannot locate tasks that match", so a
+# PR touching one of those build files would take the check down with it. They still get
+# `testClasses`, which is the only graph they have.
+QUARKUS_MARKER = "openbank.quarkus-service"
+
+
+def tasks_for(module: str) -> tuple[str, ...]:
+    build_file = pathlib.Path(module) / "build.gradle.kts"
+    try:
+        is_quarkus = QUARKUS_MARKER in build_file.read_text(encoding="utf-8")
+    except OSError:
+        is_quarkus = False
+    return TASKS if is_quarkus else ("testClasses",)
+
 
 def artifact_set(path: pathlib.Path) -> set[str]:
     """Every (component, artifact) pair in the file, as flat 'g:n:v|artifact' keys."""
@@ -79,7 +95,7 @@ def regenerate(modules: list[str]) -> None:
     same outcome as "a gap was found": a crashed build proves nothing either way,
     and reporting it as a gap would send the author chasing entries that are fine.
     """
-    targets = [f":{module}:{task}" for module in modules for task in TASKS]
+    targets = [f":{module}:{task}" for module in modules for task in tasks_for(module)]
     result = subprocess.run(
         ["./gradlew", "--write-verification-metadata", "sha256",
          # Without this the check is vacuous on CI. A warm Gradle cache does not
@@ -107,9 +123,23 @@ def main() -> int:
                         help="comma-separated Gradle module dirs; empty means nothing to do")
     parser.add_argument("--enforce", action="store_true",
                         help="exit non-zero on a gap (default: warn only)")
+    parser.add_argument("--shard", type=str, default=None, metavar="I/N",
+                        help="with --modules all: take shard I of N (1-based), for the "
+                             "periodic guard — a single fleet run needs ~12g of heap, "
+                             "more than a 16 GB runner can safely give it")
     args = parser.parse_args()
 
-    modules = [m.strip() for m in args.modules.split(",") if m.strip()]
+    if args.modules.strip() == "all":
+        every = sorted(d.name for d in pathlib.Path(".").iterdir()
+                       if d.is_dir() and d.name.startswith("openbank-")
+                       and (d / "build.gradle.kts").is_file())
+        if args.shard:
+            index, total = (int(x) for x in args.shard.split("/"))
+            every = every[index - 1::total]
+            print(f"check-verification-metadata: shard {index}/{total}")
+        modules = every
+    else:
+        modules = [m.strip() for m in args.modules.split(",") if m.strip()]
     if not modules:
         print("check-verification-metadata: no Gradle modules changed — nothing to check")
         return 0
@@ -157,7 +187,7 @@ def main() -> int:
           f"modules resolves artifacts that gradle/verification-metadata.xml does not pin. "
           f"Regenerate locally and commit the additions: "
           f"./gradlew --write-verification-metadata sha256 "
-          f"{' '.join(f':{m}:{t}' for m in modules for t in TASKS)} "
+          f"{' '.join(f':{m}:{t}' for m in modules for t in tasks_for(m))} "
           f"-Dorg.gradle.jvmargs=-Xmx6g")
     for key in missing:
         component, artifact = key.split("|", 1)
