@@ -1299,7 +1299,15 @@ gates:
     mode: advisory
     when: pull_request
     needs_base: required
+    selftest: python3 openbank-infra/scripts/check-threat-model-diff.py --self-test
+    selftest_expect: pass
     run: |
+      # Advisory by ADR-0144 graduation, NOT because the finding is optional: a
+      # threat model that no longer describes the service is how #3378 shipped —
+      # openbank-sanctions-service satisfied the enforced coverage gate for nine
+      # months while omitting sanctions.clear entirely. Graduating this to
+      # `enforced` is tracked in #3431; the blocker was a 7-of-60 false-positive
+      # rate on generated manifest churn, fixed here (now 2 of 60, both real).
       python3 openbank-infra/scripts/check-threat-model-diff.py --base "${PR_DIFF_BASE}"
 
   - id: compliance-page-evidence
