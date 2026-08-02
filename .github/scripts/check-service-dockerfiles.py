@@ -19,15 +19,18 @@ container port, **falling back to 8080 when absent**.
 That fallback is what makes the second rule below matter as much as the first: a Dockerfile that
 loses its `EXPOSE` does not fail, it silently publishes the wrong port.
 
-WHAT IT CHECKS, for every `openbank-*/Dockerfile` except the two that are genuinely built:
+WHAT IT CHECKS, for every `openbank-*/Dockerfile` except the three that are genuinely built:
 
   1. exactly one `EXPOSE <port>` line;
   2. no Gradle build stage — no `gradlew`, no `gradle:` base image, no `COPY --from=build`.
 
-EXEMPT, and they must stay exempt: `openbank-developer-portal` (static nginx) and
-`openbank-document-renderer` (WeasyPrint sidecar, ADR-0162 D3) are real, buildable, non-JVM images
-with their own recipes. #3016 counts them among the 51 dead files; they are not, and stripping them
-would have deleted two working builds.
+EXEMPT, and they must stay exempt: `openbank-admin-ui` (multi-stage Next.js, built by
+`build-push-admin-ui.sh`), `openbank-developer-portal` (static nginx) and
+`openbank-document-renderer` (WeasyPrint sidecar, ADR-0162 D3). #3016 counts all three among the 51
+dead files; they are not, and stripping them deletes working builds — which is exactly what the
+first pass of this change did to admin-ui. So the exemption set is no longer trusted as written:
+the self-test derives "is really built" from the build scripts and fails if anything they name by
+path is missing from it.
 
 Usage:  check-service-dockerfiles.py [--enforce] [--selftest]
 Advisory by default (prints ::warning, exits 0) per the repo convention; --enforce fails the build.
@@ -47,9 +50,18 @@ BUILD_STAGE_RE = re.compile(r"(?m)^(?!\s*#).*(gradlew|FROM\s+gradle:|--from=buil
 
 # Real, buildable images with their own recipes — not the dead-Gradle shape this gate is about.
 GENUINELY_BUILT = {
-    "openbank-developer-portal": "static nginx image, built from this Dockerfile",
-    "openbank-document-renderer": "WeasyPrint sidecar (ADR-0162 D3), built from this Dockerfile",
+    # openbank-infra/scripts/build-push-admin-ui.sh builds THIS file: multi-stage Next.js, bakes
+    # BUILD_VERSION/BUILD_GIT_SHA, an SBOM-collector stage and test-results.json. The first pass of
+    # this change stripped it — caught only because the branch later conflicted with main on that
+    # exact file. A hand-kept exemption list is the thing this repo keeps getting wrong, so the
+    # membership below is asserted against the build scripts in the self-test, not just written here.
+    "openbank-admin-ui": "built by openbank-infra/scripts/build-push-admin-ui.sh",
+    "openbank-developer-portal": "static nginx image, not the dead-Gradle shape",
+    "openbank-document-renderer": "WeasyPrint sidecar (ADR-0162 D3), not the dead-Gradle shape",
 }
+
+# Where a "this file is really built" claim is checked from, so the set above cannot drift silently.
+BUILD_SCRIPTS = ("openbank-infra/scripts", ".github/workflows")
 
 
 def dockerfiles() -> list[pathlib.Path]:
@@ -97,6 +109,35 @@ def selftest() -> int:
         if not (REPO / service / "Dockerfile").is_file():
             print(f"selftest FAIL: {service}/Dockerfile is missing — the exemption is stale.")
             return 1
+
+    # Anything a build script names by path IS built, and must therefore be exempt. This is the
+    # half that was missing: openbank-admin-ui/Dockerfile is built by build-push-admin-ui.sh and
+    # was stripped anyway, because the exemption list was written from reading the files rather
+    # than from what builds them.
+    referenced: set[str] = set()
+    for root in BUILD_SCRIPTS:
+        base = REPO / root
+        if not base.is_dir():
+            continue
+        for path in list(base.glob("*.sh")) + list(base.glob("*.yml")):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            for match in re.finditer(r"(openbank-[a-z0-9-]+)/Dockerfile(?![.\w])", text):
+                # `Dockerfile(?![.\w])` and not `Dockerfile\b`: product-catalog's native image is
+                # built from `Dockerfile.native`, and `\b` matches before the dot — which reported
+                # its plain (dead) Dockerfile as built. A mention inside a comment is not a build
+                # either; anacredit's only reference is a comment about the EXPOSE grep.
+                line = text[text.rfind("\n", 0, match.start()) + 1:].split("\n", 1)[0]
+                if line.lstrip().startswith("#"):
+                    continue
+                referenced.add(match.group(1))
+    missing = sorted(referenced - set(GENUINELY_BUILT))
+    if missing:
+        print(f"selftest FAIL: {missing} are named by a build script but not exempt — stripping "
+              f"them removes a working build.")
+        return 1
 
     cases = [
         ("FROM x\nEXPOSE 8101\n", False, "the stripped shape"),
