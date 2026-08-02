@@ -993,6 +993,33 @@ gates:
     run: |
       python3 .github/scripts/check-kafka-cert-reader-grant.py --enforce
 
+  # campaign-service died with `InactiveBeanException: ReactiveRedisDataSource` (#2872 defect 3).
+  # Quarkus DEACTIVATES an extension's beans when the extension is on the classpath and
+  # unconfigured, so the service compiled, its tests passed — @ApplicationScoped is LAZY, so the
+  # producer is never invoked — and it died on the first request that resolved the bean.
+  #
+  # Checks BOTH config sources, application.yaml and the gitops Deployment env. Either alone is a
+  # false positive waiting to happen: fraud-service supplies QUARKUS_REDIS_HOSTS purely from its
+  # Deployment env and its application.yaml says nothing about Redis. An earlier draft that read
+  # only application.yaml flagged it — a service that is entirely correct.
+  #
+  # The bean->property table is DECLARED rather than derived, and that is deliberate: it encodes a
+  # Quarkus framework fact (which bean deactivates without which property), which lives in Quarkus
+  # and not in this tree. Everything about THIS repo is derived. A missing row narrows the gate,
+  # never breaks it.
+  #
+  # ENFORCED: 26 (service, property) pairs, 0 findings. Proven by removing BOTH sources for one
+  # real service and watching it reproduce the campaign failure — the first attempt removed only
+  # application.yaml and stayed green, correctly, because the env supplied it.
+  - id: extension-bean-config
+    name: "an injected Quarkus extension bean has the config that activates it (#2872, enforced)"
+    group: kotlin
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-extension-bean-config.py --self-test
+    run: |
+      python3 .github/scripts/check-extension-bean-config.py --enforce
+
   - id: compliance-matrix
     name: "compliance-page evidence citations (#2370, enforced)"
     group: registry
