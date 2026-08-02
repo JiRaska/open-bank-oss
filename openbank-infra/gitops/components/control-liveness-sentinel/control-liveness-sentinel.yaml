@@ -56,6 +56,18 @@ spec:
               value: http://alertmanager-operated.observability.svc:9093
             - name: TEMPORAL_NAMESPACE
               value: openbank-liveness
+            # The daily fleet-wide check (ADR-0163). Set EXPLICITLY here rather than left to the
+            # application.yaml default, because this is the only place an operator looks to answer
+            # "when does the sentinel run" — and until #3305 the answer was "it doesn't". The
+            # service was trigger-only: measured 2026-08-02, the openbank-liveness Temporal
+            # namespace held 0 schedules and 0 workflow executions, and `findings` was empty. An
+            # empty findings table renders as "no stale controls", which is the healthiest-looking
+            # possible answer to a question nothing had ever asked.
+            # 03:15 is the ADR-0163 offset from finops-agent (03:00) and devops-agent (03:30):
+            # the three agents share one LiteLLM gateway and one Prometheus.
+            # Six fields (second minute hour day month weekday) — Quarkus cron, not crontab.
+            - name: LIVENESS_CHECK_CRON
+              value: "0 15 3 * * ?"
             # LLM backend — routed through the in-cluster LiteLLM gateway (ADR-0174/0175), which now
             # IS deployed (openbank-infra/gitops/components/ai-platform). The gateway holds the
             # provider key and is the only pod allowed to egress to the US provider; this agent
