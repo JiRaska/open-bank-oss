@@ -86,6 +86,52 @@ class ScaServiceTest {
         )
     }
 
+    /**
+     * ADR-0232 D4. delegation-service compares the challenge's purpose to the literals
+     * "DELEGATION_GRANT" / "DELEGATION_ACCEPT"; ScaPurpose is a closed enum and carried neither,
+     * so no challenge could ever match and every delegation offer and accept failed against the
+     * real service. This test is the artifact-level check: both values exist, they are distinct
+     * (a grantor's challenge must never be spendable as the grantee's acceptance), and each
+     * reaches a push message of its own rather than falling through.
+     */
+    @Test
+    fun `a delegation challenge can be raised for each half of the ceremony`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { idempotencyStore.get(any()) } returns null
+        coEvery { repository.save(any()) } answers { firstArg() }
+        coEvery { idempotencyStore.save(any(), any(), any()) } returns Unit
+        val pushed = mutableListOf<String>()
+        coEvery { notificationDispatchGuard.sendPushNotification(any(), any(), any()) } answers {
+            pushed += thirdArg<String>()
+            Unit
+        }
+
+        val grant = service.initiate(
+            InitiateScaCommand(
+                partyId = partyId,
+                purpose = ScaPurpose.DELEGATION_GRANT,
+                preferredMethod = null,
+                dynamicLinkingData = null,
+                redirectUrl = null,
+            ),
+        )
+        val accept = service.initiate(
+            InitiateScaCommand(
+                partyId = partyId,
+                purpose = ScaPurpose.DELEGATION_ACCEPT,
+                preferredMethod = null,
+                dynamicLinkingData = null,
+                redirectUrl = null,
+            ),
+        )
+
+        assertThat(grant.purpose).isEqualTo(ScaPurpose.DELEGATION_GRANT)
+        assertThat(accept.purpose).isEqualTo(ScaPurpose.DELEGATION_ACCEPT)
+        assertThat(grant.purpose).isNotEqualTo(accept.purpose)
+        assertThat(pushed).hasSize(2)
+        assertThat(pushed[0]).isNotEqualTo(pushed[1])
+    }
+
     @Test
     fun `initiate creates challenge with PUSH_NOTIFICATION as default method`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()

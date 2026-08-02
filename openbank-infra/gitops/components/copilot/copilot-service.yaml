@@ -75,7 +75,7 @@ spec:
               value: deepseek-ai/DeepSeek-V3.2
             - name: COPILOT_MODEL_ID
               value: deepseek-ai/DeepSeek-V3.2
-            # LiteLLM virtual key, projected from OpenBao (litellm/KEY_COPILOT_SERVICE) by ESO — the
+            # LiteLLM virtual key, projected from OpenBao (litellm/LITELLM_MASTER_KEY) by ESO — the
             # provider key now lives only in ai-platform (ADR-0175). Optional so an un-seeded key does
             # not CrashLoop the pod — until it is set the model call degrades.
             - name: COPILOT_MODEL_API_KEY
