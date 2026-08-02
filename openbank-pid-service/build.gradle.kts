@@ -61,6 +61,27 @@ dependencies {
     testImplementation(libs.pact.provider)
 }
 
+// Pact: forward broker config to the forked test JVM (issue #2991). pid-service publishes no
+// consumer pacts, so `pact.rootDir` is only here for consistency with the fleet; the broker
+// properties are the load-bearing half. Without them `pactbroker.url` never reaches the test JVM,
+// PidPactBrokerProviderVerificationTest stays @EnabledIfSystemProperty-skipped even on main-push,
+// and pid-service publishes no verification result — the exact `can-i-deploy` block that class
+// exists to prevent. NOTE: must be set on the test JVM fork, not the Gradle daemon.
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+}
+
 kover {
     reports {
         verify {

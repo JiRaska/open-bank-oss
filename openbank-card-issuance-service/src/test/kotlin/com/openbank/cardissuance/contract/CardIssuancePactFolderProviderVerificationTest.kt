@@ -39,6 +39,20 @@ import java.util.UUID
  * would replay the contract only after the merge — the exact debt #2327 cleared and
  * `check-pact-provider-replay.py` now prevents.
  *
+ * ## One HALF of a deliberate pair — the paragraph above is not an argument against the other half
+ *
+ * [CardIssuancePactBrokerProviderVerificationTest] is the `@PactBroker` +
+ * `@EnabledIfSystemProperty(pactbroker.url)` twin, and it is required. This class is the PR-lane
+ * gate (zero infra, always runs, catches a wrong route before merge); the twin is the only thing
+ * that publishes a verification RESULT, which is all `can-i-deploy` (ADR-0092) reads. A provider
+ * carrying only this class has never published a version on main, so every consumer reads as
+ * unverified and its deploys block permanently — #3239, and fx-service across four attempts on
+ * 2026-08-02. Neither half substitutes for the other.
+ *
+ * Any `@State` added here MUST be added to the twin in the same commit: a state the broker replay
+ * cannot satisfy fails with `MissingStateChangeMethod` and publishes a FAILURE, which is strictly
+ * worse than publishing nothing.
+ *
  * ## What this replay proves that the consumer pact cannot
  *
  * That `GET /api/v1/cards/{id}` EXISTS and answers with `partyId`. delegation-service's whole

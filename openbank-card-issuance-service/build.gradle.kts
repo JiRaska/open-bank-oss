@@ -61,8 +61,25 @@ dependencies {
 // Pact: write generated pact files to the shared pacts/ dir at the repo root (git-pact, ADR-0063).
 // The consumer test regenerates the file on every run; developers commit the result.
 // NOTE: must be set on the test JVM fork, not the Gradle daemon (System.setProperty would not propagate).
+//
+// The broker properties are forwarded for the same reason (issue #2991): without them
+// `pactbroker.url` never reaches the forked test JVM, CardIssuancePactBrokerProviderVerificationTest
+// stays @EnabledIfSystemProperty-skipped on EVERY lane including main-push, and card-issuance keeps
+// publishing no verification result — which is the `can-i-deploy` block the class exists to prevent.
+// A twin that cannot see the broker looks identical to not having one.
 tasks.withType<Test> {
     systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
 
 kover {

@@ -10,7 +10,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
-import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.openbank.pid.application.port.out.PartyRepository
 import com.openbank.pid.domain.model.AmlRiskScore
 import com.openbank.pid.domain.model.ContactAttributes
@@ -34,6 +34,7 @@ import kotlinx.coroutines.launch
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -43,54 +44,57 @@ import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 
 /**
- * Git-pact provider verification for pid-service — the FIRST it has ever had (issue #2991).
+ * Broker-side provider verification for pid-service — the published-result counterpart to
+ * [PidPactFolderProviderVerificationTest].
  *
- * pid-service is the provider for one committed pact: delegation-service's
- * `GET /api/v1/parties/{id}`, the ADR-0232 D5 eligibility check that decides whether a party may
- * be either end of a delegation grant. `check-pact-provider-replay.py` requires that every
- * committed pact is replayed by a class that actually RUNS on a pull request, so this is
- * `@PactFolder`-sourced and carries no `@EnabledIf*` gate — a `@PactBroker` class would skip on
- * the PR lane (`PACT_BROKER_URL` is blank there; the broker has no public ingress, ADR-0056) and
- * the contract would be replayed only after the merge, which is what #2327 had to unwind fleet-wide.
+ * ## Why this exists, and why it had to land in the SAME PR as the pact
  *
- * ## This class is one HALF of a deliberate pair — do not read the paragraph above as an argument
- * ## against the other half
+ * `can-i-deploy` (ADR-0092) reads the broker and nothing else. A `@PactFolder` class replays the
+ * committed pact from disk and never contacts the broker, so a provider that has only one has
+ * **never published a version on main** — and every consumer of it then reads as unverified,
+ * permanently. That is not a delay that clears itself.
  *
- * [PidPactBrokerProviderVerificationTest] is the `@PactBroker` + `@EnabledIfSystemProperty(pactbroker.url)`
- * twin, and it is required, not optional. The two answer different questions: this class is the
- * PR-lane gate (zero infra, always runs, catches the wrong-route defect before merge), and the twin
- * is the only thing that publishes a verification RESULT — which is all `can-i-deploy` (ADR-0092)
- * reads. A provider with only this class has never published a version on main, so every consumer
- * of it reads as unverified and its deploys block permanently (#3239; fx-service, four attempts,
- * 2026-08-02). Removing either half breaks something the other cannot cover.
+ * Without this class, merging the delegation pacts would have made `openbank-delegation-service`
+ * undeployable the moment it started publishing: `can-i-deploy` would answer "no verified pact
+ * between openbank-delegation-service and the version of openbank-pid-service currently in
+ * sandbox", and label it `PENDING_BUILD` — a name that reads like a transient state and is not
+ * one. The same shape took fx-service out across four deploy attempts on 2026-08-02 and is what
+ * #3239 added the aml/sanctions twins for. delegation-service reached sandbox for the first time
+ * the night this landed; shipping the consumer pact without this class would have taken that away.
  *
- * Any `@State` added here MUST be added to the twin in the same commit — a state the broker replay
- * cannot satisfy fails with `MissingStateChangeMethod` and publishes a FAILURE, which is strictly
- * worse than publishing nothing.
+ * ## Why a second `@Provider("openbank-pid-service")` class is safe
  *
- * ## Why the replay is what protects this call, not the consumer pact
+ * The collision `rules.yaml`/ADR-0029 D3 warns about is two BROKER-sourced classes for one
+ * provider — each fetches every pact the broker holds — or an HTTP and a MESSAGE target fighting
+ * over the same `@BeforeEach`. This is the sanctioned pair CLAUDE.md documents: a `@PactFolder`
+ * class for the PR lane plus a `@PactBroker` class gated on `pactbroker.url`, exactly as
+ * openbank-ledger-service and (since #3239) aml-service and sanctions-service carry. pid-service
+ * has no message-consumer contracts and both classes use [HttpTestTarget] exclusively, so
+ * verifying the same interaction from two sources is at worst redundant, never colliding.
  *
- * delegation-service reads `kycAttributes.kycLevel` with an elvis to `"NONE"`. If pid-service
- * moved or renamed that nested object, the consumer would not fail — it would rank every grantee
- * at KYC level NONE and refuse every offer, silently. The Pact mock server cannot expose that,
- * because it serves whatever the pact says; only asking the real `PartyResource` for the real
- * `PartyResponse` can (#2269).
+ * Gated on `pactbroker.url`: skipped locally and on the PR lane, where `_service-ci.yml` blanks
+ * `PACT_BROKER_URL` (the broker has no public ingress, ADR-0056). It runs on main-push, where
+ * `PUBLISH_RESULTS=true` — that run is what creates the main version `can-i-deploy` looks for.
  *
- * `@TestSecurity` matches `PartyResource.getById`'s `@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)`.
- * Note what that means for the contract: this replay proves the ROUTE and the SHAPE, and asserts
- * nothing about who may call it. The M2M authorization of delegation-service against pid-service
- * is a separate concern (ADR-0034) and a pact is the wrong instrument for it.
+ * ## Every state the git-pact twin handles is handled here too
+ *
+ * The broker serves EVERY consumer's pact for this provider, not just the one committed under
+ * `pacts/`. A missing state fails with `MissingStateChangeMethod` and publishes a FAILURE, which
+ * blocks an otherwise healthy pair — strictly worse than publishing nothing, and it would turn
+ * this class into the problem it exists to remove. Today that is one state, mirrored verbatim
+ * below; anything added to [PidPactFolderProviderVerificationTest] belongs here in the same commit.
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.pid.it.PostgresTestResource::class)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR", "ROLE_ADMIN"])
 @Provider("openbank-pid-service")
-@PactFolder("../pacts")
+@PactBroker
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
-class PidPactFolderProviderVerificationTest {
+@EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
+class PidPactBrokerProviderVerificationTest {
 
     companion object {
-        // Must match DelegationPartyEligibilityPactConsumerTest.PARTY_ID.
+        // Must match DelegationPartyEligibilityPactConsumerTest.PARTY_ID and the git-pact twin.
         private val PARTY_ID = UUID.fromString("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
         private val SEEDED_AT: OffsetDateTime = OffsetDateTime.parse("2026-01-01T00:00:00Z")
     }
@@ -104,14 +108,7 @@ class PidPactFolderProviderVerificationTest {
     @Inject
     lateinit var vertx: Vertx
 
-    /**
-     * Bridges a reactive-Panache block into Pact-JVM's synchronous `@State` callback. Pact-JVM
-     * invokes `@State` methods by reflection on the JUnit test thread, which has no Vert.x
-     * context, so a bare `runBlocking { partyRepository.save(...) }` throws `IllegalStateException:
-     * No current Vertx context found`. Same shape as `ScaPactFolderProviderVerificationTest` and
-     * `PartyPactFolderProviderVerificationTest`; a plain `vertx.runOnContext { runBlocking {} }` is
-     * NOT sufficient (balance-service's class documents why).
-     */
+    /** See the git-pact twin: Pact-JVM calls `@State` by reflection on a thread with no Vert.x context. */
     private fun runOnVertxContext(block: suspend () -> Unit) {
         val future = CompletableFuture<Unit>()
         val duplicated = (vertx.orCreateContext as ContextInternal).duplicate()
@@ -141,10 +138,11 @@ class PidPactFolderProviderVerificationTest {
     }
 
     /**
-     * Seeded once and guarded by a `findById`: `PartyRepositoryImpl.save` calls `persist`, not
-     * `merge`, and the id is application-assigned — so a second call for the same party would fail
-     * on the primary key rather than upsert. The guard keeps this handler safe if a second
-     * interaction against pid-service is ever added to the pact.
+     * Mirrors [PidPactFolderProviderVerificationTest.stateActiveFullKycParty] verbatim, including
+     * the `findById` guard: `PartyRepositoryImpl.save` calls `persist`, not `merge`, on an
+     * application-assigned id, so a second call for the same party fails on the primary key rather
+     * than upserting. The broker can hand this class several consumers' interactions naming the
+     * same state, so that guard is load-bearing here in a way it is not on the single-pact side.
      */
     @State("an ACTIVE party with FULL KYC exists")
     fun stateActiveFullKycParty() = runOnVertxContext {
