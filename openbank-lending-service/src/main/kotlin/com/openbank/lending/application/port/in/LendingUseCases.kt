@@ -5,6 +5,7 @@
 package com.openbank.lending.application.port.`in`
 
 import com.openbank.lending.domain.model.AccrualOutcome
+import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
@@ -13,6 +14,7 @@ import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanInstallment
+import com.openbank.lending.domain.model.LoanStateSummary
 import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import com.openbank.lending.domain.model.ProvisioningSnapshot
 import com.openbank.lending.domain.model.RescheduleRequest
@@ -51,6 +53,9 @@ interface ApplyForLoanUseCase {
 
     /** Backoffice queue (ADR-0230 D1): newest applications fleet-wide, optionally one status. */
     fun listRecentApplications(status: String?, limit: Int): Uni<List<LoanApplication>>
+
+    /** Per-state totals over the WHOLE book (issue #3294) — what the capped queue above cannot say. */
+    fun summariseApplications(): Uni<List<ApplicationStateSummary>>
 }
 
 /**
@@ -70,6 +75,9 @@ interface ServicingUseCase {
 
     /** Backoffice portfolio view (ADR-0230 D1): active loans fleet-wide. */
     fun listActiveLoans(limit: Int): Uni<List<Loan>>
+
+    /** Per-status totals over the WHOLE loan book (issue #3294). */
+    fun summariseLoans(): Uni<List<LoanStateSummary>>
     fun recordRepayment(loanId: LoanId, installmentId: UUID): Uni<LoanInstallment>
 }
 

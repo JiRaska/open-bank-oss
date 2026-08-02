@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.86.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.85.0...admin-ui-v0.86.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** build campaigns on a canvas instead of filling in a form ([#3323](https://github.com/JiRaska/open-bank-oss/issues/3323)) ([bd63976](https://github.com/JiRaska/open-bank-oss/commit/bd6397629292e03e2c0c52595bb384a807ce2384))
+
+## [0.85.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.84.0...admin-ui-v0.85.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** show party names on the campaign screen, not truncated UUIDs ([#3310](https://github.com/JiRaska/open-bank-oss/issues/3310)) ([46b35b9](https://github.com/JiRaska/open-bank-oss/commit/46b35b9fe7b2f95fbd350555c97d837ee37ff774))
+
+## [0.84.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.83.0...admin-ui-v0.84.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** lead the campaign people section with counts, not a list of UUIDs ([#3304](https://github.com/JiRaska/open-bank-oss/issues/3304)) ([2f2f21a](https://github.com/JiRaska/open-bank-oss/commit/2f2f21ad2ea7fb0d744f7e78eb9f269cb0a1e915))
+
+## [0.83.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.82.1...admin-ui-v0.83.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** give the campaign list a lifecycle board instead of an inventory table ([#3287](https://github.com/JiRaska/open-bank-oss/issues/3287)) ([d98c6a3](https://github.com/JiRaska/open-bank-oss/commit/d98c6a34176dca188cfcc3520bb0fa96d902386c))
+* **admin-ui:** make the lending console a credit desk, not a table dump ([#3279](https://github.com/JiRaska/open-bank-oss/issues/3279)) ([118021d](https://github.com/JiRaska/open-bank-oss/commit/118021d8c2089a38cccf4f5c66b4eb976de15bf0))
+
 ## [0.82.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.82.0...admin-ui-v0.82.1) (2026-08-02)
 
 

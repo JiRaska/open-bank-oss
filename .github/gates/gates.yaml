@@ -159,6 +159,16 @@ gates:
   # PyYAML is not stdlib: try multiple install paths for portability across
   # macOS (system python3 without pip, Homebrew pip3) and Linux ARC runners
   # (pip/pip3 not in PATH). Fall back to checking if pyyaml is already present.
+  - id: litellm-model-costs
+    name: every gateway model declares a per-token price (an unpriced model costs $0 and voids every budget)
+    group: gitops
+    mode: enforced
+    run: |
+      # Falsified both ways before wiring in: 4 findings against the unpriced tree, 0 after,
+      # 9 self-test cases including an explicit zero (which must NOT be treated as a price).
+      python3 .github/scripts/check-litellm-model-costs.py --self-test
+      python3 .github/scripts/check-litellm-model-costs.py --enforce
+
   - id: agent-virtual-keys
     name: every agent authenticates with its OWN LiteLLM virtual key, not the shared master key
     group: gitops
@@ -615,12 +625,15 @@ gates:
   # and re-passing.
   #
   # ENFORCED (was continue-on-error, #2392). The `continue-on-error` was carrying a different
-  # meaning than it looked like: the runner already treats a charter with no recorded run as
-  # ::warning and exits 0 — 4 of the 5 suites are in that state today — so the flag was only
-  # ever suppressing a REAL replay failure (a drifted prompt hash, a model/version move, a pass
-  # rate under the baselines.json floor). That is the one outcome the gate exists to surface.
-  # Remaining graduation step is --require-recordings, once every suite has a committed run;
-  # that is about coverage, not about whether a failure blocks.
+  # meaning than it looked like: the runner already treated a charter with no recorded run as
+  # ::warning and exited 0, so the flag was only suppressing a REAL replay failure (a drifted
+  # prompt hash, a model/version move, a pass rate under the baselines.json floor). That is the
+  # one outcome the gate exists to surface.
+  #
+  # GRADUATED to full ratchet-on-replay coverage (#1918). Every suite now has a committed
+  # recording in evals/recordings/, backlog.yaml is empty, and CI runs with --require-recordings.
+  # The ratchet is therefore blocking for every charter with a declared suite: a new or changed
+  # suite cannot land unrecorded, and a prompt/model promotion cannot land stale or regressed.
   - id: evals-gate-replay
     name: "evals gate replay (ADR-0148, enforced)"
     group: registry
@@ -628,7 +641,7 @@ gates:
     selftest: |
       python3 .github/scripts/run-evals.py --self-test
     run: |
-      python3 .github/scripts/run-evals.py
+      python3 .github/scripts/run-evals.py --require-recordings
 
   # ADR-0160 mechanism 2 / rules.yaml: change_requirements.lineage_code_audit. Fleet-wide scan
   # (not diff-scoped): every governance.yaml lineage edge — downstream AND, since #2315,
@@ -719,6 +732,23 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/check-eu-ai-act.sh
+
+  # The other half of the same claim. The gate above proves the GENERATED document matches
+  # ml-systems.yaml; nothing proved ml-systems.yaml matches the CODE. So the day model inference
+  # lands in the credit path, `credit-decisioning-engine` stays `deployed: false` in a YAML file,
+  # the generator keeps rendering "no high-risk system exists", the drift gate above stays green —
+  # and the platform runs an undeclared Annex III(5)(b) system.
+  #
+  # The whole EU AI Act position rests on the shipped credit engine being ADR-0213's deterministic
+  # decision tables rather than a model. That is true today and nothing was keeping it true.
+  # ENFORCED for the same reason as its sibling: over a generated claim, advisory means "the
+  # document does not match reality", and there is no judgement left to exercise.
+  - id: ai-act-high-risk-inventory-vs-code
+    name: "EU AI Act Annex III inventory vs. code (ADR-0142/0216, enforced)"
+    group: registry
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-ai-act-high-risk-inventory.py
 
   # ==== kotlin ================================================================
 
@@ -1137,6 +1167,27 @@ gates:
   # versioned event (-vN topic, ADR-0006), never an in-place edit.
   # ADVISORY until the rules.yaml schema-compat gate graduates
   # (target 2026-09-15, ADR-0144) — flip = --enforce. stdlib-only.
+  # ADR-0006 ratchet (#1916). Measured: 36 producer topics, 71 eventType literals, ZERO .avsc,
+  # zero asyncapi.yaml, no openbank-contracts/ directory. The Apicurio registry the ADR calls for
+  # is deployed and running — the runtime half exists, the contract half does not, and every Kafka
+  # event on this platform is raw unversioned JSON.
+  #
+  # Distinct from `schema-compat-gate` above, which checks that an event class does not change
+  # incompatibly. Nothing checked whether an event has a declared contract at all.
+  #
+  # Closing that is a multi-PR programme (#1916 sets the order). This does not attempt it. It
+  # freezes the debt: what exists is grandfathered in .github/event-contract-baseline.txt and
+  # nothing NEW joins it — the same baseline-ratchet used for domain purity and detekt. The gap was
+  # growing; two new services added unversioned topics in one week.
+  #
+  # The baseline is checked in BOTH directions, so a line cannot outlive the debt it records.
+  - id: event-contract-coverage-ratchet
+    name: "event-contract coverage ratchet (ADR-0006, enforced)"
+    group: data
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-event-contract-coverage.py
+
   - id: schema-compat-gate
     name: "schema-compat gate — event backward-compatibility (event_change, advisory)"
     group: data

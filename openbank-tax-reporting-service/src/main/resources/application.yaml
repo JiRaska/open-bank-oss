@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+quarkus:
+  application:
+    name: openbank-tax-reporting-service
+  http:
+    port: 8152
+  datasource:
+    db-kind: postgresql
+    username: ${DB_USERNAME:openbank}
+    password: ${DB_PASSWORD:openbank}
+    reactive:
+      url: ${DB_REACTIVE_URL:vertx-reactive:postgresql://localhost:5432/openbank_tax_reporting}
+    jdbc:
+      url: ${DB_JDBC_URL:jdbc:postgresql://localhost:5432/openbank_tax_reporting}
+  hibernate-orm:
+    database:
+      generation: none
+  flyway:
+    migrate-at-start: true
+    baseline-on-migrate: true
+  oidc:
+    auth-server-url: ${OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: ${OIDC_CLIENT_ID:openbank-tax-reporting-service}
+    tls:
+      verification: ${OIDC_TLS_VERIFICATION:required}
+  kafka:
+    bootstrap:
+      servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+mp:
+  messaging:
+    incoming:
+      # ADR-0180: a SECOND consumer group on the topic interest-service already publishes to — no
+      # change to its contract. group.id / auto.offset.reset are deliberately NOT set as YAML keys
+      # (SmallRye's dotted-key footgun, #686/#703): group.id falls back to quarkus.application.name,
+      # which is what makes this a distinct group from interest-service's own settlement consumer.
+      #
+      # auto.offset.reset stays `latest`, so a fresh deploy does not replay historical remittances
+      # into filing periods that were already assembled. Backfilling an earlier period is an
+      # explicit operator action, not something a deploy does by accident.
+      withholding-remitted-in:
+        connector: smallrye-kafka
+        topic: openbank.interest.accrual.event
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+openbank:
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+
+"%test":
+  quarkus:
+    datasource:
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5432/openbank_tax_reporting_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_tax_reporting_it
+    oidc:
+      enabled: false
+    devservices:
+      enabled: false
+    scheduler:
+      enabled: false

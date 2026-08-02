@@ -39,7 +39,7 @@ spec:
       annotations:
         # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
         # hot-reload). Kept in sync by gen-notification-opa-bundle.sh.
-        openbank.tech/policy-checksum: "aba0a6c8be0f1e07"
+        openbank.tech/policy-checksum: "54279ddff82362e2"
       labels:
         app.kubernetes.io/name: notification-service
         app.kubernetes.io/part-of: notifications

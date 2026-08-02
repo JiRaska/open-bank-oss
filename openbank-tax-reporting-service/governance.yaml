@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only.
+dataDomain: platform
+primaryDatastore: PostgreSQL
+databaseName: openbank_tax_reporting
+dataLineageRole: consumer
+dataClassification: confidential
+retentionPolicy: 10 years
+evidenceExported: true
+lineage:
+  upstream:
+    - serviceName: interest-service
+      relationType: topic
+      description: >
+        openbank.interest.accrual.event — consumes interest.withholding.remitted.v1 as a second
+        consumer group alongside interest-service's own settlement consumer (ADR-0180)

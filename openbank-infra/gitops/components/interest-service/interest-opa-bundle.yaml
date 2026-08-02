@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: interest-service
     app.kubernetes.io/part-of: interest
   annotations:
-    openbank.tech/policy-checksum: "bde6f9b3cdaa57bf"
+    openbank.tech/policy-checksum: "6d8bdaf090f0f2b8"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -127,10 +127,16 @@ data:
     	# agents.allow call — undefined, silently denying every resource-less AI_AGENT REST call.
     	# The MCP server (openbank-mcp-service) is the first caller to route AI_AGENT through
     	# rest.allow with no resource; agent-service queries agents.allow directly and never hit this.
+    	# attributes MUST be forwarded (ADR-0195 step 5, #3292): the MCP endpoint sends
+    	# {tool, consentId} on every tools/call, and agents.rego's skill_ok else-branch reads
+    	# input.attributes.skill — a bridge that drops them makes consent-state gating impossible
+    	# and denies a chartered run.skill that arrives via REST. Same object.get pattern as
+    	# resource: a caller that sends no attributes key must not make the query undefined.
     	data.openbank.agents.allow with input as {
     		"agent": input.principal.id,
     		"tool": input.action,
     		"resource": object.get(input, "resource", null),
+    		"attributes": object.get(input, "attributes", {}),
     	}
     }
 

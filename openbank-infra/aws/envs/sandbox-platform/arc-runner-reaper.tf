@@ -227,7 +227,12 @@ resource "kubernetes_cron_job_v1" "arc_reaper" {
     concurrency_policy            = "Forbid"
     starting_deadline_seconds     = 200
     successful_jobs_history_limit = 3
-    failed_jobs_history_limit     = 3
+    # 3 -> 1: KubeJobFailed fires per surviving failed Job OBJECT, so keeping three
+    # turns one recurring failure into three permanent alerts, and the pods are
+    # garbage-collected long before the objects are — the extra tombstones carry the
+    # alert and none of the evidence. Measured 2026-08-02: this reaper alone accounted
+    # for 3 of the 11 firing KubeJobFailed, its oldest from 07-28 with pods=0.
+    failed_jobs_history_limit = 1
 
     job_template {
       metadata {}
