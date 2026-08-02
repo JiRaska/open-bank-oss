@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.88.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.88.0...admin-ui-v0.88.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** render the campaign tables in the console's own style ([#3480](https://github.com/JiRaska/open-bank-oss/issues/3480)) ([32a2cb1](https://github.com/JiRaska/open-bank-oss/commit/32a2cb186da898e4079c33822513f859e9115ec2))
+
 ## [0.88.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.87.3...admin-ui-v0.88.0) (2026-08-02)
 
 
