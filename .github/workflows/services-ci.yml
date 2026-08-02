@@ -368,8 +368,12 @@ jobs:
           fi
           # Only module-level build files matter; a root or build-logic change is
           # out of scope here and would fan out to the whole fleet.
+          # `|| true` on the grep is required, not defensive: under `set -o pipefail`
+          # a grep that matches nothing exits 1 and kills the step — which is the
+          # common case here, since most PRs touch no module build file. Measured on
+          # this very PR (#3233), whose own gate went red for exactly this reason.
           mods="$(git diff --name-only "$base"...HEAD \
-                    | grep -E '^openbank-[^/]+/build\.gradle\.kts$' \
+                    | { grep -E '^openbank-[^/]+/build\.gradle\.kts$' || true; } \
                     | cut -d/ -f1 | sort -u | paste -sd, -)"
           echo "modules=${mods}" >> "$GITHUB_OUTPUT"
           echo "changed modules: ${mods:-<none>}"
