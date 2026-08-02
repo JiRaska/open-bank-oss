@@ -8,12 +8,14 @@ STRIDE/DFD threat model for the sanctions/PEP screening bounded context, per ADR
 Money-path service — `SANCTIONS_SCREENING` in the KYC check set (ADR-0116) delegates here, and
 ADR-0032 documents the synchronous AML/sanctions screening gate. Reviewed in PR.
 
-- **Status:** Draft (first pass, written alongside the real-feed-registration wiring)
-- **Last reviewed:** 2026-07-07
+- **Status:** Draft (first pass, written alongside the real-feed-registration wiring; §6 added
+  with the review-path persistence fix)
+- **Last reviewed:** 2026-08-02
 - **Owner:** sanctions/AML CODEOWNERS
 - **Related ADRs:** ADR-0002 (hexagonal), ADR-0032 (synchronous AML/sanctions screening gate),
   ADR-0100 (injected Clock, Layer 1 determinism), ADR-0116 (KYC engine — `SANCTIONS_SCREENING`
-  check delegates to this service), ADR-0030 (money-path threat models)
+  check delegates to this service), ADR-0030 (money-path threat models),
+  ADR-0126 (assigned-id persistence), ADR-0155 (four-eyes gate)
 
 ## 1. Scope & assets
 
@@ -115,7 +117,45 @@ TLS. Domain layer (`SanctionsEntry`, `SanctionsList` models) has zero framework 
   §"External watchlist... Planned"). This threat model and PR close the **sanctions-screening feed
   registration/wiring** half of ADR-0116's screening surface, not the KYC-side vendor integration.
 
-## 6. Change log
+## 6. Manual review of a screening hit (`sanctions.clear`)
+
+Sections 1-5 model the **import** side only — feeds, `source_url` integrity, parser resource use.
+They omit the disposition side entirely, which is the higher-consequence half:
+`rules.yaml: money_path_services` justifies this service's entry on precisely that action, since
+"a wrongly-cleared true positive is a real sanctions violation". This section closes that gap.
+
+**Asset.** The disposition decision itself — the transition of a `HIT` / `POTENTIAL_HIT` to
+`CLEAR` / `WHITELISTED` / `ESCALATED`, together with `reviewed_by` and `review_note`. A wrongly
+recorded `CLEAR` releases a payment that a real match should have stopped; a lost or unattributable
+decision destroys the audit trail that a screening call was ever adjudicated by a human.
+
+**Entry point.** `POST /api/v1/sanctions/review` — `@RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")`,
+`@Authorize(action = "sanctions.clear")`, deliberately no `ROLE_API`; there is no M2M caller (all
+six `SanctionsServiceClient` interfaces declare only `/screen`). Externally routable via the
+`sanctions-api` Ingress (`api.open-bank.tech`, prefix `/api/v1/sanctions`).
+
+| # | Threat | Mitigation | Residual risk |
+|---|---|---|---|
+| C1 | **Elevation / segregation of duties** — one operator both raises and clears a hit | Four-eyes on `sanctions.clear` (ADR-0155): `AuthorizeInterceptor` pauses the maker's call with 202 + a `PendingApproval` id; a DIFFERENT principal decides it via `PATCH /api/v1/sanctions/approvals/{id}`; the maker retries with `X-Approval-Id`. Enforced centrally in `RedisApprovalStore.decide`, not per-service, so a service's REST layer cannot forget it | **The guard compares principal-id strings.** One human or agent holding two identities satisfies it — #3190 is the measured lending instance. Mechanism-level limit, not an implementation defect; mitigating it needs identity-level controls, not more code here. **Separately, the guard is unfalsified (#3349):** no test anywhere feeds it a maker approving themselves — `AuthorizeInterceptorTest`'s fake re-implements the check, so deleting the production line stays green |
+| C2 | **Over-broad approval grant** — a checker approves one specific decision, the maker applies it elsewhere | `AuthorizeInterceptor.satisfies()` binds an approval to (action, resourceId, maker), and `markExecuted` makes it one-time — an EXECUTED approval can never be replayed | `@Authorize(action = "sanctions.clear", resource = "")` carries an **empty resource**, so a granted approval authorises *any* review by that maker, not the check the checker actually looked at. Narrowing it to `resource = "#cmd.checkId"` is the fix; deferred because no UI drives this flow yet (#3334) |
+| C3 | **Repudiation** — a cleared hit with no attributable decider | `reviewed_by` / `review_note` / `reviewed_at` persisted on the check; a `SanctionChecked` outbox event is emitted in the **same transaction** as the update, so audit/AML consumers cannot miss a decision that was durably recorded | Outbox delivery is at-least-once, not exactly-once; consumers must dedupe. `OutboxMessage.createdAt` defaults to `Instant.EPOCH` fleet-wide (#3272), which inverts FIFO claim order |
+| C4 | **Tampering via lost update** — a review silently overwrites a concurrent one | Single-statement `merge` inside one transaction | **No optimistic locking**: the entity has no `@Version`, so two concurrent reviewers last-write-wins with no conflict surfaced. Low likelihood while the queue is worked by hand; revisit if #3334 makes review routine |
+| C5 | **Denial of the control itself** — the review path does not work at all | Covered by `SanctionsReviewUpdateIT` against a real Postgres | Was live until this change: `review()` called the insert path on an application-assigned `@Id`, so **every** review died at flush on `sanctions_checks_pkey` (ADR-0126 D3). Nothing alerted — see below |
+
+**Invariant (must never regress).** The review path performs an **UPDATE**. The insert path
+(`saveWithEvent`) and the update path (`updateWithEvent`) stay separate: `merge` cannot raise a
+primary-key violation, and the insert path deliberately lets that violation escape (#3264), because
+there it signals a real defect rather than an idempotent replay. Collapsing the two into an
+unconditional upsert would delete that guard and render `SanctionsIdempotentReplayIT`'s
+primary-key case structurally unable to fail.
+
+**Detection gap worth naming.** C5 was invisible to every layer: the service's unit test stubbed the
+repository port, so it asserted a call that in production always threw; no UI exercised the endpoint
+(#3334); no M2M caller existed; and a failed review is a 500 on a rarely-used path, which no alert
+distinguishes from noise. The only signal available anywhere was `listPending()` never shrinking —
+and nothing alerts on a queue that fails to drain (the same class as #3273).
+
+## 7. Change log
 
 - **2026-07-07** — Verified the sanctions/PEP feed registry (`sanctions_lists`, Flyway V3/V7/V8) was
   already populated with real, live source URLs (OFAC Treasury `sdn.xml`; EU/UN/HM Treasury via
