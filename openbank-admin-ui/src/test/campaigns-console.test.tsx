@@ -116,12 +116,16 @@ describe('campaign console', () => {
     // Human phrasing is what a marketer reads…
     await waitFor(() => expect(screen.getByText('Consent withdrawn')).toBeTruthy(), { timeout: 8000 })
     expect(screen.getByText('Sent')).toBeTruthy()
-    expect(screen.getByText('Ended — consent withdrawn')).toBeTruthy()
+    // The enrolment table became a counts-by-state summary (PeopleSummary); the label moved
+    // with it. Assert the summary's wording, not the old row badge.
+    expect(screen.getAllByText(/Withdrew consent/).length).toBeGreaterThan(0)
 
     // …and the raw enum stays reachable, so the screen and the API never describe different things.
     // Without this, relabelling could quietly drift from the values the service actually emits.
     expect(screen.getByTitle('SUPPRESSED_CONSENT')).toBeTruthy()
-    expect(screen.getByTitle('TERMINATED_CONSENT_REVOKED')).toBeTruthy()
+    // The enrolment state moved from a `title` on a table row to `data-state` on the summary
+    // tile — same rule as the journey canvas: the enum stays queryable, never visible text.
+    expect(document.querySelector('[data-state="TERMINATED_CONSENT_REVOKED"]')).toBeTruthy()
 
     // Surfaced as a headline number, not buried in the table.
     expect(screen.getByText('Suppressed sends')).toBeTruthy()

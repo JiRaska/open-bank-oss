@@ -12,6 +12,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import { JourneyCanvas, type StepFunnel } from '@/components/campaigns/JourneyCanvas'
 import { SectionBoundary } from '@/components/feedback/SectionBoundary'
+import { PeopleSummary } from '@/components/campaigns/PeopleSummary'
 
 interface Campaign {
   id: string
@@ -358,28 +359,9 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 dense
               />
             ) : (
-              <div className="overflow-x-auto rounded-lg border">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50 text-left">
-                    <tr>
-                      <th className="px-4 py-2 font-medium">{t('Party', 'Party')}</th>
-                      <th className="px-4 py-2 font-medium">{t('Stav', 'State')}</th>
-                      <th className="px-4 py-2 font-medium">{t('Krok', 'Step')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detail.enrolments.map(e => (
-                      <tr key={e.id} className="border-t">
-                        <td className="px-4 py-2 font-mono text-xs" title={e.partyId}>{shortId(e.partyId)}</td>
-                        <td className="px-4 py-2">
-                          <span title={e.state}><StatusBadge status={e.state} label={stateLabel(e.state)} /></span>
-                        </td>
-                        <td className="px-4 py-2">{e.currentStep}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <SectionBoundary name="People">
+                <PeopleSummary enrolments={detail.enrolments} />
+              </SectionBoundary>
             )}
 
             {sends.length > 0 && (
