@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.80.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.80.1...admin-ui-v0.80.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop tagging every GlitchTip event with a release nobody ships ([#3243](https://github.com/JiRaska/open-bank-oss/issues/3243)) ([8d321a8](https://github.com/JiRaska/open-bank-oss/commit/8d321a801c5cefa93f3f3a44bf2e77ab5aaf455a))
+
 ## [0.80.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.80.0...admin-ui-v0.80.1) (2026-08-02)
 
 
