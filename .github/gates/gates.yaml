@@ -1347,21 +1347,29 @@ gates:
   # ADR-0144) — findings are ::warning annotations; add --enforce to flip.
   # PR-only: the gate diffs against the resolved PR diff base (see above).
   - id: threat-model-updated-on-trust-boundary-change
-    name: "threat-model updated on trust-boundary change (ADR-0030 D2, advisory)"
+    name: "threat-model updated on trust-boundary change (ADR-0030 D2, enforced)"
     group: security
-    mode: advisory
+    mode: enforced
     when: pull_request
     needs_base: required
     selftest: python3 openbank-infra/scripts/check-threat-model-diff.py --self-test
     selftest_expect: pass
     run: |
-      # Advisory by ADR-0144 graduation, NOT because the finding is optional: a
-      # threat model that no longer describes the service is how #3378 shipped —
-      # openbank-sanctions-service satisfied the enforced coverage gate for nine
-      # months while omitting sanctions.clear entirely. Graduating this to
-      # `enforced` is tracked in #3431; the blocker was a 7-of-60 false-positive
-      # rate on generated manifest churn, fixed here (now 2 of 60, both real).
-      python3 openbank-infra/scripts/check-threat-model-diff.py --base "${PR_DIFF_BASE}"
+      # BOTH the mode above and --enforce below are required, and neither alone does
+      # anything (#2392): the script prints ::warning and exits 0 unless passed
+      # --enforce, so `mode: enforced` on its own leaves the runner seeing rc=0 and
+      # reporting a permanently green gate that blocks nothing. Measured on #3431:
+      # `--base d949ce9ef^ --head d949ce9ef` exits 0 without the flag and 1 with it.
+      #
+      # Graduated from advisory in #3431 after the scope fix in #3438 took the
+      # false-positive rate from 7-of-60 to 2-of-60 (both survivors real). What this
+      # now blocks: a PR that moves a money-path service's trust boundary — an
+      # inbound REST surface, an outbound client edge, authn/listener keys in
+      # application.yaml, a NetworkPolicy, or a Deployment hunk touching ports,
+      # identity or privilege — without updating that service's threat model in the
+      # same diff. Generated churn (policy-checksum restamps, image tags) does not
+      # count; see hunk_moves_boundary and the gate's --self-test.
+      python3 openbank-infra/scripts/check-threat-model-diff.py --base "${PR_DIFF_BASE}" --enforce
 
   - id: compliance-page-evidence
     name: "Compliance-page evidence (issue #2370, enforced)"
