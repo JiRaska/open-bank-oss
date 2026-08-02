@@ -154,6 +154,44 @@ There is no verified pact between version abc123 of openbank-fraud-service and t
 ===SERVICE openbank-transaction-service${TAB}PENDING_BUILD
 There is no verified pact between version def456 of openbank-transaction-service and the version of openbank-fraud-service currently deployed to sandbox"
 
+# ── issue #3454: NOT_ASKED, the class where no verdict exists at all ─────────────────────
+# 12. A NOT_ASKED pair references each other exactly like a deadlocked one, and on a fleet
+#     dispatch this is EVERY blocked service (54 of 54 on run 30765380309). Recommending a
+#     co-deploy there would not be a weaker check, it would be no check: can-i-deploy was
+#     never asked about any of them. The set must not be named.
+check "NOT_ASKED pair is not a co-deploy set" \
+  "UNGATED${TAB}openbank-fraud-service openbank-transaction-service" \
+  "openbank-fraud-service openbank-transaction-service" \
+"===SERVICE openbank-fraud-service${TAB}NOT_ASKED
+There is no verified pact between version abc123 of openbank-fraud-service and the version of openbank-transaction-service currently deployed to sandbox
+===SERVICE openbank-transaction-service${TAB}NOT_ASKED
+There is no verified pact between version def456 of openbank-transaction-service and the version of openbank-fraud-service currently deployed to sandbox"
+
+# 13. NOT_ASKED must not ride on the PENDING report either. PENDING prints "waiting on their
+#     own builds, not deadlocked; no action" — the self-clearing promise NOT_ASKED exists to
+#     avoid. If someone folds NOT_ASKED into TRANSIENT_CLASSES, this goes red.
+check "NOT_ASKED reports separately from PENDING_BUILD" \
+  "PENDING${TAB}openbank-fraud-service
+UNGATED${TAB}openbank-transaction-service" \
+  "openbank-fraud-service openbank-transaction-service" \
+"===SERVICE openbank-fraud-service${TAB}PENDING_BUILD
+Computer says no
+===SERVICE openbank-transaction-service${TAB}NOT_ASKED
+Computer says no"
+
+# 14. A durable pair stays a set even when a NOT_ASKED service names one of them — the
+#     addition must not silence the case the script exists for.
+check "NOT_ASKED alongside a durable pair does not suppress the set" \
+  "CODEPLOY${TAB}openbank-fraud-service openbank-transaction-service
+UNGATED${TAB}openbank-swift-service" \
+  "openbank-fraud-service openbank-transaction-service openbank-swift-service" \
+"===SERVICE openbank-fraud-service${TAB}UNVERIFIED
+There is no verified pact between version a of openbank-fraud-service and the version of openbank-transaction-service currently deployed to sandbox
+===SERVICE openbank-transaction-service${TAB}UNVERIFIED
+There is no verified pact between version b of openbank-transaction-service and the version of openbank-fraud-service currently deployed to sandbox
+===SERVICE openbank-swift-service${TAB}NOT_ASKED
+There is no verified pact between version c of openbank-swift-service and the version of openbank-fraud-service currently deployed to sandbox"
+
 if [ "$fails" -gt 0 ]; then
   echo "derive-codeploy-set.py: ${fails} case(s) FAILED"
   exit 1

@@ -841,13 +841,10 @@ jobs:
           BLOCKS_FILE="$(mktemp)"
 
           # ── #1985: co-deploy mode ───────────────────────────────────────────────────────
-          # A set of services that block EACH OTHER cannot converge one deploy at a time:
-          # each is blocked by the other's not-yet-deployed version. `--to-environment
-          # sandbox` has no answer for that, so the set was being hand-driven past the gate
-          # (#1979, #2057, #2059 — all money-path, one week). This asks the broker the
-          # question the humans were asking by hand: are THESE versions mutually compatible.
-          # It is a gate, not a bypass — a red verdict deploys nothing — but it is a
-          # DIFFERENT question from the per-service one, so it is opt-in on workflow_dispatch
+          # Services that block EACH OTHER cannot converge one deploy at a time; this asks
+          # the broker whether THOSE versions are mutually compatible. Full reasoning in
+          # derive-codeploy-set.py's header. It is a gate, not a bypass — a red verdict
+          # deploys nothing — but a DIFFERENT question, so it is opt-in on workflow_dispatch
           # and never reachable from a push or a scheduled tick.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
              && [ "${{ github.event.inputs.codeploy }}" = "true" ]; then
@@ -904,8 +901,14 @@ jobs:
             # service — aborting the batch is the #846 shape (#3445).
             if [ "${CID_SELECTOR[0]}" = "REFUSE" ]; then
               refuse_why="$(printf '%s' "$sel_line" | cut -f2)"
-              echo "::error::can-i-deploy: ${refuse_why}"
-              printf '===SERVICE %s\n%s\n' "$svc" "$refuse_why" >> "$BLOCKS_FILE"
+              # #3454: classify it too, from the SAME inputs the selector refused on — a
+              # class-less record reads downstream as [UNKNOWN]. Empty stdin: no verdict exists.
+              r_line="$(PACT_VERSION_PRESENT="$vpresent" EVENT_NAME="$GITHUB_EVENT_NAME" \
+                bash .github/scripts/classify-can-i-deploy-block.sh "$svc" </dev/null)"
+              cls="$(cut -f1 <<< "$r_line")"
+              block_class["$svc"]="$cls"; block_reason["$svc"]="$(cut -f2- <<< "$r_line")"
+              echo "::error::can-i-deploy: [${cls}] ${refuse_why}"
+              printf '===SERVICE %s\t%s\n%s\n' "$svc" "$cls" "$refuse_why" >> "$BLOCKS_FILE"
               rc=1  # keep the job red (ADR-0092); only the batch survives
               continue
             fi
@@ -944,15 +947,11 @@ jobs:
                 echo "::warning::can-i-deploy: ${svc} has counterpart(s) not yet recorded in sandbox — treating as deployable (ADR-0092)"
                 deployable_list+=("$svc")
               else
-                # Why is it blocked? "the build has not published its pacts yet" and "a
-                # contract regressed" produce the SAME verdict, and reading them as one is
-                # how a 29-module sweep left 51 of 55 workloads behind with nothing to
-                # distinguish a queue delay from a regression (issue #2549). Probe the
-                # broker for a version of THIS commit, then classify (the classifier is
-                # unit-tested — .github/scripts/test-classify-can-i-deploy-block.sh).
-                # Reuse the probe taken above: a second call could disagree if the version
-                # landed in between, and the label would then explain a block decided on
-                # other evidence.
+                # Why is it blocked? A queue delay and a real regression give the SAME
+                # verdict (#2549) — classify-can-i-deploy-block.sh's header has the full
+                # reasoning and the unit test drives every branch. Reuse the probe taken
+                # above: a second call could disagree and explain a block decided on other
+                # evidence. Keep this comment SHORT (check-workflow-run-step-size.py).
                 cls_line="$(PACT_VERSION_PRESENT="$vpresent" \
                   bash .github/scripts/classify-can-i-deploy-block.sh "$svc" <<< "$cid_out")"
                 cls="$(cut -f1 <<< "$cls_line")"
@@ -1015,11 +1014,9 @@ jobs:
               fi
             done
             # ── #1985: name the SET, not just the members ────────────────────────────────
-            # #1420 names who is blocked and #2549 names what kind of block it is; neither
-            # answers "can this be deployed at all, one at a time?". When two blocked
-            # services name each other, the answer is no — and until now that was worked out
-            # by hand from the broker matrix and then hand-dispatched past the gate. Derive
-            # it instead, and print the exact supported command (unit-tested, no network:
+            # #1420 names who is blocked and #2549 names what kind; neither answers "can
+            # this deploy at all, one at a time?". Derive it instead of working it out by
+            # hand from the broker matrix (unit-tested, no network:
             # .github/scripts/test-derive-codeploy-set.sh).
             mapfile -t CHANGED_LIST < <(echo "$SERVICES" | jq -r '.[]')
             CODEPLOY_OUT="$(python3 .github/scripts/derive-codeploy-set.py "${CHANGED_LIST[@]}" < "$BLOCKS_FILE" || true)"
@@ -1042,6 +1039,10 @@ jobs:
                     echo "::notice::[${a}] waiting on their own main-push build (PENDING_BUILD) — self-clearing, not a deadlock. Do NOT co-deploy (#1985)"
                     echo "- \`${a}\` — waiting on their own builds, not deadlocked; no action" >> "$GITHUB_STEP_SUMMARY"
                     ;;
+                  UNGATED)
+                    echo "::error::[${a}] have NO can-i-deploy verdict at all [NOT_ASKED] — the gate was refused, not answered; a co-deploy over them would be no check, and re-running the same dispatch cannot help (#3454)"
+                    echo "- \`${a}\` — \`NOT_ASKED\`: no verdict exists; deploy the sha services-ci built for them, or publish a pact version for this one" >> "$GITHUB_STEP_SUMMARY"
+                    ;;
                   EXTERNAL)
                     echo "::warning::[${a}] is blocked on ${b}, which is NOT part of this run — a co-deploy cannot help; ${b} has to deploy first (issue #1985)"
                     echo "- \`${a}\` waits on \`${b}\`, outside this run — co-deploy does not apply" >> "$GITHUB_STEP_SUMMARY"
@@ -1054,7 +1055,8 @@ jobs:
               echo "\`PENDING_BUILD\`/\`UNVERIFIED\` clear themselves — the every-3h reconcile tick"
               echo "re-drives them (auto-deploy-reconcile-lag.sh, #2020). \`REGRESSION\` does not:"
               echo "it needs a contract fix, and is reported as an error on every run including"
-              echo "scheduled ticks. \`UNKNOWN\` means the classifier could not tell — read the log."
+              echo "scheduled ticks, and neither does \`NOT_ASKED\` (#3454), which means the gate was"
+              echo "never asked at all. \`UNKNOWN\` means the classifier could not tell — read the log."
             } >> "$GITHUB_STEP_SUMMARY"
             [ "$mp_blocked" = "1" ] && echo "::error::can-i-deploy left one or more MONEY-PATH services behind this run — see the job summary (issue #1420)"
             [ "$regression_blocked" = "1" ] && echo "::error::can-i-deploy: at least one block is a CONTRACT REGRESSION, which no reconcile tick can clear — see the job summary (issue #2549)"
