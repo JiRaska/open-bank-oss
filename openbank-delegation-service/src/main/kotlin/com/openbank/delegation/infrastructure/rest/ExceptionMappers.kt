@@ -4,10 +4,12 @@
 
 package com.openbank.delegation.infrastructure.rest
 
+import com.openbank.delegation.application.usecase.DelegationCallerMismatchException
 import com.openbank.delegation.application.usecase.DelegationEligibilityException
 import com.openbank.delegation.application.usecase.DelegationNotFoundException
 import com.openbank.delegation.application.usecase.DelegationNotGranteeException
 import com.openbank.delegation.application.usecase.DelegationNotGrantorException
+import com.openbank.delegation.application.usecase.DelegationResourceOwnershipException
 import com.openbank.delegation.application.usecase.DelegationScaException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
@@ -45,5 +47,21 @@ class DelegationScaExceptionMapper : ExceptionMapper<DelegationScaException> {
 @Provider
 class DelegationEligibilityExceptionMapper : ExceptionMapper<DelegationEligibilityException> {
     override fun toResponse(exception: DelegationEligibilityException): Response =
+        Response.status(422).entity(errorBody(422, exception.message)).build()
+}
+
+@Provider
+class DelegationCallerMismatchExceptionMapper : ExceptionMapper<DelegationCallerMismatchException> {
+    override fun toResponse(exception: DelegationCallerMismatchException): Response =
+        Response.status(Response.Status.FORBIDDEN).entity(errorBody(403, exception.message)).build()
+}
+
+/**
+ * 422, not 403: the request is well-formed and the caller is who they say they are — the
+ * *content* of the grant is what cannot be accepted. Same class as the eligibility gate.
+ */
+@Provider
+class DelegationResourceOwnershipExceptionMapper : ExceptionMapper<DelegationResourceOwnershipException> {
+    override fun toResponse(exception: DelegationResourceOwnershipException): Response =
         Response.status(422).entity(errorBody(422, exception.message)).build()
 }
