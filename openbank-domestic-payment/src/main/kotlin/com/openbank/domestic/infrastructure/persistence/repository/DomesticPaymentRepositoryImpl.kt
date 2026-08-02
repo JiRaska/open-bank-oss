@@ -61,6 +61,22 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
         query.range(offset, offset + limit - 1).list()
     }.awaitSuspending().map { it.toDomain() }
 
+    override suspend fun findRedrivable(maxAttempts: Int, minAge: Instant, limit: Int): List<UUID> =
+        Panache.withSession {
+            find(
+                "status = ?1 and redriveAttempts < ?2 and createdAt < ?3 order by createdAt asc",
+                DomesticPaymentStatus.RECEIVED.name,
+                maxAttempts,
+                minAge,
+            ).range(0, limit - 1).list()
+        }.awaitSuspending().map { it.paymentId }
+
+    override suspend fun recordRedriveAttempt(paymentId: UUID) {
+        Panache.withTransaction {
+            update("redriveAttempts = redriveAttempts + 1 where paymentId = ?1", paymentId)
+        }.awaitSuspending()
+    }
+
     override suspend fun update(payment: DomesticPayment, outboxMessage: OutboxMessage): DomesticPayment =
         Panache.withTransaction {
             find("paymentId", payment.id).firstResult()
