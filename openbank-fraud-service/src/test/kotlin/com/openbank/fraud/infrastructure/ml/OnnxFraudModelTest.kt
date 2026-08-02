@@ -5,8 +5,13 @@
 package com.openbank.fraud.infrastructure.ml
 
 import ai.onnxruntime.OrtEnvironment
+import ai.onnxruntime.OrtSession
 import com.openbank.libs.domain.feature.VELOCITY_TXN_COUNT_H1
 import com.openbank.libs.domain.feature.VELOCITY_TXN_COUNT_H24
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.mockkStatic
+import io.mockk.unmockkStatic
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -82,5 +87,52 @@ class OnnxFraudModelTest {
         val anyBytes = byteArrayOf(9)
         assertThat(OnnxFraudModel.verifyCard(anyBytes, "ml/no-such.card.json", requireSignature = true))
             .isFalse()
+    }
+
+    // --- the native library not loading at all ---
+    //
+    // The cases above cover a missing *resource*, which is an Exception. A platform mismatch is an
+    // Error: OrtEnvironment.getEnvironment() System.load()s a bundled .so and throws
+    // ExceptionInInitializerError wrapping UnsatisfiedLinkError. That escaped the field initializer,
+    // so constructing this bean threw, so CDI failed every injection point of it — and
+    // FraudResource.reviewQueue, a read-only analyst query that never touches a model, answered 500
+    // on every call in the deployed environment. These two cases fail against that code.
+
+    @Test
+    fun `a native library Error leaves the environment null instead of propagating`() {
+        mockkStatic(OrtEnvironment::class)
+        try {
+            every { OrtEnvironment.getEnvironment() } throws
+                ExceptionInInitializerError(UnsatisfiedLinkError("libstdc++.so.6: No such file or directory"))
+
+            assertThat(OnnxFraudModel.loadEnvironment()).isNull()
+        } finally {
+            unmockkStatic(OrtEnvironment::class)
+        }
+    }
+
+    @Test
+    fun `construction survives a native library Error and degrades to null scores`() {
+        mockkStatic(OrtEnvironment::class)
+        try {
+            every { OrtEnvironment.getEnvironment() } throws
+                ExceptionInInitializerError(UnsatisfiedLinkError("libstdc++.so.6: No such file or directory"))
+
+            // The constructor must not throw — anything sharing this bean's CDI graph depends on it.
+            val degraded = OnnxFraudModel()
+            assertThat(degraded.scoreShadow(mapOf(VELOCITY_TXN_COUNT_H1.name to 5.0))).isNull()
+            degraded.close()
+        } finally {
+            unmockkStatic(OrtEnvironment::class)
+        }
+    }
+
+    @Test
+    fun `a linkage Error while creating the session degrades instead of propagating`() {
+        val hostile = mockk<OrtEnvironment>()
+        every { hostile.createSession(any<ByteArray>(), any<OrtSession.SessionOptions>()) } throws
+            UnsatisfiedLinkError("native session creation failed")
+
+        assertThat(OnnxFraudModel.loadSession(hostile, "ml/baseline-fraud-v1.onnx")).isNull()
     }
 }

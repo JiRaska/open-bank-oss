@@ -36,6 +36,11 @@ import java.security.MessageDigest
  * Session load happens once at construction; a load or verification failure leaves [session] `null`,
  * so every [scoreShadow] call returns `null` immediately — the ADR-0139 fail-closed floor applies to
  * model *loading* (and now verification), not just per-call inference failures.
+ *
+ * "Failure" includes the native library not loading at all, which is an `Error` and not an
+ * `Exception` — see [loadEnvironment]. Construction of this bean must never throw: it is injected
+ * into the same graph as read-only endpoints that do not use a model, and a bean that fails to
+ * construct takes all of them down with it.
  */
 @ApplicationScoped
 class OnnxFraudModel(
@@ -43,17 +48,18 @@ class OnnxFraudModel(
     private val requireSignature: Boolean = false,
 ) : MlModelPort {
 
-    private val environment: OrtEnvironment = OrtEnvironment.getEnvironment()
+    private val environment: OrtEnvironment? = loadEnvironment()
     private val session: OrtSession? =
-        loadSession(environment, MODEL_RESOURCE_PATH, MODEL_CARD_PATH, requireSignature)
+        environment?.let { loadSession(it, MODEL_RESOURCE_PATH, MODEL_CARD_PATH, requireSignature) }
 
     @Suppress("TooGenericExceptionCaught") // OrtException + tensor lifecycle errors have no common base
     override fun scoreShadow(features: Map<String, Double>): Double? {
+        val env = environment ?: return null
         val activeSession = session ?: return null
         val h1 = (features[VELOCITY_TXN_COUNT_H1.name] ?: 0.0).toFloat()
         val h24 = (features[VELOCITY_TXN_COUNT_H24.name] ?: 0.0).toFloat()
         return try {
-            OnnxTensor.createTensor(environment, FloatBuffer.wrap(floatArrayOf(h1, h24)), INPUT_SHAPE).use { input ->
+            OnnxTensor.createTensor(env, FloatBuffer.wrap(floatArrayOf(h1, h24)), INPUT_SHAPE).use { input ->
                 activeSession.run(mapOf(INPUT_NAME to input)).use { result ->
                     @Suppress("UNCHECKED_CAST")
                     (result[0].value as Array<FloatArray>)[0][0].toDouble()
@@ -86,9 +92,49 @@ class OnnxFraudModel(
         // credit-decisioning model, ADR-0142) must not be served here even if its bytes verify.
         private val ALLOWED_SCOPES = setOf("fraud-shadow")
 
+        /**
+         * Acquire the ONNX Runtime environment, or `null` when the native library will not load.
+         *
+         * This MUST catch [Throwable], not [Exception]. `OrtEnvironment.getEnvironment()` unpacks
+         * and `System.load`s a bundled `.so`, and a platform mismatch surfaces as
+         * `ExceptionInInitializerError` wrapping an `UnsatisfiedLinkError` — both `Error`s, so the
+         * `catch (ex: Exception)` in [loadSession] below never saw them and the class documented a
+         * degradation it could not perform.
+         *
+         * What that cost: the deploy image is `eclipse-temurin:25-jre-alpine` (musl, no libstdc++),
+         * onnxruntime's `libonnxruntime.so` is built against glibc, so `getEnvironment()` threw in
+         * a FIELD INITIALIZER — construction of the bean failed, and CDI then failed every
+         * injection point of it. `FraudResource.reviewQueue` is a read-only analyst query that
+         * never touches the model, and it answered 500 on every call because this bean sits in the
+         * same graph. A missing native library disabled a listing endpoint.
+         *
+         * Measured against the three candidate bases (arm64, onnxruntime 1.22.0):
+         *   eclipse-temurin:25-jre-alpine                -> UnsatisfiedLinkError: libstdc++.so.6
+         *   eclipse-temurin:25-jre-alpine + apk libstdc++ -> UnsatisfiedLinkError: ld-linux-aarch64.so.1
+         *   eclipse-temurin:25-jre (glibc)               -> loads
+         * So the runtime image is the fix for *shadow scoring*; this is the fix for *the blast
+         * radius*, and it is worth having either way — a corrupt library or an OOM at load time
+         * must never be able to take a read endpoint down with it.
+         */
+        @Suppress("TooGenericExceptionCaught") // an Error is exactly what we must survive here
+        internal fun loadEnvironment(): OrtEnvironment? = try {
+            OrtEnvironment.getEnvironment()
+        } catch (t: Throwable) {
+            log.errorf(
+                t,
+                "ONNX Runtime native library unavailable — shadow scoring disabled, rules-only " +
+                    "verdicts stand. This does NOT change any fraud verdict (ADR-0139 phase-1b " +
+                    "scores in shadow); it only removes the shadow signal.",
+            )
+            null
+        }
+
         // internal (not private): OnnxFraudModelTest exercises the load-failure branch directly.
         // requireSignature defaults to false so the existing 2-/3-arg test calls keep the advisory
         // (log + proceed) behaviour without a card assertion.
+        //
+        // Catches Throwable for the same reason as loadEnvironment: createSession also crosses into
+        // native code, so a linkage failure here is an Error, not an Exception.
         @Suppress("TooGenericExceptionCaught") // OrtException + IO errors have no common base worth splitting
         internal fun loadSession(
             environment: OrtEnvironment,
@@ -103,7 +149,7 @@ class OnnxFraudModel(
                 return null // fail-closed: card mismatch under require-signature
             }
             environment.createSession(modelBytes, OrtSession.SessionOptions())
-        } catch (ex: Exception) {
+        } catch (ex: Throwable) {
             log.errorf(ex, "failed to load ONNX baseline fraud model (%s) — shadow scoring disabled", resourcePath)
             null
         }
