@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Redis backing delegation-service's idempotency store (libs' Redis-backed
+# IdempotencyStore, wired in IdempotencyConfig): a repeated Idempotency-Key on an offer
+# must return the first result rather than issue a second grant. The Quarkus Redis client
+# is a hard boot dependency here — without QUARKUS_REDIS_HOSTS the ReactiveRedisDataSource
+# bean is inactive and the app dies at boot with InactiveBeanException, as campaign did.
+# Same shape as the consent/accounts/billing namespaces.
+#
+# Ephemeral on purpose — persistence is disabled (--save "" --appendonly no), so a
+# restart clears in-flight approval records. Acceptable in the sandbox: a pending
+# approval simply has to be re-made. Prod should use an operator-managed HA Redis.
+# Pinned to the image's redis uid 999/gid 1000 to satisfy PSS restricted; /data is a
+# writable emptyDir so the root fs can stay read-only.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: delegation
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/part-of: delegation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: docker.io/valkey/valkey:8-alpine
+          args: ["--save", "", "--appendonly", "no"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 192Mi
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: delegation
+  labels:
+    app.kubernetes.io/name: redis
+spec:
+  selector:
+    app.kubernetes.io/name: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis

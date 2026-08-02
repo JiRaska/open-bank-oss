@@ -1,0 +1,15 @@
+# Delegated-access domain (ADR-0037: domain = namespace). App plane. Holds
+# delegation-service plus its single-owner CNPG Postgres and a Redis for the
+# idempotency store. delegation-service owns DelegationGrant — the SCA-bound,
+# capability-scoped authority for one party to act on another's resource
+# (ADR-0232) — and publishes its lifecycle onto openbank.delegation.events, from
+# which account-service and card-issuance build their local enforcement projections.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: delegation
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
