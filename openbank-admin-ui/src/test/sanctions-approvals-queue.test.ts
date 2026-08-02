@@ -50,9 +50,31 @@ describe('sanctions pending-approvals queue BFF', () => {
 
     await GET(new NextRequest('http://localhost/api/sanctions/approvals?limit=5'))
 
-    // Clamping lives upstream (200 ceiling) — the BFF must not silently swallow the parameter,
-    // or a supervisor's "show me more" would do nothing.
+    // The BFF must not silently swallow the parameter, or a supervisor's "show me more" does
+    // nothing.
     expect(lastFetchCall()[0]).toBe('http://openbank-sanctions-service:8123/api/v1/sanctions/approvals?limit=5')
+  })
+
+  it('refuses to build a path out of a non-numeric limit', async () => {
+    // CodeQL flagged the first draft: `path` is interpolated into the helper's console.error, so a
+    // raw query value reached a log format string (js/tainted-format-string, high) and could inject
+    // newlines into the log stream (js/log-injection). A parsed integer cannot carry either — and
+    // `?limit=abc` was never a legitimate request anyway.
+    global.fetch = respond([])
+    const { GET } = await import('../app/api/sanctions/approvals/route')
+
+    await GET(new NextRequest('http://localhost/api/sanctions/approvals?limit=abc%0AInjected'))
+
+    expect(lastFetchCall()[0]).toBe('http://openbank-sanctions-service:8123/api/v1/sanctions/approvals')
+  })
+
+  it('clamps an out-of-range limit instead of forwarding it', async () => {
+    global.fetch = respond([])
+    const { GET } = await import('../app/api/sanctions/approvals/route')
+
+    await GET(new NextRequest('http://localhost/api/sanctions/approvals?limit=100000'))
+
+    expect(lastFetchCall()[0]).toBe('http://openbank-sanctions-service:8123/api/v1/sanctions/approvals?limit=200')
   })
 
   it('refuses without a session before touching the backend', async () => {
