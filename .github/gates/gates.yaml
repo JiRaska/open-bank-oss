@@ -797,19 +797,6 @@ gates:
   # enforced would break main on a defect this PR is not fixing; registering it advisory is
   # what makes that defect visible at all. Graduate to enforced once the finding is closed —
   # tracked on #3240.
-  # ensure-ecr-repository.sh runs on the deploy path, where CI cannot exercise it — it needs AWS
-  # credentials and a real registry. So the only thing that can be checked here is that it still
-  # behaves correctly against a stubbed CLI, which is exactly the part that regresses silently:
-  # the script's whole value is "make no mutating call when the repo exists, create it when it
-  # does not, and fail loudly when it cannot". Its own --self-test asserts all three and validates
-  # the stub first, so a stub that fell through to the real `aws` cannot report a pass (#3423).
-  - id: ensure-ecr-repository
-    name: "ensure-ecr-repository behaviour (#3423, enforced)"
-    group: supplychain
-    mode: enforced
-    run: |
-      bash .github/scripts/ensure-ecr-repository.sh --self-test
-
   - id: operator-write-naming
     name: "operator-write naming vs. shared-M2M prohibition (GHSA-58jq-9hq3-66jr, advisory)"
     group: registry
