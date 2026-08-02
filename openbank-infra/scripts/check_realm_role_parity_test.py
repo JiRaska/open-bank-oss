@@ -73,6 +73,30 @@ class RealmRoleParityTest(unittest.TestCase):
         self.assertNotIn("offline_access", r.stderr)
         self.assertNotIn("default-roles-openbank", r.stderr)
 
+    def test_uma_protection_is_a_builtin_not_a_finding(self):
+        """CLIENT-scoped built-in. Keycloak adds uma_protection to any of OUR clients that turns
+        on authorization services, so it appears in the live capture and in no template. It only
+        became reachable once the capture started including client roles (2026-08-02); before
+        that the realm-roles-only capture reported every client role as declared-not-live, which
+        is what kept `mcp-caller` permanently red and the CronJob failing on its own output."""
+        r = run(declared_roles() + BUILTINS + ["uma_protection"])
+        self.assertEqual(0, r.returncode, r.stderr)
+        self.assertNotIn("uma_protection", r.stderr)
+
+    def test_client_scoped_declared_role_is_matched_by_the_live_capture(self):
+        """`mcp-caller` is declared under roles.client, not roles.realm. template_roles() flattens
+        both into one name set, so a live snapshot that carries it must read as in-sync — and one
+        that omits it must flag it. Asserting only the first half would pass against a capture
+        that never looked at client roles at all, which was the actual defect."""
+        self.assertIn("mcp-caller", declared_roles())
+        r = run(declared_roles() + BUILTINS)
+        self.assertNotIn("mcp-caller", r.stderr)
+
+        without = [n for n in declared_roles() if n != "mcp-caller"] + BUILTINS
+        r2 = run(without)
+        self.assertNotEqual(0, r2.returncode)
+        self.assertIn("mcp-caller", r2.stderr)
+
     # --- direction 1: declared in the template, absent from the live realm ---------------------
     def test_role_missing_from_live_realm_is_flagged(self):
         """The real #2540 defect: ROLE_KYC_REVIEWER declared, never created live."""

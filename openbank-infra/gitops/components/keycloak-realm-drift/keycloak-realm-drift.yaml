@@ -194,8 +194,44 @@ spec:
                     curl -sS --fail-with-body \
                       -H "Authorization: Bearer ${TOKEN}" \
                       "${KC_URL}/admin/realms/${REALM}/roles?briefRepresentation=true&first=0&max=2000" \
-                      > "/work/${REALM}-roles.json"
-                    echo "  $(python3 -c "import json;print(len(json.load(open('/work/${REALM}-roles.json'))))") role(s)"
+                      > "/work/${REALM}-realm-roles.json"
+
+                    # CLIENT roles too. check-realm-role-parity.py's template_roles()
+                    # flattens `roles.realm` AND `roles.client[*]` into ONE name set, so a
+                    # capture of realm roles alone reports every client role as
+                    # declared-not-live — permanently, and by construction rather than
+                    # because anything drifted. `mcp-caller` (a client role on
+                    # openbank-mcp-service, ADR-0224) sat that way: present in the live
+                    # realm the whole time, reported missing on every run, and the
+                    # CronJob failing on its own false positive took the ArgoCD app to
+                    # Degraded for a day. The two sides of a comparison have to agree on
+                    # scope; that is what actually broke here, not the realm.
+                    #
+                    # SKIP KEYCLOAK'S OWN CLIENTS. Measured on the sandbox 2026-08-02:
+                    # the realm has 29 client roles and exactly ONE (`mcp-caller`) is ours
+                    # — the other 28 come from realm-management, account, account-console
+                    # and broker. Capturing them unfiltered trades one false
+                    # declared-not-live for 28 false live-not-declared, which is worse.
+                    # Filter by CLIENT IDENTITY rather than by role name, so a role we
+                    # later define that happens to be called `view-users` is still checked
+                    # instead of silently matching a built-in's name.
+                    curl -sS --fail-with-body \
+                      -H "Authorization: Bearer ${TOKEN}" \
+                      "${KC_URL}/admin/realms/${REALM}/clients?briefRepresentation=true&first=0&max=2000" \
+                      > "/work/${REALM}-clients.json"
+                    rm -rf "/work/${REALM}-cr" && mkdir -p "/work/${REALM}-cr"
+                    for CID in $(python3 -c "import json;B={'account','account-console','admin-cli','broker','realm-management','security-admin-console'};print(' '.join(c['id'] for c in json.load(open('/work/${REALM}-clients.json')) if c.get('clientId') not in B))"); do
+                      curl -sS --fail-with-body \
+                        -H "Authorization: Bearer ${TOKEN}" \
+                        "${KC_URL}/admin/realms/${REALM}/clients/${CID}/roles?briefRepresentation=true&first=0&max=2000" \
+                        > "/work/${REALM}-cr/${CID}.json"
+                    done
+
+                    # Merge into the single array load_live() expects. `uma_protection` is
+                    # still expected here — Keycloak creates it on any of OUR clients that
+                    # enables authorization services — so the checker's builtins filter
+                    # carries it; see keycloak_builtins() in the script.
+                    python3 -c "import glob,json;r=json.load(open('/work/${REALM}-realm-roles.json'));[r.extend(json.load(open(f))) for f in sorted(glob.glob('/work/${REALM}-cr/*.json'))];json.dump(r,open('/work/${REALM}-roles.json','w'));print('  %d role(s) (realm + client)' % len(r))"
                   done
 
                   # --skip-annotations is NOT passed: the clone is a full checkout, so the
