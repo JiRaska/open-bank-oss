@@ -1036,6 +1036,19 @@ gates:
     run: |
       python3 .github/scripts/check-object-store-blobs-migration.py --enforce
 
+  # auto-deploy derives its libs fan-out from the `project(":openbank-libs-*")` declarations
+  # (#2983). A hardcoded path regex missed the ADR-0122 siblings entirely, so a libs-temporal fix
+  # rebuilt zero consumers and left services running pre-fix images while their pods read green.
+  # The self-test pins the declaration matcher and both path matchers in both directions.
+  - id: libs-change-dependents
+    name: "libs change fan-out is derived (issue #2983, enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      bash .github/scripts/libs-change-dependents.sh --selftest
+    run: |
+      bash .github/scripts/libs-change-dependents.sh --selftest
+
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
     group: data
