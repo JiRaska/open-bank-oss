@@ -5,11 +5,6 @@
 # source and same shape as copilot's COPILOT_MODEL_API_KEY (es-copilot-service.yaml), each on its
 # own budgeted virtual key rather than the shared master key.
 #
-# GROQ_API_KEY is retained ONLY for the rollout window: the currently-deployed image predates the
-# AGENT_MODEL_* config seam and still reads GROQ_API_KEY against api.groq.com directly. Drop it (and
-# the matching env in agent-service.yaml) once the repointed image is live — that removal is the
-# precondition for turning on the agent-pod egress lock.
-#
 # OIDC_CLIENT_SECRET (openbank-services realm client) is unchanged.
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
@@ -42,10 +37,6 @@ spec:
       remoteRef:
         key: litellm
         property: KEY_AGENT_SERVICE
-    - secretKey: GROQ_API_KEY
-      remoteRef:
-        key: agent-service
-        property: GROQ_API_KEY
     - secretKey: OIDC_CLIENT_SECRET
       remoteRef:
         key: agent-service
