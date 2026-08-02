@@ -46,6 +46,16 @@ interface PendingApprovalResponse {
   approvalId?: string
 }
 
+// One row of the checker's queue (GET /api/v1/sanctions/approvals, #3472).
+interface PendingApprovalItem {
+  id: string
+  action: string
+  resourceId?: string | null
+  status: string
+  makerId?: string | null
+  createdAt?: string | null
+}
+
 const DAYS = ['MON','TUE','WED','THU','FRI','SAT','SUN']
 const DAY_LABELS_CS: Record<string,string> = { MON:'Po', TUE:'Út', WED:'St', THU:'Čt', FRI:'Pá', SAT:'So', SUN:'Ne' }
 const DAY_LABELS_EN: Record<string,string> = { MON:'Mon', TUE:'Tue', WED:'Wed', THU:'Thu', FRI:'Fri', SAT:'Sat', SUN:'Sun' }
@@ -204,6 +214,10 @@ export default function SanctionsPage() {
   // retry must carry it as X-Approval-Id or the interceptor mints a fresh one and 202s forever.
   const [pendingApproval, setPendingApproval] = useState<{ id: string; checkId: string } | null>(null)
   const [decideId, setDecideId] = useState('')
+  // The checker's queue (#3472). Before sanctions-service served this list, a decision parked at
+  // 202 was reachable only by whoever had been handed its id out of band.
+  const [pendingQueue, setPendingQueue] = useState<PendingApprovalItem[]>([])
+  const [queueUnavail, setQueueUnavail] = useState(false)
   const [decideBusy, setDecideBusy] = useState(false)
   const [decideMsg, setDecideMsg] = useState('')
 
@@ -248,7 +262,26 @@ export default function SanctionsPage() {
     finally { setListsLoading(false) }
   }, [])
 
-  useEffect(() => { loadChecks(); loadLists() }, [loadChecks, loadLists])
+  const loadPendingQueue = useCallback(async () => {
+    try {
+      const res = await fetch('/api/sanctions/approvals', { cache: 'no-store' })
+      if (!res.ok) {
+        // A refused or unreachable read must never render as an empty queue — "nothing is
+        // waiting" is the most dangerous thing an approvals surface can say wrongly.
+        setPendingQueue([])
+        setQueueUnavail(true)
+        return
+      }
+      const data = await res.json().catch(() => ([]))
+      setPendingQueue(Array.isArray(data) ? data : [])
+      setQueueUnavail(false)
+    } catch {
+      setPendingQueue([])
+      setQueueUnavail(true)
+    }
+  }, [])
+
+  useEffect(() => { loadChecks(); loadLists(); loadPendingQueue() }, [loadChecks, loadLists, loadPendingQueue])
 
   // Once lists load for the first time, initialise scope to all enabled lists
   useEffect(() => {
@@ -395,6 +428,7 @@ export default function SanctionsPage() {
     }
   }
 
+
   /** Checker half of the four-eyes gate. A maker deciding their own request gets 403 upstream. */
   const decideApproval = async (approve: boolean) => {
     const id = decideId.trim()
@@ -419,6 +453,7 @@ export default function SanctionsPage() {
         ? t('Schváleno. Maker nyní může akci zopakovat.', 'Approved. The maker can now retry the action.')
         : t('Zamítnuto.', 'Rejected.'))
       setDecideId('')
+      await loadPendingQueue()
     } catch {
       setDecideMsg(t('Služba je nedostupná.', 'The service is unreachable.'))
     } finally {
@@ -679,9 +714,43 @@ export default function SanctionsPage() {
                     {t('Schválit žádost (druhý pár očí)', 'Decide an approval (second pair of eyes)')}
                   </div>
                   <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                    {t('Vložte ID žádosti, které vám předal jiný operátor. Vlastní žádost schválit nelze — službu to odmítne.',
-                       'Paste the approval id another operator handed you. You cannot decide your own request — the service refuses it.')}
+                    {t('Vlastní žádost schválit nelze — službu to odmítne.',
+                       'You cannot decide your own request — the service refuses it.')}
                   </div>
+
+                  {queueUnavail ? (
+                    // Never render "nothing pending" for a read that failed — a supervisor would
+                    // read an empty queue as "nothing needs me".
+                    <div style={{ fontSize: '12px', color: 'var(--warning-text)' }}>
+                      {t('Frontu žádostí se nepodařilo načíst — nezaměňujte s prázdnou frontou.',
+                         'Could not load the approval queue — do not read this as an empty queue.')}
+                    </div>
+                  ) : pendingQueue.length === 0 ? (
+                    <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
+                      {t('Žádné čekající žádosti.', 'No approvals waiting.')}
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {pendingQueue.map(a => (
+                        <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px',
+                          borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
+                              {a.action}{a.makerId ? ` — ${t('žádá', 'asked by')} ${a.makerId}` : ''}
+                            </div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
+                              {a.id}{a.createdAt ? ` · ${new Date(a.createdAt).toLocaleString('cs-CZ')}` : ''}
+                            </div>
+                          </div>
+                          <button onClick={() => setDecideId(a.id)}
+                            style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'transparent',
+                              color: 'var(--text-primary)', fontSize: '11px', fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>
+                            {t('Vybrat', 'Select')}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <input value={decideId} onChange={e => setDecideId(e.target.value)} placeholder={t('ID žádosti', 'Approval id')}
                       style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px',
