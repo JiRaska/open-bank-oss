@@ -10,6 +10,8 @@ import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.port.out.SendLogRepository
+import com.openbank.campaign.application.port.out.CampaignOutcomeCount
+import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.StepOutcomeCount
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignState
@@ -203,6 +205,19 @@ class PanacheEnrolmentRepository :
         find("campaignId", campaignId).list<EnrolmentEntity>()
     }.awaitSuspending().map { it.toDomain() }
 
+    /** `GROUP BY campaignId` — enrolment counts for every campaign at once (issue #3296). */
+    override suspend fun countAllByCampaign(): List<CampaignEnrolmentCount> = Panache
+        .withSession {
+            Panache.getSession().flatMap { session ->
+                session.createQuery(
+                    "select e.campaignId, count(e) from EnrolmentEntity e group by e.campaignId",
+                    Array<Any>::class.java,
+                ).resultList
+            }
+        }
+        .awaitSuspending()
+        .map { row -> CampaignEnrolmentCount(campaignId = row[0] as UUID, count = row[1] as Long) }
+
     override suspend fun listByParty(partyId: UUID): List<Enrolment> =
         Panache.withSession { find("partyId", partyId).list<EnrolmentEntity>() }.awaitSuspending().map { it.toDomain() }
 
@@ -268,6 +283,26 @@ class PanacheSendLogRepository :
             occurredAt = it.occurredAt,
         )
     }
+
+    /** `GROUP BY campaignId, outcome` — the whole estate in one round trip (issue #3296). */
+    override suspend fun countAllByCampaignAndOutcome(): List<CampaignOutcomeCount> = Panache
+        .withSession {
+            Panache.getSession().flatMap { session ->
+                session.createQuery(
+                    "select s.campaignId, s.outcome, count(s) from SendLogEntity s " +
+                        "group by s.campaignId, s.outcome",
+                    Array<Any>::class.java,
+                ).resultList
+            }
+        }
+        .awaitSuspending()
+        .map { row ->
+            CampaignOutcomeCount(
+                campaignId = row[0] as UUID,
+                outcome = SendOutcome.valueOf(row[1] as String),
+                count = row[2] as Long,
+            )
+        }
 
     override suspend fun countByStepAndOutcome(campaignId: UUID): List<StepOutcomeCount> = Panache
         .withSession {

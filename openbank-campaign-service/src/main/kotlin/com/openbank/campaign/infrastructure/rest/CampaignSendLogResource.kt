@@ -5,6 +5,7 @@
 package com.openbank.campaign.infrastructure.rest
 
 import com.openbank.campaign.application.usecase.CampaignSendLogQuery
+import com.openbank.campaign.application.usecase.CampaignSummaryQuery
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.libs.authz.Authorize
 import jakarta.enterprise.context.ApplicationScoped
@@ -22,7 +23,25 @@ import java.util.UUID
  */
 @Path("/api/v1/campaigns")
 @ApplicationScoped
-class CampaignSendLogResource(private val query: CampaignSendLogQuery) {
+class CampaignSendLogResource(
+    private val query: CampaignSendLogQuery,
+    private val summaries: CampaignSummaryQuery,
+) {
+
+    /**
+     * Reach and delivery for every campaign in one call (issue #3296).
+     *
+     * The campaign list returns records only, so a console had no way to show whether anything
+     * reached anyone without one request per campaign — an N+1 against a scale-to-zero service.
+     * Three grouped queries answer it instead.
+     *
+     * Suppressions are carried through rather than folded away: "2 sent" and "2 sent, 40 suppressed
+     * for consent" are different campaigns, and only the second says why reach was low.
+     */
+    @GET
+    @Path("/summary")
+    @Authorize(action = "campaign.read", resource = "")
+    suspend fun summary(): Response = Response.ok(summaries.summaries()).build()
 
     /**
      * What happened per party per step, newest first.
