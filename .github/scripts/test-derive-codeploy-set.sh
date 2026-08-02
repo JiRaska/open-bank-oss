@@ -122,6 +122,38 @@ The verification for the pact between openbank-transaction-service and openbank-
 #    a co-deploy hint in every green log.
 check "no blocked services => no output" "" "openbank-fraud-service" ""
 
+# 9. THE REGRESSION THIS FIXES (#1985, observed on run 30761740836). Two services blocked
+#    with PENDING_BUILD reference each other exactly like a deadlocked pair — but that class
+#    means only "their main-push build has not finished", which self-clears. Recommending a
+#    co-deploy (a weaker check, and these two are money-path) on that evidence is wrong, so
+#    the set must NOT be named; the pending services are reported instead.
+check "PENDING_BUILD pair is not a co-deploy set" \
+  "PENDING${TAB}openbank-fraud-service openbank-transaction-service" \
+  "openbank-fraud-service openbank-transaction-service" \
+"===SERVICE openbank-fraud-service${TAB}PENDING_BUILD
+There is no verified pact between version abc123 of openbank-fraud-service and the version of openbank-transaction-service currently deployed to sandbox
+===SERVICE openbank-transaction-service${TAB}PENDING_BUILD
+There is no verified pact between version def456 of openbank-transaction-service and the version of openbank-fraud-service currently deployed to sandbox"
+
+# 10. A DURABLE pair still is one — the fix must not silence the case the script exists for.
+check "UNVERIFIED pair is still a co-deploy set" \
+  "CODEPLOY${TAB}openbank-fraud-service openbank-transaction-service" \
+  "openbank-fraud-service openbank-transaction-service" \
+"===SERVICE openbank-fraud-service${TAB}UNVERIFIED
+There is no verified pact between version abc123 of openbank-fraud-service and the version of openbank-transaction-service currently deployed to sandbox
+===SERVICE openbank-transaction-service${TAB}UNVERIFIED
+There is no verified pact between version def456 of openbank-transaction-service and the version of openbank-fraud-service currently deployed to sandbox"
+
+# 11. Mixed: a durable block paired with a transient one cannot be called a deadlock yet —
+#     half the evidence is "CI is behind". Report the pending one, name no set.
+check "mixed durable+transient pair names no set" \
+  "PENDING${TAB}openbank-transaction-service" \
+  "openbank-fraud-service openbank-transaction-service" \
+"===SERVICE openbank-fraud-service${TAB}UNVERIFIED
+There is no verified pact between version abc123 of openbank-fraud-service and the version of openbank-transaction-service currently deployed to sandbox
+===SERVICE openbank-transaction-service${TAB}PENDING_BUILD
+There is no verified pact between version def456 of openbank-transaction-service and the version of openbank-fraud-service currently deployed to sandbox"
+
 if [ "$fails" -gt 0 ]; then
   echo "derive-codeploy-set.py: ${fails} case(s) FAILED"
   exit 1

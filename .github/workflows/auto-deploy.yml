@@ -960,7 +960,8 @@ jobs:
                 block_class["$svc"]="$cls"
                 block_reason["$svc"]="$cls_why"
                 echo "::error::can-i-deploy: ${svc} NOT deployable [${cls}] — ${cls_why} (ADR-0092, #2549)"
-                printf '===SERVICE %s\n%s\n' "$svc" "$cid_out" >> "$BLOCKS_FILE"
+                # Class too: derive-codeploy-set.py rejects transient blocks (#1985).
+                printf '===SERVICE %s\t%s\n%s\n' "$svc" "$cls" "$cid_out" >> "$BLOCKS_FILE"
                 rc=1
               fi
             fi
@@ -1036,6 +1037,10 @@ jobs:
                       echo "gh workflow run auto-deploy.yml -f services='${a}' -f codeploy=true"
                       echo "\`\`\`"
                     } >> "$GITHUB_STEP_SUMMARY"
+                    ;;
+                  PENDING)
+                    echo "::notice::[${a}] waiting on their own main-push build (PENDING_BUILD) — self-clearing, not a deadlock. Do NOT co-deploy (#1985)"
+                    echo "- \`${a}\` — waiting on their own builds, not deadlocked; no action" >> "$GITHUB_STEP_SUMMARY"
                     ;;
                   EXTERNAL)
                     echo "::warning::[${a}] is blocked on ${b}, which is NOT part of this run — a co-deploy cannot help; ${b} has to deploy first (issue #1985)"
