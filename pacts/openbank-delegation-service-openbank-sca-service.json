@@ -1,0 +1,72 @@
+{
+  "consumer": {
+    "name": "openbank-delegation-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the delegation SCA challenge by id",
+      "providerStates": [
+        {
+          "name": "a COMPLETED DELEGATION_GRANT SCA challenge exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/sca/challenges/d1e2f3a4-b5c6-4d7e-8f90-1a2b3c4d5e6f"
+      },
+      "response": {
+        "body": {
+          "id": "d1e2f3a4-b5c6-4d7e-8f90-1a2b3c4d5e6f",
+          "partyId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "purpose": "DELEGATION_GRANT",
+          "status": "COMPLETED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST consume the delegation SCA challenge",
+      "providerStates": [
+        {
+          "name": "a COMPLETED DELEGATION_GRANT SCA challenge exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "partyId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/sca/challenges/d1e2f3a4-b5c6-4d7e-8f90-1a2b3c4d5e6f/consume"
+      },
+      "response": {
+        "body": {
+          "id": "d1e2f3a4-b5c6-4d7e-8f90-1a2b3c4d5e6f",
+          "partyId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "purpose": "DELEGATION_GRANT",
+          "status": "COMPLETED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-sca-service"
+  }
+}

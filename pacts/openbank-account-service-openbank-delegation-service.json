@@ -1,0 +1,220 @@
+{
+  "consumer": {
+    "name": "openbank-account-service"
+  },
+  "messages": [
+    {
+      "contents": {
+        "aggregateId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "capabilities": [
+          "ACCOUNT_READ_BALANCES"
+        ],
+        "eventType": "DelegationActivated",
+        "granteePartyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "grantorPartyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "perTransactionLimit": {
+          "amount": 1500.0,
+          "currency": "CZK"
+        },
+        "resourceId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "resourceType": "ACCOUNT",
+        "validFrom": "2026-01-01T00:00:00Z"
+      },
+      "description": "a DelegationActivated event for an account",
+      "generators": {
+        "body": {
+          "$.aggregateId": {
+            "type": "Uuid"
+          },
+          "$.granteePartyId": {
+            "type": "Uuid"
+          },
+          "$.grantorPartyId": {
+            "type": "Uuid"
+          },
+          "$.resourceId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.aggregateId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.capabilities[0]": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.granteePartyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.grantorPartyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.perTransactionLimit.amount": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "decimal"
+              }
+            ]
+          },
+          "$.perTransactionLimit.currency": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.resourceId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.validFrom": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "format": "yyyy-MM-dd'T'HH:mm:ssXXX",
+                "match": "timestamp"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "an ACCOUNT-scoped delegation grant has been activated"
+        }
+      ]
+    },
+    {
+      "contents": {
+        "aggregateId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "capabilities": [
+          "ACCOUNT_READ_BALANCES"
+        ],
+        "eventType": "DelegationRevoked",
+        "granteePartyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "grantorPartyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "resourceId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "resourceType": "ACCOUNT"
+      },
+      "description": "a DelegationRevoked event for an account",
+      "generators": {
+        "body": {
+          "$.aggregateId": {
+            "type": "Uuid"
+          },
+          "$.granteePartyId": {
+            "type": "Uuid"
+          },
+          "$.grantorPartyId": {
+            "type": "Uuid"
+          },
+          "$.resourceId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.aggregateId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.capabilities[0]": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.granteePartyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.grantorPartyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.resourceId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "an ACCOUNT-scoped delegation grant has been revoked"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-delegation-service"
+  }
+}

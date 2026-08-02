@@ -54,6 +54,32 @@ dependencies {
     // rather than greps. No version: managed by the enforcedPlatform(quarkus.bom) above
     // (testImplementation extends implementation), so it cannot drift from the runtime's Jackson.
     testImplementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")
+    // Provider-side verification (git-pact, ADR-0063): PidPactFolderProviderVerificationTest
+    // replays the pacts in pacts/ that name openbank-pid-service as provider — today
+    // delegation-service's eligibility lookup (issue #2991). pid-service is a provider only, so
+    // there is no pact-consumer dependency here.
+    testImplementation(libs.pact.provider)
+}
+
+// Pact: forward broker config to the forked test JVM (issue #2991). pid-service publishes no
+// consumer pacts, so `pact.rootDir` is only here for consistency with the fleet; the broker
+// properties are the load-bearing half. Without them `pactbroker.url` never reaches the test JVM,
+// PidPactBrokerProviderVerificationTest stays @EnabledIfSystemProperty-skipped even on main-push,
+// and pid-service publishes no verification result — the exact `can-i-deploy` block that class
+// exists to prevent. NOTE: must be set on the test JVM fork, not the Gradle daemon.
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
 
 kover {
