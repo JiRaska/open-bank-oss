@@ -50,6 +50,19 @@ export const PERMISSIONS = {
   "kyc:view":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
   "kyc:approve":          [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.KYC_REVIEWER],
   "onboarding:view":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
+  // Delegated access (ADR-0232 / ADR-0230). Mirrors delegation-service's own class-level
+  // @RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN) minus ROLE_API, which is the M2M
+  // identity and never a console session — listing it here would render a section for a
+  // principal that cannot hold a browser session anyway. Nav/route gating only, not a
+  // security control: the BFF relays the operator's own bearer and delegation-service +
+  // OPA (delegation.list / delegation.read) decide the real answer.
+  //
+  // There is deliberately NO "delegations:propose" yet. The bank-side mutations
+  // (suspend/reinstate/revoke) have no maker-checker store to land in, so this console
+  // ships read-only and there is no action for such a permission to gate — see
+  // src/test/delegations-no-mutation.guard.test.ts. Adding the permission before the
+  // action exists would be a role matrix that lies about what the UI can do.
+  "delegations:view":     [ROLES.ADMIN, ROLES.OPERATOR],
   // Audit
   "audit:view":           [ROLES.ADMIN, ROLES.AUDITOR, ROLES.COMPLIANCE, ROLES.SUPERVISOR],
   // Compliance / Regulatory
