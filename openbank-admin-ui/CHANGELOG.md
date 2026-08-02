@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.88.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.87.3...admin-ui-v0.88.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** let an operator dispose of a sanctions hit ([#3465](https://github.com/JiRaska/open-bank-oss/issues/3465)) ([3c00e90](https://github.com/JiRaska/open-bank-oss/commit/3c00e90cbd83ddfba2d0d6625f6ff83a01d03fc5)), closes [#3334](https://github.com/JiRaska/open-bank-oss/issues/3334)
+
 ## [0.87.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.87.2...admin-ui-v0.87.3) (2026-08-02)
 
 
