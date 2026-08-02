@@ -173,6 +173,32 @@ also be deleted (nothing else in balance-service depends on it).
 
 ## 7. Change log
 
+- **2026-08-02** — **balance-service is now genuinely reachable from the public edge**, and the
+  honest framing is that the *intent* did not change while the *reality* did. `accounts/accounts-api`
+  had declared `api.open-bank.tech/api/v1/balances` since the Ingress was written, so the exposure was
+  always designed and threat-modelled as public — but an Ingress backend resolves only inside its own
+  namespace, and it named `balance-service` in `accounts`, where no such Service exists. The path
+  returned **503 for ~60 days** and nginx logged `no object matching key "accounts/balance-service"`
+  ~1,700×/hour. The route now lives in `components/balances/ingress.yaml` beside the Service it
+  targets (the shape `payments-api`/`sanctions-api` already use on this host).
+  **Trust-boundary delta:** `balance-service-ingress-allow-list` gains one derived rule,
+  `TCP:8103 FROM ingress-nginx` — the first non-`openbank-*` namespace admitted to the service port.
+  Without it the fix would have swapped the 503 for a hang, so it is load-bearing, not incidental;
+  it was produced by `gen-network-policies.py` (which derives ingress-nginx edges from Ingress
+  backends) rather than hand-written, and no other component's policies moved.
+  **Why the residual risk does not move:** every §4 mitigation on S1/I1/E1 is authn/authz at the
+  application layer — OIDC bearer JWT, role-gated mutations, OPA enforced on every endpoint, and the
+  A1 `X-Customer-Party-Id` ownership scoping — none of which depended on the caller being in-cluster.
+  This is the same posture `account-service` already carries on the same host and the same Ingress
+  class. D1 (DoS) is the one row that changes in practice rather than in principle: the new Ingress
+  carries the same `limit-rps: 20` / `limit-burst-multiplier: 3` / `limit-connections: 10`
+  annotations as its three siblings, deliberately identical so one host does not present four
+  different limits depending on which path a client happens to hit. The pre-existing
+  "Gateway rate-limit — infra scope" residual is now actually exercised instead of theoretical.
+  **What this does NOT change:** no application code, no schema, no role, no OPA policy, no
+  in-cluster caller. Rollback is deleting `components/balances/ingress.yaml` and re-running the
+  NetworkPolicy generator; the path returns to 503, which is where it has been all along.
+
 - **2026-07-12** — Wired the four-eyes (maker-checker) enforcement *mechanism* (ADR-0155) onto
   `balance.credit`/`balance.debit`, mirroring the account-service rollout (issue #413). New
   `ApprovalConfig` (`RedisApprovalStore` producer) and `PATCH /api/v1/balances/approvals/{id}`
