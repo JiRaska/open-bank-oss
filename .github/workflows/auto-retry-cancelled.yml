@@ -55,9 +55,19 @@
 # (run_attempt 2) never re-triggers, and a run cancelled for a real reason (superseded by a
 # newer push to the same PR — the concurrency group's normal operation) is only retried once,
 # where it fails fast if the branch has moved. Deliberately NOT retried: `action_required`
-# (approval gates are a human's job) and runs cancelled by anything other than the runner
-# dying — indistinguishable from the outside, so we accept one wasted retry on a manually
-# cancelled run over a more clever heuristic that can misfire.
+# (approval gates are a human's job).
+#
+# This paragraph used to end "and runs cancelled by anything other than the runner dying —
+# indistinguishable from the outside, so we accept one wasted retry on a manually cancelled run".
+# HALF of that is now false and the correction cost one API call: a reclaim kills a RUNNING job,
+# so a run whose cancelled jobs never started a step cannot have been reclaimed. That case is now
+# skipped (see the `cancelled` branch below). The other half stands — a human who cancels WHILE
+# jobs are running is still indistinguishable, and is still retried once.
+#
+# The accepted waste was priced for an idle pool, and the case where someone cancels is precisely
+# the case where the pool is NOT idle: draining a 19-hour, 23-run backlog put all 19 runs straight
+# back in the queue, so the drain silently needed two passes and the re-added load landed on
+# everyone else's PRs (#3208, capacity itself is #2039).
 #
 # `-R` ON EVERY `gh run rerun` IS LOAD-BEARING (issue #2841 follow-up)
 # This job has no `actions/checkout`, so there is no git repository for `gh` to infer the
@@ -105,11 +115,32 @@ jobs:
           set -euo pipefail
 
           if [ "${CONCLUSION}" = "cancelled" ]; then
-            # Whole run cancelled. Indistinguishable from the outside between a reclaim and a
-            # human/concurrency cancel, so retry once either way — the accepted waste that
-            # LOOP SAFETY above describes. `--failed` is a no-op against `cancelled`, so this
-            # is always the full re-run.
-            echo "Re-running cancelled run ${RUN_URL} (issue #2330)"
+            # A reclaim kills a RUNNING job. So if not one cancelled job ever started a step,
+            # nothing was running and a reclaim is impossible — this was a queue cancel, and
+            # re-running it puts back exactly the load whoever cancelled was removing (#3208).
+            #
+            # `steps` is empty for a job that was still queued when the run was cancelled;
+            # a job interrupted mid-flight carries its steps with their conclusions. Verified on
+            # both sides against real runs: 30693441813 (operator drain) has 5 cancelled jobs and
+            # 0 with steps, while contemporaneous cancels that hit running jobs report 1-2 with
+            # steps. Attempt-scoped for the same reason the failure branch below is.
+            #
+            # ONE-DIRECTIONAL on purpose. This only rules a reclaim OUT; it never claims one
+            # happened. A human who cancels while jobs are running still looks exactly like a
+            # reclaim and is still retried once — unchanged, and still the accepted waste the
+            # LOOP SAFETY note describes. What it removes is the case the header never priced:
+            # draining a deep queue, where every cancelled job is one that never started, and the
+            # retry silently undid the drain (#3208, #2039).
+            RUNNING="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/1/jobs?per_page=100" \
+                        --jq '[.jobs[] | select(.conclusion == "cancelled") | select((.steps | length) > 0)] | length')"
+            if [ "${RUNNING:-0}" -eq 0 ]; then
+              echo "::notice title=spot-kill auto-retry::NOT re-running ${RUN_URL} — no cancelled job had started a step, so no runner was reclaimed. Treating it as a deliberate cancel (#3208)."
+              exit 0
+            fi
+
+            # At least one job was interrupted mid-flight: a reclaim is possible, so retry once.
+            # `--failed` is a no-op against `cancelled`, so this is always the full re-run.
+            echo "Re-running cancelled run ${RUN_URL} (${RUNNING} job(s) interrupted mid-flight; issue #2330)"
             gh run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}"
             echo "::notice title=spot-kill auto-retry::Re-ran cancelled run ${RUN_URL} (attempt 2 of max 2; a second kill stays for a human)"
             exit 0

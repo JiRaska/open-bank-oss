@@ -4,6 +4,7 @@
 
 package com.openbank.campaign.application
 
+import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
@@ -76,6 +77,7 @@ class CampaignEnrolmentFailureTest {
         override suspend fun listByCampaign(campaignId: UUID): List<Enrolment> =
             saved.filter { it.campaignId == campaignId }
         override suspend fun listByParty(partyId: UUID): List<Enrolment> = saved.filter { it.partyId == partyId }
+        override suspend fun countAllByCampaign() = emptyList<CampaignEnrolmentCount>()
         override suspend fun save(enrolment: Enrolment): Enrolment = enrolment.also { saved += it }
     }
 
