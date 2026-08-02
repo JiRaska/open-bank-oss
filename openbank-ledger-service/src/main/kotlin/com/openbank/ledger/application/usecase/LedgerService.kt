@@ -49,6 +49,7 @@ class LedgerService(
     private val metrics: DomainMetrics,
     private val yearCloseRepository: YearCloseRepository,
     private val accountingDayLock: AccountingDayLock,
+    private val periodFreezeLock: PeriodFreezeLock,
     private val clock: Clock,
 ) : LedgerUseCase {
     // The single constructor is the CDI entry point; tests pass a fixed Clock for deterministic
@@ -74,6 +75,11 @@ class LedgerService(
         // start failing (#1197: turning on a new money-path refusal blind killed five workloads
         // for four days).
         accountingDayLock.requireOpen(command.entryDate, AccountingDayLock.OPERATION_POSTING)
+
+        // Period lock (ADR-0096 D1) sits between the two: tighter than the fiscal year, looser than
+        // the day. A month can be FROZEN inside an unattested year, and a day can be LOCKED inside
+        // an unfrozen month, so neither of its neighbours can express this state. Also shadow-first.
+        periodFreezeLock.requireOpen(command.entryDate, AccountingDayLock.OPERATION_POSTING)
 
         // Period lock (#869): an ATTESTED fiscal year is closed; new activity into it would
         // silently invalidate the attested trial-balance hash. Reject before doing any work.
@@ -185,11 +191,10 @@ class LedgerService(
         // In shadow mode the decision is recorded but the date is left alone, so no booking date
         // changes until the lock is deliberately enforced.
         val dayDecision = accountingDayLock.evaluate(original.entryDate, AccountingDayLock.OPERATION_REVERSAL)
-        val correctionDate = if (dayDecision.wouldRefuse && accountingDayLock.enforcing) {
-            accountingDayLock.forwardCorrectionDate()
-        } else {
-            original.entryDate
-        }
+        val frozenPeriod = periodFreezeLock.evaluate(original.entryDate, AccountingDayLock.OPERATION_REVERSAL)
+        val sealed = (dayDecision.wouldRefuse && accountingDayLock.enforcing) ||
+            (frozenPeriod != null && periodFreezeLock.enforcing)
+        val correctionDate = if (sealed) accountingDayLock.forwardCorrectionDate() else original.entryDate
 
         val reversalId = UUID.randomUUID()
         // A reversal is itself a journal entry and needs its own unique entry number

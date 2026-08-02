@@ -10,8 +10,8 @@ design intent, and — as of the phase-2 cutover recorded here — no longer ine
 call real downstream services behind a live-validated PSD2 consent.
 
 - **Status:** Draft (revised for the ADR-0195 phase-2 cutover — PR #2253 caller auth, #2262 real
-  read ports, #2278 M2M client, #2316 atomic cutover)
-- **Last reviewed:** 2026-07-25
+  read ports, #2278 M2M client, #2316 atomic cutover; #3292 policy-input fix)
+- **Last reviewed:** 2026-08-02
 - **Owner:** mcp-service CODEOWNERS
 - **Related ADRs:** ADR-0181 (this service), ADR-0031 (AI-agent governance / charters), ADR-0034
   (unified OPA authz — the shared PDP this service calls), ADR-0126 (consent lifecycle — the phase-2
@@ -48,10 +48,11 @@ What is actually running (`openbank-infra/gitops/components/mcp/mcp-service.yaml
 (T-E2) that §0 of the phase-1 model warned about is now live — the service holds and uses its own
 M2M credential on every real caller's behalf. What closes it is exactly the sequencing that model
 called for: identity (#2253) and consent-intersection enforcement (in the port, #2262) landed
-*before* the real clients went live as the CDI default (#2316) — never the other way round. What is
-**still** open, and was never gated on the cutover: `rest.rego`'s bridge into `agents.rego` still
-drops `attributes` (§3), so the PDP itself still cannot see the consent id or scope anything by it —
-consent enforcement lives entirely in the port, not the policy plane — and per-agent charter
+*before* the real clients went live as the CDI default (#2316) — never the other way round. The
+last policy-input gap closed after the cutover: `rest.rego`'s bridge into `agents.rego` now
+forwards `attributes` (#3292, ADR-0195 step 5), so the PDP receives the consent id on every call —
+though no policy consumes it yet, so consent enforcement still lives in the port, with the policy
+plane now able to add a second layer. Still open, and never gated on the cutover: per-agent charter
 provisioning (T-S1) has not shipped, so the distinguishable identity the token now carries is not
 yet matched by a distinguishable authorization tier.
 
@@ -92,8 +93,8 @@ Assets, in priority order:
 │         │        └──localhost:8181──► [OPA sidecar]  rest.rego → agents.rego │
 │         │                              (mcp-opa-bundle ConfigMap)            │
 │         │            exception / timeout ⇒ DENY (fail closed)                │
-│         │            rest.rego bridge drops `attributes` — PDP never sees    │
-│         │            consentId, only agentId + tool name                     │
+│         │            rest.rego bridge forwards `attributes` (#3292) — PDP    │
+│         │            sees consentId; no policy consumes it yet               │
 │         └─ registry.call(...) ──► RealAccountReadPort (accounts/balance/      │
 │              transactions/consents) — M2M OIDC client-credentials bearer      │
 │              ├─ consent.validate(consentId, scope, iban) ── LIVE, fails      │
@@ -128,22 +129,25 @@ attributes = {"tool": …, "consentId": …}
 ```
 
 `rest.rego`'s `agent-charter-allows` rule bridges this to `agents.rego` by rebuilding the input as
-`{agent, tool, resource}` — **it still drops `attributes` entirely**
-(`openbank-libs/governance/policies/rest.rego`, re-verified unchanged against `main` at this
-revision). The cutover did not touch this bridge, and closing T-S1/T-E2 did not require it to: the
-consent check moved into the port (§0, T-I2), not the policy. Therefore:
+`{agent, tool, resource, attributes}` — since #3292 (ADR-0195 step 5) the bridge **forwards
+`attributes`**, defaulting to `{}` when the caller sends none. The consent id now reaches the
+policy plane on every call; no rule in `agents.rego` consumes `consentId` yet, so the consent
+check still lives in the port (§0, T-I2), not the policy. Therefore:
 
 **The PDP CAN see:** the principal type (`AI_AGENT`), the *real* agent id from the validated token
-(no longer a constant), and which of the five capabilities is being invoked. That is enough for the
-hard-denied tool tier, the charter's `deny` globs (`money.*`, `gh.pr.*`, `*.write`,
-`secrets.read.raw`) and its five-entry `allow` list — all **[LIVE]** and all genuinely enforced.
+(no longer a constant), which of the five capabilities is being invoked, and — since #3292 — the
+presented consent id. That is enough for the hard-denied tool tier, the charter's `deny` globs
+(`money.*`, `gh.pr.*`, `*.write`, `secrets.read.raw`) and its five-entry `allow` list — all
+**[LIVE]** and all genuinely enforced — and it unblocks a future policy that gates on consent
+state (none is written yet; today the id is observed, not acted on).
 
-**The PDP CANNOT see:** the consent id (still dropped by the bridge), the account id argument, the
-proposed amount, the payee, or any request count. So no policy written in this plane can express
-"this consent has expired" or "this is the 500th call this minute" — the consent-validity and
+**The PDP CANNOT see:** the account id argument, the proposed amount, the payee, or any request
+count (the endpoint never sends them). So no policy written in this plane can express "this
+consent has expired" or "this is the 500th call this minute" — the consent-validity and
 account-scope checks that *are* now enforced live entirely in `RealAccountReadPort`, not here; a
-future tool whose author forgets to call `validate()` gets no backstop from the PDP. Those remain
-**input** gaps, not policy gaps to be closed by better rego.
+future tool whose author forgets to call `validate()` gets no backstop from the PDP until a
+consent-state policy is authored on the now-forwarded input. Those remain **input** gaps, not
+policy gaps to be closed by better rego.
 
 **Relation to the `openbank-psd2-service` finding (PR #2166 / issue #2169).** The same limitation
 applies here, and it applies *worse*. On psd2 the PDP also cannot distinguish one external caller
@@ -448,3 +452,12 @@ a stub (T-T2/T-D2).
   still authenticates through one M2M client, so T-S1/T-E3's charter-granularity gap remains open.
   T-I3 and T-D1 move from latent-behind-the-stub to live-exploitable, since the tools now return real
   data and real downstream fan-out.
+- **2026-08-02 (issue #3292, ADR-0195 step 5)** — The policy-input gap the phase-2 entry above
+  recorded as "confirmed unchanged" is closed: `rest.rego`'s `agent-charter-allows` bridge now
+  forwards `attributes` (defaulting to `{}` when absent), so the consent id the endpoint passes on
+  every `tools/call` reaches the policy plane (§0, §2 DFD, §3 restated). No rule consumes
+  `consentId` yet — enforcement stays in `RealAccountReadPort`; the change is that a consent-state
+  policy is now *authorable* on real input, and the `run.skill` skill-check can no longer be
+  silently denied when an AI_AGENT arrives via the REST bridge. Guarded by
+  `rest_test.rego` bridge tests and two `build-bundle.sh` drift assertions against the real
+  `agents.yaml`; fleet-wide OPA bundle restamp rides the same PR (mechanics of #2142/#2152).

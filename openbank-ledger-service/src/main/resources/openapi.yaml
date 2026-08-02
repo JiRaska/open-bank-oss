@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Ledger Service API
-  version: 1.12.0
+  version: 1.13.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -15,6 +15,7 @@ tags:
   - name: Ledger
   - name: YearClose
   - name: AccountingDay
+  - name: ClosedPeriod
 
 paths:
   /api/v1/journals:
@@ -616,6 +617,159 @@ paths:
         '409':
           description: Illegal transition (not the immediate successor), or a concurrent transition won
 
+  /api/v1/ledger/periods:
+    get:
+      tags: [ClosedPeriod]
+      summary: List closed-period records overlapping a date range (ADR-0096 D1)
+      operationId: listClosedPeriods
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Closed-period records, ascending by period start
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ClosedPeriodResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/ledger/periods/{type}/{date}:
+    get:
+      tags: [ClosedPeriod]
+      summary: Get the close record for the period containing the date
+      operationId: getClosedPeriod
+      parameters:
+        - $ref: '#/components/parameters/PeriodTypePath'
+        - $ref: '#/components/parameters/PeriodDatePath'
+      responses:
+        '200':
+          description: Closed-period record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClosedPeriodResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [ClosedPeriod]
+      summary: Create or refresh the DRAFT close from the current journal
+      description: >
+        Idempotent while DRAFT — a refresh keeps the record id and moves only the snapshot, so the
+        checker always reviews a draft with a known author. Refused with 409 if the period is
+        already FROZEN, if the GL does not balance over it, or if the period has not ended yet.
+      operationId: createClosedPeriodDraft
+      parameters:
+        - $ref: '#/components/parameters/PeriodTypePath'
+        - $ref: '#/components/parameters/PeriodDatePath'
+      responses:
+        '200':
+          description: DRAFT close record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClosedPeriodResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/ledger/periods/{type}/{date}/trial-balance:
+    get:
+      tags: [ClosedPeriod]
+      summary: Trial balance for the period containing the date (computed on demand)
+      operationId: getPeriodTrialBalance
+      parameters:
+        - $ref: '#/components/parameters/PeriodTypePath'
+        - $ref: '#/components/parameters/PeriodDatePath'
+      responses:
+        '200':
+          description: Period trial balance with its content hash
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PeriodTrialBalanceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/ledger/periods/{type}/{date}/verify:
+    get:
+      tags: [ClosedPeriod]
+      summary: Re-verify a close against a fresh trial balance (read-only)
+      description: >
+        Recomputes the period trial balance and compares its content hash to the one anchored on the
+        record, WITHOUT flipping state. Reports drift (matches=false) rather than failing, so an
+        auditor can continuously prove a FROZEN period is unchanged, or detect a stale DRAFT.
+      operationId: verifyClosedPeriod
+      parameters:
+        - $ref: '#/components/parameters/PeriodTypePath'
+        - $ref: '#/components/parameters/PeriodDatePath'
+      responses:
+        '200':
+          description: Verification verdict (match / drift, both hashes)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClosedPeriodVerificationResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/ledger/periods/{type}/{date}/freeze:
+    post:
+      tags: [ClosedPeriod]
+      summary: Freeze the DRAFT close (DRAFT → FROZEN)
+      description: >
+        Re-verifies the content hash against a fresh computation fail-closed, then seals the period:
+        the trial balance becomes immutable evidence and no journal may be dated into it. Four-eyes —
+        the freezing principal must differ from the draft author, and a draft with no recorded author
+        can never be frozen.
+      operationId: freezeClosedPeriod
+      parameters:
+        - $ref: '#/components/parameters/PeriodTypePath'
+        - $ref: '#/components/parameters/PeriodDatePath'
+      responses:
+        '200':
+          description: FROZEN close record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClosedPeriodResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
   /api/v1/journals/approvals/{id}:
     patch:
       tags: [Ledger]
@@ -676,6 +830,24 @@ components:
       schema:
         type: integer
 
+    PeriodTypePath:
+      name: type
+      in: path
+      required: true
+      description: Statutory period granularity.
+      schema:
+        type: string
+        enum: [MONTH, QUARTER, YEAR]
+
+    PeriodDatePath:
+      name: date
+      in: path
+      required: true
+      description: Any date inside the period; normalised server-side to the whole calendar period.
+      schema:
+        type: string
+        format: date
+
     BusinessDatePath:
       name: businessDate
       in: path
@@ -724,6 +896,58 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    PeriodTrialBalanceResponse:
+      type: object
+      description: Trial balance for one statutory period, with its attestation anchor (ADR-0096 D1).
+      required: [period, from, to, totalDebit, totalCredit, balanced, accountCount, contentHash]
+      properties:
+        period: { type: string, description: "Stable label, e.g. MONTH:2026-05 / QUARTER:2026-Q2 / YEAR:2026." }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        totalDebit: { type: string }
+        totalCredit: { type: string }
+        balanced: { type: boolean, description: "Double-entry holds over the period: debits == credits." }
+        accountCount: { type: integer }
+        contentHash: { type: string, description: "SHA-256 of the canonical trial-balance JSON." }
+
+    ClosedPeriodResponse:
+      type: object
+      description: The persisted statutory close for one period (ADR-0096 D1).
+      required: [id, period, periodType, from, to, status, computedAt, contentHash]
+      properties:
+        id: { type: string, format: uuid }
+        period: { type: string }
+        periodType: { type: string, enum: [MONTH, QUARTER, YEAR] }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        status:
+          type: string
+          enum: [DRAFT, FROZEN]
+          description: DRAFT is recomputable; FROZEN is immutable evidence.
+        computedAt: { type: string, format: date-time }
+        totalDebits: { type: string }
+        totalCredits: { type: string }
+        accountCount: { type: integer }
+        contentHash: { type: string }
+        draftedBy: { type: string, nullable: true, description: "Maker (four-eyes)." }
+        frozenBy: { type: string, nullable: true, description: "Checker; must differ from the maker." }
+        frozenAt: { type: string, format: date-time, nullable: true }
+
+    ClosedPeriodVerificationResponse:
+      type: object
+      description: Read-only re-verification of a close against a fresh computation.
+      required: [period, status, recordedHash, recomputedHash, matches, balanced, recomputedAt]
+      properties:
+        period: { type: string }
+        status: { type: string, enum: [DRAFT, FROZEN] }
+        recordedHash: { type: string }
+        recomputedHash: { type: string }
+        matches:
+          type: boolean
+          description: False on a FROZEN period means a reported figure moved after it was sealed.
+        balanced: { type: boolean }
+        recomputedAt: { type: string, format: date-time }
+
     CurrentAccountingDayResponse:
       type: object
       description: The current accounting day per the business-date authority (ADR-0207 D1).

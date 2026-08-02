@@ -27,7 +27,8 @@
 # behaviour nobody observed — worse than the gap it hides, because the gap is at least visible.
 
 awaiting_first_recording: {}
-# Empty, and that is the point: every eval suite in the tree now has a recorded run, so the ratchet
-# replays all 5 rather than counting suites that replay nothing. Both entries that used to sit here
-# were closed by RECORDING, never by deleting the entry — the gate fails on a stale declaration in
-# either direction, so an entry cannot be cleared while the gap is real.
+# Empty, and that is the point: every eval suite in the tree now has a recorded run, so CI can run
+# `run-evals.py --require-recordings` and block on replay for all 5 rather than counting suites that
+# replay nothing. Both entries that used to sit here were closed by RECORDING, never by deleting the
+# entry — the gate fails on a stale declaration in either direction, so an entry cannot be cleared
+# while the gap is real.

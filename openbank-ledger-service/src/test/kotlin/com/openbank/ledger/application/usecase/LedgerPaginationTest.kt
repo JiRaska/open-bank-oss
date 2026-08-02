@@ -1,4 +1,7 @@
-// SPDX-License-Identifier: Apache-2.0\n// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.\n// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.\n
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
 package com.openbank.ledger.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -32,6 +35,7 @@ class LedgerPaginationTest {
         mockk<com.openbank.libs.observability.DomainMetrics>(relaxed = true),
         mockk<com.openbank.ledger.application.port.out.YearCloseRepository>(relaxed = true),
         mockk<AccountingDayLock>(relaxed = true),
+        mockk<PeriodFreezeLock>(relaxed = true),
         java.time.Clock.fixed(Instant.parse("2026-07-31T09:00:00Z"), java.time.ZoneOffset.UTC),
     )
 

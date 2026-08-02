@@ -59,7 +59,8 @@ spec:
               value: http://keycloak.iam.svc:8080/realms/openbank
             # openbank-services client secret — lets the agent mint a client-credentials
             # token (ROLE_OPERATOR) so its read tools reach the banking services as a
-            # least-privilege service principal. Same Secret as the Groq key.
+            # least-privilege service principal. Projected by the same ExternalSecret as the
+            # LiteLLM virtual key, but sourced from the agent-service OpenBao path.
             - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -89,24 +90,13 @@ spec:
               value: llama-3.3-70b-versatile
             - name: AGENT_MODEL_ENDPOINT
               value: http://litellm.ai-platform.svc:4000/v1
-            # LiteLLM virtual key (OpenBao litellm/LITELLM_MASTER_KEY via ESO), not a provider key.
+            # LiteLLM virtual key (OpenBao litellm/KEY_AGENT_SERVICE via ESO), not a provider key.
             # Optional so an un-seeded key degrades the chat call instead of CrashLooping the pod.
             - name: AGENT_MODEL_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: agent-service-secrets
                   key: AGENT_MODEL_API_KEY
-                  optional: true
-            # ROLLOUT WINDOW ONLY — remove with the es-agent-service.yaml entry once the repointed
-            # image is live. The image deployed at merge time predates the AGENT_MODEL_* seam and
-            # still resolves `agent.model.openai.api-key` from GROQ_API_KEY against api.groq.com;
-            # dropping it here in the same commit would break the assistant until the deploy lands.
-            # Its removal is the precondition for the agent-pod egress lock (ADR-0175 §4).
-            - name: GROQ_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: agent-service-secrets
-                  key: GROQ_API_KEY
                   optional: true
             # MCP tool backends — in-cluster ClusterIPs. get_account hits account-service
             # (accounts ns, live); balance via balance-service (balances ns, live).

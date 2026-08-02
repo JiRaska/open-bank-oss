@@ -184,9 +184,25 @@ locals {
     # attempted an archive, so nothing alerted, and they would have had no recovery point the
     # first time anyone needed one. The matching barmanObjectStore + ScheduledBackup + a bounded
     # max_wal_size were added to their gitops manifests in the same change.
-    anacredit        = { namespace = "anacredit", sa = "anacredit-db" }
-    authzaudit       = { namespace = "authz-policy-auditor", sa = "authzaudit-db" }
-    billing          = { namespace = "billing", sa = "billing-db" }
+    anacredit  = { namespace = "anacredit", sa = "anacredit-db" }
+    authzaudit = { namespace = "authz-policy-auditor", sa = "authzaudit-db" }
+    billing    = { namespace = "billing", sa = "billing-db" }
+    # campaign was the ONE cluster in the fleet whose backups had never worked. Its
+    # gitops manifest declares a barmanObjectStore (s3://…/campaign-db) and a
+    # ScheduledBackup, so Postgres kept trying to archive and kept failing —
+    # `barman-cloud-wal-archive: exit status 4`, ContinuousArchiving=False, ~48h of
+    # PostgresWALArchiveFailing. Backups were switched on and the permission to
+    # perform them never was.
+    #
+    # This is NOT the 2026-07-19 failure mode (#1759), where the association existed
+    # and EKS Pod Identity simply missed injecting credentials at admission during a
+    # node roll; there the fix was a pod restart. Checked here first: the agent is
+    # 31/31 healthy and a restart still produced a pod with no
+    # AWS_CONTAINER_CREDENTIALS_FULL_URI, because there was no association to inject.
+    #
+    # Measured 2026-08-02 across the live fleet: 52 CNPG clusters declare
+    # barmanObjectStore, 51 archive fine, and campaign was the only one broken.
+    campaign         = { namespace = "campaign", sa = "campaign-db" }
     devops           = { namespace = "devops-agent", sa = "devops-db" }
     docstruth        = { namespace = "docs-truth-agent", sa = "docstruth-db" }
     document-service = { namespace = "documents", sa = "document-service-db" }

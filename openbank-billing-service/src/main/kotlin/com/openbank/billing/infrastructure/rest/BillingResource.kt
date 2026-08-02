@@ -10,6 +10,7 @@ import com.openbank.billing.application.usecase.FeeNotFoundException
 import com.openbank.billing.application.usecase.FeeNotPostedException
 import com.openbank.billing.application.usecase.FeeReversalService
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.money.CurrencyCode
 import io.quarkus.security.Authenticated
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
@@ -81,9 +82,11 @@ class BillingResource(
         @QueryParam("accountId") accountId: String?,
         @QueryParam("currency") currency: String?,
     ): Response {
-        val validation = validateParams(cycleId, accountId, currency) ?: return badRequest()
-        val (c, a, cur) = validation
-        return Response.ok(service.assess(c, a, cur)).build()
+        val params = when (val v = validateParams(cycleId, accountId, currency)) {
+            is ParamValidation.Invalid -> return badRequest(v.message)
+            is ParamValidation.Valid -> v
+        }
+        return Response.ok(service.assess(params.cycleId, params.accountId, params.currency)).build()
     }
 
     @POST
@@ -95,13 +98,15 @@ class BillingResource(
         @QueryParam("accountId") accountId: String?,
         @QueryParam("currency") currency: String?,
     ): Response {
-        val validation = validateParams(cycleId, accountId, currency) ?: return badRequest()
-        val (c, a, cur) = validation
+        val params = when (val v = validateParams(cycleId, accountId, currency)) {
+            is ParamValidation.Invalid -> return badRequest(v.message)
+            is ParamValidation.Valid -> v
+        }
         // ADR-0143 step 4: postedBy is captured for the audit trail; the ledger-level maker/checker
         // separation is enforced by AuthorizeInterceptor's four-eyes gate on this action, keyed on
         // the same JWT sub — see the class KDoc.
         val postedBy = postedBy()
-        val assessment = cycleService.assessAndPost(c, a, cur)
+        val assessment = cycleService.assessAndPost(params.cycleId, params.accountId, params.currency)
         return Response.ok(assessment).header("X-Posted-By", postedBy).build()
     }
 
@@ -128,17 +133,50 @@ class BillingResource(
         }
     }
 
-    private fun validateParams(
-        cycleId: String?,
-        accountId: String?,
-        currency: String?,
-    ): Triple<String, String, String>? {
-        if (cycleId.isNullOrBlank() || accountId.isNullOrBlank() || currency.isNullOrBlank()) return null
-        return Triple(cycleId, accountId, currency)
+    /**
+     * Validates the three query parameters against the constraints the *database* enforces, which
+     * until #3038 were the only place they were enforced at all.
+     *
+     * Blankness was the sole check here, so any non-blank garbage reached
+     * `BillingAssessmentRepository.persistWithPostingIntent` and died at the schema
+     * (`V1__init_billing.sql`: `currency CHAR(3) NOT NULL`, `cycle_id`/`account_id VARCHAR(64)`)
+     * as an unmapped Postgres error — a 500 for what is squarely a client error. The authenticated
+     * fuzz run found it with `currency=ISO-2022-CN` (11 characters).
+     *
+     * Note the fault-tolerant path *below* this one does not save us: an unresolvable account
+     * yields a `skipped = true` assessment that still carries the caller's raw currency, and
+     * `BillingCycleService.assessAndPost` persists skipped assessments too — so the graceful
+     * degradation branch is precisely the branch that reaches the `CHAR(3)` column.
+     *
+     * [CurrencyCode.of] also upper-cases, deliberately: `czk` and `CZK` would otherwise be two
+     * distinct values in both the column and the `(cycleId, accountId, currency)` idempotency key,
+     * so the same fee could be assessed twice under two spellings of one currency.
+     */
+    private fun validateParams(cycleId: String?, accountId: String?, currency: String?): ParamValidation {
+        if (cycleId.isNullOrBlank() || accountId.isNullOrBlank() || currency.isNullOrBlank()) {
+            return ParamValidation.Invalid("cycleId, accountId and currency are required")
+        }
+        if (cycleId.length > ID_MAX_LENGTH) {
+            return ParamValidation.Invalid("cycleId must be at most $ID_MAX_LENGTH characters")
+        }
+        if (accountId.length > ID_MAX_LENGTH) {
+            return ParamValidation.Invalid("accountId must be at most $ID_MAX_LENGTH characters")
+        }
+        val normalisedCurrency = try {
+            CurrencyCode.of(currency).code
+        } catch (e: IllegalArgumentException) {
+            // CurrencyCode rejects both a wrong length and an unknown ISO 4217 code — but its
+            // `defaultFractionDigits` property initialiser runs BEFORE its `init` block, so the
+            // throw usually comes from java.util.Currency.getInstance, which carries a NULL
+            // message. The offending value therefore has to come from here, not from the cause.
+            val detail = e.message ?: "not a known ISO 4217 code"
+            return ParamValidation.Invalid("currency '$currency' is invalid: $detail")
+        }
+        return ParamValidation.Valid(cycleId, accountId, normalisedCurrency)
     }
 
-    private fun badRequest(): Response = Response.status(Response.Status.BAD_REQUEST)
-        .entity(mapOf("error" to "cycleId, accountId and currency are required"))
+    private fun badRequest(message: String): Response = Response.status(Response.Status.BAD_REQUEST)
+        .entity(mapOf("error" to message))
         .build()
 
     // .principal.name (preferred_username), NOT .subject (UUID) — MUST match how
@@ -147,6 +185,17 @@ class BillingResource(
     // compare differently-formatted ids for the same person and could fail to catch (or wrongly
     // flag) a self-approval.
     private fun postedBy(): String = identity.principal?.name ?: "anonymous"
+
+    private companion object {
+        /** Matches `cycle_id`/`account_id VARCHAR(64)` in `V1__init_billing.sql`. */
+        const val ID_MAX_LENGTH = 64
+    }
+}
+
+/** Outcome of [BillingResource]'s query-parameter validation — a valid triple, or why it is not. */
+private sealed interface ParamValidation {
+    data class Valid(val cycleId: String, val accountId: String, val currency: String) : ParamValidation
+    data class Invalid(val message: String) : ParamValidation
 }
 
 data class ReverseFeeRequest(val reason: String)

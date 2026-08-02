@@ -83,7 +83,12 @@ describe('campaign console', () => {
     render(React.createElement(Providers, null, React.createElement(CampaignsPage)))
 
     await waitFor(() => expect(screen.getByText('smoke-offer')).toBeTruthy())
-    expect(screen.getByText('ACTIVE')).toBeTruthy()
+    // The state is now rendered as a human label ("Running"), because a marketer should not have to
+    // know what ACTIVE means. Both halves are asserted on purpose: the label is what the reader
+    // sees, and the raw enum stays reachable as the title so the screen and the state machine can
+    // never end up describing different things. Asserting only the label would let the two drift.
+    expect(screen.getAllByText('Running').length).toBeGreaterThan(0)
+    expect(screen.getByTitle('ACTIVE')).toBeTruthy()
     // The checker is shown next to the maker: for an ACTIVE campaign that pair is the
     // audit-relevant fact, and a console that hides it makes four-eyes unverifiable by eye.
     expect(screen.getByText('ops-checker@openbank.local')).toBeTruthy()
@@ -111,12 +116,16 @@ describe('campaign console', () => {
     // Human phrasing is what a marketer reads…
     await waitFor(() => expect(screen.getByText('Consent withdrawn')).toBeTruthy(), { timeout: 8000 })
     expect(screen.getByText('Sent')).toBeTruthy()
-    expect(screen.getByText('Ended — consent withdrawn')).toBeTruthy()
+    // The enrolment table became a counts-by-state summary (PeopleSummary); the label moved
+    // with it. Assert the summary's wording, not the old row badge.
+    expect(screen.getAllByText(/Withdrew consent/).length).toBeGreaterThan(0)
 
     // …and the raw enum stays reachable, so the screen and the API never describe different things.
     // Without this, relabelling could quietly drift from the values the service actually emits.
     expect(screen.getByTitle('SUPPRESSED_CONSENT')).toBeTruthy()
-    expect(screen.getByTitle('TERMINATED_CONSENT_REVOKED')).toBeTruthy()
+    // The enrolment state moved from a `title` on a table row to `data-state` on the summary
+    // tile — same rule as the journey canvas: the enum stays queryable, never visible text.
+    expect(document.querySelector('[data-state="TERMINATED_CONSENT_REVOKED"]')).toBeTruthy()
 
     // Surfaced as a headline number, not buried in the table.
     expect(screen.getByText('Suppressed sends')).toBeTruthy()

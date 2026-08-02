@@ -2,12 +2,8 @@
 #
 # AGENT_MODEL_API_KEY = the LiteLLM virtual key (ADR-0174/0175, #1919): agent-service authenticates
 # to the in-cluster gateway, NOT to the provider — the Groq key now lives only in ai-platform. Same
-# source and same shape as copilot's COPILOT_MODEL_API_KEY (es-copilot-service.yaml).
-#
-# GROQ_API_KEY is retained ONLY for the rollout window: the currently-deployed image predates the
-# AGENT_MODEL_* config seam and still reads GROQ_API_KEY against api.groq.com directly. Drop it (and
-# the matching env in agent-service.yaml) once the repointed image is live — that removal is the
-# precondition for turning on the agent-pod egress lock.
+# source and same shape as copilot's COPILOT_MODEL_API_KEY (es-copilot-service.yaml), each on its
+# own budgeted virtual key rather than the shared master key.
 #
 # OIDC_CLIENT_SECRET (openbank-services realm client) is unchanged.
 apiVersion: external-secrets.io/v1beta1
@@ -29,14 +25,18 @@ spec:
         annotations:
           argocd.argoproj.io/compare-options: IgnoreExtraneous
   data:
+      # Per-agent LiteLLM virtual key, NOT the shared master key. The master key is the proxy's
+      # admin credential: it can mint and revoke keys, it is exempt from every budget, and it is
+      # the same string in every agent namespace — so with it "which agent burned the budget" is
+      # unanswerable and "stop THAT agent" revokes the whole fleet. This key carries its own daily
+      # budget, which LiteLLM REFUSES to exceed (a preventive control, where AiFleetDailySpendHigh
+      # is only detective), and its spend attributes to this alias in /spend/logs.
+      # Seeded by openbank-infra/scripts/seed-litellm-virtual-keys.sh; the property name is the
+      # agent's charter id, so a spend row joins onto agents.yaml with no mapping table.
     - secretKey: AGENT_MODEL_API_KEY
       remoteRef:
         key: litellm
-        property: LITELLM_MASTER_KEY
-    - secretKey: GROQ_API_KEY
-      remoteRef:
-        key: agent-service
-        property: GROQ_API_KEY
+        property: KEY_AGENT_SERVICE
     - secretKey: OIDC_CLIENT_SECRET
       remoteRef:
         key: agent-service
