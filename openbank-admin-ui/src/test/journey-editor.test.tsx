@@ -10,6 +10,14 @@ import { JourneyEditor, MAX_STEPS, type EditorStep } from '@/components/campaign
 import { StepEditor } from '@/components/campaigns/StepEditor'
 
 const TEMPLATES = { MARKETING_PRODUCT_OFFER: ['offerTitle', 'offerText', 'ctaText'] }
+
+// The editor labels a variable in the marketer's words. The mapping is data, so the test carries its
+// own copy — asserting the rendered label against the same map the component reads would be vacuous.
+const VAR_LABELS = {
+  offerTitle: { label: 'Headline', example: 'Savings at 4% interest' },
+  offerText: { label: 'Offer text', example: 'One sentence.' },
+  ctaText: { label: 'Button text', example: 'Start saving' },
+}
 const LABELS = { MARKETING_PRODUCT_OFFER: 'Product offer' }
 const step = (delay = 0, vars: Record<string, string> = {}): EditorStep => ({
   template: 'MARKETING_PRODUCT_OFFER',
@@ -81,12 +89,15 @@ describe('step editor', () => {
     const { container } = render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(), templates: TEMPLATES, templateLabels: LABELS,
+          index: 0, step: step(), templates: TEMPLATES, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange: vi.fn(), onClose: vi.fn(),
         })))
 
-    expect(screen.getByLabelText('offerTitle')).toBeTruthy()
-    expect(screen.getByLabelText('ctaText')).toBeTruthy()
+    // Asserted by id, not by label: the id carries the variable name the SERVICE knows, so a
+    // renamed label can never quietly change which field is submitted.
+    expect(document.getElementById('var-0-offerTitle')).toBeTruthy()
+    expect(document.getElementById('var-0-ctaText')).toBeTruthy()
+    expect(screen.getByLabelText('Headline')).toBeTruthy()
     expect(container.querySelector('textarea')).toBeNull()
   })
 
@@ -96,7 +107,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(), templates: TEMPLATES, templateLabels: LABELS,
+          index: 0, step: step(), templates: TEMPLATES, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
@@ -108,10 +119,12 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(0, { offerTitle: 'T' }), templates: TEMPLATES, templateLabels: LABELS,
+          index: 0, step: step(0, { offerTitle: 'T' }), templates: TEMPLATES, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange: vi.fn(), onClose: vi.fn(),
         })))
 
-    expect(screen.getByText(/offerText, ctaText/)).toBeTruthy()
+    // Named the way the fields above are named. Listing `offerText` under a field labelled
+    // "Offer text" would send someone hunting for a control that is not on the screen.
+    expect(screen.getByText(/Offer text, Button text/)).toBeTruthy()
   })
 })

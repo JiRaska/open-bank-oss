@@ -68,6 +68,23 @@ export default function NewCampaignPage() {
     MARKETING_PRODUCT_OFFER: t('Nabídka produktu', 'Product offer'),
   }
 
+  // The template declares `offerTitle`; a marketer writes a headline. Same field, and only one of
+  // those two words belongs on a screen someone uses to write an email.
+  const variableLabels: Record<string, { label: string; example: string }> = {
+    offerTitle: {
+      label: t('Titulek', 'Headline'),
+      example: t('Spoření s úrokem 4 %', 'Savings at 4% interest'),
+    },
+    offerText: {
+      label: t('Text nabídky', 'Offer text'),
+      example: t('Jedna věta, proč to stojí za to.', 'One sentence on why it is worth it.'),
+    },
+    ctaText: {
+      label: t('Text tlačítka', 'Button text'),
+      example: t('Chci spořit', 'Start saving'),
+    },
+  }
+
   useEffect(() => {
     fetch('/api/segments')
       .then(r => r.json())
@@ -153,8 +170,6 @@ export default function NewCampaignPage() {
       .finally(() => setSaving(false))
   }
 
-  const field = 'w-full rounded-md border bg-transparent px-3 py-1.5 text-sm'
-
   return (
     <div className="space-y-6">
       <Link href="/campaigns" className="inline-flex items-center gap-1 text-sm hover:underline">
@@ -170,39 +185,77 @@ export default function NewCampaignPage() {
         icon={<Megaphone className="h-6 w-6" />}
       />
 
-      <section className="max-w-3xl space-y-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1">
-            <label htmlFor="c-name" className="text-sm font-medium">{t('Název', 'Name')}</label>
-            <input id="c-name" className={field} value={name} onChange={e => setName(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <label htmlFor="c-goal" className="text-sm font-medium">{t('Cíl', 'Goal')}</label>
-            <input id="c-goal" className={field} value={goal} onChange={e => setGoal(e.target.value)} />
-          </div>
+      {/* A marketer names a campaign and picks who gets it. Both were `<label>` + bare box, which is
+          how a database table looks, not how a campaign brief does. The name behaves like a document
+          title; the audience is a set of tiles carrying its plain-language rule and its reach, which
+          is the choice being made — a dropdown hides exactly the number the choice turns on. */}
+      <section className="max-w-3xl space-y-8">
+        <div>
+          <input
+            id="c-name"
+            className="input w-full"
+            style={{ fontSize: '1.5rem', fontWeight: 600, padding: '0.7rem 0.9rem' }}
+            placeholder={t('Pojmenujte kampaň', 'Name this campaign')}
+            value={name}
+            onChange={e => setName(e.target.value)}
+          />
+          <input
+            id="c-goal"
+            className="input w-full"
+            style={{ marginTop: '0.75rem' }}
+            placeholder={t(
+              'Čeho má dosáhnout? Třeba „víc lidí si založí spoření"',
+              'What should it achieve? e.g. "more people open a savings account"',
+            )}
+            value={goal}
+            onChange={e => setGoal(e.target.value)}
+          />
         </div>
 
-        <div className="space-y-1">
-          <label htmlFor="c-segment" className="text-sm font-medium">{t('Komu', 'Audience')}</label>
-          <select
-            id="c-segment"
-            className={field}
-            value={segment}
-            onChange={e => {
-              setSegment(e.target.value)
-              previewReach(e.target.value)
-            }}
-          >
-            <option value="">{t('Vyberte segment…', 'Choose a segment…')}</option>
-            {segments.map(s => (
-              <option key={`${s.name}@${s.version}`} value={`${s.name}@${s.version}`}>
-                {s.name} v{s.version} — {s.rules.join('; ')}
-              </option>
-            ))}
-          </select>
+        <div>
+          <h2 className="text-sm font-semibold" style={{ marginBottom: '0.75rem' }}>
+            {t('Komu to půjde', 'Who gets it')}
+          </h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {segments.map(s => {
+              const ref = `${s.name}@${s.version}`
+              const active = segment === ref
+              return (
+                <button
+                  key={ref}
+                  type="button"
+                  data-segment={ref}
+                  data-selected={active ? 'true' : 'false'}
+                  onClick={() => {
+                    setSegment(ref)
+                    previewReach(ref)
+                  }}
+                  className="rounded-xl border text-left"
+                  style={{
+                    padding: '0.9rem 1rem',
+                    background: 'var(--surface)',
+                    borderColor: active ? 'var(--accent)' : 'var(--border)',
+                    boxShadow: active ? '0 0 0 1px var(--accent)' : undefined,
+                  }}
+                >
+                  <p className="text-sm font-semibold">{s.name}</p>
+                  <p className="text-xs text-muted-foreground" style={{ marginTop: '0.25rem' }}>
+                    {s.rules.join('; ')}
+                  </p>
+                  {/* The reach lands on the tile that was chosen, next to the rule that produced it —
+                      the two facts a marketer weighs together. */}
+                  <p className="text-xs text-muted-foreground" style={{ marginTop: '0.5rem' }}>
+                    {active && reach !== null
+                      ? t(`≈ ${reach} lidí`, `≈ ${reach} people`)
+                      : t(`verze ${s.version}`, `version ${s.version}`)}
+                  </p>
+                </button>
+              )
+            })}
+          </div>
           {/* Segments are code (ADR-0201 D1). Saying so is cheaper than letting someone hunt for an
               "add segment" button that will never exist. */}
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground" style={{ marginTop: '0.75rem' }}>
             {t(
               'Segmenty jsou definované v kódu a verzované. Nový segment je pull request, ne akce v UI.',
               'Segments are defined in code and versioned. A new segment is a pull request, not a UI action.',
@@ -213,9 +266,14 @@ export default function NewCampaignPage() {
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold">{t('Cesta', 'The journey')}</h2>
+        {/* space-y-0 around the canvas+panel pair: any gap between them undoes the join. */}
+        <div className="space-y-0">
         <JourneyEditor
+          attachedBelow={selected !== null && steps[selected] !== undefined}
           steps={steps}
-          audience={segment}
+          // `savers@2` is how the API refers to a segment. The node says who they are; the tile above
+          // already carries the version, which is the only place it is a decision.
+          audience={segment ? segment.split('@')[0] : ''}
           audienceSize={reach}
           selected={selected}
           onSelect={setSelected}
@@ -224,18 +282,22 @@ export default function NewCampaignPage() {
           templateLabels={templateLabels}
         />
 
+        {/* No gap and no separate card: the panel is the selected node opened, so it continues the
+            canvas surface rather than sitting under it as an unrelated block. */}
         {selected !== null && steps[selected] && (
-          <div className="max-w-2xl">
-            <StepEditor
-              index={selected}
-              step={steps[selected]}
-              templates={TEMPLATES}
-              templateLabels={templateLabels}
-              onChange={next => updateStep(selected, next)}
-              onClose={() => setSelected(null)}
-            />
-          </div>
+          <StepEditor
+            attached
+            index={selected}
+            step={steps[selected]}
+            templates={TEMPLATES}
+            templateLabels={templateLabels}
+            variableLabels={variableLabels}
+            onChange={next => updateStep(selected, next)}
+            onClose={() => setSelected(null)}
+          />
         )}
+
+        </div>
 
         {/* Read-only on purpose: the contact policy is a single enforcement point, and a per-campaign
             override here would make that point decorative (ADR-0219 D4, ADR-0221 D1 step 4). */}
@@ -256,7 +318,7 @@ export default function NewCampaignPage() {
         <button
           onClick={submit}
           disabled={!ready || saving}
-          className="rounded-md border px-3 py-1.5 text-sm disabled:opacity-40"
+          className="btn btn-primary disabled:opacity-40"
         >
           {saving ? t('Zakládám…', 'Creating…') : t('Založit koncept', 'Create draft')}
         </button>
