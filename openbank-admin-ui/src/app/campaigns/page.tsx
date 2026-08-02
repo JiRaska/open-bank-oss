@@ -224,24 +224,24 @@ export default function CampaignsPage() {
 
           {filtered.length > 0 && (
             <div className="overflow-x-auto rounded-lg border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-left">
+              <table className="data-table">
+                <thead>
                   <tr>
-                    <th className="px-4 py-2 font-medium">{t('Název', 'Name')}</th>
-                    <th className="px-4 py-2 font-medium">{t('Stav', 'State')}</th>
-                    <th className="px-4 py-2 font-medium">{t('Segment', 'Segment')}</th>
-                    {summary && <th className="px-4 py-2 font-medium">{t('Zařazeno', 'Enrolled')}</th>}
-                    {summary && <th className="px-4 py-2 font-medium">{t('Doručeno', 'Sent')}</th>}
-                    {summary && <th className="px-4 py-2 font-medium">{t('Potlačeno', 'Suppressed')}</th>}
-                    <th className="px-4 py-2 font-medium">{t('Vytvořil', 'Created by')}</th>
-                    <th className="px-4 py-2 font-medium">{t('Schválil', 'Approved by')}</th>
-                    <th className="px-4 py-2 font-medium">{t('Vytvořeno', 'Created')}</th>
+                    <th>{t('Název', 'Name')}</th>
+                    <th>{t('Stav', 'State')}</th>
+                    <th>{t('Segment', 'Segment')}</th>
+                    {summary && <th>{t('Zařazeno', 'Enrolled')}</th>}
+                    {summary && <th>{t('Doručeno', 'Sent')}</th>}
+                    {summary && <th>{t('Potlačeno', 'Suppressed')}</th>}
+                    <th>{t('Vytvořil', 'Created by')}</th>
+                    <th>{t('Schválil', 'Approved by')}</th>
+                    <th>{t('Vytvořeno', 'Created')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map(c => (
-                    <tr key={c.id} className="border-t">
-                      <td className="px-4 py-2">
+                    <tr key={c.id}>
+                      <td>
                         <Link href={`/campaigns/${c.id}`} className="font-medium hover:underline">
                           {c.name}
                         </Link>
@@ -249,31 +249,31 @@ export default function CampaignsPage() {
                       </td>
                       {/* Human label for the reader, raw state kept as the title so the screen and
                           the state machine can never end up describing different things. */}
-                      <td className="px-4 py-2">
+                      <td>
                         <span title={c.state}><StatusBadge status={c.state} label={label(c.state)} /></span>
                       </td>
-                      <td className="px-4 py-2 font-mono text-xs">
+                      <td className="font-mono text-xs">
                         {c.segmentRef?.name}@{c.segmentRef?.version}
                       </td>
-                      {summary && <td className="px-4 py-2 text-xs">{summary[c.id]?.enrolled ?? 0}</td>}
-                      {summary && <td className="px-4 py-2 text-xs">{summary[c.id]?.sent ?? 0}</td>}
+                      {summary && <td className="text-xs">{summary[c.id]?.enrolled ?? 0}</td>}
+                      {summary && <td className="text-xs">{summary[c.id]?.sent ?? 0}</td>}
                       {/* Suppressed is tinted only when it happened: "0 suppressed" is the normal
                           case and colouring it would make every row look like it needs attention.
                           A non-zero here is the answer to "why was reach low", so it must not read
                           as ordinary. */}
                       {summary && (
                         <td
-                          className="px-4 py-2 text-xs"
+                          className="text-xs"
                           style={(summary[c.id]?.suppressed ?? 0) > 0 ? { color: 'var(--warning)', fontWeight: 600 } : undefined}
                         >
                           {summary[c.id]?.suppressed ?? 0}
                         </td>
                       )}
-                      <td className="px-4 py-2 text-xs">{c.createdBy}</td>
+                      <td className="text-xs">{c.createdBy}</td>
                       {/* The checker, shown next to the maker on purpose: the maker/checker pair is
                           the audit-relevant fact about an ACTIVE campaign, not a detail. */}
-                      <td className="px-4 py-2 text-xs">{c.approvedBy ?? '—'}</td>
-                      <td className="px-4 py-2 text-xs whitespace-nowrap">{fmtDate(c.createdAt)}</td>
+                      <td className="text-xs">{c.approvedBy ?? '—'}</td>
+                      <td className="text-xs whitespace-nowrap">{fmtDate(c.createdAt)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -130,28 +130,28 @@ export default function SegmentsPage() {
 
       {!loading && !unavailable && items.length > 0 && (
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left">
+          <table className="data-table">
+            <thead>
               <tr>
-                <th className="px-4 py-2 font-medium">{t('Segment', 'Segment')}</th>
-                <th className="px-4 py-2 font-medium">{t('Verze', 'Version')}</th>
-                <th className="px-4 py-2 font-medium">{t('Koho zahrnuje', 'Who it selects')}</th>
-                <th className="px-4 py-2 font-medium">{t('Velikost', 'Size')}</th>
+                <th>{t('Segment', 'Segment')}</th>
+                <th>{t('Verze', 'Version')}</th>
+                <th>{t('Koho zahrnuje', 'Who it selects')}</th>
+                <th>{t('Velikost', 'Size')}</th>
               </tr>
             </thead>
             <tbody>
               {items.map(s => (
-                <tr key={key(s)} className="border-t">
-                  <td className="px-4 py-2 font-medium">{s.name}</td>
-                  <td className="px-4 py-2 tabular-nums text-muted-foreground">v{s.version}</td>
-                  <td className="px-4 py-2">
+                <tr key={key(s)}>
+                  <td className="font-medium">{s.name}</td>
+                  <td className="tabular-nums text-muted-foreground">v{s.version}</td>
+                  <td>
                     <ul className="list-inside list-disc text-muted-foreground">
                       {s.rules.map(r => (
                         <li key={r}>{r}</li>
                       ))}
                     </ul>
                   </td>
-                  <td className="px-4 py-2">{renderPreview(s)}</td>
+                  <td>{renderPreview(s)}</td>
                 </tr>
               ))}
             </tbody>
