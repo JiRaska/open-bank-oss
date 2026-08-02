@@ -906,12 +906,14 @@ jobs:
             sel_line="$(PACT_VERSION_PRESENT="$vpresent" EVENT_NAME="$GITHUB_EVENT_NAME" \
               bash .github/scripts/resolve-can-i-deploy-selector.sh "$svc" "$GITHUB_SHA")"
             read -ra CID_SELECTOR <<< "$(printf '%s' "$sel_line" | cut -f1)"
-            # REFUSE (#3318): a manual dispatch of a sha with no pact version. Stop rather
-            # than gate it on a different commit — see the selector script's header.
+            # REFUSE (#3318): a manual dispatch of a sha with no pact version. Skip THIS
+            # service — aborting the batch is the #846 shape (#3445).
             if [ "${CID_SELECTOR[0]}" = "REFUSE" ]; then
-              echo "::error::can-i-deploy: $(printf '%s' "$sel_line" | cut -f2)"
-              echo "deployable=[]" >> "$GITHUB_OUTPUT"
-              exit 1
+              refuse_why="$(printf '%s' "$sel_line" | cut -f2)"
+              echo "::error::can-i-deploy: ${refuse_why}"
+              printf '===SERVICE %s\n%s\n' "$svc" "$refuse_why" >> "$BLOCKS_FILE"
+              rc=1  # keep the job red (ADR-0092); only the batch survives
+              continue
             fi
             echo "==> can-i-deploy ${svc} (${CID_SELECTOR[*]}) → environment sandbox"
             echo "    $(printf '%s' "$sel_line" | cut -f2)"
