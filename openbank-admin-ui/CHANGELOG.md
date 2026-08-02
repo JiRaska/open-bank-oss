@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.85.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.84.0...admin-ui-v0.85.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** show party names on the campaign screen, not truncated UUIDs ([#3310](https://github.com/JiRaska/open-bank-oss/issues/3310)) ([46b35b9](https://github.com/JiRaska/open-bank-oss/commit/46b35b9fe7b2f95fbd350555c97d837ee37ff774))
+
 ## [0.84.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.83.0...admin-ui-v0.84.0) (2026-08-02)
 
 
