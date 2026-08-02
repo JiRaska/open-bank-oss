@@ -140,6 +140,16 @@ mp:
           connector: smallrye-kafka
           enabled: false
 openbank:
+  # ML / shadow scoring (ADR-0139 phase-1b) — READ THIS BEFORE TRUSTING A "shadow score" NUMBER.
+  # The in-process ONNX adapter has NEVER loaded in a deployed environment: the fleet runtime
+  # image is eclipse-temurin:*-jre-alpine (musl) and onnxruntime's libonnxruntime.so is linked
+  # against glibc, so OrtEnvironment.getEnvironment() throws UnsatisfiedLinkError at startup and
+  # scoreShadow() returns null for every request. Verdicts are therefore rules-only, and always
+  # have been — measured on arm64: alpine fails on libstdc++.so.6, alpine + `apk add libstdc++`
+  # then fails on ld-linux-aarch64.so.1, and only a glibc base loads it (#3354). No verdict has
+  # ever differed because of this — the bundled model reproduces the previous pure-Kotlin
+  # logistic exactly — but any claim that the ONNX serving path "works" is unverified.
+  # openbank.ml.require-signature (ADR-0141 model-card pinning) only takes effect once it does.
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
