@@ -1,6 +1,6 @@
 {
-  "openbank-account-service": "0.16.2",
-  "openbank-admin-ui": "0.87.0",
+  "openbank-account-service": "0.17.0",
+  "openbank-admin-ui": "0.87.1",
   "openbank-agent-service": "1.16.1",
   "openbank-aml-service": "0.7.8",
   "openbank-anacredit-service": "0.9.1",
@@ -9,7 +9,7 @@
   "openbank-authz-policy-auditor": "0.3.1",
   "openbank-balance-service": "1.12.2",
   "openbank-billing-service": "0.8.2",
-  "openbank-card-issuance-service": "0.14.0",
+  "openbank-card-issuance-service": "0.15.0",
   "openbank-clearing-service": "0.7.6",
   "openbank-clearing-simulator": "0.4.6",
   "openbank-consent-service": "0.16.5",
