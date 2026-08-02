@@ -50,6 +50,23 @@ quarkus:
     # test JVMs fight over 8085.
     management:
       enabled: false
+    # No Keycloak in a test JVM. `tenant-enabled: false` and NOT `enabled: false`: turning the
+    # extension off removes the JsonWebToken bean, and CampaignResource injects it in its
+    # constructor, so the build fails in ArC before a test ever runs
+    # ("Unsatisfied dependency for type org.eclipse.microprofile.jwt.JsonWebToken"). Disabling only
+    # the tenant keeps the bean and skips the discovery call that would otherwise fail the whole
+    # deployment with "OIDC Server is not available". consent-service can use `enabled: false`
+    # because none of its resources inject the token.
+    oidc:
+      tenant-enabled: false
+  # `authz.enforce` has no key in this file, so the interceptor's safe default (true) applies — and
+  # with no PolicyDecisionPoint bean in a test JVM every @Authorize call fails closed before the
+  # handler ever runs. Advisory HERE ONLY (note the %test nesting): CampaignRestContractIT is about
+  # the HTTP contract — media types, headers, serialisation — not about who may call what. The
+  # policy is covered by the OPA gate and the rego tests, neither of which needs the app running.
+  authz:
+    enforce: false
+
 
 openbank:
   temporal:

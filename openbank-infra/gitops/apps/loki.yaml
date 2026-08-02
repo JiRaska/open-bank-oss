@@ -20,8 +20,11 @@
 # this Loki with `trace_id`/`span_id`/`correlationId` lifted into structured
 # metadata.
 #
-# Codified into GitOps (ADR-0027). No root app-of-apps syncs gitops/apps yet, so
-# applied with `kubectl apply` until that is wired (separate follow-up).
+# Codified into GitOps (ADR-0027). The root app-of-apps (`root`, ArgoCD
+# Application over openbank-infra/gitops/apps, prune+selfHeal) syncs this file,
+# so a merge to main IS the deploy. A `kubectl apply` of an UNMERGED change here
+# is reverted within seconds — verified 2026-08-01, three applies in a row
+# reported `configured` and the live object never changed (#3156).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -100,8 +103,33 @@ spec:
           compactor:
             retention_enabled: true
             delete_request_store: s3
+          # RULER (log-based alerting). enable_api alone was all this had, and it delivered
+          # nothing: there was no alertmanager_url, so a firing rule had nowhere to go, and there
+          # were no rules at all — the whole feature was configured-looking and inert. Meanwhile
+          # several of this repo's most expensive incidents left their ONLY evidence in a log line
+          # (HR000068 schedulers that had never run, SRCFG00040 at boot, the persist-vs-merge
+          # duplicate-key 500s, fx-service's "skipping its revaluation leg"), and no metric existed
+          # for any of them.
           ruler:
             enable_api: true
+            # Rules come from ConfigMaps in git via the chart's k8s-sidecar (see sidecar.rules
+            # below), so the ruler reads them off local disk. This deliberately does NOT use the
+            # S3 `ruler` bucket configured above: S3 ruler storage is written through the ruler
+            # API, which would make the rules a mutable runtime object rather than a reviewed
+            # artifact — the exact "derived data hand-edited in place" shape the house rules forbid.
+            storage:
+              type: local
+              local:
+                directory: /rules
+            # Loki is single-tenant here (auth_enabled: false), so the sidecar's folder must be the
+            # "fake" tenant directory the ruler looks in.
+            rule_path: /tmp/loki-rules
+            ring:
+              kvstore:
+                store: inmemory
+            # The missing half. Without this a rule evaluates, fires, and is delivered nowhere.
+            alertmanager_url: http://kube-prometheus-stack-alertmanager.observability.svc:9093
+            enable_alertmanager_v2: true
           # Single-binary needs the embedded query scheduler off.
           querier:
             max_concurrent: 2
@@ -156,6 +184,14 @@ spec:
         sidecar:
           image:
             repository: kiwigrid/k8s-sidecar
+          # Watch for ConfigMaps labelled loki_rule=1 and drop them into the ruler's local
+          # directory, so a log-based alert is a reviewed file in git like every PrometheusRule.
+          rules:
+            enabled: true
+            label: loki_rule
+            labelValue: "1"
+            searchNamespace: observability
+            folder: /rules/fake
   destination:
     server: https://kubernetes.default.svc
     namespace: observability

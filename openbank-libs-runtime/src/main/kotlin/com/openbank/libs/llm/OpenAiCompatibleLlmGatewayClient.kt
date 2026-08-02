@@ -49,6 +49,10 @@ class OpenAiCompatibleLlmGatewayClient(
     http: HttpClient? = null,
     private val temperature: Double = 0.2,
     private val maxTokens: Int = 700,
+    // Defaults to the no-op so an un-wired caller stays silent rather than broken, and so this
+    // stays a plain constructible class — `DomainMetrics` is the CDI bean that implements it, and
+    // producing one from here would drag Micrometer into every consumer's Arc type closure.
+    private val metrics: LlmCallMetricsPort = LlmCallMetricsPort.NONE,
 ) : LlmGatewayPort {
 
     private val log = Logger.getLogger(OpenAiCompatibleLlmGatewayClient::class.java)
@@ -61,6 +65,10 @@ class OpenAiCompatibleLlmGatewayClient(
     override suspend fun chat(systemPrompt: String, userPrompt: String): String? {
         if (apiKey.isBlank()) {
             log.warn("LLM api-key not seeded — skipping call (degraded to deterministic fallback)")
+            // Recorded, not silent: an agent that has never had a key looks identical to one that
+            // is simply idle unless this series exists, and "the AI features were never switched
+            // on" is exactly the state this repo keeps discovering months late.
+            metrics.recordCall(model, LlmCallMetricsPort.OUTCOME_NOT_CONFIGURED, 0, 0, 0)
             return null
         }
         val url = "${baseUrl.trimEnd('/')}/chat/completions"
@@ -70,6 +78,10 @@ class OpenAiCompatibleLlmGatewayClient(
             temperature = temperature,
             maxTokens = maxTokens,
         )
+        // Nanos, not a Timer.Sample: the metrics port is a pure-domain interface and may not carry a
+        // Micrometer type. Measured around the whole attempt, so a timeout — the slowest and most
+        // interesting case — is timed too rather than being dropped with the exception.
+        val startedAt = System.nanoTime()
         return try {
             val request = HttpRequest.newBuilder(URI.create(url))
                 .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_S))
@@ -83,12 +95,33 @@ class OpenAiCompatibleLlmGatewayClient(
             }
             if (resp.statusCode() !in OK_RANGE) {
                 log.warnf("LLM backend %s returned HTTP %d", baseUrl, resp.statusCode())
+                metrics.recordCall(
+                    model,
+                    LlmCallMetricsPort.OUTCOME_HTTP_ERROR,
+                    0,
+                    0,
+                    System.nanoTime() - startedAt,
+                )
                 return null
             }
-            mapper.readValue(resp.body(), ChatResponse::class.java)
-                .choices.firstOrNull()?.message?.content?.takeIf { it.isNotBlank() }
+            val parsed = mapper.readValue(resp.body(), ChatResponse::class.java)
+            metrics.recordCall(
+                model,
+                LlmCallMetricsPort.OUTCOME_SUCCESS,
+                parsed.usage?.promptTokens ?: 0,
+                parsed.usage?.completionTokens ?: 0,
+                System.nanoTime() - startedAt,
+            )
+            parsed.choices.firstOrNull()?.message?.content?.takeIf { it.isNotBlank() }
         } catch (ex: Exception) {
             log.warnf("LLM call failed: %s", ex.message)
+            metrics.recordCall(
+                model,
+                LlmCallMetricsPort.OUTCOME_EXCEPTION,
+                0,
+                0,
+                System.nanoTime() - startedAt,
+            )
             null
         }
     }
@@ -114,7 +147,21 @@ internal data class ChatRequest(
 internal data class ChatMessage(val role: String, val content: String)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-internal data class ChatResponse(val choices: List<ChatChoice> = emptyList())
+internal data class ChatResponse(
+    val choices: List<ChatChoice> = emptyList(),
+    // Every OpenAI-compatible backend returns this block on a successful non-streaming call, but
+    // it is nullable because none of them PROMISE to: the client must not start returning null
+    // completions because a provider dropped `usage`. Until now it was parsed away by
+    // @JsonIgnoreProperties, which is why the fleet's token consumption existed only on the
+    // provider's invoice.
+    val usage: ChatUsage? = null,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+internal data class ChatUsage(
+    @JsonProperty("prompt_tokens") val promptTokens: Int = 0,
+    @JsonProperty("completion_tokens") val completionTokens: Int = 0,
+)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 internal data class ChatChoice(val message: ChatMessage = ChatMessage("assistant", ""))

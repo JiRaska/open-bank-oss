@@ -1,0 +1,122 @@
+# Log-based alerting (Loki ruler) — the failures that only ever appear in a log line.
+#
+# Delivered as a ConfigMap labelled loki_rule=1; the Loki chart's k8s-sidecar drops it into the
+# ruler's local rules directory (see sidecar.rules in apps/loki.yaml). A rule here is a reviewed
+# file in git, exactly like a PrometheusRule — never pushed through the ruler API.
+#
+# WHY THESE FOUR. Each one is a failure this repo has already paid for, whose ONLY evidence anywhere
+# was a log line, and for which no metric exists or could easily exist:
+#
+#   HR000068                        five @Scheduled methods, three money-path, had NEVER run. A
+#                                   plain @Scheduled method carries no Vert.x context, so
+#                                   runBlocking around reactive Panache throws before the per-item
+#                                   try/catch. The job aborts having done nothing — no failed
+#                                   counter increments, because nothing got far enough to count.
+#   SRCFG00040                       a missing @ConfigProperty value throws at boot. The pod
+#                                   crashloops, which IS visible — but the reason is not, and
+#                                   "which config key" is the entire diagnosis.
+#   duplicate key ... _pkey          Panache persist() on an application-assigned @Id is INSERT-only,
+#                                   so every lifecycle transition 500s (ADR-0126 D3, #1521).
+#                                   Invisible to unit tests that mock the repository.
+#   skipping its revaluation leg     fx-service's FxRevaluationService found no valid rate, logged
+#                                   this, and returned posted=false — a successful-looking run of a
+#                                   job that revalued nothing, for the entire life of the service.
+#                                   The only other evidence was a table that stopped growing, and
+#                                   nothing alerts on a table not growing.
+#
+# All four are `warning`, none pages. They mean "a thing you believe is running is not", which is
+# urgent to know and not urgent at 03:00 — and alert fatigue is already this estate's documented
+# root cause, so a new rule that pages is a regression even when it is correct.
+#
+# Retention is 7d (ADR-0088 D3), so these windows must stay well inside it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-rules-silent-failures
+  namespace: observability
+  labels:
+    loki_rule: "1"
+    app.kubernetes.io/part-of: observability
+data:
+  silent-failures.yaml: |
+    groups:
+      - name: openbank.logs.silent-failures
+        interval: 5m
+        rules:
+          # A scheduler that aborts on the missing Vert.x context. `HR000068` is Hibernate
+          # Reactive's own code, so this matches the exception rather than our prose about it —
+          # prose gets reworded, an exception code does not.
+          - alert: SchedulerMissingVertxContext
+            expr: |
+              sum by (namespace, app) (
+                count_over_time({namespace=~".+"} |= "HR000068" [15m])
+              ) > 0
+            for: 5m
+            labels:
+              severity: warning
+              team: platform
+            annotations:
+              summary: "{{ $labels.app }} in {{ $labels.namespace }} logged HR000068 — a scheduled job aborted"
+              description: >-
+                A @Scheduled method reached reactive Panache with no Vert.x context and threw before
+                doing any work. The job did NOT run, and no failure counter incremented because
+                nothing got far enough to count. Make the method a `suspend fun` — never
+                runBlocking, never VertxContextSupport (rules.yaml: scheduled_methods).
+
+          # A missing config value at boot. The crashloop is visible in kube-state-metrics; WHICH
+          # key is missing is only ever in this line, and it is the whole diagnosis.
+          - alert: ConfigPropertyMissingAtBoot
+            expr: |
+              sum by (namespace, app) (
+                count_over_time({namespace=~".+"} |= "SRCFG00040" [15m])
+              ) > 0
+            for: 5m
+            labels:
+              severity: warning
+              team: platform
+            annotations:
+              summary: "{{ $labels.app }} in {{ $labels.namespace }} failed config load (SRCFG00040)"
+              description: >-
+                A @ConfigProperty has no value and no default, so the pod cannot start. Optional
+                fields must be Optional<String> with a defaultValue. The failing key is named in
+                the log line this alert matched.
+
+          # persist() on an application-assigned @Id. Every lifecycle transition 500s, and a
+          # repository-mocking unit test cannot see it.
+          - alert: PanacheAssignedIdInsertOnly
+            expr: |
+              sum by (namespace, app) (
+                count_over_time({namespace=~".+"} |= "duplicate key value violates" [15m])
+              ) > 0
+            for: 5m
+            labels:
+              severity: warning
+              team: platform
+            annotations:
+              summary: "{{ $labels.app }} in {{ $labels.namespace }} hit a duplicate-key violation on flush"
+              description: >-
+                Usually Panache persist() on an aggregate whose @Id is set by the application:
+                Hibernate schedules an INSERT and never an UPDATE, so every update fails at flush
+                (ADR-0126 D3, #1521). Use Panache.getSession().flatMap { it.merge(entity) }. Not
+                always this cause — a genuine unique-constraint clash looks the same — so read the
+                constraint name in the line.
+
+          # A job that completed successfully having done nothing. The hardest class to alert on,
+          # because every metric it touches reports a healthy run.
+          - alert: FxRevaluationSkippedAllLegs
+            expr: |
+              sum by (namespace) (
+                count_over_time({namespace="fx"} |= "skipping its revaluation leg" [1h])
+              ) > 0
+            for: 15m
+            labels:
+              severity: warning
+              team: platform
+            annotations:
+              summary: "fx-service revalued nothing — no valid rate available"
+              description: >-
+                FxRevaluationService found no usable rate and returned posted=false. The run looks
+                successful from every angle: no exception, no failed counter, a green job. The only
+                other evidence is a table that stops growing, and nothing alerts on that. Check the
+                ČNB feed first (check-external-feeds.py probes the URL's payload SHAPE, not its
+                status code — a 404 HTML page is a perfectly valid HTTP response).

@@ -2,6 +2,18 @@
 # recurring AWS cost incidents documented in the ADR: NAT drain, cross-AZ traffic,
 # Karpenter node churn, EBS attachment failures, and CI runner pool pressure.
 # All alerts route to GoAlert (which triggers the finops-agent Temporal workflow).
+# The openbank.finops.ai-costs group used to live here, holding one alert:
+# FinOpsAgentTokenBudgetExceeded, written against langfuse_agent_tokens_total,
+# langfuse_model_cost_per_token and langfuse_agent_daily_budget_usd. Langfuse has never been
+# deployed — it appears in no manifest anywhere in gitops — so none of those three series has
+# ever existed and the alert could not fire. Its own description said as much ("will be absent
+# until the bridge is deployed"), which is the trap: it read as pending rather than as inert,
+# and the D6 detector looked covered on every dashboard that counts rules.
+#
+# Replaced by prometheus-rules-ai.yaml, which alerts on openbank_llm_* — counted client-side by
+# DomainMetrics on the three code paths that make real /chat/completions calls, because
+# LiteLLM's own Prometheus exporter is an Enterprise feature. AI spend alerting now depends on
+# nothing that is not deployed.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -186,27 +198,3 @@ spec:
             summary: "CI runner pool > 80% utilisation"
             description: "ARC runner pool is at {{ $value | humanizePercentage }} capacity. Scale-up recommended to prevent aio-max-nr exhaustion and job queuing."
             runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0007-arc-runner-scale.md"
-
-    - name: openbank.finops.ai-costs
-      interval: 15m
-      rules:
-        # AI token budget overage — requires Langfuse→Prometheus bridge (ADR-0112 P1).
-        # The bridge exposes langfuse_agent_tokens_total{agent_id, model} counter.
-        # on(agent_id) ensures the budget scalar matches by agent_id to avoid cross-label
-        # vector matching failures when langfuse_agent_daily_budget_usd carries extra labels.
-        - alert: FinOpsAgentTokenBudgetExceeded
-          expr: |
-            (
-              increase(langfuse_agent_tokens_total[24h]) * on(model) group_left()
-              langfuse_model_cost_per_token
-            ) > on(agent_id) langfuse_agent_daily_budget_usd
-          for: 0m
-          labels:
-            severity: warning
-            detector: D6
-            team: platform
-            route: finops-agent
-          annotations:
-            summary: "AI agent {{ $labels.agent_id }} exceeded daily token budget"
-            description: "Agent {{ $labels.agent_id }} used {{ $value }} USD in the last 24h, exceeding its budget. Kill switch available in IAOps console. Requires ADR-0112 P1 Langfuse bridge — alert will be absent until the bridge is deployed."
-            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0008-ai-token-budget.md"
