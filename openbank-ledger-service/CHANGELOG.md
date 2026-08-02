@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.17.2...ledger-service-v1.18.0) (2026-08-02)
+
+
+### Features
+
+* **ledger:** statutory period freeze — attested, immutable trial balance (ADR-0096) ([#3006](https://github.com/JiRaska/open-bank-oss/issues/3006)) ([8567fbd](https://github.com/JiRaska/open-bank-oss/commit/8567fbd2612ff2ba1615417937fffa4f37c554b8))
+
 ## [1.17.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.17.1...ledger-service-v1.17.2) (2026-08-02)
 
 
