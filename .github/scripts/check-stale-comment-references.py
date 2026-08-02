@@ -35,9 +35,16 @@
 #               openbank-admin-ui stays green). Glob/ellipsis forms are not claims and are
 #               skipped. Gitignored build outputs are skipped — they exist at build time.
 #
-#   R2 `repo`   A `JiRaska/<slug>` GitHub repository named in a comment that is archived or
-#               does not exist. Needs the network; DEGRADES TO A NOTICE, never to a pass and
-#               never to a red, when the API cannot be reached (see resolve_repo).
+#   R2 `repo`   A `JiRaska/<slug>` GitHub repository named in a comment that GitHub reports
+#               ARCHIVED. Needs the network; degrades to a ::notice — never to a pass and
+#               never to a red — when the API cannot be reached.
+#               It deliberately does NOT claim "the repo was deleted". A job's GITHUB_TOKEN
+#               is scoped to this repository, so a PRIVATE repo answers 404 exactly as a
+#               deleted one does, and GitHub offers no way to separate them. The first
+#               version did claim it, passed locally (owner credentials see everything) and
+#               went red in CI on `JiRaska/openbank-app`, which is private and alive. See
+#               resolve_repo — and validate any network probe with the credential its GATE
+#               will use, not the one on your laptop.
 #
 #   Two candidate rules were measured against origin/main and REJECTED. Both rejections are
 #   recorded here because "we did not build it" is the part a later reader cannot recover:
@@ -270,13 +277,34 @@ def path_candidates(comment: str, top_level: set[str]) -> list[str]:
 
 REPO_SLUG = re.compile(r"\bJiRaska/([A-Za-z0-9._-]+)\b")
 
+# The only repo state this rule CLAIMS. `invisible` (404) and `unknown` (no network) are
+# both reported as notices and never as findings — see resolve_repo for why 404 cannot
+# mean "deleted" under a repo-scoped CI token.
+FLAGGED = ("archived",)
+
 
 def resolve_repo(slug: str) -> tuple[str, str]:
-    """('ok'|'archived'|'missing'|'unknown', detail).
+    """('ok'|'archived'|'invisible'|'unknown', detail).
 
     UNKNOWN is the fail-safe direction on purpose: no network must never read as a pass
     (it prints a ::notice) and must never read as a red (a proxy-less runner would fail
     every PR for a reason that has nothing to do with the PR).
+
+    404 IS NOT "DOES NOT EXIST" — that is the whole reason this returns `invisible` and
+    not `missing`, and it was learned the expensive way. The first version flagged a 404
+    as a stale reference, which is correct against a token that can see everything and
+    WRONG against the one CI actually has: a job's GITHUB_TOKEN is scoped to this
+    repository, so a PRIVATE repo in the same account answers 404 exactly as a deleted one
+    does. `JiRaska/openbank-app` is private and alive, and the gate went red on it in CI
+    while passing locally, where `gh` is authenticated as the owner. GitHub offers no way
+    to tell the two apart, so the "repo was deleted" half of this rule is UNDECIDABLE from
+    CI and is deliberately not claimed. What survives is `archived`, which needs read
+    access to observe and is therefore never ambiguous — and which is the state the
+    motivating defect was in anyway.
+
+    The transferable half: a network probe must be validated with the CREDENTIAL its gate
+    will run under, not the one on the developer's laptop. Locally this rule reported OK
+    for the very reference CI failed on.
     """
     if os.environ.get("STALE_REF_SKIP_NETWORK") == "1":
         return "unknown", "network checks disabled"
@@ -290,7 +318,8 @@ def resolve_repo(slug: str) -> tuple[str, str]:
     if r.returncode != 0:
         err = (r.stderr or "").strip()
         if "404" in err or "Not Found" in err:
-            return "missing", "GitHub returns 404"
+            return "invisible", ("404 — deleted, or private and outside this token's "
+                                 "scope. GitHub does not distinguish the two; not claimed.")
         return "unknown", err.splitlines()[0][:120] if err else "gh failed"
     try:
         archived = json.loads(r.stdout).get("archived")
@@ -351,7 +380,7 @@ def scan_text(path: str, text: str, top_level: set[str], resolvable,
         if slug_state is not None:
             for m in REPO_SLUG.finditer(comment):
                 state, detail = slug_state.get(m.group(1), ("unknown", ""))
-                if state in ("archived", "missing"):
+                if state in FLAGGED:
                     out.append(Finding("repo", path, line, f"JiRaska/{m.group(1)}", detail))
     return out
 
@@ -406,14 +435,16 @@ def run(root: Path, want_network: bool) -> list[Finding]:
     state: dict[str, tuple[str, str]] = {}
     for slug in sorted(slugs):
         state[slug] = resolve_repo(slug) if want_network else ("unknown", "network skipped")
-    unknown = [s for s, (st, _) in state.items() if st == "unknown"]
+    # `invisible` is surfaced too, not silently dropped: a reader who sees only "OK" would
+    # reasonably assume every slug was checked, and one of them was not.
+    unknown = [s for s, (st, _) in state.items() if st in ("unknown", "invisible")]
     if unknown:
         print(f"::notice::stale-comment-references: repo rule UNRESOLVED for "
               f"{', '.join('JiRaska/' + s for s in unknown)} — "
               f"{state[unknown[0]][1]}. Not a pass and not a failure.")
     for f, line, slug in hits:
         st, detail = state.get(slug, ("unknown", ""))
-        if st in ("archived", "missing"):
+        if st in FLAGGED:
             findings.append(Finding("repo", f, line, f"JiRaska/{slug}", detail))
     return findings
 
@@ -501,13 +532,19 @@ _MUST_NOT_FLAG = {
 _REPO_FLAG = {
     "archived repo": ("a.yml", "# scope the token to JiRaska/open-bank\n",
                       {"open-bank": ("archived", "repository is ARCHIVED")}),
-    "missing repo": ("a.yml", "# see JiRaska/does-not-exist\n",
-                     {"does-not-exist": ("missing", "GitHub returns 404")}),
 }
 _REPO_NO_FLAG = {
     "live repo": ("a.yml", "# see JiRaska/open-bank-oss\n", {"open-bank-oss": ("ok", "")}),
     "unresolved never fails": ("a.yml", "# see JiRaska/open-bank\n",
                                {"open-bank": ("unknown", "no network")}),
+    # THE CI REGRESSION, pinned. `JiRaska/openbank-app` is private and alive; a job's
+    # repo-scoped GITHUB_TOKEN sees it as 404, identically to a deleted repo. Flagging
+    # `invisible` fails every PR forever on a correct reference — measured on run
+    # 30768813716, where this gate went red locally-green. Whoever is tempted to "also
+    # catch deleted repos" has to delete this case first.
+    "404 is not a claim — private repo looks deleted to a CI token": (
+        "a.yml", "# the app lives in JiRaska/openbank-app\n",
+        {"openbank-app": ("invisible", "404 — deleted, or private and out of scope")}),
     "waived": ("a.yml", "# JiRaska/open-bank\n# stale-ref-ok: cited as history\n",
                {"open-bank": ("archived", "x")}),
 }
