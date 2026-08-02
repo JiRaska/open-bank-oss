@@ -103,14 +103,22 @@ class SavingsProposalIT {
     fun `an unattributed call is refused rather than defaulted`(): Unit = runBlocking {
         val accountId = openAccount()
 
-        Given {
-            contentType("application/json")
-            body("""{"amountMinor": 1000, "currency": "CZK"}""")
-        } When {
-            post("/api/v1/accounts/$accountId/savings-goal/delegation/proposals")
-        } Then {
-            statusCode(403)
-        }
+        val error: String = (
+            Given {
+                contentType("application/json")
+                body("""{"amountMinor": 1000, "currency": "CZK"}""")
+            } When {
+                post("/api/v1/accounts/$accountId/savings-goal/delegation/proposals")
+            } Then {
+                statusCode(403)
+            }
+            ).extract().path("error")
+
+        // The status alone cannot carry this test: a missing grant is ALSO 403, so asserting only
+        // the code would pass even if the header were ignored entirely. Found by a falsification
+        // probe that made the resource discard the header — this case stayed green while the
+        // happy path went red.
+        assertThat(error).contains("X-Customer-Party-Id")
     }
 
     private fun openAccount(): String {
