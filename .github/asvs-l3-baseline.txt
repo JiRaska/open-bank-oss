@@ -206,6 +206,13 @@ V9.1 openbank-infra/gitops/components/billing/billing-service.yaml:78: plaintext
 V9.1 openbank-infra/gitops/components/billing/billing-service.yaml:97: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/onboarding/onboarding-service.yaml:134: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:79: plaintext http:// env value http://clickhouse.analytics.svc:8123
+# analytics-sink -> Apicurio schema registry (issue #1916). Same declared debt as every other
+# in-cluster edge here: the Service exposes exactly one port, named `http`, on 8080
+# (gitops/components/apicurio/registry.yaml) — there is no TLS listener to point at, so https
+# is not an available alternative rather than an unchosen one. kafka-ui already carries the
+# identical URL in this baseline (see the kafka-ui.yaml:45 line above). Paid off by the
+# Layer 1 mTLS-everywhere work, with the rest of the V9.1 block, not before.
+V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:131: plaintext http:// env value http://apicurio-registry.messaging.svc:8080
 V13.1 openbank-analytics-sink: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-authz-policy-auditor: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-control-liveness-sentinel: serves REST resources but publishes no openapi.yaml

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: swift-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "062ab5f32de2d9e2"
+    openbank.tech/policy-checksum: "88147fb4a2fd7390"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -3016,6 +3016,46 @@ data:
       # first, so the probe would keep passing against a URL the service does not use — the same
       # vacuous shape as deriving both halves of a pact from one annotation.
       ci_producer: .github/scripts/check-external-feeds.py
+
+    incluster_hostnames:
+      # The in-cluster half of external_feeds (above). Same unfalsifiability, different upstream: a
+      # hostname naming another SERVICE in this cluster is stubbed by the unit test, overridden to
+      # localhost by the IT, and never sent by a consumer pact — so it is wrong only at the moment a
+      # pod dials it, and the symptom is a connect timeout in one log line.
+      #
+      # Found live (issue #1916): openbank-analytics-sink's application.yaml documented the Apicurio
+      # schema registry as "provisioned in openbank-infra as service schema-registry:8081" and
+      # defaulted ANALYTICS_SCHEMA_APICURIO_URL to http://localhost:8081. The Service is
+      # `apicurio-registry` on 8080 in namespace `messaging`. Wrong host AND wrong port, stated twice
+      # (prose and value), with nothing in the repo able to contradict either.
+      #
+      # THE RULE: every in-cluster hostname in an openbank-*/src/main/resources/application.yaml must
+      # resolve to a Service that openbank-infra/gitops/ declares.
+      hostname_must_resolve_to_declared_service: true
+      #
+      # Unlike external_feeds this needs no network — the set of names that CAN resolve is fully
+      # declared in gitops, so the claim is decidable offline and deterministically.
+      known_set_is_derived_from_gitops: true
+      # kind: Service, plus the endpoints CNPG (<name>-rw/-ro/-r) and Strimzi
+      # (<name>-kafka-bootstrap/-brokers) synthesise from their CRs. There is NO hand-kept list of
+      # service names in the checker: a gate whose scope is maintained separately from the artifacts
+      # it covers reads as PASSING when the list is short, never as unchecked.
+      asserts_against_parsed_yaml_not_file_text: true
+      # A whole-file grep cannot tell config from the prose ABOUT config, and this repo has been burnt
+      # in both directions (#2450 flagged the comment explaining the bug; #3072 matched the comment
+      # above the line it was asserting on, so deleting the line stayed green). The checker reads
+      # yaml.safe_load_all output, which drops comments by construction, and --self-test pins it with
+      # a fixture whose only bogus host is in a comment.
+      #
+      # ADVISORY while the 6 pre-existing findings are triaged. All six are bare `openbank-<svc>` rest
+      # client defaults (account, card-issuance, onboarding, settlement) that name no Service in any
+      # namespace — the deployed pods override them by env, so they are dead defaults rather than a
+      # live outage, but each is a hostname nobody could dial. They are NOT fixed in the PR that
+      # introduced this gate: four of the owning services are money-path, so a default-URL change
+      # there needs the two-approval path rather than riding along with a CI guard.
+      enforced: advisory
+      target_enforce_date: "2026-10-31"   # ADR-0144
+      ci_producer: .github/scripts/check-incluster-hostnames.py
 
     kafka_dotted_keys:
       # SmallRye Config's YAML source quotes any leaf map key containing a literal dot, so
