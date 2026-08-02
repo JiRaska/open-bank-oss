@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.4.0...delegation-service-v0.4.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **delegation:** the SCA pre-check made every customer ceremony impossible ([#3537](https://github.com/JiRaska/open-bank-oss/issues/3537)) ([6261040](https://github.com/JiRaska/open-bank-oss/commit/6261040eff75484f1bc849b298b9939980519acb))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.3.2...delegation-service-v0.4.0) (2026-08-02)
 
 
