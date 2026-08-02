@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.14.3...mcp-service-v0.14.4) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** make the per-service Dockerfiles honest, and keep them that way ([#3392](https://github.com/JiRaska/open-bank-oss/issues/3392)) ([21f2ff4](https://github.com/JiRaska/open-bank-oss/commit/21f2ff497fffb782162a5f8333ac6fff97d6c171)), closes [#3016](https://github.com/JiRaska/open-bank-oss/issues/3016)
+
 ## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.14.2...mcp-service-v0.14.3) (2026-08-02)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.87.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.87.1...admin-ui-v0.87.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** make the per-service Dockerfiles honest, and keep them that way ([#3392](https://github.com/JiRaska/open-bank-oss/issues/3392)) ([21f2ff4](https://github.com/JiRaska/open-bank-oss/commit/21f2ff497fffb782162a5f8333ac6fff97d6c171)), closes [#3016](https://github.com/JiRaska/open-bank-oss/issues/3016)
+
 ## [0.87.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.87.0...admin-ui-v0.87.1) (2026-08-02)
 
 
