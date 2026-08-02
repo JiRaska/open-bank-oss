@@ -81,7 +81,7 @@ class CampaignSummaryQueryTest {
     }
 
     @Test
-    fun `carries suppressions instead of reporting sends alone`() = runBlocking {
+    fun `carries suppressions instead of reporting sends alone`(): Unit = runBlocking {
         val sends = Sends(
             listOf(
                 CampaignOutcomeCount(c1, SendOutcome.SENT, 2),
@@ -101,7 +101,7 @@ class CampaignSummaryQueryTest {
     }
 
     @Test
-    fun `a campaign nobody is enrolled in reports zero, never null`() = runBlocking {
+    fun `a campaign nobody is enrolled in reports zero, never null`(): Unit = runBlocking {
         val q = CampaignSummaryQuery(
             Campaigns(listOf(campaign(c1, CampaignState.DRAFT))),
             Enrolments(emptyList()),
@@ -111,7 +111,7 @@ class CampaignSummaryQueryTest {
     }
 
     @Test
-    fun `asks the send log ONCE regardless of how many campaigns there are`() = runBlocking {
+    fun `asks the send log ONCE regardless of how many campaigns there are`(): Unit = runBlocking {
         val sends = Sends(listOf(CampaignOutcomeCount(c1, SendOutcome.SENT, 1)))
         val q = CampaignSummaryQuery(
             Campaigns(listOf(campaign(c1, CampaignState.ACTIVE), campaign(c2, CampaignState.PAUSED))),
@@ -130,7 +130,7 @@ class CampaignSummaryQueryTest {
     }
 
     @Test
-    fun `drops zero-count cells so the outcome list is what actually happened`() = runBlocking {
+    fun `drops zero-count cells so the outcome list is what actually happened`(): Unit = runBlocking {
         val sends = Sends(
             listOf(
                 CampaignOutcomeCount(c1, SendOutcome.SENT, 5),
