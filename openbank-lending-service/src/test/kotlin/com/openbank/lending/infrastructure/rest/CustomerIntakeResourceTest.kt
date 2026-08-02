@@ -47,9 +47,19 @@ class CustomerIntakeResourceTest {
         caller: String? = "service-account-openbank-edge",
         rate: BigDecimal? = BigDecimal("0.079"),
     ) = CustomerIntakeConfig(
+        // Every value is spelled out: the production bean has NO Kotlin constructor defaults, because
+        // they made Arc bypass @ConfigProperty entirely and silently disable the endpoint. Keeping
+        // the omissions here would just move that hazard into the test helper.
         enabled = enabled,
         callerPrincipal = Optional.ofNullable(caller),
+        jurisdiction = "CZ",
+        productType = "CONSUMER_CREDIT",
+        currency = "CZK",
         nominalAnnualRate = Optional.ofNullable(rate),
+        minAmount = BigDecimal("5000"),
+        maxAmount = BigDecimal("1000000"),
+        minTermMonths = 6,
+        maxTermMonths = 120,
     )
 
     private fun identity(name: String): SecurityIdentity =
