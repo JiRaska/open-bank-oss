@@ -27,11 +27,7 @@ import org.eclipse.microprofile.openapi.annotations.Operation
 import java.time.OffsetDateTime
 import java.util.UUID
 
-data class ProposeWithdrawalRequest(
-    val amountMinor: Long,
-    val currency: String,
-    val note: String? = null,
-)
+data class ProposeWithdrawalRequest(val amountMinor: Long, val currency: String, val note: String? = null)
 
 data class DecideProposalRequest(val approve: Boolean, val scaSessionId: UUID)
 
@@ -153,8 +149,7 @@ class SavingsProposalResource(private val proposalService: SavingsProposalServic
         @PathParam("accountId") accountId: UUID,
         @PathParam("proposalId") proposalId: UUID,
         @HeaderParam(AccountResource.CUSTOMER_PARTY_HEADER) callerPartyId: UUID?,
-    ): ProposalResponse =
-        ProposalResponse.from(proposalService.cancel(accountId, proposalId, caller(callerPartyId)))
+    ): ProposalResponse = ProposalResponse.from(proposalService.cancel(accountId, proposalId, caller(callerPartyId)))
 
     /** Fail closed: a call with no attributable caller is refused, never defaulted. */
     private fun caller(callerPartyId: UUID?): UUID = callerPartyId
