@@ -9,6 +9,7 @@ import com.openbank.domestic.application.port.out.ScreeningUnavailableException
 import com.openbank.domestic.domain.screening.ScreeningMatchStatus
 import com.openbank.domestic.domain.screening.ScreeningResult
 import com.openbank.domestic.domain.screening.ScreeningRole
+import com.openbank.libs.observability.ResilientCallMetrics
 import com.openbank.libs.observability.reportingFirstFailure
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -32,6 +33,14 @@ class SanctionsScreeningAdapter(@RestClient private val client: SanctionsService
     @Inject
     lateinit var self: SanctionsScreeningAdapter
 
+    /**
+     * Field injection, not a constructor parameter: detekt's `LongParameterList` fires AT the
+     * threshold, and the fleet convention for adding a metrics port to an existing adapter is
+     * `@Inject lateinit` (LoanStageEventConsumer, VopRateLimitFilter, McpEndpoint).
+     */
+    @Inject
+    lateinit var metrics: ResilientCallMetrics
+
     private val log = Logger.getLogger(SanctionsScreeningAdapter::class.java)
 
     override suspend fun screen(name: String, role: ScreeningRole, idempotencyKey: String): ScreeningResult = try {
@@ -50,6 +59,9 @@ class SanctionsScreeningAdapter(@RestClient private val client: SanctionsService
         // the timeout, the connection refusal is discarded with the earlier attempts (#3267).
         val response = reportingFirstFailure(
             onFailure = { ex ->
+                // Counted per attempt, so `breaker_open` and `call_failed` line up with what fault
+                // tolerance actually saw — not with the single exception that escaped (#3267).
+                metrics.recordFailure(ADAPTER, ex)
                 log.warnf(
                     ex,
                     "sanctions.screen attempt failed idempotency_key=%s role=%s — this is the ORIGINAL fault; " +
@@ -84,5 +96,8 @@ class SanctionsScreeningAdapter(@RestClient private val client: SanctionsService
     private companion object {
         // Sanctions matching is name-based; entityType is informational. See ADR-0032 scope note.
         const val ENTITY_TYPE = "INDIVIDUAL"
+
+        /** Metric tag. A compile-time constant per call site — never a URL or an id (cardinality). */
+        const val ADAPTER = "sanctions"
     }
 }
