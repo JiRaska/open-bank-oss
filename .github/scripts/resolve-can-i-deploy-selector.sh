@@ -62,7 +62,8 @@
 #   PACT_VERSION_PRESENT — the caller's probe of
 #     GET <broker>/pacticipants/<svc>/versions/<sha>, same vocabulary the classifier uses:
 #       yes     → 200, a version exists for THIS commit
-#       no      → 404, this commit's build has published nothing yet
+#       no      → 404 on the version, but the pacticipant EXISTS: this commit has published nothing yet
+#       absent  → the broker does not know the pacticipant AT ALL (no contracts either way)
 #       unknown → the probe itself failed (broker unreachable / non-2xx-non-404)
 #
 # Prints one TAB-separated line: <selector args>\t<human reason>
@@ -111,6 +112,18 @@ case "$PRESENT" in
       emit "--latest main" \
         "no pact version for this commit — falling back to latest/main (ADR-0092); the block classifier will label this PENDING_BUILD"
     fi
+    ;;
+  absent)
+    # The broker has never heard of this pacticipant: the service publishes no consumer pact
+    # and verifies no provider pact, so there is no contract for can-i-deploy to check. This is
+    # NOT the #3318 case — that one is a service WITH contracts whose sha has no version, where
+    # answering about a different commit would be a false verdict. Here there is no question to
+    # answer at all, and REFUSE would make a service undeployable for as long as it has no
+    # pacts, which is every service's first deploy (it blocked openbank-delegation-service's).
+    # `--latest main` on an unknown pacticipant is the pre-#3318 behaviour and can-i-deploy
+    # answers it the same way it answers a 404 pacticipant today.
+    emit "--latest main" \
+      "broker does not know ${SVC} — no published contracts either way, so there is nothing to verify (not the #3318 case: that is a service WITH contracts and no version for this sha)"
     ;;
   *)
     # Probe failed. Fall back rather than invent precision: an unreachable broker must not

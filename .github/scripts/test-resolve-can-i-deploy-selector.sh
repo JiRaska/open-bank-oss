@@ -116,6 +116,14 @@ check "dispatch + version present → ask about THIS commit" "--version ${SHA}" 
 #    make the gate fail closed on infrastructure rather than on contracts.
 check "dispatch + probe inconclusive → latest/main, not REFUSE" "--latest main" unknown workflow_dispatch
 
+# The distinction the REFUSE branch got wrong: a service the broker has never heard of has no
+# contracts to verify, so refusing makes its FIRST deploy impossible. Measured on
+# openbank-delegation-service, whose first dispatch was blocked by exactly this.
+check "dispatch + pacticipant absent → latest/main, NOT REFUSE" "--latest main" absent workflow_dispatch
+check "push + pacticipant absent → latest/main" "--latest main" absent push
+# And the #3318 case must still refuse — 'absent' must not have widened it.
+check "dispatch + version missing but pacticipant KNOWN → still REFUSE" "REFUSE" no workflow_dispatch
+
 if [ "$fails" -ne 0 ]; then
   echo "FAILED: ${fails} case(s)"
   exit 1
