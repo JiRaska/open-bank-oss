@@ -1,0 +1,57 @@
+# Single-owner Postgres for delegation-service, reconciled by the cluster-wide CNPG
+# operator. CNPG generates the `delegation-db-app` secret (username/password for the
+# `openbank` owner) and a `delegation-db-rw` Service — both consumed by the
+# delegation-service Deployment for the reactive datasource and Flyway migrations.
+# One instance for sandbox FinOps; prod should raise to 3 for HA.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: delegation-db
+  namespace: delegation
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_delegations
+      owner: openbank
+  # WAL archiving + base backups to S3. A grant row IS the authority by which one party
+  # touched another's money — losing this DB loses the ability to answer "who was allowed
+  # to do that, and who said so", which is the whole evidentiary point of ADR-0232.
+  # Credentials from EKS Pod Identity on the delegation-db ServiceAccount.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/delegation-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: delegation-db-daily
+  namespace: delegation
+spec:
+  schedule: "0 35 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: delegation-db

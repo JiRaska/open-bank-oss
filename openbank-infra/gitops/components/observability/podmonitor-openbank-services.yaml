@@ -64,6 +64,7 @@ spec:
       - consent
       - control-liveness-sentinel
       - customer-edge
+      - delegation
       - devops-agent
       - dispute
       - docs-truth-agent

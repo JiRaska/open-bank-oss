@@ -1,0 +1,40 @@
+# Kafka mTLS identity + ACLs for openbank-delegation-service (ADR-0137 Tier 2).
+#
+# delegation-service is a PRODUCER only: it publishes the grant lifecycle
+# (offered/accepted/declined/revoked/suspended/reinstated/renounced/expired) onto
+# openbank.delegation.events via the transactional outbox (ADR-0232 D3). The consumers
+# are the product services building local enforcement projections — account-service and
+# card-issuance — and each holds its own KafkaUser with its own Read ACL, so nothing is
+# granted here for them.
+#
+# No consumer-group ACL: this service reads no topic, so granting one would widen the
+# principal for no caller. Add one only alongside a real @Incoming channel.
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for
+# all of this service's Kafka traffic. The Strimzi User Operator mints the per-user
+# Secret of the same name in `messaging`; ESO projection into `delegation` is done by
+# kafka-mtls-externalsecrets.yaml, as for every other service user.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # Certs (KafkaUsers→Strimzi secrets→ESO projection) must land before the
+    # delegation-service Deployment rolls pods onto mTLS; lower waves sync first.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: delegation-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      # Produce the grant lifecycle → product-service enforcement projections (ADR-0232 D3).
+      - resource:
+          type: topic
+          name: openbank.delegation.events
+          patternType: literal
+        operations: [Write, Describe]

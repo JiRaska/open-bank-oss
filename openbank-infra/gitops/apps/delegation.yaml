@@ -1,0 +1,35 @@
+# Delegated-access domain: delegation-service + its single-owner CNPG Postgres + Redis
+# (idempotency) + OIDC ExternalSecret + Kafka mTLS projection + OPA bundle.
+# delegation-service owns DelegationGrant — the SCA-bound, capability-scoped authority
+# for one party to act on another's resource (ADR-0232) — and publishes the grant
+# lifecycle onto openbank.delegation.events. Enforcement stays with the product services:
+# account-service and card-issuance each build a local projection from that stream and
+# decide for themselves, so a delegation outage cannot grant access it never had.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: delegation
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/delegation
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: delegation
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
