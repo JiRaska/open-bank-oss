@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.11.2...domestic-payment-v0.11.3) (2026-08-02)
+
+
+### Bug Fixes
+
+* **libs,domestic:** surface the transport fault a resilient call masks ([#3377](https://github.com/JiRaska/open-bank-oss/issues/3377)) ([c7a78ff](https://github.com/JiRaska/open-bank-oss/commit/c7a78ff10bd99abd4af37434f0351e396d1ad85a))
+
 ## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.11.1...domestic-payment-v0.11.2) (2026-08-02)
 
 
