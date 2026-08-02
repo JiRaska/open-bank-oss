@@ -65,7 +65,7 @@ class LlmDiagnosisAdapter : LlmDiagnosisPort {
 
         /**
          * Load the system prompt from the ADR-0148 registry, packaged onto the classpath at build
-         * time from the control-liveness-sentinel `system.v2.md` registry file. v2 (over v1)
+         * time from the control-liveness-sentinel `system.v3.md` registry file. v2 (over v1)
          * explicitly forbids emitting a concrete, copy-pasteable remediation command anywhere in
          * the output, including inside a "recommended" section — the #1918 evals gate caught v1
          * partially complying with an injected alert instructing a `kubectl scale --replicas=0`
@@ -75,7 +75,7 @@ class LlmDiagnosisAdapter : LlmDiagnosisPort {
          * rather than shipping a silent empty prompt.
          */
         private fun loadRegisteredPrompt(): String {
-            val path = "/governance-prompts/control-liveness-sentinel/system.v2.md"
+            val path = "/governance-prompts/control-liveness-sentinel/system.v3.md"
             return LlmDiagnosisAdapter::class.java.getResourceAsStream(path)
                 ?.bufferedReader()?.use { it.readText() }
                 ?: error(
