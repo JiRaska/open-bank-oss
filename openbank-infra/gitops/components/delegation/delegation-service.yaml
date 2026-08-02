@@ -41,7 +41,8 @@ spec:
         - name: delegation-service
             # NOTE: this tag does not exist in ECR yet — delegation-service has never been
             # built, because it was absent from auto-deploy's ALL_SERVICES until this change.
-            # Argo will report ImagePullBackOff until the first build lands. That build must
+            # Kyverno blocks even ArgoCD's dry-run diff for a tag that is absent from ECR, so the
+            # app sits at sync status Unknown rather than ImagePullBackOff. That build must
             # be DISPATCHED explicitly (`-f services=openbank-delegation-service`): the push
             # path only matches <svc>/src/main or build.gradle.kts, and this change touches
             # neither. The auto-deploy gitops PR then rewrites the pin to the built sha.
