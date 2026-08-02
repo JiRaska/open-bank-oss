@@ -864,6 +864,64 @@ test_deny_ai_agent_charter_denied_tool_via_bridge if {
 		}
 }
 
+# ---------------------------------------------------------------------------------------
+# ADR-0195 step 5 (#3292): the bridge MUST forward `attributes` into agents.allow. This is
+# behaviourally observable through agents.rego's skill_ok else-branch, which reads
+# input.attributes.skill: a chartered run.skill arriving via the REST bridge is granted ONLY
+# when the attributes map survives the bridge rewrite. The MCP endpoint's consentId rides the
+# same channel ({tool, consentId}), so this test is the forwarding proof for consent-state
+# gating too — without it a future consent policy would evaluate against an empty map.
+# ---------------------------------------------------------------------------------------
+skill_charter_for_attributes_bridge := {
+	"agents": [
+		{
+			"id": "ledger-domain-engineer",
+			"plane": "development",
+			"skills": ["ship-check"],
+			"tools": {"allow": ["run.skill"], "deny": []},
+		},
+	],
+	"tool_tiers": {"deny": []},
+}
+
+test_allow_ai_agent_run_skill_via_bridge_when_attributes_forwarded if {
+	decision := rest.allow with input as {
+		"principal": {"id": "agent:ledger-domain-engineer", "type": "AI_AGENT", "roles": []},
+		"action": "run.skill",
+		"resource": null,
+		"attributes": {"skill": "ship-check"},
+	}
+		with data.openbank.bundle as bundle
+		with data.agents as skill_charter_for_attributes_bridge
+
+	decision.allow == true
+	decision.reason == "agent-charter-allows"
+}
+
+# Same call with an unchartered skill stays denied — the forwarded attributes are really the
+# input skill_ok evaluates (not merely present).
+test_deny_ai_agent_run_skill_via_bridge_with_unchartered_skill if {
+	not rest.allow with input as {
+		"principal": {"id": "agent:ledger-domain-engineer", "type": "AI_AGENT", "roles": []},
+		"action": "run.skill",
+		"resource": null,
+		"attributes": {"skill": "deploy-prod"},
+	}
+		with data.agents as skill_charter_for_attributes_bridge
+}
+
+# A caller that sends NO attributes key must not make the bridged query undefined — the
+# bridge defaults attributes to {} (same object.get pattern as resource), and skill_ok's
+# else-branch then denies run.skill cleanly instead of disappearing the whole decision.
+test_deny_ai_agent_run_skill_via_bridge_without_attributes_key if {
+	not rest.allow with input as {
+		"principal": {"id": "agent:ledger-domain-engineer", "type": "AI_AGENT", "roles": []},
+		"action": "run.skill",
+		"resource": null,
+	}
+		with data.agents as skill_charter_for_attributes_bridge
+}
+
 # A real operator/admin staff member (ROLE_OPERATOR, but NOT the edge's identity) must
 # NOT gain this rule's reach — critically, must NOT be able to device.enroll (SCA
 # WebAuthn registration is an account-takeover primitive if grantable to arbitrary staff).
