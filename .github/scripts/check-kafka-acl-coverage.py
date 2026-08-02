@@ -60,37 +60,22 @@ GITOPS = REPO / "openbank-infra" / "gitops"
 # principal a new topic permission is a live-broker change whose blast radius wants its own
 # review, and several of them may instead mean the service publishes over a different principal.
 # Tracked in #2598's follow-up.
-KNOWN_GAPS: dict[str, str] = {
-    "openbank-audit-service#openbank.cards.events#Read":
-        "audit subscribes to six payment/card/lending topics its KafkaUser predates; needs a "
-        "broker-side grant reviewed as one change (#2598 follow-up).",
-    "openbank-audit-service#openbank.domestic.payment.events#Read":
-        "same audit grant batch (#2598 follow-up).",
-    "openbank-audit-service#openbank.lending.events#Read":
-        "same audit grant batch (#2598 follow-up).",
-    "openbank-audit-service#openbank.payments.swift.event#Read":
-        "same audit grant batch (#2598 follow-up).",
-    "openbank-audit-service#openbank.sepa.instant.events#Read":
-        "same audit grant batch (#2598 follow-up).",
-    "openbank-audit-service#openbank.sepa.payment.events#Read":
-        "same audit grant batch (#2598 follow-up).",
-    "openbank-card-issuance-service#openbank.cards.events#Write":
-        "producer grant missing; card-issuance's KafkaUser carries only the party.events Read it "
-        "was created for (#2598 follow-up).",
-    "openbank-domestic-payment#openbank.domestic.payment.events#Write":
-        "producer grant missing; the KafkaUser carries only payment.scheme-accepted (#2598 "
-        "follow-up).",
-    "openbank-sepa-payment#openbank.sepa.payment.events#Write":
-        "producer grant missing; the KafkaUser carries only payment.scheme-accepted (#2598 "
-        "follow-up).",
-    "openbank-transaction-service#openbank.transactions.transaction.initiated#Write":
-        "producer grant missing; the KafkaUser carries only payment.scheme-accepted (#2598 "
-        "follow-up).",
-    "openbank-interest-service#openbank.interest.accrual.event#Read":
-        "self-consumed topic with no KafkaUser grant (#2598 follow-up).",
-    "openbank-sdd-service#openbank.sdd.event#Read":
-        "self-consumed topic with no KafkaUser grant (#2598 follow-up).",
-}
+KNOWN_GAPS: dict[str, str] = {}
+# EMPTY, and that is the point. All twelve original entries were granted in #3271's follow-up.
+#
+# They were baselined rather than fixed because a grant is a live-broker change and it was not
+# settled from the repo alone whether a service publishes under a different principal. Both halves
+# have since been answered with evidence: every workload mounts `<service>-kafka-keystore`, whose
+# ExternalSecret extracts the KafkaUser of the same name, so the name-based match this check makes
+# is exact; and `components/kafka/kafka.yaml:118` sets
+# `allow.everyone.if.no.acl.found: "false"`, so a topic with no ACL is denied, not open.
+#
+# What that baseline cost: domestic-payment's own event topic had no Write grant and 13 outbox
+# rows went DEAD before anyone looked (#3271). "Declared debt" and "measured incident" were the
+# same fact the whole time — the entry just made it easy not to check.
+#
+# An entry added here needs a reason, and the check fails on a stale declaration in BOTH
+# directions, so a new gap cannot quietly become permanent.
 
 
 def _walk(node: object, path: list[str], out: list[tuple[list[str], object]]) -> None:
