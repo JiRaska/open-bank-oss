@@ -41,13 +41,12 @@ ENUM_RE = re.compile(r"enum\s+class\s+(\w*Trigger)\s*\{([^}]*)\}", re.S)
 # Services whose SCHEDULED value is declared but not yet emitted. This is a RATCHET, not an
 # amnesty: a new occurrence fails, and an entry that becomes covered ALSO fails, so a debt cannot
 # quietly become permanent and a fix cannot quietly leave a stale declaration behind.
-KNOWN_UNEMITTED = {
-    "openbank-governance-auditor": "ADR-0164 — scheduler not built; tracked with the sweep that fixed #3339/#3370",
-    "openbank-release-steward": "ADR-0165 — same",
-    "openbank-docs-truth-agent": "ADR-0166 — same",
-    "openbank-authz-policy-auditor": "ADR-0167 — same",
-    "openbank-flaky-test-hunter": "ADR-0168 — same",
-}
+# EMPTY, and that is the point: the five services listed here when this gate landed (#3484) are
+# the five #3500 fixed, so every SCHEDULED value in the tree is now actually emitted. The other
+# direction of the ratchet is what forced this edit — leaving a fixed service listed is itself a
+# failure, so the list cannot rot into an excuse nobody rereads (same shape as KNOWN_UNCOVERED in
+# check-pact-provider-replay.py, also empty). A new entry needs a reason and a way out.
+KNOWN_UNEMITTED: dict[str, str] = {}
 
 
 def strip_comments(text: str) -> str:
