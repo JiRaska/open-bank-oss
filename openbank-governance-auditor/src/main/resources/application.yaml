@@ -77,6 +77,20 @@ quarkus:
       enabled: false
     management:
       enabled: false
+    http:
+      # Ephemeral: this module now has more than one @QuarkusTest profile, so there is more than
+      # one application boot per run, and on the fixed default the second dies with
+      # QuarkusBindException whenever anything else on the machine holds the port.
+      test-port: 0
+
+  openbank:
+    governance-auditor:
+      # A cron that never fires (the 31st of February), NOT `quarkus.scheduler.enabled: false`.
+      # Disabling the scheduler makes the class structurally invisible to every test — which is how
+      # five schedulers in this fleet reached production having never run (#2148, #2187). With a
+      # real-but-unreachable expression the wiring is still built and validated at boot, and a test
+      # profile can override this key with a fast cron to drive the REAL schedule.
+      audit-cron: "0 0 5 31 2 ?"
 
 openbank:
   temporal:
@@ -85,6 +99,16 @@ openbank:
     namespace: ${TEMPORAL_NAMESPACE:openbank}
     task-queue: governance-auditor
   governance-auditor:
+    # Periodic sweep (ADR-0164) — daily at 04:30 UTC. The control-plane AI agents are offset from one
+    # another because they share ONE LiteLLM gateway and one Prometheus, and each carries its own
+    # daily token budget: finops 03:00, control-liveness-sentinel 03:15, devops 03:30,
+    # governance-auditor 04:30, release-steward 05:00, then the three weekly sweeps on Sunday at
+    # 05:30 / 06:00 / 06:30 — placed AFTER the last daily agent so that on Sunday, the one day all
+    # eight can coincide, no sweep starts while another is still in its opening minutes.
+    # Collisions with unrelated per-service batch jobs are explicitly not a consideration:
+    # different pods, different databases.
+    # Quarkus cron is SIX fields (second minute hour day month weekday).
+    audit-cron: ${GOVERNANCE_AUDITOR_AUDIT_CRON:0 30 4 * * ?}
     github-api-url: ${GITHUB_API_URL:https://api.github.com}
     github-repo: ${GITHUB_REPO:JiRaska/open-bank-oss}
     llm-gateway-url: ${LLM_GATEWAY_URL:http://litellm.ai-platform:4000}
