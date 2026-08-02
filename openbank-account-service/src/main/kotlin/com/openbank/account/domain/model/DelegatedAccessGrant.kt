@@ -19,6 +19,17 @@ import java.util.UUID
 data class DelegatedAccessGrant(
     val id: UUID,
     val accountId: UUID,
+    /**
+     * The party that issued the grant. Carried so the guard can ask the question this projection
+     * could not: does the grantor actually OWN the account?
+     *
+     * Without it a grant row is authority in itself — the guard matched on
+     * (accountId, granteePartyId) alone, so a grant naming a stranger's account produced real,
+     * enforced access to that account. delegation-service now verifies ownership at offer time
+     * too; this is the enforcing side, and it is the one that re-reads the truth on every call
+     * rather than trusting a check that passed once.
+     */
+    val grantorPartyId: UUID,
     val granteePartyId: UUID,
     val capabilities: Set<String>,
     val perTransactionLimitAmount: java.math.BigDecimal? = null,
@@ -27,6 +38,9 @@ data class DelegatedAccessGrant(
     val validTo: OffsetDateTime? = null,
     val active: Boolean = true,
 ) {
+    /** The grant only speaks for the account if the party who issued it owns the account. */
+    fun issuedBy(ownerPartyId: UUID): Boolean = grantorPartyId == ownerPartyId
+
     fun isActiveOn(now: OffsetDateTime): Boolean = active &&
         !now.isBefore(validFrom) &&
         (validTo == null || now.isBefore(validTo))

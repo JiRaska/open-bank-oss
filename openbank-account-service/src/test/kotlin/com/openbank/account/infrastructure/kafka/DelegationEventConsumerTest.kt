@@ -26,6 +26,7 @@ class DelegationEventConsumerTest {
 
     private val grantId: UUID = UUID.randomUUID()
     private val accountId: UUID = UUID.randomUUID()
+    private val grantor: UUID = UUID.randomUUID()
     private val grantee: UUID = UUID.randomUUID()
 
     @BeforeEach
@@ -38,7 +39,7 @@ class DelegationEventConsumerTest {
             mapOf(
                 "eventType" to type,
                 "aggregateId" to grantId,
-                "grantorPartyId" to UUID.randomUUID(),
+                "grantorPartyId" to grantor,
                 "granteePartyId" to grantee,
                 "resourceType" to resourceType,
                 "resourceId" to resourceId,
@@ -58,12 +59,35 @@ class DelegationEventConsumerTest {
                 match<DelegatedAccessGrant> {
                     it.id == grantId &&
                         it.accountId == accountId &&
+                        // Without the grantor the guard cannot ask whether the issuer owns the
+                        // account, and a projection row becomes authority in itself.
+                        it.grantorPartyId == grantor &&
                         it.active &&
                         "ACCOUNT_READ_BALANCES" in it.capabilities &&
                         it.perTransactionLimitAmount?.compareTo("5000.00".toBigDecimal()) == 0
                 },
             )
         }
+    }
+
+    @Test
+    fun `an event with no readable grantor is a poison pill, not an optimistic row`(): Unit = runBlocking {
+        val noGrantor = objectMapper.writeValueAsString(
+            mapOf(
+                "eventType" to "DelegationActivated",
+                "aggregateId" to grantId,
+                "granteePartyId" to grantee,
+                "resourceType" to "ACCOUNT",
+                "resourceId" to accountId,
+                "capabilities" to listOf("ACCOUNT_INITIATE_PAYMENT"),
+                "occurredAt" to "2026-08-01T12:00:00Z",
+            ),
+        )
+
+        consumer.consume(noGrantor)
+
+        // Projecting it would create a row the ownership check can never evaluate.
+        coVerify(exactly = 0) { repository.upsertActive(any()) }
     }
 
     @Test

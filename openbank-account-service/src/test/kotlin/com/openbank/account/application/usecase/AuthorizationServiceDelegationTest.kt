@@ -53,9 +53,11 @@ class AuthorizationServiceDelegationTest {
         capabilities: Set<String>,
         validTo: OffsetDateTime? = now.plusDays(30),
         perTxAmount: String? = null,
+        grantorPartyId: UUID = owner,
     ) = DelegatedAccessGrant(
         id = UUID.randomUUID(),
         accountId = accountId,
+        grantorPartyId = grantorPartyId,
         granteePartyId = delegate,
         capabilities = capabilities,
         perTransactionLimitAmount = perTxAmount?.toBigDecimal(),
@@ -140,6 +142,69 @@ class AuthorizationServiceDelegationTest {
             ),
         ).isFalse()
     }
+
+    // --- the grant must have been issued by the account's OWNER -------------------------------
+    // Before this, the guard matched on (accountId, granteePartyId) alone, so a projection row is
+    // authority in itself: a grant naming somebody else's account was enforced against that
+    // account. Two colluding parties could therefore mint payment rights over a stranger's money
+    // with nothing but their own valid SCA.
+
+    @Test
+    fun `a grant issued by someone who does not own the account is denied`(): Unit = runBlocking {
+        val stranger = UUID.randomUUID()
+        coEvery { projectionRepository.findActiveByAccountAndParty(accountId, delegate) } returns
+            listOf(grant(setOf("ACCOUNT_READ_BALANCES"), grantorPartyId = stranger))
+
+        assertThat(service.isAuthorized(accountId, delegate, AuthorizationRole.READ_ONLY)).isFalse()
+    }
+
+    @Test
+    fun `a payment grant issued by a non-owner is denied on the amount path too`(): Unit = runBlocking {
+        val stranger = UUID.randomUUID()
+        coEvery { projectionRepository.findActiveByAccountAndParty(accountId, delegate) } returns
+            listOf(grant(setOf("ACCOUNT_INITIATE_PAYMENT"), perTxAmount = "5000", grantorPartyId = stranger))
+
+        // The amount path is a separate branch of the guard and was separately vulnerable — this
+        // is the one that reaches the money.
+        assertThat(
+            service.isAuthorizedForAmount(
+                accountId,
+                delegate,
+                AuthorizationRole.PAYMENT_ONLY,
+                Money.of("100".toBigDecimal(), "CZK"),
+            ),
+        ).isFalse()
+    }
+
+    @Test
+    fun `a grant from the owner still passes, on both paths`(): Unit = runBlocking {
+        coEvery { projectionRepository.findActiveByAccountAndParty(accountId, delegate) } returns
+            listOf(grant(setOf("ACCOUNT_INITIATE_PAYMENT"), perTxAmount = "5000"))
+
+        assertThat(service.isAuthorized(accountId, delegate, AuthorizationRole.PAYMENT_ONLY)).isTrue()
+        assertThat(
+            service.isAuthorizedForAmount(
+                accountId,
+                delegate,
+                AuthorizationRole.PAYMENT_ONLY,
+                Money.of("100".toBigDecimal(), "CZK"),
+            ),
+        ).isTrue()
+    }
+
+    @Test
+    fun `a valid grant next to a forged one still passes, and the forged one is not what carried it`(): Unit =
+        runBlocking {
+            val stranger = UUID.randomUUID()
+            coEvery { projectionRepository.findActiveByAccountAndParty(accountId, delegate) } returns listOf(
+                grant(setOf("ACCOUNT_INITIATE_PAYMENT"), grantorPartyId = stranger),
+                grant(setOf("ACCOUNT_READ_BALANCES")),
+            )
+
+            assertThat(service.isAuthorized(accountId, delegate, AuthorizationRole.READ_ONLY)).isTrue()
+            // The forged row is the only one carrying a payment capability.
+            assertThat(service.isAuthorized(accountId, delegate, AuthorizationRole.PAYMENT_ONLY)).isFalse()
+        }
 
     @Test
     fun `no grant at all denies`(): Unit = runBlocking {

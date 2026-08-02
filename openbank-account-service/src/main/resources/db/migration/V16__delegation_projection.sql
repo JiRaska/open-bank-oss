@@ -5,6 +5,10 @@
 CREATE TABLE account_delegation_projection (
     id                      UUID PRIMARY KEY,
     account_id              UUID NOT NULL,
+    -- The grantor is not decoration: the guard compares it to the account's owner, because a
+    -- projection row keyed only on (account_id, grantee_party_id) is authority in itself and a
+    -- grant naming a stranger's account would therefore be enforced against that account.
+    grantor_party_id        UUID NOT NULL,
     grantee_party_id        UUID NOT NULL,
     per_tx_limit_amount     NUMERIC(20, 6),
     per_tx_limit_currency   CHAR(3),

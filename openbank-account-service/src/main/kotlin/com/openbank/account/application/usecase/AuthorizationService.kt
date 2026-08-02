@@ -69,7 +69,7 @@ class AuthorizationService(
         if (account.partyId == partyId) return true
         val active = authorizationRepository.findActiveByAccountAndParty(accountId, partyId)
         if (active.any { it.role == role || it.role == AuthorizationRole.FULL_ACCESS }) return true
-        return hasDelegatedAccess(accountId, partyId, role)
+        return hasDelegatedAccess(accountId, partyId, role, account.partyId)
     }
 
     override suspend fun isAuthorizedForAmount(
@@ -82,10 +82,10 @@ class AuthorizationService(
         if (account.partyId == partyId) return true
         val active = authorizationRepository.findActiveByAccountAndParty(accountId, partyId)
         if (active.any { it.role == role || it.role == AuthorizationRole.FULL_ACCESS }) return true
-        if (amount == null) return hasDelegatedAccess(accountId, partyId, role)
+        if (amount == null) return hasDelegatedAccess(accountId, partyId, role, account.partyId)
         val now = OffsetDateTime.now(clock)
         return delegationProjectionRepository.findActiveByAccountAndParty(accountId, partyId)
-            .filter { it.isActiveOn(now) && it.satisfies(role) }
+            .filter { it.issuedBy(account.partyId) && it.isActiveOn(now) && it.satisfies(role) }
             .any { it.withinPerTransactionLimit(amount.amount, amount.currency.code) }
     }
 
@@ -94,10 +94,24 @@ class AuthorizationService(
      * grant from the local event-fed projection. Runs after ownership and the legacy
      * AccountAuthorization table so the 99% path (owner) and the existing grants keep
      * their exact behavior; delegation only ever ADDS access, never removes it.
+     *
+     * [ownerPartyId] is the account's own owner, and a grant only counts when the party who
+     * ISSUED it is that owner. Without this the disjunct made a grant row authority in itself:
+     * the projection matched on (accountId, granteePartyId) alone, so a grant naming somebody
+     * else's account was enforced against that account — two colluding parties could mint
+     * payment rights over a stranger's money using nothing but their own valid SCA. The
+     * offer-time ownership gate in delegation-service closes the same hole from the other end;
+     * this check is the one that re-evaluates on every request instead of trusting a verdict
+     * reached once, and it is the last line before the money path.
      */
-    private suspend fun hasDelegatedAccess(accountId: UUID, partyId: UUID, role: AuthorizationRole): Boolean {
+    private suspend fun hasDelegatedAccess(
+        accountId: UUID,
+        partyId: UUID,
+        role: AuthorizationRole,
+        ownerPartyId: UUID,
+    ): Boolean {
         val now = OffsetDateTime.now(clock)
         return delegationProjectionRepository.findActiveByAccountAndParty(accountId, partyId)
-            .any { it.isActiveOn(now) && it.satisfies(role) }
+            .any { it.issuedBy(ownerPartyId) && it.isActiveOn(now) && it.satisfies(role) }
     }
 }
