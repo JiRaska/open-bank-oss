@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.11.0...domestic-payment-v0.11.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **domestic:** resolve the debtor's party for an AML case instead of sending the account id ([#3404](https://github.com/JiRaska/open-bank-oss/issues/3404)) ([d949ce9](https://github.com/JiRaska/open-bank-oss/commit/d949ce9ef5ba09e0961159f403fd672fc0e5ca81))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.10.6...domestic-payment-v0.11.0) (2026-08-02)
 
 
