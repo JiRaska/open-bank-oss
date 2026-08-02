@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.87.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.87.2...admin-ui-v0.87.3) (2026-08-02)
+
+
+### Bug Fixes
+
+* **infra:** restore the three non-Quarkus Dockerfiles and make their exemption falsifiable ([#3439](https://github.com/JiRaska/open-bank-oss/issues/3439)) ([d75c714](https://github.com/JiRaska/open-bank-oss/commit/d75c7146271b7f1fd3e7cf0a7fe223c3c0936be5))
+
 ## [0.87.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.87.1...admin-ui-v0.87.2) (2026-08-02)
 
 
