@@ -5,6 +5,7 @@
 package com.openbank.lending.infrastructure.rest
 
 import com.openbank.lending.application.port.`in`.ApplyForLoanUseCase
+import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.DecisionRequest
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
@@ -189,6 +190,7 @@ class CustomerIntakeResourceTest {
         override fun advanceIfInState(id: LoanApplicationId, expectedState: String, actor: String) =
             unsupported<LoanApplication>()
         override fun listRecentApplications(status: String?, limit: Int) = unsupported<List<LoanApplication>>()
+        override fun summariseApplications() = unsupported<List<ApplicationStateSummary>>()
 
         private fun <T> unsupported(): Uni<T> = throw UnsupportedOperationException("not used by intake")
     }
