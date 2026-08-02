@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.10](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.7.9...aml-service-v0.7.10) (2026-08-02)
+
+
+### Bug Fixes
+
+* **aml:** resolve the party an AML case is really about, instead of storing the account id ([#3529](https://github.com/JiRaska/open-bank-oss/issues/3529)) ([f0843dd](https://github.com/JiRaska/open-bank-oss/commit/f0843dd42cf208499259955e51fc31c05b513612)), closes [#3413](https://github.com/JiRaska/open-bank-oss/issues/3413)
+
 ## [0.7.9](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.7.8...aml-service-v0.7.9) (2026-08-02)
 
 
