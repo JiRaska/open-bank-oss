@@ -776,6 +776,27 @@ gates:
   # evidence citation is mechanical, and advisory over a published claim means "the page
   # says something the code does not support" is mergeable. Green on the current tree, and
   # `--self-test` (added with this registration) proves the red is reachable.
+  # The meta-gate: every check-* script must be run by SOMETHING. #3240 found two that were not —
+  # check-compliance-matrix.py, written for #2370 with a docstring naming the exact regulatory
+  # drift it prevents and referenced from nowhere, and check-operator-write-naming.py, which
+  # rules.yaml names as its own ci_producer while nothing invoked it. Both had never executed.
+  #
+  # That is worse than an unfalsified gate: a check that has never run cannot go red, never
+  # appears in a run list, and its presence in the tree reads as coverage to anyone grepping for
+  # it. Registering those two was the fix; this is what stops the third.
+  #
+  # ENFORCED and clean at registration. It flags ITSELF until registered — the same
+  # self-reference check-advisory-gate-registration.py hit in #2450 — which is the cheapest
+  # possible demonstration that its red is reachable.
+  - id: gate-script-registration
+    name: "every check-* script is actually run (#3240, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-gate-script-registration.py --self-test
+    run: |
+      python3 .github/scripts/check-gate-script-registration.py --enforce
+
   - id: compliance-matrix
     name: "compliance-page evidence citations (#2370, enforced)"
     group: registry
