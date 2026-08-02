@@ -323,6 +323,22 @@ fire from *outside* it, so they stay here:
   Note the file list `gh pr view --json files` shows is computed against the MERGE-BASE, so after
   a competing PR squash-merges it still lists the overlap as a diff even when the content already
   agrees. Read the content, not the diff.
+- **A merge git calls CLEAN can still DELETE content — it reports no conflict when two sides add
+  neighbouring entries to the same list, and keeps only one.** Not a conflict resolved badly:
+  nothing to resolve, nothing printed, exit 0. Twice on 2026-08-02, both while merging `main` into
+  a branch. `.release-please-manifest.json` went **56 entries -> 55** because #3007 added
+  `openbank-tax-reporting-service` next to the branch's `openbank-delegation-service` and git kept
+  one; that would have put a service with a `version.txt` on `main` that release-please does not
+  know, breaking its first release. Caught only by the `release-registration consistency` gate
+  (rule 3, ADR-0029: `version.txt`, `release-please-config.json` and the manifest must stay in
+  lockstep) — no test and no review would have seen a line quietly not being there. The same day
+  #3241's two files differed by 77 and 81 lines yet were **identical once comments were stripped**
+  (40/40 and 44/44 code lines), the harmless end of the same phenomenon. **After any merge, diff the
+  RESULT against what you merged into and check the scope is what you expected** —
+  `git diff --name-only origin/main` and, for a structured file, count the entries before and
+  after. One command; it is knowing to run it that costs. Most exposed: JSON/YAML maps every
+  service registers itself in — the release manifest, `gates.yaml`, `rules.yaml` lists,
+  `event-contract-baseline.txt`.
 - **A finding from a CI run goes stale in MINUTES while a parallel agent is active — re-check
   before acting on it.** Three times in one session a ktlint/test failure was already fixed by the
   time the fix was written: the branch had moved (`db25c9ac8` -> `629aff176`,
