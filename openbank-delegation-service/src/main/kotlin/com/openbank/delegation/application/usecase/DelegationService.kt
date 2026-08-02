@@ -27,6 +27,7 @@ import com.openbank.delegation.domain.event.DelegationReinstated
 import com.openbank.delegation.domain.event.DelegationRenounced
 import com.openbank.delegation.domain.event.DelegationRevoked
 import com.openbank.delegation.domain.event.DelegationSuspended
+import com.openbank.delegation.domain.event.EventMoney
 import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
 import jakarta.enterprise.context.ApplicationScoped
@@ -120,6 +121,9 @@ class DelegationService(
                 resourceType = grant.resourceType,
                 resourceId = grant.resourceId,
                 capabilities = grant.capabilities,
+                validFrom = grant.validFrom,
+                validTo = grant.validTo,
+                perTransactionLimit = EventMoney.from(grant.perTransactionLimit),
                 occurredAt = clock.instant(),
             ),
         )
@@ -149,6 +153,9 @@ class DelegationService(
                 resourceType = accepted.resourceType,
                 resourceId = accepted.resourceId,
                 capabilities = accepted.capabilities,
+                validFrom = accepted.validFrom,
+                validTo = accepted.validTo,
+                perTransactionLimit = EventMoney.from(accepted.perTransactionLimit),
                 occurredAt = clock.instant(),
             ),
         )
@@ -257,6 +264,9 @@ class DelegationService(
                 resourceType = reinstated.resourceType,
                 resourceId = reinstated.resourceId,
                 capabilities = reinstated.capabilities,
+                validFrom = reinstated.validFrom,
+                validTo = reinstated.validTo,
+                perTransactionLimit = EventMoney.from(reinstated.perTransactionLimit),
                 occurredAt = clock.instant(),
             ),
         )

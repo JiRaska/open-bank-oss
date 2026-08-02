@@ -14,19 +14,26 @@ import com.openbank.delegation.application.port.out.PartyEligibilityClient
 import com.openbank.delegation.application.port.out.ResourceOwnershipClient
 import com.openbank.delegation.application.port.out.ScaChallengeClient
 import com.openbank.delegation.application.port.out.ScaChallengeSnapshot
+import com.openbank.delegation.domain.event.DelegationOffered
+import com.openbank.delegation.domain.event.EventMoney
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
+import com.openbank.libs.domain.event.DomainEvent
+import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.domain.money.Money
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -83,6 +90,45 @@ class DelegationServiceTest {
         validTo = now.plusDays(30),
         grantScaSessionId = UUID.randomUUID(),
     )
+
+    /**
+     * #3410: the aggregate carried `validFrom`, `validTo` and `perTransactionLimit` and no event
+     * did, so both enforcement projections read fields the producer never sent and defaulted them
+     * — `validFrom ?: now` made a future-dated grant enforceable at once, `validTo = null` meant it
+     * never expired locally, and no consumer could apply a per-transaction ceiling at all.
+     *
+     * Asserting on the EMITTED EVENT, not on the returned aggregate: the aggregate always had these
+     * values, which is exactly why the gap was invisible from the producer's side.
+     */
+    @Test
+    fun `the offered event carries the window and the ceiling, not just the aggregate`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+        val event = slot<DomainEvent>()
+        coEvery { repository.save(any<DelegationGrant>(), capture(event)) } answers { firstArg() }
+
+        service.offer(offerCommand())
+
+        val offered = event.captured as DelegationOffered
+        assertThat(offered.validFrom).isEqualTo(now)
+        assertThat(offered.validTo).isEqualTo(now.plusDays(30))
+    }
+
+    /**
+     * The currency must be a FLAT string. `Money` holds a `CurrencyCode`, a data class with no
+     * `@JsonValue`, so serializing it directly renders `{"code":"CZK"}` while both consumers read
+     * `perTransactionLimit.currency` as text — the amount would arrive and the currency would
+     * silently be null.
+     */
+    @Test
+    fun `the event money carries a flat ISO currency, never the CurrencyCode object`() {
+        val wire = EventMoney.from(Money(BigDecimal("5000.00"), CurrencyCode("CZK")))
+
+        assertThat(wire).isNotNull
+        assertThat(wire!!.currency).isEqualTo("CZK")
+        assertThat(wire.amount).isEqualByComparingTo(BigDecimal("5000.00"))
+        assertThat(EventMoney.from(null)).isNull()
+    }
 
     @Test
     fun `offer persists OFFERED grant and emits DelegationOffered`(): Unit = runBlocking {

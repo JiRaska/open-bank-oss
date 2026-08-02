@@ -208,6 +208,45 @@ components:
           items:
             $ref: '#/components/schemas/capability'
 
+    # The enforceable window and the ceiling. Present on the events that make a grant enforceable
+    # — Offered, Activated, Reinstated — and on no other, because nothing else changes them.
+    #
+    # These were ADDED in #3410. Before that the aggregate carried all three and no event did, so
+    # both projections read fields the producer never sent and defaulted them: `validFrom ?: now`
+    # made a future-dated grant enforceable immediately, `validTo = null` meant it never expired
+    # locally, and no consumer could apply a per-transaction ceiling at all.
+    enforcement:
+      type: object
+      required: [validFrom]
+      properties:
+        validFrom:
+          type: string
+          format: date-time
+          description: >-
+            When the grant becomes enforceable. Consumers MUST NOT treat an absent value as "now" —
+            that is the defect this field closes.
+        validTo:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            End of the window, or null for open-ended. A consumer still receives DelegationExpired
+            from the producer's sweep; this field lets it stop authorising WITHOUT waiting for it.
+        perTransactionLimit:
+          type: object
+          nullable: true
+          required: [amount, currency]
+          properties:
+            amount: { type: string, format: decimal }
+            currency:
+              type: string
+              minLength: 3
+              maxLength: 3
+              description: >-
+                ISO 4217, flat — NOT the domain `CurrencyCode`, which Jackson renders as
+                `{"code":"CZK"}` while every consumer reads this as text. Matches the fleet's
+                event convention (AccountEvents, LedgerEvents).
+
   messages:
     DelegationOffered:
       name: DelegationOffered
@@ -225,6 +264,7 @@ components:
           - $ref: '#/components/schemas/parties'
           - $ref: '#/components/schemas/resource'
           - $ref: '#/components/schemas/capabilities'
+          - $ref: '#/components/schemas/enforcement'
 
     DelegationActivated:
       name: DelegationActivated
@@ -241,6 +281,7 @@ components:
           - $ref: '#/components/schemas/parties'
           - $ref: '#/components/schemas/resource'
           - $ref: '#/components/schemas/capabilities'
+          - $ref: '#/components/schemas/enforcement'
 
     DelegationDeclined:
       name: DelegationDeclined
@@ -310,6 +351,7 @@ components:
           - $ref: '#/components/schemas/parties'
           - $ref: '#/components/schemas/resource'
           - $ref: '#/components/schemas/capabilities'
+          - $ref: '#/components/schemas/enforcement'
 
     DelegationRenounced:
       name: DelegationRenounced

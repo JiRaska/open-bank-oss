@@ -7,7 +7,10 @@ package com.openbank.delegation.domain.event
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.libs.domain.event.DomainEvent
+import com.openbank.libs.domain.money.Money
+import java.math.BigDecimal
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.UUID
 
 /**
@@ -16,6 +19,21 @@ import java.util.UUID
  * from the event stream alone, never by calling back — the same reason ConsentRevoked
  * mirrors ConsentGranted's scopes.
  */
+/**
+ * The wire shape of a money amount on a delegation event.
+ *
+ * NOT [com.openbank.libs.domain.money.Money]: `CurrencyCode` is a data class with no `@JsonValue`,
+ * so Jackson renders it as `{"code":"CZK"}` while both consumers read
+ * `perTransactionLimit.currency` as TEXT — the amount would arrive and the currency would silently
+ * be null. A flat `currency: String` matches the consumers and the fleet's own event convention
+ * (AccountEvents, LedgerEvents both carry `currency: String`).
+ */
+data class EventMoney(val amount: BigDecimal, val currency: String) {
+    companion object {
+        fun from(money: Money?): EventMoney? = money?.let { EventMoney(it.amount, it.currency.code) }
+    }
+}
+
 data class DelegationOffered(
     override val aggregateId: UUID,
     val grantorPartyId: UUID,
@@ -23,6 +41,9 @@ data class DelegationOffered(
     val resourceType: DelegationResourceType,
     val resourceId: UUID,
     val capabilities: Set<DelegationCapability>,
+    val validFrom: OffsetDateTime,
+    val validTo: OffsetDateTime? = null,
+    val perTransactionLimit: EventMoney? = null,
     override val occurredAt: Instant,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "DelegationGrant"
@@ -37,6 +58,9 @@ data class DelegationActivated(
     val resourceType: DelegationResourceType,
     val resourceId: UUID,
     val capabilities: Set<DelegationCapability>,
+    val validFrom: OffsetDateTime,
+    val validTo: OffsetDateTime? = null,
+    val perTransactionLimit: EventMoney? = null,
     override val occurredAt: Instant,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "DelegationGrant"
@@ -92,6 +116,9 @@ data class DelegationReinstated(
     val resourceType: DelegationResourceType,
     val resourceId: UUID,
     val capabilities: Set<DelegationCapability>,
+    val validFrom: OffsetDateTime,
+    val validTo: OffsetDateTime? = null,
+    val perTransactionLimit: EventMoney? = null,
     override val occurredAt: Instant,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "DelegationGrant"
