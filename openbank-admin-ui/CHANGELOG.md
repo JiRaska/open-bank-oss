@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.82.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.82.0...admin-ui-v0.82.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** stage the origination Kotlin so the image build can derive its graph ([#3286](https://github.com/JiRaska/open-bank-oss/issues/3286)) ([a585898](https://github.com/JiRaska/open-bank-oss/commit/a5858989fdeab10f447e41ad5dfba26934802f36))
+
 ## [0.82.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.81.0...admin-ui-v0.82.0) (2026-08-02)
 
 
