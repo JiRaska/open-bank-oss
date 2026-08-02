@@ -37,6 +37,19 @@ interface DomesticPaymentRepository {
     /** Update a payment and enqueue a domain-event outbox message, atomically. */
     suspend fun update(payment: DomesticPayment, outboxMessage: OutboxMessage): DomesticPayment
 
+    /**
+     * Ids of payments still in `RECEIVED` that are worth screening again (#3266).
+     *
+     * A payment held because sanctions screening was unavailable has no other way out: the workflow
+     * completed, and nothing consumes the AML case's decision. Bounded three ways so a genuinely
+     * held payment is not re-screened forever — [maxAttempts], a [minAge] so a payment mid-flight is
+     * never touched, and [limit].
+     */
+    suspend fun findRedrivable(maxAttempts: Int, minAge: Instant, limit: Int): List<UUID>
+
+    /** Count one re-drive against [paymentId], before it is attempted. */
+    suspend fun recordRedriveAttempt(paymentId: UUID)
+
     /** How many payments currently sit in [status]. */
     suspend fun countByStatus(status: DomesticPaymentStatus): Long
 

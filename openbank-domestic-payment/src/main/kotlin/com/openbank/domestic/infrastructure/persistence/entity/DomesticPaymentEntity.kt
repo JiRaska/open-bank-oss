@@ -98,4 +98,11 @@ class DomesticPaymentEntity : PanacheEntity() {
 
     @Column(name = "updated_at", nullable = false)
     lateinit var updatedAt: Instant
+
+    /**
+     * How many times the #3266 sweep has re-screened this payment. Persistence-only — deliberately
+     * absent from the domain model, which describes the payment, not the recovery machinery.
+     */
+    @Column(name = "redrive_attempts", nullable = false)
+    var redriveAttempts: Int = 0
 }

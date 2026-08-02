@@ -156,6 +156,15 @@ openbank:
     bic: ${OPENBANK_BIC:OPBKCZ22}
     bank-code: ${OPENBANK_BANK_CODE:2000}
   domestic:
+    # #3266: re-screen payments left holding on an unavailable sanctions check. Enabled by default
+    # because it only re-runs the designed flow — it re-screens, it never releases.
+    screening-redrive:
+      enabled: ${DOMESTIC_SCREENING_REDRIVE_ENABLED:true}
+      interval: 15m
+      initial-delay: 2m
+      max-attempts: 5
+      min-age-minutes: 10
+      batch-limit: 20
     scheme-submission:
       # ADR-0104 D4 Czech clearing pilot. OFF by default; when off, behaviour is exactly as before.
       enabled: ${DOMESTIC_SCHEME_SUBMISSION_ENABLED:false}
