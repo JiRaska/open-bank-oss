@@ -1,0 +1,16 @@
+# Delegation lifecycle events — published by delegation-service on offer/accept/revoke/
+# suspend/reinstate/renounce/expiry (ADR-0232 D3). Consumed by product-service
+# enforcement projections (account/card/savings) in the next implementation slice.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.delegation.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

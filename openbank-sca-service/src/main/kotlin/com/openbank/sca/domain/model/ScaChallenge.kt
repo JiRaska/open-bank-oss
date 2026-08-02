@@ -31,6 +31,18 @@ enum class ScaPurpose {
      * sensitive, card-scoped operation: the device-signed evidence must say "I authorised THIS
      * action on THIS card", never a bare "I completed some challenge". */
     CARD_MANAGEMENT,
+
+    /** The grantor's half of an ADR-0232 D4 delegation ceremony: "I am handing this capability
+     * over my product to another party". Carries no [DynamicLinkingData] today, so a consume
+     * that states no operation is what authorises it — the binding that IS enforced is party +
+     * purpose + single-use. Linking the challenge to the grant's content (resource, capability
+     * set, ceilings) needs a delegation-shaped [DynamicLinkingData] and is tracked separately. */
+    DELEGATION_GRANT,
+
+    /** The grantee's half of the same ceremony — accepting an OFFERED grant. Separate from
+     * [DELEGATION_GRANT] on purpose: a challenge completed by the grantor must never be
+     * spendable as the grantee's acceptance, and purpose equality is what enforces that. */
+    DELEGATION_ACCEPT,
 }
 
 enum class ScaStatus {

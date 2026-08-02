@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: clearing-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "e6e55dff8356e5ea"
+    openbank.tech/policy-checksum: "f1388da4e744a6f2"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1887,6 +1887,8 @@ data:
             reason: "psd2-service docs consistently describe this as audit-trail + external TPP-webhook delivery, not an intra-fleet reaction — no OpenBank service is meant to consume it."
           - topic: "openbank.tpp.registry.event"
             reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
+          - topic: "openbank.delegation.events"
+            reason: "Tracked future work (ADR-0232 D3): product-service enforcement projections (account/card/savings) are the next implementation slice and are the intended consumers — the publisher ships first so the event contract is stable before consumers land. Re-triage: remove this entry with the first projection consumer PR."
           - topic: "openbank.pid.events"
             reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
       lineage_code_audit:
@@ -2268,6 +2270,14 @@ data:
                                                 # flipping AUTHZ_FOUR_EYES_ENFORCE here. consent.activate deliberately
                                                 # left ungated: its rego already reserves an M2M grant for a possible
                                                 # SCA-completion-callback caller.
+      - openbank-delegation-service            # ADR-0232: mints payment rights (customer-to-party grants) without moving
+                                                # money itself — money-path for the same reason consent/vop are. Threat
+                                                # model: docs/threat-models/delegation-service.md. four-eyes assessed:
+                                                # delegation.offer/revoke/suspend are self-service or fraud-signal actions
+                                                # with SCA-bound ceremonies on both ends; the bank-side suspend lands via
+                                                # the fraud pipeline, not an operator console, so there is no
+                                                # maker/checker pair to gate yet. Revisit when the operator
+                                                # backoffice surface ships.
       - openbank-fraud-service                # ADR-0084: v4 rule engine live; domestic-payment enforcement gate merged (issue #667, flag default-off pending risk-team threshold calibration)
                                                # four-eyes assessed (issue #938 follow-up): the only REST surface today is a stateless
                                                # POST /fraud/score (fraud.score) — no operator case-decision, rule-config, or manual

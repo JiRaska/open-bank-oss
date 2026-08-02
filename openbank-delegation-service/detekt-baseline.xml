@@ -1,0 +1,25 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>MagicNumber:AuthzProducer.kt$AuthzProducer$500</ID>
+    <ID>MagicNumber:DelegationOutboxDispatcher.kt$DelegationOutboxDispatcher$30000</ID>
+    <ID>MagicNumber:DelegationOutboxDispatcher.kt$DelegationOutboxDispatcher$3000</ID>
+    <ID>MagicNumber:DelegationResource.kt$DelegationResource$201</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$DelegationCallerMismatchExceptionMapper$403</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$DelegationEligibilityExceptionMapper$422</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$DelegationNotFoundExceptionMapper$404</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$DelegationNotGranteeExceptionMapper$403</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$DelegationNotGrantorExceptionMapper$403</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$DelegationResourceOwnershipExceptionMapper$422</ID>
+    <ID>MagicNumber:ExceptionMappers.kt$DelegationScaExceptionMapper$400</ID>
+    <ID>MagicNumber:PartyEligibilityClient.kt$ResilientPartyEligibilityClient$2000</ID>
+    <ID>MagicNumber:ResourceOwnershipClient.kt$RestResourceOwnershipClient$2000</ID>
+    <ID>MagicNumber:ScaChallengeClient.kt$ResilientScaChallengeClient$2000</ID>
+    <ID>ThrowsCount:DelegationService.kt$DelegationService$private suspend fun verifyEligibility(command: OfferDelegationCommand)</ID>
+    <ID>TooGenericExceptionCaught:DelegationService.kt$DelegationService$e: Exception</ID>
+    <ID>TooManyFunctions:DelegationGrant.kt$DelegationGrant</ID>
+    <ID>TooManyFunctions:DelegationResource.kt$DelegationResource</ID>
+    <ID>TooManyFunctions:DelegationService.kt$DelegationService : OfferDelegationUseCaseRespondDelegationUseCaseRevokeDelegationUseCaseGetDelegationUseCaseCheckDelegationUseCase</ID>
+  </CurrentIssues>
+</SmellBaseline>
