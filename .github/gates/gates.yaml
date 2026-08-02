@@ -217,6 +217,15 @@ gates:
         exit 1
       fi
 
+  - id: gitops-duplicate-resources
+    name: "No duplicate resource or env-list entry in a gitops manifest (issues #3450/#3460, enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-gitops-duplicate-resources.py --self-test
+    run: |
+      python3 .github/scripts/check-gitops-duplicate-resources.py --enforce
+
   - id: podmonitor-namespace-coverage
     name: "PodMonitor namespace coverage (issue #2255, enforced)"
     group: gitops
