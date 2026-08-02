@@ -1,0 +1,127 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Periodic regression guard for gradle/verification-metadata.xml (#3131).
+#
+# The PR gate (#3233) only sees modules whose build.gradle.kts changed, and the
+# producer (#3199) only runs on Dependabot PRs. Neither notices a gap that arrives
+# some other way — a transitive dependency shifting under an unchanged version
+# range, a platform BOM bump pulling a new artifact, or a merge that raced both.
+# This sweeps the whole fleet on a schedule so such a gap has a ceiling on how long
+# it can sit undetected.
+#
+# Why it matters more each week: org.gradle.dependency.verification is `lenient`
+# today, so a missing entry is a warning. At the ADR-0144 graduation (2026-09-30,
+# #1915) it becomes a failing build on every cold cache at once — a fresh runner,
+# a recreated ARC volume, CodeQL's tracing build, a new clone.
+#
+# Sharded on purpose: one fleet-wide regeneration needs ~12g of heap (measured;
+# 6g died with `Java heap space` after 3h40m on the quarkusBuild variant), which is
+# more than a 16 GB runner can safely hand a single JVM. Eight shards of ~7 modules
+# each keep every job well inside that budget and run concurrently.
+#
+# Eight rather than four costs nothing: this repo is public, so ubuntu-latest minutes
+# are free and unmetered, and GitHub-hosted runners are outside our VPC so no NAT
+# egress is billed. The one resource that IS scarce is the Actions cache (~9 GB of a
+# 10 GB ceiling) — which is exactly why this workflow does not populate it.
+name: Verification metadata drift
+
+on:
+  schedule:
+    - cron: "20 4 * * *" # 04:20 UTC daily, after the nightly service builds
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verification-metadata-drift
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: sweep ${{ matrix.shard }}/8
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false # one shard's gap must not hide another's
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@v4
+
+      # No `cache: gradle` on purpose. Two reasons, one FinOps and one correctness:
+      # the repo's Actions cache sits at ~9 GB of its 10 GB ceiling across 61 entries, so
+      # eight more entries per night would evict caches that PR builds depend on — slowing
+      # everyone else down to speed up a nightly job that has no deadline. And the sweep
+      # passes --refresh-dependencies anyway, so a warm cache buys it nothing.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      # The script passes --refresh-dependencies, which is what makes this real: on a
+      # warm cache Gradle does not re-resolve metadata artifacts, so a regeneration
+      # check reports "no gaps" even with an entry demonstrably deleted. CI caches are
+      # always warm. Do not "optimise" that flag away.
+      - name: Sweep shard for unpinned artifacts
+        run: |
+          python3 .github/scripts/check-verification-metadata-complete.py \
+            --modules all --shard "${{ matrix.shard }}/8" --enforce
+
+  # A red schedule is addressed to nobody. Turn a real gap into an owned ticket —
+  # the same reason fleet-attestation.yml and dependency-submission.yml do this.
+  raise-issue:
+    name: Raise issue on drift
+    needs: sweep
+    if: ${{ failure() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Open or refresh the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TITLE="verification-metadata drift: unpinned artifacts on main"
+          # Flush-left heredoc: `run: |` strips only the common YAML indent, so an
+          # indented body would carry leading spaces into the issue markdown.
+          BODY=$(cat <<EOF
+          The daily verification-metadata sweep FAILED: at least one Gradle module on
+          \`main\` resolves an artifact that \`gradle/verification-metadata.xml\` does not pin.
+
+          Run: ${RUN_URL} — each failing shard's log names the exact artifacts.
+
+          **Latent today, breaking on 2026-09-30.** \`org.gradle.dependency.verification\`
+          is \`lenient\`, so this is currently a warning. At the ADR-0144 graduation (#1915)
+          it becomes a failing build on every cold cache — a fresh runner, a recreated ARC
+          cache volume, CodeQL's tracing build, a new contributor clone.
+
+          To fix, regenerate for the affected modules and commit **only the additions**
+          (a full rewrite reindents ~18.5k lines and has previously deleted valid entries):
+
+          \`\`\`
+          ./gradlew --write-verification-metadata sha256 --refresh-dependencies \\
+            :<module>:testClasses :<module>:quarkusDependenciesBuild \\
+            -Dorg.gradle.jvmargs=-Xmx6g
+          \`\`\`
+
+          Cross-check each new sha256 against Maven Central's published \`.sha1\` before
+          committing it — this file is a security control, and "add the hash the build
+          showed you" is the failure mode it exists to prevent.
+
+          Context: #3131.
+          EOF
+          )
+          existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$BODY"
+          else
+            gh issue create --title "$TITLE" --body "$BODY" \
+              --label fleet-health-build --label dependencies --label "severity:medium"
+          fi
