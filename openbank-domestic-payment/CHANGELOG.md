@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.10.6...domestic-payment-v0.11.0) (2026-08-02)
+
+
+### Features
+
+* **domestic-payment:** alert on payments that stop progressing, not just on the service being down ([#3379](https://github.com/JiRaska/open-bank-oss/issues/3379)) ([02fd8fc](https://github.com/JiRaska/open-bank-oss/commit/02fd8fcd67cca1cbbd0f8ddf0f2220727f696682)), closes [#3273](https://github.com/JiRaska/open-bank-oss/issues/3273) [#3271](https://github.com/JiRaska/open-bank-oss/issues/3271)
+
 ## [0.10.6](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.10.5...domestic-payment-v0.10.6) (2026-08-02)
 
 
