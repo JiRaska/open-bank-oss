@@ -43,6 +43,37 @@ quarkus:
     root-path: /q
   dev-ui:
     enabled: false
+  # quarkus-flyway was a build dependency and `db/migration/` held V2/V3, but nothing ever
+  # told Flyway to run: `migrate-at-start` defaults to false, and no deployment env set it
+  # either. So the deployed database had ZERO tables and no flyway_schema_history at all,
+  # and every write hit `ERROR: relation "security_outbox" does not exist (42P01)` -> a 500
+  # out of /api/v1/security/report. Nothing was red about it: the pod is Ready (the health
+  # probes do not touch the schema), the migrations look present in the repo, and the
+  # console blamed the caller with "scanner HTTP 401" from a *separate* auth defect that
+  # masked this one. The datasource itself comes from QUARKUS_DATASOURCE_* env in the
+  # deployment; only the migrate switch was missing. Mirrors sanctions/fraud.
+  #
+  # The datasource is declared here with literal local defaults, not left to the deployment env.
+  # Flyway migrates the DEFAULT (Agroal/JDBC) datasource, and a service that only boots because
+  # gitops happens to export QUARKUS_DATASOURCE_JDBC_URL cannot be started from this repo alone
+  # — the failure mode #3080 catalogued across five money-path services, and what
+  # check-flyway-default-datasource.py enforces. The reactive URL is the one the Panache entities
+  # use; both are overridden by QUARKUS_DATASOURCE_* in every deployed environment.
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: postgresql://localhost:5432/openbank_security
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_security
+  flyway:
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+  hibernate-orm:
+    database:
+      generation: none
   # quarkus-oidc was already a build dependency but never configured — every REST endpoint
   # was reachable with no authentication at all (issue found alongside the AmlCaseResource /
   # StandingOrderResource / TppRegistryResource unauthenticated-endpoint sweep).

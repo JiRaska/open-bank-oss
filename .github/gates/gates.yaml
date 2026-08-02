@@ -1057,7 +1057,7 @@ gates:
   # MAPPING that reads as the fix and is not — that key names which datasource to use, it does
   # not define one. Decidable from one committed file, so no boot and no cluster.
   - id: flyway-default-datasource
-    name: "Flyway default datasource (issue #3080, enforced)"
+    name: "Flyway default datasource, and migrations something actually runs (issue #3080, enforced)"
     group: data
     mode: enforced
     selftest: |
