@@ -13,6 +13,7 @@ const securityHeaders = [
 ]
 
 const nextConfig = {
+  productionBrowserSourceMaps: true,
   poweredByHeader: false,
   output: process.env.NEXT_STANDALONE === 'true' ? 'standalone' : undefined,
   // `pg` (node-postgres) uses dynamic requires (pg-native, connection-string).

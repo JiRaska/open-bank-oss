@@ -34,7 +34,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-lending-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "93929a5400a4a3f8"
+        openbank.tech/policy-checksum: "d286465f8a6d157d"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -131,6 +131,32 @@ spec:
             # Flipping early refuses every origination with no pack present.
             - name: LENDING_ENFORCE_PACK
               value: "false"
+            # ADR-0211 customer intake (#3197). The applicant's own channel into
+            # origination: customer-edge posts here with the party id it derived from the
+            # customer JWT. Three values, each a refusal boundary rather than a preference:
+            #
+            #   caller-principal  the ONLY identity permitted to submit on a customer's
+            #                     behalf. Left blank the service refuses every call, which
+            #                     is deliberate — edge's M2M token carries ROLE_OPERATOR and
+            #                     nothing else, and AuthorizeInterceptor classifies a
+            #                     client_credentials JWT as HUMAN, so neither @RolesAllowed
+            #                     nor rego can tell the edge from a person at a desk. The
+            #                     name match is the actual control.
+            #   nominal-annual-rate  no default in the service: an unpriced product refuses
+            #                     rather than guessing. The value below is a PLACEHOLDER for
+            #                     the sandbox, in the same spirit as the uncalibrated PD/LGD
+            #                     constants — it is not a rate anyone priced.
+            #   enabled           the feature switch. Restart-required.
+            #
+            # This is the MAKER leg only: an application lands in the ordinary origination
+            # graph and still needs a human four-eyes decision before any disbursement, so
+            # turning it on cannot move money.
+            - name: LENDING_INTAKE_ENABLED
+              value: "true"
+            - name: LENDING_INTAKE_CALLER_PRINCIPAL
+              value: service-account-openbank-edge
+            - name: LENDING_INTAKE_NOMINAL_ANNUAL_RATE
+              value: "0.079"
             # OTel traces → Tempo.
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"

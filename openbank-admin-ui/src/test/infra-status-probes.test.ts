@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { describe, it, expect } from 'vitest'
-import { CLUSTER_INFRA, LOCAL_INFRA, probeInfra } from '@/app/api/infra/status/route'
+import { CLUSTER_INFRA, LOCAL_INFRA, probeInfra } from '@/lib/infra/probes'
 
 // The infra ids are a stable contract consumed by /docs/bcp and /infrastructure.
 // These checks give the probe map consistent coverage without depending on a live

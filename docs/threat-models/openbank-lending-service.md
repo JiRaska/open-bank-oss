@@ -250,7 +250,48 @@ two authenticated principals to alter.
 CZ reference pack is seeded and activated — the guard cannot protect origination while off.
 Tracked as the named bootstrap follow-up (ADR-0212 D4).
 
-## 9. Change log
+## 9. Customer self-service origination intake (ADR-0211) — STRIDE supplement
+
+`CustomerIntakeResource` (`POST /api/v1/lending/intake/applications`) is the first path by which a
+request originating **outside the bank's staff** reaches the loan book. Until it existed, every
+origination entry point was a desk endpoint, and the whole §4 posture assumed an authenticated
+employee behind every write. That assumption no longer holds, so this supplement states what does.
+
+**What it is not.** It is the MAKER leg only. The created application enters the ordinary
+origination graph and still requires a human checker (`lending.approve`, four-eyes) before a
+disbursement moves any money. A customer cannot originate cash by calling this endpoint, and the
+§7 controls are untouched.
+
+**Why `@RolesAllowed` cannot be the control here.** customer-edge's M2M identity carries
+`ROLE_OPERATOR` and nothing else, and `AuthorizeInterceptor` classifies a client_credentials JWT as
+`HUMAN` — so neither the JAX-RS role gate nor the lending rego extension (whose
+`operator-lending-write` rule admits any `lending.*` action for `ROLE_OPERATOR`) can distinguish the
+edge from a real person at a desk. The control is therefore a named-principal check in the handler
+against `lending.intake.caller-principal`, which refuses every call when unset.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **S**poofing | An operator (or any `ROLE_OPERATOR` holder) files an application in a customer's name | Handler compares `SecurityIdentity.principal.name` to `lending.intake.caller-principal` and refuses on mismatch; an unset value refuses everything rather than admitting any operator. Covered by `CustomerIntakeResourceTest` (the test suite goes red when the check is removed). |
+| **S**poofing | A customer applies on behalf of another party | The party id comes only from `X-Customer-Party-Id`, which customer-edge derives from the customer JWT's `party_id`/`sub`; the request body has no party field at all, and the nil UUID is refused. |
+| **T**ampering | An applicant prices their own loan, or picks the compliance regime that judges them | `nominalAnnualRate`, `jurisdiction`, `productType` and `currency` are server configuration, absent from the request schema. An unpriced product refuses (403) rather than defaulting a rate. |
+| **T**ampering | An applicant bypasses the ADR-0212 pack guard by declaring a jurisdiction with no active pack | Same as above — jurisdiction is not caller-supplied, so the (jurisdiction, productType) key the guard resolves is fixed by configuration. |
+| **R**epudiation | "Did the customer really ask for this?" | The maker is recorded as `customer:<partyId>`, namespaced so it can never be mistaken for a desk principal in the ADR-0214 evidence trail nor satisfy a checker leg; customer-edge emits `LOAN_APPLICATION_SUBMITTED` to the audit stream with the upstream status. |
+| **D**oS | An app floods intake, filling the application table and the operator queue | Bounded by customer-edge's `RateLimitFilter` on the customer-facing side and by the amount/term bounds here; the feature defaults OFF (`lending.intake.enabled=false`), so the exposure exists only once deliberately enabled. Per-party application-rate limiting is a gap — see below. |
+| **E**oP | Self-service intake becomes a route to disbursement | It is not: intake creates an application, never a `Loan`; `lending.disburse` remains a separate four-eyes desk action. |
+
+**Residual risks / gaps (not closed by this change):**
+
+- **No per-party intake rate limit in lending-service.** The only throttle is customer-edge's
+  generic filter. A compromised edge, or a second future caller, could enqueue applications faster
+  than the desk can dispose of them. Bounded in practice by the feature defaulting off.
+- **No SCA on submission.** ADR-0211 puts SCA on the *signature*, not the application, so this is
+  by design — but it means an attacker holding a live customer session can file an application in
+  that customer's name. The consequence is an entry in the operator queue, not money movement.
+- **The rego rule is documentation, not enforcement.** `edge-customer-intake` names the intended
+  caller, but `operator-lending-write` already grants the same action more broadly; the rule only
+  becomes load-bearing if that blanket operator grant is narrowed.
+
+## 10. Change log
 
 - **2026-07-31** — Termination and early-exit lifecycle (ADR-0215): termination
   sub-lifecycle states + guard, settlement quote (expired quote refused), statutory
@@ -346,3 +387,12 @@ Tracked as the named bootstrap follow-up (ADR-0212 D4).
   staleness bound, haircut calibration is a placeholder). No DB schema change (reads the existing
   `collateral` table); no new endpoint; rollback = revert the commit (LGD reverts to the flat
   placeholder for every loan, identical to before this increment).
+- **2026-08-01** — ADR-0211 customer self-service intake. `CustomerIntakeResource`
+  (`POST /api/v1/lending/intake/applications`) is the first entry point on this service reachable
+  from outside the bank's staff, so §4's "an employee is behind every write" assumption no longer
+  holds unqualified — new §9 states what replaces it. The control is a named-principal check in the
+  handler, NOT `@RolesAllowed` and NOT rego: customer-edge's M2M token carries `ROLE_OPERATOR` and
+  the interceptor classifies it as `HUMAN`, so neither layer can tell the edge from a person.
+  Default OFF (`lending.intake.enabled=false`) and refuses everything while
+  `lending.intake.caller-principal` is unset. No DB schema change; maker leg only, so the four-eyes
+  disbursement control is untouched; rollback = revert the commit or leave the flag false.
