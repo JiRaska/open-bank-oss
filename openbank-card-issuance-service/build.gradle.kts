@@ -44,10 +44,12 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
-    // Consumer-driven contract test for the product-catalog card-entitlement lookup (ADR-0063).
-    // Consumer side only: card issuance publishes no API that another service pacts against, so
-    // there is no pact-provider dependency here.
+    // Consumer-driven contract tests: the product-catalog card-entitlement lookup (ADR-0063) and
+    // the `openbank.delegation.events` message contract this service projects (ADR-0232 D3).
     testImplementation(libs.pact.consumer)
+    // Provider side: as of issue #2991 card-issuance IS pacted against — delegation-service reads
+    // GET /api/v1/cards/{id} to verify the grantor holds the card before offering a grant.
+    testImplementation(libs.pact.provider)
 
     // CI infra sweep (#578): isolated PostgreSQL + Valkey(Redis) per test JVM
     // via Testcontainers. Kafka is already in-memory in the IT (no broker).

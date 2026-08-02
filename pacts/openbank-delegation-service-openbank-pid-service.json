@@ -1,0 +1,43 @@
+{
+  "consumer": {
+    "name": "openbank-delegation-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the party whose delegation eligibility is being checked",
+      "providerStates": [
+        {
+          "name": "an ACTIVE party with FULL KYC exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/parties/cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+      },
+      "response": {
+        "body": {
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "kycAttributes": {
+            "kycLevel": "FULL"
+          },
+          "status": "ACTIVE"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-pid-service"
+  }
+}

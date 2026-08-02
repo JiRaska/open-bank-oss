@@ -54,6 +54,11 @@ dependencies {
     // rather than greps. No version: managed by the enforcedPlatform(quarkus.bom) above
     // (testImplementation extends implementation), so it cannot drift from the runtime's Jackson.
     testImplementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")
+    // Provider-side verification (git-pact, ADR-0063): PidPactFolderProviderVerificationTest
+    // replays the pacts in pacts/ that name openbank-pid-service as provider — today
+    // delegation-service's eligibility lookup (issue #2991). pid-service is a provider only, so
+    // there is no pact-consumer dependency here.
+    testImplementation(libs.pact.provider)
 }
 
 kover {

@@ -5,6 +5,7 @@
 package com.openbank.account.contract
 
 import au.com.dius.pact.provider.PactVerifyProvider
+import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.MessageTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
@@ -14,13 +15,34 @@ import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.domain.event.AccountCreatedEvent
+import com.openbank.account.domain.model.Account
+import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
+import com.openbank.account.it.PostgresRedpandaRedisTestResource
+import com.openbank.libs.domain.account.Iban
+import com.openbank.libs.domain.money.CurrencyCode
+import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
+import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
+import io.vertx.core.Vertx
+import io.vertx.core.impl.ContextInternal
+import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
+import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 
 /**
  * Provider-side verification for async message contracts published by account-service
@@ -45,11 +67,13 @@ import java.util.UUID
  * `@EnabledIfSystemProperty` keeps it a no-op locally and on the PR lane, where no broker is
  * configured — matching every other broker-based provider test in the fleet.
  *
- * A [MessageTestTarget] alone is correct here: both pacts naming account-service as provider are
- * message-only (balance-service's AccountCreated, notification-service's TRANSACTION_COMPLETED),
- * so unlike `PartyEventPactProviderVerificationTest` there is no HTTP interaction to dispatch to
- * and no Quarkus instance to boot. If an HTTP consumer contract against account-service is ever
- * added, this needs party-service's per-interaction target dispatch.
+ * Per-interaction target dispatch, as `PartyEventPactProviderVerificationTest` does: two of the
+ * three pacts naming account-service as provider are message-only (balance-service's
+ * AccountCreated, notification-service's TRANSACTION_COMPLETED), but delegation-service's
+ * ownership gate (issue #2991, ADR-0232 D7) reads `GET /api/v1/accounts/{id}`, which needs a
+ * running endpoint — hence `@QuarkusTest` + Testcontainers. This mirrors the git-pact twin
+ * exactly; the two must stay identical or the same contract passes from git and fails from the
+ * broker.
  *
  * IMPORTANT: if `AccountCreatedMessagePactConsumerTest` (openbank-balance-service) changes the
  * contract, regenerate the pact JSON (`./gradlew :openbank-balance-service:test --tests
@@ -59,19 +83,60 @@ import java.util.UUID
  *
  * `@IgnoreNoPactsToVerify(ignoreIoErrors)` makes a missing/unreadable pact a skip, not a failure.
  */
+@QuarkusTest
+@QuarkusTestResource(PostgresRedpandaRedisTestResource::class)
+@TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_VIEWER", "ROLE_OPERATOR"])
 @Provider("openbank-account-service")
 @PactBroker(enablePendingPacts = "true")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class AccountEventPactProviderVerificationTest {
 
+    companion object {
+        // Must match DelegationAccountOwnershipPactConsumerTest's ACCOUNT_ID / OWNER_PARTY_ID.
+        private val ACCOUNT_ID = UUID.fromString("11111111-2222-4333-8444-555555555555")
+        private val OWNER_PARTY_ID = UUID.fromString("66666666-7777-4888-8999-aaaaaaaaaaaa")
+    }
+
     private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
+
+    @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
+    lateinit var testPort: String
+
+    @Inject
+    lateinit var accountRepository: AccountRepository
+
+    @Inject
+    lateinit var vertx: Vertx
+
+    /** See the git-pact twin: Pact-JVM calls `@State` on a thread with no Vert.x context. */
+    private fun runOnVertxContext(block: suspend () -> Unit) {
+        val future = CompletableFuture<Unit>()
+        val duplicated = (vertx.orCreateContext as ContextInternal).duplicate()
+        VertxContextSafetyToggle.setContextSafe(duplicated, true)
+        val dispatcher = Executor { command -> duplicated.runOnContext { command.run() } }.asCoroutineDispatcher()
+        CoroutineScope(dispatcher).launch {
+            try {
+                block()
+                future.complete(Unit)
+            } catch (t: Throwable) {
+                future.completeExceptionally(t)
+            }
+        }
+        future.get(10, TimeUnit.SECONDS)
+    }
 
     @BeforeEach
     fun setTarget(context: PactVerificationContext?) {
+        if (context == null) return
         // Limit the @PactVerifyProvider scan to this package — the default classpath-wide scan
-        // (ClassGraph) throws on the JDK 25 toolchain.
-        context?.target = MessageTestTarget(listOf("com.openbank.account.contract"))
+        // (ClassGraph) throws on the JDK 25+ toolchain.
+        context.target = if (context.interaction.isAsynchronousMessage()) {
+            MessageTestTarget(listOf("com.openbank.account.contract"))
+        } else {
+            HttpTestTarget("localhost", testPort.toInt())
+        }
+        context.addStateChangeHandlers(this)
     }
 
     @TestTemplate
@@ -116,5 +181,26 @@ class AccountEventPactProviderVerificationTest {
             "variables" to mapOf("amount" to "50.00", "currency" to "CZK"),
         )
         return objectMapper.writeValueAsString(request)
+    }
+
+    /** Mirror of the git-pact twin's handler — see there for why the findById guard is needed. */
+    @State("an account owned by a known party exists")
+    fun accountOwnedByKnownParty() = runOnVertxContext {
+        if (accountRepository.findById(ACCOUNT_ID) != null) return@runOnVertxContext
+        accountRepository.save(
+            Account(
+                id = ACCOUNT_ID,
+                accountNumber = Iban("CZ6508000000192000145399"),
+                accountType = AccountType.CURRENT,
+                partyId = OWNER_PARTY_ID,
+                productId = UUID.fromString("99999999-8888-4777-8666-555555555555"),
+                currency = CurrencyCode("CZK"),
+                status = AccountStatus.ACTIVE,
+                openedAt = Instant.parse("2026-01-01T00:00:00Z"),
+                closedAt = null,
+                version = 0,
+            ),
+        )
+        Unit
     }
 }
