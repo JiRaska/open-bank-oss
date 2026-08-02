@@ -50,10 +50,7 @@ class CampaignSummaryQueryTest {
         createdAt = Instant.EPOCH,
     )
 
-    private class Sends(
-        private val cells: List<CampaignOutcomeCount>,
-        var calls: Int = 0,
-    ) : SendLogRepository {
+    private class Sends(private val cells: List<CampaignOutcomeCount>, var calls: Int = 0) : SendLogRepository {
         override suspend fun record(send: SendRecord) = Unit
         override suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long) = 0
         override suspend fun listByCampaign(campaignId: UUID, outcome: SendOutcome?, page: Int, size: Int) =
