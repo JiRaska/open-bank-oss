@@ -10,7 +10,7 @@ import { ArrowLeft, Megaphone } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
-import { JourneyFlow, type StepFunnel } from '@/components/campaigns/JourneyFlow'
+import { JourneyCanvas, type StepFunnel } from '@/components/campaigns/JourneyCanvas'
 import { SectionBoundary } from '@/components/feedback/SectionBoundary'
 
 interface Campaign {
@@ -331,7 +331,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
               />
             ) : (
               <SectionBoundary name="Journey">
-                <JourneyFlow
+                <JourneyCanvas
                   steps={c.steps ?? []}
                   funnel={detail?.journey ?? []}
                   audienceSize={(detail?.enrolments?.length ?? 0) > 0 ? (detail?.enrolments?.length ?? 0) : null}
