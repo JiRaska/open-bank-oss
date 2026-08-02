@@ -25,7 +25,10 @@
 #       python3 .github/scripts/run-gates.py --list
 #       python3 .github/scripts/run-gates.py --group kotlin
 #       python3 .github/scripts/run-gates.py --only domain-purity-gate-hexagonal-invariant
-#       python3 .github/scripts/run-gates.py --selftest-only        # falsify every gate
+#       python3 .github/scripts/run-gates.py --all                  # every gate + its self-test
+#       python3 .github/scripts/run-gates.py --self-test            # falsify the RUNNER itself
+#   (there is no --selftest-only: a gate's self-test always runs immediately before that gate,
+#    so `--all` is what falsifies every gate.)
 #
 # THE CONTRACT — read this before adding an entry
 #   id          stable slug, unique across the file. Used by --only and in the run log.
@@ -236,6 +239,31 @@ gates:
   # YAML validation, ArgoCD sync and Kyverno admission alike — the pod then sits in
   # CreateContainerConfigError forever with no signal but `kubectl describe`. vop-service
   # burned an hour on exactly this (#1232) right after #1229 fixed its ALL_SERVICES gap.
+  # issue #2929 — four services mint an OIDC client_credentials token at startup, and the client
+  # secret they read was never provisioned. The three halves of the wiring live in three separate
+  # artifacts (the service's config names a secret, an ExternalSecret must create it, and the
+  # Keycloak realm must define the client), so nothing compared them and each looked fine alone.
+  # All three are committed, so this needs no cluster access.
+  #
+  # --selftest runs first on purpose: a gate whose failure path has never executed is unfalsified,
+  # and this one's red is the only thing standing between a missing secret and a service that
+  # authenticates as nobody.
+  - id: oidc-client-secret-wiring
+    name: "OIDC client secret wiring (issue #2929, enforced)"
+    group: gitops
+    mode: enforced
+    # In the `selftest:` field, not folded into `run:`. Chaining them inside `run:` still executes
+    # the harness, but it gives up the two things the field buys: the runner no longer SKIPS the
+    # gate when the self-test verdict is wrong (a gate whose falsification is broken would still
+    # report a verdict), and `selftest_expect` has nothing to attach to. It also stops this
+    # manifest being able to answer "which gates are falsifiable". Default
+    # `selftest_expect: pass`: the command is the checker's own harness, which exits 0 when it has
+    # proved the gate's red is reachable.
+    selftest: |
+      python3 .github/scripts/check-oidc-client-secret-wiring.py --selftest
+    run: |
+      python3 .github/scripts/check-oidc-client-secret-wiring.py --enforce
+
   - id: gitops-ref-integrity-guard
     name: "gitops ref-integrity guard (referenced Secret/ConfigMap => declared)"
     group: gitops
