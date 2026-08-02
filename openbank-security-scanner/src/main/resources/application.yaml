@@ -78,6 +78,14 @@ quarkus:
   # was reachable with no authentication at all (issue found alongside the AmlCaseResource /
   # StandingOrderResource / TppRegistryResource unauthenticated-endpoint sweep).
   oidc:
+    # LOCAL DEFAULT ONLY — and this service is the reason the warning is worth writing down.
+    # Its deployment carried `QUARKUS_OIDC_ENABLED=false` and no issuer URL, which reads as
+    # "auth is off here" and is not: quarkus.oidc.enabled is a BUILD-TIME property, so an env
+    # var cannot switch OIDC off in a built image. The pod therefore validated every bearer
+    # against this localhost default, inside its own pod, where nothing listens. Anonymous
+    # requests answered 200/401 normally; every request WITH a token answered 500, which is
+    # what the admin-ui Security screen hit. Fixed by setting QUARKUS_OIDC_AUTH_SERVER_URL in
+    # the gitops manifest (#3443, #3433) — an env var outranks this value in SmallRye Config.
     auth-server-url: http://localhost:8080/realms/openbank
     client-id: openbank-services
     credentials:
