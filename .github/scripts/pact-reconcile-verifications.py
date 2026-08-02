@@ -343,22 +343,44 @@ def self_test() -> int:
     if not edges:
         bad.append("edge list empty")
 
-    # can_publish_verification against the REAL repo, in both directions. A version that
-    # answered True for everything would have dispatched the folder-only providers
-    # forever; one that answered False for everything would dispatch nobody and look
-    # exactly like a healthy fleet.
+    # can_publish_verification in BOTH directions, against SYNTHETIC fixtures.
+    #
+    # This used to assert on the fleet's own population — that some provider could publish
+    # and some could not. That caught what it was built to catch and then went red for the
+    # right reason: #3232 added the @PactBroker half to all eight folder-only providers, so
+    # the "some cannot" half became false by being FIXED. An assertion whose truth depends
+    # on the fleet still having the defect is an assertion that must be edited every time
+    # someone improves things, and editing it under time pressure is how it ends up deleted.
+    # Fixtures do not have that problem: they test the function, not the estate.
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpp = pathlib.Path(tmp)
+        for name, ann in (("prov-broker", "@PactBroker"), ("prov-folder", '@PactFolder("../pacts")')):
+            d = tmpp / name / "src" / "test" / "kotlin"
+            d.mkdir(parents=True)
+            (d / "T.kt").write_text(f'@Provider("x")\n{ann}\nclass T\n')
+        (tmpp / "prov-none" / "src" / "test").mkdir(parents=True)
+        checks = [
+            ("prov-broker", True, "@PactBroker provider is publishable"),
+            ("prov-folder", False, "@PactFolder-only provider is NOT publishable"),
+            ("prov-none", False, "provider with no test at all is NOT publishable"),
+            ("prov-missing", False, "provider directory that does not exist"),
+        ]
+        for name, want, why in checks:
+            got = can_publish_verification(tmpp, name)
+            mark = "ok " if got == want else "BAD"
+            print(f"  {mark} {why:48s} -> {got}")
+            if got != want:
+                bad.append(why)
+
+    # And a light fleet sanity check: if NOTHING in the real repo can publish, the function
+    # is answering False for everything and no verification would ever be dispatched — which
+    # looks exactly like a healthy fleet.
     providers = sorted({p for _, p in edges})
     pub = [p for p in providers if can_publish_verification(root, p)]
-    folder = [p for p in providers if not can_publish_verification(root, p)]
-    print(f"  {'ok ' if pub else 'BAD'} providers that CAN publish: {len(pub)}")
-    print(f"  {'ok ' if folder else 'BAD'} providers that CANNOT (folder-only): {len(folder)}")
+    print(f"  {'ok ' if pub else 'BAD'} providers in this repo that can publish: {len(pub)}/{len(providers)}")
     if not pub:
-        bad.append("no provider can publish — the check is answering False for everything")
-    if not folder:
-        bad.append(
-            "every provider can publish — either the fleet changed, or the check is "
-            "answering True for everything; verify before removing this assertion"
-        )
+        bad.append("no provider in the repo can publish — the check answers False for everything")
 
     if bad:
         print("\n::error::self-test FAILED: " + "; ".join(bad))
