@@ -66,8 +66,17 @@ spec:
                   key: password
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
-            - name: QUARKUS_OIDC_ENABLED
-              value: "false"
+            # `QUARKUS_OIDC_ENABLED=false` used to sit here and did NOTHING: quarkus.oidc.enabled
+            # is a BUILD-TIME property, so setting it through the environment cannot switch OIDC
+            # off in an already-built image. It read as "auth is off for this service" while the
+            # pod validated every bearer it was given — against the application.yaml default
+            # `http://localhost:8080/realms/openbank`, i.e. inside its own pod, where nothing
+            # listens. Result: anonymous requests answered 200/401 normally and every request
+            # WITH a token answered 500 (`OIDCException: OIDC Server is not available`), which is
+            # what the admin-ui Security screen was hitting. Point it at the real issuer instead,
+            # exactly as fraud/sanctions/campaign do.
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
