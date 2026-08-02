@@ -21,6 +21,23 @@
 # collector's C8 scorer read this file as a plain substring, so the false claim scored
 # sdd as scraped. Coverage is now asserted from the workload manifests by
 # .github/scripts/check-podmonitor-namespace-coverage.py — do not hand-audit it.
+#
+# Third sweep: added authz-policy-auditor, control-liveness-sentinel, devops-agent,
+# docs-truth-agent, finops-agent, flaky-test-hunter, governance-auditor, release-steward —
+# the entire control-plane agent fleet, none of which had ever been scraped. All eight are
+# ordinary Quarkus apps (management port 8085, root-path /q, micrometer-registry-prometheus)
+# carrying app.kubernetes.io/name, so they were one line each away from working the whole time.
+#
+# The gate above did not catch it, and its green was the reason nobody looked: it iterated
+# `openbank-*-service` plus the money-path list, so the agents — openbank-devops-agent,
+# openbank-governance-auditor and friends, none of which carry the `-service` suffix — were
+# never in its population. It printed `41 scraped, 0 missing` while eight namespaces went
+# unscraped. That is this repo's recurring shape: a gate whose SCOPE is a hand-kept list of the
+# thing it checks reads as passing when the list is short, never as unchecked. The check now
+# ALSO derives its population from the scrape contract itself — every workload declaring a
+# `management` container port — and cross-references every Pod/ServiceMonitor that scrapes that
+# port, so `iam` (its own keycloak PodMonitor) is correctly not a gap. Deliberate exclusions go
+# in NOT_SCRAPED with a reason, and a stale entry there fails in either direction.
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
@@ -40,16 +57,23 @@ spec:
       - anacredit
       - analytics
       - audit
+      - authz-policy-auditor
       - balances
       - billing
       - campaign
       - consent
+      - control-liveness-sentinel
       - customer-edge
+      - devops-agent
       - dispute
+      - docs-truth-agent
       - documents
+      - finops-agent
       - finrep
+      - flaky-test-hunter
       - fraud
       - fx
+      - governance-auditor
       - interest
       - kyc
       - ledger
@@ -61,6 +85,7 @@ spec:
       - pid
       - platform
       - psd2
+      - release-steward
       - sanctions
       - sca
       - sdd

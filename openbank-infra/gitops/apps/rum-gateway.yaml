@@ -75,6 +75,14 @@ spec:
           ingressClassName: nginx
           annotations:
             cert-manager.io/cluster-issuer: letsencrypt-prod
+            # ADR-0234: declared exemption from the identity-aware edge gate.
+            # This is an OTLP receiver for mobile SDKs in the field — there is no
+            # browser and no session to gate on. The paths are already narrowed to
+            # /v1/traces and /v1/metrics, and the pod's own NetworkPolicy
+            # (networkpolicy-rum-gateway.yaml) is what contains it.
+            openbank.io/ungated-machine-callers: >-
+              Mobile OTLP/HTTP export from SDKs in the field; no browser session
+              exists to authenticate against.
             nginx.ingress.kubernetes.io/limit-rps: "20"
             nginx.ingress.kubernetes.io/limit-burst-multiplier: "3"
             nginx.ingress.kubernetes.io/proxy-body-size: "512k"

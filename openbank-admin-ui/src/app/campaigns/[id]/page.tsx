@@ -37,12 +37,23 @@ interface Send {
   occurredAt: string
 }
 
+interface SendPage {
+  items: Send[]
+  total: number
+  page: number
+  size: number
+}
+
 type Detail = {
   campaign: Campaign | null
   enrolments: Enrolment[]
-  sends: Send[]
+  sends: SendPage
+  sendSummary: Record<string, number>
   sources: Record<string, string>
 }
+
+/** Outcomes the send-log filter offers, in the order an operator scans them. */
+const OUTCOMES = ['SENT', 'FAILED', 'SUPPRESSED_CONSENT', 'SUPPRESSED_CAP', 'SUPPRESSED_QUIET_HOURS'] as const
 
 /**
  * Outcome colouring, passed explicitly rather than added to the shared tone map (see `tone.ts`:
@@ -72,6 +83,9 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   const [detail, setDetail] = useState<Detail | null>(null)
   const [unavailable, setUnavailable] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
+  // Bumped after a lifecycle action so the screen re-reads the campaign rather than guessing the
+  // new state locally — the service owns the state machine and may refuse a transition.
+  const [reloadToken, setReloadToken] = useState(0)
 
   useEffect(() => {
     if (!id) return
@@ -86,11 +100,109 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       })
       .catch(() => setUnavailable('unreachable'))
       .finally(() => setLoading(false))
-  }, [id])
+  }, [id, reloadToken])
 
   const c = detail?.campaign
-  const sends = detail?.sends ?? []
-  const suppressed = sends.filter(s => s.outcome.startsWith('SUPPRESSED')).length
+
+  // The bundle carries page 0; every later page and every filter change comes from the dedicated
+  // sends route, so turning a page does not re-read the campaign and its enrolments.
+  const [sendOverride, setSendOverride] = useState<SendPage | null>(null)
+  const [sendState, setSendState] = useState<string>('ok')
+  const [outcomeFilter, setOutcomeFilter] = useState<string>('')
+  const [sendsLoading, setSendsLoading] = useState(false)
+
+  const sendPage = sendOverride ?? detail?.sends ?? { items: [], total: 0, page: 0, size: 50 }
+  const sends = sendPage.items
+
+  // Lifecycle actions (ADR-0221 D2). Which ones are offered follows the campaign's own state
+  // machine; whether the caller may run them is decided by OPA, and the domain re-asserts
+  // maker != checker on activate. The UI renders capability, the policy decides it.
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [acting, setActing] = useState(false)
+
+  const runAction = (action: string) => {
+    setActing(true)
+    setActionError(null)
+    fetch(`/api/campaigns/${encodeURIComponent(id ?? '')}/actions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action }),
+    })
+      .then(r => r.json())
+      .then((d: { state: string; error?: string }) => {
+        if (d.state === 'ok') {
+          // Drop the paged override too: after a transition the first page is the right thing to
+          // show, and keeping page 7 of a log that just changed is a stale view of a new state.
+          setSendOverride(null)
+          setReloadToken(n => n + 1)
+          return
+        }
+        // The service answers a refused transition with the invariant that blocked it — including
+        // "the approver must differ from the creator". That sentence IS the four-eyes gate becoming
+        // visible; replacing it with "action failed" would make a working control look like a bug.
+        setActionError(
+          d.error ??
+            (d.state === 'forbidden'
+              ? t('Nemáte oprávnění k této akci.', 'You are not permitted to do that.')
+              : t('Campaign-service neodpovídá.', 'Campaign-service is not responding.')),
+        )
+      })
+      .catch(() => setActionError(t('Campaign-service neodpovídá.', 'Campaign-service is not responding.')))
+      .finally(() => setActing(false))
+  }
+
+  const actionsFor = (state?: string): string[] => {
+    switch (state) {
+      case 'DRAFT':
+        return ['submit']
+      case 'PENDING_APPROVAL':
+        return ['activate']
+      case 'ACTIVE':
+        return ['enrol', 'pause', 'close']
+      case 'PAUSED':
+        return ['resume', 'close']
+      default:
+        return []
+    }
+  }
+
+  const actionLabel = (a: string): string =>
+    ({
+      submit: t('Odeslat ke schválení', 'Submit for approval'),
+      activate: t('Schválit a spustit', 'Approve and activate'),
+      pause: t('Pozastavit', 'Pause'),
+      resume: t('Obnovit', 'Resume'),
+      close: t('Uzavřít', 'Close'),
+      enrol: t('Zařadit publikum', 'Enrol audience'),
+    })[a] ?? a
+
+  const loadSends = (page: number, outcome: string) => {
+    setSendsLoading(true)
+    const qs = new URLSearchParams({ page: String(page), size: String(sendPage.size || 50) })
+    if (outcome) qs.set('outcome', outcome)
+    fetch(`/api/campaigns/${encodeURIComponent(id ?? '')}/sends?${qs.toString()}`)
+      .then(r => r.json())
+      .then((d: SendPage & { state: string }) => {
+        setSendState(d.state)
+        // A failed page must not replace a good one with an empty table — that renders as
+        // "nothing was suppressed", the misreading this screen exists to prevent.
+        if (d.state === 'ok') setSendOverride({ items: d.items, total: d.total, page: d.page, size: d.size })
+      })
+      .catch(() => setSendState('unreachable'))
+      .finally(() => setSendsLoading(false))
+  }
+
+  const applyFilter = (outcome: string) => {
+    setOutcomeFilter(outcome)
+    loadSends(0, outcome)
+  }
+  const summary = detail?.sendSummary ?? {}
+
+  // From the server-side summary, never from the loaded page: a headline derived from the rows on
+  // screen understates every campaign larger than one page.
+  const suppressed = Object.entries(summary)
+    .filter(([outcome]) => outcome.startsWith('SUPPRESSED'))
+    .reduce((n, [, count]) => n + count, 0)
 
   const fmtDateTime = (iso: string | null | undefined) =>
     iso
@@ -130,9 +242,9 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
 
   // Suppressions grouped by reason: "2 suppressed" tells an operator something is off,
   // "2 × quiet hours" tells them whether to act.
-  const byReason = sends
-    .filter(s => s.outcome.startsWith('SUPPRESSED'))
-    .reduce<Record<string, number>>((acc, s) => ({ ...acc, [s.outcome]: (acc[s.outcome] ?? 0) + 1 }), {})
+  const byReason = Object.fromEntries(
+    Object.entries(summary).filter(([outcome, count]) => outcome.startsWith('SUPPRESSED') && count > 0),
+  )
 
   return (
     <div className="space-y-6">
@@ -145,6 +257,36 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         subtitle={c?.goal}
         icon={<Megaphone className="h-6 w-6" />}
       />
+
+      {/* Only the transitions this state actually allows are offered. Rendering every button and
+          letting the service reject four of them teaches operators that red messages are normal,
+          which is how a real refusal stops being read. */}
+      {!loading && !unavailable && c && actionsFor(c.state).length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {actionsFor(c.state).map(a => (
+            <button
+              key={a}
+              onClick={() => runAction(a)}
+              disabled={acting}
+              className="rounded-md border px-3 py-1.5 text-sm disabled:opacity-40"
+            >
+              {actionLabel(a)}
+            </button>
+          ))}
+          {c.state === 'PENDING_APPROVAL' && (
+            // Said out loud, because the refusal is otherwise indistinguishable from a bug: the
+            // approver is taken from the token, so the person who created it cannot approve it.
+            <span className="text-xs text-muted-foreground">
+              {t(
+                `Schválit musí někdo jiný než ${c.createdBy}.`,
+                `Someone other than ${c.createdBy} must approve this.`,
+              )}
+            </span>
+          )}
+        </div>
+      )}
+
+      {actionError && <p className="text-sm text-red-600">{actionError}</p>}
 
       {loading && <p className="text-sm text-muted-foreground">{t('Načítám…', 'Loading…')}</p>}
       {!loading && unavailable && (
@@ -242,6 +384,34 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 </table>
               </div>
             )}
+
+            {sends.length > 0 && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">
+                  {/* The range and the total together: "1–50" alone cannot distinguish the whole
+                      log from the first slice of a much larger one. */}
+                  {t('Zobrazeno', 'Showing')} {sendPage.page * sendPage.size + 1}–
+                  {sendPage.page * sendPage.size + sends.length} {t('z', 'of')}{' '}
+                  {sendPage.total.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}
+                </span>
+                <span className="flex gap-2">
+                  <button
+                    onClick={() => loadSends(sendPage.page - 1, outcomeFilter)}
+                    disabled={sendPage.page === 0 || sendsLoading}
+                    className="rounded-md border px-2 py-1 text-xs disabled:opacity-40"
+                  >
+                    {t('Předchozí', 'Previous')}
+                  </button>
+                  <button
+                    onClick={() => loadSends(sendPage.page + 1, outcomeFilter)}
+                    disabled={(sendPage.page + 1) * sendPage.size >= sendPage.total || sendsLoading}
+                    className="rounded-md border px-2 py-1 text-xs disabled:opacity-40"
+                  >
+                    {t('Další', 'Next')}
+                  </button>
+                </span>
+              </div>
+            )}
           </section>
 
           <section className="space-y-2">
@@ -260,9 +430,36 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 'Quiet hours: 21:00–08:00. Sends in that window are suppressed (ADR-0200 D6).',
               )}
             </p>
-            {detail?.sources.sends !== 'ok' ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="outcome-filter" className="text-xs text-muted-foreground">
+                {t('Výsledek', 'Outcome')}
+              </label>
+              <select
+                id="outcome-filter"
+                value={outcomeFilter}
+                onChange={e => applyFilter(e.target.value)}
+                className="rounded-md border bg-transparent px-2 py-1 text-sm"
+              >
+                <option value="">{t('Vše', 'All')}</option>
+                {OUTCOMES.map(o => (
+                  <option key={o} value={o}>
+                    {outcomeLabel(o)}
+                    {summary[o] !== undefined ? ` (${summary[o]})` : ''}
+                  </option>
+                ))}
+              </select>
+              {sendsLoading && <span className="text-xs text-muted-foreground">{t('Načítám…', 'Loading…')}</span>}
+            </div>
+
+            {detail?.sources.sends !== 'ok' || sendState !== 'ok' ? (
               <DataUnavailable
-                kind={detail?.sources.sends === 'unauthorized' ? 'unauthorized' : detail?.sources.sends === 'not_deployed' ? 'not_deployed' : 'unreachable'}
+                kind={
+                  detail?.sources.sends === 'unauthorized' || sendState === 'unauthorized'
+                    ? 'unauthorized'
+                    : detail?.sources.sends === 'not_deployed'
+                      ? 'not_deployed'
+                      : 'unreachable'
+                }
                 service="Campaign-service"
                 feature={t('Log odeslání', 'Send log')}
                 dense

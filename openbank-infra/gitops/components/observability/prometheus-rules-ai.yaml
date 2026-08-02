@@ -1,0 +1,184 @@
+# AI / LLM cost and reliability rules (ADR-0112, ADR-0174).
+#
+# Why these live here and not in LiteLLM: the gateway is the natural choke point and it does ship a
+# Prometheus exporter, but that exporter is a LiteLLM **Enterprise** feature — verified against
+# upstream docs (docs.litellm.ai/docs/proxy/prometheus, "Enterprise LiteLLM Only") before choosing
+# an approach, not assumed. So the tokens are counted client-side instead, by DomainMetrics on the
+# three code paths that make real /chat/completions calls, and this file turns those counts into
+# spend and into alerts.
+#
+# What this replaces: FinOpsAgentTokenBudgetExceeded in prometheus-rules-finops.yaml was written
+# against langfuse_agent_tokens_total / langfuse_model_cost_per_token / langfuse_agent_daily_budget_usd.
+# Langfuse has never been deployed — it appears nowhere in gitops — so that alert could not fire,
+# and its own annotation said so. An alert that documents its own inertness is still an alert nobody
+# can act on; it is removed in the same PR that adds these.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-ai-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    # ── Price book ────────────────────────────────────────────────────────────
+    #
+    # USD per token, as a recording rule rather than a constant in Kotlin, so a provider's rate-card
+    # change is a gitops edit that reloads in place instead of a redeploy of every LLM caller — and
+    # so a wrong price is visible in one file rather than compiled into the fleet.
+    #
+    # `kind` matches the label DomainMetrics emits on openbank_llm_tokens_total, so the join below
+    # is on (model, kind) and prompt/completion are priced separately — every provider charges
+    # different rates for the two, so a combined total cannot be costed at all.
+    #
+    # `price_source` is carried deliberately: it is the difference between a number we can defend
+    # and one we cannot, and it stays visible on the dashboard rather than living in a comment.
+    - name: openbank.ai.price-book
+      interval: 1h
+      rules:
+        # Authoritative: BerriAI/litellm model_prices_and_context_window.json, entry
+        # `groq/llama-3.3-70b-versatile` — $0.59/M input, $0.79/M output.
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.00000059)
+          labels:
+            model: llama-3.3-70b-versatile
+            kind: prompt
+            price_source: litellm-map
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.00000079)
+          labels:
+            model: llama-3.3-70b-versatile
+            kind: completion
+            price_source: litellm-map
+        # APPROXIMATE. LiteLLM's price map has no `deepinfra/deepseek-ai/DeepSeek-V3.2` entry — the
+        # newest DeepInfra DeepSeek it knows is V3.1 ($0.27/M input, $1.00/M output), used here as
+        # the nearest published sibling. Every panel and alert built on this carries
+        # price_source="nearest-sibling" so the estimate is never mistaken for a billed figure.
+        # Replace with the real rate card when DeepInfra publishes V3.2, or when the invoice
+        # disagrees — the invoice is the authority, this is a leading indicator.
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.00000027)
+          labels:
+            model: deepseek-ai/DeepSeek-V3.2
+            kind: prompt
+            price_source: nearest-sibling
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.00000100)
+          labels:
+            model: deepseek-ai/DeepSeek-V3.2
+            kind: completion
+            price_source: nearest-sibling
+
+    # ── Derived spend ─────────────────────────────────────────────────────────
+    - name: openbank.ai.spend
+      interval: 5m
+      rules:
+        # Spend per model over 24h. `group_left(price_source)` carries the provenance through, so a
+        # panel can show which figures are estimates without a second query.
+        - record: openbank:llm_cost_usd_24h:by_model
+          expr: |
+            sum by (model, price_source) (
+              increase(openbank_llm_tokens_total[24h])
+              * on (model, kind) group_left (price_source) openbank:llm_price_usd_per_token
+            )
+        # Fleet total. Deliberately re-derived from the same join rather than summing the rule
+        # above, so a model missing from the price book is missing from BOTH and cannot silently
+        # inflate one while deflating the other.
+        - record: openbank:llm_cost_usd_24h:total
+          expr: |
+            sum (
+              increase(openbank_llm_tokens_total[24h])
+              * on (model, kind) group_left () openbank:llm_price_usd_per_token
+            )
+        # Tokens seen for a model with NO price-book entry. This is the metric that makes the price
+        # book falsifiable: add a model to the gateway and forget this file, and the spend figures
+        # stay quietly and wrongly low. `unless on (model)` is the whole point — a plain sum would
+        # not notice.
+        #
+        # No `group_left` here: `unless` is a set operator, not a join, and Prometheus rejects a
+        # grouping modifier on it outright ("no grouping allowed for 'unless' operation"). Written
+        # with one first; promtool caught it, which is the only reason this file is not a rule group
+        # Prometheus silently refuses to load.
+        - record: openbank:llm_tokens_unpriced_24h
+          expr: |
+            sum by (model) (
+              increase(openbank_llm_tokens_total[24h])
+              unless on (model) openbank:llm_price_usd_per_token
+            )
+
+    # ── Alerts ────────────────────────────────────────────────────────────────
+    - name: openbank.ai.alerts
+      interval: 5m
+      rules:
+        # The real replacement for FinOpsAgentTokenBudgetExceeded. Threshold is a plain USD/day
+        # ceiling on the whole fleet rather than a per-agent budget: per-agent budgets need
+        # LiteLLM virtual keys backed by a Postgres, which this gateway does not have yet
+        # (tracked separately). A fleet ceiling is enforceable today and is what actually protects
+        # the card.
+        - alert: AiFleetDailySpendHigh
+          expr: openbank:llm_cost_usd_24h:total > 25
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+            route: finops-agent
+          annotations:
+            summary: "LLM fleet spend {{ $value | printf \"%.2f\" }} USD/24h exceeds the 25 USD ceiling"
+            description: >-
+              Rolling 24h token spend across every model. Derived from openbank_llm_tokens_total
+              and the openbank:llm_price_usd_per_token price book; figures whose price_source is
+              "nearest-sibling" are estimates, so confirm against the provider invoice before
+              treating the absolute number as billed. Break down by model on the AI dashboard.
+
+        # A model burning tokens that nothing prices. Not a cost alert — a *trust* alert about the
+        # cost figures themselves.
+        - alert: AiSpendUnpriced
+          expr: openbank:llm_tokens_unpriced_24h > 0
+          for: 1h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Model {{ $labels.model }} has no entry in the LLM price book"
+            description: >-
+              openbank_llm_tokens_total carries tokens for {{ $labels.model }}, but
+              openbank:llm_price_usd_per_token has no (model, kind) pair for it, so every spend
+              figure on the AI dashboard UNDERSTATES the real cost by this model's share. Add the
+              model to the price-book group in prometheus-rules-ai.yaml.
+
+        # Reliability. Deliberately excludes not_configured: a never-seeded agent is a different
+        # problem with a different fix, and folding it in here would make the error rate unusable.
+        - alert: AiCallErrorRateHigh
+          expr: |
+            100 * (
+              sum by (model) (rate(openbank_llm_requests_total{outcome=~"http_error|exception"}[15m]))
+              /
+              sum by (model) (rate(openbank_llm_requests_total{outcome!="not_configured"}[15m]))
+            ) > 20
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "{{ $value | printf \"%.0f\" }}% of LLM calls to {{ $labels.model }} are failing"
+            description: >-
+              Every caller degrades to a deterministic fallback on a failed LLM call, so this does
+              NOT page — nothing is down. It means the AI features are silently off: the agents
+              still answer, with their non-model path. Check the gateway pod, the provider status
+              and the API key.
+
+        # The gap this whole PR exists to close. An agent whose key was never seeded returns null
+        # forever and logs one warning at startup; nothing else anywhere says so.
+        - alert: AiCallsNotConfigured
+          expr: sum by (model) (increase(openbank_llm_requests_total{outcome="not_configured"}[1h])) > 0
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "LLM calls for {{ $labels.model }} are being skipped — no API key seeded"
+            description: >-
+              A caller attempted an LLM call and skipped it because its API key is blank, degrading
+              to the deterministic fallback. This is the documented safe mode (an unseeded key must
+              not CrashLoop the pod), but it is not a steady state: the feature is off. Seed the key
+              via ESO/OpenBao.

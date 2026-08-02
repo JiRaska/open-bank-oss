@@ -91,11 +91,13 @@ jobs:
                   skipped.append((svc, "no application.yaml or openapi.yaml")); continue
               raw = app.read_text()
               port = re.search(r"^  http:\n(?:.*\n)?\s*port:\s*(\d+)", raw, re.M)
-              db = re.search(r"jdbc:postgresql://[^/]+/([A-Za-z0-9_]+)", raw)
+              # Reactive-only services carry no jdbc: URL (their Agroal datasource is
+              # supplied at boot below). The DB name is in the reactive URL all the same.
+              db = re.search(r"(?:jdbc:)?(?:vertx-reactive:)?postgresql://[^/]+/([A-Za-z0-9_]+)", raw)
               if not port:
                   skipped.append((svc, "no derivable quarkus.http.port")); continue
               if not db:
-                  skipped.append((svc, "no jdbc:postgresql URL — the harness cannot provision its DB")); continue
+                  skipped.append((svc, "no postgresql:// URL — the harness cannot provision its DB")); continue
               keep.append(svc)
 
           for svc, why in skipped:
@@ -176,7 +178,7 @@ jobs:
             # Derive the HTTP port and database name from the service's own
             # config — no per-service table to rot.
             PORT="$(grep -m1 -A3 '^  http:' "$APP_YAML" | grep -m1 'port:' | grep -oE '[0-9]+')"
-            DB="$(grep -m1 'jdbc:postgresql://' "$APP_YAML" | sed -E 's|.*/([A-Za-z0-9_]+).*|\1|')"
+            DB="$(grep -m1 -E 'postgresql://' "$APP_YAML" | sed -E 's|.*/([A-Za-z0-9_]+).*|\1|')"
             DBUSER="$(grep -m1 '^    username:' "$APP_YAML" | awk '{print $2}')"
             echo "==> [${svc}] port=${PORT} db=${DB} user=${DBUSER}"
 
@@ -207,6 +209,7 @@ jobs:
             # (the transactional outbox keeps brokers out of the request path).
             echo "==> [${svc}] starting quarkusDev"
             ./gradlew ":${svc}:quarkusDev" \
+              -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
               -Dquarkus.console.basic=true \
               --console=plain --quiet \
               > "fuzz-reports/${svc}-boot.log" 2>&1 &

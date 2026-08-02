@@ -74,7 +74,11 @@ class FxResource(private val fxUseCase: FxUseCase, private val cnbIngestion: Cnb
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
     @Authorize(action = "fx.convert", resource = "")
     @Operation(summary = "Execute FX conversion")
-    suspend fun convert(req: ConvertRequest, @HeaderParam("Idempotency-Key") key: String): Response {
+    suspend fun convert(req: ConvertRequest?, @HeaderParam("Idempotency-Key") key: String): Response {
+        // A JSON `null` body deserialises to null despite the non-nullable Kotlin type, so the
+        // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
+        // IllegalArgumentException to 400.
+        requireNotNull(req) { "request body is required" }
         require(key.isNotBlank()) { "Idempotency-Key required" }
         val conv = fxUseCase.convert(
             ConvertCommand(
