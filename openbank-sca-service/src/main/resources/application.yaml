@@ -36,19 +36,19 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: vertx-reactive:postgresql://localhost:5432/openbank_sca
+    # The DEFAULT (Agroal/JDBC) datasource Flyway migrates. Declaring only the reactive URL leaves
+    # it unconfigured, and `migrate-at-start` then kills the boot with "Unable to find datasource
+    # '<default>' … Bean is not active: SYNTHETIC bean [class=AgroalDataSource]" — so the service
+    # could start only where the gitops env supplied QUARKUS_DATASOURCE_JDBC_URL, never from this
+    # file alone, including for `quarkusDev` (#3080). The env var still wins in the cluster.
+    jdbc:
+      url: ${QUARKUS_DATASOURCE_JDBC_URL:jdbc:postgresql://localhost:5432/openbank_sca}
 
   flyway:
     migrate-at-start: true
     connect-retries: 10
     connect-retries-interval: 2S
     locations: db/migration
-    datasource:
-      db-kind: postgresql
-      username: openbank
-      password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
-      jdbc:
-        url: jdbc:postgresql://localhost:5432/openbank_sca
-
   hibernate-orm:
     database:
       generation: none

@@ -963,6 +963,22 @@ gates:
     run: |
       python3 .github/scripts/check-kafka-topics-exist.py --enforce
 
+  # Five money-path services could not start from their committed configuration: each declared
+  # only a REACTIVE datasource URL, so the default Agroal (JDBC) datasource Flyway migrates was
+  # never configured and the boot died with "Unable to find datasource '<default>'". They ran in
+  # the cluster only because the gitops env supplied QUARKUS_DATASOURCE_JDBC_URL; `quarkusDev`
+  # and the fuzz harness (#3039) got the failure. Three carried a `quarkus.flyway.datasource:`
+  # MAPPING that reads as the fix and is not — that key names which datasource to use, it does
+  # not define one. Decidable from one committed file, so no boot and no cluster.
+  - id: flyway-default-datasource
+    name: "Flyway default datasource (issue #3080, enforced)"
+    group: data
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-flyway-default-datasource.py --selftest
+    run: |
+      python3 .github/scripts/check-flyway-default-datasource.py --enforce
+
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
     group: data
