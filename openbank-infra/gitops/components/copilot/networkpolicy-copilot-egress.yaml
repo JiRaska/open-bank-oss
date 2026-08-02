@@ -1,0 +1,75 @@
+# Egress lockdown for copilot-service (ADR-0175 §4).
+#
+# The platform namespace now contains two LiteLLM callers: agent-service and copilot-service. The
+# gateway in ai-platform is the ONLY workload permitted to leave the cluster to a hosted LLM
+# provider, so the caller pod itself must be default-deny for internet egress and may reach only the
+# gateway plus its in-cluster dependencies.
+#
+# Hand-written and DELIBERATELY named networkpolicy-*.yaml (not network-policies.yaml) so
+# gen-network-policies.py — which owns/overwrites network-policies.yaml and emits INGRESS only —
+# never clobbers it (ADR-0081). Ingress for this pod stays generator-owned; this file is egress-only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: copilot-service-egress-allow-list
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: copilot-service
+    app.kubernetes.io/part-of: platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: copilot-service
+  policyTypes:
+    - Egress
+  egress:
+    # DNS resolution.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Hosted-model leg — always through the in-cluster LiteLLM gateway, never directly to the provider.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ai-platform
+      ports:
+        - protocol: TCP
+          port: 4000
+    # Same-namespace dependency: redis session/token store.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: copilot-redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Customer JWT verification (Keycloak JWKS / metadata).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: iam
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Customer data reads go through the BFF, not directly to banking services.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: customer-edge
+      ports:
+        - protocol: TCP
+          port: 8128
+    # OTLP traces to Tempo.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - protocol: TCP
+          port: 4317
