@@ -183,6 +183,18 @@ gates:
       python3 .github/scripts/check-litellm-model-costs.py --self-test
       python3 .github/scripts/check-litellm-model-costs.py --enforce
 
+  - id: scheduled-trigger-emitted
+    name: a declared SCHEDULED trigger must actually be emitted (an unreachable schedule fails silently)
+    group: kotlin
+    mode: enforced
+    run: |
+      # Falsified in three directions before wiring in: a new unemitted service fails, a
+      # baselined service that becomes covered ALSO fails (so the list cannot rot), and the
+      # tree as committed passes. 9 self-test cases, including comment-only mentions and
+      # Kotlin's NESTED block comments.
+      python3 .github/scripts/check-scheduled-trigger-emitted.py --self-test
+      python3 .github/scripts/check-scheduled-trigger-emitted.py --enforce
+
   - id: agent-virtual-keys
     name: every agent authenticates with its OWN LiteLLM virtual key, not the shared master key
     group: gitops
