@@ -203,7 +203,15 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY openbank-admin-ui/ ./
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_STANDALONE=true
-RUN npm run build
+# Source-map upload to GlitchTip (#3235). The token arrives as a BuildKit SECRET, not a build arg:
+# an ARG is recorded in `docker history` and would ship the credential inside the image everyone
+# can pull. The mount exists only for the lifetime of this RUN.
+#
+# Absent secret = no upload and a normal build, so local and PR builds are unaffected and this can
+# never become the reason a build fails.
+RUN --mount=type=secret,id=glitchtip_token \
+    SENTRY_AUTH_TOKEN="$(cat /run/secrets/glitchtip_token 2>/dev/null || true)" \
+    npm run build
 
 # ──────────────────────────────────────────────────────────────────────
 # Stage 4: Runtime image — minimal surface, non-root.
