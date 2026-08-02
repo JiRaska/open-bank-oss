@@ -337,9 +337,59 @@ jobs:
 
   # Single required status check that aggregates the matrix, so branch protection
   # can require "Services CI / all-green" without enumerating every service.
+  # Human PRs never get their verification metadata refreshed: the producer
+  # (dependabot-verification-metadata.yml) is gated on
+  # `github.actor == 'dependabot[bot]'`, deliberately, because it pushes a commit
+  # back to the PR branch. So this VERIFIES instead of writing — regeneration runs
+  # against a throwaway copy and the committed file is restored, which keeps that
+  # trust boundary intact while still catching an unpinned artifact. See #3218.
+  #
+  # Scoped to the modules whose build files changed, not the fleet: a full-fleet
+  # regeneration is ~20 min and a `quarkusBuild` variant OOM'd after 3h40m.
+  verification-metadata:
+    name: verification-metadata
+    needs: [changes]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Derive changed Gradle modules
+        id: mods
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "modules=" >> "$GITHUB_OUTPUT"
+            echo "No usable base sha — skipping."; exit 0
+          fi
+          # Only module-level build files matter; a root or build-logic change is
+          # out of scope here and would fan out to the whole fleet.
+          mods="$(git diff --name-only "$base"...HEAD \
+                    | grep -E '^openbank-[^/]+/build\.gradle\.kts$' \
+                    | cut -d/ -f1 | sort -u | paste -sd, -)"
+          echo "modules=${mods}" >> "$GITHUB_OUTPUT"
+          echo "changed modules: ${mods:-<none>}"
+
+      - uses: actions/setup-java@v4
+        if: steps.mods.outputs.modules != ''
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: gradle
+
+      - name: Check verification metadata covers the changed modules
+        if: steps.mods.outputs.modules != ''
+        run: |
+          python3 .github/scripts/check-verification-metadata-complete.py \
+            --modules "${{ steps.mods.outputs.modules }}" --enforce
+
   all-green:
     name: all-green
-    needs: [changes, build]
+    needs: [changes, build, verification-metadata]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -348,6 +398,9 @@ jobs:
         run: |
           if [ "${{ needs.build.result }}" = "failure" ] || [ "${{ needs.build.result }}" = "cancelled" ]; then
             echo "One or more service builds failed."; exit 1
+          fi
+          if [ "${{ needs.verification-metadata.result }}" = "failure" ]; then
+            echo "verification-metadata check failed (#3218)."; exit 1
           fi
           echo "All changed services built green (or nothing to build)."
 
