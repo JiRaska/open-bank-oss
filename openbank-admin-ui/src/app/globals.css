@@ -193,6 +193,22 @@ main {
 .badge-neutral { background: var(--surface-3);  color: var(--text-secondary); border: 1px solid var(--border-strong); }
 .badge-accent  { background: var(--ob-accent-light); color: var(--ob-accent-text); border: 1px solid var(--ob-accent-border); }
 
+/* ── Funnel bar (ADR-0208 D2 vocabulary, solid variant) ──
+   A proportion bar is not a chip. The `.badge-*` rules are pale backgrounds tuned so DARK TEXT sits
+   on them legibly, which makes them the wrong fill for a 14px bar carrying no text: at that size the
+   success and info pastels are barely distinguishable, and each segment's 1px border reads as noise
+   rather than structure. These use the SAME semantic variables at full saturation, so the meaning
+   stays in one place and only the presentation differs. Colour still never leaves this file. */
+.funnel-bar { display: flex; height: 14px; width: 100%; overflow: hidden; border-radius: 999px;
+              background: var(--surface-3); }
+.funnel-seg { height: 100%; border: 0; transition: width 240ms ease; }
+.funnel-seg-success { background: var(--success); }
+.funnel-seg-info    { background: var(--info); }
+.funnel-seg-warning { background: var(--warning); }
+.funnel-seg-danger  { background: var(--danger); }
+/* Neutral must stay visible against the track it sits on, so it is a mid grey, not the track grey. */
+.funnel-seg-neutral { background: var(--text-secondary); opacity: 0.45; }
+
 /* ── Button ── */
 @layer components {
   .btn {

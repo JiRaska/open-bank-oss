@@ -21,6 +21,35 @@ permissions:
   contents: read
   id-token: write
 
+# Collapse duplicate dispatches for the SAME provider. The reconciler
+# (.github/workflows/pact-verification-reconcile.yml) dispatches once per provider that
+# owes a verification, so a fleet-wide libs change that makes many consumers republish
+# would otherwise queue one run per tick per provider onto a six-runner ARC pool that
+# already wedges for hours (#2039).
+#
+# cancel-in-progress is FALSE, and the reasoning behind the original `true` is worth
+# keeping because it was wrong in an instructive way. The argument was: a provider
+# verification is not incremental — it verifies every consumer pact currently required of
+# that provider — so the newest run is a strict superset of any run it cancels, and
+# cancelling the older one loses nothing. That is true about the WORK. It silently assumed
+# the runs get to RUN.
+#
+# They did not. With the pool saturated, a dispatched verification sits queued for longer
+# than the reconciler's 30-minute interval, so every tick cancelled the still-queued
+# predecessor and dispatched a fresh one that queued behind the same wall. Observed on
+# openbank-kyc-service: runs at 12:25 and 12:31 both cancelled, a third queued at 12:49 —
+# the verification never executed, the strand never cleared, and the reconciler kept
+# reporting a successful dispatch every time. A livelock that looks like it is working.
+#
+# With `false`, GitHub holds the newer run as pending and cancels older PENDING runs
+# instead, so duplicates are still collapsed to one — but a run that is already underway
+# is never killed, which is the only property that actually mattered. The exact wrong
+# assumption to avoid re-making: "superseding is free" is only true when the thing being
+# superseded was making progress.
+concurrency:
+  group: verify-provider-${{ inputs.service }}
+  cancel-in-progress: false
+
 jobs:
   verify:
     uses: ./.github/workflows/_service-ci.yml

@@ -8,6 +8,7 @@
 # openbank-infra/scripts/seed-vault-gaps.sh, which generates random creds and writes:
 #   vault kv put openbank/pact-broker username=ci password=<rand> \
 #     read-only-username=viewer read-only-password=<rand>
+#
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:

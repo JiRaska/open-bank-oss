@@ -26,6 +26,13 @@ import java.time.OffsetDateTime
 import java.util.UUID
 
 @Entity
+// `columnDefinition = "char(3)"` on every `currency` below is not decoration. V1/V4 declare these
+// columns CHAR(3); `length = 3` alone makes Hibernate expect varchar(3), and schema validation
+// reports "wrong column type encountered in column [currency]" (#3081). Five tables carry it —
+// loan_application, loan, installment, collateral, loan_provisioning — and validation aborts on
+// the first, which is why the issue names only one. settlement_quote (V10) is genuinely VARCHAR(3)
+// and is deliberately left alone. The migrations are applied, so their checksums are frozen: the
+// entities are what move.
 @Table(name = "loan_application")
 class LoanApplicationEntity : PanacheEntityBase() {
     @Id
@@ -38,7 +45,7 @@ class LoanApplicationEntity : PanacheEntityBase() {
     @Column(name = "requested_amount", precision = 20, scale = 2)
     var requestedAmount: BigDecimal = BigDecimal.ZERO
 
-    @Column(name = "currency", length = 3)
+    @Column(name = "currency", length = 3, columnDefinition = "char(3)")
     var currency: String = "EUR"
 
     @Column(name = "nominal_annual_rate", precision = 10, scale = 6)
@@ -138,7 +145,7 @@ class LoanEntity : PanacheEntityBase() {
     @Column(name = "principal", precision = 20, scale = 2)
     var principal: BigDecimal = BigDecimal.ZERO
 
-    @Column(name = "currency", length = 3)
+    @Column(name = "currency", length = 3, columnDefinition = "char(3)")
     var currency: String = "EUR"
 
     @Column(name = "nominal_annual_rate", precision = 10, scale = 6)
@@ -196,7 +203,7 @@ class InstallmentEntity : PanacheEntityBase() {
     @Column(name = "due_date")
     var dueDate: LocalDate = LocalDate.EPOCH
 
-    @Column(name = "currency", length = 3)
+    @Column(name = "currency", length = 3, columnDefinition = "char(3)")
     var currency: String = "EUR"
 
     @Column(name = "opening_balance", precision = 20, scale = 2)
@@ -247,7 +254,7 @@ class CollateralEntity : PanacheEntityBase() {
     @Column(name = "market_value", precision = 20, scale = 2)
     var marketValue: BigDecimal = BigDecimal.ZERO
 
-    @Column(name = "currency", length = 3)
+    @Column(name = "currency", length = 3, columnDefinition = "char(3)")
     var currency: String = "EUR"
 
     @Column(name = "haircut", precision = 5, scale = 4)
@@ -305,7 +312,7 @@ class LoanProvisioningEntity : PanacheEntityBase() {
     @Column(name = "outstanding_balance", precision = 20, scale = 2)
     var outstandingBalance: BigDecimal = BigDecimal.ZERO
 
-    @Column(name = "currency", length = 3)
+    @Column(name = "currency", length = 3, columnDefinition = "char(3)")
     var currency: String = "EUR"
 
     @Column(name = "days_past_due")

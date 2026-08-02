@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.20.3...lending-service-v0.21.0) (2026-08-02)
+
+
+### Features
+
+* **lending:** customer self-service loan application intake (ADR-0211) ([#3197](https://github.com/JiRaska/open-bank-oss/issues/3197)) ([3848b5c](https://github.com/JiRaska/open-bank-oss/commit/3848b5c25ab638765c355414fd04c773997d43c5))
+
+## [0.20.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.20.2...lending-service-v0.20.3) (2026-08-02)
+
+
+### Bug Fixes
+
+* **lending,domestic:** align the entities with the DDL their own migrations create ([#3211](https://github.com/JiRaska/open-bank-oss/issues/3211)) ([0fbd745](https://github.com/JiRaska/open-bank-oss/commit/0fbd74595bd7b1401de5e67838b3cb0e7eed0722))
+
 ## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.20.1...lending-service-v0.20.2) (2026-08-01)
 
 

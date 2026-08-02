@@ -83,13 +83,28 @@ spec:
           # DaemonSet overhead by ~180Mi — a key ingredient of the 4Gi-node memory
           # exhaustion / reclaim-livelock hangs. The request must reflect reality
           # for Karpenter's bin-packing to be honest.
+          # 512Mi → 768Mi (2026-08-02). Measured with Loki HEALTHY, so this is the
+          # steady state and not a backlog artefact: across the 20 pods that were
+          # still alive, median 415Mi / p90 452Mi / max 458Mi against a 512Mi cap —
+          # 14 of 20 over 400Mi. Six more had already been OOMKilled, so the true
+          # requirement is above 458Mi; those are survivors.
+          #
+          # The OOMs were NOT a consequence of Loki being full, which is what I
+          # first assumed: all six died 3-4 minutes AFTER Loki was ready and
+          # draining. 512Mi is simply undersized for the log volume on the busiest
+          # nodes.
+          #
+          # FinOps: only the LIMIT moves; the 320Mi request is unchanged, so
+          # Karpenter's bin-packing and node count are unaffected. The cost is
+          # headroom the pods may use, not capacity reserved up front — and the
+          # alternative is a DaemonSet that crashloops and drops the fleet's logs.
           resources:
             requests:
               cpu: 50m
               memory: 320Mi
             limits:
               cpu: 300m
-              memory: 512Mi
+              memory: 768Mi
           configMap:
             content: |-
               // ---- discover every pod on this node ----

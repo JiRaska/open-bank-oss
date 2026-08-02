@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.82.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.82.0...admin-ui-v0.82.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** stage the origination Kotlin so the image build can derive its graph ([#3286](https://github.com/JiRaska/open-bank-oss/issues/3286)) ([a585898](https://github.com/JiRaska/open-bank-oss/commit/a5858989fdeab10f447e41ad5dfba26934802f36))
+
+## [0.82.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.81.0...admin-ui-v0.82.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** draw the campaign journey as a flow, not a bar ([#3262](https://github.com/JiRaska/open-bank-oss/issues/3262)) ([9bbec95](https://github.com/JiRaska/open-bank-oss/commit/9bbec95dca6cff2f0c1c0abd95c0363facc3253b))
+
+## [0.81.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.80.2...admin-ui-v0.81.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** show a loan application's real path through the ADR-0211 lifecycle ([#3236](https://github.com/JiRaska/open-bank-oss/issues/3236)) ([451012a](https://github.com/JiRaska/open-bank-oss/commit/451012a65899851ecec56264b6258ba9b1c4e8c7))
+
+## [0.80.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.80.1...admin-ui-v0.80.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop tagging every GlitchTip event with a release nobody ships ([#3243](https://github.com/JiRaska/open-bank-oss/issues/3243)) ([8d321a8](https://github.com/JiRaska/open-bank-oss/commit/8d321a801c5cefa93f3f3a44bf2e77ab5aaf455a))
+
+## [0.80.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.80.0...admin-ui-v0.80.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** the campaign detail bundle handed journey the summary result ([#3213](https://github.com/JiRaska/open-bank-oss/issues/3213)) ([37a132a](https://github.com/JiRaska/open-bank-oss/commit/37a132a6fd568e292d9401f71b742f6515ef6d4b))
+
+## [0.80.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.79.0...admin-ui-v0.80.0) (2026-08-01)
+
+
+### Features
+
+* **admin-ui:** a four-eyes console for credit compliance pack activation ([#3190](https://github.com/JiRaska/open-bank-oss/issues/3190)) ([8642767](https://github.com/JiRaska/open-bank-oss/commit/86427672456506b28894536d47a0b6db20cbcd90))
+
+## [0.79.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.78.2...admin-ui-v0.79.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** show the journey as a funnel, not a table of enums ([#3191](https://github.com/JiRaska/open-bank-oss/issues/3191)) ([6bc3dda](https://github.com/JiRaska/open-bank-oss/commit/6bc3dda5b1ec1ab094335dfcf23e6c6337552aa4))
+
 ## [0.78.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.78.1...admin-ui-v0.78.2) (2026-08-01)
 
 

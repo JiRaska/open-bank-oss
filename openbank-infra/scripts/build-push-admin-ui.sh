@@ -317,7 +317,18 @@ fi
 # Context is the repo root: the Dockerfile collects every openbank-*/docs tree and
 # COPYs openbank-admin-ui/ in. Build args carry the provenance into the image.
 echo "==> docker buildx build + push"
+# GLITCHTIP_AUTH_TOKEN (optional) enables source-map upload — passed as a BuildKit secret so it is
+# never recorded in the image history. Unset means a normal build with no upload (#3235).
+SECRET_ARGS=()
+if [ -n "${GLITCHTIP_AUTH_TOKEN:-}" ]; then
+  SECRET_ARGS+=(--secret "id=glitchtip_token,env=GLITCHTIP_AUTH_TOKEN")
+  echo "    sourcemaps: upload ENABLED"
+else
+  echo "    sourcemaps: no GLITCHTIP_AUTH_TOKEN — upload skipped"
+fi
+
 docker buildx build \
+  "${SECRET_ARGS[@]}" \
   --platform "${PLATFORM}" \
   --file openbank-admin-ui/Dockerfile \
   --build-arg "BUILD_VERSION=${BUILD_VERSION}" \

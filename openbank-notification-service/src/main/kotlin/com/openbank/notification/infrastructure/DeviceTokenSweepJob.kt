@@ -8,6 +8,7 @@ import com.openbank.notification.infrastructure.persistence.repository.DeviceTok
 import io.quarkus.logging.Log
 import io.quarkus.scheduler.Scheduled
 import io.quarkus.scheduler.Scheduled.ConcurrentExecution.SKIP
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import java.time.Clock
@@ -20,8 +21,15 @@ import java.time.temporal.ChronoUnit
  * until they re-register on next launch — this reduces delivery noise and limits the blast
  * radius of a token database compromise.
  *
- * The job is intentionally fire-and-forget (Uni.subscribe): a failure is logged but does not
- * surface as a Quarkus Scheduler failure (which would create alert noise for a non-critical job).
+ * A failure is caught and logged rather than propagated, so it does not surface as a Quarkus
+ * Scheduler failure (which would create alert noise for a non-critical job).
+ *
+ * The method MUST stay a `suspend fun`. It used to be a plain method that `subscribe()`d the
+ * pipeline, which meant it ran on a bare `executor-thread` with no Vert.x context and
+ * [DeviceTokenRepository.sweepStale]'s `Panache.withTransaction` threw `HR000068` on every single
+ * firing — so no stale token was ever retired (#2913 fleet sweep). Subscribing rather than
+ * awaiting does not help: the subscription still starts on the scheduler's thread
+ * (`rules.yaml: scheduled_methods`).
  */
 @ApplicationScoped
 class DeviceTokenSweepJob {
@@ -32,16 +40,18 @@ class DeviceTokenSweepJob {
     @Inject
     lateinit var clock: Clock
 
+    // TooGenericExceptionCaught: a non-critical nightly sweep must not surface as a Quarkus
+    // Scheduler failure — ANY fault is logged and tomorrow's tick sweeps the same rows again.
+    @Suppress("TooGenericExceptionCaught")
     @Scheduled(cron = "0 0 3 * * ?", identity = "device-token-stale-sweep", concurrentExecution = SKIP)
-    fun sweepStaleTokens() {
+    suspend fun sweepStaleTokens() {
         val threshold = Instant.now(clock).minus(STALE_DAYS, ChronoUnit.DAYS)
-        repo.sweepStale(threshold)
-            .subscribe().with(
-                { count ->
-                    if (count > 0) Log.infof("Swept %d stale device tokens (threshold %s)", count, threshold)
-                },
-                { err -> Log.errorf(err, "Failed to sweep stale device tokens") },
-            )
+        try {
+            val count = repo.sweepStale(threshold).awaitSuspending()
+            if (count > 0) Log.infof("Swept %d stale device tokens (threshold %s)", count, threshold)
+        } catch (err: Exception) {
+            Log.errorf(err, "Failed to sweep stale device tokens")
+        }
     }
 
     companion object {

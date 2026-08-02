@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.10.0
+  version: 1.11.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -52,6 +52,39 @@ paths:
           description: Applications for the party
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/intake/applications:
+    post:
+      tags: [Lending]
+      operationId: submitCustomerIntake
+      summary: Submit a loan application on behalf of an authenticated customer (customer-edge only)
+      description: >-
+        Customer self-service origination intake (ADR-0211). The party id is taken from the
+        X-Customer-Party-Id header set by customer-edge from the customer JWT — never from the body.
+        Price, jurisdiction and product type are lending-side configuration, so an applicant can
+        neither price their own loan nor choose which ADR-0212 compliance pack judges them. Only the
+        configured customer-edge service principal may call it; any other caller is refused 403.
+        This is the MAKER leg only — the application still needs a human four-eyes decision.
+      parameters:
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerIntakeRequest'
+      responses:
+        '201':
+          description: Application accepted into the origination graph
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: Refused by the origination guard (e.g. no active compliance pack)
   /api/v1/lending/applications/{id}:
     get:
       tags: [Lending]
@@ -641,6 +674,21 @@ components:
       properties:
         amount: { type: number }
         currency: { type: string, description: ISO-4217 currency code }
+    CustomerIntakeRequest:
+      type: object
+      required: [amount, termMonths]
+      description: >-
+        What a customer app may state. Note what is absent — partyId, nominalAnnualRate,
+        jurisdiction, productType. Those are the trusted header and server configuration
+        respectively; accepting any of them from the applicant would let them submit for another
+        party, price their own loan, or select the compliance pack that judges them.
+      properties:
+        amount:
+          type: number
+          description: Requested principal, in the configured self-service currency.
+        termMonths:
+          type: integer
+          description: Requested term. Bounds are server configuration; outside them is a 400.
     LoanApplicationRequest:
       type: object
       required: [partyId, requestedAmount, nominalAnnualRate, termPeriods, firstDueDate]

@@ -1,0 +1,76 @@
+# Dispatch a provider's verification when a consumer has published a pact it has not
+# verified (ADR-0092).
+#
+# WHY: a provider only ever verified a consumer's pact when the PROVIDER itself next
+# happened to build, so a consumer could sit UNVERIFIED indefinitely — openbank-lending-service
+# did, for five hours on 2026-08-01, failing 33 of 40 auto-deploy runs while can-i-deploy
+# was right every time. There was simply nothing that made the provider look. Full
+# reasoning, and the two states it deliberately does NOT act on, in
+# .github/scripts/pact-reconcile-verifications.py.
+#
+# WHY POLLING AND NOT A BROKER WEBHOOK: the push version needs a GitHub token stored in
+# the Pact Broker, which is internet-facing (a documented ADR-0056 exception) — that turns
+# a broker compromise into CI-execution capability and adds a credential nothing tracks
+# the rotation of. This needs NO new secret: PACT_BROKER_* already exists for
+# publish/can-i-deploy, and the dispatch uses this job's own GITHUB_TOKEN, narrowed to
+# `actions: write` for the length of one job. The cost is poll latency against a strand
+# that ran for five hours.
+name: Pact verification reconcile
+
+on:
+  schedule:
+    # Every 30 minutes. The strand this fixes lasted five hours, so the interval is not
+    # the constraint; keeping it off a 15-minute cadence keeps the scheduled-run count
+    # (and the API calls behind it) modest for something that is usually a no-op.
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      dispatch:
+        description: "Actually dispatch verifications (unchecked = report only)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  # The whole point of the reconciler over the webhook: the only credential that can
+  # start a workflow is this one, it exists for the length of this job, and nothing
+  # outside GitHub ever holds it.
+  actions: write
+
+concurrency:
+  group: pact-verification-reconcile
+  cancel-in-progress: true
+
+jobs:
+  reconcile:
+    name: reconcile
+    # The broker is reachable over its public ingress (pact.open-bank.tech), so this does
+    # NOT need the self-hosted pool — which matters, because the pool being saturated is
+    # half of what strands pacts in the first place (#2039). Public repo ⇒ hosted minutes
+    # are free.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Reconcile pact verifications
+        env:
+          PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
+          PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
+          PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A manual run defaults to dispatching; `false` makes it a dry run. The
+          # scheduled run always dispatches — a reconciler that only ever reported
+          # would be a report nobody reads.
+          DO_DISPATCH: ${{ github.event_name != 'workflow_dispatch' || inputs.dispatch }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PACT_BROKER_URL}" ]; then
+            # Not a silent skip: without the broker URL this job would "succeed" having
+            # checked nothing, which is indistinguishable from a clean fleet.
+            echo "::error::PACT_BROKER_URL is not set — refusing to report success about a check that did not run."
+            exit 1
+          fi
+          ARGS=""
+          if [ "${DO_DISPATCH}" = "true" ]; then ARGS="--dispatch"; fi
+          python3 .github/scripts/pact-reconcile-verifications.py $ARGS
