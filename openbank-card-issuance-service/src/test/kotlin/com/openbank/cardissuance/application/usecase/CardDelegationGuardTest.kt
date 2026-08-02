@@ -41,19 +41,16 @@ class CardDelegationGuardTest {
         coEvery { cardRepository.findById(cardId) } returns card
     }
 
-    private fun grant(
-        capabilities: Set<String>,
-        validTo: OffsetDateTime? = now.plusDays(30),
-        grantor: UUID = holder,
-    ) = DelegatedCardGrant(
-        id = UUID.randomUUID(),
-        cardId = cardId,
-        grantorPartyId = grantor,
-        granteePartyId = delegate,
-        capabilities = capabilities,
-        validFrom = now.minusDays(1),
-        validTo = validTo,
-    )
+    private fun grant(capabilities: Set<String>, validTo: OffsetDateTime? = now.plusDays(30), grantor: UUID = holder) =
+        DelegatedCardGrant(
+            id = UUID.randomUUID(),
+            cardId = cardId,
+            grantorPartyId = grantor,
+            granteePartyId = delegate,
+            capabilities = capabilities,
+            validFrom = now.minusDays(1),
+            validTo = validTo,
+        )
 
     /**
      * The defect this guard shipped without, kept as the test that fails if the conjunct is removed.
