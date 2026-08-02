@@ -152,7 +152,10 @@ class SavingsProposalResource(private val proposalService: SavingsProposalServic
     ): ProposalResponse = ProposalResponse.from(proposalService.cancel(accountId, proposalId, caller(callerPartyId)))
 
     /** Fail closed: a call with no attributable caller is refused, never defaulted. */
-    private fun caller(callerPartyId: UUID?): UUID = callerPartyId
+    // FALSIFICATION PROBE — REVERTED IN THE NEXT COMMIT. Ignores the header entirely, so any
+    // request that actually travels through this resource resolves to a party with no grant.
+    // Invisible to the unit tests, which call SavingsProposalService directly.
+    private fun caller(callerPartyId: UUID?): UUID = UUID(0L, 0L).takeIf { true } ?: callerPartyId
         ?: throw ProposalForbiddenException(
             "${AccountResource.CUSTOMER_PARTY_HEADER} is required — the caller's party cannot come from the request",
         )
