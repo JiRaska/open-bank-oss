@@ -353,13 +353,30 @@ gates:
   # in exactly that state (issue #1444); sdd-db had been failing every WAL archive for three
   # days. NOT diff-scoped: it runs against whole repo state, because the gap is a MISSING
   # pair, and a PR that adds only the gitops half would not touch the .tf side at all.
-  # ADVISORY for now — add --enforce to flip.
+  #
+  # ENFORCED since 2026-08-02, and the reason is that advisory demonstrably did not work: on
+  # that day delegation-db shipped in exactly this state, the gate printed the warning naming
+  # the cluster and the one-line fix, and the change merged anyway. That is the fourth
+  # occurrence of a defect this gate was built to end.
+  #
+  # An advisory verdict is right where a human still has judgement to exercise. Here there is
+  # none left: "this database declares a backup and cannot possibly authenticate to perform
+  # it" is not a style opinion, it is a database with no recovery point, and the failure is
+  # invisible until someone needs a restore. Advisory only made it mergeable.
+  #
+  # Scope note — `mode: enforced` ALONE is vacuous for this checker (the repo has paid for
+  # that once already): it prints ::warning and exits 0 unless passed --enforce, so both
+  # halves are needed and both are set below. Verified falsifiable against the real defect,
+  # not a fixture: --enforce exits 1 on the unfixed tree and 0 with delegation added. The
+  # goalert-db finding stays a ::warning under --enforce by design — a cluster backing up to
+  # a bucket outside Terraform is a governance question with a real choice in it, which is
+  # exactly where advisory belongs.
   - id: db-backup-association-gate
-    name: "db-backup association gate — every backed-up CNPG cluster has pod identity (advisory)"
+    name: "db-backup association gate — every backed-up CNPG cluster has pod identity (enforced)"
     group: gitops
-    mode: advisory
+    mode: enforced
     run: |
-      python3 openbank-infra/scripts/check-db-backup-associations.py
+      python3 openbank-infra/scripts/check-db-backup-associations.py --enforce
 
   # A probed or scraped port must be a port the service opens (issue #2872, item 1).
   #
