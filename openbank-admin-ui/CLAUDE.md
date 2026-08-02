@@ -136,6 +136,36 @@ always mounted, never conditionally hidden.
 a page hand-rolls an agent-finding renderer (the HITL lifecycle `proposed/approved/rejected` status-map
 signature) instead of importing `AgentInsightsPanel`. New agent surfaces must comply from day one.
 
+### 7. Bearer-relay rule — a BFF route calls an OIDC-gated backend with the operator's token, or not at all
+
+Every `openbank-*` service is OIDC-gated (`quarkus.oidc` + `@RolesAllowed`). The browser holds a NextAuth
+**session cookie**, not a bearer, so a server-side route that just `fetch`es a backend sends **no
+credential** and gets a 401 — from a perfectly healthy service. The page then blames the operator: the
+sanctions screen rendered *"Vypršela relace"* (session expired) at a freshly signed-in operator, its list
+tab rendered *"Invalid JSON"* (a 401 body is not the JSON the route parsed), and the security screen
+printed *"scanner HTTP 401"*. Three routes, all wrong the same way, because each hand-rolled its own
+`fetch` (#3336).
+
+**The rule:** a route that reaches a cluster service goes through a shared upstream helper —
+`src/lib/sanctions/upstream.ts` and `src/lib/closings/upstream.ts` are the pattern, and the generic
+`/api/svc` proxy documents the reasoning. The helper `auth()`s server-side, sends
+`Authorization: Bearer <session.user.accessToken>`, and **returns 401 before touching a backend** when
+there is no session (ADR-0056: the BFF must never be an unauthenticated relay into the cluster). A
+per-route `fetch` is a per-route opportunity to omit the header again.
+
+Two corollaries, both learned the same day:
+- **Never pass an upstream error body to the browser.** Replace it with a generic envelope
+  (`{error:"upstream_error"}`) and log the detail server-side (ADR-0080 P1). Forwarding it is how
+  `{error:"Invalid JSON"}` became operator-facing copy.
+- **Map a backend 401/403 to `kind: 'unauthorized'`, never to a status string.** `classifyBffFailure`
+  already does this for the `/api/svc` proxy; a route with its own envelope (like `/api/security`) must
+  carry the same case, or it prints `scanner HTTP 401` at someone whose session is fine.
+
+**Verifying it:** mock `@/auth`, assert `new Headers(init.headers).get('Authorization')` on the outgoing
+`fetch`, and assert that a session-less call never calls `fetch` at all — see
+`src/test/sanctions-security-bff-auth.test.ts`. Run the assertions against the *unfixed* route first; a
+bearer test that has only ever seen the fixed code proves nothing.
+
 ## Versioning
 
 **Do not hand-edit `version.txt` or `package.json` `version` — a feature PR touches neither.**
