@@ -91,7 +91,34 @@ selftest() {
     echo "selftest FAIL: a governance catalog matched the global paths — that is data, not a compile input" >&2
     fail=1
   fi
-  [ "$fail" -eq 0 ] && echo "selftest OK: declaration matcher and both path matchers verified in both directions."
+  # END-TO-END exit status. Everything above tests the matchers in-process, which is why this
+  # script could exit 1 on the commonest input in production while the selftest stayed green: the
+  # caller consumes the script as a command substitution under `set -e`, so its EXIT STATUS is part
+  # of the contract and has to be exercised by actually running it.
+  local out rc
+  # (a) No libs module changed — the overwhelmingly common push. Must be exit 0 and no output.
+  out="$(printf 'openbank-fraud-service/src/main/kotlin/X.kt\n' \
+    | bash "$0" "openbank-fraud-service" 2>/dev/null)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "selftest FAIL: a push touching no libs module exited $rc — 'no dependents' is a normal answer" >&2
+    fail=1
+  elif [ -n "$out" ]; then
+    echo "selftest FAIL: a push touching no libs module printed '$out'" >&2
+    fail=1
+  fi
+  # (b) A libs module changed, but NO consumer of it is in ALL_SERVICES — so every comparison in
+  #     the intersection loop fails, including the last one. (An empty argument cannot be used
+  #     here: `${1:?}` rejects it as a usage error, which is a legitimate non-zero.)
+  printf 'openbank-libs-temporal/src/main/kotlin/X.kt\n' | bash "$0" "openbank-not-a-real-service" >/dev/null 2>&1 \
+    || { echo "selftest FAIL: dependents outside ALL_SERVICES made the script exit non-zero" >&2; fail=1; }
+  # (c) The positive path still works end to end.
+  out="$(printf 'openbank-libs-temporal/src/main/kotlin/X.kt\n' \
+    | bash "$0" "openbank-fx-service openbank-fraud-service" 2>/dev/null)" \
+    || { echo "selftest FAIL: a real libs change exited non-zero" >&2; fail=1; }
+  command grep -qx openbank-fx-service <<< "$out" || {
+    echo "selftest FAIL: a libs-temporal change did not yield fx-service end to end" >&2; fail=1; }
+
+  [ "$fail" -eq 0 ] && echo "selftest OK: matchers verified in both directions, and the exit status verified end to end."
   return "$fail"
 }
 
@@ -122,8 +149,31 @@ done
 
 # Intersect with ALL_SERVICES: a consumer that this pipeline cannot build (a different pipeline
 # owns it, or it has no gitops manifest) must never enter the build set.
-printf '%s\n' $DEPENDENTS | command grep -v '^$' | sort -u | while read -r svc; do
+#
+# "No dependents" is the NORMAL answer, not an error — most pushes touch no libs module at all.
+# Under `set -euo pipefail` this block had two silent routes to exit 1, and the caller consumes it
+# as `LIBS_DEPENDENTS="$( … | bash this-script … )"` under `set -e`, so either one killed the
+# "Detect changed services" step with **no output whatsoever** and every push-triggered auto-deploy
+# run went red without deploying anything (era 2 of #3403; runs from 14:56 on 2026-08-02 onward):
+#   1. an empty $DEPENDENTS means `grep -v '^$'` matches nothing and exits 1, which pipefail
+#      propagates as the pipeline's status;
+#   2. even with dependents, the `while` loop's status is its body's last command — so if the last
+#      service read is NOT in $ALL_SERVICES, the inner `for` ends on a failed `[ … ]` and the loop
+#      exits 1 too.
+# Hence the guarded grep AND the explicit `exit 0`: this script's contract is "print the dependents,
+# possibly none", and only a real error (a missing argument, an unreadable build file) may be
+# non-zero. `--selftest` covers both routes.
+# `if` rather than `[ … ] && echo && break`: a `for` whose last statement is a FAILED `[ … ]`
+# returns 1, which becomes the `while` body's status, then the loop's, then the pipeline's — and
+# `set -e` aborts there, before any trailing `exit 0` can run. An `if` with no `else` returns 0
+# when its condition is false, so the loop ends cleanly whether or not the last service matched.
+printf '%s\n' $DEPENDENTS | { command grep -v '^$' || true; } | sort -u | while read -r svc; do
   for known in $ALL_SERVICES; do
-    [ "$svc" = "$known" ] && echo "$svc" && break
+    if [ "$svc" = "$known" ]; then
+      echo "$svc"
+      break
+    fi
   done
 done
+
+exit 0
