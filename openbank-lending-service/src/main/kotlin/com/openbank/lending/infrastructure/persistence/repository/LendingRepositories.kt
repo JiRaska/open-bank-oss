@@ -302,6 +302,16 @@ class ProvisioningRepositoryImpl @Inject constructor(
     }
 }
 
+// Column positions of the aggregate SELECTs. Named because the query and the fold that reads it sit
+// far apart in this file: `row[4]` says nothing at the point of use, and a column added to the
+// SELECT silently shifts every later index.
+private const val COL_STATUS = 0
+private const val COL_CURRENCY = 1
+private const val COL_COUNT = 2
+private const val COL_APP_OLDEST = 3
+private const val COL_APP_SUM = 4
+private const val COL_LOAN_SUM = 3
+
 /**
  * Fold `(status, currency, count, oldest, sum)` tuples into one entry per status.
  *
@@ -311,14 +321,19 @@ class ProvisioningRepositoryImpl @Inject constructor(
  */
 internal fun foldApplicationSummaries(rows: List<Array<Any?>>): List<ApplicationStateSummary> {
     val byStatus = LinkedHashMap<String, MutableList<Array<Any?>>>()
-    for (r in rows) byStatus.getOrPut(r[0].toString()) { mutableListOf() }.add(r)
+    for (r in rows) byStatus.getOrPut(r[COL_STATUS].toString()) { mutableListOf() }.add(r)
     return byStatus.map { (status, group) ->
         ApplicationStateSummary(
             status = status,
-            count = group.sumOf { (it[2] as Number).toLong() },
-            oldestCreatedAt = group.mapNotNull { it[3] as? java.time.OffsetDateTime }.minOrNull(),
+            count = group.sumOf { (it[COL_COUNT] as Number).toLong() },
+            oldestCreatedAt = group.mapNotNull { it[COL_APP_OLDEST] as? java.time.OffsetDateTime }.minOrNull(),
             requested = group
-                .map { MoneyTotal(it[1].toString().trim(), (it[4] as? BigDecimal) ?: BigDecimal.ZERO) }
+                .map {
+                    MoneyTotal(
+                        it[COL_CURRENCY].toString().trim(),
+                        (it[COL_APP_SUM] as? BigDecimal) ?: BigDecimal.ZERO,
+                    )
+                }
                 .sortedBy { it.currency },
         )
     }.sortedBy { it.status }
@@ -327,13 +342,18 @@ internal fun foldApplicationSummaries(rows: List<Array<Any?>>): List<Application
 /** As [foldApplicationSummaries], for `(status, currency, count, sum)` loan tuples. */
 internal fun foldLoanSummaries(rows: List<Array<Any?>>): List<LoanStateSummary> {
     val byStatus = LinkedHashMap<String, MutableList<Array<Any?>>>()
-    for (r in rows) byStatus.getOrPut(r[0].toString()) { mutableListOf() }.add(r)
+    for (r in rows) byStatus.getOrPut(r[COL_STATUS].toString()) { mutableListOf() }.add(r)
     return byStatus.map { (status, group) ->
         LoanStateSummary(
             status = status,
-            count = group.sumOf { (it[2] as Number).toLong() },
+            count = group.sumOf { (it[COL_COUNT] as Number).toLong() },
             principal = group
-                .map { MoneyTotal(it[1].toString().trim(), (it[3] as? BigDecimal) ?: BigDecimal.ZERO) }
+                .map {
+                    MoneyTotal(
+                        it[COL_CURRENCY].toString().trim(),
+                        (it[COL_LOAN_SUM] as? BigDecimal) ?: BigDecimal.ZERO,
+                    )
+                }
                 .sortedBy { it.currency },
         )
     }.sortedBy { it.status }
