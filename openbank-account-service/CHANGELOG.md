@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.17.0...account-service-v0.18.0) (2026-08-02)
+
+
+### Features
+
+* **account:** savings-goal delegation + propose-only withdrawal flow (ADR-0232 D3/D8) ([#3143](https://github.com/JiRaska/open-bank-oss/issues/3143)) ([18bcac7](https://github.com/JiRaska/open-bank-oss/commit/18bcac75a2b3ea8fccee6f831043607b862586ae))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.16.2...account-service-v0.17.0) (2026-08-02)
 
 
