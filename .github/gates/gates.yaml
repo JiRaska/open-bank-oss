@@ -159,6 +159,16 @@ gates:
   # PyYAML is not stdlib: try multiple install paths for portability across
   # macOS (system python3 without pip, Homebrew pip3) and Linux ARC runners
   # (pip/pip3 not in PATH). Fall back to checking if pyyaml is already present.
+  - id: litellm-model-costs
+    name: every gateway model declares a per-token price (an unpriced model costs $0 and voids every budget)
+    group: gitops
+    mode: enforced
+    run: |
+      # Falsified both ways before wiring in: 4 findings against the unpriced tree, 0 after,
+      # 9 self-test cases including an explicit zero (which must NOT be treated as a price).
+      python3 .github/scripts/check-litellm-model-costs.py --self-test
+      python3 .github/scripts/check-litellm-model-costs.py --enforce
+
   - id: agent-virtual-keys
     name: every agent authenticates with its OWN LiteLLM virtual key, not the shared master key
     group: gitops
