@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.3.1...delegation-service-v0.3.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **delegation:** put the validity window and the ceiling on the events that grant authority ([#3411](https://github.com/JiRaska/open-bank-oss/issues/3411)) ([f75fe6d](https://github.com/JiRaska/open-bank-oss/commit/f75fe6d3af521b10d171c3dd5643829fe91be0c8))
+
 ## [0.3.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.3.0...delegation-service-v0.3.1) (2026-08-02)
 
 
