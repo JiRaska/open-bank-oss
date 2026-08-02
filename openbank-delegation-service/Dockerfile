@@ -1,42 +1,34 @@
-FROM eclipse-temurin:25-jdk@sha256:dfc0093e3dbf43dae57827111c6e374f5b44fac19a9451584b2b336b81474d64 AS build
-WORKDIR /build
-
-# The root settings.gradle.kts is the entry point for every openbank-* module and it
-# `includeBuild("build-logic")` for the `openbank.quarkus-service` convention plugin,
-# so the wrapper, the root build files and build-logic all have to be in the context —
-# not just the service directory. gradle.properties matters too: it carries
-# org.gradle.dependency.verification=lenient, so omitting it silently builds the
-# image under Gradle's default STRICT verification - different rules than the repo.
-COPY gradle /build/gradle
-COPY gradlew gradle.properties build.gradle.kts settings.gradle.kts /build/
-COPY build-logic /build/build-logic
-# ADR-0122 split the shared code into sibling top-level modules; `COPY openbank-libs`
-# alone leaves `project(":openbank-libs-domain")` etc. unresolvable at configuration time.
-COPY openbank-libs /build/openbank-libs
-COPY openbank-libs-domain /build/openbank-libs-domain
-COPY openbank-libs-runtime /build/openbank-libs-runtime
-COPY openbank-libs-temporal /build/openbank-libs-temporal
-COPY openbank-libs-testing /build/openbank-libs-testing
-COPY openbank-delegation-service /build/openbank-delegation-service
-
-RUN chmod +x gradlew && \
-    ./gradlew :openbank-delegation-service:quarkusBuild \
-      -Dquarkus.package.jar.type=fast-jar \
-      --no-daemon \
-      --console=plain
+# NOT a build recipe — and it never was one.
+#
+# The image is built by .github/workflows/Dockerfile.deploy from a quarkus-app/
+# produced host-side (auto-deploy.yml, ghcr-publish.yml,
+# openbank-infra/scripts/build-push-service.sh). Those three read exactly ONE thing
+# from this file: the EXPOSE line, used to set the container port (falling back to
+# 8080 when absent).
+#
+# This file was born with a Gradle build stage, and unlike the 51 #3016 measured it
+# would have worked — it did COPY build-logic, gradle.properties and the ADR-0122 libs
+# siblings, which is exactly what made the others unbuildable. That made it worse, not
+# better: a second and genuinely buildable definition of how the image is made, free to
+# drift from the one that actually runs. It now mirrors Dockerfile.deploy, so what it
+# says is what actually happens.
+#
+# Adding a build stage back here is enforced against by
+# .github/scripts/check-dockerfile-no-build-stage.py (#3392).
 
 FROM eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0
 WORKDIR /app
 RUN addgroup -S openbank && adduser -S openbank -G openbank
 USER openbank
+COPY quarkus-app/lib/ /app/lib/
+COPY quarkus-app/*.jar /app/
+COPY quarkus-app/app/ /app/app/
+COPY quarkus-app/quarkus/ /app/quarkus/
 
-# fast-jar layout: build/quarkus-app/{lib,app,quarkus,quarkus-run.jar}. There is no
-# top-level <service>-<version>-runner.jar — that is the uber-jar output. Naming it
-# here also hardcoded a version that does not track version.txt.
-COPY --from=build /build/openbank-delegation-service/build/quarkus-app/lib/ /app/lib/
-COPY --from=build /build/openbank-delegation-service/build/quarkus-app/*.jar /app/
-COPY --from=build /build/openbank-delegation-service/build/quarkus-app/app/ /app/app/
-COPY --from=build /build/openbank-delegation-service/build/quarkus-app/quarkus/ /app/quarkus/
+# CycloneDX SBOM baked in by the deploy pipeline when the service produces one;
+# served live at /q/openbank/sbom (admin-ui Tech Inventory reads it).
+COPY sbom/bom.json /app/sbom/bom.json
+ENV OPENBANK_SBOM_PATH=/app/sbom/bom.json
 
 EXPOSE 8126
-ENTRYPOINT ["java", "-XX:+UseZGC", "-Djava.util.logging.manager=org.jboss.logmanager.LogManager", "-jar", "/app/quarkus-run.jar"]
+ENTRYPOINT ["java","-XX:+UseZGC","-Djava.util.logging.manager=org.jboss.logmanager.LogManager","-jar","/app/quarkus-run.jar"]
