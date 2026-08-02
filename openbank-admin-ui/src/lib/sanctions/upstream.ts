@@ -34,12 +34,21 @@ const BASE = process.env.SANCTIONS_SERVICE_URL ?? 'http://openbank-sanctions-ser
  *
  * `body` is sent as JSON when present. `timeoutMs` defaults to a read-shaped 10s; the
  * screening and refresh calls do real work upstream and pass a longer budget.
+ *
+ * `extraHeaders` exists for the four-eyes retry and is not optional decoration: the maker's
+ * second call must carry `X-Approval-Id`, which `AuthorizeInterceptor.resolveApprovalIdHeader`
+ * reads off the REQUEST. Dropping it does not error — the interceptor simply mints a fresh
+ * PendingApproval and answers 202 again, so the operator loops forever with every individual
+ * call looking healthy. Never let a caller reach the upstream except through this function;
+ * a per-route fetch is a per-route opportunity to forget a header (that is how all three
+ * original routes lost the bearer).
  */
 export async function forwardToSanctionsService(
   path: string,
-  method: 'GET' | 'POST' = 'GET',
+  method: 'GET' | 'PATCH' | 'POST' | 'PUT' = 'GET',
   body?: unknown,
   timeoutMs = 10_000,
+  extraHeaders?: Record<string, string>,
 ): Promise<NextResponse> {
   const accessToken = (await auth())?.user?.accessToken
   if (!accessToken) {
@@ -53,6 +62,10 @@ export async function forwardToSanctionsService(
         Authorization: `Bearer ${accessToken}`,
         Accept: 'application/json',
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        // Last, but Authorization is not overridable in practice: the only caller-supplied
+        // header today is X-Approval-Id, and the review route allow-lists what it forwards
+        // rather than passing the browser's headers through.
+        ...(extraHeaders ?? {}),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       cache: 'no-store',
