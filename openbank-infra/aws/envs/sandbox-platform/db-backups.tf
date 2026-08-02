@@ -212,6 +212,25 @@ locals {
     liveness         = { namespace = "control-liveness-sentinel", sa = "liveness-db" }
     product-catalog  = { namespace = "accounts", sa = "product-catalog-db" }
     releasesteward   = { namespace = "release-steward", sa = "releasesteward-db" }
+    # delegation-db is the FOURTH time this list has been the thing that lagged a new cluster,
+    # and the first one where the gate built to prevent it had already said so. It shipped
+    # 2026-08-02 with a barmanObjectStore, a ScheduledBackup, and no association, so every WAL
+    # archive failed from the first minute:
+    #
+    #   Barman cloud WAL archive check exception: Unable to locate credentials
+    #
+    # Confirmed the same way campaign was, rather than assumed: the pod carries no
+    # AWS_CONTAINER_CREDENTIALS_FULL_URI at all (accounts-db-1 does), so this is a missing
+    # association and not the #1759 admission-injection race a restart fixes. IMDS is
+    # unreachable from pods, so there is no fallback credential path — the archive can only
+    # ever fail.
+    #
+    # check-db-backup-associations.py flagged it correctly and the change merged anyway,
+    # because the gate was advisory. That is the actual defect this entry pays for, and it is
+    # fixed alongside: a check that can only ever be right about "this database has no
+    # backups" has no judgement left to exercise, so advisory just made it mergeable. The gate
+    # is now enforced.
+    delegation = { namespace = "delegation", sa = "delegation-db" }
   }
 }
 
