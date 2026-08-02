@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.6.0
+  version: 1.7.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -51,6 +51,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Campaign'
+  /api/v1/campaigns/summary:
+    get:
+      tags: [Campaigns]
+      operationId: campaignSummary
+      summary: Reach and delivery for every campaign
+      description: >-
+        The campaign list returns records only, so a console had no way to show whether anything
+        reached anyone without one request per campaign — an N+1 against a scale-to-zero service
+        (issue #3296). Answered here in three grouped queries. Suppression counts are carried
+        through rather than folded away: "2 sent" and "2 sent, 40 suppressed for consent" are
+        different campaigns, and only the second explains why reach was low.
+        NOTE the literal path segment: it must keep matching ahead of /api/v1/campaigns/{id}.
+      responses:
+        '200':
+          description: One entry per campaign
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CampaignSummary' }
   /api/v1/campaigns/{id}:
     get:
       tags: [Campaigns]
@@ -340,6 +360,34 @@ components:
         type: string
         format: uuid
   schemas:
+    OutcomeCount:
+      type: object
+      required: [outcome, count]
+      properties:
+        outcome: { type: string, description: A SendOutcome value. }
+        count: { type: integer, format: int64 }
+    CampaignSummary:
+      type: object
+      required: [campaignId, state, enrolled, outcomes, sent, suppressed, failed]
+      properties:
+        campaignId: { type: string, format: uuid }
+        state: { type: string }
+        enrolled:
+          type: integer
+          format: int64
+          description: >-
+            0 when nobody is enrolled yet — never null. "not enrolled" and "unknown" render the
+            same in a table and mean different things to whoever is judging the campaign.
+        outcomes:
+          type: array
+          description: Every outcome that actually occurred, suppressions included.
+          items: { $ref: '#/components/schemas/OutcomeCount' }
+        sent: { type: integer, format: int64 }
+        suppressed:
+          type: integer
+          format: int64
+          description: Sum of the ADR-0200 D6 suppression outcomes (cap, quiet hours, consent).
+        failed: { type: integer, format: int64 }
     Campaign:
       type: object
       properties:
