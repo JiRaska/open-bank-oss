@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.20.3...lending-service-v0.21.0) (2026-08-02)
+
+
+### Features
+
+* **lending:** customer self-service loan application intake (ADR-0211) ([#3197](https://github.com/JiRaska/open-bank-oss/issues/3197)) ([3848b5c](https://github.com/JiRaska/open-bank-oss/commit/3848b5c25ab638765c355414fd04c773997d43c5))
+
 ## [0.20.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.20.2...lending-service-v0.20.3) (2026-08-02)
 
 
