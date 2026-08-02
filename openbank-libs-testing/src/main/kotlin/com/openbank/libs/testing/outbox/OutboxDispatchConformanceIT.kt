@@ -104,7 +104,8 @@ abstract class OutboxDispatchConformanceIT {
             aggregateId = aggregateId,
             eventType = "test.event.posted",
             payload = """{"seq":1}""",
-            createdAt = Instant.now(),
+            // createdAt DELIBERATELY omitted: the default is what ~48 fleet call sites use, and
+            // passing it here is what made this suite blind to the epoch default (#3272).
         )
         val second = first.copy(eventId = Ids.newId(), payload = """{"seq":2}""")
         onEventLoop { seed(first) }
@@ -136,9 +137,18 @@ abstract class OutboxDispatchConformanceIT {
             val row = onEventLoop { findEntry(msg.eventId) }
             assertThat(row).describedAs("row for event ${msg.eventId}").isNotNull
             assertThat(row!!.status).isEqualTo(OutboxStatus.SENT)
-            assertThat(row.sentAt).isNotNull
             assertThat(row.attemptCount).isGreaterThanOrEqualTo(1)
             assertThat(row.lastError).isNull()
+            // `isNotNull` is what this used to assert, and Instant.EPOCH satisfies it. The claim
+            // query orders on created_at and the janitor prunes on updated_at, so a 1970 stamp is
+            // a live defect, not a cosmetic one (#3272).
+            assertThat(row.sentAt)
+                .describedAs("sentAt must be a real time — markSent's default reaches every row in the fleet")
+                .isNotNull
+                .isAfter(EPOCH_SANITY_FLOOR)
+            assertThat(row.createdAt)
+                .describedAs("createdAt must be a real time when the caller omits it")
+                .isAfter(EPOCH_SANITY_FLOOR)
         }
     }
 
@@ -165,5 +175,13 @@ abstract class OutboxDispatchConformanceIT {
             headerValue(it, OutboxKafkaHeaders.HEADER_EVENT_ID) == message.eventId.toString()
         }
         assertThat(secondPassCount).describedAs("SENT row must not be re-published on replay").isEqualTo(1)
+    }
+    private companion object {
+        /**
+         * Any real stamp is after this; `Instant.EPOCH` is not. Deliberately a floor rather than
+         * "within N seconds of now" — the point is to catch a 1970 default, not to police clock
+         * skew on a slow runner (#3272).
+         */
+        val EPOCH_SANITY_FLOOR: Instant = Instant.parse("2020-01-01T00:00:00Z")
     }
 }
