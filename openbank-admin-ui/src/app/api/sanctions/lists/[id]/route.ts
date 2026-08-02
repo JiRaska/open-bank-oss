@@ -2,26 +2,22 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-import { NextRequest, NextResponse } from 'next/server'
-
-const BASE = process.env.SANCTIONS_SERVICE_URL ?? 'http://openbank-sanctions-service:8123'
+import { NextRequest } from 'next/server'
+import { forwardToSanctionsService } from '@/lib/sanctions/upstream'
 
 export const dynamic = 'force-dynamic'
 
+/**
+ * Enable/disable a sanctions list, or patch its cron/source URL. Operator-mutating against an
+ * OIDC-gated upstream.
+ *
+ * Moved onto the shared helper in #3334. #3336 fixed `checks`, `lists` and `screen`, but this
+ * route and `lists/[id]/refresh` kept their own fetch and their own missing `Authorization`
+ * header — the same defect, on the same screen, still live. The old `catch` also returned the
+ * upstream error message verbatim, which #3336 removed everywhere else (ADR-0080 P1).
+ */
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try {
-    const { id } = await params
-    const body = await req.json()
-    const res = await fetch(`${BASE}/api/v1/sanctions/lists/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(body),
-      cache: 'no-store',
-      signal: AbortSignal.timeout(10_000),
-    })
-    const data = await res.json().catch(() => ({ error: 'Invalid JSON' }))
-    return NextResponse.json(data, { status: res.status })
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Update failed' }, { status: 502 })
-  }
+  const { id } = await params
+  const body = await req.json()
+  return forwardToSanctionsService(`/api/v1/sanctions/lists/${encodeURIComponent(id)}`, 'PUT', body)
 }
