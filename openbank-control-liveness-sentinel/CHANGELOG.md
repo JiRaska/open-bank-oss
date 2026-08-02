@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.6.1...control-liveness-sentinel-v0.7.0) (2026-08-02)
+
+
+### Features
+
+* **control-liveness-sentinel:** run the daily check on a schedule, not only when asked ([#3339](https://github.com/JiRaska/open-bank-oss/issues/3339)) ([0dad251](https://github.com/JiRaska/open-bank-oss/commit/0dad2515909de6df8657230edddd7a5bbe5f0d88)), closes [#2239](https://github.com/JiRaska/open-bank-oss/issues/2239)
+
 ## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.6.0...control-liveness-sentinel-v0.6.1) (2026-08-02)
 
 
