@@ -337,6 +337,24 @@ gates:
     run: |
       python3 .github/scripts/check-oidc-client-secret-wiring.py --enforce
 
+  # A GitOps config that DECLARES a messaging channel must not deploy ahead of an image
+  # that can SERVE it. openbank-card-issuance-service died at boot for an hour on
+  # 2026-08-02 — money-path — with SRMSG00071, because the msg-override ConfigMap carried
+  # `mp.messaging.incoming.delegation-events-in.*` while the pinned image was eight days
+  # older and had no `connector:` for that channel. Both halves were correct on main and
+  # every gate was green; they simply reached the cluster at different times, because the
+  # deploy gate was blocked while GitOps flowed unimpeded. SmallRye treats a declared
+  # channel with no connector as a HARD BOOT FAILURE, so this does not degrade a service,
+  # it stops it starting. Checkable offline because the image tag IS a git sha.
+  - id: msg-channel-image-parity
+    name: "messaging channel is servable by the image actually deployed (SRMSG00071)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-msg-channel-image-parity.py --self-test
+    run: |
+      python3 .github/scripts/check-msg-channel-image-parity.py
+
   - id: gitops-ref-integrity-guard
     name: "gitops ref-integrity guard (referenced Secret/ConfigMap => declared)"
     group: gitops
