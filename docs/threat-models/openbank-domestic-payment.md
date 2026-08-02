@@ -177,3 +177,31 @@ not change any existing request's outcome until explicitly flipped.
   separately-reviewed flip, not bundled with this change. No DB schema change (the AML case store's
   `alertCode` column already accepts arbitrary values); rollback = flip the flag back to `false` or
   revert the commit.
+
+- **2026-08-02** — **New inbound trust edge: the `delegation` namespace.** `#3414` added
+  `delegation` as an allowed ingress peer in this component's `network-policies.yaml`, so
+  `delegation-service` can now reach this service's API from inside the cluster. A NetworkPolicy is
+  coarse — it decides *reach*, not *permission* — so the actual authorization is unchanged and still
+  rests on OIDC (`@RolesAllowed`) plus the OPA sidecar (ADR-0034); this edge widens who may attempt a
+  call, not who may succeed. Risk class = **elevation of privilege** if a policy gap exists on an
+  endpoint that previously had no in-cluster caller: network reach was an implicit second control for
+  such endpoints and is now gone for this peer. Per ADR-0232 delegation-service holds
+  `DelegationGrant` and enforcement stays with the product services, which build their own local
+  projection — so a compromised or buggy delegation-service should not be able to grant access it
+  never had, and that property is the mitigation this edge depends on. Rollback: drop the
+  `namespaceSelector` entry for `delegation`. Recorded here because #3431's measurement showed this
+  change landed with no threat-model update.
+
+- **2026-08-02** — **New outbound trust edge: `account-service` party lookup.** `d949ce9ef` added
+  `AccountServiceClient.getById` (`GET /api/v1/accounts/{accountId}`) and wired `AmlCaseAdapter` to
+  call it with an OIDC client-credentials token, so an AML case carries the debtor's *party* id
+  rather than an account id (ADR-0032 follow-up, #3274). Risk class = **information disclosure**
+  (account→party linkage now crosses a service boundary) and **availability** (a second synchronous
+  dependency on the AML-case path). Mitigations already in the code: the call is bearer-authenticated
+  per request; every failure path is caught and returns `null`, so a lookup outage degrades the case
+  record rather than blocking the payment; and a 404 is deliberately not logged as a warning, so a
+  missing account is not treated as an error. Residual: `null` is indistinguishable between "no such
+  account" and "lookup failed", so a sustained outage silently reintroduces cases without a party id
+  — the exact condition #3274 exists to fix. Rollback: revert; the adapter's previous behaviour was
+  to store the account id in `partyId`. Recorded here because #3431's measurement showed this change
+  landed with no threat-model update.
