@@ -50,6 +50,16 @@
 #     burns a runner and hides a real contract break behind a retry loop — the #2549
 #     failure shape.
 #
+#     A provider whose build CANNOT publish a verification result. A provider only
+#     publishes to the broker from a `@PactBroker`-sourced verification test; a
+#     `@PactFolder` one replays the committed pact from disk and never contacts the
+#     broker at all. Eight of this fleet's seventeen providers are folder-only, so
+#     dispatching them re-runs a build that cannot change the answer — every cycle,
+#     forever. That is not hypothetical: the first live dispatch of this reconciler
+#     went to openbank-kyc-service, which is folder-only, and would have repeated
+#     every 30 minutes indefinitely. The check is `@PactBroker` in the provider's own
+#     test sources, offline, from the repo.
+#
 #     A provider with NO main-branch version in the broker. This one nearly shipped:
 #     the first live run reported five providers "owed", and four of them had simply
 #     never published a version on main (`/pacticipants/<p>/branches/main/latest-version`
@@ -109,6 +119,27 @@ def integrations(root: pathlib.Path):
         if c and p:
             edges.add((c, p))
     return sorted(edges)
+
+
+def can_publish_verification(root: pathlib.Path, provider: str) -> bool:
+    """True if the provider has a broker-sourced verification test.
+
+    A `@PactFolder` test replays the committed pact from disk and never contacts the
+    broker, so no amount of building that provider will ever publish a verification
+    result. Dispatching one is a build that cannot change the answer — see the module
+    header for the live case this was written after.
+    """
+    tests = root / provider / "src" / "test"
+    if not tests.is_dir():
+        return False
+    for f in tests.rglob("*.kt"):
+        try:
+            src = f.read_text(errors="replace")
+        except OSError:
+            continue
+        if "@Provider" in src and "@PactBroker" in src:
+            return True
+    return False
 
 
 def has_branch_version(broker, pacticipant, user, password, branch=DEFAULT_BRANCH):
@@ -182,7 +213,7 @@ def main() -> int:
     user = os.environ.get("PACT_BROKER_USERNAME", "")
     password = os.environ.get("PACT_BROKER_PASSWORD", "")
 
-    owed, failing, unpublished, errors = {}, [], {}, 0
+    owed, failing, unpublished, cannot_publish, errors = {}, [], {}, {}, 0
     branch_cache = {}
     for consumer, provider in edges:
         try:
@@ -209,16 +240,26 @@ def main() -> int:
                     )
                     branch_cache[provider] = False
                     errors += 1
-            if branch_cache[provider]:
-                owed.setdefault(provider, []).append(consumer)
-            else:
+            if not branch_cache[provider]:
                 unpublished.setdefault(provider, []).append(consumer)
+            elif not can_publish_verification(root, provider):
+                cannot_publish.setdefault(provider, []).append(consumer)
+            else:
+                owed.setdefault(provider, []).append(consumer)
 
     print(f"{len(edges)} integration(s) checked against {args.broker}")
     if errors:
         print(f"  {errors} could not be queried (see warnings above) — NOT counted as owed")
     for pair in failing:
         print(f"  FAILED verification, not dispatching (a retry cannot fix a real break): {pair}")
+    for p in sorted(cannot_publish):
+        print(
+            f"  CANNOT PUBLISH, not dispatching: {p} has only a @PactFolder verification "
+            f"test, which replays the committed pact from disk and never contacts the "
+            f"broker — building it cannot publish a result, so its consumers "
+            f"({', '.join(sorted(cannot_publish[p]))}) would stay unverified and this "
+            f"would re-dispatch every cycle. It needs the @PactBroker half."
+        )
     for p in sorted(unpublished):
         print(
             f"  NO {args.branch} VERSION, not dispatching: {p} has never published a version "
@@ -271,6 +312,8 @@ def main() -> int:
 # ---------------------------------------------------------------------------
 def self_test() -> int:
     # (summary, provider_has_main_branch, expect_owed, expect_failing, why)
+    # `can_publish` is exercised separately below against the real repo, because it is a
+    # filesystem fact rather than a branch of this arithmetic.
     cases = [
         ({"deployable": True, "success": 1, "failed": 0, "unknown": 0}, True, False, False, "verified"),
         ({"deployable": None, "success": 0, "failed": 0, "unknown": 1}, True, True, False, "unverified, provider publishes"),
@@ -299,6 +342,23 @@ def self_test() -> int:
     print(f"  {'ok ' if edges else 'BAD'} edge list from pacts/*.json: {len(edges)} edge(s)")
     if not edges:
         bad.append("edge list empty")
+
+    # can_publish_verification against the REAL repo, in both directions. A version that
+    # answered True for everything would have dispatched the folder-only providers
+    # forever; one that answered False for everything would dispatch nobody and look
+    # exactly like a healthy fleet.
+    providers = sorted({p for _, p in edges})
+    pub = [p for p in providers if can_publish_verification(root, p)]
+    folder = [p for p in providers if not can_publish_verification(root, p)]
+    print(f"  {'ok ' if pub else 'BAD'} providers that CAN publish: {len(pub)}")
+    print(f"  {'ok ' if folder else 'BAD'} providers that CANNOT (folder-only): {len(folder)}")
+    if not pub:
+        bad.append("no provider can publish — the check is answering False for everything")
+    if not folder:
+        bad.append(
+            "every provider can publish — either the fleet changed, or the check is "
+            "answering True for everything; verify before removing this assertion"
+        )
 
     if bad:
         print("\n::error::self-test FAILED: " + "; ".join(bad))
