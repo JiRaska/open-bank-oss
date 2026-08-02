@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.89.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.88.1...admin-ui-v0.89.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** read-only backoffice delegation console ([#3510](https://github.com/JiRaska/open-bank-oss/issues/3510)) ([8aed038](https://github.com/JiRaska/open-bank-oss/commit/8aed038886140f511841464d6dc713cc8ed0abc9)), closes [#2990](https://github.com/JiRaska/open-bank-oss/issues/2990)
+
 ## [0.88.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.88.0...admin-ui-v0.88.1) (2026-08-02)
 
 
