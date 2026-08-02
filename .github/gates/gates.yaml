@@ -764,6 +764,46 @@ gates:
     run: |
       python3 .github/scripts/check-ai-act-high-risk-inventory.py
 
+  # The admin-ui compliance page renders 47 regulatory-conformance claims from a hardcoded
+  # literal. #2370 found it wrong in BOTH directions — GDPR rows marked `ok` citing columns
+  # that exist only in a Flyway migration, with nothing reading them — and #2667 corrected
+  # those rows BY HAND. The checker that stops them rotting again was written at the same
+  # time and then referenced from nowhere: no workflow, no manifest entry, and nothing in
+  # this repo iterates `.github/scripts/check-*` (this runner reads the manifest, not the
+  # directory). So it had never run once (#3240).
+  #
+  # ENFORCED, same reasoning as the two gates above: the claim is published to users, the
+  # evidence citation is mechanical, and advisory over a published claim means "the page
+  # says something the code does not support" is mergeable. Green on the current tree, and
+  # `--self-test` (added with this registration) proves the red is reachable.
+  - id: compliance-matrix
+    name: "compliance-page evidence citations (#2370, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-compliance-matrix.py --self-test
+    run: |
+      python3 .github/scripts/check-compliance-matrix.py --enforce
+
+  # rules.yaml' shared_m2m_write_prohibition names this script as its own `ci_producer`, and
+  # nothing invoked it — so reading rules.yaml gave every impression the rule was enforced
+  # while the check had never executed (#3240). The surrounding rule is not a small one: it
+  # says in place that registering an operator write without it "is a money-path outage, not
+  # a test failure".
+  #
+  # ADVISORY, deliberately and temporarily. The script has no --enforce flag and exits 1 on
+  # the current tree with one real finding (`operator-mcp-session` in the shared rest.rego
+  # grants on ROLE_OPERATOR/ROLE_ADMIN without pinning input.principal.id). Registering it
+  # enforced would break main on a defect this PR is not fixing; registering it advisory is
+  # what makes that defect visible at all. Graduate to enforced once the finding is closed —
+  # tracked on #3240.
+  - id: operator-write-naming
+    name: "operator-write naming vs. shared-M2M prohibition (GHSA-58jq-9hq3-66jr, advisory)"
+    group: registry
+    mode: advisory
+    run: |
+      python3 .github/scripts/check-operator-write-naming.py
+
   # ==== kotlin ================================================================
 
   # ADR-0160 mechanism 1 / rules.yaml: change_requirements.event_consumer_liveness.
