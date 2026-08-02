@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.5](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.16.4...consent-service-v0.16.5) (2026-08-02)
+
+
+### Bug Fixes
+
+* **consent:** the expiration sweep runs on a Vert.x context, and the gate now checks the property ([#2976](https://github.com/JiRaska/open-bank-oss/issues/2976)) ([5f3c535](https://github.com/JiRaska/open-bank-oss/commit/5f3c535d44d728598d547dcdb499a6a1e595c626)), closes [#2913](https://github.com/JiRaska/open-bank-oss/issues/2913)
+
 ## [0.16.4](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.16.3...consent-service-v0.16.4) (2026-08-01)
 
 
