@@ -1,0 +1,170 @@
+# -----------------------------------------------------------------------------
+# Deployed == main drift watch (issue #3344).
+#
+# WHY THIS EXISTS
+#   The sandbox ran lending 0.11.5 while main was at 0.20.2 — what runs is not what
+#   is tested, and the drift surfaced by accident. Every gitops component manifest
+#   pins an immutable `sandbox-<sha>` image tag, so "what is deployed" is a committed
+#   fact and "what is main" is a git query; nothing compared them daily.
+#
+# TWO LANES, deliberately different (same shape as external-feed-watch)
+#   DECLARATION is a property of the committed files, needs no network, and is exact —
+#   so it runs on PRs that touch a scanned file and BLOCKS (binding copy: the
+#   `deploy-drift-declaration` gate in .github/gates/gates.yaml; this workflow's PR
+#   lane is the fast echo). That is what stops a malformed or hand-set image pin from
+#   becoming a deployment the watch knows nothing about while still reporting green.
+#
+#   DRIFT is a property of the cluster at this moment. It never blocks a merge: an
+#   undeployed service is an operational signal, not a defect in the PR at hand. It
+#   escalates instead — one open `deploy-drift` issue per drifted service, refreshed
+#   in place and auto-closed when the deployment catches up.
+#
+# WHY IT IS NOT A REQUIRED CHECK
+#   `paths:`-filtered workflows cannot be required contexts (a required context that
+#   never reports blocks every PR touching none of its paths).
+# -----------------------------------------------------------------------------
+name: Deployed == main watch
+
+on:
+  schedule:
+    # 05:40 UTC daily, after the external feed watch (05:10). Daily is the right
+    # cadence: auto-deploy merges continuously, so drift older than the threshold
+    # is already a decision someone made without noticing.
+    - cron: "40 5 * * *"
+  pull_request:
+    paths:
+      - "openbank-infra/gitops/components/**/*.yaml"
+      - ".github/scripts/check-deploy-drift.py"
+      - ".github/workflows/deploy-drift-watch.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-drift-watch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    name: deploy-drift-watch
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The drift lane resolves each deployed sandbox-<sha> against main's
+          # history; a shallow checkout would report every pin as unverifiable.
+          fetch-depth: 0
+
+      # A verdict that has only ever said "in sync" is indistinguishable from a
+      # scanner that finds nothing, so the harness drives the flagging paths
+      # (stale pin, unpinned tag, drift inside the grace window) before any
+      # verdict below is trusted. This step failing voids the whole run.
+      - name: Self-test the drift scanner
+        run: python3 .github/scripts/check-deploy-drift.py --self-test
+
+      # PR lane: declaration drift only. No git-history queries, so nothing here
+      # can go red because a deployment happens to be old today.
+      - name: Check image-pin declarations (blocking)
+        if: ${{ github.event_name == 'pull_request' }}
+        run: python3 .github/scripts/check-deploy-drift.py --root . --offline
+
+      - name: Compare deployed pins against main
+        id: probe
+        if: ${{ github.event_name != 'pull_request' }}
+        env:
+          DRIFT_DAYS: "7"
+        run: |
+          set +e
+          python3 .github/scripts/check-deploy-drift.py --root . \
+            --days "$DRIFT_DAYS" --json /tmp/deploy-drift.json | tee /tmp/drift.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) echo "Every deployed service matches main's version.txt." ;;
+            1) echo "::error::The drift watch could not answer (scan found nothing or a"
+               echo "::error::declaration is broken). That is a failure of THIS GATE, not"
+               echo "::error::a 'deployed == main' verdict."
+               exit 1 ;;
+            2) echo "::warning::Deployed != main beyond ${DRIFT_DAYS}d for one or more"
+               echo "::warning::services — escalating onto deploy-drift issues." ;;
+            *) echo "::error::Unexpected exit $code from the drift scanner."
+               exit "$code" ;;
+          esac
+
+      - name: Escalate drift per service
+        if: ${{ github.event_name != 'pull_request' && steps.probe.outputs.code == '2' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs')
+            const report = JSON.parse(fs.readFileSync('/tmp/deploy-drift.json', 'utf8'))
+            const LABEL = 'deploy-drift'
+            const markerFor = s => `<!-- deploy-drift:${s} -->`
+
+            const drifted = report.entries.filter(e => e.status !== 'ok')
+            const bodyFor = e => [
+              markerFor(e.service),
+              `## Deployed != main: \`${e.service}\``,
+              '',
+              `| | |`,
+              `|---|---|`,
+              `| deployed | \`${e.deployed_version ?? 'unknown'}\` (tag \`${e.tag}\`${e.age_days != null ? `, ${e.age_days}d old` : ''}) |`,
+              `| main | \`${e.main_version}\` |`,
+              `| status | ${e.status} |`,
+              `| manifest | \`${e.manifest}\` |`,
+              '',
+              e.reason,
+              '',
+              'What runs is not what is tested (issue #3344). Deploy the current build,',
+              'or accept the drift knowingly by closing this issue with a reason — a',
+              'silent drift is the only unacceptable state.',
+              '',
+              `_Automated: \`${context.workflow}\` run ${context.runId}, threshold ${report.threshold_days}d. Refreshed in place while the drift persists._`,
+            ].join('\n')
+            const titleFor = e =>
+              `deploy-drift: ${e.service} runs ${e.deployed_version ?? e.tag}, main is ${e.main_version}`
+
+            // One open issue per drifted service — refreshed, never stacked. A watch
+            // that spams a new issue per day trains people to filter it.
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              ...context.repo, state: 'open', labels: LABEL, per_page: 100,
+            })
+            const byMarker = new Map()
+            for (const issue of open) {
+              const m = issue.body && issue.body.match(/<!-- deploy-drift:([a-z0-9-]+) -->/)
+              if (m) byMarker.set(m[1], issue)
+            }
+
+            for (const e of drifted) {
+              const existing = byMarker.get(e.service)
+              if (existing) {
+                await github.rest.issues.update({
+                  ...context.repo, issue_number: existing.number,
+                  title: titleFor(e), body: bodyFor(e),
+                })
+                byMarker.delete(e.service)
+              } else {
+                await github.rest.issues.create({
+                  ...context.repo, title: titleFor(e), body: bodyFor(e),
+                  labels: [LABEL, 'fleet-health'],
+                })
+              }
+            }
+            // Whatever remains open but is no longer drifted has caught up — say so
+            // and close it, or the label rots into a standing red nobody reads.
+            for (const [service, issue] of byMarker) {
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: issue.number,
+                body: `Deployed build caught up with main — closing. _(\`${context.workflow}\` run ${context.runId})_`,
+              })
+              await github.rest.issues.update({
+                ...context.repo, issue_number: issue.number, state: 'closed',
+              })
+            }
+            core.info(`drifted: ${drifted.length}, auto-closed: ${byMarker.size}`)
