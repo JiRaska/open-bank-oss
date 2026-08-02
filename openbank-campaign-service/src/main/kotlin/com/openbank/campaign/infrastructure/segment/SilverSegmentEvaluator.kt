@@ -15,6 +15,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
+import java.util.Optional
 import java.util.UUID
 
 /**
@@ -28,10 +29,14 @@ import java.util.UUID
 class SilverSegmentEvaluator(
     @ConfigProperty(name = "analytics.clickhouse-url", defaultValue = "http://localhost:8123")
     private val clickHouseUrl: String,
-    @ConfigProperty(name = "analytics.clickhouse-user", defaultValue = "")
-    private val clickHouseUser: String,
-    @ConfigProperty(name = "analytics.clickhouse-password", defaultValue = "")
-    private val clickHousePassword: String,
+    // Optional<String>, not String: SmallRye's converter treats an empty value as null, so a plain
+    // String with defaultValue = "" throws SRCFG00040 at boot rather than arriving blank. The
+    // committed default IS empty (application.yaml: CLICKHOUSE_USER:), so this made the service
+    // unbootable on its own defaults — invisible anywhere the env vars happen to be set.
+    @ConfigProperty(name = "analytics.clickhouse-user")
+    private val clickHouseUser: Optional<String>,
+    @ConfigProperty(name = "analytics.clickhouse-password")
+    private val clickHousePassword: Optional<String>,
     @ConfigProperty(name = "analytics.clickhouse-database", defaultValue = "openbank_analytics")
     private val database: String,
 ) : SegmentEvaluationPort {
@@ -59,8 +64,8 @@ class SilverSegmentEvaluator(
         val requestBuilder = HttpRequest.newBuilder(uri)
             .POST(HttpRequest.BodyPublishers.ofString(sql))
             .header("Content-Type", "text/plain")
-        if (clickHouseUser.isNotBlank()) requestBuilder.header("X-ClickHouse-User", clickHouseUser)
-        if (clickHousePassword.isNotBlank()) requestBuilder.header("X-ClickHouse-Key", clickHousePassword)
+        clickHouseUser.filter { it.isNotBlank() }.ifPresent { requestBuilder.header("X-ClickHouse-User", it) }
+        clickHousePassword.filter { it.isNotBlank() }.ifPresent { requestBuilder.header("X-ClickHouse-Key", it) }
 
         val response = http.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString())
         if (response.statusCode() != HTTP_OK) {

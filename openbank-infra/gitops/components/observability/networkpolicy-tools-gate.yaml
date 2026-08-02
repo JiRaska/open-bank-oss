@@ -1,0 +1,77 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Edge access for the tools served behind the identity-aware gate (ADR-0234).
+#
+# The gate is an EDGE control and says nothing about the in-cluster path, so each
+# routed workload also needs the ingress-nginx controller admitted to its pod —
+# and nothing else new. Grafana's equivalent lives in networkpolicy-grafana.yaml.
+#
+# HAND-WRITTEN, like the others in this directory. `network-policies.yaml` is
+# emitted by gen-network-policies.py from the declared GitOps edges of
+# Deployments under components/, and it adds ingress-nginx only "where an Ingress
+# backend exists". These Ingresses live in the `admin-ui` namespace and reach
+# here through an ExternalName Service, so the generator cannot see the edge —
+# the same blind spot that already made networkpolicy-grafana.yaml and
+# networkpolicy-grafana-oidc.yaml hand-written.
+#
+# Alertmanager is a chart-managed workload (kube-prometheus-stack) and so is
+# invisible to the generator for a second, independent reason.
+#
+# NOTE ON ALERTMANAGER'S OTHER CALLER: Prometheus delivers alerts to
+# :9093 from inside this namespace, which the same-namespace rule below already
+# covers. Its PATH moved with routePrefix — see prometheusSpec.alertingEndpoints
+# in apps/kube-prometheus-stack.yaml; that is a routing change, not a network one,
+# and it fails as a 404 rather than a timeout.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: alertmanager-ingress-allow-list
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager
+  policyTypes:
+    - Ingress
+  ingress:
+    # Same namespace: Prometheus alert delivery, and the operator's reload sidecar.
+    - from:
+        - podSelector: {}
+    # The edge — already gated by nginx before it proxies.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: admin-ui
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pyrra-api-ingress-allow-list
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: pyrra
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: admin-ui

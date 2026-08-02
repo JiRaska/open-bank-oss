@@ -1,0 +1,47 @@
+# ADR-0006 event-contract baseline — GRANDFATHERED, NOT APPROVED.
+#
+# Every line is a Kafka topic produced with no AsyncAPI contract and no registered schema: raw,
+# unversioned JSON on the wire. The Apicurio registry the ADR calls for is deployed; the contracts
+# are not written. This file freezes that debt so it stops growing while #1916's migration runs.
+#
+# This file only SHRINKS. check-event-contract-coverage.py fails on a new entry AND on a stale one,
+# so a line cannot outlive the debt it records. Migration order is in #1916: money-path topics
+# first, BACKWARD compatibility enforced at the registry, producers before consumers.
+#
+# Regenerate deliberately, never as a way to make a red build green.
+openbank-account-service:openbank.accounts.account.created
+openbank-account-service:openbank.notification.requests
+openbank-aml-service:openbank.aml.events
+openbank-balance-service:openbank.balance.events
+openbank-campaign-service:openbank.notification.requests
+openbank-card-issuance-service:openbank.cards.events
+openbank-clearing-service:openbank.clearing.batch.event
+openbank-consent-service:openbank.consent.events
+openbank-customer-edge:openbank.customer.audit
+openbank-customer-edge:openbank.feedback.events
+openbank-customer-edge:openbank.onboarding.funnel.events
+openbank-dispute-service:openbank.dispute.events
+openbank-document-service:openbank.documents.document.event
+openbank-domestic-payment:openbank.domestic.payment.events
+openbank-fx-service:openbank.fx.conversion.completed
+openbank-interest-service:openbank.interest.accrual.event
+openbank-kyc-service:openbank.kyc.events
+openbank-ledger-service:openbank.ledger.journal.posted
+openbank-lending-service:openbank.lending.events
+openbank-party-service:openbank.party.events
+openbank-pid-service:openbank.pid.events
+openbank-pid-service:party.events
+openbank-psd2-service:openbank.psd2.events
+openbank-sanctions-service:openbank.sanctions.screening.event
+openbank-sca-service:openbank.notification.requests
+openbank-sca-service:openbank.sca.events
+openbank-sdd-service:openbank.sdd.event
+openbank-security-scanner:openbank.security.ict.incident
+openbank-security-scanner:openbank.security.scan.event
+openbank-sepa-instant:openbank.sepa.instant.events
+openbank-sepa-payment:openbank.sepa.payment.events
+openbank-standing-order-service:openbank.standing-orders.order.event
+openbank-statement-service:openbank.statement.event
+openbank-swift-service:openbank.payments.swift.event
+openbank-tpp-registry-service:openbank.tpp.registry.event
+openbank-transaction-service:openbank.transactions.transaction.initiated

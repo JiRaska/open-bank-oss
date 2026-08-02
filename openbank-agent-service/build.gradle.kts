@@ -59,6 +59,20 @@ dependencies {
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
 }
 
+// Package the live ADR-0148 registry prompts onto the classpath so the assistant and oversight
+// agent load their system prompts from the registered files at runtime instead of inline constants.
+// This copy is derived from openbank-libs/governance/prompts/ — never hand-edit it here.
+tasks.named<Copy>("processResources") {
+    from(rootProject.file("openbank-libs/governance/prompts/compliance-officer")) {
+        include("oversight.v1.md")
+        into("governance-prompts/compliance-officer")
+    }
+    from(rootProject.file("openbank-libs/governance/prompts/ui-assistant")) {
+        include("system.v2.md")
+        into("governance-prompts/ui-assistant")
+    }
+}
+
 // Coverage floor (ADR-0020, ratchet-only — sweep #466: was a placebo minValue = 0
 // gate that could never fail). Measured 75.8% LINE coverage (1344/1772) at
 // introduction, no filter excludes; floor set at 70, raise-only from here.

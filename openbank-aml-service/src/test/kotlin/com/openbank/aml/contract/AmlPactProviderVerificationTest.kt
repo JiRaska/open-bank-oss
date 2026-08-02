@@ -37,10 +37,19 @@ import org.junit.jupiter.api.extension.ExtendWith
  * `pacts/openbank-fx-service-openbank-aml-service.json` in the same PR, or this test verifies a
  * stale contract.
  *
- * **This must remain the ONLY `@Provider("openbank-aml-service")` class in the repo.** Two classes
- * sharing a provider name both pull every pact for that provider and collide (`rules.yaml:`
- * ADR-0029 D3 note); a second interaction type belongs in `@BeforeEach` target selection here, not
- * in a new class.
+ * **This is the git-pact half of the sanctioned pair.** Its counterpart is
+ * [AmlPactBrokerProviderVerificationTest], a `@PactBroker` class gated on `pactbroker.url` that
+ * runs only on main-push and PUBLISHES its result — which is what `can-i-deploy` reads, and what
+ * this class structurally cannot do. Before that class existed, aml-service had never published a
+ * version on main and every fx-service deploy was blocked on the missing verification.
+ *
+ * That is the only permitted second `@Provider("openbank-aml-service")` class. The collision
+ * ADR-0029 D3 warns about is two BROKER-sourced classes both pulling every pact, or HTTP and
+ * MESSAGE targets fighting over the same `@BeforeEach`; both classes here use `HttpTestTarget`
+ * exclusively and read from different sources. A further interaction TYPE still belongs in
+ * `@BeforeEach` target selection here, not in a third class — and any `@State` added here must be
+ * added to the broker class too, or the broker replay fails with MissingStateChangeMethod and
+ * publishes a failure.
  *
  * `@IgnoreNoPactsToVerify(ignoreIoErrors)` makes a missing/unreadable pact file a skip rather than
  * a failure — relevant if the folder is ever emptied ahead of a broker migration.

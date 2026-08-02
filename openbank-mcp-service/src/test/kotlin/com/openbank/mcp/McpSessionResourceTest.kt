@@ -34,11 +34,21 @@ class McpSessionResourceTest {
 
     private val clock = Clock.fixed(Instant.parse("2026-07-31T10:00:00Z"), ZoneOffset.UTC)
 
-    private fun resource(operator: String, roles: Set<String>) = McpSessionResource(repo, clock, 15).apply {
+    /**
+     * [operator] is the display name (`preferred_username`); [sub] is what the session is keyed
+     * on. They are separate parameters on purpose — keying on the display name is #3182.
+     */
+    private fun resource(
+        operator: String,
+        roles: Set<String>,
+        sub: String = "11111111-1111-1111-1111-111111111111",
+        repository: AgentSessionRepository = repo,
+    ) = McpSessionResource(repository, clock, 15).apply {
         identity = QuarkusSecurityIdentity.builder()
             .setPrincipal { operator }
             .apply { roles.forEach { addRole(it) } }
             .build() as SecurityIdentity
+        jwt = TestJsonWebToken(mapOf("sub" to sub, "preferred_username" to operator))
     }
 
     @Test
@@ -47,7 +57,7 @@ class McpSessionResourceTest {
             .create(CreateSessionRequest(roleCeiling = listOf("ROLE_OPERATOR", "ROLE_ADMIN")))
         assertThat(res.status).isEqualTo(201)
         assertThat(saved.single().roleCeiling).isEqualTo("[\"ROLE_OPERATOR\"]")
-        assertThat(saved.single().subject).isEqualTo("jane.operator")
+        assertThat(saved.single().subject).isEqualTo("11111111-1111-1111-1111-111111111111")
     }
 
     @Test
@@ -71,12 +81,7 @@ class McpSessionResourceTest {
         val repoWithForeign = object : AgentSessionRepository() {
             override suspend fun findById(id: java.util.UUID) = if (id == foreign.id) foreign else null
         }
-        val outsider = McpSessionResource(repoWithForeign, clock, 15).apply {
-            identity = QuarkusSecurityIdentity.builder()
-                .setPrincipal { "jane.operator" }
-                .addRole("ROLE_OPERATOR")
-                .build() as SecurityIdentity
-        }
+        val outsider = resource("jane.operator", setOf("ROLE_OPERATOR"), repository = repoWithForeign)
         assertThat(outsider.status(foreign.id).status).isEqualTo(403)
         assertThat(outsider.revoke(foreign.id).status).isEqualTo(403)
     }
@@ -103,5 +108,52 @@ class McpSessionResourceTest {
         }
         assertThat(admin.status(foreign.id).status).isEqualTo(200)
         assertThat(admin.revoke(foreign.id).status).isEqualTo(204)
+    }
+
+    @Test
+    fun `a Keycloak rename does not strand the caller's own session`(): Unit = runBlocking {
+        // The session is issued before the rename...
+        assertThat(
+            resource("jane.operator", setOf("ROLE_OPERATOR")).create(
+                CreateSessionRequest(roleCeiling = listOf("ROLE_OPERATOR")),
+            ).status,
+        ).isEqualTo(201)
+        val session = saved.single()
+
+        // ...and the admin then changes preferred_username. `sub` is unchanged, because Keycloak
+        // guarantees it is. Keyed on the display name, `owns()` would now say "not your session"
+        // and the OBO resolver would fall through to anonymous — a fail-closed
+        // "Authorization unavailable" against a row that still reads live (#3182).
+        val repoWithSession = object : AgentSessionRepository() {
+            override suspend fun findById(id: java.util.UUID) = if (id == session.id) session else null
+        }
+        val renamed = resource("jane.smith", setOf("ROLE_OPERATOR"), repository = repoWithSession)
+
+        assertThat(renamed.status(session.id).status)
+            .describedAs("the same human, one Keycloak rename later, must still own their session")
+            .isEqualTo(200)
+    }
+
+    @Test
+    fun `a different human with the same display name does not own the session`(): Unit = runBlocking {
+        // The converse, which is what keying on an immutable id actually buys: display names are
+        // not unique over time, so matching on one could hand a session to the wrong person.
+        assertThat(
+            resource("jane.operator", setOf("ROLE_OPERATOR")).create(
+                CreateSessionRequest(roleCeiling = listOf("ROLE_OPERATOR")),
+            ).status,
+        ).isEqualTo(201)
+        val session = saved.single()
+        val repoWithSession = object : AgentSessionRepository() {
+            override suspend fun findById(id: java.util.UUID) = if (id == session.id) session else null
+        }
+        val impostor = resource(
+            "jane.operator",
+            setOf("ROLE_OPERATOR"),
+            sub = "22222222-2222-2222-2222-222222222222",
+            repository = repoWithSession,
+        )
+
+        assertThat(impostor.status(session.id).status).isEqualTo(403)
     }
 }

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.16.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.16.0...agent-service-v1.16.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **agent:** the admin assistant leaked its own system prompt — position, not wording ([#3228](https://github.com/JiRaska/open-bank-oss/issues/3228)) ([b52f989](https://github.com/JiRaska/open-bank-oss/commit/b52f989b4e24d4bf9489793bcf37cddb065dda2e))
+
+## [1.16.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.15.3...agent-service-v1.16.0) (2026-08-01)
+
+
+### Features
+
+* **observability:** make fleet LLM spend and reliability observable in Prometheus ([#3043](https://github.com/JiRaska/open-bank-oss/issues/3043)) ([000ba2a](https://github.com/JiRaska/open-bank-oss/commit/000ba2a516069ba4c65b50015a76b4086b229b30))
+
 ## [1.15.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.15.2...agent-service-v1.15.3) (2026-07-31)
 
 

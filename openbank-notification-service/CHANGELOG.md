@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.17.1...notification-service-v0.17.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **consent:** the expiration sweep runs on a Vert.x context, and the gate now checks the property ([#2976](https://github.com/JiRaska/open-bank-oss/issues/2976)) ([5f3c535](https://github.com/JiRaska/open-bank-oss/commit/5f3c535d44d728598d547dcdb499a6a1e595c626)), closes [#2913](https://github.com/JiRaska/open-bank-oss/issues/2913)
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.17.0...notification-service-v0.17.1) (2026-08-01)
+
+
+### Bug Fixes
+
+* **approvals:** a null JSON body on the four-eyes decide endpoint returned 500 ([#3029](https://github.com/JiRaska/open-bank-oss/issues/3029)) ([#3032](https://github.com/JiRaska/open-bank-oss/issues/3032)) ([36ff2ac](https://github.com/JiRaska/open-bank-oss/commit/36ff2ac571df954a408f80fa7d661967953d6144))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.16.2...notification-service-v0.17.0) (2026-07-31)
 
 

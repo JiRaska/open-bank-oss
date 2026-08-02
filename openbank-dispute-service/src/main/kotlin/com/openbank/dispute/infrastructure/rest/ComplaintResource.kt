@@ -44,7 +44,6 @@ class ComplaintResource(
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     fun file(request: FileComplaintRequest): Uni<Response> =
         fileUseCase.file(request).map { Response.status(HTTP_CREATED).entity(it).build() }
-            .onFailure().recoverWithItem { e -> Response.serverError().entity(mapOf("error" to e.message)).build() }
 
     @GET
     @Authorize(action = "complaint.list")

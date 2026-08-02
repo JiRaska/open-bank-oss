@@ -195,3 +195,13 @@ openbank:
       # Held outside the audit DB (env/Vault). Production replaces the default HMAC signer with a
       # KMS/cosign-keyed adapter (follow-up); this key is the in-cluster fallback.
       signing-key: ${AUDIT_ANCHOR_SIGNING_KEY:CHANGE_ME_LOCAL_DEV_ONLY}
+    chain-verify:
+      # ADR-0133: recompute the whole hash chain on a cadence and publish the verdict as metrics.
+      # Defaults ON, unlike the retention scheduler above — that one DELETES, so its dangerous
+      # state is running; this one only reads, so its dangerous state is NOT running. A control
+      # nobody evaluates reports nothing, which reads exactly like a control that always passes.
+      enabled: ${AUDIT_CHAIN_VERIFY_ENABLED:true}
+      # Full walk, so hourly. Config rather than a literal so an operator can tighten it during a
+      # suspected incident, or widen it if the log grows enough for the walk to cost real time —
+      # openbank_audit_chain_verify_duration_seconds is what tells them which.
+      cron: ${AUDIT_CHAIN_VERIFY_CRON:0 0 * * * ?}

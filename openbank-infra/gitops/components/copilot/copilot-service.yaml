@@ -29,7 +29,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-copilot-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a345757aa24beb8f"
+        openbank.tech/policy-checksum: "71c814044f06596a"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -40,7 +40,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: copilot-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-copilot-service:sandbox-84f1bd4d
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-copilot-service:sandbox-9b40c5db
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -75,7 +75,7 @@ spec:
               value: deepseek-ai/DeepSeek-V3.2
             - name: COPILOT_MODEL_ID
               value: deepseek-ai/DeepSeek-V3.2
-            # LiteLLM virtual key, projected from OpenBao (litellm/LITELLM_MASTER_KEY) by ESO — the
+            # LiteLLM virtual key, projected from OpenBao (litellm/KEY_COPILOT_SERVICE) by ESO — the
             # provider key now lives only in ai-platform (ADR-0175). Optional so an un-seeded key does
             # not CrashLoop the pod — until it is set the model call degrades.
             - name: COPILOT_MODEL_API_KEY

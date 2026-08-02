@@ -33,8 +33,9 @@
 # THE RUNNER MUST BE ABLE TO FAIL
 #   `--self-test` runs the assertion engine, the staleness detector and the ratchet against built-in
 #   fixtures that MUST fail and fixtures that MUST pass, and exits non-zero if any of them behaves
-#   the other way round. It is wired into CI as an ENFORCED step, ahead of the (advisory) replay, so
-#   a gate that has quietly stopped being able to go red takes the build down with it. This repo has
+#   the other way round. It is wired into CI as an ENFORCED step, ahead of the blocking replay it
+#   protects, so a gate that has quietly stopped being able to go red takes the build down with it.
+#   This repo has
 #   shipped two gates that could not fail — a reporter that crashed on every finding and a scanner
 #   that printed nothing — and both read as green for weeks.
 #
@@ -66,6 +67,10 @@ EVALS = GOV / "evals"
 PROMPTS = GOV / "prompts"
 RECORDINGS = EVALS / "recordings"
 BASELINES = EVALS / "baselines.json"
+# Lives in recordings/, NOT in evals/: check-evals-registry.py treats every evals/*.yaml as an eval
+# suite and rejected this file as a malformed one ("charter 'None' is not an id: in agents.yaml").
+# It belongs next to the recordings it is about anyway.
+RECORDING_BACKLOG = RECORDINGS / "backlog.yaml"
 
 # Kept in lockstep with KNOWN_ASSERTS in check-evals-registry.py: the guard rejects any key this
 # runner cannot evaluate, so a scenario can never assert something that silently does nothing.
@@ -118,6 +123,27 @@ def load_suites(evals_dir):
         if charter:
             suites[str(charter)] = (path, doc)
     return suites
+
+
+def load_recording_backlog(path):
+    """{charter: reason} for suites deliberately not yet recorded.
+
+    A suite with no recording is replayed against nothing, so the charter is uncovered while
+    LOOKING covered — the suite file exists, check-evals-registry.py counts it, and the only signal
+    is one advisory ::warning line. That line had no owner and no expiry, which is how a temporary
+    gap becomes permanent: four of the five suites had been in it, and one of those (an injection-
+    resistance suite for a control-plane agent) had been unrecorded long enough for its prompt to be
+    promoted v1 -> v2 underneath it.
+
+    So the backlog is DECLARED, and [run_replay] fails in both directions — an undeclared gap and a
+    stale declaration are both errors. Same shape as KNOWN_UNCOVERED in
+    check-pact-provider-replay.py, and for the same reason: a gate whose exclusions are implicit
+    reports as passing when the exclusion list grows, never as unchecked.
+    """
+    if not path.is_file():
+        return {}
+    doc = yaml.safe_load(path.read_text()) or {}
+    return {str(k): str(v) for k, v in (doc.get("awaiting_first_recording") or {}).items()}
 
 
 def load_baselines(baselines_path):
@@ -206,7 +232,7 @@ def replay_charter(charter, suite_path, suite, recordings_dir, prompts_dir, floo
 
 
 def run_replay(args, evals_dir=EVALS, recordings_dir=RECORDINGS, prompts_dir=PROMPTS,
-               baselines_path=BASELINES, stream=sys.stdout):
+               baselines_path=BASELINES, stream=sys.stdout, backlog_path=RECORDING_BACKLOG):
     suites = load_suites(evals_dir)
     if not suites:
         stream.write("::error title=Evals gate::no eval suites found — the registry is empty\n")
@@ -223,23 +249,54 @@ def run_replay(args, evals_dir=EVALS, recordings_dir=RECORDINGS, prompts_dir=PRO
             stream.write(line + "\n")
         {"fail": failed, "pending": pending, "pass": ok}[status].append(charter)
 
+    declared = load_recording_backlog(backlog_path)
+    undeclared = sorted(set(pending) - set(declared))
+    stale = sorted(set(declared) - set(pending))
+
     if pending:
         stream.write(
             f"::warning title=Evals gate::{len(pending)} charter(s) have an eval suite but no "
-            f"recorded run yet, so nothing is being replayed for them: {', '.join(sorted(pending))}. "
-            f"Record one with `run-evals.py --record <charter>` against the charter's live model.\n")
+            f"recorded run yet, so replay is advisory for them only: {', '.join(sorted(pending))}. "
+            f"Charters with a committed recording are still blocking. Record one with "
+            f"`run-evals.py --record <charter>` against the charter's live model.\n")
         if args.require_recordings:
             failed.extend(pending)
+
+    # A NEW unrecorded suite is red on the PR that adds it. Landing a suite is cheap and landing a
+    # recording needs a live model and a key, so without this the cheap half ships alone and the
+    # coverage number counts a suite that replays nothing.
+    for charter in undeclared:
+        stream.write(
+            f"::error title=Evals gate::{charter} has an eval suite but no recording, and is not "
+            f"declared in {backlog_path.name}. Either record it "
+            f"(`run-evals.py --record {charter}`) or add it under `awaiting_first_recording:` with "
+            f"a reason. Never hand-write a recording — a fabricated one is a green gate over "
+            f"behaviour nobody observed.\n")
+
+    # And the declaration cannot outlive the gap: once recorded, the entry must go, or the file
+    # drifts into a list of reassuring sentences about work that is already done.
+    for charter in stale:
+        stream.write(
+            f"::error title=Evals gate::{backlog_path.name} declares {charter} as awaiting a first "
+            f"recording, but it has one (or has no suite). Remove the stale entry.\n")
 
     if failed:
         for charter in sorted(set(failed)):
             stream.write(f"::error title=Evals gate::{charter} — eval gate FAILED "
                          f"(see the '!!' lines above)\n")
-        stream.write(f"::error::run-evals: {len(set(failed))} charter(s) failed the evals gate.\n")
+    # Counted after the per-charter message above, not before: undeclared/stale charters already
+    # printed their own specific error, and re-announcing them as "see the '!!' lines above" would
+    # point a reader at lines that do not exist for a charter that was never replayed.
+    problems = set(failed) | set(undeclared) | set(stale)
+    if problems:
+        stream.write(f"::error::run-evals: {len(problems)} charter(s) failed the evals gate.\n")
         return 1
 
-    stream.write(f"evals-gate: {len(ok)} charter(s) replayed clean, {len(pending)} awaiting a "
-                 f"first recording, {len(suites)} suite(s) total.\n")
+    stream.write(
+        f"evals-gate: blocking replay passed for {len(ok)} charter(s) with recorded baselines; "
+        f"{len(pending)} charter(s) remain advisory awaiting a first recording; "
+        f"{len(suites)} suite(s) total.\n"
+    )
     return 0
 
 
@@ -330,8 +387,8 @@ GOOD_OUTPUTS = {
 
 
 def _write_case(tmp, outputs, *, suite=None, prompt=SELF_TEST_PROMPT, suite_version="v1",
-                model_id="self-test-model"):
-    """Materialise a throwaway registry + recording and return the four paths run_replay needs."""
+                model_id="self-test-model", declare_backlog=None):
+    """Materialise a throwaway registry + recording and return the five paths run_replay needs."""
     evals_dir = tmp / "evals"
     rec_dir = evals_dir / "recordings"
     prompts_dir = tmp / "prompts" / "self-test"
@@ -344,7 +401,10 @@ def _write_case(tmp, outputs, *, suite=None, prompt=SELF_TEST_PROMPT, suite_vers
         "prompt_sha256": hashlib.sha256(SELF_TEST_PROMPT.encode()).hexdigest(),
         "model_id": model_id, "outputs": outputs,
     }))
-    return evals_dir, rec_dir, tmp / "prompts", evals_dir / "baselines.json"
+    backlog = rec_dir / "backlog.yaml"
+    if declare_backlog is not None:
+        backlog.write_text(yaml.safe_dump({"awaiting_first_recording": declare_backlog}))
+    return evals_dir, rec_dir, tmp / "prompts", evals_dir / "baselines.json", backlog
 
 
 def run_self_test():
@@ -385,26 +445,59 @@ def run_self_test():
         with tempfile.TemporaryDirectory() as td:
             paths = _write_case(pathlib.Path(td), outputs, **kw)
             buf = io.StringIO()
-            got = run_replay(_Args(), *paths, stream=buf)
+            evals_dir, rec_dir, prompts_dir, baselines, backlog = paths
+            got = run_replay(_Args(), evals_dir, rec_dir, prompts_dir, baselines,
+                             stream=buf, backlog_path=backlog)
         verdict = "ok " if got == expect else "BAD"
         print(f"  {verdict} [exit {got}, want {expect}] {name}")
         if got != expect:
             failures.append(name)
             print("\n".join(f"        | {line}" for line in buf.getvalue().splitlines()))
 
-    # A missing recording must be advisory by default and hard under --require-recordings.
-    with tempfile.TemporaryDirectory() as td:
-        tmp = pathlib.Path(td)
-        paths = _write_case(tmp, GOOD_OUTPUTS)
-        (paths[1] / "self-test.json").unlink()
-        for flag, expect in ((False, 0), (True, 1)):
+    # A missing recording that IS declared in the backlog must be advisory by default and hard
+    # under --require-recordings — the pre-existing contract, now conditional on the declaration.
+    def missing_recording_case(label, expect, declare, flag=False):
+        with tempfile.TemporaryDirectory() as td:
+            evals_dir, rec_dir, prompts_dir, baselines, backlog = _write_case(
+                pathlib.Path(td), GOOD_OUTPUTS, declare_backlog=declare)
+            (rec_dir / "self-test.json").unlink()
+
             class _A:
                 require_recordings = flag
-            got = run_replay(_A(), *paths, stream=io.StringIO())
-            label = f"missing recording, --require-recordings={flag}"
-            print(f"  {'ok ' if got == expect else 'BAD'} [exit {got}, want {expect}] {label}")
-            if got != expect:
-                failures.append(label)
+
+            buf = io.StringIO()
+            got = run_replay(_A(), evals_dir, rec_dir, prompts_dir, baselines,
+                             stream=buf, backlog_path=backlog)
+        print(f"  {'ok ' if got == expect else 'BAD'} [exit {got}, want {expect}] {label}")
+        if got != expect:
+            failures.append(label)
+            print("\n".join(f"        | {line}" for line in buf.getvalue().splitlines()))
+
+    declared = {"self-test": "declared gap, reason recorded"}
+    missing_recording_case("declared missing recording, --require-recordings=False", 0, declared)
+    missing_recording_case("declared missing recording, --require-recordings=True", 1, declared,
+                           flag=True)
+    # A gap nobody declared is red on the PR that introduces it — the whole point of the file.
+    missing_recording_case("UNDECLARED missing recording fails", 1, {})
+
+    # ...and a declaration that outlived its gap is red too, so the file cannot drift into a list of
+    # reassuring sentences about work that is already done.
+    with tempfile.TemporaryDirectory() as td:
+        evals_dir, rec_dir, prompts_dir, baselines, backlog = _write_case(
+            pathlib.Path(td), GOOD_OUTPUTS,
+            declare_backlog={"self-test": "stale — this charter HAS a recording"})
+
+        class _A:
+            require_recordings = False
+
+        buf = io.StringIO()
+        got = run_replay(_A(), evals_dir, rec_dir, prompts_dir, baselines,
+                         stream=buf, backlog_path=backlog)
+    label = "STALE backlog declaration fails"
+    print(f"  {'ok ' if got == 1 else 'BAD'} [exit {got}, want 1] {label}")
+    if got != 1:
+        failures.append(label)
+        print("\n".join(f"        | {line}" for line in buf.getvalue().splitlines()))
 
     if failures:
         for f in failures:
@@ -414,8 +507,8 @@ def run_self_test():
                          f"evals gate can no longer be trusted to go red.\n")
         return 1
 
-    print(f"run-evals --self-test: {len(cases) + 2} case(s) behaved exactly as declared "
-          f"(1 must-pass, {len(cases) + 1} must-fail).")
+    print(f"run-evals --self-test: {len(cases) + 5} case(s) behaved exactly as declared "
+          f"(2 must-pass, {len(cases) + 3} must-fail).")
     return 0
 
 

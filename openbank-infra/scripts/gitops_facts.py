@@ -36,6 +36,8 @@ __all__ = [
     "service_namespace",
     "workload_namespaces",
     "podmonitor_namespaces",
+    "management_port_workloads",
+    "management_scraped_namespaces",
     "declared_datastore",
     "is_stateless",
 ]
@@ -219,6 +221,89 @@ def podmonitor_namespaces(gitops: Path) -> set[str]:
             out.add(m.group(2))
         elif line.strip():
             break  # dedented back out of the list
+    return out
+
+
+def management_port_workloads(gitops: Path) -> dict[str, set[str]]:
+    """{namespace: {workload names}} for every workload declaring a container port `management`.
+
+    This is the SCRAPE CONTRACT, read off the workloads themselves. The fleet PodMonitor scrapes
+    `port: management, path: /q/metrics`, so a workload that declares that port is asking to be
+    scraped, and a workload that does not cannot be scraped no matter which namespace it sits in.
+    Deriving the population this way is the whole point: [workload_namespaces] answers "where does
+    module X run", which can only ever enumerate namespaces for modules someone already listed.
+
+    That difference is not academic. The caller that used to drive the coverage gate iterated
+    `repo.glob("openbank-*-service")` plus the money-path list, so the eight control-plane agent
+    workloads — devops-agent, finops-agent, governance-auditor, docs-truth-agent,
+    authz-policy-auditor, flaky-test-hunter, control-liveness-sentinel, release-steward — were
+    never in its population at all. All eight declare a `management` port, none was in
+    `matchNames`, and the gate printed `0 missing` about a fleet it had never looked at. A gate
+    whose scope is a hand-kept list of the thing it checks reads as passing when the list is
+    short, never as unchecked (CLAUDE.md).
+    """
+    out: dict[str, set[str]] = {}
+    for f in sorted(gitops.rglob("*.yaml")):
+        text = read(f)
+        if "name: management" not in text:
+            continue
+        for doc in text.split("\n---"):
+            kind = re.search(r"^kind:\s*(\S+)", doc, re.M)
+            if not kind or kind.group(1) not in ("Deployment", "Rollout", "StatefulSet"):
+                continue
+            # The port entry itself, not a mere mention: `- name: management` inside `ports:`.
+            if not re.search(r"^\s+-\s+name:\s*management\s*$", doc, re.M):
+                continue
+            name = re.search(r"^\s{2}name:\s*(\S+)", doc, re.M)
+            explicit = re.search(r"^\s{2}namespace:\s*(\S+)", doc, re.M)
+            ns = explicit.group(1) if explicit else _nearest_kustomize_namespace(f, gitops)
+            if ns:
+                out.setdefault(ns, set()).add(name.group(1) if name else f.name)
+    return out
+
+
+def management_scraped_namespaces(gitops: Path) -> dict[str, set[str]]:
+    """{namespace: {monitor names}} for every Pod/ServiceMonitor scraping `port: management`.
+
+    The fleet PodMonitor is not the only one — `iam` (keycloak) has its own, and billing,
+    document-service and statement-service each carry a per-service ServiceMonitor on the same
+    port. A gate that only reads the fleet PodMonitor would report keycloak as an uncovered gap
+    and get argued down, which is how a real gap ends up excluded next to a false one.
+
+    Only endpoints on the `management` port count. A monitor scraping `redis-metrics` or
+    `tcp-prometheus` in a namespace says nothing about whether that namespace's Quarkus
+    `/q/metrics` reaches Prometheus.
+    """
+    out: dict[str, set[str]] = {}
+    for f in sorted(gitops.rglob("*.yaml")):
+        text = read(f)
+        if "Monitor" not in text:
+            continue
+        for doc in text.split("\n---"):
+            kind = re.search(r"^kind:\s*(\S+)", doc, re.M)
+            if not kind or kind.group(1) not in ("PodMonitor", "ServiceMonitor"):
+                continue
+            if not re.search(r"^\s+-\s+port:\s*management\s*$", doc, re.M):
+                continue
+            name_m = re.search(r"^\s{2}name:\s*(\S+)", doc, re.M)
+            name = name_m.group(1) if name_m else f.name
+            own = re.search(r"^\s{2}namespace:\s*(\S+)", doc, re.M)
+            own_ns = own.group(1) if own else _nearest_kustomize_namespace(f, gitops)
+            targets: set[str] = set()
+            if re.search(r"^\s+any:\s*true\s*$", doc, re.M):
+                targets.add("*")
+            elif "matchNames:" in doc:
+                for line in doc.split("matchNames:", 1)[1].splitlines():
+                    m = re.match(r"^(\s+)-\s+(\S+)\s*$", line)
+                    if m:
+                        targets.add(m.group(2))
+                    elif line.strip():
+                        break
+            elif own_ns:
+                # No namespaceSelector: the operator defaults to the monitor's own namespace.
+                targets.add(own_ns)
+            for t in targets:
+                out.setdefault(t, set()).add(name)
     return out
 
 

@@ -1,7 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "release-type": "simple",
-  "separate-pull-requests": true,
+  "separate-pull-requests": false,
+  "group-pull-request-title-pattern": "chore(main): release ${branch}",
   "include-component-in-tag": true,
   "last-release-sha": "af9c9cbbc02ba0a8fc5f655f5871ea00d4a66b7f",
   "changelog-sections": [
@@ -120,6 +121,9 @@
       "exclude-paths": [
         "openbank-billing-service/src/test"
       ]
+    },
+    "openbank-campaign-service": {
+      "release-type": "simple"
     },
     "openbank-card-issuance-service": {
       "component": "card-issuance-service",
@@ -367,6 +371,9 @@
         "openbank-swift-service/src/test"
       ]
     },
+    "openbank-tax-reporting-service": {
+      "release-type": "simple"
+    },
     "openbank-tpp-registry-service": {
       "component": "tpp-registry-service",
       "exclude-paths": [
@@ -384,9 +391,6 @@
       "exclude-paths": [
         "openbank-vop-service/src/test"
       ]
-    },
-    "openbank-campaign-service": {
-      "release-type": "simple"
     }
   }
 }

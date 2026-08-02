@@ -27,13 +27,20 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: vertx-reactive:postgresql://localhost:5432/openbank_ledger
+    # The DEFAULT (Agroal/JDBC) datasource Flyway migrates. Declaring only the reactive URL above
+    # leaves it unconfigured, and `migrate-at-start` then kills the boot with "Unable to find
+    # datasource '<default>' … Bean is not active: SYNTHETIC bean [class=AgroalDataSource]" —
+    # so the service could start only where the gitops env supplied QUARKUS_DATASOURCE_JDBC_URL,
+    # never from this file alone (#3080). The env var still wins in the cluster; the literal is
+    # the local-dev default, matching the reactive URL above and the fleet convention.
+    jdbc:
+      url: ${QUARKUS_DATASOURCE_JDBC_URL:jdbc:postgresql://localhost:5432/openbank_ledger}
 
   flyway:
-    # Flyway (blocking/JDBC) migrates the DEFAULT datasource. Its JDBC URL comes from the
-    # default datasource — QUARKUS_DATASOURCE_JDBC_URL in the cluster (see ledger-service.yaml)
-    # and the %test override below — so no `quarkus.flyway.datasource.*` block is needed. Those
-    # keys were unrecognized and ignored anyway (they logged a startup WARN); removing them is a
-    # no-op for behaviour and silences the noise.
+    # Flyway (blocking/JDBC) migrates the DEFAULT datasource, whose JDBC URL is declared above.
+    # A `quarkus.flyway.datasource.*` block would NOT define one — that key names which existing
+    # datasource Flyway should use — which is why the three services that carried such a block
+    # failed to boot in exactly the same way (#3080).
     migrate-at-start: true
     connect-retries: 10
     connect-retries-interval: 2S
@@ -139,6 +146,13 @@ openbank:
     # postings can be attributed rather than only counted.
     day-lock:
       mode: "${LEDGER_DAY_LOCK_MODE:shadow}"
+    # Period-granular lock (ADR-0096 D1). Modes: off | shadow | enforce. Same staged rollout and
+    # the same reason as the day lock above — it ships in SHADOW and refuses nothing until the
+    # counter openbank_ledger_period_lock_decisions_total{outcome="would_refuse"} reads zero (or
+    # every hit is explained). The two locks are independent: a month can be FROZEN inside an
+    # unattested year, and a day LOCKED inside an unfrozen month.
+    period-lock:
+      mode: "${LEDGER_PERIOD_LOCK_MODE:shadow}"
     # journal_entries partition lifecycle (JournalPartitionMaintainer). Roll-forward is always
     # active; retention is DETACH-only and dry-run by default. Flip drop-enabled + dry-run only
     # as a deliberate, archived operator action — DROP is physically destructive.

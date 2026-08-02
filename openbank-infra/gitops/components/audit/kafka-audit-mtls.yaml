@@ -128,6 +128,47 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # Six topics audit-service subscribes to whose grants its KafkaUser predates (#2598 → #3271).
+      # The cluster is deny-by-default (allow.everyone.if.no.acl.found=false,
+      # components/kafka/kafka.yaml:118), so each of these subscriptions was silently receiving
+      # nothing — and an audit trail missing payment, card and lending events reads exactly like a
+      # quiet period.
+      - resource:
+          type: topic
+          name: openbank.cards.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.domestic.payment.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.lending.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.payments.swift.event
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.sepa.instant.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.sepa.payment.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       - resource:
           type: group
           name: audit-service

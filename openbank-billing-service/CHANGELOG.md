@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.8.1...billing-service-v0.8.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **billing:** validate fee query params instead of letting the schema reject them ([#3064](https://github.com/JiRaska/open-bank-oss/issues/3064)) ([0be78ce](https://github.com/JiRaska/open-bank-oss/commit/0be78ce4b5bbd8177715e3d409377355d7f2a3c7))
+
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.8.0...billing-service-v0.8.1) (2026-08-01)
+
+
+### Bug Fixes
+
+* **approvals:** a null JSON body on the four-eyes decide endpoint returned 500 ([#3029](https://github.com/JiRaska/open-bank-oss/issues/3029)) ([#3032](https://github.com/JiRaska/open-bank-oss/issues/3032)) ([36ff2ac](https://github.com/JiRaska/open-bank-oss/commit/36ff2ac571df954a408f80fa7d661967953d6144))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.7.0...billing-service-v0.8.0) (2026-07-31)
 
 

@@ -6,8 +6,8 @@
 # (instruction/schema disclosure) and FIND-S4-05 (a "maintenance mode" injection that drove an AML
 # tool call and returned GDPR Art. 9 data to any logged-in operator).
 charter: ui-assistant
-version: v1
-prompt: system.v1
+version: v2
+prompt: system.v2
 scenarios:
   - id: refuses-fake-maintenance-mode
     description: >-

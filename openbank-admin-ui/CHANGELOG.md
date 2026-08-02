@@ -1,5 +1,132 @@
 # Changelog
 
+## [0.86.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.85.0...admin-ui-v0.86.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** build campaigns on a canvas instead of filling in a form ([#3323](https://github.com/JiRaska/open-bank-oss/issues/3323)) ([bd63976](https://github.com/JiRaska/open-bank-oss/commit/bd6397629292e03e2c0c52595bb384a807ce2384))
+
+## [0.85.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.84.0...admin-ui-v0.85.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** show party names on the campaign screen, not truncated UUIDs ([#3310](https://github.com/JiRaska/open-bank-oss/issues/3310)) ([46b35b9](https://github.com/JiRaska/open-bank-oss/commit/46b35b9fe7b2f95fbd350555c97d837ee37ff774))
+
+## [0.84.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.83.0...admin-ui-v0.84.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** lead the campaign people section with counts, not a list of UUIDs ([#3304](https://github.com/JiRaska/open-bank-oss/issues/3304)) ([2f2f21a](https://github.com/JiRaska/open-bank-oss/commit/2f2f21ad2ea7fb0d744f7e78eb9f269cb0a1e915))
+
+## [0.83.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.82.1...admin-ui-v0.83.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** give the campaign list a lifecycle board instead of an inventory table ([#3287](https://github.com/JiRaska/open-bank-oss/issues/3287)) ([d98c6a3](https://github.com/JiRaska/open-bank-oss/commit/d98c6a34176dca188cfcc3520bb0fa96d902386c))
+* **admin-ui:** make the lending console a credit desk, not a table dump ([#3279](https://github.com/JiRaska/open-bank-oss/issues/3279)) ([118021d](https://github.com/JiRaska/open-bank-oss/commit/118021d8c2089a38cccf4f5c66b4eb976de15bf0))
+
+## [0.82.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.82.0...admin-ui-v0.82.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** stage the origination Kotlin so the image build can derive its graph ([#3286](https://github.com/JiRaska/open-bank-oss/issues/3286)) ([a585898](https://github.com/JiRaska/open-bank-oss/commit/a5858989fdeab10f447e41ad5dfba26934802f36))
+
+## [0.82.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.81.0...admin-ui-v0.82.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** draw the campaign journey as a flow, not a bar ([#3262](https://github.com/JiRaska/open-bank-oss/issues/3262)) ([9bbec95](https://github.com/JiRaska/open-bank-oss/commit/9bbec95dca6cff2f0c1c0abd95c0363facc3253b))
+
+## [0.81.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.80.2...admin-ui-v0.81.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** show a loan application's real path through the ADR-0211 lifecycle ([#3236](https://github.com/JiRaska/open-bank-oss/issues/3236)) ([451012a](https://github.com/JiRaska/open-bank-oss/commit/451012a65899851ecec56264b6258ba9b1c4e8c7))
+
+## [0.80.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.80.1...admin-ui-v0.80.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop tagging every GlitchTip event with a release nobody ships ([#3243](https://github.com/JiRaska/open-bank-oss/issues/3243)) ([8d321a8](https://github.com/JiRaska/open-bank-oss/commit/8d321a801c5cefa93f3f3a44bf2e77ab5aaf455a))
+
+## [0.80.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.80.0...admin-ui-v0.80.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** the campaign detail bundle handed journey the summary result ([#3213](https://github.com/JiRaska/open-bank-oss/issues/3213)) ([37a132a](https://github.com/JiRaska/open-bank-oss/commit/37a132a6fd568e292d9401f71b742f6515ef6d4b))
+
+## [0.80.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.79.0...admin-ui-v0.80.0) (2026-08-01)
+
+
+### Features
+
+* **admin-ui:** a four-eyes console for credit compliance pack activation ([#3190](https://github.com/JiRaska/open-bank-oss/issues/3190)) ([8642767](https://github.com/JiRaska/open-bank-oss/commit/86427672456506b28894536d47a0b6db20cbcd90))
+
+## [0.79.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.78.2...admin-ui-v0.79.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** show the journey as a funnel, not a table of enums ([#3191](https://github.com/JiRaska/open-bank-oss/issues/3191)) ([6bc3dda](https://github.com/JiRaska/open-bank-oss/commit/6bc3dda5b1ec1ab094335dfcf23e6c6337552aa4))
+
+## [0.78.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.78.1...admin-ui-v0.78.2) (2026-08-01)
+
+
+### Bug Fixes
+
+* **ci:** make the customer-app dossier check actually enforce, and refresh it ([#3179](https://github.com/JiRaska/open-bank-oss/issues/3179)) ([6bb6bdf](https://github.com/JiRaska/open-bank-oss/commit/6bb6bdfc9253302c51502c96c74a7766a0b94500))
+
+## [0.78.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.78.0...admin-ui-v0.78.1) (2026-08-01)
+
+
+### Security
+
+* **admin-ui:** hold the public demo account to least privilege in each tool, and deny it Alertmanager ([#3156](https://github.com/JiRaska/open-bank-oss/issues/3156)) ([408caf9](https://github.com/JiRaska/open-bank-oss/commit/408caf9351be7d183257d92a908cc1ba92b09c78)), closes [#3071](https://github.com/JiRaska/open-bank-oss/issues/3071)
+
+## [0.78.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.77.0...admin-ui-v0.78.0) (2026-08-01)
+
+
+### Features
+
+* **admin-ui:** put Alertmanager and Pyrra behind the identity-aware edge gate ([#3150](https://github.com/JiRaska/open-bank-oss/issues/3150)) ([6cc27d6](https://github.com/JiRaska/open-bank-oss/commit/6cc27d62b3ee20ec8a8f2beb123011e97afb5420)), closes [#3071](https://github.com/JiRaska/open-bank-oss/issues/3071)
+
+## [0.77.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.76.0...admin-ui-v0.77.0) (2026-08-01)
+
+
+### Features
+
+* **admin-ui:** serve Grafana behind an identity-aware edge gate, not a port-forward ([#3072](https://github.com/JiRaska/open-bank-oss/issues/3072)) ([85feb82](https://github.com/JiRaska/open-bank-oss/commit/85feb826d99d3590e73baa79bdfb05d3c3a704e5)), closes [#3071](https://github.com/JiRaska/open-bank-oss/issues/3071)
+
+## [0.76.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.75.0...admin-ui-v0.76.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** campaign authoring in the console, with the four-eyes gate intact ([#3110](https://github.com/JiRaska/open-bank-oss/issues/3110)) ([4e071db](https://github.com/JiRaska/open-bank-oss/commit/4e071db22b18bb05dd40221ac90f3425fcfc5b38))
+
+## [0.75.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.74.0...admin-ui-v0.75.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** page and filter the send log instead of reading it whole ([#3111](https://github.com/JiRaska/open-bank-oss/issues/3111)) ([da87baa](https://github.com/JiRaska/open-bank-oss/commit/da87baad0c7d43eafe282a1777f11093a2ddc74a))
+
+## [0.74.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.73.0...admin-ui-v0.74.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** make the segment catalogue code-defined and visible to marketers ([#3055](https://github.com/JiRaska/open-bank-oss/issues/3055)) ([baa7b6c](https://github.com/JiRaska/open-bank-oss/commit/baa7b6c8729a47eefbf359a0c64cb94d95742dd5))
+
 ## [0.73.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.72.2...admin-ui-v0.73.0) (2026-08-01)
 
 

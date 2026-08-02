@@ -40,10 +40,17 @@ import org.junit.jupiter.api.extension.ExtendWith
  * `pacts/openbank-fx-service-openbank-sanctions-service.json` in the same PR, or this test verifies
  * a stale contract.
  *
- * **This must remain the ONLY `@Provider("openbank-sanctions-service")` class in the repo.** Two
- * classes sharing a provider name both pull every pact for that provider and collide (ADR-0029 D3);
- * a further interaction type belongs in the `@BeforeEach` target selection here, or in a new
- * `@State` handler, not in a new class.
+ * **This is the git-pact half of the sanctioned pair.** Its counterpart is
+ * [SanctionsPactBrokerProviderVerificationTest], a `@PactBroker` class gated on `pactbroker.url`
+ * that runs only on main-push and PUBLISHES its result — which is what `can-i-deploy` reads, and
+ * what this class structurally cannot do. Before it existed, sanctions-service had never published
+ * a version on main and every fx-service deploy was blocked on the missing verification.
+ *
+ * That is the only permitted second `@Provider("openbank-sanctions-service")` class: the ADR-0029
+ * D3 collision is two BROKER-sourced classes, or HTTP vs MESSAGE targets sharing a `@BeforeEach`.
+ * A further interaction type still belongs in the `@BeforeEach` target selection here, not in a
+ * third class — and any `@State` added here must be added to the broker class too, or its replay
+ * fails with MissingStateChangeMethod and publishes a failure.
  *
  * `@IgnoreNoPactsToVerify(ignoreIoErrors)` makes a missing/unreadable pact file a skip rather than a
  * failure — relevant if the folder is ever emptied ahead of a broker migration.

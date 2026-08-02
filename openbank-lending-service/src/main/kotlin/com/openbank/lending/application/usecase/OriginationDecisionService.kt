@@ -44,6 +44,12 @@ data class DecisionOutcome(
  * into ELIGIBILITY, and runs the pure evaluator. The full output contract — outcome,
  * price band, reason codes, matched rules, versions, input snapshot hash — rides back
  * for persistence and `credit.decision.evaluated` evidence (ADR-0214).
+ *
+ * Input completeness is part of the contract, not a convenience: any attribute the
+ * pinned policy needs that the application does not carry (income, residency, age)
+ * makes the evaluator fail closed to REFER (ADR-0213 D2) — never to a silent approve.
+ * The DSTI/DTI pair is computed from the regenerated amortization schedule, so the
+ * affordability number the floor reads is identical to the one the offer discloses.
  */
 @ApplicationScoped
 class OriginationDecisionService(

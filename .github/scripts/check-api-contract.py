@@ -150,10 +150,109 @@ EXTERNAL_CONTRACT_SERVICES: dict[str, str] = {
 
 # JAX-RS REST *client* stubs carry the CALLEE's URL major (e.g. an Alertmanager client at
 # /api/v2), not this service's own contract — they must not drive the D2 URL-major check.
-_CLIENT_HINT = re.compile(r"@RegisterRestClient|RestClient\b")
+#
+# `@RegisterRestClient` only, NOT a bare `RestClient` reference: the wider pattern matched any file
+# that *injects* a client, which is ordinary in a resource class, and skipped that whole file — so a
+# resource serving /api/v1 and calling one upstream contributed nothing. clearing-simulator was in
+# exactly that state; its major was recovered only by accident, from the word "/api/v1" in a comment
+# in a different file, which stopped working the moment prose stopped counting (#3119).
+_CLIENT_HINT = re.compile(r"@RegisterRestClient")
+
+
+# `@Path("…")` values only. Scanning raw file text for /api/v{N} matches PROSE: a comment
+# explaining the URL-major rule reads as an endpoint implementing it, and the gate fails on a
+# service whose every @Path says /api/v1. Measured on #3110, where the only occurrence of
+# "/api/v2" in the service was a KDoc paragraph about why a major bump was avoided (#3119).
+_PATH_ANNOTATION = re.compile(r'@Path\s*\(\s*"([^"]*)"')
+
+# A `v{N}` PATH SEGMENT anywhere in the served path, not the literal prefix `/api/v{N}`.
+# openbank-customer-edge serves `/customer/v1/...`, and under the old raw-text scan its "major"
+# came from outbound URL strings pointing at document-service — the D2 invariant was being
+# satisfied by a string addressed to a different service. D2 is about the major of the path this
+# service serves; the prefix in front of it is not the point.
+_VERSION_SEGMENT = re.compile(r"(?:^|/)v(\d+)(?=/|$)")
+
+# `/api/v{N}` specifically — the shape THIS repo owns. Used only to judge whether an
+# EXTERNAL_CONTRACT_SERVICES entry has gone stale: a service that starts serving the house shape
+# has taken ownership of its URL major and no longer needs the exemption. A version segment under
+# a mandated foreign prefix (psd2's Berlin Group `/v1/consents`) proves no such thing, which is why
+# the staleness test cannot reuse the broader match above.
+_OWN_API_PATH = re.compile(r"/api/v(\d+)(?=/|$)")
+
+
+def strip_comments(text: str) -> str:
+    """Kotlin source with comments blanked out, preserving offsets and string literals.
+
+    Written as a scanner rather than a regex for two reasons the repo has been bitten by:
+    Kotlin block comments NEST, so a naive non-greedy block-comment regex closes early on a KDoc
+    that itself contains an open-comment marker
+    and leaks the rest of that comment back into the scanned text; and `//` occurs inside string
+    literals (`"http://…"`), so a line-comment rule that ignores strings truncates real code.
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    depth = 0
+    while i < n:
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+        if depth:
+            if ch == "/" and nxt == "*":
+                depth += 1
+                out.append("  ")
+                i += 2
+                continue
+            if ch == "*" and nxt == "/":
+                depth -= 1
+                out.append("  ")
+                i += 2
+                continue
+            out.append("\n" if ch == "\n" else " ")
+            i += 1
+            continue
+        if ch == "/" and nxt == "*":
+            depth = 1
+            out.append("  ")
+            i += 2
+            continue
+        if ch == "/" and nxt == "/":
+            while i < n and text[i] != "\n":
+                out.append(" ")
+                i += 1
+            continue
+        if ch in ('"', "'"):
+            quote = ch
+            triple = text.startswith(quote * 3, i)
+            end = quote * 3 if triple else quote
+            j = i + len(end)
+            while j < n:
+                if not triple and text[j] == "\\":
+                    j += 2
+                    continue
+                if text.startswith(end, j):
+                    j += len(end)
+                    break
+                if not triple and text[j] == "\n":
+                    break
+                j += 1
+            out.append(text[i:j])
+            i = j
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def own_api_majors(service_dir: Path) -> set[int]:
+    """Majors served under this repo's own `/api/v{N}` shape. See [_OWN_API_PATH]."""
+    return _majors(service_dir, _OWN_API_PATH)
 
 
 def url_majors(service_dir: Path) -> set[int]:
+    """Majors of every version segment this service serves, under any prefix."""
+    return _majors(service_dir, _VERSION_SEGMENT)
+
+
+def _majors(service_dir: Path, pattern: re.Pattern[str]) -> set[int]:
     majors: set[int] = set()
     src = service_dir / "src/main/kotlin"
     if not src.is_dir():
@@ -169,8 +268,9 @@ def url_majors(service_dir: Path) -> set[int]:
             continue
         if _CLIENT_HINT.search(text):
             continue
-        for m in re.finditer(r"/api/v(\d+)", text):
-            majors.add(int(m.group(1)))
+        for path_value in _PATH_ANNOTATION.findall(strip_comments(text)):
+            for m in pattern.finditer(path_value):
+                majors.add(int(m.group(1)))
     return majors
 
 
@@ -238,12 +338,140 @@ def service_touched_beyond_spec(service: str, spec_rel: str, changed_all: list[s
     ]
 
 
+def _self_test() -> int:
+    """Feed url_majors the cases it MUST reject, and the ones it must still find.
+
+    A gate that has only ever passed is unfalsified. This one shipped a false positive for months
+    because it scanned raw text (#3119), so the interesting cases here are the ones that must NOT
+    contribute a major: prose, KDoc, and a plain string that is not a @Path.
+    """
+    import tempfile
+
+    cases: list[tuple[str, str, set[int]]] = [
+        (
+            "a line comment naming a URL major is not an endpoint",
+            '// under ADR-0048 a major bump means moving every path to /api/v2\n'
+            '@Path("/api/v1/campaigns")\nclass R\n',
+            {1},
+        ),
+        (
+            "a KDoc naming a URL major is not an endpoint",
+            '/**\n * A major bump means serving under /api/v2, which we avoided.\n */\n'
+            '@Path("/api/v1/campaigns")\nclass R\n',
+            {1},
+        ),
+        (
+            "a KDoc containing a nested open-comment marker still ends where it ends",
+            '/**\n * Kotlin block comments nest: /* like this */ and the KDoc continues.\n'
+            ' * Mentioning /api/v9 here must not count.\n */\n'
+            '@Path("/api/v1/x")\nclass R\n',
+            {1},
+        ),
+        (
+            "a bare string that is not a @Path does not count",
+            'const val UPSTREAM = "http://alertmanager/api/v2/alerts"\n'
+            '@Path("/api/v1/x")\nclass R\n',
+            {1},
+        ),
+        (
+            "a URL containing // inside a string does not swallow the rest of the line",
+            'val u = "http://host/x"; @Path("/api/v4/y")\nclass R\n',
+            {4},
+        ),
+        (
+            "real @Path annotations are still found, including several majors",
+            '@Path("/api/v1/a")\nclass A\n@Path("/api/v3/b")\nclass B\n',
+            {1, 3},
+        ),
+        (
+            "a served version segment counts under any prefix, not just /api",
+            '@Path("/customer/v1/feedback")\nclass R\n',
+            {1},
+        ),
+        (
+            "a path segment that merely starts with v is not a version",
+            '@Path("/verify/thing")\nclass R\n',
+            set(),
+        ),
+        (
+            "a resource that also injects a client still contributes its own served path",
+            'import org.eclipse.microprofile.rest.client.inject.RestClient\n'
+            'class R {\n  @RestClient lateinit var up: Upstream\n}\n'
+            '@Path("/api/v1/clearing")\nclass ClearingResource\n',
+            {1},
+        ),
+        (
+            "a commented-out @Path does not count",
+            '// @Path("/api/v7/dead")\n@Path("/api/v1/live")\nclass R\n',
+            {1},
+        ),
+    ]
+
+    failures = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, source, expected in cases:
+            svc = Path(tmp) / name.replace(" ", "_")
+            pkg = svc / "src/main/kotlin/com/openbank/x"
+            pkg.mkdir(parents=True, exist_ok=True)
+            (pkg / "R.kt").write_text(source, encoding="utf-8")
+            got = url_majors(svc)
+            if got != expected:
+                print(f"SELF-TEST FAIL: {name}: expected {sorted(expected)}, got {sorted(got)}")
+                failures += 1
+            else:
+                print(f"ok: {name}")
+    # Two real services pin the distinction between the two major sets. Both were one edit away
+    # from a regression while #3119 was being fixed, and neither is reachable from the synthetic
+    # cases above.
+    repo = Path(__file__).resolve().parents[2]
+    live: list[tuple[str, str, set[int], set[int]]] = [
+        (
+            "openbank-psd2-service",
+            "Berlin Group mandates /v1/consents, so it serves a version segment but NOT the "
+            "house /api/v{N} shape — treating that as ownership would declare its "
+            "EXTERNAL_CONTRACT_SERVICES exemption stale and fail every psd2 spec PR",
+            set(),
+            {1, 2},
+        ),
+        (
+            "openbank-customer-edge",
+            "serves /customer/v1, so D2 is assertable — under the old raw-text scan its major came "
+            "from outbound URL strings addressed to document-service",
+            set(),
+            {1},
+        ),
+    ]
+    for name, why, want_own, want_url in live:
+        svc = repo / name
+        if not (svc / "src/main/kotlin").is_dir():
+            print(f"skip (not in tree): {name}")
+            continue
+        got_own, got_url = own_api_majors(svc), url_majors(svc)
+        if got_own != want_own or got_url != want_url:
+            print(
+                f"SELF-TEST FAIL: {name}: own={sorted(got_own)} url={sorted(got_url)}, "
+                f"expected own={sorted(want_own)} url={sorted(want_url)} — {why}"
+            )
+            failures += 1
+        else:
+            print(f"ok: {name} own={sorted(got_own)} url={sorted(got_url)}")
+
+    if failures:
+        print(f"{failures} self-test case(s) failed")
+        return 1
+    print(f"all {len(cases) + len(live)} self-test checks passed")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", required=True, help="git sha of the PR base")
+    ap.add_argument("--base", help="git sha of the PR base (not needed with --self-test)")
     ap.add_argument("--enforce", action="store_true")
     ap.add_argument("--oasdiff", default="oasdiff")
+    ap.add_argument("--self-test", action="store_true", help="run the url_majors falsification cases")
     args = ap.parse_args()
+    if args.self_test:
+        return _self_test()
 
     if shutil.which(args.oasdiff) is None:
         print(f"::error::oasdiff binary not found ({args.oasdiff}) — install step missing?")
@@ -366,26 +594,28 @@ def main() -> int:
         majors = url_majors(service_dir)
         doc_major = new_v[0]
         external_reason = EXTERNAL_CONTRACT_SERVICES.get(service)
-        if majors and external_reason:
+        own_majors = own_api_majors(service_dir)
+        if own_majors and external_reason:
             # The declaration has stopped being true: it now serves its own /api/v{N}, so D2 is
             # assertable and the exemption is stale. Fail rather than let the list outlive its
             # justification (KNOWN_UNCOVERED shape).
             findings.append(
                 f"{service}: listed in EXTERNAL_CONTRACT_SERVICES but now serves its own "
-                f"/api/v{max(majors)} — the exemption is stale. Drop the entry from "
+                f"/api/v{max(own_majors)} — the exemption is stale. Drop the entry from "
                 f".github/scripts/check-api-contract.py so D2 is asserted again (issue #2276)."
             )
         if doc_major == 0:
             print(f"api-contract gate: {service}: info.version {new_raw} is pre-1.0 — D2 invariant not asserted.")
-        elif not majors and external_reason:
+        elif external_reason:
             print(
                 f"api-contract gate: {service}: declared external contract — D2 not asserted. "
                 f"Reason: {external_reason}"
             )
         elif not majors:
             findings.append(
-                f"{service}: serves no own /api/v{{N}} path, so ADR-0048 D2 cannot be asserted and "
-                f"info.version {new_raw} has nothing to drift against. Either adopt /api/v{{N}} or "
+                f"{service}: serves no versioned path (no `v{{N}}` segment in any @Path), so "
+                f"ADR-0048 D2 cannot be asserted and info.version {new_raw} has nothing to drift "
+                f"against. Either adopt /api/v{{N}} or "
                 f"add the service to EXTERNAL_CONTRACT_SERVICES in "
                 f".github/scripts/check-api-contract.py with the external spec it follows "
                 f"(issue #2276)."

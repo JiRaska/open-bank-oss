@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.11.2...product-catalog-v0.11.3) (2026-08-02)
+
+
+### Bug Fixes
+
+* **ci:** forward the Pact Broker properties into the test JVM for the last three providers ([#3301](https://github.com/JiRaska/open-bank-oss/issues/3301)) ([cf00673](https://github.com/JiRaska/open-bank-oss/commit/cf0067340539a88f16d9455095735aa6211839d6))
+
 ## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.11.1...product-catalog-v0.11.2) (2026-07-24)
 
 

@@ -227,6 +227,11 @@ openbank-admin-ui/catalog.json
 # Generated code-derived governance manifest baked at build time
 # (scripts/generate-governance.mjs, ADR-0071). Derived — never committed.
 openbank-admin-ui/governance.json
+# Generated ADR-0211 origination state graph, derived from OriginationState.kt +
+# OriginationTransitionPolicy.kt (scripts/generate-origination-graph.mjs). Derived —
+# never committed, and never hand-written: a second copy of the state list would drift
+# from the machine while still rendering a perfectly convincing diagram.
+openbank-admin-ui/origination-graph.json
 # Generated git-derived DORA snapshot baked at build time
 # (scripts/collect-dora.mjs, ADR-0061). Derived — never committed.
 openbank-admin-ui/dora.json

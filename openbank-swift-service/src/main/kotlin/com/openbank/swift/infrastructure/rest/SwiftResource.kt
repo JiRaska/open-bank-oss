@@ -29,7 +29,13 @@ class SwiftResource(private val useCase: SwiftUseCase) {
     @POST
     @RolesAllowed(Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "swift.send", resource = "")
-    suspend fun send(cmd: SendSwiftCommand) = Response.status(201).entity(useCase.send(cmd)).build()
+    suspend fun send(cmd: SendSwiftCommand?): Response {
+        // A JSON `null` body deserialises to null despite the non-nullable Kotlin type, so the
+        // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
+        // IllegalArgumentException to 400.
+        requireNotNull(cmd) { "request body is required" }
+        return Response.status(201).entity(useCase.send(cmd)).build()
+    }
 
     @GET
     @Path("/messages")
@@ -53,12 +59,13 @@ class SwiftResource(private val useCase: SwiftUseCase) {
     @Path("/{id}/ack")
     @RolesAllowed(Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "swift.acknowledge", resource = "#id")
-    suspend fun ack(@PathParam("id") id: UUID, body: Map<String, String>) =
-        useCase.acknowledge(id, body["ackRef"] ?: "")
+    suspend fun ack(@PathParam("id") id: UUID, body: Map<String, String>?) =
+        useCase.acknowledge(id, body?.get("ackRef") ?: "")
 
     @POST
     @Path("/{id}/reject")
     @RolesAllowed(Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "swift.reject", resource = "#id")
-    suspend fun reject(@PathParam("id") id: UUID, body: Map<String, String>) = useCase.reject(id, body["reason"] ?: "")
+    suspend fun reject(@PathParam("id") id: UUID, body: Map<String, String>?) =
+        useCase.reject(id, body?.get("reason") ?: "")
 }

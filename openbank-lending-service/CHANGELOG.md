@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.21.0...lending-service-v0.22.0) (2026-08-02)
+
+
+### Features
+
+* **lending:** per-state and per-status totals for the whole book ([#3309](https://github.com/JiRaska/open-bank-oss/issues/3309)) ([c50795a](https://github.com/JiRaska/open-bank-oss/commit/c50795a62be54ceac6ed375a5d62b559d10928ac))
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.20.3...lending-service-v0.21.0) (2026-08-02)
+
+
+### Features
+
+* **lending:** customer self-service loan application intake (ADR-0211) ([#3197](https://github.com/JiRaska/open-bank-oss/issues/3197)) ([3848b5c](https://github.com/JiRaska/open-bank-oss/commit/3848b5c25ab638765c355414fd04c773997d43c5))
+
+## [0.20.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.20.2...lending-service-v0.20.3) (2026-08-02)
+
+
+### Bug Fixes
+
+* **lending,domestic:** align the entities with the DDL their own migrations create ([#3211](https://github.com/JiRaska/open-bank-oss/issues/3211)) ([0fbd745](https://github.com/JiRaska/open-bank-oss/commit/0fbd74595bd7b1401de5e67838b3cb0e7eed0722))
+
+## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.20.1...lending-service-v0.20.2) (2026-08-01)
+
+
+### Bug Fixes
+
+* **lending:** document the fail-closed input contract of the decision evaluation ([#3168](https://github.com/JiRaska/open-bank-oss/issues/3168)) ([9052f5f](https://github.com/JiRaska/open-bank-oss/commit/9052f5f17477d72da595660a25cfa569a5c69b95))
+
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.20.0...lending-service-v0.20.1) (2026-08-01)
+
+
+### Bug Fixes
+
+* **approvals:** a null JSON body on the four-eyes decide endpoint returned 500 ([#3029](https://github.com/JiRaska/open-bank-oss/issues/3029)) ([#3032](https://github.com/JiRaska/open-bank-oss/issues/3032)) ([36ff2ac](https://github.com/JiRaska/open-bank-oss/commit/36ff2ac571df954a408f80fa7d661967953d6144))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.19.0...lending-service-v0.20.0) (2026-07-31)
 
 

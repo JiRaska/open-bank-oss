@@ -15,8 +15,14 @@
 # named after the service, not after a per-topic role. A KafkaUser's ACLs list
 # everything that service may do on the ACL'd resources; resources without ACLs
 # stay open under allow.everyone.if.no.acl.found=true (see kafka.yaml), so each
-# service only needs ACLs for the locked-down scheme-accepted topics — its own
-# domain-event topics need none.
+# service needs an ACL for EVERY topic it touches. This comment used to say the
+# opposite — that resources without ACLs "stay open under
+# allow.everyone.if.no.acl.found=true", so a service's own domain-event topics
+# needed none. That was true until #2794 flipped the cluster to
+# `allow.everyone.if.no.acl.found: "false"` (components/kafka/kafka.yaml:118) and
+# was never corrected here. The stale prose is what made the missing producer
+# grants below read as deliberate: domestic-payment's own event topic had no
+# Write grant and 13 outbox rows went DEAD (#3271).
 #
 # These live in `messaging` (where the Strimzi User Operator watches); the User
 # Operator mints a per-user Secret of the same name there (user.crt/key/p12 +
@@ -46,6 +52,11 @@ spec:
   authorization:
     type: simple
     acls:
+      # Its own domain-event topic. Missing until #3271: with the cluster
+      # deny-by-default, the outbox dispatcher could not publish at all.
+      - resource: { type: topic, name: openbank.sepa.payment.events, patternType: literal }
+        operations: [Write, Describe]
+        host: "*"
       - resource:
           type: topic
           name: payment.scheme-accepted
@@ -106,6 +117,11 @@ spec:
   authorization:
     type: simple
     acls:
+      # Its own domain-event topic. Missing until #3271, which measured the cost:
+      # 13 outbox rows DEAD because every publish was denied.
+      - resource: { type: topic, name: openbank.domestic.payment.events, patternType: literal }
+        operations: [Write, Describe]
+        host: "*"
       - resource:
           type: topic
           name: payment.scheme-accepted
@@ -172,6 +188,10 @@ spec:
   authorization:
     type: simple
     acls:
+      # Its own domain-event topic — consumed by audit-service and analytics-sink.
+      - resource: { type: topic, name: openbank.transactions.transaction.initiated, patternType: literal }
+        operations: [Write, Describe]
+        host: "*"
       - resource:
           type: topic
           name: payment.scheme-accepted
@@ -244,6 +264,10 @@ spec:
   authorization:
     type: simple
     acls:
+      # Its own domain-event topic.
+      - resource: { type: topic, name: openbank.cards.events, patternType: literal }
+        operations: [Write, Describe]
+        host: "*"
       - resource:
           type: topic
           name: openbank.party.events

@@ -1,0 +1,266 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+openapi: 3.1.0
+info:
+  title: Tax Reporting Service API
+  version: 1.0.0
+  description: >
+    §38d Vyúčtování daně vybírané srážkou podle zvláštní sazby daně — the platform's system of
+    record for the monthly withholding-tax return (ADR-0180). Consumes
+    interest.withholding.remitted.v1, aggregates per §38d period, and records what was filed.
+    EPO XML rendering is not built in v1; see /export-capability, which reports that plainly.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: http://localhost:8152
+    description: Local development
+tags:
+  - name: TaxFiling
+
+paths:
+  /api/v1/tax/filings:
+    get:
+      tags: [TaxFiling]
+      summary: List filing periods, newest first
+      operationId: listTaxFilings
+      responses:
+        '200':
+          description: Filing periods
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TaxFilingResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/tax/filings/overdue:
+    get:
+      tags: [TaxFiling]
+      summary: Filings past the §38d deadline and not yet filed
+      description: >
+        The alertable set. A return that is late is a compliance failure that produces no error
+        anywhere else — nothing throws when a filing simply does not happen.
+      operationId: listOverdueTaxFilings
+      responses:
+        '200':
+          description: Overdue filings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TaxFilingResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/tax/filings/export-capability:
+    get:
+      tags: [TaxFiling]
+      summary: Whether EPO XML rendering is available
+      description: >
+        Reports the truth rather than implying a capability. In v1 this returns false: the GFŘ EPO
+        XSD is a specific published schema and a guess at it would produce a file that looks valid
+        and is wrong at the finanční úřad.
+      operationId: getExportCapability
+      responses:
+        '200':
+          description: Capability report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportCapabilityResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/tax/filings/{period}:
+    get:
+      tags: [TaxFiling]
+      summary: Get one filing period
+      operationId: getTaxFiling
+      parameters:
+        - $ref: '#/components/parameters/PeriodPath'
+      responses:
+        '200':
+          description: Filing period
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaxFilingResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/tax/filings/{period}/remittances:
+    get:
+      tags: [TaxFiling]
+      summary: The remittance batches making up a period
+      description: The audit trail behind the total — which batches produced this figure.
+      operationId: listPeriodRemittances
+      parameters:
+        - $ref: '#/components/parameters/PeriodPath'
+      responses:
+        '200':
+          description: Observed remittances, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ObservedRemittanceResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/tax/filings/{period}/assemble:
+    post:
+      tags: [TaxFiling]
+      summary: Assemble the period, freezing its totals (OPEN → ASSEMBLED)
+      description: >
+        Refused with 409 if the month has not ended, if the period is not OPEN, or if the observed
+        remittances span more than one currency (§38d withholding is CZK-only, ADR-0033 §E — summing
+        across currencies would put a meaningless figure on a tax return).
+      operationId: assembleTaxFiling
+      parameters:
+        - $ref: '#/components/parameters/PeriodPath'
+      responses:
+        '200':
+          description: Assembled filing
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaxFilingResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/tax/filings/{period}/filed:
+    post:
+      tags: [TaxFiling]
+      summary: Record that the assembled return was submitted (ASSEMBLED → FILED)
+      description: >
+        Four-eyes — the actor who assembled the period may not also record it as filed, and an
+        assembly with no recorded author can never be filed. The reference is mandatory: a filing
+        recorded without one cannot be evidenced later.
+      operationId: markTaxFilingFiled
+      parameters:
+        - $ref: '#/components/parameters/PeriodPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MarkFiledRequest' }
+      responses:
+        '200':
+          description: Filed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaxFilingResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+components:
+  parameters:
+    PeriodPath:
+      name: period
+      in: path
+      required: true
+      description: The §38d withholding month, YYYY-MM.
+      schema:
+        type: string
+        pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$'
+
+  responses:
+    BadRequest:
+      description: Malformed request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    Forbidden:
+      description: Authenticated but not authorized
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    NotFound:
+      description: No filing for that period
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    Conflict:
+      description: Fail-closed lifecycle invariant (wrong state, period not ended, four-eyes, mixed currency)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    UnprocessableEntity:
+      description: Domain validation failure
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+
+  schemas:
+    ApiError:
+      type: object
+      properties:
+        error: { type: string }
+
+    MarkFiledRequest:
+      type: object
+      required: [reference]
+      properties:
+        reference:
+          type: string
+          description: The FÚ/EPO submission reference. Mandatory — a filing without one cannot be evidenced.
+
+    ExportCapabilityResponse:
+      type: object
+      required: [epoXmlAvailable, note]
+      properties:
+        epoXmlAvailable: { type: boolean }
+        note: { type: string }
+
+    TaxFilingResponse:
+      type: object
+      required: [id, period, status, currency, totalTaxAmount, remittanceCount, itemCount, dueDate]
+      properties:
+        id: { type: string, format: uuid }
+        period: { type: string, description: 'YYYY-MM' }
+        status: { type: string, enum: [OPEN, ASSEMBLED, FILED] }
+        currency: { type: string }
+        totalTaxAmount: { type: string }
+        remittanceCount: { type: integer }
+        itemCount: { type: integer }
+        dueDate: { type: string, format: date, description: '§38d odst. 3 deadline.' }
+        assembledAt: { type: string, format: date-time, nullable: true }
+        assembledBy: { type: string, nullable: true }
+        filedAt: { type: string, format: date-time, nullable: true }
+        filedBy: { type: string, nullable: true }
+        filingReference: { type: string, nullable: true }
+
+    ObservedRemittanceResponse:
+      type: object
+      required: [remittanceId, period, currency, totalTaxAmount, itemCount, dueDate, observedAt]
+      properties:
+        remittanceId: { type: string, format: uuid }
+        period: { type: string }
+        currency: { type: string }
+        totalTaxAmount: { type: string }
+        itemCount: { type: integer }
+        dueDate: { type: string, format: date }
+        observedAt: { type: string, format: date-time }
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - bearerAuth: []

@@ -18,6 +18,7 @@ LENDING_REST_EXT=$(cat << 'REGO'
 # Actions gated (LendingResource):
 #   lending.create              — submit a loan application (maker)
 #   lending.approve             — approve/reject an application (checker; four-eyes in the handler)
+#   lending.intake              — customer self-service application via customer-edge (ADR-0211)
 #   lending.read                — get application/loan/schedule/collateral/IFRS-9 snapshot (#id)
 #   lending.list                — list a party's applications/loans
 #   lending.disburse            — disburse an approved application (books the loan)
@@ -108,12 +109,31 @@ allowed_reasons contains "compliance-lending-desk" if {
 	}
 }
 
-# NO SERVICE (M2M) rule on purpose: no in-repo service calls lending's @Authorize
-# endpoints today (verified — the only cross-namespace ingress is the admin-ui BFF's
-# unauthenticated /api/v1/info discovery and the observability/security-scanner
-# management-port probes; ledger posting is an OUTBOUND call from lending). A blanket
-# SERVICE allow would open every endpoint to any M2M client. If a future caller lands
-# (e.g. anacredit moving from Kafka to REST), add a named, action-scoped rule here.
+# customer-edge submits customer self-service loan applications (ADR-0211's "Customer
+# intake" row; CustomerIntakeResource). This is the named, action-scoped M2M rule the note
+# below anticipated — the first in-repo service to call a lending @Authorize endpoint.
+#
+# Identified by principal.id, NOT by principal.type: AuthorizeInterceptor classifies a
+# client_credentials JWT as HUMAN, so `input.principal.type == "SERVICE"` can never fire
+# (issue #266), and edge's only role is ROLE_OPERATOR, which real staff also carry.
+#
+# This rule is NOT the control. `operator-lending-write` above already admits any
+# lending.* action for a ROLE_OPERATOR principal, so rego cannot be what stops a person
+# at a desk from filing an application in a customer's name — CustomerIntakeResource
+# checks the principal name against `lending.intake.caller-principal` in Kotlin and
+# refuses when it is unset. This rule states the intent, and narrows the day the blanket
+# operator grant is tightened.
+allowed_reasons contains "edge-customer-intake" if {
+	input.principal.id == "service-account-openbank-edge"
+	input.action == "lending.intake"
+}
+
+# NO BLANKET SERVICE (M2M) rule on purpose: the only in-repo M2M caller is the one named
+# above (the admin-ui BFF reaches only the unauthenticated /api/v1/info discovery, the
+# observability/security scanners use the management port, and ledger posting is an
+# OUTBOUND call from lending). A blanket SERVICE allow would open every endpoint to any
+# M2M client. If a future caller lands (e.g. anacredit moving from Kafka to REST), add
+# another named, action-scoped rule here.
 REGO
 )
 

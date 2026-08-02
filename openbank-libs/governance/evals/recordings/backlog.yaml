@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Eval suites that exist but have never been recorded, and why (ADR-0148).
+#
+# An eval suite with no recording in recordings/ is replayed against NOTHING. The suite file exists,
+# check-evals-registry.py counts it as coverage, and the only signal anywhere is a single advisory
+# ::warning line — so the charter is uncovered while looking covered. That line had no owner and no
+# expiry, which is exactly how a temporary gap becomes permanent: four of the five suites sat in it,
+# and one of those (control-liveness-sentinel, whose scenarios include injection resistance for an
+# agent that proposes kubectl actions) had been unrecorded long enough for its prompt to be promoted
+# v1 -> v2 underneath it. Nothing was ever replayed against the shipped prompt.
+#
+# So the gap is declared here, and run-evals.py fails in BOTH directions:
+#   - a suite with no recording that is NOT listed here  -> error (a new gap is red on its own PR)
+#   - a charter listed here that HAS a recording          -> error (a stale declaration is red too)
+#
+# Same shape as KNOWN_UNCOVERED in check-pact-provider-replay.py, for the same reason: a gate whose
+# exclusions are implicit reads as passing when the exclusion list grows, never as unchecked.
+#
+# TO CLOSE AN ENTRY (operator, off-CI, needs EVALS_API_KEY):
+#
+#     python3 .github/scripts/run-evals.py --record <charter>
+#
+# then commit recordings/<charter>.json and DELETE the entry below in the same commit.
+#
+# NEVER hand-write a recording to clear a warning. A fabricated recording is a green gate over
+# behaviour nobody observed — worse than the gap it hides, because the gap is at least visible.
+
+awaiting_first_recording: {}
+# Empty, and that is the point: every eval suite in the tree now has a recorded run, so CI can run
+# `run-evals.py --require-recordings` and block on replay for all 5 rather than counting suites that
+# replay nothing. Both entries that used to sit here were closed by RECORDING, never by deleting the
+# entry — the gate fails on a stale declaration in either direction, so an entry cannot be cleared
+# while the gap is real.
