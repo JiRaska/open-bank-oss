@@ -26,7 +26,7 @@ spec:
         # would leave agent-service's repointed call failing "model not found" with a green,
         # in-sync ArgoCD — the same silent-degradation shape as an `optional: true` secret ref.
         # BUMP THIS whenever litellm-config.yaml changes; that is what rolls the pod.
-        openbank.tech/litellm-config-revision: "5"
+        openbank.tech/litellm-config-revision: "6"
     spec:
       securityContext:
         runAsNonRoot: true
