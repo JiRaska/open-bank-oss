@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
   annotations:
-    openbank.tech/policy-checksum: "7e06faf3d5f149d9"
+    openbank.tech/policy-checksum: "5e94cd06985386be"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -3500,6 +3500,33 @@ data:
       # layer down. Verified by REVERT: with #1232's ExternalSecret removed the guard fails
       # naming `Secret payments/vop-oidc`; restored, it passes.
       incident: 2026-07-16
+
+    service_dockerfiles:
+      script: .github/scripts/check-service-dockerfiles.py
+      gate: service-dockerfiles                                  # .github/gates/gates.yaml
+      single_image_recipe: .github/workflows/Dockerfile.deploy
+      # THE RULE: `.github/workflows/Dockerfile.deploy` is the ONE image recipe. A per-service
+      # `openbank-*/Dockerfile` is a DECLARATION, not a recipe: its only live contract is the
+      # `EXPOSE <port>` line, which auto-deploy.yml, ghcr-publish.yml and
+      # openbank-infra/scripts/build-push-service.sh grep to set the container port.
+      #
+      # All three build host-side from Dockerfile.deploy copied into a generated context;
+      # build-push-service.sh documents why the in-image Gradle build was abandoned. So the build
+      # stage those 49 files carried had never run, and could not: none had `COPY build-logic` (the
+      # root settings.gradle.kts includeBuild's it for the openbank.quarkus-service plugin) and none
+      # copied the ADR-0122 openbank-libs-* siblings. A real `docker build` died at configuration
+      # time with "Included build '/build/build-logic' does not exist" (#3016).
+      #
+      # This is the unfalsified-gate shape inverted: not a check that has only ever passed, but a
+      # recipe that has never run and therefore cannot be wrong out loud.
+      #
+      # The EXPOSE half is the sharper of the two rules: the grep FALLS BACK TO 8080 when the line is
+      # absent, so losing it does not fail, it publishes the wrong port.
+      #
+      # Two Dockerfiles are genuinely built from their own recipes and are exempt in the script:
+      # openbank-developer-portal (static nginx) and openbank-document-renderer (WeasyPrint sidecar,
+      # ADR-0162 D3). #3016 counted them among the dead 51; stripping them would have deleted two
+      # working builds.
 
     deploy_coverage:
       script: .github/scripts/check-deploy-coverage.sh

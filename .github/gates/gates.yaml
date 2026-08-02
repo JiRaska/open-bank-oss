@@ -1036,6 +1036,19 @@ gates:
     run: |
       python3 .github/scripts/check-object-store-blobs-migration.py --enforce
 
+  # All 49 Gradle per-service Dockerfiles carried a build stage that could not run, and nothing
+  # builds them — the image comes from Dockerfile.deploy, host-side. Their one live contract is the
+  # EXPOSE line the three build paths grep, and that grep FALLS BACK TO 8080 when it is absent, so
+  # losing it publishes the wrong port silently (#3016).
+  - id: service-dockerfiles
+    name: "service Dockerfiles are declarations, not recipes (issue #3016, enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-service-dockerfiles.py --selftest
+    run: |
+      python3 .github/scripts/check-service-dockerfiles.py --enforce
+
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
     group: data
