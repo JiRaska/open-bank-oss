@@ -909,6 +909,19 @@ gates:
     run: |
       python3 .github/scripts/check-operator-write-naming.py
 
+  # Admin-ui IAOps governance snapshot drift (ADR-0029 D3 / ADR-0031).
+  # openbank-admin-ui/ai-governance-snapshot.json is DERIVED from curated rollout prose
+  # plus machine-checkable repo facts (agents.yaml, prompt-registry coverage, evals
+  # baselines, and which services actually package registry prompts). The route must read
+  # the generated artifact only; a stale snapshot would reintroduce the exact hand-edited
+  # drift this refactor removes.
+  - id: ai-governance-snapshot-drift
+    name: "AI governance snapshot drift (ADR-0029 D3 / ADR-0031, enforced)"
+    group: registry
+    mode: enforced
+    run: |
+      python3 .github/scripts/gen-ai-governance-snapshot.py --check
+
   # ==== kotlin ================================================================
 
   # ADR-0160 mechanism 1 / rules.yaml: change_requirements.event_consumer_liveness.
