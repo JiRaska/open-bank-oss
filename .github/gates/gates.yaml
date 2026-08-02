@@ -604,12 +604,15 @@ gates:
   # and re-passing.
   #
   # ENFORCED (was continue-on-error, #2392). The `continue-on-error` was carrying a different
-  # meaning than it looked like: the runner already treats a charter with no recorded run as
-  # ::warning and exits 0 — 4 of the 5 suites are in that state today — so the flag was only
-  # ever suppressing a REAL replay failure (a drifted prompt hash, a model/version move, a pass
-  # rate under the baselines.json floor). That is the one outcome the gate exists to surface.
-  # Remaining graduation step is --require-recordings, once every suite has a committed run;
-  # that is about coverage, not about whether a failure blocks.
+  # meaning than it looked like: the runner already treated a charter with no recorded run as
+  # ::warning and exited 0, so the flag was only suppressing a REAL replay failure (a drifted
+  # prompt hash, a model/version move, a pass rate under the baselines.json floor). That is the
+  # one outcome the gate exists to surface.
+  #
+  # GRADUATED to full ratchet-on-replay coverage (#1918). Every suite now has a committed
+  # recording in evals/recordings/, backlog.yaml is empty, and CI runs with --require-recordings.
+  # The ratchet is therefore blocking for every charter with a declared suite: a new or changed
+  # suite cannot land unrecorded, and a prompt/model promotion cannot land stale or regressed.
   - id: evals-gate-replay
     name: "evals gate replay (ADR-0148, enforced)"
     group: registry
@@ -617,7 +620,7 @@ gates:
     selftest: |
       python3 .github/scripts/run-evals.py --self-test
     run: |
-      python3 .github/scripts/run-evals.py
+      python3 .github/scripts/run-evals.py --require-recordings
 
   # ADR-0160 mechanism 2 / rules.yaml: change_requirements.lineage_code_audit. Fleet-wide scan
   # (not diff-scoped): every governance.yaml lineage edge — downstream AND, since #2315,
