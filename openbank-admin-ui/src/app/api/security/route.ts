@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
+import { auth } from '@/auth'
 import { resolveInClusterBaseUrl } from '@/lib/discovery'
 
 // ── Security posture: READ-ONLY consumer of CI-produced results ──────────────
@@ -30,7 +31,11 @@ import { resolveInClusterBaseUrl } from '@/lib/discovery'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-type Unavailable = { available: false; reason: 'not_deployed' | 'unreachable' | 'error'; detail?: string }
+type Unavailable = {
+  available: false
+  reason: 'not_deployed' | 'unreachable' | 'error' | 'unauthorized'
+  detail?: string
+}
 
 // Resolve the security-scanner base URL:
 //   1. In-cluster: Kubernetes Service DNS via discovery (authoritative, same pattern
@@ -63,9 +68,18 @@ async function fromBundle(): Promise<NextResponse | null> {
 async function fromScanner(): Promise<NextResponse | null> {
   const base = await scannerBase()
   if (!base) return null
+  // security-scanner is OIDC-gated (quarkus.oidc + @RolesAllowed on its resources), so the
+  // read needs the operator's Keycloak bearer relayed server-side — exactly like the generic
+  // /api/svc proxy does. Without it the scanner answered 401 and this route surfaced
+  // "scanner HTTP 401" on a healthy, deployed service.
+  const accessToken = (await auth())?.user?.accessToken
+  if (!accessToken) {
+    const payload: Unavailable = { available: false, reason: 'unauthorized' }
+    return NextResponse.json(payload, { status: 200 })
+  }
   try {
     const res = await fetch(`${base}/api/v1/security/report`, {
-      headers: { Accept: 'application/json' },
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
       cache: 'no-store',
       signal: AbortSignal.timeout(10_000),
     })
@@ -74,10 +88,16 @@ async function fromScanner(): Promise<NextResponse | null> {
       // is empty after pod restart; scheduler runs on 30-min cadence + 2-min initial
       // delay). Report as 'unreachable' so the page shows a neutral state rather
       // than the misleading "not deployed" message.
-      const reason: Unavailable['reason'] = res.status === 404 ? 'unreachable' : 'error'
+      // 401/403 = the relayed operator token was rejected (expired, or the role is missing).
+      // That is a session state, not a scanner fault, so say so rather than printing a status.
+      const reason: Unavailable['reason'] =
+        res.status === 404 ? 'unreachable'
+          : res.status === 401 || res.status === 403 ? 'unauthorized'
+            : 'error'
       const detail = res.status === 404
         ? 'No scan completed yet — first scan runs 2 minutes after startup, then every 30 minutes'
-        : `scanner HTTP ${res.status}`
+        : reason === 'unauthorized' ? undefined
+          : `scanner HTTP ${res.status}`
       const payload: Unavailable = { available: false, reason, detail }
       return NextResponse.json(payload, { status: 200 })
     }
