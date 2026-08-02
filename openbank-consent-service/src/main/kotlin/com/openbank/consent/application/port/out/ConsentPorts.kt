@@ -35,8 +35,9 @@ interface ConsentRepository {
 
     /**
      * Reactive sweep: find all ACTIVE consents with validTo < threshold.
-     * Returns a Uni so callers can compose it in a reactive pipeline without
-     * blocking (scheduled sweeper runs from a non-event-loop thread via Uni.subscribe).
+     * Returns a Uni so callers can compose it in a reactive pipeline without blocking. The
+     * scheduled sweeper awaits that pipeline from a `suspend fun`, which is what puts it on a
+     * Vert.x context — subscribing from a plain `@Scheduled` method does NOT (#2913).
      */
     fun findExpiredActive(threshold: OffsetDateTime): Uni<List<Consent>>
 
