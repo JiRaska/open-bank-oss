@@ -51,6 +51,7 @@ type Detail = {
   campaign: Campaign | null
   enrolments: Enrolment[]
   sends: SendPage
+  partyNames: Record<string, string>
   sendSummary: Record<string, number>
   journey: StepFunnel[]
   sources: Record<string, string>
@@ -360,7 +361,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
               />
             ) : (
               <SectionBoundary name="People">
-                <PeopleSummary enrolments={detail.enrolments} />
+                <PeopleSummary enrolments={detail.enrolments} partyNames={detail.partyNames ?? {}} />
               </SectionBoundary>
             )}
 
@@ -459,7 +460,11 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                   <tbody>
                     {sends.map(s => (
                       <tr key={s.id} className="border-t">
-                        <td className="px-4 py-2 font-mono text-xs" title={s.partyId}>{shortId(s.partyId)}</td>
+                        <td className="px-4 py-2 text-xs" title={s.partyId}>
+                          {detail?.partyNames?.[s.partyId] ?? (
+                            <span className="font-mono">{shortId(s.partyId)}</span>
+                          )}
+                        </td>
                         <td className="px-4 py-2">{s.stepOrder}</td>
                         <td className="px-4 py-2">
                           <span title={s.outcome}>

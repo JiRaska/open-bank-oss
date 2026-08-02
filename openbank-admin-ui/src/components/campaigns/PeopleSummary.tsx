@@ -37,7 +37,14 @@ const STATE_TONE: Record<string, Tone> = {
   TERMINATED_CAMPAIGN_CLOSED: 'neutral',
 }
 
-export function PeopleSummary({ enrolments }: { enrolments: Enrolment[] }) {
+export function PeopleSummary({
+  enrolments,
+  partyNames = {},
+}: {
+  enrolments: Enrolment[]
+  /** id → display name. A missing entry falls back to the short id, never to a blank cell. */
+  partyNames?: Record<string, string>
+}) {
   const { t, language } = useLanguage()
   const n = (v: number) => v.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')
 
@@ -100,8 +107,10 @@ export function PeopleSummary({ enrolments }: { enrolments: Enrolment[] }) {
             <tbody>
               {rows.map(e => (
                 <tr key={e.id} className="border-t" data-state={e.state}>
-                  <td className="px-4 py-2 font-mono text-xs" title={e.partyId}>
-                    {e.partyId.slice(0, 8)}
+                  {/* Name when we have it, short id when we do not — the full id stays in `title`,
+                      because the id is what goes into a support ticket. */}
+                  <td className="px-4 py-2 text-xs" title={e.partyId}>
+                    {partyNames[e.partyId] ?? <span className="font-mono">{e.partyId.slice(0, 8)}</span>}
                   </td>
                   <td className="px-4 py-2">
                     <StatusBadge status={e.state} label={stateLabel(e.state)} tone={STATE_TONE[e.state] ?? 'neutral'} />
