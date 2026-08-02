@@ -66,6 +66,42 @@ class SanctionsRepositoryImpl(private val outboxRepo: SanctionsOutboxRepository)
     }
 
     /**
+     * Update an existing check and emit its outbox event in one transaction (`SanctionsService.review`).
+     *
+     * `merge`, not `persist`, and that is not interchangeable here: `SanctionsCheckEntity.id` is
+     * application-assigned (no `@GeneratedValue`), so a non-null id cannot tell Hibernate whether
+     * the instance is transient or detached. `persist` resolves that ambiguity by always
+     * scheduling an INSERT, so every review died at flush on `sanctions_checks_pkey` — the manual
+     * disposition of a screening hit, which `rules.yaml` calls the highest-risk action in this
+     * service, had never once worked. ADR-0126 D3; the same defect 500'd every consent-service
+     * transition (#1521/#1553) and broke standing-order cancel (#2079). `SddMandateRepositoryImpl`
+     * documents the pattern.
+     *
+     * Kept as a SEPARATE method rather than making [saveWithEvent] an unconditional upsert. A
+     * `merge` cannot raise a primary-key violation, and the insert path deliberately lets that
+     * violation escape (see [isIdempotencyKeyViolation]) because there it signals a real defect
+     * rather than a replay. Merging the two paths would therefore delete a live guard and render
+     * `SanctionsIdempotentReplayIT`'s primary-key case structurally unable to fail.
+     *
+     * `call` rather than `chain`: the merged instance is the return value, and it is NOT the same
+     * object as `e` — Hibernate returns a managed copy, so reading state back off `e` would give
+     * the detached input, not what was written.
+     */
+    override suspend fun updateWithEvent(check: SanctionsCheck, eventType: String): SanctionsCheck {
+        val e = check.toEntity()
+        val event = OutboxMessage(
+            aggregateId = check.id,
+            eventType = eventType,
+            payload = mapper.writeValueAsString(check),
+        )
+        return Panache.withTransaction {
+            Panache.getSession()
+                .flatMap { session -> session.merge(e) }
+                .call { _ -> outboxRepo.persistInTransaction(event) }
+        }.awaitSuspending().toDomain()
+    }
+
+    /**
      * True when this violation is the unique index on `sanctions_checks.idempotency_key`.
      *
      * Identified by constraint, never by SQLSTATE alone: a primary-key collision is also 23505,
