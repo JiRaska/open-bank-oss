@@ -46,6 +46,17 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     tls:
       verification: none
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+  rest-client:
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      scope: jakarta.inject.Singleton
   redis:
     hosts: redis://localhost:6379
   smallrye-reactive-messaging:
@@ -144,6 +155,14 @@ mp:
   authz:
     enforce: "false"
 openbank:
+  aml:
+    # #3413: point cases at the party that owns the account, after the fact. Sweep-only —
+    # never on the case-creation path, so account-service being down cannot lose a case.
+    party-resolution:
+      enabled: ${AML_PARTY_RESOLUTION_ENABLED:true}
+      interval: 30m
+      initial-delay: 2m
+      batch-limit: 50
   outbox:
     dispatch-enabled: true
   rate-limit:
