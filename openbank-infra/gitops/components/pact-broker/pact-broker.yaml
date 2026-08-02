@@ -4,6 +4,14 @@
 # credentials come from the ESO-synced `pact-broker-basic-auth` secret
 # (es-pact-broker.yaml ← OpenBao openbank/pact-broker).
 #
+# Webhooks: this broker also holds ONE webhook, created out-of-band by
+# openbank-infra/scripts/seed-pact-verification-webhook.sh — it dispatches
+# verify-provider.yml when a consumer publishes a pact the provider has not verified.
+# Before it existed a provider only verified on its OWN next build, which stranded
+# openbank-lending-service for five hours and failed 33 of 40 auto-deploy runs on
+# 2026-08-01. Webhooks live in the broker's database, not in git; that script is
+# idempotent and is the way to recreate or rotate this one.
+#
 # Exposure (ADR-0092, documented ADR-0056 exception): reached via the nginx
 # Ingress at https://pact.open-bank.tech (ingress.yaml) because the openbank-build
 # runner pool is mixed (ARC + external Hetzner/Mac) and external runners can't use
@@ -82,6 +90,19 @@ spec:
             # contract registry, not a demo.
             - name: PACT_BROKER_SEED_EXAMPLE_DATA
               value: "false"
+            # Log the RESPONSE of webhooks to api.github.com. Without a host on this
+            # whitelist the broker logs "For security purposes, the response details
+            # are not logged" and reports only "Webhook execution failed" — so a
+            # working webhook and a webhook with a dead token look identical, and the
+            # only way to tell them apart is to notice, later, that verifications
+            # stopped happening. That is the unfalsifiable-gate shape this repo keeps
+            # getting caught by, so the host the webhook actually calls is whitelisted
+            # deliberately. Scoped to that ONE host: the whitelist is what allows
+            # response bodies into the log, and a wildcard would let any future
+            # webhook's response — possibly carrying a token echoed back — land there.
+            - name: PACT_BROKER_WEBHOOK_HOST_WHITELIST
+              value: "api.github.com"
+
             # --- basic auth (ESO ← OpenBao openbank/pact-broker) ---
             # Write creds gate publish/can-i-deploy from CI; read-only creds let
             # humans browse the matrix UI without write power.

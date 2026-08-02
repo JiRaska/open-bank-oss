@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.80.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.79.0...admin-ui-v0.80.0) (2026-08-01)
+
+
+### Features
+
+* **admin-ui:** a four-eyes console for credit compliance pack activation ([#3190](https://github.com/JiRaska/open-bank-oss/issues/3190)) ([8642767](https://github.com/JiRaska/open-bank-oss/commit/86427672456506b28894536d47a0b6db20cbcd90))
+
+## [0.79.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.78.2...admin-ui-v0.79.0) (2026-08-01)
+
+
+### Features
+
+* **campaign:** show the journey as a funnel, not a table of enums ([#3191](https://github.com/JiRaska/open-bank-oss/issues/3191)) ([6bc3dda](https://github.com/JiRaska/open-bank-oss/commit/6bc3dda5b1ec1ab094335dfcf23e6c6337552aa4))
+
 ## [0.78.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.78.1...admin-ui-v0.78.2) (2026-08-01)
 
 

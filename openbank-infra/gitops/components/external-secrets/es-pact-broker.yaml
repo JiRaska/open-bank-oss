@@ -8,6 +8,19 @@
 # openbank-infra/scripts/seed-vault-gaps.sh, which generates random creds and writes:
 #   vault kv put openbank/pact-broker username=ci password=<rand> \
 #     read-only-username=viewer read-only-password=<rand>
+#
+# A THIRD key lives at the same path and is deliberately NOT projected here:
+#   github-dispatch-token   a fine-grained PAT, this repository only, permission
+#                           `Actions: Read and write` and nothing else.
+# It is consumed by openbank-infra/scripts/seed-pact-verification-webhook.sh, which
+# writes it into the Pact Broker webhook that dispatches verify-provider.yml when a
+# consumer publishes a pact the provider has not verified (ADR-0092). It is not in
+# this ExternalSecret because the broker Deployment never reads it as env — the
+# broker stores it in its own database as part of the webhook definition, and
+# redacts Authorization headers in API responses.
+#
+# Note for whoever rotates it: use `kv patch`, not `kv put`. `put` replaces the whole
+# secret, which would drop the basic-auth credentials above and take the broker down.
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:

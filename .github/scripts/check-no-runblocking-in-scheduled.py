@@ -31,13 +31,31 @@ blocking bridge for another, pins the scheduler worker for the whole run, and *t
 called from an event-loop thread (so it breaks the day the method gains `@NonBlocking` or a
 virtual thread).
 
+`runBlocking` is only the SPELLING the first version of this guard knew, and keying on a spelling
+is how the same defect walked straight past it. `ConsentExpirationJob.sweepExpiredConsents()`
+(#2913) reached the identical HR000068 with no `runBlocking` anywhere: it built a `Uni` and
+`subscribe()`d it. That reads as "hand this off, it runs elsewhere" and does not — the
+subscription starts on the *caller's* thread, which is the contextless executor-thread. The
+hourly consent-expiration sweep had therefore never once succeeded, and the fleet sweep that
+found it found two more in the same shape (notification-service's device-token sweep and its
+dead-letter janitor). So the guard now checks the PROPERTY — a `@Scheduled` method that starts
+reactive work must be `suspend` (or `Uni`-returning, the other shape Quarkus dispatches on a
+proper context) — rather than one forbidden identifier.
+
 WHAT IT CHECKS: every `openbank-*/src/main/kotlin/**.kt`. For each `@Scheduled` annotation it
-locates the annotated method, brace-matches its body, and flags `runBlocking` inside it — in
-code, never in comments. A genuine exception (a service with no reactive persistence on its
-classpath at all, where `runBlocking` is a deliberate bridge for *blocking* clients) must be
-listed in `rules.yaml: scheduled_methods.runblocking_allowlist` with a one-line reason, the same
+locates the annotated method, brace-matches its body, and flags, in code and never in comments:
+
+  1. `runBlocking` anywhere in the body, and
+  2. any reactive entry point (`subscribe()`, `Panache.`, `Uni.`, `Multi.`, `awaitSuspending`,
+     `await()`) in a method that is neither `suspend` nor declared to return `Uni<…>`.
+
+A genuine exception (a service with no reactive persistence on its classpath at all, where
+`runBlocking` is a deliberate bridge for *blocking* clients) must be listed in
+`rules.yaml: scheduled_methods.runblocking_allowlist` — or, for (2),
+`scheduled_methods.nonsuspend_reactive_allowlist` — with a one-line reason, the same
 individually-justified-exception idiom as the ktlint/detekt baselines and
-`event_consumer_liveness.allowlist`.
+`event_consumer_liveness.allowlist`. Both allowlists fail on a stale entry, in either direction,
+so an exception cannot quietly outlive its reason.
 
 ENFORCED: findings are ::error:: annotations and exit 1.
 
@@ -57,6 +75,18 @@ import yaml
 SCHEDULED_RE = re.compile(r"^\s*@Scheduled\b")
 FUN_RE = re.compile(r"\bfun\s+`?(\w+)`?\s*\(")
 RUNBLOCKING_RE = re.compile(r"\brunBlocking\b")
+
+# Reactive work started from the method body. `runBlocking` is the *spelling* the original guard
+# knew; these are the shapes that reach Hibernate Reactive without it — most importantly
+# `subscribe()`, which reads as "fire and forget, off this thread" and is not: the subscription
+# starts on the caller's thread, so the first Panache call still throws HR000068 (#2913).
+REACTIVE_RE = re.compile(
+    r"\.subscribe\(\)|\bPanache\.|\bUni\.|\bMulti\.|\bawaitSuspending\b|\.await\(\)"
+)
+# A `Uni<…>`-returning @Scheduled method is the OTHER shape Quarkus dispatches on a proper
+# (duplicated) Vert.x context — it hands the Uni back to the scheduler rather than subscribing on
+# the scheduler thread. Four services use it, and it is not a violation.
+UNI_RETURN_RE = re.compile(r"\)\s*:\s*Uni\s*<")
 
 
 def strip_comments(lines: list[str]) -> list[str]:
@@ -140,10 +170,10 @@ def scheduled_method_bodies(lines: list[str]) -> list[tuple[str, int, int, int]]
     return found
 
 
-def load_allowlist(rules_path: pathlib.Path) -> dict[str, str]:
-    """`rules.yaml: scheduled_methods.runblocking_allowlist` as {"<path>#<method>": reason}."""
+def load_allowlist(rules_path: pathlib.Path, key: str = "runblocking_allowlist") -> dict[str, str]:
+    """`rules.yaml: scheduled_methods.<key>` as {"<path>#<method>": reason}."""
     data = yaml.safe_load(rules_path.read_text(encoding="utf-8")) or {}
-    entries = (data.get("scheduled_methods") or {}).get("runblocking_allowlist") or []
+    entries = (data.get("scheduled_methods") or {}).get(key) or []
     allow: dict[str, str] = {}
     for entry in entries:
         if isinstance(entry, dict) and "method" in entry:
@@ -159,7 +189,9 @@ def main() -> int:
 
     root = pathlib.Path(args.root)
     allow = load_allowlist(root / args.rules)
+    reactive_allow = load_allowlist(root / args.rules, "nonsuspend_reactive_allowlist")
     used_allow: set[str] = set()
+    used_reactive_allow: set[str] = set()
 
     sources = sorted(
         p for p in root.glob("openbank-*/src/main/kotlin/**/*.kt") if "/build/" not in str(p)
@@ -173,25 +205,51 @@ def main() -> int:
             continue
         code = strip_comments(raw)
         rel = path.relative_to(root).as_posix()
-        for name, _decl, start, end in scheduled_method_bodies(code):
+        for name, decl, start, end in scheduled_method_bodies(code):
             scheduled += 1
-            hits = [j for j in range(start, end + 1) if RUNBLOCKING_RE.search(code[j])]
-            if not hits:
-                continue
             key = f"{rel}#{name}"
-            if key in allow:
-                used_allow.add(key)
-                print(f"::notice file={rel},line={hits[0] + 1}::allowlisted: {allow[key]}")
+            signature = " ".join(code[decl:start + 1])
+            suspending = "suspend" in signature.split("fun")[0]
+
+            hits = [j for j in range(start, end + 1) if RUNBLOCKING_RE.search(code[j])]
+            if hits:
+                if key in allow:
+                    used_allow.add(key)
+                    print(f"::notice file={rel},line={hits[0] + 1}::allowlisted: {allow[key]}")
+                else:
+                    fail = 1
+                    for j in hits:
+                        print(
+                            f"::error file={rel},line={j + 1}::runBlocking inside the @Scheduled "
+                            f"method `{name}` — Quarkus invokes a non-suspend @Scheduled method on "
+                            f"a bare executor-thread with no Vert.x context, so the first reactive "
+                            f"Panache call throws HR000068 and the job silently does nothing "
+                            f"(#2148, #2187). Make it a `suspend fun` "
+                            f"(rules.yaml: scheduled_methods)."
+                        )
+
+            # Same defect, different spelling: a plain method that starts reactive work at all.
+            if suspending or UNI_RETURN_RE.search(signature):
+                continue
+            reactive_hits = [j for j in range(start, end + 1) if REACTIVE_RE.search(code[j])]
+            if not reactive_hits:
+                continue
+            if key in reactive_allow:
+                used_reactive_allow.add(key)
+                print(
+                    f"::notice file={rel},line={reactive_hits[0] + 1}::allowlisted: "
+                    f"{reactive_allow[key]}"
+                )
                 continue
             fail = 1
-            for j in hits:
-                print(
-                    f"::error file={rel},line={j + 1}::runBlocking inside the @Scheduled method "
-                    f"`{name}` — Quarkus invokes a non-suspend @Scheduled method on a bare "
-                    f"executor-thread with no Vert.x context, so the first reactive Panache call "
-                    f"throws HR000068 and the job silently does nothing (#2148, #2187). Make it a "
-                    f"`suspend fun` (rules.yaml: scheduled_methods)."
-                )
+            print(
+                f"::error file={rel},line={reactive_hits[0] + 1}::the @Scheduled method `{name}` is "
+                f"neither `suspend` nor `Uni`-returning, yet starts reactive work — Quarkus invokes "
+                f"it on a bare executor-thread with no Vert.x context, so the first reactive Panache "
+                f"call throws HR000068 and the job silently does nothing. `subscribe()` does NOT "
+                f"move it off that thread: the subscription starts on the caller's (#2913). Make it "
+                f"a `suspend fun` and await the pipeline (rules.yaml: scheduled_methods)."
+            )
 
     for key in sorted(set(allow) - used_allow):
         fail = 1
@@ -201,10 +259,20 @@ def main() -> int:
             f"runBlocking in a @Scheduled body (or no longer exists). Remove it."
         )
 
+    for key in sorted(set(reactive_allow) - used_reactive_allow):
+        fail = 1
+        print(
+            f"::error file={args.rules}::stale allowlist entry "
+            f"`scheduled_methods.nonsuspend_reactive_allowlist: {key}` — that method no longer "
+            f"starts reactive work from a non-suspend @Scheduled body (or no longer exists). "
+            f"Remove it."
+        )
+
     verdict = "clean." if fail == 0 else "VIOLATIONS above."
     print(
         f"check-no-runblocking-in-scheduled: {scheduled} @Scheduled method(s) checked across "
-        f"{len(sources)} main-source file(s), {len(allow)} allowlisted — {verdict}"
+        f"{len(sources)} main-source file(s), {len(allow)} runBlocking-allowlisted, "
+        f"{len(reactive_allow)} nonsuspend-reactive-allowlisted — {verdict}"
     )
     return fail
 

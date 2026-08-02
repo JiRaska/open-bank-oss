@@ -9,6 +9,7 @@ import io.quarkus.logging.Log
 import io.quarkus.scheduler.Scheduled
 import io.quarkus.scheduler.Scheduled.ConcurrentExecution.SKIP
 import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import java.time.Clock
@@ -22,9 +23,14 @@ import java.time.temporal.ChronoUnit
  * indefinitely. A 30-day retention window gives operators enough history for post-incident analysis
  * while keeping the table size bounded.
  *
- * The job is fire-and-forget (subscribe().with): a failure is logged but does not surface as a
- * Quarkus Scheduler failure, matching the pattern established by [DeviceTokenSweepJob]. The job
- * runs at 02:00 server time (1 hour before the device-token sweep) so both jobs never overlap.
+ * A failure is caught and logged rather than propagated, so it does not surface as a Quarkus
+ * Scheduler failure, matching the pattern established by [DeviceTokenSweepJob]. The job runs at
+ * 02:00 server time (1 hour before the device-token sweep) so both jobs never overlap.
+ *
+ * The method MUST stay a `suspend fun`. It used to be a plain method that `subscribe()`d the
+ * pipeline, so it ran on a bare `executor-thread` with no Vert.x context and the
+ * `Panache.withTransaction` behind [NotificationOutboxRepository.purgeDeadBefore] threw
+ * `HR000068` on every firing — no DEAD row was ever purged (#2913 fleet sweep).
  */
 @ApplicationScoped
 class NotificationOutboxDeadLetterJanitorJob {
@@ -35,22 +41,20 @@ class NotificationOutboxDeadLetterJanitorJob {
     @Inject
     lateinit var clock: Clock
 
+    // TooGenericExceptionCaught: a retention janitor must not surface as a Quarkus Scheduler
+    // failure — ANY fault is logged and tomorrow's tick purges the same rows again.
+    @Suppress("TooGenericExceptionCaught")
     @Scheduled(cron = "0 0 2 * * ?", identity = "notification-outbox-dead-letter-janitor", concurrentExecution = SKIP)
-    fun purgeDeadLetters() {
+    suspend fun purgeDeadLetters() {
         val threshold = Instant.now(clock).minus(RETENTION_DAYS, ChronoUnit.DAYS)
-        buildPurgePipeline(threshold)
-            .subscribe().with(
-                { count ->
-                    if (count > 0) {
-                        Log.infof(
-                            "notification.outbox.dead_letter.purged count=%d threshold=%s",
-                            count,
-                            threshold,
-                        )
-                    }
-                },
-                { err -> Log.errorf(err, "notification.outbox.dead_letter.purge FAILED threshold=%s", threshold) },
-            )
+        try {
+            val count = buildPurgePipeline(threshold).awaitSuspending()
+            if (count > 0) {
+                Log.infof("notification.outbox.dead_letter.purged count=%d threshold=%s", count, threshold)
+            }
+        } catch (err: Exception) {
+            Log.errorf(err, "notification.outbox.dead_letter.purge FAILED threshold=%s", threshold)
+        }
     }
 
     /**

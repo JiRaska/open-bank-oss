@@ -9,6 +9,11 @@ quarkus:
       url: "${QUARKUS_DATASOURCE_REACTIVE_URL:vertx-reactive:postgresql://localhost:5432/settlement}"
     username: "${QUARKUS_DATASOURCE_USERNAME:openbank_settlement}"
     password: "${QUARKUS_DATASOURCE_PASSWORD:settlement}"
+    # The DEFAULT (Agroal/JDBC) datasource Flyway migrates. Without it `migrate-at-start` kills
+    # the boot with "Unable to find datasource '<default>'" — settlement-service has the same
+    # defect as the four named in #3080, which the issue missed. Env var wins in the cluster.
+    jdbc:
+      url: "${QUARKUS_DATASOURCE_JDBC_URL:jdbc:postgresql://localhost:5432/settlement}"
   flyway:
     migrate-at-start: true
     locations: classpath:db/migration

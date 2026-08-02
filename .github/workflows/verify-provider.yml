@@ -21,6 +21,24 @@ permissions:
   contents: read
   id-token: write
 
+# Collapse duplicate dispatches for the SAME provider. The Pact Broker webhook
+# (openbank-infra/scripts/seed-pact-verification-webhook.sh) fires once per pact
+# requiring verification, so a fleet-wide libs change that makes twenty consumers
+# republish would dispatch twenty runs — at most a handful of which are distinct
+# work — onto a six-runner ARC pool that already wedges for hours (#2039). Without
+# this, the fix for the unverified-pact strand would deepen the queue starvation
+# that strands things in the first place.
+#
+# cancel-in-progress is TRUE, and that is safe here specifically because a provider
+# verification is not incremental: the run verifies EVERY consumer pact currently
+# required of that provider, so the newest run is a strict superset of the work any
+# run it cancels was doing. Cancelling the older one loses nothing. (That reasoning
+# does NOT transfer to the publish side, where each run carries its own SHA's
+# result — do not copy this block to a workflow that publishes pacts.)
+concurrency:
+  group: verify-provider-${{ inputs.service }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     uses: ./.github/workflows/_service-ci.yml

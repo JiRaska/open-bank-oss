@@ -82,12 +82,15 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const { id } = await ctx.params
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
 
-  const [campaign, enrolments, sends, sendSummary] = await Promise.all([
+  const [campaign, enrolments, sends, sendSummary, journey] = await Promise.all([
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}`, null),
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/enrolments`, []),
     // First page only. Paging and filtering go through /api/campaigns/[id]/sends so turning a
     // page does not re-read the campaign and its enrolments.
     readSends(headers, id),
+    // The journey funnel: per-step SQL aggregates. Bundled with the first paint because the flow is
+    // the first thing on the screen, not something you scroll to.
+    read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/journey`, []),
     // Counts come from the service, not from the page above: a suppressed-total derived from the
     // rows on screen understates every campaign larger than one page, and that total is the number
     // an operator acts on.
@@ -99,6 +102,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     enrolments: enrolments.data,
     sends: sends.data,
     sendSummary: sendSummary.data,
+    journey: journey.data,
     // Per-part state travels to the client: the send log is the part most likely to be
     // restricted, and an empty send log rendered as "nothing was suppressed" would be the
     // exact misreading this screen exists to prevent.
@@ -107,6 +111,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       enrolments: enrolments.state,
       sends: sends.state,
       sendSummary: sendSummary.state,
+      journey: journey.state,
     },
   })
 }

@@ -39,7 +39,7 @@ spec:
       annotations:
         # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
         # hot-reload). Kept in sync by gen-notification-opa-bundle.sh.
-        openbank.tech/policy-checksum: "b538ef54a3e28ccb"
+        openbank.tech/policy-checksum: "649c8c2c175c6cb3"
       labels:
         app.kubernetes.io/name: notification-service
         app.kubernetes.io/part-of: notifications
@@ -57,7 +57,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: notification-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-notification-service:sandbox-793bfd9a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-notification-service:sandbox-95b652dd
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -110,8 +110,19 @@ spec:
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             # ADR-0198 D4 consent gate (#2660): MARKETING sends check consent-service per send.
-            # The M2M client_credentials grant rides the shared openbank-services client
-            # (OIDC_CLIENT_SECRET is already projected for the OIDC resource-server config).
+            # The M2M client_credentials grant rides the shared openbank-services client.
+            #
+            # This comment used to claim OIDC_CLIENT_SECRET was "already projected for the OIDC
+            # resource-server config". It was not projected at all — and it could not have been,
+            # since resource-server JWT validation uses the realm JWKS, not a client secret. So
+            # the consent gate's M2M call had no credential to mint a token from (#2929). The ref
+            # below and oidc-externalsecret.yaml close that.
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: notification-service-oidc
+                  key: OIDC_CLIENT_SECRET
+                  optional: false
             - name: CONSENT_SERVICE_URL
               value: http://consent-service.consent.svc:8106
             # No SMTP in the sandbox — mock the mailer so dispatch logs instead of
