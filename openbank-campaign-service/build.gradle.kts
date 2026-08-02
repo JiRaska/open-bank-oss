@@ -8,6 +8,10 @@ plugins {
 }
 
 dependencies {
+    // DELIBERATELY UNPINNED — this dependency is absent from
+    // gradle/verification-metadata.xml on purpose. Do not "fix" it: the point of
+    // this branch is to prove the #3233 gate goes red. Never merge.
+    implementation("org.jsoup:jsoup:1.18.3")
     implementation(enforcedPlatform(libs.quarkus.bom))
     implementation(libs.quarkus.kotlin)
     implementation(libs.quarkus.resteasy.reactive)
