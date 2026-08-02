@@ -396,9 +396,21 @@ class DelegationService(
         if (challenge.partyId != expectedPartyId || challenge.purpose != expectedPurpose) {
             throw DelegationScaException("$errorPrefix challenge ${challenge.id} does not match party or purpose")
         }
-        if (challenge.status != "COMPLETED") {
-            throw DelegationScaException("$errorPrefix challenge ${challenge.id} is not completed")
-        }
+        // Deliberately NOT asserting status == "COMPLETED" here. A decoupled challenge
+        // (PUSH_NOTIFICATION / BIOMETRIC) sits at PENDING while holding a signature-verified
+        // device decision: `verify()` promotes it, and NOTHING a customer can reach calls verify —
+        // customer-edge exposes create / read / decision only. Payments work because the edge's own
+        // scaGate calls `consume`, which resolves a pending decoupled challenge itself before
+        // spending it ("resolve it now rather than refusing"). This pre-check ran BEFORE consume and
+        // rejected exactly the challenges consume would have legitimately resolved, so every
+        // customer-driven offer and accept failed with "challenge is not completed" — the whole
+        // ceremony was unreachable from the app.
+        //
+        // Approval is still enforced, and by the component that owns it: consume throws
+        // ScaChallengeNotApprovedException unless the challenge reaches COMPLETED, checks the party,
+        // refuses an already-spent challenge, and enforces dynamic linking. Asserting completion
+        // here as well only duplicated a weaker copy of that check at the one moment it could not
+        // yet be true.
     }
 
     @Suppress("TooGenericExceptionCaught") // includes sca-service's 409 for an already-spent challenge

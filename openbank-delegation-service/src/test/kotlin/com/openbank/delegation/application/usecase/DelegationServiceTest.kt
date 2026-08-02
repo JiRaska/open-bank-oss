@@ -73,6 +73,19 @@ class DelegationServiceTest {
         )
     }
 
+    /**
+     * A decoupled challenge as the customer path actually presents it: PENDING, holding a
+     * signature-verified device decision that only `consume` will promote.
+     */
+    private fun scaPendingDecoupled(partyId: UUID, purpose: String) {
+        coEvery { scaClient.getChallenge(any()) } returns ScaChallengeSnapshot(
+            id = UUID.randomUUID(),
+            partyId = partyId,
+            purpose = purpose,
+            status = "PENDING",
+        )
+    }
+
     private fun eligibilityOk(grantorKyc: String = "FULL", granteeKyc: String = "FULL") {
         coEvery { eligibilityClient.eligibilityOf(grantor) } returns PartyEligibility(grantor, true, grantorKyc)
         coEvery { eligibilityClient.eligibilityOf(grantee) } returns PartyEligibility(grantee, true, granteeKyc)
@@ -148,6 +161,40 @@ class DelegationServiceTest {
         scaOk(grantor, "CONSENT_GRANT")
         // Ownership and eligibility are checked BEFORE the SCA gate (so a doomed request does not
         // spend the ceremony), hence both must be stubbed for the SCA assertion to be reached.
+        eligibilityOk()
+        assertThatThrownBy { runBlocking { service.offer(offerCommand()) } }
+            .isInstanceOf(DelegationScaException::class.java)
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `offer accepts a PENDING decoupled challenge and lets consume promote it`(): Unit = runBlocking {
+        // The state every customer-driven ceremony is actually in. NOTHING a customer can reach
+        // calls sca-service's verify(): customer-edge exposes create / read / decision only, and
+        // `decision` records the signed device decision without promoting the challenge. `consume`
+        // resolves it — payments rely on exactly that via the edge's scaGate. A pre-check on
+        // status == "COMPLETED" therefore rejected every offer and accept the app could make, and
+        // no test noticed because every fixture handed the service an already-COMPLETED challenge.
+        scaPendingDecoupled(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+        coEvery { repository.save(any<DelegationGrant>(), any()) } answers { firstArg() }
+
+        val grant = service.offer(offerCommand())
+
+        assertThat(grant.status).isEqualTo(DelegationStatus.OFFERED)
+
+        // Approval is still enforced — by consume, which owns it: it promotes the decision, refuses
+        // an unapproved or already-spent challenge, and binds dynamic linking.
+        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), grantor) }
+        coVerify(exactly = 1) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `offer still rejects a PENDING challenge belonging to another party`(): Unit = runBlocking {
+        // Relaxing the status check must not relax the identity check: the party+purpose assertion
+        // is the half that cannot be delegated to consume, because consume is told which party to
+        // expect and would happily confirm the wrong one if we passed it through.
+        scaPendingDecoupled(UUID.randomUUID(), "DELEGATION_GRANT")
         eligibilityOk()
         assertThatThrownBy { runBlocking { service.offer(offerCommand()) } }
             .isInstanceOf(DelegationScaException::class.java)
