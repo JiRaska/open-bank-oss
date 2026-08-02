@@ -1020,6 +1020,29 @@ gates:
     run: |
       python3 .github/scripts/check-extension-bean-config.py --enforce
 
+  # The root CLAUDE.md has documented this footgun for months with nothing enforcing it: a
+  # @ConfigProperty that is neither Optional<..> nor given a defaultValue throws SRCFG00040 at BOOT
+  # when no value is supplied — the service does not start. #2872's second defect was this shape
+  # (`Failed to load config value ... analytics.clickhouse-user`), on main, all checks green.
+  #
+  # Accepts a value from application.yaml (including a %profile root) OR from env on the gitops
+  # workload. Either source alone is a false positive waiting to happen; several services here
+  # configure purely from Deployment env.
+  #
+  # application.yaml is PARSED, not grepped — a comment naming a property must not count as
+  # supplying it, or a stale comment marks a service that cannot boot as configured.
+  #
+  # ENFORCED: 38 required declarations, 0 findings. Proven by deleting one real key and watching it
+  # name the exact file, property and missing env var.
+  - id: configproperty-supplied
+    name: "a required @ConfigProperty has a value (SRCFG00040, enforced)"
+    group: kotlin
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-configproperty-supplied.py --self-test
+    run: |
+      python3 .github/scripts/check-configproperty-supplied.py --enforce
+
   - id: compliance-matrix
     name: "compliance-page evidence citations (#2370, enforced)"
     group: registry
