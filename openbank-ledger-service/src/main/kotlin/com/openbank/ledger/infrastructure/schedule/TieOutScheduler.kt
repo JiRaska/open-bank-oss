@@ -121,9 +121,9 @@ class TieOutScheduler(
             // it silently ignores the injected `clock` and reads the JVM's real wall clock.
             // Harmless in production (the CDI clock is `Clock.systemUTC()`, so both give the same
             // instant and therefore the same Prague date), but it makes this method untestable
-            // with a fixed clock — exactly the class of clock-injection violation flagged
-            // fleet-wide in the closing audit (docs/audits/2026-07-16-closing-audit.md, systemic
-            // root cause 1).
+            // with a fixed clock — exactly the class of clock-injection violation the
+            // fleet-wide closing audit flagged as systemic root cause 1, and that
+            // .github/scripts/check-clock-injection.sh now gates.
             val through = LocalDate.now(clock.withZone(zone)).minusDays(1)
             val dates = catchUpDates(through)
             if (dates.isEmpty()) {

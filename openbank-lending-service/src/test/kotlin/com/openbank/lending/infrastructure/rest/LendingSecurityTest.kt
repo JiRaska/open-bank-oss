@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test
 /**
  * Regression guard (C7/ADR-0030): no lending endpoint must be opened without role-gating.
  * Lending is a money-path service — unauthorised access would expose loan lifecycle actions.
- * Pure reflection — no Quarkus boot needed. Threat model: docs/threat-models/lending-service.md
+ * Pure reflection — no Quarkus boot needed. Threat model: docs/threat-models/openbank-lending-service.md
  */
 class LendingSecurityTest {
 

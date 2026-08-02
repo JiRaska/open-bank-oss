@@ -43,7 +43,10 @@ on:
   # (issue #1419): without a per-PR submission the Gradle graph is main-only, and
   # dependency-review — which only ever compares submitted graphs — silently had
   # nothing to say about the fleet's primary language. This is the integration
-  # documented by gradle/actions (docs/dependency-submission.md). The path filter is
+  # documented by gradle/actions in its own docs/dependency-submission.md — a file in
+  # THAT repository, not this one.
+  # stale-ref-ok: the path above is gradle/actions', not a path in this tree.
+  # The path filter is
   # kept HERE and only here: a PR that changes no manifest cannot change resolution, so
   # its head needs no snapshot of its own — the gate has nothing to diff either way.
   pull_request:

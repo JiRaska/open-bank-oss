@@ -6,8 +6,8 @@
 //
 // In-cluster: queries the K8s API for Deployments in the OpenBank domain
 // namespaces and returns readiness from .status.readyReplicas. The ServiceAccount
-// must have the openbank-discovery-reader ClusterRole bound via per-namespace
-// RoleBindings (see openbank-infra/gitops/components/admin-ui/rbac.yaml).
+// must have the admin-ui-discovery ClusterRole bound via per-namespace
+// RoleBindings (see openbank-infra/gitops/components/admin-ui/admin-ui.yaml).
 //
 // Off-cluster (local dev, no SA token): returns { source: "static", services: [] }
 // so callers degrade gracefully without crashing.
