@@ -35,6 +35,17 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
 import { StageBoard, summariseBy, type StageDef } from '@/components/flow/StageBoard'
 
+/** `/api/v1/campaigns/summary` (#3296). Null when the deployed service predates the endpoint —
+ *  the page then keeps saying reach is not available rather than showing zeros that look like
+ *  "nobody was reached". */
+interface CampaignSummary {
+  campaignId: string
+  enrolled: number
+  sent: number
+  suppressed: number
+  failed: number
+}
+
 interface Campaign {
   id: string
   name: string
@@ -60,6 +71,7 @@ const LIFECYCLE: { key: string; cs: string; en: string; terminal?: boolean }[] =
 export default function CampaignsPage() {
   const { t, language } = useLanguage()
   const [items, setItems] = useState<Campaign[]>([])
+  const [summary, setSummary] = useState<Record<string, CampaignSummary> | null>(null)
   const [unavailable, setUnavailable] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -68,12 +80,15 @@ export default function CampaignsPage() {
   useEffect(() => {
     fetch('/api/campaigns')
       .then(r => r.json())
-      .then((d: { items: Campaign[]; state: string }) => {
+      .then((d: { items: Campaign[]; state: string; summary?: CampaignSummary[] | null }) => {
         if (d.state !== 'ok') {
           setUnavailable(d.state === 'unauthorized' ? 'unauthorized' : d.state === 'not_deployed' ? 'not_deployed' : 'unreachable')
           return
         }
         setItems(d.items ?? [])
+        setSummary(
+          Array.isArray(d.summary) ? Object.fromEntries(d.summary.map(x => [x.campaignId, x])) : null,
+        )
       })
       .catch(() => setUnavailable('unreachable'))
       .finally(() => setLoading(false))
@@ -161,10 +176,12 @@ export default function CampaignsPage() {
             onSelect={setStateFilter}
             lang={language}
             ariaLabel={t('Životní cyklus kampaní podle stavu', 'Campaign lifecycle by state')}
-            footnote={t(
-              'Doručení a odezva zde nejsou — seznam kampaní je od služby nevrací.',
-              'Delivery and response are not here — the campaign list endpoint does not return them.',
-            )}
+            footnote={summary
+              ? t('Dosah a doručení v tabulce níže.', 'Reach and delivery in the table below.')
+              : t(
+                  'Doručení a odezva zde nejsou — nasazená služba je zatím nevrací.',
+                  'Delivery and response are not here — the deployed service does not return them yet.',
+                )}
           />
 
           {unknownStates.length > 0 && (
@@ -213,6 +230,9 @@ export default function CampaignsPage() {
                     <th className="px-4 py-2 font-medium">{t('Název', 'Name')}</th>
                     <th className="px-4 py-2 font-medium">{t('Stav', 'State')}</th>
                     <th className="px-4 py-2 font-medium">{t('Segment', 'Segment')}</th>
+                    {summary && <th className="px-4 py-2 font-medium">{t('Zařazeno', 'Enrolled')}</th>}
+                    {summary && <th className="px-4 py-2 font-medium">{t('Doručeno', 'Sent')}</th>}
+                    {summary && <th className="px-4 py-2 font-medium">{t('Potlačeno', 'Suppressed')}</th>}
                     <th className="px-4 py-2 font-medium">{t('Vytvořil', 'Created by')}</th>
                     <th className="px-4 py-2 font-medium">{t('Schválil', 'Approved by')}</th>
                     <th className="px-4 py-2 font-medium">{t('Vytvořeno', 'Created')}</th>
@@ -235,6 +255,20 @@ export default function CampaignsPage() {
                       <td className="px-4 py-2 font-mono text-xs">
                         {c.segmentRef?.name}@{c.segmentRef?.version}
                       </td>
+                      {summary && <td className="px-4 py-2 text-xs">{summary[c.id]?.enrolled ?? 0}</td>}
+                      {summary && <td className="px-4 py-2 text-xs">{summary[c.id]?.sent ?? 0}</td>}
+                      {/* Suppressed is tinted only when it happened: "0 suppressed" is the normal
+                          case and colouring it would make every row look like it needs attention.
+                          A non-zero here is the answer to "why was reach low", so it must not read
+                          as ordinary. */}
+                      {summary && (
+                        <td
+                          className="px-4 py-2 text-xs"
+                          style={(summary[c.id]?.suppressed ?? 0) > 0 ? { color: 'var(--warning)', fontWeight: 600 } : undefined}
+                        >
+                          {summary[c.id]?.suppressed ?? 0}
+                        </td>
+                      )}
                       <td className="px-4 py-2 text-xs">{c.createdBy}</td>
                       {/* The checker, shown next to the maker on purpose: the maker/checker pair is
                           the audit-relevant fact about an ACTIVE campaign, not a detail. */}
