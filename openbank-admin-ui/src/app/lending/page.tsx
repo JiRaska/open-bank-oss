@@ -10,6 +10,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
 import { RefreshCw, TrendingUp } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
@@ -133,6 +134,9 @@ export default function LendingPage() {
               <th style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-tertiary)' }}>
                 {tab === 'queue' ? t('Podáno', 'Submitted') : t('Čerpáno', 'Disbursed')}
               </th>
+              {tab === 'queue' && (
+                <th style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-tertiary)' }} />
+              )}
             </tr>
           </thead>
           <tbody>
@@ -143,6 +147,13 @@ export default function LendingPage() {
                 <td style={{ padding: '10px 14px' }}><span className="pill">{a.status}</span></td>
                 <td style={{ padding: '10px 14px', color: 'var(--text-tertiary)', fontSize: 12 }}>
                   {a.createdAt ? new Date(a.createdAt).toLocaleString() : '—'}
+                </td>
+                {/* The row answers "which applications exist"; the desk's next question is always
+                    "where is this one and what is it waiting for" — that lives on the flow page. */}
+                <td style={{ padding: '10px 14px' }}>
+                  <Link href={`/lending/applications/${a.id}`} style={{ color: 'var(--accent)', fontSize: 12 }}>
+                    {t('Průběh', 'Progress')} ›
+                  </Link>
                 </td>
               </tr>
             ))}
@@ -157,7 +168,7 @@ export default function LendingPage() {
               </tr>
             ))}
             {!loading && ((tab === 'queue' && applications.length === 0) || (tab === 'portfolio' && loans.length === 0)) && (
-              <tr><td colSpan={4} style={{ padding: 20, textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 13 }}>
+              <tr><td colSpan={tab === 'queue' ? 5 : 4} style={{ padding: 20, textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 13 }}>
                 {t('Žádné záznamy', 'No records')}
               </td></tr>
             )}

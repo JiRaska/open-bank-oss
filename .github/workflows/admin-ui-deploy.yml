@@ -396,6 +396,10 @@ jobs:
 
       - name: Build, collect, push
         id: build
+        env:
+          # Optional: enables source-map upload to GlitchTip (#3235). Unset = no upload, normal
+          # build — the maps are what turn a captured error into a file and a line.
+          GLITCHTIP_AUTH_TOKEN: ${{ secrets.GLITCHTIP_AUTH_TOKEN }}
         run: |
           set -euo pipefail
           # build-push-admin-ui.sh derives the tag from git (dirty check runs BEFORE

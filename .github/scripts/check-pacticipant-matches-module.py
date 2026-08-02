@@ -5,19 +5,19 @@
 # Guard: every Pact participant name is exactly a module directory in this repo.
 #
 # WHY THIS EXISTS
-#   The Pact Broker webhook created by
-#   openbank-infra/scripts/seed-pact-verification-webhook.sh dispatches
-#   verify-provider.yml with `service = ${pactbroker.providerName}` — it hands the
-#   broker's pacticipant name straight to a workflow input that must name a module
-#   directory. That works today (55 of 55 match, checked against the live broker),
-#   and it works ONLY because the two vocabularies happen to coincide.
+#   The verification reconciler
+#   .github/scripts/pact-reconcile-verifications.py dispatches verify-provider.yml
+#   with the broker's pacticipant name as its `service` input — a workflow input that
+#   must name a module directory. That works today (55 of 55 match, checked against
+#   the live broker), and it works ONLY because the two vocabularies happen to
+#   coincide.
 #
 #   Nothing was holding them together. Register a pacticipant as `ledger` instead of
-#   `openbank-ledger-service`, or rename a module directory, and the webhook keeps
-#   firing — it just dispatches a build of a service that does not exist. GitHub
+#   `openbank-ledger-service`, or rename a module directory, and the reconciler keeps
+#   dispatching — it just dispatches a build of a service that does not exist. GitHub
 #   accepts the dispatch (the input is a free-form string), the run fails somewhere
 #   inside the build, and the pact it was supposed to verify stays unverified. The
-#   symptom would be indistinguishable from the problem the webhook was built to
+#   symptom would be indistinguishable from the problem the reconciler was built to
 #   fix, which is the worst possible failure mode for it.
 #
 #   So the coincidence becomes an invariant, checked offline: this reads the
@@ -89,11 +89,11 @@ def main() -> int:
             if name not in modules:
                 errors.append(
                     f"{f.name}: {role} '{name}' is not a Gradle module directory. The Pact "
-                    f"Broker webhook dispatches verify-provider.yml with the pacticipant name "
-                    f"as its `service` input, so a name that is not a module directory "
+                    f"verification reconciler dispatches verify-provider.yml with the pacticipant "
+                    f"name as its `service` input, so a name that is not a module directory "
                     f"dispatches a build of nothing and the pact stays unverified. Rename the "
                     f"pacticipant to match the module, or stop relying on the identity in "
-                    f"openbank-infra/scripts/seed-pact-verification-webhook.sh."
+                    f".github/scripts/pact-reconcile-verifications.py."
                 )
 
     if errors:

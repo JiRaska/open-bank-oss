@@ -43,8 +43,11 @@ class LlmDiagnosisAdapterTest {
         threshold = BigDecimal("900"),
     )
 
+    // Pinned to the version the adapter actually loads. This assertion is the reason the prompt
+    // bump v2 -> v3 (#3188) could not be a silent edit: it went red the moment the adapter moved
+    // and the helper did not, which is exactly what it is for.
     private fun registeredPrompt(): String =
-        javaClass.getResourceAsStream("/governance-prompts/control-liveness-sentinel/system.v2.md")!!
+        javaClass.getResourceAsStream("/governance-prompts/control-liveness-sentinel/system.v3.md")!!
             .bufferedReader().use { it.readText() }
 
     @Test

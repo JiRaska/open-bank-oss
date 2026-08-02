@@ -88,13 +88,19 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     // First page only. Paging and filtering go through /api/campaigns/[id]/sends so turning a
     // page does not re-read the campaign and its enrolments.
     readSends(headers, id),
-    // The journey funnel: per-step SQL aggregates. Bundled with the first paint because the flow is
-    // the first thing on the screen, not something you scroll to.
-    read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/journey`, []),
     // Counts come from the service, not from the page above: a suppressed-total derived from the
     // rows on screen understates every campaign larger than one page, and that total is the number
     // an operator acts on.
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/sends/summary`, {}),
+    // The journey funnel: per-step SQL aggregates. Bundled with the first paint because the flow is
+    // the first thing on the screen, not something you scroll to.
+    //
+    // ORDER IS THE CONTRACT. This array is positional and the destructuring above names the
+    // positions; adding a read in the middle silently hands every later name someone else's result.
+    // That is how the journey slot came to hold the summary object: `funnel` was no longer an array,
+    // and the screen died on `.map` with the 404 on /journey never surfacing, because its state had
+    // landed under `sendSummary`.
+    read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/journey`, []),
   ])
 
   return NextResponse.json({

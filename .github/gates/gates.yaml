@@ -872,13 +872,14 @@ gates:
 
   # ==== api ===================================================================
 
-  # The Pact Broker webhook (openbank-infra/scripts/seed-pact-verification-webhook.sh)
-  # dispatches verify-provider.yml with `service = ${pactbroker.providerName}`, which
-  # only works because every pacticipant name is exactly a module directory — true for
-  # all 55 today, and previously held together by nothing. A drifted name would keep
-  # dispatching, just at a service that does not exist: the run fails inside the build
-  # and the pact stays unverified, which looks identical to the strand the webhook was
-  # built to remove. Reads the committed pacts, so no broker and no credentials.
+  # The verification reconciler (.github/scripts/pact-reconcile-verifications.py)
+  # dispatches verify-provider.yml with the PACTICIPANT NAME as its `service` input,
+  # which only works because every pacticipant name is exactly a module directory —
+  # true for all 55 today, and previously held together by nothing. A drifted name
+  # would keep dispatching, just at a service that does not exist: the run fails
+  # inside the build and the pact stays unverified, which looks identical to the
+  # strand the reconciler was built to remove. Reads the committed pacts, so no
+  # broker and no credentials.
   - id: pacticipant-matches-module
     name: "pacticipant name is a module directory (Pact webhook contract)"
     group: api
@@ -1022,6 +1023,31 @@ gates:
       python3 .github/scripts/check-flyway-default-datasource.py --selftest
     run: |
       python3 .github/scripts/check-flyway-default-datasource.py --enforce
+  # A service that INJECTS ObjectStorePort and resolves to the Postgres backend must create the
+  # table it reads (#3081). Not the 36-way "entity visible but unused" gap — that is by design and
+  # inert under `database.generation: none`; this is the pairing that fails at first use, with a
+  # runtime 500 and nothing before it to say so.
+  - id: object-store-blobs-migration
+    name: "object store blobs migration (issue #3081, enforced)"
+    group: data
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-object-store-blobs-migration.py --selftest
+    run: |
+      python3 .github/scripts/check-object-store-blobs-migration.py --enforce
+
+  # auto-deploy derives its libs fan-out from the `project(":openbank-libs-*")` declarations
+  # (#2983). A hardcoded path regex missed the ADR-0122 siblings entirely, so a libs-temporal fix
+  # rebuilt zero consumers and left services running pre-fix images while their pods read green.
+  # The self-test pins the declaration matcher and both path matchers in both directions.
+  - id: libs-change-dependents
+    name: "libs change fan-out is derived (issue #2983, enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      bash .github/scripts/libs-change-dependents.sh --selftest
+    run: |
+      bash .github/scripts/libs-change-dependents.sh --selftest
 
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
