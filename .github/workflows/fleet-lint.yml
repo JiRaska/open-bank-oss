@@ -62,7 +62,10 @@ concurrency:
   # PR pushes keep the superseding behaviour, which is what that setting is for.
   # The key stays O(1) — a sha, never a list: interpolating a fleet-sized value here
   # stops the job being created at all (#3082).
-  group: fleet-lint-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci' }}
+  # A scheduled run must not share a lane with a manual dispatch: both fall to the
+  # 'ci' key otherwise, so a workflow_dispatch cancels an in-flight nightly. Same
+  # separation services-ci.yml already makes for the nightly fleet build.
+  group: fleet-lint-${{ github.ref }}-${{ github.event_name == 'schedule' && 'nightly' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci') }}
   cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:
