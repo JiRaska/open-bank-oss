@@ -125,7 +125,42 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
         with:
-          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          # NEVER write the Actions cache from this job — restore only, on every ref
+          # including main (#3299).
+          #
+          # The repo's Actions cache runs permanently over its 10 GB ceiling (measured
+          # 2026-08-02: 11.7 GB / 92 entries), so GitHub evicts LRU continuously. Measured
+          # over 16 cache-writing job-runs, exactly two jobs write on main — `fleet-lint`
+          # and this one, 8 runs each — and each writing run pushes a fresh
+          # `gradle-build-cache-v1` entry (~200 MB) plus, whenever the fleet's dependency
+          # set shifts by even one artifact, a whole new ~700-850 MB
+          # `gradle-dependencies-v1` entry. That is why 9 near-identical dependency entries
+          # (6.1 GB, 60% of the pool) coexist: the entry is content-addressed over the
+          # entire `modules-2` tree, so two jobs resolving almost-the-same set still store
+          # it twice.
+          #
+          # This is the fix `setup-gradle`'s own docs prescribe for exactly this shape
+          # ("Select which jobs should write to the cache"): elect ONE writer per
+          # OS+architecture and make every other job a consumer. `fleet-lint` is that writer
+          # on Linux-X64 — it runs `testClasses detekt ktlintCheck` fleet-wide on every main
+          # push, so its Gradle home is a near-superset of what this job needs, and
+          # `gradle-home-cache-strict-match` defaults to false, so this job still RESTORES
+          # from it across job boundaries.
+          #
+          # Why THIS job is the right one to demote rather than fleet-lint or CodeQL:
+          # it is the only fleet-wide Gradle job nobody waits on. It is not a required
+          # check, it is push/schedule-triggered, and it currently runs 4.8-8.5 min against
+          # a 30 min timeout. The cost of a colder cache here is re-downloading the
+          # runtime-only artifacts `assemble` pulls beyond fleet-lint's `testClasses` set —
+          # minutes, inside that headroom. fleet-lint is a required check, and CodeQL's
+          # java-kotlin leg documents a 25-30 min cold penalty and is the most
+          # preemption-exposed job in the fleet; demoting either would trade a real, felt
+          # regression for the same headroom.
+          #
+          # Read-only does NOT affect the submitted graph: `generate-and-submit` resolves
+          # the fleet regardless of cache state, so the #1449 stale-graph alarm below is
+          # unaffected.
+          cache-read-only: true
           dependency-graph: generate-and-submit
           # Keep detached and buildscript configurations OUT of the submitted graph (#2833).
           #

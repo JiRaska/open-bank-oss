@@ -536,6 +536,23 @@ gates:
     run: |
       python3 .github/scripts/check-workflow-run-step-size.py
 
+  # Gradle Actions-cache writer budget (issue #3299). The pool has been over its 10 GB
+  # ceiling continuously (11.7 GB / 92 entries on 2026-08-02), so GitHub evicts LRU and the
+  # only symptom is somebody's job re-resolving dependencies — never a red check. What
+  # fills it is the number of jobs WRITING: each writing run stores a ~200 MB build-cache
+  # entry and, on any shift in the resolved set, a whole new ~700-850 MB dependencies entry.
+  # Nothing counted the writers, so a workflow adding `setup-gradle` with no cache inputs
+  # silently became one (the default writes on main). This declares every usage's mode and
+  # fails on drift in EITHER direction — new, changed, or removed.
+  - id: gradle-cache-writer-budget
+    name: "Gradle Actions-cache writer budget (issue #3299, enforced)"
+    group: lint
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-gradle-cache-writers.py --self-test
+    run: |
+      python3 .github/scripts/check-gradle-cache-writers.py --enforce
+
   # co-deploy set derivation unit test (issue #1985). The classifier above says WHAT KIND
   # of block a service has; this one says whether the block can be resolved by deploying
   # that service at all. Two services that name each other never converge one at a time,
