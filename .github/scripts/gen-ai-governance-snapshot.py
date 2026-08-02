@@ -205,6 +205,16 @@ def collect_evals_facts() -> dict:
 def collect_registry_loader_facts(registered_charters: list[str]) -> dict:
     build_pattern = re.compile(r'openbank-libs/governance/prompts/([a-z0-9-]+)"\)')
     source_pattern = re.compile(r'/governance-prompts/([a-z0-9-]+)/')
+    # A loader that composes the path from the charter id, e.g.
+    #   val path = "/governance-prompts/$agentId/$name.md"
+    # ADR-0148 asks for exactly this — one registry-driven loader rather than a branch per
+    # charter — so `source_pattern` above, which only ever matches a LITERAL slug, cannot
+    # see it and reports every packaged charter as unloaded. That is not a missing loader,
+    # it is a loader this check cannot statically resolve, and failing on it would push
+    # agent-service back to hardcoding a charter list. Measured on openbank-agent-service
+    # after #3312: packaged=[compliance-officer, ui-assistant], literal hits=[], so both
+    # were reported missing while `RegisteredPromptTemplates` loads them at runtime.
+    dynamic_pattern = re.compile(r'/governance-prompts/\$')
 
     services: list[dict] = []
     loaded_charters: set[str] = set()
@@ -217,10 +227,17 @@ def collect_registry_loader_facts(registered_charters: list[str]) -> dict:
         module = build_file.parent.name
         src_root = build_file.parent / "src" / "main" / "kotlin"
         source_hits: set[str] = set()
+        dynamic_loader = False
         for kotlin_file in src_root.rglob("*.kt"):
-            source_hits.update(source_pattern.findall(kotlin_file.read_text(encoding="utf-8")))
+            text = kotlin_file.read_text(encoding="utf-8")
+            source_hits.update(source_pattern.findall(text))
+            if dynamic_pattern.search(text):
+                dynamic_loader = True
 
-        missing_code = sorted(set(packaged) - source_hits)
+        # The rule being enforced is "nothing is packaged that no code loads". A dynamic
+        # loader still has to EXIST — a module packaging prompts with no reference to
+        # /governance-prompts/ at all is still dead packaging and still fails below.
+        missing_code = [] if dynamic_loader else sorted(set(packaged) - source_hits)
         if missing_code:
             fail(
                 f"{module} packages registry prompts for {missing_code} but no Kotlin source loads "

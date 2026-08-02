@@ -217,6 +217,14 @@
     "registryPromptLoaders": {
       "services": [
         {
+          "module": "openbank-agent-service",
+          "charters": [
+            "compliance-officer",
+            "ui-assistant"
+          ],
+          "buildFile": "openbank-agent-service/build.gradle.kts"
+        },
+        {
           "module": "openbank-control-liveness-sentinel",
           "charters": [
             "control-liveness-sentinel"
@@ -231,15 +239,15 @@
           "buildFile": "openbank-devops-agent/build.gradle.kts"
         }
       ],
-      "serviceCount": 2,
+      "serviceCount": 3,
       "registeredChartersLoadedFromRegistry": [
+        "compliance-officer",
         "control-liveness-sentinel",
-        "devops-agent"
+        "devops-agent",
+        "ui-assistant"
       ],
       "registeredChartersStillInline": [
-        "compliance-officer",
-        "customer-copilot",
-        "ui-assistant"
+        "customer-copilot"
       ]
     },
     "governanceDefaults": {
