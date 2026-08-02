@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.84.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.83.0...admin-ui-v0.84.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** lead the campaign people section with counts, not a list of UUIDs ([#3304](https://github.com/JiRaska/open-bank-oss/issues/3304)) ([2f2f21a](https://github.com/JiRaska/open-bank-oss/commit/2f2f21ad2ea7fb0d744f7e78eb9f269cb0a1e915))
+
 ## [0.83.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.82.1...admin-ui-v0.83.0) (2026-08-02)
 
 
