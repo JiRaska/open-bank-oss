@@ -43,7 +43,7 @@ class CampaignSummaryQueryTest {
         name = "c-$id",
         goal = "goal",
         segmentRef = SegmentRef("actives", 1),
-        steps = listOf(CampaignStep(0, "TPL", Channel.EMAIL, emptyMap(), 0)),
+        steps = listOf(CampaignStep(0, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0)),
         state = state,
         createdBy = "maker",
         approvedBy = null,

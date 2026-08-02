@@ -57,10 +57,10 @@ class CampaignSendLogTest {
                 records.count { outcome == null || it.outcome == outcome }.toLong()
 
             override suspend fun countByStepAndOutcome(campaignId: UUID) =
-
-            override suspend fun countAllByCampaignAndOutcome() = emptyList<CampaignOutcomeCount>()
                 records.groupBy { it.stepOrder to it.outcome }
                     .map { (k, v) -> StepOutcomeCount(k.first, k.second, v.size.toLong()) }
+
+            override suspend fun countAllByCampaignAndOutcome() = emptyList<CampaignOutcomeCount>()
         },
     )
 
