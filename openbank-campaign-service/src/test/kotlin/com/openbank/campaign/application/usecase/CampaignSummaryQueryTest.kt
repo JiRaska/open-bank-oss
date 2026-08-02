@@ -48,6 +48,7 @@ class CampaignSummaryQueryTest {
         createdBy = "maker",
         approvedBy = null,
         createdAt = Instant.EPOCH,
+        updatedAt = Instant.EPOCH,
     )
 
     private class Sends(private val cells: List<CampaignOutcomeCount>, var calls: Int = 0) : SendLogRepository {
