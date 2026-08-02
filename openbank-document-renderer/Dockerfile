@@ -1,3 +1,18 @@
+# Built OUT OF BAND — nothing in this repository builds this image.
+#
+# Unlike the 48 stripped in #3249, this file is a genuine, self-contained recipe: it needs no
+# Gradle build stage and no ADR-0122 sibling COPYs, so `docker build` on this directory works.
+# But no workflow, no `openbank-infra/scripts/*` and no Makefile invokes it — the running image
+# (`openbank-document-renderer`) was produced somewhere outside this tree, and nothing connects the two.
+#
+# So "there is an image in ECR" is NOT evidence that this file produced it. Before trusting this
+# recipe, confirm the deployed digest actually came from it; before editing it, remember that a
+# change here reaches nothing until someone rebuilds by hand.
+#
+# Fixing this properly means pointing a workflow at it (the way build-push-admin-ui.sh does for
+# admin-ui). Recorded rather than silently left, so the next reader does not mistake a deployed
+# artifact for a live pipeline.
+
 # openbank-document-renderer — WeasyPrint HTTP sidecar (ADR-0162 D3).
 #
 # Multi-stage: the builder stage carries a C toolchain + WeasyPrint's build
