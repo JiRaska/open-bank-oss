@@ -971,6 +971,28 @@ gates:
     run: |
       python3 .github/scripts/check-opa-sidecar-bundle-shape.py --enforce
 
+  # campaign-service's rollout died on `secrets "campaign-service" is forbidden` (#2872/#2851):
+  # the ESO cert-reader Role grants by resourceNames, a HAND-KEPT list, and adding a service to
+  # the fleet means editing it while nothing says so. Four of that rollout's five boot failures
+  # were pure repo-internal contradictions — two artifacts in this tree disagreeing, with nothing
+  # comparing them.
+  #
+  # Derived, not declared: the required set comes from the ExternalSecrets that actually read the
+  # kafka cert store, which is why it needs NO exception list — openbank-cluster-cluster-ca-cert
+  # is read by 30 of them and is not a KafkaUser, so a KafkaUser-based rule would have needed an
+  # allowlist entry, the very construct this retires.
+  #
+  # ENFORCED: 38 read, 38 granted, zero drift in either direction at registration. Proven against
+  # the real tree by deleting one entry and watching it reproduce the exact production message.
+  - id: kafka-cert-reader-grant
+    name: "ESO cert-reader grant covers what ExternalSecrets read (#2872, enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-kafka-cert-reader-grant.py --self-test
+    run: |
+      python3 .github/scripts/check-kafka-cert-reader-grant.py --enforce
+
   - id: compliance-matrix
     name: "compliance-page evidence citations (#2370, enforced)"
     group: registry
