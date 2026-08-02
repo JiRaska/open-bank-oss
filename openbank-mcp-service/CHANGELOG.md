@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.14.2...mcp-service-v0.14.3) (2026-08-02)
+
+
+### Bug Fixes
+
+* **mcp:** forward attributes through the rest.rego agent-charter bridge ([#3315](https://github.com/JiRaska/open-bank-oss/issues/3315)) ([4d1ef53](https://github.com/JiRaska/open-bank-oss/commit/4d1ef53ce25e705fa215fcab83ac627d4ee449b0))
+
 ## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.14.1...mcp-service-v0.14.2) (2026-08-02)
 
 
