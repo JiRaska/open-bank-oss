@@ -1,0 +1,345 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006: every Kafka topic is documented in AsyncAPI 3.0 under openbank-contracts/<service>/.
+# This is the FIRST contract in the tree — `openbank-contracts/` did not exist before it — so it
+# also sets the shape the fleet's remaining 34 producer topics will follow (#1916).
+#
+# WHAT IS AND IS NOT ENFORCED HERE. `check-event-contract-coverage.py` asserts this FILE EXISTS;
+# nothing validates its content, and no AsyncAPI linter is wired despite ADR-0006's delivery table
+# claiming one is (line 16, "CI linting gate — Shipped"). Nor is any schema registered in Apicurio:
+# the registry runs, but zero topics have a registered schema, so a producer that violates this
+# document fails nowhere. Everything below is therefore DERIVED from the code that runs, and each
+# claim names its source so the next reader can re-check it rather than trust it.
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Delegation Service — events
+  version: 1.0.0
+  description: |
+    Domain events emitted when a customer-to-party delegation grant changes state (ADR-0232).
+
+    A grant is one party letting another act on a resource they own, scoped to explicit
+    capabilities and a validity window. Every state transition on the aggregate is published here.
+
+    **Transactional outbox.** Events are written to `delegation_outbox` in the same transaction as
+    the state change and dispatched afterwards, so a published event always corresponds to a
+    committed transition. The dispatcher is `DelegationOutboxDispatcher`; the publisher is
+    `KafkaDelegationOutboxEventPublisher`.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: |
+      Strimzi cluster `openbank-cluster` in the `messaging` namespace. mTLS; the plaintext 9092
+      listener is ACL-denied. Producers authenticate with a per-service KafkaUser certificate.
+
+channels:
+  delegationEvents:
+    address: openbank.delegation.events
+    title: Delegation grant lifecycle
+    description: |
+      One partition, one replica, `cleanup.policy: delete`, `retention.ms: 604800000` (7 days) —
+      declared in `openbank-infra/gitops/components/delegation/kafka-topic.yaml`.
+
+      **Retention is 7 days and the topic is not compacted, so it is a change feed, not a source of
+      truth.** A consumer rebuilding a projection from scratch cannot replay history beyond a week;
+      it must seed from the delegation-service REST API and then follow the topic. Anything that
+      needs the full history needs this topic changed to `compact`, which is a decision for whoever
+      first needs it — not something to assume.
+
+      **Partitioning key: `aggregateId`** — the grant id, as a UUID string
+      (`OutboxKafkaHeaders.partitionKey`, which returns `entry.aggregateId.toString()`). All events
+      for one grant therefore land on one partition and are ordered with respect to each other.
+      Ordering across different grants is NOT guaranteed, and with `partitions: 1` today the
+      distinction is invisible — it will become real the moment the topic is scaled out, so do not
+      write a consumer that depends on cross-grant ordering.
+    messages:
+      DelegationOffered:
+        $ref: '#/components/messages/DelegationOffered'
+      DelegationActivated:
+        $ref: '#/components/messages/DelegationActivated'
+      DelegationDeclined:
+        $ref: '#/components/messages/DelegationDeclined'
+      DelegationRevoked:
+        $ref: '#/components/messages/DelegationRevoked'
+      DelegationSuspended:
+        $ref: '#/components/messages/DelegationSuspended'
+      DelegationReinstated:
+        $ref: '#/components/messages/DelegationReinstated'
+      DelegationRenounced:
+        $ref: '#/components/messages/DelegationRenounced'
+      DelegationExpired:
+        $ref: '#/components/messages/DelegationExpired'
+
+operations:
+  publishDelegationEvents:
+    action: send
+    title: Publish delegation grant transitions
+    channel:
+      $ref: '#/channels/delegationEvents'
+    description: |
+      **Producer: `openbank-delegation-service`** — the sole producer, and the owner of this
+      contract. Configured as `mp.messaging.outgoing.delegation-events-out` in its
+      `application.yaml`.
+
+      **Consumers: none in this repository today.** Two are in flight and not yet merged —
+      `openbank-account-service` (#3058, `account_delegation_projection`) and
+      `openbank-card-issuance-service` (#3105, `card_delegation_projection`). Both build a local
+      read model so that enforcing a delegation never requires a synchronous call to
+      delegation-service. When either merges, add it here; a consumer absent from this list is a
+      consumer nobody has agreed to keep compatible.
+    messages:
+      - $ref: '#/channels/delegationEvents/messages/DelegationOffered'
+      - $ref: '#/channels/delegationEvents/messages/DelegationActivated'
+      - $ref: '#/channels/delegationEvents/messages/DelegationDeclined'
+      - $ref: '#/channels/delegationEvents/messages/DelegationRevoked'
+      - $ref: '#/channels/delegationEvents/messages/DelegationSuspended'
+      - $ref: '#/channels/delegationEvents/messages/DelegationReinstated'
+      - $ref: '#/channels/delegationEvents/messages/DelegationRenounced'
+      - $ref: '#/channels/delegationEvents/messages/DelegationExpired'
+
+components:
+  messageTraits:
+    outboxHeaders:
+      headers:
+        type: object
+        required: [ce-id, ce-type, idempotency-key]
+        properties:
+          ce-id:
+            type: string
+            format: uuid
+            description: Event id. Stable across redeliveries of the same event.
+          ce-type:
+            type: string
+            description: Event type, equal to the payload's `eventType`.
+          idempotency-key:
+            type: string
+            format: uuid
+            description: |
+              Equal to `ce-id` — see `OutboxKafkaHeaders.headersFor`. The outbox dispatcher offers
+              at-least-once delivery, so a consumer MUST deduplicate on this value rather than
+              assume each event arrives once.
+
+  schemas:
+    resourceType:
+      type: string
+      description: The kind of resource a grant is over.
+      enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT]
+    capability:
+      type: string
+      description: |
+        A single delegated permission. `ACCOUNT_PROPOSE_PAYMENT` and `SAVINGS_PROPOSE_WITHDRAW` are
+        propose-only — they create a proposal for the grantor to approve, they do not move money.
+      enum:
+        - ACCOUNT_READ_BALANCES
+        - ACCOUNT_READ_TRANSACTIONS
+        - ACCOUNT_INITIATE_PAYMENT
+        - ACCOUNT_PROPOSE_PAYMENT
+        - CARD_VIEW
+        - CARD_MANAGE_LIMITS
+        - SAVINGS_DEPOSIT
+        - SAVINGS_WITHDRAW
+        - SAVINGS_PROPOSE_WITHDRAW
+        - OBJECT_READ
+        - DELEGATION_MANAGE
+    envelope:
+      type: object
+      description: |
+        Fields every event carries, from `com.openbank.libs.domain.event.DomainEvent`. The payload
+        is the serialized event data class itself — there is no wrapper object.
+      required: [eventId, aggregateId, aggregateType, eventType, version, occurredAt]
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        aggregateId:
+          type: string
+          format: uuid
+          description: The delegation grant id. Also the partition key.
+        aggregateType:
+          type: string
+          const: DelegationGrant
+        eventType:
+          type: string
+        version:
+          type: integer
+          const: 1
+          description: Schema version of this event type. Bump on a breaking payload change.
+        occurredAt:
+          type: string
+          format: date-time
+          description: ISO-8601 instant at which the transition happened, not when it was published.
+    parties:
+      type: object
+      required: [grantorPartyId, granteePartyId]
+      properties:
+        grantorPartyId:
+          type: string
+          format: uuid
+          description: The party who owns the resource and gave the grant.
+        granteePartyId:
+          type: string
+          format: uuid
+          description: The party the grant was given to.
+    resource:
+      type: object
+      required: [resourceType, resourceId]
+      properties:
+        resourceType:
+          $ref: '#/components/schemas/resourceType'
+        resourceId:
+          type: string
+          format: uuid
+    capabilities:
+      type: object
+      required: [capabilities]
+      properties:
+        capabilities:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/capability'
+
+  messages:
+    DelegationOffered:
+      name: DelegationOffered
+      title: A grant was offered and awaits the grantee's acceptance
+      summary: |
+        Emitted by `DelegationService.offer` after the grantor's ownership of the resource has been
+        verified and an SCA challenge has been spent. The grant is NOT yet usable — it confers no
+        authority until `DelegationActivated`.
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/envelope'
+          - $ref: '#/components/schemas/parties'
+          - $ref: '#/components/schemas/resource'
+          - $ref: '#/components/schemas/capabilities'
+
+    DelegationActivated:
+      name: DelegationActivated
+      title: The grantee accepted — the grant is now in force
+      summary: |
+        **The only event that grants authority.** A projection must treat a grant as usable from
+        this event and not from `DelegationOffered`.
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/envelope'
+          - $ref: '#/components/schemas/parties'
+          - $ref: '#/components/schemas/resource'
+          - $ref: '#/components/schemas/capabilities'
+
+    DelegationDeclined:
+      name: DelegationDeclined
+      title: The grantee refused the offer
+      summary: Terminal. Carries no resource or capabilities — the offer never took effect.
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/envelope'
+          - $ref: '#/components/schemas/parties'
+
+    DelegationRevoked:
+      name: DelegationRevoked
+      title: The grantor withdrew the grant
+      summary: |
+        Terminal, and **authority-removing** — a consumer that has not applied this event is
+        enforcing a grant that no longer exists. `reason` is derived from the authenticated caller's
+        input, never from a query parameter.
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/envelope'
+          - $ref: '#/components/schemas/parties'
+          - $ref: '#/components/schemas/resource'
+          - $ref: '#/components/schemas/capabilities'
+          - type: object
+            required: [reason]
+            properties:
+              reason:
+                type: string
+
+    DelegationSuspended:
+      name: DelegationSuspended
+      title: An operator suspended the grant
+      summary: |
+        Authority-removing but NOT terminal — a suspended grant can return via
+        `DelegationReinstated`. Restricted to `ROLE_OPERATOR` / `ROLE_ADMIN`.
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/envelope'
+          - $ref: '#/components/schemas/parties'
+          - $ref: '#/components/schemas/resource'
+          - $ref: '#/components/schemas/capabilities'
+          - type: object
+            required: [reason]
+            properties:
+              reason:
+                type: string
+
+    DelegationReinstated:
+      name: DelegationReinstated
+      title: A suspended grant was returned to force
+      summary: Authority-restoring. Only follows `DelegationSuspended`.
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/envelope'
+          - $ref: '#/components/schemas/parties'
+          - $ref: '#/components/schemas/resource'
+          - $ref: '#/components/schemas/capabilities'
+
+    DelegationRenounced:
+      name: DelegationRenounced
+      title: The grantee gave the grant back
+      summary: |
+        Terminal and authority-removing. Distinct from `DelegationRevoked` in who acted — the
+        grantee, not the grantor — which is why both exist. Carries no capabilities.
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/envelope'
+          - $ref: '#/components/schemas/parties'
+          - $ref: '#/components/schemas/resource'
+
+    DelegationExpired:
+      name: DelegationExpired
+      title: The validity window closed
+      summary: |
+        Terminal and authority-removing. Emitted by the scheduled expiry sweep
+        (`DelegationExpirationJob.sweepExpiredGrants`), so it arrives on the sweep's cadence rather
+        than at the instant of expiry. **A consumer must therefore enforce the window itself and not
+        wait for this event** — between the grant's end instant and the next sweep, no event has
+        been published and the grant is already invalid.
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/envelope'
+          - $ref: '#/components/schemas/parties'
+          - $ref: '#/components/schemas/resource'

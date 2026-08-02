@@ -10,6 +10,7 @@ import io.quarkus.logging.Log
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import java.time.Clock
@@ -21,6 +22,7 @@ import java.time.OffsetDateTime
  * must hear the expiry, not just compute it, so their enforcement rows close too.
  * Status flip + outbox enqueue share one transaction (DelegationRepository.markExpired).
  */
+@Suppress("TooGenericExceptionCaught") // a sweep must survive one bad grant, and log why
 @ApplicationScoped
 class DelegationExpirationJob {
 
@@ -30,18 +32,31 @@ class DelegationExpirationJob {
     @Inject
     lateinit var clock: Clock
 
-    @Scheduled(cron = "0 7 * * * ?", identity = "delegation-expiration-sweep")
-    fun sweepExpiredGrants() {
+    /**
+     * `suspend fun` — the fleet convention (rules.yaml: scheduled_methods), and here it is load
+     * bearing. Quarkus invokes a PLAIN @Scheduled method on a bare executor thread with NO Vert.x
+     * context, so every reactive Panache call underneath throws HR000068
+     * ("No current Vertx context found"). This method used to be plain and to bridge with
+     * `.subscribe().with(onFailure = Log.errorf)`, which swallowed exactly that into one ERROR
+     * line per hour: the sweep had never expired a grant, and nothing downstream could tell,
+     * because a grant past `validTo` still reads as expired to anyone who computes it — only the
+     * projections that need the EVENT stay open. Same defect class as #2148/#2187, in the Mutiny
+     * shape the runBlocking guard does not match.
+     *
+     * `awaitSuspending()` inside a suspend scheduled method runs on a context Quarkus does supply.
+     */
+    @Scheduled(cron = "{openbank.delegation.expiration.cron}", identity = "delegation-expiration-sweep")
+    suspend fun sweepExpiredGrants() {
         val threshold = OffsetDateTime.now(clock)
-        buildSweepPipeline(threshold)
-            .subscribe().with(
-                { count ->
-                    if (count > 0) {
-                        Log.infof("delegation.expiration.sweep expired=%d threshold=%s", count, threshold)
-                    }
-                },
-                { err -> Log.errorf(err, "delegation.expiration.sweep FAILED threshold=%s", threshold) },
-            )
+        val count = try {
+            buildSweepPipeline(threshold).awaitSuspending()
+        } catch (e: Exception) {
+            Log.errorf(e, "delegation.expiration.sweep FAILED threshold=%s", threshold)
+            return
+        }
+        if (count > 0) {
+            Log.infof("delegation.expiration.sweep expired=%d threshold=%s", count, threshold)
+        }
     }
 
     internal fun buildSweepPipeline(threshold: OffsetDateTime): Uni<Int> = delegationRepo.findExpiredActive(threshold)
