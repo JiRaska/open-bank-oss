@@ -26,7 +26,7 @@ spec:
         # would leave agent-service's repointed call failing "model not found" with a green,
         # in-sync ArgoCD — the same silent-degradation shape as an `optional: true` secret ref.
         # BUMP THIS whenever litellm-config.yaml changes; that is what rolls the pod.
-        openbank.tech/litellm-config-revision: "4"
+        openbank.tech/litellm-config-revision: "6"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -35,6 +35,37 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      # LiteLLM runs `prisma generate` on every start, which COPIES schema.prisma into its own
+      # site-packages directory. That directory is root-owned and this pod runs as uid 1000 under
+      # PodSecurity `restricted`, so the generator dies with
+      #   PermissionError: [Errno 13] Permission denied:
+      #     '/usr/lib/python3.13/site-packages/prisma/schema.prisma'
+      # and the query engine never comes up ("Not connected to the query engine") — which is what
+      # crashlooped the gateway for 12h after #3065 and got the database backed out in #3185.
+      #
+      # Isolated to the uid, not guessed: the SAME image, memory and database starts in ~20s as
+      # root and fails as uid 1000. Running as root is not the fix — this is the one pod in the
+      # fleet with 0.0.0.0/0:443 egress (ADR-0175 §4), so it is the last place to relax the
+      # security baseline. Instead the package directory gets a writable copy: this initContainer
+      # copies it into an emptyDir (reading it as 1000 is fine; only writing was denied) and the
+      # main container mounts that over the same path. Verified end to end locally at uid 1000:
+      # proxy READY, /key/generate returns a budgeted key, and the key survives a restart.
+      initContainers:
+        - name: seed-prisma-writable
+          image: ghcr.io/berriai/litellm:v1.74.3-stable
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "cp -a /usr/lib/python3.13/site-packages/prisma/. /seed/"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          volumeMounts:
+            - name: prisma-writable
+              mountPath: /seed
       containers:
         - name: litellm
           # ghcr.io prefix kept so the Kyverno ecr-pull-through-rewrite mutates it to the ECR cache
@@ -69,21 +100,28 @@ spec:
                   name: litellm-secrets
                   key: LITELLM_MASTER_KEY
                   optional: true
-            # DATABASE_URL / LITELLM_SALT_KEY are DELIBERATELY NOT SET YET (#3065 -> this PR).
-            # Wiring them made the new ReplicaSet CrashLoopBackOff for 12h / 180 restarts while the
-            # old one kept serving — nothing went red, the Service still answered, ArgoCD said
-            # Synced. Three separate causes, each only visible after the previous one was fixed:
-            #   1. this pod is Egress-deny-by-default and 5432 was not on the allow-list
-            #      (fixed in networkpolicy-litellm-egress.yaml, verified TCP_5432_OPEN);
-            #   2. no writable HOME, so Prisma could not create /.cache/prisma-python/binaries
-            #      under uid 1000 — the local docker check missed this because that container ran
-            #      as root;
-            #   3. even past that, the image DOWNLOADS the Prisma CLI and a node runtime at every
-            #      start and is OOMKilled at the 512Mi limit.
-            # (3) is the one that makes this more than a config tweak: it puts an internet download
-            # on the boot path of the very pod that exists to BE the egress choke point (ADR-0175).
-            # That trade needs its own reviewed change, so the DB stays provisioned and unused
-            # rather than half-wired. postgres.yaml and seed-litellm-virtual-keys.sh are kept as-is.
+            # Postgres (CNPG litellm-db). Required for virtual keys — the only mechanism that
+            # bounds spend per CALLER rather than per model — and for spend counters that survive a
+            # restart. Re-enabled after #3185 backed it out; see the initContainer above for the
+            # three things that had to be true first. NOT optional: a missing DATABASE_URL leaves
+            # the proxy serving and enforcing nothing, which is worse than not claiming a ceiling.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-db-app
+                  key: uri
+            # Encrypts virtual-key material at rest in that Postgres.
+            - name: LITELLM_SALT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-secrets
+                  key: LITELLM_SALT_KEY
+                  optional: true
+            # prisma-python caches its downloaded query engine under $HOME. Without this it
+            # resolves to "/" and the pod dies on
+            # FileNotFoundError: '/.cache/prisma-python/binaries/...'.
+            - name: HOME
+              value: /tmp
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
@@ -93,13 +131,19 @@ spec:
             - name: config
               mountPath: /etc/litellm
               readOnly: true
+            - name: prisma-writable
+              mountPath: /usr/lib/python3.13/site-packages/prisma
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               cpu: 100m
               memory: 256Mi
             limits:
               cpu: "1"
-              memory: 512Mi
+              # 512Mi OOMKilled (exit 137) once DATABASE_URL was set: the DB path installs the
+              # Prisma CLI and a node runtime at start. 1Gi measured to start cleanly at uid 1000.
+              memory: 1Gi
           readinessProbe:
             httpGet:
               path: /health/liveliness
@@ -116,6 +160,11 @@ spec:
         - name: config
           configMap:
             name: litellm-config
+        - name: prisma-writable
+          emptyDir: {}
+        # $HOME for the prisma engine cache (~90 MB downloaded on first start).
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

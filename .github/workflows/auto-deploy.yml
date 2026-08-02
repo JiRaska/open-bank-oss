@@ -233,38 +233,45 @@ jobs:
           # exit SIGPIPEs the echo and the match is racily mis-read as false
           # (same footgun documented in services-ci.yml).
           CODE_FILES="$(grep -vE '^openbank-libs/governance/' <<< "$CHANGED_FILES" || true)"
-          SHARED_CHANGED=0
-          # Precise per-module match (src/main + build file), not a bare "openbank-libs"
-          # prefix — that also matched openbank-libs/docs/** (non-compiled) and silently
-          # triggered a 37-service rebuild on doc-only changes (issue #375).
-          grep -qE '^(openbank-libs/(src/main|build\.gradle\.kts|gradle/)|openbank-libs-domain/(src/main|build\.gradle\.kts)|openbank-libs-runtime/(src/main|build\.gradle\.kts)|build-logic|gradle/|settings\.gradle\.kts)' <<< "$CODE_FILES" && SHARED_CHANGED=1 || true
+          # Services to rebuild because a SHARED library changed, derived from the
+          # `project(":openbank-libs-*")` declarations in each consumer's build.gradle.kts
+          # (issue #2983). The old shape was a hardcoded path regex naming only openbank-libs,
+          # -domain and -runtime, so the ADR-0122 siblings matched NOTHING: #2949 fixed the
+          # Temporal payload converter and rebuilt zero consumers, leaving fx-service and
+          # statement-service running pre-fix images while their pods read green.
+          #
+          # Deriving it also narrows the blast radius rather than widening it: a libs-temporal
+          # change rebuilds its 16 consumers, not the whole fleet, and libs-testing
+          # (testImplementation everywhere) rebuilds nobody.
+          LIBS_DEPENDENTS="$(printf '%s\n' "$CODE_FILES" \
+            | bash .github/scripts/libs-change-dependents.sh "$ALL_SERVICES")"
 
-          if [ "$SHARED_CHANGED" = "1" ]; then
-            echo "Shared dependency changed → rebuilding all services."
-            SERVICES_JSON="$(echo "$ALL_SERVICES" | tr ' ' '\n' | jq -R . | jq -sc .)"
-          else
-            # Pick only services whose src/main or build file changed.
-            SERVICES=()
-            for svc in $ALL_SERVICES; do
-              if grep -qE "^${svc}/(src/main|build\.gradle\.kts)" <<< "$CHANGED_FILES"; then
-                # Only deploy services that have a gitops manifest (not lending, pid, etc.).
-                if grep -rlq "${svc}:sandbox-" openbank-infra/gitops/components 2>/dev/null; then
-                  SERVICES+=("$svc")
-                else
-                  echo "  skip ${svc} — no gitops manifest found"
-                fi
-              fi
-            done
-
-            if [ "${#SERVICES[@]}" -eq 0 ]; then
-              echo "No deployable services changed."
-              echo "services=[]" >> "$GITHUB_OUTPUT"
-              echo "any=false" >> "$GITHUB_OUTPUT"
-              exit 0
+          # Services changed directly in this push.
+          SERVICES=()
+          for svc in $ALL_SERVICES; do
+            if grep -qE "^${svc}/(src/main|build\.gradle\.kts)" <<< "$CHANGED_FILES"; then
+              SERVICES+=("$svc")
             fi
+          done
+          # ...unioned with the libs consumers, then filtered ONCE on the gitops manifest, so a
+          # library fan-out cannot try to deploy a service this pipeline has no manifest for.
+          DEPLOYABLE=()
+          for svc in $(printf '%s\n' "${SERVICES[@]+"${SERVICES[@]}"}" $LIBS_DEPENDENTS | grep -v '^$' | sort -u); do
+            if grep -rlq "${svc}:sandbox-" openbank-infra/gitops/components 2>/dev/null; then
+              DEPLOYABLE+=("$svc")
+            else
+              echo "  skip ${svc} — no gitops manifest found"
+            fi
+          done
 
-            SERVICES_JSON="$(printf '%s\n' "${SERVICES[@]}" | jq -R . | jq -sc .)"
+          if [ "${#DEPLOYABLE[@]}" -eq 0 ]; then
+            echo "No deployable services changed."
+            echo "services=[]" >> "$GITHUB_OUTPUT"
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          SERVICES_JSON="$(printf '%s\n' "${DEPLOYABLE[@]}" | jq -R . | jq -sc .)"
 
           echo "Services to deploy: $SERVICES_JSON"
           echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"

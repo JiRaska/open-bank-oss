@@ -147,6 +147,61 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
+        # ─── evictor ────────────────────────────────────────────────────────
+        # Without this the cache grows monotonically and then dies: nginx serves
+        # /data/cache as a plain directory, PUT writes a file, and NOTHING ever
+        # deletes one. There is no maxSize, no LRU, no CronJob — by design there
+        # never was.
+        #
+        # Measured 2026-08-02, after the PVC sat at 100% (48.90/48.91 GiB) for 76h
+        # with KubePersistentVolumeFillingUp firing the whole time:
+        #   PUT /cache/… -> 500   x72     ("No space left on device", nginx [crit])
+        #   GET /cache/… -> 404   x33
+        # So every write was failing and the hit rate was decaying toward zero —
+        # a paid disk doing negative work, since a miss costs a full compile.
+        #
+        # 79795 files / 48.9G, of which 99% had not been written for 7 days and 95%
+        # not for 14. A build cache's value is almost entirely in recent entries;
+        # older ones key off source that has since changed. So eviction by age is
+        # the right shape, and a bigger disk is not — it only moves the date.
+        #
+        # A SIDECAR rather than a CronJob because the PVC is ReadWriteOnce: a
+        # separate pod cannot mount it while this one holds it, and pinning a
+        # CronJob to the same node would be fragile. Same pod, same volume, no
+        # scheduling coupling.
+        #
+        # `-mtime` (write time) not atime: relatime means reads do not reliably
+        # update atime, so a true LRU is not available here. Age-since-stored is
+        # the honest approximation.
+        #
+        # FinOps: $0. No extra storage, no extra node — the PVC stays 50Gi and
+        # this replaces the growth that would otherwise have forced it up.
+        - name: evictor
+          image: docker.io/library/nginx:1.27-alpine
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              while true; do
+                before=$(du -sm /data/cache 2>/dev/null | cut -f1)
+                deleted=$(find /data/cache -type f -mtime +14 -delete -print 2>/dev/null | wc -l)
+                after=$(du -sm /data/cache 2>/dev/null | cut -f1)
+                echo "evictor: removed ${deleted} entries older than 14d, ${before}MB -> ${after}MB"
+                sleep 21600
+              done
+          volumeMounts:
+            - name: data
+              mountPath: /data/cache
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
           readinessProbe:
             httpGet:
               path: /healthz

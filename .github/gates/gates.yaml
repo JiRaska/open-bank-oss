@@ -159,6 +159,27 @@ gates:
   # PyYAML is not stdlib: try multiple install paths for portability across
   # macOS (system python3 without pip, Homebrew pip3) and Linux ARC runners
   # (pip/pip3 not in PATH). Fall back to checking if pyyaml is already present.
+  - id: litellm-model-costs
+    name: every gateway model declares a per-token price (an unpriced model costs $0 and voids every budget)
+    group: gitops
+    mode: enforced
+    run: |
+      # Falsified both ways before wiring in: 4 findings against the unpriced tree, 0 after,
+      # 9 self-test cases including an explicit zero (which must NOT be treated as a price).
+      python3 .github/scripts/check-litellm-model-costs.py --self-test
+      python3 .github/scripts/check-litellm-model-costs.py --enforce
+
+  - id: agent-virtual-keys
+    name: every agent authenticates with its OWN LiteLLM virtual key, not the shared master key
+    group: gitops
+    mode: enforced
+    run: |
+      # Falsified in both directions before it was wired in: 4 findings against the
+      # pre-fix tree, 0 after, plus 7 self-test cases covering the exemption and the
+      # near-misses. A gate that has only ever passed is unfalsified.
+      python3 .github/scripts/check-agent-virtual-keys.py --self-test
+      python3 .github/scripts/check-agent-virtual-keys.py --enforce
+
   - id: gen-network-policies-drift-gate
     name: "gen-network-policies drift gate (ADR-0081, issue #854)"
     group: gitops
@@ -1036,7 +1057,7 @@ gates:
     run: |
       python3 .github/scripts/check-object-store-blobs-migration.py --enforce
 
-  # All 49 Gradle per-service Dockerfiles carried a build stage that could not run, and nothing
+  # All 48 Gradle per-service Dockerfiles carried a build stage that could not run, and nothing
   # builds them — the image comes from Dockerfile.deploy, host-side. Their one live contract is the
   # EXPOSE line the three build paths grep, and that grep FALLS BACK TO 8080 when it is absent, so
   # losing it publishes the wrong port silently (#3016).
@@ -1048,6 +1069,18 @@ gates:
       python3 .github/scripts/check-service-dockerfiles.py --selftest
     run: |
       python3 .github/scripts/check-service-dockerfiles.py --enforce
+  # auto-deploy derives its libs fan-out from the `project(":openbank-libs-*")` declarations
+  # (#2983). A hardcoded path regex missed the ADR-0122 siblings entirely, so a libs-temporal fix
+  # rebuilt zero consumers and left services running pre-fix images while their pods read green.
+  # The self-test pins the declaration matcher and both path matchers in both directions.
+  - id: libs-change-dependents
+    name: "libs change fan-out is derived (issue #2983, enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      bash .github/scripts/libs-change-dependents.sh --selftest
+    run: |
+      bash .github/scripts/libs-change-dependents.sh --selftest
 
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
