@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.16.1...agent-service-v1.16.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* **agent:** @Path bound to a top-level function, so /mcp was never registered ([#3371](https://github.com/JiRaska/open-bank-oss/issues/3371)) ([644b2cf](https://github.com/JiRaska/open-bank-oss/commit/644b2cf27314dddb852af6b509c72481c52fcea0))
+
 ## [1.16.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.16.0...agent-service-v1.16.1) (2026-08-02)
 
 

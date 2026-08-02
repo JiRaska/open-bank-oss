@@ -1,7 +1,7 @@
 {
   "openbank-account-service": "0.17.0",
   "openbank-admin-ui": "0.87.1",
-  "openbank-agent-service": "1.16.1",
+  "openbank-agent-service": "1.16.2",
   "openbank-aml-service": "0.7.8",
   "openbank-anacredit-service": "0.9.1",
   "openbank-ap2-service": "0.3.0",
@@ -42,7 +42,7 @@
   "openbank-sanctions-service": "0.7.5",
   "openbank-sca-service": "0.13.0",
   "openbank-sdd-service": "0.9.0",
-  "openbank-security-scanner": "0.5.5",
+  "openbank-security-scanner": "0.5.6",
   "openbank-sepa-instant": "0.7.5",
   "openbank-sepa-payment": "0.8.8",
   "openbank-settlement-service": "0.4.10",
