@@ -41,14 +41,46 @@ class CardDelegationGuardTest {
         coEvery { cardRepository.findById(cardId) } returns card
     }
 
-    private fun grant(capabilities: Set<String>, validTo: OffsetDateTime? = now.plusDays(30)) = DelegatedCardGrant(
+    private fun grant(
+        capabilities: Set<String>,
+        validTo: OffsetDateTime? = now.plusDays(30),
+        grantor: UUID = holder,
+    ) = DelegatedCardGrant(
         id = UUID.randomUUID(),
         cardId = cardId,
+        grantorPartyId = grantor,
         granteePartyId = delegate,
         capabilities = capabilities,
         validFrom = now.minusDays(1),
         validTo = validTo,
     )
+
+    /**
+     * The defect this guard shipped without, kept as the test that fails if the conjunct is removed.
+     *
+     * A grant is a row in a local projection fed by Kafka. Before the `issuedBy` check, ANY active
+     * row for (cardId, delegate) authorised — including one a third party issued over a card they
+     * do not hold. delegation-service refusing to mint such a grant (#3164 C1) is the upstream
+     * half; this asserts the card side does not depend on it. #3143 makes the same assertion for
+     * accounts and savings goals.
+     */
+    @Test
+    fun `a grant issued by someone who is not the card holder authorises nothing`(): Unit = runBlocking {
+        val stranger = UUID.randomUUID()
+        coEvery { projectionRepository.findActiveByCardAndParty(cardId, delegate) } returns
+            listOf(grant(setOf(DelegatedCardGrant.CAP_CARD_VIEW), grantor = stranger))
+
+        assertThat(guard.isAuthorized(cardId, delegate, CardDelegationIntent.VIEW)).isFalse()
+    }
+
+    /** The mirror image: the identical grant, issued by the holder, does authorise. */
+    @Test
+    fun `the same grant issued by the holder authorises`(): Unit = runBlocking {
+        coEvery { projectionRepository.findActiveByCardAndParty(cardId, delegate) } returns
+            listOf(grant(setOf(DelegatedCardGrant.CAP_CARD_VIEW), grantor = holder))
+
+        assertThat(guard.isAuthorized(cardId, delegate, CardDelegationIntent.VIEW)).isTrue()
+    }
 
     @Test
     fun `holder passes with an empty projection`(): Unit = runBlocking {

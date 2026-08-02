@@ -16,12 +16,24 @@ import java.util.UUID
 data class DelegatedCardGrant(
     val id: UUID,
     val cardId: UUID,
+    val grantorPartyId: UUID,
     val granteePartyId: UUID,
     val capabilities: Set<String>,
     val validFrom: OffsetDateTime,
     val validTo: OffsetDateTime? = null,
     val active: Boolean = true,
 ) {
+    /**
+     * True only when the party who ISSUED this grant is [holderPartyId] — the card's own holder.
+     *
+     * Without this conjunct the guard's `holder OR grant` disjunction makes a grant row authority
+     * in itself: any ACTIVE row for (cardId, partyId) authorises, no matter who created it. That is
+     * defect C2 of the #3164 P0 chain, and #3143 closes the identical hole on the account and
+     * savings paths. delegation-service validating resource ownership at the writer (#3164 C1) is
+     * what should make an invalid row impossible; this is the local half that does not depend on it.
+     */
+    fun issuedBy(holderPartyId: UUID): Boolean = grantorPartyId == holderPartyId
+
     fun isActiveOn(now: OffsetDateTime): Boolean = active &&
         !now.isBefore(validFrom) &&
         (validTo == null || now.isBefore(validTo))

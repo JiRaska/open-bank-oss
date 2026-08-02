@@ -4,6 +4,9 @@
 CREATE TABLE card_delegation_projection (
     id                  UUID PRIMARY KEY,
     card_id             UUID NOT NULL,
+    -- The party who ISSUED the grant. The guard requires it to be the card's own holder, so a
+    -- row cannot authorise on its own existence (#3164 C2; #3143 does the same on accounts).
+    grantor_party_id    UUID NOT NULL,
     grantee_party_id    UUID NOT NULL,
     valid_from          TIMESTAMPTZ NOT NULL,
     valid_to            TIMESTAMPTZ,

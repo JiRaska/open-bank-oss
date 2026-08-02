@@ -28,6 +28,9 @@ class CardDelegationProjectionEntity : PanacheEntityBase() {
     @Column(name = "card_id", nullable = false)
     lateinit var cardId: UUID
 
+    @Column(name = "grantor_party_id", nullable = false)
+    lateinit var grantorPartyId: UUID
+
     @Column(name = "grantee_party_id", nullable = false)
     lateinit var granteePartyId: UUID
 
@@ -51,6 +54,7 @@ class CardDelegationProjectionEntity : PanacheEntityBase() {
     fun toDomain(): DelegatedCardGrant = DelegatedCardGrant(
         id = id,
         cardId = cardId,
+        grantorPartyId = grantorPartyId,
         granteePartyId = granteePartyId,
         capabilities = capabilities.toSet(),
         validFrom = validFrom,
@@ -63,6 +67,7 @@ class CardDelegationProjectionEntity : PanacheEntityBase() {
             CardDelegationProjectionEntity().apply {
                 id = g.id
                 cardId = g.cardId
+                grantorPartyId = g.grantorPartyId
                 granteePartyId = g.granteePartyId
                 capabilities = g.capabilities.toMutableSet()
                 validFrom = g.validFrom

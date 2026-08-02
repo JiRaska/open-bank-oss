@@ -17,6 +17,7 @@ import java.util.UUID
 private data class DelegationEvent(
     val type: String,
     val grantId: UUID,
+    val grantorPartyId: UUID,
     val granteePartyId: UUID,
     val resourceType: String,
     val resourceId: UUID?,
@@ -52,6 +53,10 @@ class CardDelegationEventConsumer(
         val node = runCatching { objectMapper.readTree(payload) }.getOrNull() ?: return null
         val grantId = runCatching { UUID.fromString(node.path("aggregateId").asText()) }.getOrNull() ?: return null
         val grantee = runCatching { UUID.fromString(node.path("granteePartyId").asText()) }.getOrNull() ?: return null
+        // A grant with no readable grantor is a poison pill, not a grant with an unknown issuer:
+        // the guard would otherwise have to decide what an absent issuer means, and every answer
+        // to that is wrong.
+        val grantor = runCatching { UUID.fromString(node.path("grantorPartyId").asText()) }.getOrNull() ?: return null
         val resourceId = node.path("resourceId").asText(null)
             ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
         val caps = node.path("capabilities").takeIf { it.isArray }
@@ -59,6 +64,7 @@ class CardDelegationEventConsumer(
         return DelegationEvent(
             type = node.path("eventType").asText(""),
             grantId = grantId,
+            grantorPartyId = grantor,
             granteePartyId = grantee,
             resourceType = node.path("resourceType").asText(""),
             resourceId = resourceId,
@@ -86,6 +92,7 @@ class CardDelegationEventConsumer(
             DelegatedCardGrant(
                 id = event.grantId,
                 cardId = cardId,
+                grantorPartyId = event.grantorPartyId,
                 granteePartyId = event.granteePartyId,
                 capabilities = event.capabilities,
                 validFrom = event.validFrom ?: OffsetDateTime.now(),

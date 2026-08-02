@@ -29,7 +29,9 @@ class CardDelegationGuard(
         val card = cardRepository.findById(cardId) ?: return false
         if (card.partyId == partyId) return true
         val now = OffsetDateTime.now(clock)
+        // issuedBy FIRST and always: a grant only counts when the card's own holder created it.
+        // Without it an ACTIVE row for (cardId, partyId) is authority in itself (#3164 C2).
         return projectionRepository.findActiveByCardAndParty(cardId, partyId)
-            .any { it.isActiveOn(now) && it.satisfies(intent) }
+            .any { it.issuedBy(card.partyId) && it.isActiveOn(now) && it.satisfies(intent) }
     }
 }
