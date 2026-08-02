@@ -226,6 +226,23 @@ gates:
     run: |
       python3 .github/scripts/check-podmonitor-namespace-coverage.py
 
+  # The Temporal registration Job's NAMESPACES list is hand-written, and it has now been the
+  # thing that drifted THREE times (settlement, campaign, lending). A missing namespace is
+  # invisible to every signal that is normally checked: the worker connects fine and only the
+  # POLL is refused, so the pod stays Ready, ArgoCD stays Synced/Healthy, and the service simply
+  # never runs a workflow — lending burned ~2,000 ERROR lines/hour into Loki for the whole time,
+  # with no origination possible. The checker derives the required set from the gitops
+  # OPENBANK_TEMPORAL_NAMESPACE env (which wins) falling back to the application.yaml default,
+  # so the list can no longer be shorter than reality without going red. ENFORCED.
+  - id: temporal-namespace-registration
+    name: "Temporal namespaces a worker polls are registered (enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-temporal-namespace-registration.py --self-test
+    run: |
+      python3 .github/scripts/check-temporal-namespace-registration.py
+
   # --since scopes the EXPENSIVE half (pull ~100 MB + boot Loki, ~90 s) to PRs that can
   # actually invalidate it. This job is unconditional and required, so an unscoped run charged
   # every PR in the fleet 90 s for a check about files it did not touch. Direct cost is $0
