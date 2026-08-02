@@ -40,8 +40,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: wrapper-validation-${{ github.ref }}
-  cancel-in-progress: true
+  # A push to main always has github.ref == refs/heads/main, so a constant key made every new
+  # commit cancel the previous commit's run — bot commits land every few minutes, so runs on main
+  # mostly never finished (#3390). Key push-to-main by SHA, as services-ci.yml does for #846;
+  # PR branches keep the superseding behaviour, where a newer push SHOULD cancel the old run.
+  group: wrapper-validation-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci' }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:
   validate:
