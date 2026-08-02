@@ -1423,3 +1423,17 @@ gates:
     mode: enforced
     run: |
       python3 .github/scripts/check-roles-allowed-realm.py
+  - id: opa-bundle-apply-size
+    name: OPA bundle must be installable (client-side apply annotation ceiling)
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-opa-bundle-apply-size.py --self-test
+    selftest_expect: pass
+    run: |
+      # A bundle over ~256 KB cannot be installed by client-side apply: the whole
+      # object goes into last-applied-configuration and the API server rejects it
+      # with "metadata.annotations: Too long". Argo then retries forever while the
+      # cluster keeps serving the PREVIOUS policy, and the Application reads as
+      # OutOfSync/Progressing rather than failed. Five services, four money-path,
+      # were drifted this way before the check existed.
+      python3 .github/scripts/check-opa-bundle-apply-size.py
