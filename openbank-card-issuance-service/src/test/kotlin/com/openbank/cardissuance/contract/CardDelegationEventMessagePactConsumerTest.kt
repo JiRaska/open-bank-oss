@@ -17,7 +17,10 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import java.time.Instant
 import java.time.OffsetDateTime
+import java.util.Date
+import java.util.TimeZone
 import java.util.UUID
 
 /**
@@ -48,6 +51,40 @@ import java.util.UUID
 )
 class CardDelegationEventMessagePactConsumerTest {
 
+    private companion object {
+        /**
+         * The `validFrom` example, pinned to a UTC instant AND rendered in UTC.
+         *
+         * ## Why this is a matcher with an explicit example, and not a `stringValue`
+         *
+         * `validFrom` is the one field in this contract no consumer branches on: the projection
+         * stores it and compares it to `now` at enforcement time, so what the contract owes is the
+         * SHAPE — an offset-datetime string `OffsetDateTime.parse` accepts — never a particular
+         * instant. Pinning the value would be a false constraint. Contrast `eventType` and
+         * `resourceType`, which ARE `stringValue`: `dispatch` compares them to exact literals, so a
+         * type matcher there would verify nothing about the only two fields that decide whether
+         * anything happens at all. **Do not "simplify" those into matchers, and do not widen this
+         * one into a pinned value — the asymmetry is deliberate.**
+         *
+         * ## Why the example is passed explicitly, with a TimeZone
+         *
+         * `datetime(name, format)` alone still emits an example string, generated from pact-jvm's
+         * default base date rendered in the JVM's DEFAULT timezone. The matcher was already
+         * correct; the EXAMPLE encoded the generating machine's timezone, so a pact generated on
+         * CET committed `2000-01-31T14:00:00+01:00` while CI regenerated `2000-01-31T13:00:00Z` —
+         * the same instant, a different string, and `pact-drift-check` red forever for everyone.
+         * The `(name, format, Date, TimeZone)` overload is the only one that pins the rendering:
+         * the `Instant` overload still formats with `TimeZone.getDefault()`.
+         *
+         * The instant is the one the provider replay actually emits
+         * (`DelegationEventPactFolderProviderVerificationTest.VALID_FROM`), so the example is a
+         * real payload rather than a library default from the year 2000.
+         */
+        const val VALID_FROM_FORMAT = "yyyy-MM-dd'T'HH:mm:ssXXX"
+        val VALID_FROM_EXAMPLE: Date = Date.from(Instant.parse("2026-01-01T00:00:00Z"))
+        val UTC: TimeZone = TimeZone.getTimeZone("UTC")
+    }
+
     private val objectMapper = ObjectMapper()
 
     @Pact(consumer = "openbank-card-issuance-service", provider = "openbank-delegation-service")
@@ -63,7 +100,7 @@ class CardDelegationEventMessagePactConsumerTest {
                 o.stringValue("resourceType", "CARD")
                 o.uuid("resourceId")
                 o.array("capabilities") { caps -> caps.stringType("CARD_VIEW") }
-                o.datetime("validFrom", "yyyy-MM-dd'T'HH:mm:ssXXX")
+                o.datetime("validFrom", VALID_FROM_FORMAT, VALID_FROM_EXAMPLE, UTC)
             }.build(),
         )
         .toPact()

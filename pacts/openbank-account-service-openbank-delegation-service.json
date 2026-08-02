@@ -18,7 +18,7 @@
         },
         "resourceId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
         "resourceType": "ACCOUNT",
-        "validFrom": "2000-01-31T14:00:00+01:00"
+        "validFrom": "2026-01-01T00:00:00Z"
       },
       "description": "a DelegationActivated event for an account",
       "generators": {
@@ -34,10 +34,6 @@
           },
           "$.resourceId": {
             "type": "Uuid"
-          },
-          "$.validFrom": {
-            "format": "yyyy-MM-dd'T'HH:mm:ssXXX",
-            "type": "DateTime"
           }
         }
       },
