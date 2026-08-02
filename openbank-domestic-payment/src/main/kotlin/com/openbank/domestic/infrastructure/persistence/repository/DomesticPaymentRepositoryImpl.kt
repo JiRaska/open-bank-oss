@@ -15,6 +15,7 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
@@ -33,6 +34,13 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
 
     override suspend fun findByIdempotencyKey(idempotencyKey: String): DomesticPayment? =
         Panache.withSession { find("idempotencyKey", idempotencyKey).firstResult() }.awaitSuspending()?.toDomain()
+
+    override suspend fun countByStatus(status: DomesticPaymentStatus): Long =
+        Panache.withSession { count("status", status.name) }.awaitSuspending()
+
+    override suspend fun oldestCreatedAt(status: DomesticPaymentStatus): Instant? = Panache.withSession {
+        find("status = ?1 order by createdAt asc", status.name).firstResult()
+    }.awaitSuspending()?.createdAt
 
     override suspend fun list(
         status: DomesticPaymentStatus?,
