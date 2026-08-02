@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: vop-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "06e06c027b09cbba"
+    openbank.tech/policy-checksum: "ee8f2a3cf3ebc9c1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1233,9 +1233,11 @@ data:
           via the GitHub API that rules.yaml's own review rules were actually followed: approval count
           vs. the money-path/default requirement, docs/threat-models/<service>.md presence for a
           money-path change, merge-commit GPG verification, a linked issue in the PR body, and
-          (best-effort) an admin/override-flag bypass. Proposes a compliance-incident ticket through
-          the HITL queue for a human to triage — a violation on an already-merged PR is a human
-          decision, not a diff. Never merges, approves or re-runs anything.
+          (best-effort) an admin/override-flag bypass. Phase-4 expands its money-path reach to
+          READ-ONLY governance/config/audit metadata only — never transaction payloads, never write
+          or act tools. Proposes a compliance-incident ticket through the HITL queue for a human to
+          triage — a violation on an already-merged PR is a human decision, not a diff. Never merges,
+          approves or re-runs anything.
         enabled: true
         enforcement: block
         schedule:
@@ -1246,11 +1248,13 @@ data:
           read:
             - github-prs-readonly        # merged-PR metadata: reviews, merge-commit verification, body, labels
             - read.governance            # rules.yaml review + money_path_services — the compliance bar itself
-          pii: none                       # PR/review metadata only; no customer data in scope
+            - money-path-config-metadata # rollout/config/policy metadata for services in rules.yaml: money_path_services
+            - audit-metadata             # masked audit/governance evidence only; never raw transaction payloads
+          pii: masked                    # masked metadata may carry identifiers; raw customer/payment payloads stay out of scope
         tools:
           allow:
             - tier: read
-              resources: [github, governance]
+              resources: [github, governance, audit]
             - tier: write_proposal
               resources: [github-pr]      # opens draft.ticket (primary) or, rarely, a mechanical fix PR
           deny:
