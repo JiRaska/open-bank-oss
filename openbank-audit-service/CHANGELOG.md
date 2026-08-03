@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.13.1...audit-service-v0.13.2) (2026-08-03)
+
+
+### Bug Fixes
+
+* **audit:** hash the timestamp the database actually stores ([#3586](https://github.com/JiRaska/open-bank-oss/issues/3586)) ([ca5bdd7](https://github.com/JiRaska/open-bank-oss/commit/ca5bdd76403a29d0f832dcbaa73277f0968b56eb)), closes [#3505](https://github.com/JiRaska/open-bank-oss/issues/3505)
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.13.0...audit-service-v0.13.1) (2026-08-02)
 
 
