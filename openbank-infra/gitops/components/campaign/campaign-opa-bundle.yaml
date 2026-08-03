@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: campaign-service
     app.kubernetes.io/part-of: campaign
   annotations:
-    openbank.tech/policy-checksum: "dca6e5cb1c79c7b1"
+    openbank.tech/policy-checksum: "1eae0a384b1ae15b"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1802,6 +1802,11 @@ data:
             - sanctions.create
             - sanctions.trigger
             - sanctions.update
+            - sdd.approve
+            - sdd.authorise
+            - sdd.create
+            - sdd.delete
+            - sdd.update
             - sctInstPayment.create
             - sepaPayment.approval.decide
             - sepaPayment.create

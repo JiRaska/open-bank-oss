@@ -276,6 +276,11 @@ authz:
         - sanctions.create
         - sanctions.trigger
         - sanctions.update
+        - sdd.approve
+        - sdd.authorise
+        - sdd.create
+        - sdd.delete
+        - sdd.update
         - sctInstPayment.create
         - sepaPayment.approval.decide
         - sepaPayment.create

@@ -19,6 +19,10 @@ spec:
       labels:
         app.kubernetes.io/name: sdd-service
         app.kubernetes.io/part-of: sdd
+      annotations:
+        # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-sdd-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "e2d8a99c9da9f9f9"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -90,15 +94,13 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
-            # OPA advisory mode (ADR-0034): sdd-service has no OPA policy-decision sidecar
-            # (unlike money-path services such as lending/payments/accounts), so @Authorize
-            # would otherwise fail closed ("OPA call failed") on every endpoint. Same posture
-            # as interest-service / anacredit — non-money-path services run authz advisory.
-            # Access stays enforced by JAX-RS @RolesAllowed (operator/viewer roles) and, for
-            # customer traffic, by the customer-edge ownership (IDOR) check before it ever
-            # reaches this service. Refs #1730.
+            # OPA enforcement enabled (ADR-0034, issue #3679). sdd is in money_path_services
+            # (#1478: posts real debits via TransactionServiceClient). Sidecar added below;
+            # matrix grants cover all 7 sdd.* actions (ROLE_OPERATOR/ADMIN: full set;
+            # ROLE_COMPLIANCE: sdd.read). AUTHZ_FOUR_EYES_ENFORCE left false — four-eyes
+            # assessment for sdd is out of scope (see rules.yaml comment).
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
@@ -138,9 +140,70 @@ spec:
             limits:
               cpu: "1"
               memory: 512Mi
+        # OPA policy-decision sidecar (ADR-0034, issue #3679). Serves
+        # data.openbank.rest.allow for all @Authorize-annotated endpoints in sdd-service
+        # (sdd.*). Bundle mounted from sdd-opa-bundle ConfigMap (gen-sdd-opa-bundle.sh).
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet: {path: "/health?bundles=true", port: 8181}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /health, port: 8181}
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: sdd-opa-bundle
         - name: kafka-keystore
           secret:
             secretName: sdd-service-kafka-keystore

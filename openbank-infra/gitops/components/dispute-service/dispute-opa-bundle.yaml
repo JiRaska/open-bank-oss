@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: dispute-service
     app.kubernetes.io/part-of: dispute
   annotations:
-    openbank.tech/policy-checksum: "488a3be284d0a60f"
+    openbank.tech/policy-checksum: "98c0c163065ba34c"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1917,6 +1917,11 @@ data:
             - sanctions.create
             - sanctions.trigger
             - sanctions.update
+            - sdd.approve
+            - sdd.authorise
+            - sdd.create
+            - sdd.delete
+            - sdd.update
             - sctInstPayment.create
             - sepaPayment.approval.decide
             - sepaPayment.create

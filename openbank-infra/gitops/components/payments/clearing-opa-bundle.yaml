@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: clearing-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "f0e58852856c4e93"
+    openbank.tech/policy-checksum: "1108fbaffd84fa62"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1835,6 +1835,11 @@ data:
             - sanctions.create
             - sanctions.trigger
             - sanctions.update
+            - sdd.approve
+            - sdd.authorise
+            - sdd.create
+            - sdd.delete
+            - sdd.update
             - sctInstPayment.create
             - sepaPayment.approval.decide
             - sepaPayment.create

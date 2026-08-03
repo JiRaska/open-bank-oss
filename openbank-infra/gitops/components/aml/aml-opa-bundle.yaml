@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: aml-service
     app.kubernetes.io/part-of: aml
   annotations:
-    openbank.tech/policy-checksum: "f0853fffb25a66b6"
+    openbank.tech/policy-checksum: "1cff07191151de85"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1805,6 +1805,11 @@ data:
             - sanctions.create
             - sanctions.trigger
             - sanctions.update
+            - sdd.approve
+            - sdd.authorise
+            - sdd.create
+            - sdd.delete
+            - sdd.update
             - sctInstPayment.create
             - sepaPayment.approval.decide
             - sepaPayment.create

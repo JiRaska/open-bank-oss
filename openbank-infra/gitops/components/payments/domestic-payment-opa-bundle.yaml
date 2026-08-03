@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: domestic-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "b1a329472478538a"
+    openbank.tech/policy-checksum: "8f3c3d5e17bf81bf"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1820,6 +1820,11 @@ data:
             - sanctions.create
             - sanctions.trigger
             - sanctions.update
+            - sdd.approve
+            - sdd.authorise
+            - sdd.create
+            - sdd.delete
+            - sdd.update
             - sctInstPayment.create
             - sepaPayment.approval.decide
             - sepaPayment.create
