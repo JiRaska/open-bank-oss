@@ -59,15 +59,22 @@ spec:
     # ADR-0137 mTLS migration). KRaft inter-broker comms use the managed
     # controller listener and are unaffected by SimpleAuthorizer.
     #
-    # Enforcement model (ADR-0137): SimpleAuthorizer is *deny-by-default per
-    # resource that carries any ACL*, and *allow-everyone* only for resources
-    # with NO ACL (because allow.everyone.if.no.acl.found=true below). So a
-    # single topic can be locked down — `payment.scheme-accepted` (the money
-    # path) — by attaching ACLs to it, WITHOUT touching the other ~30 topics
-    # that have none. ACLs bind to the authenticated principal, not the
-    # listener, so the plaintext listener below does not weaken a locked topic:
-    # an unauthenticated client is `User:ANONYMOUS`, which is absent from the
-    # scheme-accepted ACLs and therefore denied.
+    # Enforcement model: SimpleAuthorizer is deny-by-default for EVERY resource,
+    # because `allow.everyone.if.no.acl.found: "false"` below (#2794). A topic
+    # with no ACL at all is therefore denied to everyone, not open — so every
+    # client needs a KafkaUser whose ACLs name every topic it touches.
+    #
+    # This comment previously described the opposite model ("allow-everyone only
+    # for resources with NO ACL, because allow.everyone.if.no.acl.found=true
+    # below"), which had been false since #2794 flipped the flag. That stale
+    # prose is what made a set of missing producer grants read as deliberate:
+    # domestic-payment's own event topic had no Write grant and 13 outbox rows
+    # went DEAD before anyone looked (#3271).
+    #
+    # ACLs bind to the authenticated principal, not the listener, so the
+    # plaintext listener below grants nothing: an unauthenticated client is
+    # `User:ANONYMOUS`, which holds no ACL anywhere and is denied on every
+    # resource (`… is Denied … based on rule DefaultDeny` in the broker log).
     authorization:
       type: simple
     # Broker-layer observability (Dynatrace-parity #0). Strimzi's bundled JMX
@@ -83,8 +90,28 @@ spec:
           key: kafka-metrics-config.yml
     listeners:
       # Anonymous plaintext listener — retained for backward compatibility.
-      # All 33 deployed Kafka clients migrated to mTLS:9093 (ADR-0137 fleet
-      # sweep complete). Removing the listener is a follow-up step (runbook 0008).
+      #
+      # It grants NOTHING: a client here is `User:ANONYMOUS`, which holds no ACL
+      # and is denied on every resource by the deny-by-default config below. So
+      # "still on 9092" and "cannot use Kafka" are the same statement, and it is
+      # not a hole — but it is an entry point that only ever produces silent
+      # failures, which is why it should go.
+      #
+      # "All 33 deployed Kafka clients migrated to mTLS:9093 (ADR-0137 fleet
+      # sweep complete)" stood here and was NOT true. Measured on the live
+      # sandbox 2026-08-03 (#3393), three workloads still declared :9092:
+      #   * security-scanner-service — no KafkaUser at all; both topic log
+      #     segments are 0 bytes and dated their creation day, so it has never
+      #     published anything. Given an identity in this change.
+      #   * kafka-ui — the ONLY thing actually sending on :9092 today, and every
+      #     request is refused (`Principal = User:ANONYMOUS is Denied operation =
+      #     DESCRIBE … based on rule DefaultDeny`, once per 30s poll). The UI
+      #     renders an empty cluster rather than an error. Needs its own
+      #     KafkaUser before the listener can go (#3393 follow-up).
+      #   * settlement-service — carries KAFKA_BOOTSTRAP_SERVERS but has no
+      #     `mp.messaging` config and opens no connection; the env var is dead.
+      # Removing the listener is still a follow-up step (runbook 0008), and it is
+      # blocked on kafka-ui, not on the services.
       - name: plain
         port: 9092
         type: internal
@@ -110,11 +137,13 @@ spec:
       default.replication.factor: 1
       min.insync.replicas: 1
       # Cluster-wide authorization posture: deny-by-default for ALL topics.
-      # All 33 deployed Kafka clients migrated to mTLS:9093 (ADR-0137 fleet
-      # sweep complete). User:ANONYMOUS (plaintext) is now denied on every topic
-      # including those without explicit ACLs. Non-deployed services
-      # (card-issuance, sdd, standing-order, tpp-registry) are RBAC pre-registered
-      # and will receive gitops mTLS manifests before their first deploy.
+      # User:ANONYMOUS (plaintext) is denied on every topic including those
+      # without explicit ACLs — which is why a client left on :9092 does not
+      # merely lose its ACLs, it loses Kafka entirely (see the listener comment
+      # above for the three that were still there on 2026-08-03). Non-deployed
+      # services (card-issuance, sdd, standing-order, tpp-registry) are RBAC
+      # pre-registered and will receive gitops mTLS manifests before their first
+      # deploy.
       allow.everyone.if.no.acl.found: "false"
   # Consumer-lag visibility (Dynatrace-parity #0). The Kafka Exporter is a
   # separate pod (also on `tcp-prometheus`:9404) that turns consumer group
