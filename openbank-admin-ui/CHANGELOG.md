@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.91.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.90.2...admin-ui-v0.91.0) (2026-08-03)
+
+
+### Features
+
+* **governance:** extend governance-auditor money-path read-only scope ([#3319](https://github.com/JiRaska/open-bank-oss/issues/3319)) ([5510c0f](https://github.com/JiRaska/open-bank-oss/commit/5510c0f83a701fafc12faf6d4182ca097dd8878a))
+
 ## [0.90.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.90.1...admin-ui-v0.90.2) (2026-08-03)
 
 
