@@ -157,3 +157,29 @@ Trust boundaries:
   `lending.intake.enabled` is turned on, and lending refuses any caller that is not this service's
   configured principal — see §9 of the `openbank-lending-service` threat model for why the role gate
   cannot be that control.
+
+- **2026-08-03** — **A delegate can pay from a shared account** (ADR-0232 D3/D5, issue #2990
+  AC9/AC10). `POST /customer/v1/domestic-payments` previously 403'd any account the JWT party did
+  not own; it now falls back to account-service's
+  `/api/v1/accounts/{id}/delegation/payment-authorization` and proceeds when that answers
+  `authorized`. Risk class = **elevation of privilege / spoofing**. Properties this rests on:
+  (a) the edge does not decide — the decision is account-service's, and the only input the edge
+  contributes is WHO is asking, resolved from the validated `party_id` claim and never from the
+  body; (b) the authorization question carries the AMOUNT, without which the grant's
+  per-transaction ceiling is not evaluated at all; (c) a non-200, unparseable, or
+  `authorized`-without-a-grantor answer is a refusal — this path fails CLOSED; (d) every refusal
+  reason collapses to one identical 403, so the route is not an oracle for other parties' accounts
+  or grants; (e) SCA is unchanged and belongs to the INITIATOR — a grant is not a substitute for a
+  device-signed, amount-and-payee-bound challenge.
+  Two consequences worth naming. The delegated path re-fetches the debtor account **as the
+  grantor**, because account-service's `X-Customer-Party-Id` guard is an ownership guard and 404s a
+  delegate by design; that is not the edge self-authorizing, since the grantor's identity came from
+  the authoritative decision one call earlier — but it does mean a bug in that decision widens into
+  an account read, so the edge re-checks that the fetched account's owner IS the named grantor
+  before proceeding. And the instruction now carries the ACCOUNT HOLDER's legal name as
+  `debtorName`, not the initiator's: sending the delegate's would misattribute the transfer on the
+  counterparty's statement and in every downstream AML party resolution.
+  `GET /customer/v1/delegations/activity` is the grantor-side transparency view over audit-service's
+  chain; the grantor is the token party, and the optional filters can only narrow a set already
+  scoped to the caller. Rollback: revert the `resolveDebitAuthority` call site — the route returns
+  to owner-only.

@@ -22,6 +22,8 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.util.UUID
 
 /**
@@ -49,6 +51,11 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed("ROLE_CUSTOMER")
+// TooManyFunctions fires AT 11, and `activity` is the eleventh. The alternative was to drop the
+// `refuse`/`forbidden` consolidation this class already made to stay under it, or to put the
+// grantor's activity view in a twelfth file away from the grants it is about — neither buys
+// anything a reader wants. The routes are one thin proxy each; the count is not the complexity.
+@Suppress("TooManyFunctions")
 class CustomerDelegationResource(private val upstream: UpstreamClient) {
 
     @Inject
@@ -59,6 +66,9 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         defaultValue = "http://delegation-service.delegation.svc:8126",
     )
     lateinit var delegationServiceUrl: String
+
+    @ConfigProperty(name = "openbank.edge.audit-service-url")
+    lateinit var auditServiceUrl: String
 
     private val json = ObjectMapper()
 
@@ -84,8 +94,52 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     }
 
     /**
+     * "What did they do with my account" — the grantor's transparency view (ADR-0232 D5,
+     * #2990 AC10). Every action a delegate took under a grant the CALLER issued.
+     *
+     * Sourced from audit-service, not from delegation-service: a grant records what someone *may*
+     * do, and the question here is what they *did*. The tamper-evident chain is the only place
+     * that is written down, and it is written at the edge because the edge is the only tier that
+     * still holds the real customer identity.
+     *
+     * The grantor is the token's party and cannot be chosen by the client, same property as every
+     * other route in this file. `?delegatePartyId=` and `?delegationId=` narrow the view and are
+     * safe to pass through: they can only ever REMOVE rows from a set already scoped to the
+     * caller, so a guessed value yields an empty list and no oracle.
+     *
+     * Deliberately NOT merged into `/privacy/access-log`. That view answers "what happened to my
+     * party record"; on a delegated action the grantor is neither the actor nor the aggregate, so
+     * the two queries have no rows in common and folding them together would hide exactly the
+     * distinction — someone else acting — that this view exists to surface.
+     */
+    @GET
+    @Path("/activity")
+    @Blocking
+    fun activity(
+        @QueryParam("delegatePartyId") delegatePartyId: String?,
+        @QueryParam("delegationId") delegationId: String?,
+        @QueryParam("limit") limit: Int?,
+    ): Response {
+        val partyId = partyId()
+
+        // URL-encoded, not interpolated raw: an unencoded `&` in a client-supplied value would
+        // append query parameters of the caller's choosing to an upstream call made with the
+        // edge's own M2M identity.
+        fun enc(v: String) = URLEncoder.encode(v, StandardCharsets.UTF_8)
+        val query = buildList {
+            delegatePartyId?.takeIf { it.isNotBlank() }?.let { add("delegatePartyId=${enc(it)}") }
+            delegationId?.takeIf { it.isNotBlank() }?.let { add("delegationId=${enc(it)}") }
+            limit?.let { add("limit=${it.coerceIn(1, MAX_ACTIVITY_PAGE)}") }
+        }.joinToString("&").let { if (it.isEmpty()) "" else "?$it" }
+        return upstream.get("$auditServiceUrl/api/v1/audit/on-behalf-of/$partyId$query", partyId)
+    }
+
+    /**
      * One grant the caller is a party to. Upstream answers 404 when the caller is neither grantor
      * nor grantee, so a guessed id yields no existence oracle and the edge adds no check of its own.
+     *
+     * Declared AFTER `/activity`: JAX-RS prefers a literal segment over a template, but keeping the
+     * two adjacent in source order is what makes that non-collision visible to the next reader.
      */
     @GET
     @Path("/{id}")
@@ -186,5 +240,8 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         const val UPSTREAM = "/api/v1/delegations"
         const val FIELD_GRANTOR = "grantorPartyId"
         const val DEFAULT_REASON = "Revoked by grantor"
+
+        /** Matches audit-service's own customer-facing page cap; a larger value is clamped there too. */
+        const val MAX_ACTIVITY_PAGE = 500
     }
 }
