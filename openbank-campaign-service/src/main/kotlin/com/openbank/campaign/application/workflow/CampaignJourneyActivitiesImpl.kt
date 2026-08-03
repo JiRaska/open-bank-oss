@@ -5,7 +5,6 @@
 package com.openbank.campaign.application.workflow
 
 import com.openbank.campaign.application.port.out.CampaignRepository
-import com.openbank.campaign.application.port.out.ConsentCheckPort
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
 import com.openbank.campaign.application.port.out.SendLogRepository
@@ -13,6 +12,10 @@ import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
+import com.openbank.libs.contact.ContactClass
+import com.openbank.libs.contact.ContactDenyReason
+import com.openbank.libs.contact.ContactGateDecision
+import com.openbank.libs.contact.ContactPolicyGate
 import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -22,31 +25,23 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Instant
-import java.time.ZoneId
 import java.util.UUID
 
 /**
- * Delivery activities (ADR-0200 D2/D3/D6). The order inside [deliverStep] is deliberate and
- * load-bearing: suppression (frequency cap, quiet hours) is evaluated BEFORE consent (D6: "a
- * suppression is not a consent question"), consent is re-checked live immediately before the send
- * (D2 pull mechanism, ADR-0195's no-cached-consent rule), and the send itself is only ever a
- * request onto `openbank.notification.requests` — this service holds no delivery credentials (D3).
+ * Delivery activities (ADR-0200 D2/D3/D6). Suppression, caps, quiet hours and consent are one
+ * ADR-0219 gate call (#3656) — evaluated in the gate's ordering (suppression list → send cap →
+ * quiet hours → live consent pull, ADR-0195's no-cached-consent rule) — and the send itself is
+ * only ever a request onto `openbank.notification.requests` — this service holds no delivery
+ * credentials (D3). A gate OUTAGE is not a policy outcome: [ContactGateUnavailableException]
+ * rethrows so the Temporal activity retries instead of terminating a journey on a transient blip.
  */
 @ApplicationScoped
-// activity wiring: repos + ports + policy config in one place, per the worker-registrar pattern
-@Suppress("LongParameterList")
 open class CampaignJourneyActivitiesImpl(
     private val campaigns: CampaignRepository,
     private val enrolments: EnrolmentRepository,
     private val sendLog: SendLogRepository,
-    private val consentCheck: ConsentCheckPort,
+    private val contactGate: ContactPolicyGate,
     private val notificationSend: NotificationSendPort,
-    @ConfigProperty(name = "openbank.campaign.max-sends-per-party-per-week", defaultValue = "2")
-    private val maxSendsPerWeek: Int,
-    @ConfigProperty(name = "openbank.campaign.quiet-hours-start", defaultValue = "21")
-    private val quietHoursStart: Int,
-    @ConfigProperty(name = "openbank.campaign.quiet-hours-end", defaultValue = "8")
-    private val quietHoursEnd: Int,
     @ConfigProperty(name = "openbank.campaign.marketing-scope", defaultValue = "MARKETING_COMMS_EMAIL")
     private val marketingScope: String,
 ) : CampaignJourneyActivities {
@@ -59,52 +54,57 @@ open class CampaignJourneyActivitiesImpl(
     // may leave the send log without a row, and narrowing the catch would re-open the gap for
     // whichever exception type the Kafka client happens to raise next (#3581). It is rethrown, so
     // nothing is swallowed.
-    @Suppress("TooGenericExceptionCaught")
     override fun deliverStep(campaignId: UUID, partyId: UUID, stepOrder: Int): StepOutcome = runBlockingOnWorker {
-        val campaign = campaigns.findById(campaignId) ?: return@runBlockingOnWorker StepOutcome.SUPPRESSED
-        val step =
-            campaign.steps.firstOrNull { it.order == stepOrder } ?: return@runBlockingOnWorker StepOutcome.SUPPRESSED
+        deliverStepGated(campaignId, partyId, stepOrder)
+    }
 
-        // ADR-0200 D6 — suppression before consent.
-        val weekAgo = Instant.now().epochSecond - SECONDS_PER_WEEK
-        if (sendLog.countRecentForParty(partyId, weekAgo) >= maxSendsPerWeek) {
-            record(campaignId, partyId, stepOrder, SendOutcome.SUPPRESSED_CAP)
-            return@runBlockingOnWorker StepOutcome.SUPPRESSED
-        }
-        if (isQuietHours()) {
-            record(campaignId, partyId, stepOrder, SendOutcome.SUPPRESSED_QUIET_HOURS)
-            return@runBlockingOnWorker StepOutcome.SUPPRESSED
-        }
+    /**
+     * The gate decision and its mapping, split from the Vert.x bridge so a plain unit test can
+     * drive it without a Quarkus runtime ([com.openbank.campaign.application.workflow.CampaignJourneyActivitiesTest]); the activity entry
+     * point above stays a one-line delegate.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    internal suspend fun deliverStepGated(campaignId: UUID, partyId: UUID, stepOrder: Int): StepOutcome {
+        val campaign = campaigns.findById(campaignId) ?: return StepOutcome.SUPPRESSED
+        val step = campaign.steps.firstOrNull { it.order == stepOrder } ?: return StepOutcome.SUPPRESSED
 
-        // ADR-0200 D2 — live consent pull, immediately before the send.
-        if (!consentCheck.hasActiveConsent(partyId, marketingScope)) {
-            record(campaignId, partyId, stepOrder, SendOutcome.SUPPRESSED_CONSENT)
-            return@runBlockingOnWorker StepOutcome.SUPPRESSED
+        // ADR-0219 (#3656): one gate call wraps the suppression list, the frequency cap, quiet
+        // hours and the live consent pull, in the gate's ordering.
+        return when (
+            val decision = contactGate.check(
+                partyId,
+                ContactClass.OUTBOUND_SEND,
+                marketingScope,
+                topic = campaign.goal,
+            )
+        ) {
+            ContactGateDecision.ALLOWED -> {
+                // ADR-0200 D3 — delivery goes through notification-service, never direct.
+                //
+                // The order below is the fix for issue #3581: the send log may only be written
+                // AFTER the handoff has been observed to succeed, and a handoff that failed must
+                // leave a FAILED row rather than nothing. What SENT claims here is exactly
+                // "notification-service accepted the request", not "the customer received it".
+                try {
+                    notificationSend.requestSend(partyId, step.template, recipientFor(partyId), step.variables)
+                } catch (e: Exception) {
+                    record(campaignId, partyId, stepOrder, SendOutcome.FAILED)
+                    // Rethrown on purpose: Temporal retries the activity, and the FAILED row above
+                    // is the durable evidence that this attempt happened. FAILED rows do not
+                    // consume the frequency cap (SENT only), so a retry is not penalised.
+                    throw e
+                }
+                record(campaignId, partyId, stepOrder, SendOutcome.SENT)
+                StepOutcome.SENT
+            }
+            else -> {
+                if (decision.denyReason == ContactDenyReason.GATE_UNAVAILABLE) {
+                    throw ContactGateUnavailableException("contact gate state unavailable — activity will retry")
+                }
+                record(campaignId, partyId, stepOrder, outcomeFor(decision.denyReason))
+                StepOutcome.SUPPRESSED
+            }
         }
-
-        // ADR-0200 D3 — delivery goes through notification-service, never direct.
-        //
-        // The order below is the fix for issue #3581: the send log may only be written AFTER the
-        // handoff has been observed to succeed, and a handoff that failed must leave a FAILED row
-        // rather than nothing. Previously a refused publish let the exception escape the activity
-        // with no row written at all, so the funnel silently lost the party — a campaign that
-        // reached nobody and a console that had no way to say so.
-        //
-        // What SENT claims here is exactly "notification-service accepted the request onto
-        // `openbank.notification.requests`", not "the customer received it": the address is
-        // resolved and the mail is sent on the far side, and no delivery outcome is fed back yet.
-        // That feedback loop is the remaining half of #3581 and is tracked separately.
-        try {
-            notificationSend.requestSend(partyId, step.template, recipientFor(partyId), step.variables)
-        } catch (e: Exception) {
-            record(campaignId, partyId, stepOrder, SendOutcome.FAILED)
-            // Rethrown on purpose: Temporal retries the activity, and the FAILED row above is the
-            // durable evidence that this attempt happened. FAILED rows do not consume the
-            // frequency cap (`countRecentForParty` counts SENT only), so a retry is not penalised.
-            throw e
-        }
-        record(campaignId, partyId, stepOrder, SendOutcome.SENT)
-        StepOutcome.SENT
     }
 
     override fun advanceStep(campaignId: UUID, partyId: UUID, stepOrder: Int) = runBlockingOnWorker {
@@ -136,27 +136,8 @@ open class CampaignJourneyActivitiesImpl(
         sendLog.record(SendRecord(Ids.newId(), campaignId, partyId, stepOrder, outcome, Instant.now()))
     }
 
-    /** Quiet hours wrap midnight: 21→8 means "hour >= 21 OR hour < 8" in the platform zone. */
-    private fun isQuietHours(): Boolean {
-        val hour = java.time.LocalTime.now(ZoneId.of("Europe/Prague")).hour
-        return if (quietHoursStart > quietHoursEnd) {
-            hour >= quietHoursStart || hour < quietHoursEnd
-        } else {
-            hour >= quietHoursStart && hour < quietHoursEnd
-        }
-    }
-
-    /**
-     * The `recipient` field of the notification request, deliberately the party id and NOT an
-     * address (ADR-0200 D3 — the campaign holds no PII).
-     *
-     * This comment used to claim notification-service resolved the address from party data, and
-     * nothing did: the UUID reached `Mail.withHtml(req.recipient, …)` verbatim as the SMTP
-     * envelope (#3581). notification-service now resolves a non-address recipient against
-     * party-service and fails closed when it cannot, which is what makes this line true —
-     * account-service and sca-service pass the party id here too, so the resolution belongs
-     * there, once, rather than in each caller.
-     */
+    // The recipient address is resolved by notification-service from party data; the campaign
+    // never carries an e-mail address itself (ADR-0200 D3 — no PII duplication).
     private fun recipientFor(partyId: UUID): String = partyId.toString()
 
     /**
@@ -165,17 +146,26 @@ open class CampaignJourneyActivitiesImpl(
      * throws `HR000068 No current Vertx context found`, which would fail every activity in this
      * class and deliver nothing (same shape as the @Scheduled sweep in #2148/#2187). Bridge
      * through [VertxContextSupport] instead, exactly as `DomesticPaymentActivitiesImpl.vtx` does
-     * — safe here precisely because an activity thread is never an event loop.
-     *
-     * `protected open` for the same reason `FxActivitiesImpl.vtx` is: a unit test cannot supply a
-     * Vert.x context, so it overrides this one bridge with `runBlocking` and drives the real
-     * activity logic. Without the seam `deliverStep` has no test at any layer — which is how the
-     * ordering defect in #3581 shipped.
+     * — safe here precisely because an activity thread is never an event loop. `internal open` so
+     * tests can substitute a plain `runBlocking` (the FxActivitiesImplTest seam).
      */
-    protected open fun <T> runBlockingOnWorker(block: suspend () -> T): T =
+    internal open fun <T> runBlockingOnWorker(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni() }
 
     companion object {
-        private const val SECONDS_PER_WEEK = 7L * 24 * 3600
+        /** Gate deny reasons that are POLICY outcomes, recorded per step (ADR-0219). */
+        private fun outcomeFor(reason: ContactDenyReason?): SendOutcome = when (reason) {
+            ContactDenyReason.SUPPRESSED_LIST -> SendOutcome.SUPPRESSED_LIST
+            ContactDenyReason.SEND_CAP_REACHED -> SendOutcome.SUPPRESSED_CAP
+            ContactDenyReason.QUIET_HOURS -> SendOutcome.SUPPRESSED_QUIET_HOURS
+            ContactDenyReason.NO_CONSENT -> SendOutcome.SUPPRESSED_CONSENT
+            ContactDenyReason.IMPRESSION_BUDGET_REACHED,
+            ContactDenyReason.GATE_UNAVAILABLE,
+            null,
+            -> SendOutcome.FAILED
+        }
     }
 }
+
+/** Thrown when the contact gate cannot reach its state — a retry signal, never a policy outcome. */
+class ContactGateUnavailableException(message: String) : RuntimeException(message)
