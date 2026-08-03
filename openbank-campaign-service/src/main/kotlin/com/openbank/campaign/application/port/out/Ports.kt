@@ -5,11 +5,11 @@
 package com.openbank.campaign.application.port.out
 
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
-import com.openbank.campaign.domain.model.Channel
 import java.util.UUID
 
 interface CampaignRepository {

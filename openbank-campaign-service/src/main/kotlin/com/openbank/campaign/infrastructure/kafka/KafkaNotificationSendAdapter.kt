@@ -9,8 +9,8 @@ import com.openbank.campaign.application.port.out.NotificationSendPort
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Emitter
-import com.openbank.campaign.domain.model.Channel as CampaignChannel
 import java.util.UUID
+import com.openbank.campaign.domain.model.Channel as CampaignChannel
 
 /**
  * ADR-0200 D3: delivery goes through notification-service, never direct. The payload shape mirrors

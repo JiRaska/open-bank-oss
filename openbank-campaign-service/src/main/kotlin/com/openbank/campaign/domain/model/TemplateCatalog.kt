@@ -53,8 +53,7 @@ object TemplateCatalog {
     )
 
     /** Templates renderable on [channel] — what an authoring screen may offer for a step. */
-    fun forChannel(channel: Channel): Set<String> =
-        CHANNEL_OF.filterValues { it == channel }.keys
+    fun forChannel(channel: Channel): Set<String> = CHANNEL_OF.filterValues { it == channel }.keys
 
     fun exists(template: String): Boolean = template in ALL
 

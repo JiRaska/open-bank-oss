@@ -52,4 +52,12 @@ data class SendRecord(
  * Folding it into SENT would make the console report deliveries that never happened, and the first
  * person to compare it with an inbox would be right and the screen wrong.
  */
-enum class SendOutcome { SENT, DRY_RUN, SUPPRESSED_CAP, SUPPRESSED_QUIET_HOURS, SUPPRESSED_CONSENT, SUPPRESSED_LIST, FAILED }
+enum class SendOutcome {
+    SENT,
+    DRY_RUN,
+    SUPPRESSED_CAP,
+    SUPPRESSED_QUIET_HOURS,
+    SUPPRESSED_CONSENT,
+    SUPPRESSED_LIST,
+    FAILED,
+}

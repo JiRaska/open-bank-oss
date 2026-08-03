@@ -93,6 +93,7 @@ class CampaignJourneyActivitiesTest {
         val notificationSend = object : NotificationSendPort {
             override suspend fun requestSend(
                 partyId: UUID,
+                channel: Channel,
                 template: String,
                 recipient: String,
                 variables: Map<String, String>,
@@ -128,7 +129,8 @@ class CampaignJourneyActivitiesTest {
                 sendLog,
                 gate,
                 notificationSend,
-                "MARKETING_COMMS_EMAIL",
+                dryRun = false,
+                marketingScope = "MARKETING_COMMS_EMAIL",
             )
     }
 

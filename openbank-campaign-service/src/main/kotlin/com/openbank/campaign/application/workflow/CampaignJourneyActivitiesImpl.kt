@@ -103,7 +103,13 @@ open class CampaignJourneyActivitiesImpl(
                     // leave a FAILED row rather than nothing. What SENT claims here is exactly
                     // "notification-service accepted the request", not "the customer received it".
                     try {
-                        notificationSend.requestSend(partyId, step.channel, step.template, recipientFor(partyId), step.variables)
+                        notificationSend.requestSend(
+                            partyId,
+                            step.channel,
+                            step.template,
+                            recipientFor(partyId),
+                            step.variables,
+                        )
                     } catch (e: Exception) {
                         record(campaignId, partyId, stepOrder, SendOutcome.FAILED)
                         // Rethrown on purpose: Temporal retries the activity, and the FAILED row
