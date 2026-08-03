@@ -583,6 +583,36 @@ gates:
     run: |
       bash .github/scripts/test-resolve-can-i-deploy-selector.sh
 
+  # The equivalence proof that lets a reconcile deploy at all (#3432). The selector above decides
+  # WHICH version to ask about; on a manual dispatch the honest answer used to be "none, refuse"
+  # for every service, because no pact version can exist for a sha services-ci never built. This
+  # decides whether the commit that DOES have one is byte-identical, from git alone — so it is the
+  # one thing standing between a justified verdict and a borrowed one, and it is a pure function
+  # with no network, which is exactly why its failure path can be exercised here.
+  - id: pact-version-tree-equivalence-unit-test
+    name: "pact version tree-equivalence unit test (issue #3432, enforced)"
+    group: supplychain
+    mode: enforced
+    selftest: |
+      bash .github/scripts/pact-version-tree-equivalent.sh --self-test
+    run: |
+      bash .github/scripts/pact-version-tree-equivalent.sh --self-test
+
+  # The broker half of #3432. It cannot be run against the real broker from a PR — no public
+  # ingress (ADR-0056), PACT_BROKER_URL blanked off main-push — so what this asserts is only the
+  # failure modes, against a stubbed curl: unreachable, non-2xx, unparseable, no version number,
+  # a version number that is not a sha, and a well-formed sha whose trees differ. Every one must
+  # degrade to `no`, which on a dispatch is #3318's REFUSE. A reconcile that cannot verify must
+  # not deploy.
+  - id: pact-version-probe-fail-closed-unit-test
+    name: "pact version probe fails closed (issue #3432, enforced)"
+    group: supplychain
+    mode: enforced
+    selftest: |
+      bash .github/scripts/probe-pact-version.sh --self-test
+    run: |
+      bash .github/scripts/probe-pact-version.sh --self-test
+
   # Workflow `run:` step size (#3082). GitHub rejects an oversized run script by making the
   # WHOLE workflow unparseable — zero jobs, no error message, every contributor's runs of that
   # file dead until someone reverts. It happened to auto-deploy.yml (#3135 -> #3139) and NOTHING
