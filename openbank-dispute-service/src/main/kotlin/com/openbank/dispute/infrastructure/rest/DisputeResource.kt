@@ -80,15 +80,23 @@ class DisputeResource(
     @Path("/{id}/withdraw")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Operation(summary = "Withdraw a dispute")
-    fun withdraw(@PathParam("id") id: UUID, @QueryParam("actor") actor: String): Uni<Response> =
-        updateUseCase.withdraw(id, actor).map { Response.ok(it).build() }
+    fun withdraw(@PathParam("id") id: UUID, @QueryParam("actor") actor: String?): Uni<Response> {
+        // #3624 — `actor` is the attribution recorded against the state change, so a default would
+        // put a placeholder into the dispute's history. A plain `fun` emits
+        // Intrinsics.checkNotNullParameter at offset 0, so an omitted ?actor= answered 500 and a
+        // guard in the body could not run; nullable makes it reachable and libs-runtime gives 400.
+        requireNotNull(actor) { ACTOR_REQUIRED }
+        return updateUseCase.withdraw(id, actor).map { Response.ok(it).build() }
+    }
 
     @POST
     @Path("/{id}/escalate")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Operation(summary = "Escalate a dispute")
-    fun escalate(@PathParam("id") id: UUID, @QueryParam("actor") actor: String): Uni<Response> =
-        updateUseCase.escalate(id, actor).map { Response.ok(it).build() }
+    fun escalate(@PathParam("id") id: UUID, @QueryParam("actor") actor: String?): Uni<Response> {
+        requireNotNull(actor) { ACTOR_REQUIRED }
+        return updateUseCase.escalate(id, actor).map { Response.ok(it).build() }
+    }
 
     @POST
     @Path("/{id}/resolve")
@@ -132,5 +140,8 @@ class DisputeResource(
     companion object {
         /** RFC 4918 status code; not present in JAX-RS' [Response.Status] enum. */
         private const val UNPROCESSABLE_ENTITY = 422
+
+        /** #3624 — message for the absent-`actor` 400 shared by withdraw and escalate. */
+        private const val ACTOR_REQUIRED = "query parameter 'actor' is required"
     }
 }

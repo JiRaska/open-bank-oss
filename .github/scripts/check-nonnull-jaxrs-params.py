@@ -56,7 +56,10 @@
 #   (@DefaultValue), or actually optional (nullable) — and only the handler knows which. The
 #   money-path set is fixed; the remainder is BASELINED with its issue so a NEW occurrence fails
 #   while the known tail stays visible. A baseline entry that no longer occurs is reported too, so
-#   the list cannot rot in either direction.
+#   the list cannot rot in either direction. As of #3624 the BASELINE is EMPTY — both halves are
+#   remediated — so today this is an outright "no occurrences" gate. Keep the ratchet machinery
+#   anyway: it is what lets the next genuinely-optional-but-unfixed site be recorded rather than
+#   silently suppressed.
 #
 # EXIT CODES
 #   0  no new occurrences, no stale baseline entries
@@ -75,32 +78,18 @@ PARAM_ANNOTATIONS = ("QueryParam", "HeaderParam", "MatrixParam")
 # JVM primitives: JAX-RS supplies the zero value, never null, so no NPE is possible here.
 KOTLIN_PRIMITIVES = {"Int", "Long", "Double", "Float", "Boolean", "Short", "Byte", "Char"}
 
-# The tail left after the money-path fix in #3625, being worked through in #3624. psd2 and
-# card-issuance are done. Each entry is "<service>|<Class>|<param>".
-# The count per key is not recorded on purpose: several of these repeat the identical parameter
-# across sibling handlers (card-issuance's X-Operator-Id sevenfold), and pinning the count would
-# make an unrelated refactor fail the gate for no defect.
-BASELINE = {
-    # openbank-aml-service — POST /api/v1/aml/cases
-    "openbank-aml-service|AmlCaseResource|Idempotency-Key",
-    # openbank-customer-edge — the mobile/web BFF
-    "openbank-customer-edge|CustomerEdgeResource|currency",
-    "openbank-customer-edge|CustomerEdgeResource|accountId",
-    # openbank-dispute-service
-    "openbank-dispute-service|DisputeResource|actor",
-    # openbank-party-service
-    "openbank-party-service|PartyResource|Idempotency-Key",
-    # openbank-pid-service
-    "openbank-pid-service|PartyResource|index",
-    "openbank-pid-service|PartyResource|type",
-    "openbank-pid-service|PartyResource|value",
-    # openbank-statement-service
-    "openbank-statement-service|StatementResource|from",
-    "openbank-statement-service|StatementResource|to",
-    # openbank-tpp-registry-service
-    "openbank-tpp-registry-service|TppRegistryResource|tppId",
-    "openbank-tpp-registry-service|TppRegistryResource|role",
-}
+# EMPTY, and that is the finished state — not an un-run check. The money-path 24 were fixed in
+# #3625 and the remaining 39 non-money-path sites in #3624, so every inbound occurrence in the tree
+# is now nullable-and-guarded and the gate is a plain "no new occurrences" ratchet.
+#
+# An entry added here needs a reason and an issue. The stale-entry rule below is what keeps the list
+# honest in the other direction: a key that no longer occurs is reported as an error, so a baseline
+# cannot quietly outlive the defect it was recording.
+#
+# Format is "<service>|<Class>|<param>". The count per key is deliberately NOT recorded: several of
+# the original 39 repeated the identical parameter across sibling handlers (card-issuance's
+# X-Operator-Id sevenfold), and pinning a count would make an unrelated refactor fail for no defect.
+BASELINE: set[str] = set()
 
 
 def strip_comments(src: str) -> str:
@@ -368,7 +357,8 @@ def main() -> int:
         return 1
     print(
         f"non-nullable JAX-RS params: OK — {len(findings)} baselined occurrence(s), no new ones. "
-        f"The money-path set was fixed in #3104; the tail is per-handler work tracked there.",
+        f"The money-path set was fixed in #3625 and the non-money-path tail in #3624; the baseline "
+        f"is empty, so any occurrence at all is now a new one.",
     )
     return 0
 

@@ -38,7 +38,13 @@ class TppRegistryResource(
     @GET
     @Path("/check")
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
-    suspend fun checkAuthorization(@QueryParam("tppId") tppId: String, @QueryParam("role") role: String): Response {
+    suspend fun checkAuthorization(@QueryParam("tppId") tppId: String?, @QueryParam("role") role: String?): Response {
+        // #3624 — both name WHAT is being checked, so neither can default: this endpoint answers
+        // "is this TPP authorised for this role", and a guessed role would answer a question the
+        // caller did not ask. `suspend` emits no Intrinsics.checkNotNullParameter, so the nulls
+        // flowed in and `role.uppercase()` threw NPE -> 500. libs-runtime maps this to 400.
+        requireNotNull(tppId) { "query parameter 'tppId' is required" }
+        requireNotNull(role) { "query parameter 'role' is required" }
         val result = svc.checkAuthorization(
             CheckTppAuthorizationQuery(tppId, TppRole.valueOf(role.uppercase())),
         )

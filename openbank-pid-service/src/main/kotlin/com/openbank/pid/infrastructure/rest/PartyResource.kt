@@ -214,8 +214,12 @@ class PartyResource(
             produces a 404 that is operationally indistinguishable from a genuine no-match.
         """,
     )
-    suspend fun resolveByIndex(@QueryParam("index") index: String): Response {
-        if (index.isBlank()) {
+    suspend fun resolveByIndex(@QueryParam("index") index: String?): Response {
+        // #3624 — the guard below already returns the right 400 for a BLANK index and could never
+        // return it for an ABSENT one: `suspend` emits no Intrinsics.checkNotNullParameter, so
+        // JAX-RS's null flowed in and `null.isBlank()` threw NPE -> 500. Widening the guard to
+        // isNullOrBlank() keeps the existing INVALID_PARAMETER response shape for both cases.
+        if (index.isNullOrBlank()) {
             return Response.status(Response.Status.BAD_REQUEST)
                 .entity(mapOf("code" to "INVALID_PARAMETER", "message" to "'index' query parameter is required"))
                 .build()
@@ -279,9 +283,15 @@ class PartyResource(
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Operation(summary = "Get party by external ID (bankID sub, ROB AIFO, etc.)")
     suspend fun getByExternalId(
-        @QueryParam("type") type: ExternalIdType,
-        @QueryParam("value") value: String,
-    ): Response = Response.ok(getPartyUseCase.getByExternalId(type, value).toResponse()).build()
+        @QueryParam("type") type: ExternalIdType?,
+        @QueryParam("value") value: String?,
+    ): Response {
+        // #3624 — the pair IS the lookup key, so neither half has a default. `suspend` emits no
+        // intrinsic, so both nulls reached the use case; libs-runtime maps this to 400.
+        requireNotNull(type) { "query parameter 'type' is required" }
+        requireNotNull(value) { "query parameter 'value' is required" }
+        return Response.ok(getPartyUseCase.getByExternalId(type, value).toResponse()).build()
+    }
 
     @GET
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)

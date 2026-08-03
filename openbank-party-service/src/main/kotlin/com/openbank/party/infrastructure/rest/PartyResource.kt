@@ -125,7 +125,14 @@ class PartyResource {
     @POST
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC")
     @Operation(summary = "Create a new party (customer or company)")
-    suspend fun createParty(req: CreatePartyRequest, @HeaderParam("Idempotency-Key") idempotencyKey: String): Response {
+    suspend fun createParty(
+        req: CreatePartyRequest,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        // #3624 — the key is what makes a repeated create safe, so it cannot be defaulted or
+        // synthesised here: a server-generated one would make every retry a NEW party. `suspend`
+        // emits no intrinsic, so the null was carried into the command and only surfaced downstream.
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
         val party = partyUseCase.createParty(req.toCommand(idempotencyKey))
         return Response.created(URI.create("/api/v1/parties/${party.id}")).entity(party.toResponse()).build()
     }

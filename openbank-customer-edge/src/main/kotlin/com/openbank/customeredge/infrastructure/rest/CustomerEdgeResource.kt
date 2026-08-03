@@ -908,12 +908,18 @@ class CustomerEdgeResource(
     @Path("/accounts/{accountId}/pockets/resolve")
     @Authorize(action = "customer.pockets.read", resource = "#accountId")
     @Blocking
-    fun resolvePocket(@PathParam("accountId") accountId: UUID, @QueryParam("currency") currency: String): Response {
+    fun resolvePocket(@PathParam("accountId") accountId: UUID, @QueryParam("currency") currency: String?): Response {
+        // #3624 — a plain (non-suspend) handler emits Intrinsics.checkNotNullParameter at bytecode
+        // offset 0, so omitting ?currency= threw NPE before the first statement and answered 500.
+        // A guard is only reachable once the parameter is declared nullable. Answered with this
+        // resource's own badRequest() envelope, as listSddMandates already does for an absent
+        // accountId — the app parses that shape, and every other 400 here is an explicit Response.
+        val ccyRaw = currency ?: return badRequest("Missing currency")
         val customer = customer()
         if (!ownsAccount(accountId, customer.partyId)) {
             return forbidden("Account does not belong to caller")
         }
-        val ccy = currency.uppercase()
+        val ccy = ccyRaw.uppercase()
         if (!isValidCurrency(ccy)) return badRequest("Invalid currency code")
         return upstream.get(
             "$accountServiceUrl/api/v1/accounts/$accountId/pockets/resolve?currency=$ccy",
@@ -1397,17 +1403,19 @@ class CustomerEdgeResource(
     @Authorize(action = "customer.transactions.read")
     @Blocking
     fun listTransactions(
-        @QueryParam("accountId") accountId: UUID,
+        @QueryParam("accountId") accountId: UUID?,
         @QueryParam("limit") @DefaultValue("20") limit: Int,
         @QueryParam("cursor") cursor: String?,
     ): Response {
+        // #3624 — see listSddMandates: nullable + an explicit 400, not a 500 from the intrinsic.
+        val account = accountId ?: return badRequest("Missing accountId")
         val customer = customer()
-        if (!ownsAccount(accountId, customer.partyId)) {
+        if (!ownsAccount(account, customer.partyId)) {
             return forbidden("Account does not belong to caller")
         }
-        val query = buildTransactionsQuery(accountId, limit, cursor)
+        val query = buildTransactionsQuery(account, limit, cursor)
         val resp = upstream.get("$transactionServiceUrl/api/v1/transactions$query", customer.partyId.toString())
-        return enrichWithCounterpartyIban(resp, accountId, customer.partyId)
+        return enrichWithCounterpartyIban(resp, account, customer.partyId)
     }
 
     /**
@@ -1774,11 +1782,13 @@ class CustomerEdgeResource(
     @Path("/sepa-instant")
     @Authorize(action = "customer.payments.read")
     @Blocking
-    fun listSepaInstant(@QueryParam("accountId") accountId: UUID): Response {
+    fun listSepaInstant(@QueryParam("accountId") accountId: UUID?): Response {
+        // #3624 — see listSddMandates: nullable + an explicit 400, not a 500 from the intrinsic.
+        val account = accountId ?: return badRequest("Missing accountId")
         val customer = customer()
-        if (!ownsAccount(accountId, customer.partyId)) return forbidden("Account does not belong to caller")
+        if (!ownsAccount(account, customer.partyId)) return forbidden("Account does not belong to caller")
         return upstream.get(
-            "$sepaInstantServiceUrl/api/v1/sepa-instant/debtor/$accountId",
+            "$sepaInstantServiceUrl/api/v1/sepa-instant/debtor/$account",
             customer.partyId.toString(),
         )
     }
@@ -1796,11 +1806,13 @@ class CustomerEdgeResource(
     @Blocking
     fun recallSepaInstant(
         @PathParam("paymentId") paymentId: UUID,
-        @QueryParam("accountId") accountId: UUID,
+        @QueryParam("accountId") accountId: UUID?,
         body: String,
     ): Response {
+        // #3624 — see listSddMandates: nullable + an explicit 400, not a 500 from the intrinsic.
+        val account = accountId ?: return badRequest("Missing accountId")
         val customer = customer()
-        val accountJson = fetchAccount(accountId, customer.partyId)
+        val accountJson = fetchAccount(account, customer.partyId)
             ?: return forbidden("Account does not belong to caller")
         if (extractOwnerPartyId(accountJson) != customer.partyId.toString()) {
             return forbidden("Account does not belong to caller")
@@ -3287,10 +3299,12 @@ class CustomerEdgeResource(
     @Path("/disputes")
     @Authorize(action = "customer.disputes.read")
     @Blocking
-    fun listDisputes(@QueryParam("accountId") accountId: UUID): Response {
+    fun listDisputes(@QueryParam("accountId") accountId: UUID?): Response {
+        // #3624 — see listSddMandates: nullable + an explicit 400, not a 500 from the intrinsic.
+        val account = accountId ?: return badRequest("Missing accountId")
         val customer = customer()
-        if (!ownsAccount(accountId, customer.partyId)) return forbidden("Account does not belong to caller")
-        return upstream.get("$disputeServiceUrl/api/v1/disputes/account/$accountId", customer.partyId.toString())
+        if (!ownsAccount(account, customer.partyId)) return forbidden("Account does not belong to caller")
+        return upstream.get("$disputeServiceUrl/api/v1/disputes/account/$account", customer.partyId.toString())
     }
 
     /**

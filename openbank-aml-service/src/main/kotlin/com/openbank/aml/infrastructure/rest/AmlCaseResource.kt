@@ -47,9 +47,12 @@ class AmlCaseResource(
     @Operation(summary = "Submit an AML screening case")
     suspend fun createCase(
         request: CreateAmlCaseRequest,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
-        require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
+        // #3624 — this guard answered 500 in exactly the case it was written for. `suspend` emits
+        // no Intrinsics.checkNotNullParameter, so an ABSENT header arrived as null and
+        // `null.isNotBlank()` threw NPE; only a BLANK header ever reached the intended 400.
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
 
         idempotencyStore.get(idempotencyKey)?.let { cached ->
             return Response.status(cached.statusCode)

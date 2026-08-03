@@ -40,6 +40,11 @@ dependencies {
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    // StatementMissingParamStatusIT (#3624) drives the resource over REAL HTTP — the only layer at
+    // which a missing @QueryParam can be observed at all. A unit test calling the handler supplies
+    // the argument JAX-RS does not, so it passes against the broken signature.
+    testImplementation(libs.rest.assured.kotlin)
+    testImplementation(libs.quarkus.test.security)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
 
     // CI infra sweep (#578): isolated PostgreSQL per test JVM via Testcontainers.

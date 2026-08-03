@@ -47,14 +47,24 @@ class StatementResource(
     @Operation(summary = "Close a month for every pocket of an account (assigns sequences, reconciles fail-closed)")
     fun close(
         @PathParam("accountId") accountId: UUID,
-        @QueryParam("from") from: String,
-        @QueryParam("to") to: String,
-    ): Uni<Response> = closePeriod.closeMonth(accountId, LocalDate.parse(from), LocalDate.parse(to))
-        .map { Response.ok(it).build() }
-        .onFailure(ReconciliationException::class.java)
-        .recoverWithItem { e ->
-            Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
-        }
+        @QueryParam("from") from: String?,
+        @QueryParam("to") to: String?,
+    ): Uni<Response> {
+        // #3624 — the period being closed has no defensible default: a close assigns legal
+        // sequences and is idempotent on (account, currency, period), so guessing the range would
+        // write the wrong statement rather than fail. This handler is a plain `fun`, so Kotlin
+        // emitted Intrinsics.checkNotNullParameter at bytecode offset 0 and an omitted ?from= threw
+        // NPE before the body ran — a guard written here would have been dead code. Nullable makes
+        // it reachable; libs-runtime maps IllegalArgumentException to 400.
+        requireNotNull(from) { FROM_REQUIRED }
+        requireNotNull(to) { TO_REQUIRED }
+        return closePeriod.closeMonth(accountId, LocalDate.parse(from), LocalDate.parse(to))
+            .map { Response.ok(it).build() }
+            .onFailure(ReconciliationException::class.java)
+            .recoverWithItem { e ->
+                Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
+            }
+    }
 
     @GET
     @Path("/{accountId}")
@@ -86,13 +96,24 @@ class StatementResource(
     fun export(
         @PathParam("accountId") accountId: UUID,
         @PathParam("currency") currency: String,
-        @QueryParam("from") from: String,
-        @QueryParam("to") to: String,
+        @QueryParam("from") from: String?,
+        @QueryParam("to") to: String?,
         @QueryParam("format") @DefaultValue("PDF") format: String,
-    ): Uni<Response> =
-        adHocExport.export(accountId, currency, LocalDate.parse(from), LocalDate.parse(to), parseFormat(format))
+    ): Uni<Response> {
+        // #3624 — `format` is safe (it carries @DefaultValue, so JAX-RS never injects null); the
+        // date range is the whole meaning of an ad-hoc export and was a 500 when omitted.
+        requireNotNull(from) { FROM_REQUIRED }
+        requireNotNull(to) { TO_REQUIRED }
+        return adHocExport
+            .export(accountId, currency, LocalDate.parse(from), LocalDate.parse(to), parseFormat(format))
             .map { rendered -> Response.ok(rendered.body).type(rendered.contentType).build() }
+    }
 
     private fun parseFormat(raw: String): StatementFormat =
         StatementFormat.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) } ?: StatementFormat.PDF
+
+    private companion object {
+        const val FROM_REQUIRED = "query parameter 'from' is required"
+        const val TO_REQUIRED = "query parameter 'to' is required"
+    }
 }
