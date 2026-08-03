@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.7.0
+  version: 1.8.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -400,6 +400,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CampaignStep'
+        stopCondition:
+          $ref: '#/components/schemas/StopCondition'
         state:
           type: string
           enum: [DRAFT, PENDING_APPROVAL, ACTIVE, PAUSED, CLOSED]
@@ -436,6 +438,17 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CampaignStep'
+        stopCondition:
+          $ref: '#/components/schemas/StopCondition'
+    StopCondition:
+      type: object
+      required: [maxSendsPerParty]
+      description: >-
+        Optional journey stop condition (ADR-0200 D1). The workflow evaluates it before every
+        step against the party's lifetime SENT count in this campaign (send log); reaching the
+        cap ends the journey as STOPPED_MAX_SENDS. Absent means the journey runs every step.
+      properties:
+        maxSendsPerParty: { type: integer, minimum: 1 }
     ApprovalRequest:
       type: object
       deprecated: true

@@ -31,6 +31,14 @@ enum class EnrolmentState {
 
     /** Journey ended early because a step's suppression check failed (ADR-0200 D6). */
     TERMINATED_SUPPRESSED,
+
+    /**
+     * Journey stopped by the campaign's own stop condition (ADR-0200 D1, #3585): the party's
+     * lifetime send count in this campaign reached the definition's cap. Distinct from
+     * [TERMINATED_SUPPRESSED] — suppression is a per-step policy outcome, this is the definition
+     * choosing to end the journey, so the console can say why the funnel ended early.
+     */
+    STOPPED_MAX_SENDS,
 }
 
 /** A recorded send decision — the input to the frequency-cap evaluation (ADR-0219 D2). */

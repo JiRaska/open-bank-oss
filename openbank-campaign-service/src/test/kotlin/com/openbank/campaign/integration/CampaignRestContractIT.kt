@@ -259,4 +259,45 @@ class CampaignRestContractIT {
             body("message", org.hamcrest.Matchers.containsString("bodyHtml"))
         }
     }
+
+    @Test
+    fun `a stop condition survives the create-and-read round trip`() {
+        val id = Given {
+            contentType("application/json")
+            body(
+                """
+                {"name":"it-stop-condition","goal":"prove the HTTP contract","segmentName":"actives","segmentVersion":1,
+                 "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                           "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}],
+                 "stopCondition":{"maxSendsPerParty":2}}
+                """.trimIndent(),
+            )
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("stopCondition.maxSendsPerParty", org.hamcrest.Matchers.equalTo(2))
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("stopCondition.maxSendsPerParty", org.hamcrest.Matchers.equalTo(2))
+        }
+    }
+
+    @Test
+    fun `a draft without a stop condition reads back with none — absent never invents a cap`() {
+        val id = createDraft("it-no-stop-condition")
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("stopCondition", org.hamcrest.Matchers.nullValue())
+        }
+    }
 }

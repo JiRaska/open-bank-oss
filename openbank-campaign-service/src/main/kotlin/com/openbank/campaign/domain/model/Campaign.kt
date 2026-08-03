@@ -19,6 +19,7 @@ data class Campaign(
     val goal: String,
     val segmentRef: SegmentRef,
     val steps: List<CampaignStep>,
+    val stopCondition: StopCondition? = null,
     val state: CampaignState,
     val createdBy: String,
     val approvedBy: String?,
@@ -100,6 +101,22 @@ data class CampaignStep(
 }
 
 enum class Channel { EMAIL }
+
+/**
+ * The campaign's own stop condition (ADR-0200 D1, issue #3585 slice 1), evaluated by the journey
+ * workflow BEFORE each step against observable state — never against a fabricated signal. Only
+ * conditions backed by data the service already holds are representable: the first (and so far
+ * only) one is the party's lifetime SENT count in this campaign, which the send log holds. A
+ * `null` stop condition means the journey always runs every step, exactly as before.
+ */
+data class StopCondition(val maxSendsPerParty: Int) {
+    init {
+        require(maxSendsPerParty >= 1) { "maxSendsPerParty must be >= 1 — a zero cap sends nothing" }
+    }
+
+    /** True when [sendsSoFar] already reached the cap, so the journey must stop before the next step. */
+    fun reachedBy(sendsSoFar: Int): Boolean = sendsSoFar >= maxSendsPerParty
+}
 
 /** A binding to a versioned segment artifact (ADR-0201 D1): never a query, always name@version. */
 data class SegmentRef(val name: String, val version: Int) {
