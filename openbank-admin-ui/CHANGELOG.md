@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.91.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.91.0...admin-ui-v0.91.1) (2026-08-03)
+
+
+### Bug Fixes
+
+* **admin-ui:** revert the jsdom 30 bump — it disabled the whole test suite ([#3576](https://github.com/JiRaska/open-bank-oss/issues/3576)) ([e407bbf](https://github.com/JiRaska/open-bank-oss/commit/e407bbfee5f3d6ef0ae158fe5f6c337a5b8e8528))
+
 ## [0.91.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.90.2...admin-ui-v0.91.0) (2026-08-03)
 
 
