@@ -33,6 +33,11 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
     implementation(libs.quarkus.scheduler)
+    // #3413: account -> party lookup for the resolution sweep (sweep-only; never on the
+    // case-creation path, so account-service being down can never lose an AML case).
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
+    implementation(libs.quarkus.oidc.client.reactive.filter)
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)

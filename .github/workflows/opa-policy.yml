@@ -57,7 +57,9 @@ jobs:
           PATTERN='^openbank-infra/opa/'
           PATTERN="${PATTERN}|^openbank-libs/governance/agents\.yaml$"
           PATTERN="${PATTERN}|^openbank-libs/governance/rules\.yaml$"
+          PATTERN="${PATTERN}|^openbank-libs/governance/rules-opa-data\.yaml$"
           PATTERN="${PATTERN}|^openbank-libs/governance/policies/"
+          PATTERN="${PATTERN}|^\.github/scripts/gen-rules-opa-data\.py$"
           PATTERN="${PATTERN}|^\.github/workflows/opa-policy\.yml$"
 
           # Every component directory that owns a bundle generator — discovered, never
@@ -146,6 +148,17 @@ jobs:
             exit 1
           fi
           echo "ConfigMap is in sync with agents.rego + agents.yaml + bundle.manifest."
+
+      - name: Verify the derived OPA policy-input subset of rules.yaml is in sync
+        run: |
+          # openbank-libs/governance/rules-opa-data.yaml is what the bundles embed — the
+          # top-level keys of rules.yaml that a .rego actually reads as data.rules.<key>,
+          # extracted verbatim. It must be regenerated BEFORE the bundle generators run
+          # below, or they would hash a stale input and the diff check would pass about
+          # the wrong thing. The key set is derived from the .rego sources, so adding
+          # data.rules.<new> to a policy fails here until the subset is regenerated.
+          python3 -m pip install --quiet --disable-pip-version-check pyyaml
+          python3 .github/scripts/gen-rules-opa-data.py --check
 
       - name: Verify service OPA bundles + pod-roll annotations are in sync with the policy source
         run: |

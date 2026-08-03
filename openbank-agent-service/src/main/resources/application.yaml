@@ -27,6 +27,14 @@ quarkus:
         value: "max-age=31536000; includeSubDomains"
 
   oidc:
+    # LOCAL DEFAULT ONLY. Every deployed environment overrides this with
+    # QUARKUS_OIDC_AUTH_SERVER_URL (an env var outranks application.yaml in SmallRye Config),
+    # and a deployment that forgets to is not obviously broken: anonymous requests still answer
+    # 200/401 normally and only requests carrying a bearer fail — with 500, because token
+    # validation cannot reach an issuer at localhost inside the pod. security-scanner and
+    # analytics-sink shipped exactly that (#3433). Note also that QUARKUS_OIDC_ENABLED cannot
+    # switch OIDC off from the environment: quarkus.oidc.enabled is a BUILD-TIME property, so
+    # setting it in a manifest reads as "auth is off here" while the pod keeps validating.
     auth-server-url: http://localhost:8080/realms/openbank
     client-id: openbank-services
     credentials:

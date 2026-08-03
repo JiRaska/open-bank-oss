@@ -86,6 +86,8 @@ class ScaPactFolderProviderVerificationTest {
     companion object {
         private val CHALLENGE_ID = UUID.fromString("99999999-9999-9999-9999-999999999999")
         private val PARTY_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        private val DELEGATION_CHALLENGE_ID = UUID.fromString("d1e2f3a4-b5c6-4d7e-8f90-1a2b3c4d5e6f")
+        private val DELEGATION_PARTY_ID = UUID.fromString("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
     }
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
@@ -146,6 +148,37 @@ class ScaPactFolderProviderVerificationTest {
                 method = ScaMethod.PUSH_NOTIFICATION,
                 status = ScaStatus.PENDING,
                 expiresAt = OffsetDateTime.now().plusMinutes(5),
+                createdAt = OffsetDateTime.now(),
+            ),
+        )
+        Unit
+    }
+
+    /**
+     * The ADR-0232 D4 delegation ceremony's grantor half (issue #2991). Distinct from the consent
+     * challenge above in every field the consumer gates on: purpose `DELEGATION_GRANT` (so a
+     * consent or payment challenge can never be spent to mint a grant) and status `COMPLETED`
+     * (delegation-service refuses anything else), with `consumedAt` null so the pact's second
+     * interaction — the compare-and-consume that makes the ceremony single-use — has something
+     * left to spend. `save` is a `merge`, so re-running this handler per interaction resets
+     * `consumedAt` and the two interactions do not have to care which order they run in.
+     *
+     * `dynamicLinkingData` is deliberately null: a delegation challenge links to no operation, and
+     * `ScaService.consume` authorises an unlinked challenge exactly when the consume states none —
+     * which is why the consumer's request body carries only `partyId`.
+     */
+    @State("a COMPLETED DELEGATION_GRANT SCA challenge exists")
+    fun stateCompletedDelegationGrantChallengeExists() = runOnVertxContext {
+        challengeRepo.save(
+            ScaChallenge(
+                id = DELEGATION_CHALLENGE_ID,
+                partyId = DELEGATION_PARTY_ID,
+                purpose = ScaPurpose.DELEGATION_GRANT,
+                method = ScaMethod.PUSH_NOTIFICATION,
+                status = ScaStatus.COMPLETED,
+                expiresAt = OffsetDateTime.now().plusMinutes(5),
+                completedAt = OffsetDateTime.now(),
+                consumedAt = null,
                 createdAt = OffsetDateTime.now(),
             ),
         )

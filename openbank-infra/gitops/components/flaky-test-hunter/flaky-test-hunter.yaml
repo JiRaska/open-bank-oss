@@ -28,7 +28,7 @@ spec:
         - name: flaky-test-hunter
           # Pending first CI build (ADR-0168 initial PR) — build-push-service.sh publishes the
           # real sandbox-<sha> tag on merge; ArgoCD will not sync a healthy pod until then.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-95b652dd
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-b2697d6e
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -52,6 +52,16 @@ spec:
               value: temporal-frontend.temporal.svc:7233
             - name: TEMPORAL_ENABLED
               value: "true"
+            # The periodic sweep. Set EXPLICITLY here rather than left to the application.yaml
+            # default, because this is the only place an operator looks to answer "when does this
+            # agent run" — and until now the answer was "it doesn't". The agent was trigger-only,
+            # so its findings table was empty, which renders as "nothing to act on" rather than
+            # "nothing has ever looked".
+            # weekly on Sunday at 06:30 UTC, offset from the other control-plane agents, which share one LiteLLM
+            # gateway and one Prometheus and each carry their own daily token budget.
+            # Six fields (second minute hour day month weekday) — Quarkus, not crontab.
+            - name: FLAKY_TEST_HUNTER_CHECK_CRON
+              value: "0 30 6 ? * SUN"
             - name: GITHUB_API_URL
               value: https://api.github.com
             - name: GITHUB_REPO

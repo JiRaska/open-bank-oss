@@ -10,7 +10,23 @@ import com.openbank.authzaudit.domain.model.AuthzPolicyReport
 import com.openbank.authzaudit.domain.model.RunTrigger
 
 interface RunAuthzPolicyCheckUseCase {
+    /** Runs a sweep and WAITS for the report — the operator trigger, where a human is holding
+     *  an HTTP connection open and wants the outcome. */
     suspend fun run(trigger: RunTrigger): AuthzPolicyReport
+
+    /**
+     * Starts a sweep and returns its workflow id WITHOUT waiting.
+     *
+     * What the schedule uses. A sweep runs several collect activities, drift detectors and an LLM
+     * diagnosis per finding, so it can take many minutes; waiting inline would pin a scheduler
+     * thread for the whole run and make a slow sweep indistinguishable from a hung one. Temporal
+     * owns the execution and its history is the durable record.
+     *
+     * Idempotent: the workflow id is derived from the trigger and the UTC day, so a pod restart or
+     * a second replica is REJECTED by Temporal rather than starting a duplicate sweep that would
+     * spend the agent's daily LLM budget twice.
+     */
+    suspend fun startDetached(trigger: RunTrigger): String
 }
 
 interface GetFindingsUseCase {

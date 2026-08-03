@@ -12,6 +12,17 @@ import jakarta.enterprise.context.ApplicationScoped
 @ConfigMapping(prefix = "openbank.governance-auditor")
 @ApplicationScoped
 interface GovernanceAuditorConfig {
+    /**
+     * Cron for the periodic sweep (ADR-0164).
+     *
+     * Declared here because it lives under this mapping's prefix: SmallRye validates a
+     * `@ConfigMapping` prefix as a CLOSED set, so a key added to `application.yaml` with no
+     * matching accessor fails the whole application at boot with `ConfigValidationException` —
+     * not a warning about one property, a dead service.
+     */
+    @WithDefault("0 30 4 * * ?")
+    fun auditCron(): String
+
     @WithDefault("https://api.github.com")
     fun githubApiUrl(): String
 

@@ -187,15 +187,24 @@ out of it (they are path-scoped, not less important — several are live-inciden
 ### OPA / Rego policies (ADR-0031/ADR-0034)
 - **Editing any shared policy source ripples the OPA bundle checksum of every service.** Each
   `openbank-infra/gitops/components/**/gen-*opa-bundle*.sh` embeds `rest.rego`, `agents.rego`,
-  `agents.yaml` and (25 of the 26) `rules.yaml` verbatim into its ConfigMap and hashes them into
-  that service's `openbank.tech/policy-checksum` annotation. So a new charter entry for a
-  completely unrelated agent — or any `rules.yaml` edit — still changes *every* service's bundle
-  and annotation. `opa-policy.yml`'s "build + verify bundle" job discovers the generators with
+  `agents.yaml` and (39 of the 40) `rules-opa-data.yaml` verbatim into its ConfigMap and hashes them
+  into that service's `openbank.tech/policy-checksum` annotation. So a new charter entry for a
+  completely unrelated agent still changes *every* service's bundle and annotation.
+  `opa-policy.yml`'s "build + verify bundle" job discovers the generators with
   `find` and regenerates **all** of them on every OPA-relevant PR, so your PR fails there unless it
   re-runs and commits every generator's output, not just your own service's bundle. Regenerate with:
   ```
+  python3 .github/scripts/gen-rules-opa-data.py
   find openbank-infra/gitops/components -name 'gen-*opa-bundle*.sh' | sort | xargs -n1 bash
   ```
+  **`rules-opa-data.yaml` is DERIVED from `rules.yaml` and must be regenerated first** — it is the
+  subset of top-level keys some `.rego` reads as `data.rules.<key>`, extracted verbatim (#3357).
+  Embedding the whole 168 KB file meant an edit to any of the ~30 keys OPA never reads restamped
+  ~78 gitops files for nothing, colliding with the auto-deploy bot's image bumps in the very same
+  `*-service.yaml` files; it also pushed every bundle against the 262144-byte annotation ceiling
+  that had already frozen five Applications' policy. An edit to a non-read key now changes nothing
+  here at all. Never hand-edit `rules-opa-data.yaml`, and never add a key to it by hand — the key
+  set comes from the `.rego` sources, so `data.rules.<newkey>` picks itself up on regeneration.
   Expect this to roll the pods of every service whose checksum moved — that is the point (subPath
   mounts do not hot-reload). Do not hand-edit a bundle or an annotation to dodge the diff.
 - **The generator list is discovered, not hard-coded — keep it that way.** Until #1184 the gate

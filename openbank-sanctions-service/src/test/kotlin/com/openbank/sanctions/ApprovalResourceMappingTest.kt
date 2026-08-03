@@ -35,6 +35,11 @@ class ApprovalResourceMappingTest {
         assertThat(response.resourceId).isEqualTo("check-1")
         assertThat(response.status).isEqualTo("APPROVED")
         assertThat(response.decidedBy).isEqualTo("checker")
+        // makerId and createdAt were added for the checker's queue (#3472). Without them a
+        // supervisor sees a list of opaque ids: "who asked" is the thing a second pair of eyes
+        // is checking, and age is the only visible sign of a request nearing the 24h TTL.
+        assertThat(response.makerId).isEqualTo("maker")
+        assertThat(response.createdAt).isEqualTo(decidedAt.minusHours(1).toString())
     }
 
     @Test

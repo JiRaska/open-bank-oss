@@ -313,6 +313,9 @@ COPY --chmod=0644 openbank-admin-ui/dora.json ./dora.json
 # IAOps section parses (src/app/api/iaops/governance). Read-only consumer: the
 # UI never writes it. --chmod=0644 for the same UID-100 readability reason.
 COPY --chmod=0644 openbank-libs/governance/agents.yaml ./agents.yaml
+# Generated IAOps governance snapshot (ADR-0029 D3): curated rollout prose +
+# machine-checkable repo facts. Read-only consumer: src/app/api/iaops/governance.
+COPY --chmod=0644 openbank-admin-ui/ai-governance-snapshot.json ./ai-governance-snapshot.json
 # Compliance control catalogue (read-only consumer; see
 # src/lib/governance/compliance.ts → /docs/control-tower). Authored source of
 # truth, baked like agents.yaml; the Control Tower joins it with the derived
@@ -362,6 +365,7 @@ ENV OPENBANK_TEST_RESULTS=/app/test-results.json
 ENV OPENBANK_READINESS=/app/prod-readiness.json
 ENV OPENBANK_COST_REPORT=/app/cost-report.json
 ENV OPENBANK_AGENTS_FILE=/app/agents.yaml
+ENV OPENBANK_AI_GOVERNANCE_SNAPSHOT=/app/ai-governance-snapshot.json
 ENV OPENBANK_COMPLIANCE_CONTROLS=/app/compliance-controls.yaml
 ENV OPENBANK_CATALOG=/app/catalog.json
 ENV OPENBANK_SERVICE_GRAPH=/app/service-graph.json

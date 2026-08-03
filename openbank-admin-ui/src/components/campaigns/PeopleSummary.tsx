@@ -96,26 +96,26 @@ export function PeopleSummary({
           {t('Jednotliví lidé (pro ladění)', 'Individual people (for debugging)')} — {n(rows.length)}
         </summary>
         <div className="overflow-x-auto border-t">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left">
+          <table className="data-table">
+            <thead>
               <tr>
-                <th className="px-4 py-2 font-medium">{t('Party', 'Party')}</th>
-                <th className="px-4 py-2 font-medium">{t('Stav', 'State')}</th>
-                <th className="px-4 py-2 font-medium">{t('Krok', 'Step')}</th>
+                <th>{t('Party', 'Party')}</th>
+                <th>{t('Stav', 'State')}</th>
+                <th>{t('Krok', 'Step')}</th>
               </tr>
             </thead>
             <tbody>
               {rows.map(e => (
-                <tr key={e.id} className="border-t" data-state={e.state}>
+                <tr key={e.id} data-state={e.state}>
                   {/* Name when we have it, short id when we do not — the full id stays in `title`,
                       because the id is what goes into a support ticket. */}
-                  <td className="px-4 py-2 text-xs" title={e.partyId}>
+                  <td className="text-xs" title={e.partyId}>
                     {partyNames[e.partyId] ?? <span className="font-mono">{e.partyId.slice(0, 8)}</span>}
                   </td>
-                  <td className="px-4 py-2">
+                  <td>
                     <StatusBadge status={e.state} label={stateLabel(e.state)} tone={STATE_TONE[e.state] ?? 'neutral'} />
                   </td>
-                  <td className="px-4 py-2">{e.currentStep}</td>
+                  <td>{e.currentStep}</td>
                 </tr>
               ))}
             </tbody>

@@ -20,7 +20,7 @@ import java.time.OffsetDateTime
 
 /**
  * [ApprovalResource] delegates the actual self-approval / not-found / state-machine rules to
- * [ApprovalStore] (unit-tested in openbank-libs-domain) — what THIS test covers is the
+ * [ApprovalStore] (unit-tested by ApprovalStoreContractTest in openbank-libs-runtime (#3349)) — what THIS test covers is the
  * resource's own two responsibilities: resolving the checker's identity from
  * [SecurityIdentity] rather than the request body (same anti-spoofing property
  * [DispatchControlResourceTest] guards for the maker side), and translating a `null` decide

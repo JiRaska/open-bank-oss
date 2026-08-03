@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.89.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.89.0...admin-ui-v0.89.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** convert the enrolment table to the house style too ([#3497](https://github.com/JiRaska/open-bank-oss/issues/3497)) ([3ec520a](https://github.com/JiRaska/open-bank-oss/commit/3ec520a518abd520df095207919412b98d7a7bed))
+
+## [0.89.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.88.1...admin-ui-v0.89.0) (2026-08-02)
+
+
+### Features
+
+* **admin-ui:** read-only backoffice delegation console ([#3510](https://github.com/JiRaska/open-bank-oss/issues/3510)) ([8aed038](https://github.com/JiRaska/open-bank-oss/commit/8aed038886140f511841464d6dc713cc8ed0abc9)), closes [#2990](https://github.com/JiRaska/open-bank-oss/issues/2990)
+
+## [0.88.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.88.0...admin-ui-v0.88.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** render the campaign tables in the console's own style ([#3480](https://github.com/JiRaska/open-bank-oss/issues/3480)) ([32a2cb1](https://github.com/JiRaska/open-bank-oss/commit/32a2cb186da898e4079c33822513f859e9115ec2))
+
 ## [0.88.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.87.3...admin-ui-v0.88.0) (2026-08-02)
 
 

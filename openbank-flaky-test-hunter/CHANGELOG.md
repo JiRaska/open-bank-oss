@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.3.2...flaky-test-hunter-v0.4.0) (2026-08-02)
+
+
+### Features
+
+* **governance-auditor,release-steward,docs-truth-agent,authz-policy-auditor,flaky-test-hunter:** run the periodic sweep on a schedule, not only when asked ([#3500](https://github.com/JiRaska/open-bank-oss/issues/3500)) ([b2697d6](https://github.com/JiRaska/open-bank-oss/commit/b2697d6e85ef017b088e7cf2c9ba137702e1f2ce))
+
 ## [0.3.2](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.3.1...flaky-test-hunter-v0.3.2) (2026-08-02)
 
 

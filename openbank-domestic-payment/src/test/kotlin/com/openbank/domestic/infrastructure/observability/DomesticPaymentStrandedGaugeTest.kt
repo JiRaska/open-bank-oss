@@ -44,6 +44,8 @@ class DomesticPaymentStrandedGaugeTest {
         override suspend fun list(status: DomesticPaymentStatus?, debtorAccountId: UUID?, limit: Int, offset: Int) =
             error("unused")
         override suspend fun update(payment: DomesticPayment, outboxMessage: OutboxMessage) = error("unused")
+        override suspend fun findRedrivable(maxAttempts: Int, minAge: Instant, limit: Int) = error("unused")
+        override suspend fun recordRedriveAttempt(paymentId: UUID) = error("unused")
     }
 
     private fun gaugeValue(registry: SimpleMeterRegistry, name: String, status: DomesticPaymentStatus): Double =

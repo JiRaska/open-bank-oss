@@ -6,9 +6,8 @@ package com.openbank.libs.authz
 
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
+import com.openbank.libs.approval.InMemoryApprovalStore
 import com.openbank.libs.approval.InvalidApprovalStateException
-import com.openbank.libs.approval.PendingApproval
-import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.observability.DomainMetrics
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
@@ -28,7 +27,6 @@ import org.junit.jupiter.api.Test
 import java.lang.reflect.Method
 import java.time.Clock
 import java.time.Instant
-import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.security.Principal as JavaPrincipal
 
@@ -489,61 +487,6 @@ class AuthorizeInterceptorTest {
             AuthzDecision(allow = true, reason = "ok", attributes = mapOf("four_eyes_required" to true))
     }
 
-    /** In-memory ApprovalStore test double — behavior-equivalent to RedisApprovalStore. */
-    private class FakeApprovalStore : ApprovalStore {
-        val created = mutableListOf<PendingApproval>()
-        private val approvals = mutableMapOf<String, PendingApproval>()
-        private var nextId = 0
-
-        override suspend fun create(
-            action: String,
-            resourceId: String?,
-            makerId: String,
-            ttlSeconds: Long,
-        ): PendingApproval {
-            val approval = PendingApproval(
-                id = "approval-${nextId++}",
-                action = action,
-                resourceId = resourceId,
-                makerId = makerId,
-                status = ApprovalStatus.PENDING,
-                createdAt = OffsetDateTime.parse("2026-06-22T10:20:00Z"),
-            )
-            created += approval
-            approvals[approval.id] = approval
-            return approval
-        }
-
-        override suspend fun find(id: String): PendingApproval? = approvals[id]
-
-        override suspend fun findPending(limit: Int): List<PendingApproval> =
-            approvals.values.filter { it.status == ApprovalStatus.PENDING }.sortedBy { it.createdAt }.take(limit)
-
-        override suspend fun decide(id: String, decidedBy: String, approve: Boolean): PendingApproval? {
-            val approval = approvals[id] ?: return null
-            if (decidedBy == approval.makerId) throw SelfApprovalNotAllowedException(approval.makerId)
-            if (approval.status != ApprovalStatus.PENDING) {
-                throw InvalidApprovalStateException(id, ApprovalStatus.PENDING, approval.status)
-            }
-            val decided = approval.copy(
-                status = if (approve) ApprovalStatus.APPROVED else ApprovalStatus.REJECTED,
-                decidedBy = decidedBy,
-            )
-            approvals[id] = decided
-            return decided
-        }
-
-        override suspend fun markExecuted(id: String): PendingApproval? {
-            val approval = approvals[id] ?: return null
-            if (approval.status != ApprovalStatus.APPROVED) {
-                throw InvalidApprovalStateException(id, ApprovalStatus.APPROVED, approval.status)
-            }
-            val executed = approval.copy(status = ApprovalStatus.EXECUTED)
-            approvals[id] = executed
-            return executed
-        }
-    }
-
     private fun wirePdpAndStore(store: ApprovalStore, enforce: Boolean = true) {
         interceptor.pdp = mockk {
             every { isResolvable } returns true
@@ -559,7 +502,7 @@ class AuthorizeInterceptorTest {
     @Test
     fun `four-eyes required but fourEyesEnforce=false proceeds unchanged (safe default)`() {
         every { identity.roles } returns setOf("ROLE_OPERATOR")
-        wirePdpAndStore(FakeApprovalStore(), enforce = false)
+        wirePdpAndStore(InMemoryApprovalStore(), enforce = false)
         val result = interceptor.authorize(makeCtx(annotatedMethod))
         assertThat(result).isEqualTo("ok")
     }
@@ -580,7 +523,7 @@ class AuthorizeInterceptorTest {
     @Test
     fun `four-eyes enforced, no approval id header, creates a pending approval and returns 202`() {
         every { identity.roles } returns setOf("ROLE_OPERATOR")
-        val store = FakeApprovalStore()
+        val store = InMemoryApprovalStore()
         wirePdpAndStore(store)
 
         val thrown = catchThrowableOfType(
@@ -595,7 +538,7 @@ class AuthorizeInterceptorTest {
     @Test
     fun `four-eyes enforced, valid approved approval id proceeds and consumes it`() {
         every { identity.roles } returns setOf("ROLE_OPERATOR")
-        val store = FakeApprovalStore()
+        val store = InMemoryApprovalStore()
         wirePdpAndStore(store)
 
         val pending = runBlocking { store.create("party.read", null, "user-42") }
@@ -616,7 +559,7 @@ class AuthorizeInterceptorTest {
         // status, so re-deciding an EXECUTED approval flipped it back to APPROVED and let the
         // maker replay the same X-Approval-Id to execute the gated action a second time.
         every { identity.roles } returns setOf("ROLE_OPERATOR")
-        val store = FakeApprovalStore()
+        val store = InMemoryApprovalStore()
         wirePdpAndStore(store)
 
         val pending = runBlocking { store.create("party.read", null, "user-42") }
@@ -634,7 +577,7 @@ class AuthorizeInterceptorTest {
 
     @Test
     fun `code review fix - markExecuted throws when the approval is not APPROVED`() {
-        val store = FakeApprovalStore()
+        val store = InMemoryApprovalStore()
         val pending = runBlocking { store.create("party.read", null, "user-42") } // still PENDING
 
         assertThatThrownBy { runBlocking { store.markExecuted(pending.id) } }
@@ -644,7 +587,7 @@ class AuthorizeInterceptorTest {
     @Test
     fun `four-eyes enforced, approval id belonging to a DIFFERENT maker is rejected and re-pends`() {
         every { identity.roles } returns setOf("ROLE_OPERATOR")
-        val store = FakeApprovalStore()
+        val store = InMemoryApprovalStore()
         wirePdpAndStore(store)
 
         // Approved, but for a DIFFERENT maker than the current principal (user-42) — a
@@ -662,9 +605,35 @@ class AuthorizeInterceptorTest {
     }
 
     @Test
+    fun `four-eyes enforced, an approval granted for a DIFFERENT resource is rejected and re-pends`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+
+        // Approved for grantee-A, replayed against grantee-B by the SAME maker. This is the case
+        // an empty `resource = ""` cannot distinguish: with no resource, every approval that maker
+        // holds satisfies every call, so "approve this one decision" silently becomes "approve any
+        // decision of this kind". sanctions.clear was in exactly that state until the resource
+        // expression was narrowed to the specific check id.
+        val pending = runBlocking { store.create("consent.grant", "grantee-A", "user-42") }
+        runBlocking { store.decide(pending.id, "checker-99", approve = true) }
+        interceptor.httpHeaders = mockk {
+            every { isResolvable } returns true
+            every { get() } returns mockk { every { getRequestHeader("X-Approval-Id") } returns listOf(pending.id) }
+        }
+
+        assertThatThrownBy {
+            interceptor.authorize(makeCtx(annotatedMethodWithDottedResource, DummyRequest("grantee-B", emptyList())))
+        }.isInstanceOf(WebApplicationException::class.java)
+        assertThat(store.created)
+            .describedAs("the mismatched resource must re-issue a fresh pending approval, not proceed")
+            .hasSize(2)
+    }
+
+    @Test
     fun `four-eyes enforced, still-PENDING approval id is rejected and re-pends`() {
         every { identity.roles } returns setOf("ROLE_OPERATOR")
-        val store = FakeApprovalStore()
+        val store = InMemoryApprovalStore()
         wirePdpAndStore(store)
 
         val pending = runBlocking { store.create("party.read", null, "user-42") } // never decided
@@ -688,7 +657,7 @@ class AuthorizeInterceptorTest {
             every { get() } returns pdp
         }
         interceptor.fourEyesEnforce = true
-        val store = FakeApprovalStore()
+        val store = InMemoryApprovalStore()
         interceptor.approvalStore = mockk {
             every { isResolvable } returns true
             every { get() } returns store
