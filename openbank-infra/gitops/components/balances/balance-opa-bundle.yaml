@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: balance-service
     app.kubernetes.io/part-of: balances
   annotations:
-    openbank.tech/policy-checksum: "bdab21a92483a5b5"
+    openbank.tech/policy-checksum: "c7330db4b020eaf3"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -897,15 +897,19 @@ data:
     # an absent control gets found, an asserted one gets relied on. Any consumer reading the bundles
     # must now hit `_target` / `_as_built` and cannot mistake the intent for the state.
     # ---------------------------------------------------------------------------------------
-    model_gateway_as_built:            # verified 2026-07-25 against gitops AND the running Deployments
+    model_gateway_as_built:            # verified 2026-08-02 against gitops AND the running Deployments
       gateway: litellm                 # in-cluster LiteLLM proxy, ai-platform ns, :4000 (ADR-0174/0175,
                                        # #2019). Deployed and serving. It is the only workload holding a
                                        # provider key and the only one with an internet egress hole
                                        # (ai-platform/networkpolicy-litellm-egress.yaml), so it is a real
-                                       # choke point — but see `egress_enforced` before treating it as a
-                                       # *complete* one.
+                                       # choke point — and since #2210 + the GROQ_API_KEY cleanup it is a
+                                       # *complete* one (see `egress_enforced`).
       routed:                          # read off the RUNNING Deployments' env, not off the manifests
         - copilot-service              # COPILOT_MODEL_ENDPOINT (#2062) — the customer-facing assistant
+        - agent-service                # AGENT_MODEL_ENDPOINT (#2209) — verified live 2026-08-02:
+                                       # http://litellm.ai-platform.svc:4000/v1 on the running
+                                       # Deployment (image sandbox-b52f989b); the direct GROQ_API_KEY
+                                       # path is removed from agent-service.yaml + es-agent-service.yaml
         - control-liveness-sentinel    # LIVENESS_MODEL_ENDPOINT
         - devops-agent                 # DEVOPS_MODEL_ENDPOINT
         - docs-truth-agent             # LLM_GATEWAY_URL
@@ -914,15 +918,10 @@ data:
         - governance-auditor           # LLM_GATEWAY_URL
         - release-steward              # LLM_GATEWAY_URL
         - authz-policy-auditor         # LLM_GATEWAY_URL
-      not_routed:
-        - agent-service                # AGENT_MODEL_ENDPOINT repoint merged (#2209), but the deployed
-                                       # image resolves the baked-in api.groq.com URL until the rebuilt
-                                       # image rolls out. Promote it to `routed` only after re-reading
-                                       # the live Deployment — merged is not deployed.
-      egress_enforced: partial         # ai-platform is egress-locked; `platform` is NOT. agent-service's
-                                       # component still declares policyTypes: [Ingress] only, so the
-                                       # gateway is bypassable from that pod. #2210 adds the Egress half,
-                                       # gated on the agent-service repoint actually being deployed.
+      egress_enforced: full            # ai-platform is egress-locked (litellm is the only internet
+                                       # hole); agent-service is too: agent-service-egress-allow-list
+                                       # (#2210) is live in the platform namespace and the pod no longer
+                                       # carries a provider key, so the gateway cannot be bypassed.
       budgets_enforced_at: charter     # CharterRateLimiter in openbank-agent-service — NOT the gateway.
       providers:                       # both terminate INSIDE the gateway pod; no agent holds either key
         deepinfra:                     # api.deepinfra.com, deepseek-ai/DeepSeek-V3.2. US-hosted, no region

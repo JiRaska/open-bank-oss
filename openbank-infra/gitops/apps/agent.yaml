@@ -1,7 +1,7 @@
 # ArgoCD app for agent-service (admin-UI AI assistant backend, ADR-0031). Deploys
 # the platform-ns Deployment+Service from components/agent. Tracks the live sandbox
-# GitOps branch (same as the other component apps). The GROQ_API_KEY Secret is
-# delivered separately by ESO (es-agent-service in the external-secrets component).
+# GitOps branch (same as the other component apps). The LiteLLM virtual-key Secret
+# is delivered separately by ESO (es-agent-service in the external-secrets component).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

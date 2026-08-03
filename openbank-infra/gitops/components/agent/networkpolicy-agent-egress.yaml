@@ -12,7 +12,7 @@
 # Ingress for this pod stays generator-owned; this file is egress-only. NetworkPolicies are additive,
 # so adding `Egress` here does not weaken the generated ingress allow-list.
 #
-# PRECONDITION — do not merge before both hold:
+# PRECONDITION — both held before merge, verified live 2026-08-02:
 #   1. The agent-service image running in the sandbox honours AGENT_MODEL_ENDPOINT (i.e. the #1919
 #      routing change is deployed, not merely merged). An older image resolves the backend endpoint
 #      from the baked-in https://api.groq.com/openai/v1, which this policy denies.
