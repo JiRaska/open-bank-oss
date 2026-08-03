@@ -378,7 +378,7 @@ jobs:
           echo "modules=${mods}" >> "$GITHUB_OUTPUT"
           echo "changed modules: ${mods:-<none>}"
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         if: steps.mods.outputs.modules != ''
         with:
           distribution: temurin
