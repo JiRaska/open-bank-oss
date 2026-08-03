@@ -37,7 +37,7 @@
 # its own, so test-classify-can-i-deploy-block.sh can drive every branch.
 #
 # Usage:
-#   PACT_VERSION_PRESENT=yes|no|absent|unknown [EVENT_NAME=<github.event_name>] \
+#   PACT_VERSION_PRESENT=yes|no|absent|unknown|equivalent:<sha> [EVENT_NAME=<github.event_name>] \
 #     classify-can-i-deploy-block.sh <service> < cli-output
 #
 #   EVENT_NAME — the triggering event, same vocabulary and same default (push) as
@@ -105,7 +105,7 @@ set -uo pipefail
 
 SVC="${1:-}"
 if [ -z "$SVC" ]; then
-  echo "usage: PACT_VERSION_PRESENT=yes|no|absent|unknown [EVENT_NAME=<event>] $0 <service> < cli-output" >&2
+  echo "usage: PACT_VERSION_PRESENT=yes|no|absent|unknown|equivalent:<sha> [EVENT_NAME=<event>] $0 <service> < cli-output" >&2
   exit 2
 fi
 
@@ -141,6 +141,18 @@ if grep -qiE 'pact (verification )?failed|verification.*(^| )failed|failed verif
 fi
 
 case "$PRESENT" in
+  # #3432: the gate WAS asked, and by version number — the probe proved from git that the version
+  # it named is byte-identical to the sha being deployed in every build input of this service. So
+  # this is the `yes` shape, not the `no` one: a real verdict about the real source exists, and
+  # PENDING_BUILD would be a lie (nothing is building; the answer arrived).
+  equivalent:*)
+    if grep -q 'There is no verified pact' <<< "$OUT"; then
+      emit UNVERIFIED "the counterpart has not verified this version yet — normally clears within one reconcile tick"
+      exit 0
+    fi
+    emit UNKNOWN "blocked with a proven-equivalent version asked about by number and no recognised reason in the CLI output — read the job log for ${SVC}"
+    exit 0
+    ;;
   no)
     emit PENDING_BUILD "no pact version published for this commit yet — its main-push build has not finished (one ARC runner, ~45 min/service); the 3-hourly reconcile re-drives it automatically"
     exit 0
