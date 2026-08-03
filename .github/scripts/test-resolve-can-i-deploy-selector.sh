@@ -124,6 +124,35 @@ check "push + pacticipant absent → latest/main" "--latest main" absent push
 # And the #3318 case must still refuse — 'absent' must not have widened it.
 check "dispatch + version missing but pacticipant KNOWN → still REFUSE" "REFUSE" no workflow_dispatch
 
+# ── issue #3432: the equivalence answer ─────────────────────────────────────────────────
+# 10. THE POINT OF THIS ADDITION. A dispatch whose sha has no version, where the probe PROVED
+#     from git that the commit which does have one is byte-identical in every build input of
+#     this service, must ask about that version BY NUMBER — not `--latest main`, which would be
+#     the same verdict borrowed without an argument, and not REFUSE, which is what made the
+#     whole reconcile path unable to deploy anything (54 of 54 refused, run 30761923908).
+EQ_SHA="1111111111111111111111111111111111111111"
+check "dispatch + proven-equivalent version → ask about THAT version" \
+  "--version ${EQ_SHA}" "equivalent:${EQ_SHA}" workflow_dispatch
+check "schedule + proven-equivalent version → ask about THAT version, not latest/main" \
+  "--version ${EQ_SHA}" "equivalent:${EQ_SHA}" schedule
+
+# 11. THE GUARD THAT MATTERS MORE. The equivalence must never be reachable by accident: only
+#     the probe can produce this value, and it produces it only after a clean exit 0 from
+#     pact-version-tree-equivalent.sh. So a plain `no` on a dispatch — the same service, the
+#     same sha, the equivalence NOT proved — must still REFUSE. If someone ever widens the new
+#     branch into a fallback, this goes red.
+check "dispatch + no version and no proof → still REFUSE (#3318 intact)" "REFUSE" no workflow_dispatch
+
+# 12. The selector must not invent a version out of a malformed value. `equivalent` with no sha
+#     is not a proof; it must not become `--version ` with an empty argument.
+got_eq="$(PACT_VERSION_PRESENT="equivalent:" EVENT_NAME=workflow_dispatch bash "$RESOLVE" openbank-demo-service "$SHA" | cut -f1)"
+if [ "$got_eq" = "--version" ] || [ "$got_eq" = "--version " ]; then
+  echo "  FAIL malformed equivalent: produced a bare '--version' with no argument"
+  fails=$((fails + 1))
+else
+  echo "  ok   malformed 'equivalent:' does not produce a bare --version (got '${got_eq}')"
+fi
+
 if [ "$fails" -ne 0 ]; then
   echo "FAILED: ${fails} case(s)"
   exit 1

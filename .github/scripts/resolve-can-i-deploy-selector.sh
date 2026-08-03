@@ -56,12 +56,16 @@
 # behaviour is untouched.
 #
 # Usage:
-#   PACT_VERSION_PRESENT=yes|no|unknown [EVENT_NAME=<github.event_name>] \
+#   PACT_VERSION_PRESENT=yes|no|absent|unknown|equivalent:<sha> [EVENT_NAME=<github.event_name>] \
 #     resolve-can-i-deploy-selector.sh <service> <sha>
 #
 #   PACT_VERSION_PRESENT — the caller's probe of
 #     GET <broker>/pacticipants/<svc>/versions/<sha>, same vocabulary the classifier uses:
 #       yes     → 200, a version exists for THIS commit
+#       equivalent:<sha>
+#               → no version for THIS commit, but the probe PROVED from git that <sha> — the
+#                 commit that does have one — is byte-identical in every build input of this
+#                 service (#3432). Not a fallback: a narrower, justified question.
 #       no      → 404 on the version, but the pacticipant EXISTS: this commit has published nothing yet
 #       absent  → the broker does not know the pacticipant AT ALL (no contracts either way)
 #       unknown → the probe itself failed (broker unreachable / non-2xx-non-404)
@@ -77,7 +81,7 @@ set -uo pipefail
 SVC="${1:-}"
 SHA="${2:-}"
 if [ -z "$SVC" ] || [ -z "$SHA" ]; then
-  echo "usage: PACT_VERSION_PRESENT=yes|no|unknown $0 <service> <sha>" >&2
+  echo "usage: PACT_VERSION_PRESENT=yes|no|absent|unknown|equivalent:<sha> $0 <service> <sha>" >&2
   exit 2
 fi
 
@@ -88,7 +92,32 @@ EVENT="${EVENT_NAME:-push}"
 
 emit() { printf '%s\t%s\n' "$1" "$2"; }
 
+# A malformed `equivalent:` — no sha, or something that is not one — is not a proof of anything,
+# and must not become a bare `--version` with an empty argument, which the pact CLI would read as
+# the next flag. Demote it to plain `no`, which on a dispatch is #3318's REFUSE.
 case "$PRESENT" in
+  equivalent:*)
+    case "${PRESENT#equivalent:}" in
+      [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+      *) PRESENT=no ;;
+    esac
+    ;;
+esac
+
+case "$PRESENT" in
+  equivalent:*)
+    # #3432. The probe could not find a version for THIS sha, but it proved — from git tree
+    # objects, via pact-version-tree-equivalent.sh — that the commit which DOES have one is
+    # byte-identical to this one in every input this service's image is built from, and is an
+    # ancestor of it. So this is not the #3318 case at all: there is no "different commit" here
+    # in any sense that can reach the artifact, and asking by version number is more precise than
+    # the `--latest main` that a push would have used. Without this the manual/reconcile path can
+    # deploy NOTHING, ever — 54 of 54 refused on run 30761923908 — which is the state the whole
+    # fleet lands in exactly when a reconcile is needed. The refusal below is untouched for every
+    # case where the equivalence could NOT be proved, including a broker the probe could not read.
+    emit "--version ${PRESENT#equivalent:}" \
+      "no pact version for ${SHA}, but ${PRESENT#equivalent:} is byte-identical to it in every build input of ${SVC} (git tree objects, ancestor) — asking about that version by number is a question about the same source, not about a different commit (#3432, #3318)"
+    ;;
   yes)
     # The precise question, and the one the broker's own warning asks for: can THIS commit
     # of this service go to sandbox? No race window, and a green here cannot be borrowed

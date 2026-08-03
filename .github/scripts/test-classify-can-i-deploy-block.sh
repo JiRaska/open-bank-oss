@@ -118,7 +118,7 @@ check "dispatch + no version + regression-looking stdin → still NOT_ASKED" NOT
 #     nothing structural forces that, they are two files. Assert the equivalence over the
 #     whole (probe × event) cross-product, so changing either condition alone goes red.
 SHA_FIXTURE="0e32873f8c52d37e1b6530e5bd5e94275e5cefae"
-for p in yes no absent unknown; do
+for p in yes no absent unknown "equivalent:${SHA_FIXTURE}"; do
   for e in push workflow_dispatch schedule; do
     sel="$(PACT_VERSION_PRESENT="$p" EVENT_NAME="$e" bash "$RESOLVE" openbank-demo-service "$SHA_FIXTURE" | cut -f1)"
     cls="$(PACT_VERSION_PRESENT="$p" EVENT_NAME="$e" bash "$CLASSIFY" openbank-demo-service </dev/null | cut -f1)"

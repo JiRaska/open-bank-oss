@@ -45,12 +45,101 @@
 #                                 service is a separate invocation of this script.
 #   PACT_WAIT_PER_SERVICE_SECONDS per-service cap (default 60)
 #
-# Prints one word on stdout — yes | no | unknown — the same vocabulary
+# Prints one word on stdout — yes | no | absent | unknown | equivalent:<sha> — the same vocabulary
 # classify-can-i-deploy-block.sh and resolve-can-i-deploy-selector.sh consume. Progress goes to
 # stderr so it appears in the log without polluting the value.
 #
+# THE `equivalent:<sha>` ANSWER (issue #3432)
+# `no` on a `workflow_dispatch` is a dead end by construction: services-ci never built THIS sha for
+# THIS service, so no version for it can ever appear, and #3318 correctly refuses to answer about a
+# different commit. Measured on run 30761923908 — 54 of 54 services refused, `deployable=[]` — which
+# makes reconcile, the only mechanism for re-driving a service that missed its push deploy, unable
+# to deploy anything, exactly when it is most needed.
+#
+# So before reporting `no` on a non-push event, ask a narrower question: is the commit that DOES
+# have a published version byte-identical to this one in everything this service is built from? If
+# pact-version-tree-equivalent.sh proves it from git — same tree objects, and an ancestor — then the
+# published verdict is not about a different commit in any sense that can reach the artifact, and
+# the caller may ask the broker about that version by number. If it cannot prove it, the answer
+# stays `no` and #3318's refusal stands untouched.
+#
+# EVERY failure here degrades to `no`: an unreachable broker, a non-2xx, an answer that is not a
+# 40-hex sha, a missing script, a non-zero exit. A reconcile that cannot VERIFY must not deploy.
+#
 # Always exits 0: this reports a fact, it does not gate on one.
 set -uo pipefail
+
+if [ "${1:-}" = "--self-test" ] || [ "${1:-}" = "--selftest" ]; then
+  # Exercises the #3432 broker call against a STUBBED curl, because the real broker has no public
+  # ingress (ADR-0056) and PACT_BROKER_URL is blank off main-push — so this path can never be run
+  # from a PR. Everything asserted here is a FAILURE mode: the only thing that must be provable is
+  # that a probe which cannot verify degrades to `no`, which on a dispatch is #3318's REFUSE.
+  self_tmp="$(mktemp -d)"; trap 'rm -rf "$self_tmp"' EXIT
+  cat > "$self_tmp/curl" <<'STUB'
+#!/usr/bin/env bash
+# Two shapes are called: the status probes (-w '%{http_code}') and the latest-version body fetch.
+url="${@: -1}"
+for a in "$@"; do [ "$a" = "-w" ] && is_status=1; done
+if [ "${is_status:-0}" = 1 ]; then
+  case "$url" in
+    */versions/*) echo 404 ;;   # this sha has no version — the #3432 entry condition
+    *)            echo 200 ;;   # ...but the pacticipant exists, so the answer is `no`, not `absent`
+  esac
+  exit 0
+fi
+case "${STUB_MODE:-}" in
+  unreachable) exit 7 ;;                                  # could not connect
+  http500)     exit 22 ;;                                 # curl -f on a non-2xx
+  garbage)     echo 'not json at all' ;;
+  # Deliberately a rev git CAN resolve, and one that is trivially equivalent to itself. A shape
+  # check that is missing therefore turns this into `equivalent:HEAD` rather than into another
+  # failure — the case can only stay green while the 40-hex validation is really there.
+  notasha)     echo '{"number":"HEAD"}' ;;
+  empty)       echo '{}' ;;
+  ok)          echo "{\"number\":\"${STUB_SHA}\"}" ;;
+  *)           exit 7 ;;
+esac
+STUB
+  chmod +x "$self_tmp/curl"
+  me_abs="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  # A throwaway repo, so the git half is REAL — the equivalence must be decided by actual tree
+  # objects, not by whatever the surrounding checkout happens to look like when this runs.
+  repo="$self_tmp/repo"
+  mkdir -p "$repo/openbank-demo-service/src/main"
+  ( cd "$repo" && git init -q . \
+    && git config user.email s@e.x && git config user.name s && git config commit.gpgsign false \
+    && printf 'x\n' > openbank-demo-service/build.gradle.kts \
+    && printf 'x\n' > openbank-demo-service/src/main/A.kt \
+    && git add -A && git commit -qm base ) >/dev/null 2>&1
+  older_sha="$(git -C "$repo" rev-parse HEAD)"
+  ( cd "$repo" && printf 'changed\n' > openbank-demo-service/src/main/A.kt \
+    && git add -A && git commit -qm change ) >/dev/null 2>&1
+  head_sha="$(git -C "$repo" rev-parse HEAD)"
+  fails=0
+  probe_selftest_case() { # <label> <expected> <STUB_MODE> [STUB_SHA]
+    local label="$1" want="$2" mode="$3" sha="${4:-}" got
+    got="$(cd "$repo" && PATH="$self_tmp:$PATH" STUB_MODE="$mode" STUB_SHA="$sha" \
+      EVENT_NAME=workflow_dispatch \
+      PACT_BROKER_URL=http://stub PACT_BROKER_USERNAME=u PACT_BROKER_PASSWORD=p \
+      bash "$me_abs" openbank-demo-service "$head_sha" 2>/dev/null)"
+    if [ "$got" = "$want" ]; then echo "  ok   ${label} → ${got}"
+    else echo "  FAIL ${label}: want '${want}', got '${got}'"; fails=$((fails + 1)); fi
+  }
+  echo "probe-pact-version.sh (#3432 equivalence path, stubbed broker)"
+  probe_selftest_case "broker unreachable"                       no unreachable
+  probe_selftest_case "broker answers non-2xx"                   no http500
+  probe_selftest_case "answer is not JSON"                       no garbage
+  probe_selftest_case "answer has no version number"             no empty
+  probe_selftest_case "version number is not a sha"              no notasha
+  # A well-formed sha whose tree is NOT equivalent must still be `no` — the broker answering
+  # correctly is not the proof; git is.
+  probe_selftest_case "well-formed sha, trees differ"            no ok "$older_sha"
+  # ...and the one case that may pass: the same commit is trivially equivalent to itself.
+  probe_selftest_case "well-formed sha, trees identical" "equivalent:${head_sha}" ok "$head_sha"
+  if [ "$fails" -ne 0 ]; then echo "FAILED: ${fails} case(s)"; exit 1; fi
+  echo "PASS: every unverifiable broker answer degrades to 'no'; only a git-proven equivalence does not"
+  exit 0
+fi
 
 SVC="${1:-}"
 SHA="${2:-}"
@@ -100,6 +189,40 @@ probe() {
 
 budget_left() { [ -n "$BUDGET_FILE" ] && [ -f "$BUDGET_FILE" ] && cat "$BUDGET_FILE" || echo 0; }
 
+# The version number of this pacticipant's latest `main`-TAGGED version — which is precisely what
+# `can-i-deploy --latest main` resolves to, so proving equivalence against it justifies the exact
+# question the fallback would have asked blindly. Measured against the live broker on 2026-08-03:
+# GET /pacticipants/<svc>/latest-version/main answers 200 with `.number` = the full 40-hex git sha
+# (services-ci publishes with pacticipantVersionNumber=$GITHUB_SHA and tags=[main]).
+# Prints nothing at all unless the answer is a well-formed sha — every other outcome is silence,
+# and silence keeps the caller on `no`.
+latest_main_version() {
+  local auth body num
+  auth="${PACT_BROKER_USERNAME:-}:${PACT_BROKER_PASSWORD:-}"
+  body="$(curl -s -f --max-time 20 -u "$auth" \
+    "${PACT_BROKER_URL:-}/pacticipants/${SVC}/latest-version/main" 2>/dev/null)" || return 0
+  num="$(printf '%s' "$body" | jq -r '.number // empty' 2>/dev/null)" || return 0
+  command grep -qE '^[0-9a-f]{40}$' <<< "$num" || return 0
+  printf '%s' "$num"
+}
+
+# Can the published verdict be transferred to the sha being deployed? Only when git proves the two
+# commits identical in every build input of this service. Anything short of a clean exit 0 from the
+# checker — and that includes the script being absent — leaves `present` as it was.
+try_equivalence() {
+  local pact_sha out here
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  [ -x "$here/pact-version-tree-equivalent.sh" ] || [ -f "$here/pact-version-tree-equivalent.sh" ] || return 0
+  pact_sha="$(latest_main_version)"
+  [ -n "$pact_sha" ] || { echo "    no main-tagged version to compare ${SVC} against" >&2; return 0; }
+  if out="$(bash "$here/pact-version-tree-equivalent.sh" "$SVC" "$pact_sha" "$SHA" 2>&1)"; then
+    echo "    ${SVC}: ${out}" >&2
+    printf 'equivalent:%s' "$pact_sha"
+  else
+    echo "    ${SVC}: ${out}" >&2
+  fi
+}
+
 present="$(probe)"
 
 if [ "$present" = "no" ] && [ "${EVENT_NAME:-}" = "push" ] && [ "$(budget_left)" -gt 0 ]; then
@@ -114,6 +237,15 @@ if [ "$present" = "no" ] && [ "${EVENT_NAME:-}" = "push" ] && [ "$(budget_left)"
   if [ "$waited" -gt 0 ]; then
     echo "    waited ${waited}s for ${SVC}'s pact version (budget left: $(budget_left)s) -> ${present}" >&2
   fi
+fi
+
+# On a non-push event the wait above never runs — the fleet was built at other commits, so no
+# amount of waiting can produce a version for THIS sha. That is where the equivalence question is
+# both necessary and answerable. On a push it is deliberately not asked: the wait is the correct
+# answer there, and services-ci will publish for this very sha.
+if [ "$present" = "no" ] && [ "${EVENT_NAME:-}" != "push" ]; then
+  eq="$(try_equivalence)"
+  [ -n "$eq" ] && present="$eq"
 fi
 
 echo "$present"
