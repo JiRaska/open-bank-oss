@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.91.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.91.2...admin-ui-v0.91.3) (2026-08-03)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop single-use refresh tokens logging active operators out ([#3600](https://github.com/JiRaska/open-bank-oss/issues/3600)) ([73617ab](https://github.com/JiRaska/open-bank-oss/commit/73617ab250c958a9873d60f402e38df0e529d317))
+
 ## [0.91.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.91.1...admin-ui-v0.91.2) (2026-08-03)
 
 
