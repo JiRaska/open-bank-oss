@@ -105,3 +105,32 @@ allowed_reasons contains "service-consent-m2m-marketing" if {
 	input.action in {"consent.grant", "consent.revoke"}
 	input.resource.id == "party-service:marketing-comms"
 }
+
+# ADR-0219 D3 suppression administration (#3656 slice 2). Writes (suppression.manage) are
+# HUMAN-only — operators on the preference-centre / complaints / RM surfaces; no M2M writer
+# exists yet, and the shared-M2M exclusion mirrors operator-consent-write for the same reason
+# (a role-only check would grant every backend service the write). Reads (suppression.read) are
+# the contact-policy gate's shape: operators AND backend senders via the shared M2M client —
+# same identity caveat as service-consent-m2m: indistinguishable from any other
+# openbank-services caller at this layer, and acceptable for a low-sensitivity stop-list read.
+allowed_reasons contains "operator-suppression-write" if {
+	input.principal.type == "HUMAN"
+	not input.principal.id == "service-account-openbank-services"
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action == "suppression.manage"
+}
+
+allowed_reasons contains "operator-suppression-read" if {
+	input.principal.type == "HUMAN"
+	not input.principal.id == "service-account-openbank-services"
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action == "suppression.read"
+}
+
+allowed_reasons contains "service-suppression-m2m-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-services"
+	input.action == "suppression.read"
+}
