@@ -599,6 +599,19 @@ fire from *outside* it, so they stay here:
   `required_approving_review_count: 0` — it returns with `autoMergeRequest` null and the PR
   already
   MERGED, which reads like it did nothing.
+- **A gate that calls a network API must be falsified with the CREDENTIAL CI will use, not the
+  one on your laptop — and on GitHub a 404 does NOT mean "gone".** A job's `GITHUB_TOKEN` is
+  scoped to this repository, so a **private** repo in the same account answers `404` byte for
+  byte like a deleted one; `gh` on the owner's machine sees it fine. `check-stale-comment-
+  references.py` shipped a rule reading 404 as "this repo no longer exists", passed every local
+  run, and went red in CI on `JiRaska/openbank-app` — private, alive, correctly referenced. There
+  is no API field that separates the two, so that half of the rule was **dropped** rather than
+  tuned; only `archived` is claimed, since observing it requires read access and is therefore
+  unambiguous. Generalize: before asserting anything from an API response, ask which identity the
+  gate runs as and what that identity *cannot see* — a permission-shaped absence is
+  indistinguishable from a real one, and it always fails in the direction of a confident wrong
+  answer. The repo already knows "a gate that has only ever passed is unfalsified"; the sharper
+  form is that a gate falsified under the **wrong identity** is unfalsified too.
 - **Validate the PROBE, not the command inside it — in zsh a `for x in $VAR` loop runs ONCE.**
   zsh does not word-split an unquoted parameter (bash does), so a sweep written as
   `LIST="a b c"; for b in $LIST; do git show-ref --verify --quiet "refs/heads/$b" …` tests one

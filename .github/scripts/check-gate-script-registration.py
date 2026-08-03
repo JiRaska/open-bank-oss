@@ -71,6 +71,7 @@ HELPERS: dict[str, str] = {}
 #
 # A bare PATH is deliberately not one of them. The first draft accepted `.github/scripts/<name>`
 # anywhere, and its own self-test caught that on `ci_producer: ".github/scripts/check-demo.py"` —
+# stale-ref-ok: check-demo.py is a self-test fixture name, deliberately not a real file.
 # a rules.yaml value naming a script, which is precisely the #3240 case where the name is written
 # down and nothing runs it. Accepting the path would have made this gate green about the very
 # defect it exists to find.

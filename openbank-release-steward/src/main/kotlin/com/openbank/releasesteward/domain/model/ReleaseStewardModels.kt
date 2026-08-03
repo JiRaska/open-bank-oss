@@ -54,7 +54,7 @@ data class ReleaseStewardFinding(
     val detectedAt: Instant,
     val title: String,
     // The module/service/file this finding is about, e.g. "openbank-transaction-service" or
-    // "openbank-ledger-service/openapi.yaml".
+    // "openbank-ledger-service/src/main/resources/openapi.yaml".
     val component: String,
     val prNumber: Int? = null,
     val prUrl: String? = null,
