@@ -52,6 +52,7 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 
 ## 6. Change log
 
+- **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. Four parameters on the consent lifecycle: `partyId` on revoke, `scaSessionId` on activate, `reason` on reject, `scope` on hasActiveConsent. `scaSessionId` is the evidence that SCA completed, so a null reaching activate is a state transition with no SCA reference attached — the request must be rejected, not half-processed. hasActiveConsent already answered 400 by accident (`runCatching` swallowed the NPE); it now says which parameter is missing. No new caller or boundary. Rollback: revert.
 - **2026-07-17** — Completed ADR-0126 §D2: `/validate` response now carries `scopes`, `grantedAccounts`
   (covered IBANs; null = all of the party's accounts) and `frequencyPerDay` (PSD2 RTS Art. 10 AISP cap
   = 4) so a resource server can cache within that window. Additive optional fields (openapi
