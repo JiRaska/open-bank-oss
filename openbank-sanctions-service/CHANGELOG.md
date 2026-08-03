@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.7.8...sanctions-service-v0.8.0) (2026-08-03)
+
+
+### Features
+
+* **sanctions:** serve the checker's pending-approvals queue ([#3506](https://github.com/JiRaska/open-bank-oss/issues/3506)) ([a1b9010](https://github.com/JiRaska/open-bank-oss/commit/a1b9010628461acb36d2c11135bfe1c96a83cbd7))
+
 ## [0.7.8](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.7.7...sanctions-service-v0.7.8) (2026-08-02)
 
 
