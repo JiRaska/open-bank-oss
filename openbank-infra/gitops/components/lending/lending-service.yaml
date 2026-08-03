@@ -125,12 +125,21 @@ spec:
               value: "true"
             - name: OPENBANK_TEMPORAL_SERVER_URL
               value: temporal-frontend.temporal.svc.cluster.local:7233
-            # ADR-0212 D2/D4: fail-closed origination guard. STAYS false until the CZ
-            # reference pack is four-eyes-activated in this environment (compliance-
-            # packs/README.md runbook: seed -> activate -> verify /active -> flip).
-            # Flipping early refuses every origination with no pack present.
+            # ADR-0212 D2/D4: fail-closed origination guard. The runbook's precondition is
+            # met — the CZ consumer-credit pack v1 was four-eyes-activated in sandbox on
+            # 2026-08-02 (proposed by compliance@openbank.local, decided by
+            # compliance2@openbank.local, state EXECUTED) and /compliance-packs/active
+            # lists it.
+            #
+            # What this now refuses: any origination that does not name a (jurisdiction,
+            # productType) pair with an active pack. Customer intake is unaffected — it
+            # supplies CZ/CONSUMER_CREDIT from configuration rather than from the request,
+            # precisely so an applicant cannot pick which pack judges them, and CZ/
+            # CONSUMER_CREDIT is the pair that is active. Backoffice callers on
+            # POST /applications DO pass their own pair and will be refused for anything
+            # else, which is the point of the guard.
             - name: LENDING_ENFORCE_PACK
-              value: "false"
+              value: "true"
             # ADR-0211 customer intake (#3197). The applicant's own channel into
             # origination: customer-edge posts here with the party id it derived from the
             # customer JWT. Three values, each a refusal boundary rather than a preference:
