@@ -53,6 +53,13 @@ class AuditConsumer {
                 channel = node["channel"]?.asText(),
                 actChain = node["actChain"]?.takeIf { it.isArray }?.map { it.asText() } ?: emptyList(),
                 sessionId = node["sessionId"]?.asText(),
+                // ADR-0232 D5: a delegated action names the grantor it was taken on behalf of and
+                // the grant that permitted it. customer-edge flattens its audit details into the
+                // event JSON, so both arrive as top-level fields. Absent = a direct action.
+                // (`takeIf { !it.isNull }` because Jackson's asText() on an explicit JSON null
+                // yields the STRING "null", which would index a delegated action that is not one.)
+                onBehalfOf = node["onBehalfOf"]?.takeIf { !it.isNull }?.asText(),
+                delegationId = node["delegationId"]?.takeIf { !it.isNull }?.asText(),
             )
             repo.save(entry)
         } catch (e: Exception) {
