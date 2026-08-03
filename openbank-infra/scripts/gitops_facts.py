@@ -40,6 +40,7 @@ __all__ = [
     "management_scraped_namespaces",
     "declared_datastore",
     "is_stateless",
+    "cnpg_backup_configured",
 ]
 
 # Most services live in `openbank-<short>-service`, but the three payment modules do not:
@@ -305,6 +306,110 @@ def management_scraped_namespaces(gitops: Path) -> dict[str, set[str]]:
             for t in targets:
                 out.setdefault(t, set()).add(name)
     return out
+
+
+def _strip_comment(line: str) -> str:
+    """Drop a `#` comment. Only a full-line `#` or one preceded by whitespace counts, so a value
+    like `destinationPath: s3://bucket/path#frag` survives."""
+    if line.lstrip().startswith("#"):
+        return ""
+    return re.split(r"\s#", line, maxsplit=1)[0]
+
+
+def _doc_entries(doc: str) -> list[tuple[int, str, str]]:
+    """(indent, key, value) for every mapping key in a single YAML document.
+
+    A deliberately small structural reader, not a YAML parser: this module is stdlib-only (it is
+    imported by scripts that must run on a bare runner), and the only questions asked of it are
+    "is this document `kind: X`" and "does it declare the key path a.b.c". Comments are stripped
+    first — the whole reason this exists is that a substring match cannot tell a configured key
+    from prose that names it.
+
+    A list-item key (`- name: x`) is recorded at the indent of the key itself, not the dash, so
+    it nests correctly under its parent.
+    """
+    out: list[tuple[int, str, str]] = []
+    for raw in doc.splitlines():
+        line = _strip_comment(raw)
+        if not line.strip():
+            continue
+        m = re.match(r"^(\s*)(-\s+)?([A-Za-z_][\w.\-]*)\s*:(\s.*|)$", line)
+        if not m:
+            continue
+        indent = len(m.group(1)) + (len(m.group(2)) if m.group(2) else 0)
+        out.append((indent, m.group(3), m.group(4).strip()))
+    return out
+
+
+def _has_key_path(entries: list[tuple[int, str, str]], path: tuple[str, ...]) -> bool:
+    """True iff `entries` declares the nested mapping path, rooted at the document's top level.
+
+    Each component must appear strictly inside the previous one's block (greater indent, before
+    the block dedents), so `spec.backup.barmanObjectStore` is not satisfied by a `barmanObjectStore`
+    that sits somewhere else in the document.
+    """
+    lo, hi, parent = 0, len(entries), -1
+    for depth, key in enumerate(path):
+        found = -1
+        end = hi
+        for i in range(lo, hi):
+            indent, k, _ = entries[i]
+            if indent <= parent:
+                end = i
+                break
+            if k == key and (depth > 0 or indent == 0):
+                found = i
+                break
+        if found < 0:
+            return False
+        parent = entries[found][0]
+        lo, hi = found + 1, end
+        for i in range(lo, hi):
+            if entries[i][0] <= parent:
+                hi = i
+                break
+    return True
+
+
+def _yaml_documents(text: str) -> list[str]:
+    """The documents of a possibly multi-document YAML file."""
+    return re.split(r"^---\s*$", text, flags=re.M)
+
+
+def cnpg_backup_configured(short: str, gitops: Path) -> bool:
+    """True iff a CNPG `kind: Cluster` document for this service declares `spec.backup.barmanObjectStore`.
+
+    Matching mirrors the prod-readiness collector's `gitops_files_for(short, "Cluster")`: when the
+    service has its own `components/<short>/` directory that directory IS the scope, and only
+    outside it does the service name have to appear in the document.
+
+    The previous implementation asked `"barmanObjectStore" in text and (short in text or ...)`
+    over every file under `components/`, which matched PROSE. `rules.yaml` carries the literal
+    `barmanObjectStore` inside a rule DESCRIPTION, and until #3508 every service's OPA bundle
+    ConfigMap embedded rules.yaml verbatim — so `components/<svc>/<svc>-opa-bundle.yaml` satisfied
+    both halves for many services, and their runbooks promised on-call an RPO the cluster could
+    not deliver (mcp-service, which has no CNPG cluster at all, promised "RPO target: <= 5 min").
+    #3508 removed the embed and the collision went away; the TEST did not, so any future file
+    under a component directory containing both strings would reproduce it. Hence: structure.
+    """
+    comp = gitops / "components" / short
+    scoped = comp.is_dir()
+    root = comp if scoped else gitops
+    if not root.is_dir():
+        return False
+    for f in sorted(root.rglob("*.yaml")):
+        text = read(f)
+        if "barmanObjectStore" not in text:
+            continue  # cheap prefilter — the key must be present literally to be present structurally
+        for doc in _yaml_documents(text):
+            if not scoped and short not in doc:
+                continue
+            entries = _doc_entries(doc)
+            if not any(i == 0 and k == "kind" and v == "Cluster" for i, k, v in entries):
+                continue
+            if _has_key_path(entries, ("spec", "backup", "barmanObjectStore")):
+                return True
+    return False
 
 
 def declared_datastore(short: str, repo: Path) -> str:
