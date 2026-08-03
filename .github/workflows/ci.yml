@@ -408,9 +408,13 @@ jobs:
   # Aggregates the shards into the single REQUIRED context named in the main-protection
   # ruleset. `cancelled` is treated as a failure on a PR for the same reason the Admin UI
   # gate does it (#2185): a cancelled shard built nothing and must not read as a pass.
+  # needs also binds the `ui` aggregator (issue #3675): the Admin UI build carries the
+  # enforced Playwright golden-path suite (#653), and depending on it here makes that
+  # suite merge-blocking for admin-ui-touching PRs without a ruleset edit — the
+  # in-repo fix the ruleset can't ship itself.
   validate:
     name: Validate manifests
-    needs: [gates]
+    needs: [gates, ui]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -440,6 +444,22 @@ jobs:
               echo "::error::Gate shards did not run (result=$RESULT). Refusing to report success."
               exit 1 ;;
           esac
+
+      # The ui aggregator already encodes the skip/cancel semantics (#2185): it passes
+      # when the PR touches no admin-ui paths (ui-build skipped) and fails on a real
+      # build/test failure — including the Playwright E2E step. So a plain success
+      # check here is the whole binding; anything else fails closed.
+      - name: Verify Admin UI gate (build + golden-path E2E)
+        env:
+          RESULT: ${{ needs.ui.result }}
+        run: |
+          set -euo pipefail
+          if [ "$RESULT" = "success" ]; then
+            echo "Admin UI gate green (or correctly skipped: no admin-ui changes)."
+            exit 0
+          fi
+          echo "::error::Admin UI gate did not succeed (result=$RESULT) — the Playwright E2E / build must pass on admin-ui-touching PRs (issue #3675)."
+          exit 1
 
   app-status:
     name: Customer-app dossier
