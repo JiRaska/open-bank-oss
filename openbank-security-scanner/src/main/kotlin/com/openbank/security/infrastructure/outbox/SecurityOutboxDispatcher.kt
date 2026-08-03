@@ -27,7 +27,23 @@ class SecurityOutboxDispatcher(
         outboxRepository.listProcessableUni(BATCH_SIZE)
             .onItem().transformToMulti { Multi.createFrom().iterable(it) }
             .onItem().transformToUniAndConcatenate { event ->
-                Uni.createFrom().item { emitter.send(Record.of(UUID.randomUUID().toString(), event.payload)) }
+                // `completionStage`, NOT `item`. `Emitter.send` returns a CompletionStage that
+                // completes when the broker ACKS; wrapping it with `item { }` made the Uni's VALUE
+                // that CompletionStage and completed the Uni the instant `send` RETURNED. So the
+                // chain below ran unconditionally and marked the row SENT for a publish that had
+                // not happened yet — and could still fail. A broker denial, an unreachable broker
+                // or a serialisation error all lost the event silently, with the outbox reporting
+                // success. `onFailure` could only ever see a synchronous throw from `send` itself,
+                // which is the one case that does not happen.
+                //
+                // Measured while fixing #3393: security-scanner is refused by the broker as
+                // ANONYMOUS on every publish, and its outbox would have recorded every one of
+                // those as SENT. Verify a publish on the BROKER, never on outbox status.
+                Uni.createFrom().completionStage {
+                    emitter.send(
+                        Record.of(UUID.randomUUID().toString(), event.payload),
+                    )
+                }
                     .chain { _ -> outboxRepository.markSentUni(event.eventId) }
                     .onFailure().recoverWithUni { ex ->
                         outboxRepository.markFailedUni(event.eventId, ex.message ?: ex.javaClass.simpleName)
