@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.8.0...sanctions-service-v0.8.1) (2026-08-03)
+
+
+### Security
+
+* **sanctions:** scope a sanctions.clear approval to the check being decided ([#3523](https://github.com/JiRaska/open-bank-oss/issues/3523)) ([6cd709a](https://github.com/JiRaska/open-bank-oss/commit/6cd709afe419019e8412138ecfa043daf6f82610)), closes [#3521](https://github.com/JiRaska/open-bank-oss/issues/3521)
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.7.8...sanctions-service-v0.8.0) (2026-08-03)
 
 

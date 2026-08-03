@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/release-steward-v0.4.0...release-steward-v0.4.1) (2026-08-03)
+
+
+### Bug Fixes
+
+* **governance:** gate the comments — prose naming a file or repo that does not exist ([#3515](https://github.com/JiRaska/open-bank-oss/issues/3515)) ([0e93874](https://github.com/JiRaska/open-bank-oss/commit/0e93874ea31eb43900bead5f6a4353b056a9977f))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/release-steward-v0.3.2...release-steward-v0.4.0) (2026-08-02)
 
 
