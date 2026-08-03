@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.4](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.17.3...notification-service-v0.17.4) (2026-08-03)
+
+
+### Bug Fixes
+
+* **campaign,notification:** resolve the EMAIL recipient from partyId, and stop the send log losing a failed handoff ([#3662](https://github.com/JiRaska/open-bank-oss/issues/3662)) ([f050b19](https://github.com/JiRaska/open-bank-oss/commit/f050b198fbdae19a1909a180f00e9bbddce57297))
+
 ## [0.17.3](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.17.2...notification-service-v0.17.3) (2026-08-02)
 
 
