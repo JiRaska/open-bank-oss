@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.22.1...lending-service-v0.22.2) (2026-08-03)
+
+
+### Bug Fixes
+
+* **lending:** customer intake was never on — @ConfigProperty ignored on 93 constructor params fleet-wide ([#3534](https://github.com/JiRaska/open-bank-oss/issues/3534)) ([e5796ea](https://github.com/JiRaska/open-bank-oss/commit/e5796ea72496b170f302958fb6e5ca6ef8553367))
+
 ## [0.22.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.22.0...lending-service-v0.22.1) (2026-08-02)
 
 
