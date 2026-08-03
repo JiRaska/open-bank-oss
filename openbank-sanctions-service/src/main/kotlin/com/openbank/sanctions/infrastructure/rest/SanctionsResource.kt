@@ -43,7 +43,18 @@ class SanctionsResource(private val useCase: SanctionsUseCase) {
     // verb, kept apart from `release` (payment-hold release elsewhere in the fleet) for clean
     // audit separation — a wrongly-cleared true positive here is a real sanctions violation.
     // No ROLE_API on this endpoint, confirmed no M2M caller — safe to four-eyes gate.
-    @Authorize(action = "sanctions.clear", resource = "")
+    //
+    // resource = "#cmd.checkId", not "" (ADR-0206 dotted-path extraction). AuthorizeInterceptor
+    // binds an approval to the triple (action, resourceId, maker) in `satisfies`, so an EMPTY
+    // resource made a granted approval a bearer token for ANY review by that maker: a checker who
+    // approved clearing check A also, unknowingly, authorised clearing check B. The maker had to
+    // do nothing clever — retry the X-Approval-Id header against a different checkId.
+    //
+    // Harmless while nothing drove the flow; #3465 gave it a UI, at which point "approve one
+    // decision, apply it to another" stops being theoretical. Narrowing costs nothing at the
+    // policy layer: `matrix-allows` (the rule that grants sanctions.clear) keys on principal type,
+    // roles and action only, and no deny rule reads input.resource — verified before changing this.
+    @Authorize(action = "sanctions.clear", resource = "#cmd.checkId")
     suspend fun review(cmd: ReviewCommand) = useCase.review(cmd)
 
     @GET
