@@ -151,6 +151,20 @@ gates:
 
   # ==== gitops ================================================================
 
+  # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
+  # mechanism-3 liveness gauge. ADVISORY with a baseline ratchet — the 37 files
+  # without a heartbeat at introduction are listed in the producer; a NEW job
+  # without one fails even now, and the baseline may only shrink. rules.yaml:
+  # scheduled_methods.liveness_adoption, enforce target 2026-09-30.
+  - id: scheduler-liveness-adoption
+    name: "scheduler liveness adoption (ADR-0237, advisory)"
+    group: gitops
+    mode: advisory
+    selftest: |
+      python3 .github/scripts/check-scheduler-liveness.py --self-test
+    run: |
+      python3 .github/scripts/check-scheduler-liveness.py --root .
+
   # Issue #3344: every deployed image pin must be a `sandbox-<sha>` tag on a module
   # that has a release axis (version.txt). This is the DECLARATION half of the
   # deployed==main drift watch — deterministic, offline, blocking; the daily drift

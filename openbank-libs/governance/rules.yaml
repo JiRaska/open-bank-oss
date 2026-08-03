@@ -1474,6 +1474,29 @@ scheduled_methods:
   scheduler_exercised_in_tests: true
   scheduler_exercised_ci_producer: ".github/scripts/check-scheduler-exercised.py"
 
+  # ADR-0237 (issue #3345): every domain @Scheduled job registers the ADR-0160
+  # mechanism-3 workflow-liveness gauge, so a job that stops succeeding — or never
+  # starts — is an alert, not an archaeological find. The two guards above prove a
+  # job CAN run; this one proves it DID. Without a gate, adoption rots the day the
+  # sweep lands: the next scheduler added without a heartbeat is invisible to the
+  # staleness rule and to the control-liveness-sentinel (its documented known gap
+  # is exactly this adoption rate).
+  #
+  # RATCHET, not a sweep-gate: the 37 files without a heartbeat at introduction
+  # (first scan 2026-08-03, money-path first) are baselined in the producer with
+  # their adoption PRs shrinking the list; a NEW domain @Scheduled job with no
+  # registerWorkflowLiveness fails even in advisory mode, and a healed entry that
+  # was not removed from the baseline fails too — the list cannot rot in either
+  # direction. Exempt by role, not by name: outbox dispatchers/backlog gauges (own
+  # openbank.outbox.backlog freshness) and two allowlisted producers (audit-chain
+  # gauge — own three-rule alerting; the sentinel's own scheduler — circularity).
+  # Flipping to enforced = --enforce in the gates.yaml entry (mode: enforced).
+  liveness_adoption:
+    gate: scheduler-liveness-adoption
+    enforced: advisory
+    target_enforce_date: "2026-09-30"
+    ci_producer: ".github/scripts/check-scheduler-liveness.py"
+
 
 # ---------------------------------------------------------------------------------------
 # Kafka topic existence (issue #2598). A service may only reference a topic that exists.
