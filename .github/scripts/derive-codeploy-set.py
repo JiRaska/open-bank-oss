@@ -62,6 +62,7 @@ Usage:
 Prints, one finding per line, TAB-separated. Two record types:
     CODEPLOY\t<svc> <svc> ...        a mutually-blocking set that must deploy together
     PENDING\t<svc> <svc> ...         blocked only because their builds have not finished
+    UNGATED\t<svc> <svc> ...         no can-i-deploy verdict exists for them at all (#3454)
     EXTERNAL\t<svc>\t<counterpart>   blocked on a service this run cannot move
 
 Always exits 0 — this is a reporter, not a gate.
@@ -105,6 +106,16 @@ PAIR_LINE = ("There is no verified pact", "The verification for the pact between
 # set. Records with no class at all keep today's behaviour, so older captures still parse.
 CODEPLOY_CLASSES = ("UNVERIFIED", "REGRESSION")
 TRANSIENT_CLASSES = ("PENDING_BUILD",)
+
+# NOT_ASKED (#3454) is ineligible for a set by construction — CODEPLOY_CLASSES is an
+# allow-list — but it must not be silently dropped either, and it is NOT transient, so it
+# cannot ride on the PENDING report ("waiting on their own builds, no action") without
+# repeating the false self-clearing promise the class exists to avoid. It gets its own
+# finding: these services have no can-i-deploy verdict at all, so a co-deploy over them
+# would not be a weaker check, it would be NO check. On a fleet dispatch this is the whole
+# run — 54 of 54 services on run 30765380309 — which is exactly the population a
+# CO-DEPLOY recommendation must never be printed for.
+UNGATED_CLASSES = ("NOT_ASKED",)
 
 
 def derive(changed: set[str], stream) -> list[str]:
@@ -173,6 +184,10 @@ def derive(changed: set[str], stream) -> list[str]:
     pending = sorted(s for s in blocked if cls_of.get(s) in TRANSIENT_CLASSES)
     if pending:
         findings.append("PENDING\t" + " ".join(pending))
+
+    ungated = sorted(s for s in blocked if cls_of.get(s) in UNGATED_CLASSES)
+    if ungated:
+        findings.append("UNGATED\t" + " ".join(ungated))
 
     for svc_name, counterpart in sorted(external):
         findings.append(f"EXTERNAL\t{svc_name}\t{counterpart}")
