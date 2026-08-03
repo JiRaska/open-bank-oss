@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.90.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.89.1...admin-ui-v0.90.0) (2026-08-03)
+
+
+### Features
+
+* **sanctions:** serve the checker's pending-approvals queue ([#3506](https://github.com/JiRaska/open-bank-oss/issues/3506)) ([a1b9010](https://github.com/JiRaska/open-bank-oss/commit/a1b9010628461acb36d2c11135bfe1c96a83cbd7))
+
 ## [0.89.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.89.0...admin-ui-v0.89.1) (2026-08-02)
 
 

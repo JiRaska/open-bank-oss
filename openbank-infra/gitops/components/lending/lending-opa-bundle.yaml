@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: lending-service
     app.kubernetes.io/part-of: lending
   annotations:
-    openbank.tech/policy-checksum: "4da4649ac27bdf06"
+    openbank.tech/policy-checksum: "3a301190dbcdc205"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1659,7 +1659,7 @@ data:
                                                 # SCA-completion-callback caller.
       - openbank-delegation-service            # ADR-0232: mints payment rights (customer-to-party grants) without moving
                                                 # money itself — money-path for the same reason consent/vop are. Threat
-                                                # model: docs/threat-models/delegation-service.md. four-eyes assessed:
+                                                # model: docs/threat-models/openbank-delegation-service.md. four-eyes assessed:
                                                 # delegation.offer/revoke/suspend are self-service or fraud-signal actions
                                                 # with SCA-bound ceremonies on both ends; the bank-side suspend lands via
                                                 # the fraud pipeline, not an operator console, so there is no

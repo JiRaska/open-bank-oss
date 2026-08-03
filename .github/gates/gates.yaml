@@ -428,6 +428,25 @@ gates:
     run: |
       python3 .github/scripts/check-license-headers.py
 
+  # Comments are stripped by every OTHER guard here on purpose, so that code-about-code does
+  # not trip them (#2450). Nothing therefore checks the prose — and the prose is what a human
+  # acts on. Measured cost of that in two days: a Kafka ACL header claiming the broker ran
+  # `allow.everyone.if.no.acl.found=true` (it runs false; 13 outbox rows died), an
+  # application.yaml naming the wrong schema-registry host AND port, and a workflow comment
+  # scoping tokens to an archived repo. This gate checks only what the repo can FALSIFY: a
+  # repo-root-relative path that resolves nowhere, and a JiRaska/<slug> that is archived or
+  # 404. Two other candidate rules were measured and rejected — see the script header, which
+  # records why, because "we did not build it" is what a later reader cannot recover.
+  # Enforced from the start: origin/main was left at zero findings by this PR.
+  - id: stale-comment-references
+    name: "stale comment references — prose naming a missing file or dead repo (enforced)"
+    group: supplychain
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-stale-comment-references.py --self-test
+    run: |
+      python3 .github/scripts/check-stale-comment-references.py --enforce
+
   - id: gh-repo-context-in-checkoutless-jobs
     name: "gh repo context in checkoutless jobs (issue #2841, enforced)"
     group: supplychain

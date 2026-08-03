@@ -103,15 +103,19 @@ mp:
         # client default (latest) instead of earliest — a consumer would silently skip
         # backlogged messages on first boot.
         #
-        # This service has NO gitops manifest yet (never deployed — no version.txt, not a
-        # released component). Whoever wires up its first deployment manifest MUST set these
-        # via a properties-file ConfigMap loaded with QUARKUS_CONFIG_LOCATIONS
-        # (config_ordinal=500), matching the intended values previously in this YAML block:
+        # Both keys ARE set — from the deployed manifest, not from this file. The
+        # analytics-sink-msg-override ConfigMap in
+        # openbank-infra/gitops/components/analytics/analytics-sink.yaml carries them in its
+        # override.properties, mounted at /mnt/msg-config and loaded via the container's
+        # QUARKUS_CONFIG_LOCATIONS env var (a properties source, so no dot-quoting):
         #   mp.messaging.incoming.analytics-events-in.group.id=analytics-sink
         #   mp.messaging.incoming.analytics-events-in.auto.offset.reset=earliest
-        # Mirror the ConfigMap/mount/env-var structure already used by onboarding-service
+        # Same ConfigMap/mount/env-var structure as onboarding-service
         # (openbank-infra/gitops/components/onboarding/onboarding-service-msg-override.yaml)
-        # and other services in the #686 sweep. Do NOT set these via
+        # and the other services in the #686 sweep. Change either value THERE, not here.
+        # (Separately: this service still has no version.txt and is absent from
+        # release-please-config.json — it is deployed, but not a released component.)
+        # Do NOT set these via
         # MP_MESSAGING_INCOMING_ANALYTICS_EVENTS_IN_* env vars — SmallRye's env-var
         # reverse-mapping is ambiguous for hyphenated channel names like
         # analytics-events-in and can crash at boot (quarkusio/quarkus#30106,

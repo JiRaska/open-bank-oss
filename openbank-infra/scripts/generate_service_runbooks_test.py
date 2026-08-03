@@ -211,6 +211,87 @@ class RunbookGeneratorTest(unittest.TestCase):
         self.assertIn("barmanObjectStore", out)
         self.assertNotIn("RPO/RTO: undefined", out)
 
+    # -- backup detection is structural, not a substring match ---------------
+    def test_prose_naming_barman_is_not_a_configured_backup(self):
+        """The #3508 collision, in fixture form: a NON-Cluster document under the service's own
+        component directory that contains BOTH `barmanObjectStore` and the service short name.
+
+        That is exactly the shape the OPA bundle ConfigMap had — it embedded rules.yaml verbatim,
+        and rules.yaml names `barmanObjectStore` inside a rule DESCRIPTION. The old whole-file
+        substring test returned True for it, so mcp-service — which has no CNPG cluster anywhere —
+        shipped a runbook promising on-call `RPO target: <= 5 min (continuous archiving)`.
+        """
+        self.write_service(datastore="postgresql", database="openbank_widget")
+        (self.comp / "widget-opa-bundle.yaml").write_text(
+            "apiVersion: v1\n"
+            "kind: ConfigMap\n"
+            "metadata:\n  name: widget-opa-bundle\n  namespace: widgets\n"
+            "data:\n"
+            "  rules.yaml: |\n"
+            "    db_backup_associations:\n"
+            "      description: every CNPG Cluster must declare spec.backup.barmanObjectStore\n"
+            "      applies_to: widget-db and every other openbank cluster\n"
+        )
+        self.assertFalse(self.mod.backup_configured("widget"))
+        out = self.mod.render("widget")
+        self.assertIn("no backup configured", out)
+        self.assertNotIn("**RPO target:**", out)
+
+    def test_barman_in_a_cluster_comment_is_not_a_configured_backup(self):
+        """The same failure one layer in: a real CNPG Cluster whose only `barmanObjectStore` is a
+        comment explaining that it has none. A guard over source text needs an explicit rule for
+        code-about-code, and here the rule is: comments are stripped before the structure is read."""
+        self.write_service(datastore="postgresql", database="openbank_widget")
+        (self.comp / "widget-db.yaml").write_text(
+            "apiVersion: postgresql.cnpg.io/v1\n"
+            "kind: Cluster\n"
+            "metadata:\n  name: widget-db\n  namespace: widgets\n"
+            "spec:\n"
+            "  instances: 1\n"
+            "  # TODO: no spec.backup.barmanObjectStore yet — tracked by the backup sweep\n"
+        )
+        self.assertFalse(self.mod.backup_configured("widget"))
+
+    def test_barman_nested_somewhere_else_is_not_a_configured_backup(self):
+        """`barmanObjectStore` must be under `spec.backup`, not merely present in the document."""
+        self.write_service(datastore="postgresql", database="openbank_widget")
+        (self.comp / "widget-db.yaml").write_text(
+            "apiVersion: postgresql.cnpg.io/v1\n"
+            "kind: Cluster\n"
+            "metadata:\n"
+            "  name: widget-db\n"
+            "  annotations:\n"
+            "    barmanObjectStore: planned\n"
+            "spec:\n  instances: 1\n"
+        )
+        self.assertFalse(self.mod.backup_configured("widget"))
+
+    def test_a_real_barman_backup_is_detected(self):
+        self.write_service(datastore="postgresql", database="openbank_widget")
+        (self.comp / "widget-db.yaml").write_text(
+            "apiVersion: postgresql.cnpg.io/v1\n"
+            "kind: Cluster\n"
+            "metadata:\n  name: widget-db\n  namespace: widgets\n"
+            "spec:\n  backup:\n    barmanObjectStore:\n      destinationPath: s3://backups/widget\n"
+        )
+        self.assertTrue(self.mod.backup_configured("widget"))
+
+    def test_a_real_barman_backup_is_detected_in_a_multi_document_file(self):
+        """A Cluster sharing a file with other resources — the fleet's usual shape."""
+        self.write_service(datastore="postgresql", database="openbank_widget")
+        (self.comp / "widget-db.yaml").write_text(
+            "apiVersion: v1\n"
+            "kind: Secret\n"
+            "metadata:\n  name: widget-db-creds\n"
+            "stringData:\n  note: barmanObjectStore is configured on the cluster below\n"
+            "---\n"
+            "apiVersion: postgresql.cnpg.io/v1\n"
+            "kind: Cluster\n"
+            "metadata:\n  name: widget-db\n  namespace: widgets\n"
+            "spec:\n  backup:\n    barmanObjectStore:\n      destinationPath: s3://backups/widget\n"
+        )
+        self.assertTrue(self.mod.backup_configured("widget"))
+
     # -- the C6 contract the readiness collector reads ----------------------
     def test_every_rendered_runbook_carries_the_disaster_recovery_heading(self):
         """prod-readiness C6=2 is detected by this exact heading — stateless included."""
