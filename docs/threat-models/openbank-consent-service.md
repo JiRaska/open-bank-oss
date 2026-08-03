@@ -52,6 +52,22 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 
 ## 6. Change log
 
+- **2026-08-03** — ADR-0219 D3 suppression store (#3656 slice 2): new inbound REST surface
+  `/api/v1/suppressions` (create / list-active-by-party / revoke) over a new `suppressions` table,
+  with `SuppressionCreated`/`SuppressionRevoked` events written in the same transaction (the
+  gate's near-real-time invalidation signal). **Spoofing:** writes are `suppression.manage`,
+  HUMAN-operator-only — the shared M2M client is explicitly excluded, because a role-only check
+  would have granted every backend service the write (the same defect class `operator-consent-write`
+  already fixed); reads (`suppression.read`) serve operators and the gate's M2M callers — a
+  low-sensitivity stop-list (partyId + reason code, no content). **Tampering:** the ALL/SCOPE/TOPIC
+  shape is validated by construction AND by a DB check constraint, so an ALL entry cannot carry a
+  scoping value; revoke is a one-way transition with actor recorded. **Info disclosure:** the
+  per-party list is the gate's read shape — it reveals only that a stop exists, never why the
+  person is vulnerable; reason codes are coarse by design. **Repudiation:** every transition is an
+  outbox event in the same commit (ADR-0126 §D3 pattern). Risk class = **integrity** (a forged
+  suppression silences a customer; a deleted one re-enables contact the law forbids) — both need
+  the write path above, which is why it stays operator-only. Verified by `SuppressionTest`
+  (covers(), shape, one-way revoke) + the consent ext rego tests (4 new rules).
 - **2026-07-17** — Completed ADR-0126 §D2: `/validate` response now carries `scopes`, `grantedAccounts`
   (covered IBANs; null = all of the party's accounts) and `frequencyPerDay` (PSD2 RTS Art. 10 AISP cap
   = 4) so a resource server can cache within that window. Additive optional fields (openapi

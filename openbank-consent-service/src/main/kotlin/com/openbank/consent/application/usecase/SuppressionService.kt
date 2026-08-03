@@ -10,6 +10,7 @@ import com.openbank.consent.domain.event.SuppressionRevoked
 import com.openbank.consent.domain.model.Suppression
 import com.openbank.consent.domain.model.SuppressionReason
 import com.openbank.consent.domain.model.SuppressionScope
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
 import java.time.OffsetDateTime
@@ -33,7 +34,7 @@ class SuppressionService(private val suppressions: SuppressionRepository, privat
     ): Suppression {
         val now = OffsetDateTime.now(clock)
         val suppression = Suppression(
-            id = UUID.randomUUID(),
+            id = Ids.newId(),
             partyId = partyId,
             scope = scope,
             value = value,
