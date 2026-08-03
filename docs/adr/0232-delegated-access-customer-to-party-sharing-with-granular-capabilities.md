@@ -198,6 +198,41 @@ transacting).
   external-disclosure port is shaped so VC issuance becomes a third
   delivery channel without reworking the aggregate.
 
+## Delivery status, measured
+
+As of 2026-08-03, against `origin/main`, on the **numeric constraints** of D1
+only — the rest of the ADR is not assessed here.
+
+| Element of the decision | State |
+| --- | --- |
+| `perTransactionLimit` on the aggregate | **Done** — `DelegationGrant.withinLimits`, and mirrored into account-service's projection |
+| `dailyLimit` / `monthlyLimit` accepted by the API | **Was done, now refused** — see below |
+| Cumulative daily/monthly ceiling ENFORCED anywhere | **None.** No spend counter exists in any service |
+| `DelegationOffered` carrying the two ceilings | **No.** The event has `perTransactionLimit` only, so no projection can learn them |
+
+D1 lists "per-transaction / daily / monthly limit" among the grant's
+constraints and D6 renders the promise to the customer verbatim — *"max
+5 000 Kč/den"*. The per-transaction half shipped. The cumulative half never
+did, and the gap was invisible because the fields existed at every layer
+except the one that matters: `OfferDelegationRequest` accepted them,
+`DelegationGrant` held them, the entity persisted them, and
+`DelegationResponse` echoed them back — while nothing anywhere counted spend
+against either. The API therefore answered 201 to a request that capped
+nobody. The customer app declines to render a ceiling chip for this reason
+(openbank-app#360), which contained the damage at one client and not at the
+contract.
+
+**Both fields are now rejected on offer** (400
+`CUMULATIVE_LIMIT_UNSUPPORTED`, at customer-edge and at delegation-service),
+and are marked unsupported in both `openapi.yaml`s. This does not deliver
+D1/D6 — it stops the platform claiming them. A correct implementation needs a
+spend counter that is incremented in the same transaction that debits the
+account, and today there is no such transaction to join: no money-moving
+service reads a delegation grant at all, so an accumulator built now would
+have no writer. Delivering the ceilings means first wiring a delegated
+money path, then counting on it — in that order, or the counter is a second
+number nobody applies.
+
 ## Consequences
 
 **Positive**
