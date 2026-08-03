@@ -144,10 +144,6 @@ DECLARED: dict[str, tuple[str, str]] = {
         "setup-java",
         "Same setup-java keying as pitest.",
     ),
-    "dependabot-verification-metadata.yml::refresh-metadata": (
-        "setup-java",
-        "Same setup-java keying as pitest.",
-    ),
     "perf-gate.yml::perf": (
         "read-only",
         "Consumer; restores fleet-lint's home. Weekly advisory k6 gate (ADR-0243) — "
