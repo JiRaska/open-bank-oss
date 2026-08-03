@@ -111,6 +111,24 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   (RestAssured + `@TestSecurity`) and assert the row with a plain JDBC read. This is also the only
   way to prove transactional-outbox atomicity (status change + outbox row commit together) — a mocked
   repo can't. Pattern: `LendingOutboxWriteIT`, `ConsentRevocationOutboxIT`.
+- **A non-nullable `@QueryParam`/`@HeaderParam` is a 500, and `requireNotNull` in the body is DEAD
+  CODE — the parameter must be declared nullable.** JAX-RS injects `null` for an absent parameter;
+  Kotlin's null-safety is compile-time only, so the declared type only decides *where* the failure
+  lands, and every landing is a 500 (`GenericExceptionMapper`). Measured with `javap`: a plain `fun`
+  emits `Intrinsics.checkNotNullParameter` at **offset 0**, so a guard written in the body compiles
+  to nothing — the NPE already threw. A **`suspend fun` emits no intrinsic at all**, so the null
+  flows into the body and fails at the first dereference; where nothing dereferences it, the request
+  proceeds with a null the signature promised could not exist, which is worse than the 500 and
+  invisible. That is how three services shipped
+  `require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }` that answered
+  **500 for the absent header** — the exact case it was written for — and 400 only for a blank one.
+  Write `@QueryParam("x") x: String?` + `requireNotNull(x) { "query parameter 'x' is required" }`;
+  libs-runtime maps `IllegalArgumentException` to 400 (never add a service-local mapper, #526). The
+  primitive case differs and is out of scope: JAX-RS supplies `0`, not null. `@DefaultValue` is the
+  other correct answer where one exists. Enforced by `check-nonnull-jaxrs-params.py` (gate
+  `nonnull-jaxrs-param-ratchet`) — money-path fixed, the tail baselined (#3104, #3624). Counting
+  trap: an outbound REST-client **`interface`** carries the identical annotation and is NOT a defect
+  (the caller supplies the argument, compile-time checked), which is half of every naive grep.
 - **A Kotlin annotation binds to the NEXT declaration — a top-level function between `@Path` and its
   class silently steals it.** `McpEndpoint` had `@Path("/mcp")`, then a top-level
   `private fun String?.sanitizeForLog()`, then `class McpEndpoint`. The `@Path` bound to the
