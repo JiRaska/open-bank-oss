@@ -113,7 +113,7 @@ class DomainMetricsTest {
     }
 
     @Test
-    fun `a never-succeeded workflow reads as maximally stale`() {
+    fun `a never-succeeded workflow reads only as stale as the pod is old`() {
         val reg = SimpleMeterRegistry()
         val dm = withRegistry(reg)
 
@@ -121,10 +121,12 @@ class DomainMetricsTest {
 
         val age = reg.find("openbank.workflow.last_success.age_seconds")
             .tag("workflow", "standing-order-execution").gauge()
-        // Age is computed from Instant.EPOCH (1970) — trivially past any real threshold, no
-        // special-casing needed for "this workflow has literally never run".
+        // Seeded at registration time (ADR-0237), NOT Instant.EPOCH: an EPOCH seed reads as
+        // decades-stale from boot, so any staleness rule fires for the whole window between a
+        // daily job's deploy and its first run. "Never ran" is detected by the alert layer
+        // (absent() + the staleness rule after one grace period), not by an exaggerated age.
         assertThat(age).isNotNull
-        assertThat(age!!.value()).isGreaterThan(Duration.ofDays(365 * 50).toSeconds().toDouble())
+        assertThat(age!!.value()).isLessThan(5.0)
     }
 
     @Test

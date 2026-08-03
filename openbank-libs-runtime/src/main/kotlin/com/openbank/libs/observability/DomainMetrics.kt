@@ -345,19 +345,18 @@ class DomainMetrics {
      * Register the liveness gauges for a scheduled workflow (ADR-0160): age-of-last-success and
      * its expected interval, both in seconds.
      *
-     * **What consumes them, accurately (#2239).** `openbank-control-liveness-sentinel`'s D1
-     * detection (ADR-0163) reads both gauges and files a FINDING on any workflow past 2x its
-     * declared interval. There is **no PrometheusRule and no page**: this KDoc used to describe
-     * `openbank_workflow_last_success_age_seconds > 2 * on(workflow)
-     * openbank_workflow_expected_interval_seconds` as a rule that already exists, and ADR-0163 D1
-     * leaned on that sentence — two documents describing a paging line nothing had ever
-     * implemented. Before adding it verbatim, note why it would page falsely: the age gauge seeds
-     * from [java.time.Instant.EPOCH], so a freshly started pod reports decades of staleness until
-     * the job's first success — for a daily job that is up to 24h of continuous firing after every
-     * deploy or restart, and no `for:` duration helps because the condition genuinely persists.
-     * That EPOCH behaviour is right for a sentinel finding and wrong for a 3am page; making it a
-     * rule needs a decision (seed from persisted run state, gate on pod uptime, or stay
-     * sentinel-only), not a copy-paste. Tracked in #2239 Gap 2.
+     * **What consumes them.** `openbank-control-liveness-sentinel`'s D1 detection (ADR-0163)
+     * reads both gauges and files a FINDING on any workflow past 2x its declared interval, and the
+     * `openbank.workflow.liveness` PrometheusRule group (ADR-0237) alerts `warning` on the same
+     * condition. ADR-0237 is the decision #2239 Gap 2 said a rule needs: the age gauge seeds from
+     * **registration time**, not [java.time.Instant.EPOCH]. The EPOCH seed made a freshly started
+     * pod report decades of staleness until the job's first success — up to 24h of continuous
+     * firing after every deploy of a daily job, and no `for:` duration helps because the condition
+     * genuinely persists. Seeding from now makes the metric mean "age of last success, or of pod
+     * start if none": a never-running job fires exactly once its own 2x grace elapses, and a
+     * redeployed healthy job never false-fires. The residual hole — a pod restarted more often
+     * than 2x the interval hides a never-running job — is covered by the availability alerts
+     * (crashloop / tier1 down / ADR-0098 rollout abort), not duplicated here.
      *
      * This exists because a scheduled job can fail SILENTLY (an exception swallowed after logging,
      * or simply stopping) and leave no record and no alarm — exactly how balance-service's daily
@@ -366,11 +365,13 @@ class DomainMetrics {
      *
      * Call **once at startup** (e.g. from the caller's constructor) with the workflow's own name
      * and expected run interval; call [WorkflowLivenessRecorder.recordSuccess] at the end of the
-     * job's success path on every run. A workflow that has never succeeded reads as maximally
-     * stale (age computed from [java.time.Instant.EPOCH]) — no special-casing needed, it is
-     * trivially over any real threshold. Re-registration with the same `workflow` tag is a no-op
-     * gauge re-register (safe, matches [registerOutboxBacklog]); a no-op [WorkflowLivenessRecorder]
-     * is returned when no [MeterRegistry] is resolvable (same fallback as every method above).
+     * job's success path on every run. A workflow that has never succeeded reads as stale as the
+     * pod is old (seeded at registration, see above) — the "never reported" state is the alert
+     * layer's job: `absent()` catches an unregistered/unscraped workflow, the staleness rule
+     * catches the rest after one grace period. Re-registration with the same `workflow` tag is a
+     * no-op gauge re-register (safe, matches [registerOutboxBacklog]); a no-op
+     * [WorkflowLivenessRecorder] is returned when no [MeterRegistry] is resolvable (same fallback
+     * as every method above).
      *
      * @param workflow          stable low-cardinality name, e.g. `standing-order-execution`
      * @param expectedInterval  the job's normal run cadence (e.g. `Duration.ofDays(1)` for a daily
@@ -378,7 +379,10 @@ class DomainMetrics {
      *                          not a tighter SLA; grace period is baked into the 2x multiplier.
      */
     fun registerWorkflowLiveness(workflow: String, expectedInterval: Duration): WorkflowLivenessRecorder {
-        val lastSuccessEpochMillis = java.util.concurrent.atomic.AtomicLong(java.time.Instant.EPOCH.toEpochMilli())
+        // Seeded at registration time, NOT Instant.EPOCH — see the KDoc above (ADR-0237): an
+        // EPOCH seed makes every fresh pod read as decades-stale until the job's first success,
+        // which any PrometheusRule on this gauge would fire on after every single deploy.
+        val lastSuccessEpochMillis = java.util.concurrent.atomic.AtomicLong(java.time.Instant.now().toEpochMilli())
         reg()?.let { r ->
             // Names come from WorkflowLivenessMetrics, never a literal: the consumer side
             // (openbank-control-liveness-sentinel) queried a name nothing emitted for as long as
