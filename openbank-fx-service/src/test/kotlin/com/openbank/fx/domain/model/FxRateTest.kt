@@ -78,12 +78,51 @@ class FxRateTest {
         assertThat(round.bidRate).isLessThan(round.askRate)
     }
 
+    // --- identity of a derived quote (#3374) -------------------------------------------------
+
     @Test
-    fun `the inverted quote keeps the id of the row it was derived from`() {
-        // FxConversion.rateId must still point at the stored quote the price came from.
+    fun `the inverted quote has its own id, not the source row's`() {
+        // The defect this replaces: EUR/CZK and CZK/EUR answered under ONE id with different
+        // pairs, so an id no longer identified what it named.
         val original = fxRate()
 
-        assertThat(original.inverted().id).isEqualTo(original.id)
+        assertThat(original.inverted().id).isNotEqualTo(original.id)
+    }
+
+    @Test
+    fun `the inverted quote names the row it came from`() {
+        val original = fxRate()
+
+        assertThat(original.inverted().derivedFrom).isEqualTo(original.id)
+    }
+
+    @Test
+    fun `a stored quote declares no derivation`() {
+        // The discriminator only works if it is absent on the other side.
+        assertThat(fxRate().derivedFrom).isNull()
+    }
+
+    @Test
+    fun `the derived id is deterministic across calls`() {
+        // A client may cache by id; a fresh id per request would make that cache useless and the
+        // id itself meaningless as a reference in an audit record.
+        val original = fxRate()
+
+        assertThat(original.inverted().id).isEqualTo(original.inverted().id)
+    }
+
+    @Test
+    fun `the derived id depends on the source row`() {
+        // Two different stored rows must not derive to one inverse id.
+        assertThat(fxRate().inverted().id).isNotEqualTo(fxRate().inverted().id)
+    }
+
+    @Test
+    fun `the derived id is a well-formed RFC 9562 version 8 UUID`() {
+        val derived = fxRate().inverted().id
+
+        assertThat(derived.version()).isEqualTo(EXPECTED_UUID_VERSION)
+        assertThat(derived.variant()).isEqualTo(EXPECTED_UUID_VARIANT)
     }
 
     @Test
@@ -112,4 +151,9 @@ class FxRateTest {
         validTo = validTo,
         createdAt = Instant.parse("2026-01-01T00:00:00Z"),
     )
+
+    private companion object {
+        const val EXPECTED_UUID_VERSION = 8
+        const val EXPECTED_UUID_VARIANT = 2
+    }
 }

@@ -291,7 +291,10 @@ class FxService(
         toAmountMinorUnits = toAmountMinorUnits,
         appliedRate = rate.askRate,
         feeMinorUnits = feeMinorUnits,
-        rateId = rate.id,
+        // The STORED row, never the derived quote's own id (#3374). `fx_conversions.rate_id` is
+        // `NOT NULL REFERENCES fx_rates(id)`, so a derived id — which has no row — would fail the
+        // insert on a foreign-key violation for every CZK→foreign conversion.
+        rateId = rate.derivedFrom ?: rate.id,
         status = status,
         createdAt = createdAt,
         settledAt = settledAt,

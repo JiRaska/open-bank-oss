@@ -60,6 +60,10 @@ dependencies {
     // Consumer-driven contract for the aml-service case store (issue #2255, C3): fx is the consumer
     // of POST /api/v1/aml/cases, so this module also generates a pact.
     testImplementation(libs.pact.consumer)
+    // FxRateApiContractTest asserts the running endpoint against the committed openapi.yaml, which
+    // it PARSES rather than greps (#3374). No version: the Quarkus BOM manages it, same as
+    // openbank-ap2-service and openbank-pid-service, which carry the identical test shape.
+    testImplementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")
 }
 
 kover {

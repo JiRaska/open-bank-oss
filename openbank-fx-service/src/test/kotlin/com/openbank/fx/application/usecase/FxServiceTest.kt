@@ -162,6 +162,56 @@ class FxServiceTest {
         assertThat(conv.appliedRate).isEqualByComparingTo("0.04016064")
     }
 
+    // --- identity of a derived quote (#3374) -------------------------------------------------
+
+    @Test
+    fun `the two directions of one pair answer under different ids`() = runBlocking<Unit> {
+        // The reported defect: GET EUR/CZK and GET CZK/EUR returned the SAME id with inverted
+        // numbers, so the id could not be replayed to a direction.
+        val stored = fxRate()
+        coEvery { rateRepo.findLatest("EUR", "CZK", RateType.SPOT) } returns stored
+        coEvery { rateRepo.findLatest("CZK", "EUR", RateType.SPOT) } returns null
+
+        val direct = service.getRate(GetRateQuery("EUR", "CZK", RateType.SPOT))!!
+        val derived = service.getRate(GetRateQuery("CZK", "EUR", RateType.SPOT))!!
+
+        assertThat(derived.id).isNotEqualTo(direct.id)
+        assertThat(derived.derivedFrom).isEqualTo(stored.id)
+        assertThat(direct.derivedFrom).isNull()
+    }
+
+    @Test
+    fun `a conversion on a derived quote records the STORED row id`() = runBlocking<Unit> {
+        // The money-path property. `fx_conversions.rate_id` is NOT NULL REFERENCES fx_rates(id):
+        // a derived id has no row, so persisting it would fail the insert on a foreign-key
+        // violation for every CZK→foreign conversion — and the audit trail would cite an id
+        // nothing can resolve.
+        val stored = fxRate()
+        val command = convertCommand().copy(fromCurrency = "CZK", toCurrency = "EUR")
+        coEvery { rateRepo.findLatest("CZK", "EUR", RateType.SPOT) } returns null
+        coEvery { rateRepo.findLatest("EUR", "CZK", RateType.SPOT) } returns stored
+        coEvery { convRepo.saveWithOutbox(any(), any()) } answers { firstArg() }
+        clear()
+
+        val conv = service.convert(command)
+
+        assertThat(conv.rateId).isEqualTo(stored.id)
+        assertThat(conv.rateId).isNotEqualTo(stored.inverted().id)
+    }
+
+    @Test
+    fun `a conversion on a stored quote still records that row's id`() = runBlocking<Unit> {
+        // The `derivedFrom ?: id` fallback must not change the direct path.
+        val stored = fxRate()
+        coEvery { rateRepo.findLatest("EUR", "CZK", RateType.SPOT) } returns stored
+        coEvery { convRepo.saveWithOutbox(any(), any()) } answers { firstArg() }
+        clear()
+
+        val conv = service.convert(convertCommand().copy(fromCurrency = "EUR", toCurrency = "CZK"))
+
+        assertThat(conv.rateId).isEqualTo(stored.id)
+    }
+
     @Test
     fun `convert throws when rate is expired`() = runBlocking<Unit> {
         val command = convertCommand()

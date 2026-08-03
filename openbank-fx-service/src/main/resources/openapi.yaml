@@ -3,9 +3,12 @@
 openapi: 3.1.0
 info:
   title: FX Service API
-  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.2 -> 1.3): additive
-  # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
-  version: 1.5.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.5 -> 1.6): two response
+  # properties ADDED to ExchangeRateResponse (`id`, `derivedFrom`, #3374). Additive only — nothing
+  # is removed, no property changes type, and neither is required, so no client breaks. `id` was
+  # served for the whole life of the endpoint and never documented; documenting it now is therefore
+  # a spec correction, not a new field on the wire.
+  version: 1.6.0
   description: >-
     Foreign exchange rates and currency conversion. On convert, the converting party's name is
     synchronously screened against the sanctions lists (ADR-0032): a clean party settles the
@@ -259,7 +262,27 @@ components:
   schemas:
     ExchangeRateResponse:
       type: object
+      description: >-
+        A quote for one direction of a currency pair. It may be a stored row or DERIVED from the
+        opposite direction: the ČNB fixing, the only live source ingested, publishes FOREIGN→CZK
+        exclusively, so every stored pair is `X/CZK` and a CZK→foreign quote is computed by
+        inverting the stored one (bid and ask swap). `derivedFrom` is what tells the two apart.
       properties:
+        id:
+          type: string
+          format: uuid
+          description: >-
+            Identifies THIS quote — this pair, in this direction. On a derived quote it is computed
+            deterministically from `derivedFrom`, so it is stable across calls and safe to cache
+            by, but it is NOT the identifier of any row in the rate store. Use `derivedFrom` when
+            you need the stored row.
+        derivedFrom:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            The id of the stored quote this one was inverted from, or absent/null when this quote
+            IS the stored one. A conversion executed on a derived quote records this id, not `id`.
         baseCurrency:
           type: string
         quoteCurrency:
