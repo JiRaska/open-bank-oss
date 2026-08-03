@@ -92,30 +92,95 @@ function extractRoles(jwt: string): string[] {
   return realmAccess?.roles?.filter(r => r.startsWith("ROLE_")) ?? []
 }
 
-async function refreshAccessToken(token: JWT): Promise<JWT> {
-  try {
-    const url = `${KEYCLOAK_INTERNAL_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token`
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET,
-        grant_type: "refresh_token",
-        refresh_token: token.refreshToken as string,
-      }),
-    })
-    const refreshed = await res.json()
-    if (!res.ok) throw refreshed
+/**
+ * Refresh a minute BEFORE the access token actually expires. A token that is valid at the
+ * moment the JWT callback runs can still be expired by the time the upstream service
+ * validates it, and the realm's clock is not ours.
+ */
+const REFRESH_SKEW_MS = 60_000
+
+/**
+ * How long a completed rotation stays answerable by the refresh token it consumed.
+ * One access-token lifespan (300s) is the window in which stale copies of the cookie can
+ * still arrive; 120s covers the realistic tail without holding grants longer than needed.
+ */
+const ROTATION_CACHE_TTL_MS = 120_000
+
+type Rotation = Pick<JWT, "accessToken" | "accessTokenExpires" | "refreshToken" | "roles">
+
+/**
+ * Keyed by the refresh token that was SPENT, not by user.
+ *
+ * The realm sets `revokeRefreshToken: true` + `refreshTokenMaxReuse: 0`, so every refresh
+ * token is strictly single-use. Two things then break a session that is actively in use:
+ *
+ *  - **Stampede.** `auth()` is called independently by the middleware, ~30 route handlers and
+ *    `/api/gate` (nginx `auth_request`). Each decodes the SAME cookie, so once the access
+ *    token expires they all present the same refresh token at once. One wins; every other
+ *    gets `invalid_grant` and marks the session `RefreshAccessTokenError`, which the
+ *    middleware turns into a redirect to `/auth/login?error=SessionExpired`.
+ *  - **Rotation loss.** Only a response that reaches the browser can persist the rotated
+ *    token. `/api/gate` is an nginx auth subrequest (its `Set-Cookie` is discarded) and
+ *    `auth()` inside a Server Component cannot set cookies at all. Such a call spends the
+ *    refresh token and throws the replacement away, leaving the browser holding a revoked
+ *    one — the next refresh is then guaranteed to fail.
+ *
+ * Both are answered by remembering the result against the spent token: concurrent callers
+ * share one in-flight grant, and a later caller still carrying the old cookie is handed the
+ * already-rotated token instead of presenting a revoked one to Keycloak. The admin-ui runs a
+ * single replica, so an in-process map is sufficient; a multi-replica deployment would need a
+ * shared store instead.
+ */
+const rotationCache = new Map<string, { at: number; result: Promise<Rotation> }>()
+
+function pruneRotationCache(now: number): void {
+  for (const [key, entry] of rotationCache) {
+    if (now - entry.at > ROTATION_CACHE_TTL_MS) rotationCache.delete(key)
+  }
+}
+
+async function requestRotation(refreshToken: string): Promise<Rotation> {
+  const url = `${KEYCLOAK_INTERNAL_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token`
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    }),
+  })
+  const refreshed = await res.json()
+  if (!res.ok) throw refreshed
+  return {
     // Re-extract roles from new access token
-    const roles = extractRoles(refreshed.access_token)
-    return {
-      ...token,
-      accessToken: refreshed.access_token,
-      accessTokenExpires: Date.now() + refreshed.expires_in * 1000,
-      refreshToken: refreshed.refresh_token ?? token.refreshToken,
-      roles,
-    }
+    roles: extractRoles(refreshed.access_token),
+    accessToken: refreshed.access_token,
+    accessTokenExpires: Date.now() + refreshed.expires_in * 1000,
+    refreshToken: refreshed.refresh_token ?? refreshToken,
+  }
+}
+
+async function refreshAccessToken(token: JWT): Promise<JWT> {
+  const refreshToken = token.refreshToken as string | undefined
+  if (!refreshToken) return { ...token, error: "RefreshAccessTokenError" }
+
+  const now = Date.now()
+  pruneRotationCache(now)
+
+  let entry = rotationCache.get(refreshToken)
+  if (!entry) {
+    entry = { at: now, result: requestRotation(refreshToken) }
+    rotationCache.set(refreshToken, entry)
+    // A failed grant must not be remembered: the next request has to be free to try again
+    // (Keycloak may simply have been unreachable). Attach the handler here so the shared
+    // promise is never unhandled, and let the awaiting callers see the rejection too.
+    entry.result.catch(() => rotationCache.delete(refreshToken))
+  }
+
+  try {
+    return { ...token, ...(await entry.result), error: undefined }
   } catch {
     return { ...token, error: "RefreshAccessTokenError" }
   }
@@ -177,8 +242,8 @@ export const authOptions: NextAuthConfig = {
           })() : {}),
         }
       }
-      // Token still valid
-      if (Date.now() < (token.accessTokenExpires as number)) return token
+      // Token still valid, with a margin — see REFRESH_SKEW_MS.
+      if (Date.now() < (token.accessTokenExpires as number) - REFRESH_SKEW_MS) return token
       // Refresh
       return refreshAccessToken(token)
     },
