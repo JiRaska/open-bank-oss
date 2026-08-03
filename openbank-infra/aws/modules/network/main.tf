@@ -93,6 +93,12 @@ resource "aws_nat_gateway" "this" {
 }
 
 # --- fck-nat instance (count=0 when egress_mode=managed_nat) ----------------
+#
+# This data source is the BOOTSTRAP fallback only — it is consulted when
+# var.nat_ami_id is empty, i.e. on a brand-new environment that has no NAT
+# instance yet. Every environment that already runs one pins var.nat_ami_id, so
+# a newly published upstream AMI cannot silently force-replace a live NAT.
+# See var.nat_ami_id and issue #3602 for the full failure mode.
 data "aws_ami" "fck_nat" {
   count       = var.egress_mode == "fck_nat" ? 1 : 0
   most_recent = true
@@ -147,7 +153,10 @@ resource "aws_security_group" "fck_nat" {
 
 resource "aws_instance" "fck_nat" {
   count = var.egress_mode == "fck_nat" ? 1 : 0
-  ami   = data.aws_ami.fck_nat[0].id
+  # PINNED, deliberately (issue #3602). The data source below is the bootstrap
+  # fallback for an environment that has no NAT yet; a live environment pins,
+  # so `ami` only ever changes when a human changes it in a reviewed diff.
+  ami = var.nat_ami_id != "" ? var.nat_ami_id : data.aws_ami.fck_nat[0].id
   # t4g.nano/micro hit InsufficientInstanceCapacity in eu-north-1a; t4g.small
   # is reliably available and still comfortably sized for NAT-instance traffic.
   instance_type = "t4g.small"
