@@ -1114,6 +1114,27 @@ gates:
     run: |
       python3 .github/scripts/check-configproperty-supplied.py --enforce
 
+  # webpack rejects a non-route value export from an App Router route handler with
+  # `"X" is not a valid Route export field`. This has broken the admin-ui build twice —
+  # infra/status (#3262) and delegations/projection-health (#3611, where it was the last blocker to
+  # uploading source maps to GlitchTip at all).
+  #
+  # It is now MORE likely to recur: #3611 moved the production build to `next build --webpack`
+  # (Turbopack emits no client source maps), while `npm run dev` still uses Turbopack, which
+  # TOLERATES these exports. A developer cannot see this failure locally — the first signal is a red
+  # CI build on a change that looked fine everywhere they could look. That is the shape worth
+  # gating: not carelessness, but a defect the local feedback loop is structurally unable to show.
+  #
+  # ENFORCED: 87 route files, 0 findings. Proven by reintroducing the exact export #3611 removed.
+  - id: route-exports
+    name: "App Router route.ts exports only route fields (#3262/#3611, enforced)"
+    group: lint
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-route-exports.py --self-test
+    run: |
+      python3 .github/scripts/check-route-exports.py --enforce
+
   - id: compliance-matrix
     name: "compliance-page evidence citations (#2370, enforced)"
     group: registry
