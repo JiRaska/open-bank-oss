@@ -84,12 +84,13 @@ spec:
             # (GET /accounts/active) and reads their booked balance (GET /accounts/{id}/balance).
             - name: ACCOUNT_SERVICE_URL
               value: "http://account-service.accounts.svc:8100"
-            # OPA sidecar bootstrap (ADR-0034 Phase 5, issue #938). Advisory mode first
-            # (AUTHZ_ENFORCE=false, @Authorize logs "would DENY" without blocking) — matches
-            # every other service's rollout convention. Flip to true only after an observation
-            # window with a clean advisory report.
+            # OPA sidecar enforced (ADR-0034 Phase 5, issue #3679). Advisory since the Phase-5
+            # sidecar bootstrap (issue #938); coverage verified before the flip: all five
+            # @Authorize actions (interest.list/read/create/delete/trigger) are granted to
+            # ROLE_OPERATOR by the rules.yaml role_action_matrix, reads additionally reach the
+            # shared M2M client via operator-read-any, and no M2M writer exists.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           startupProbe: {tcpSocket: {port: management}, initialDelaySeconds: 10, periodSeconds: 5, failureThreshold: 30}
           readinessProbe: {tcpSocket: {port: http}, periodSeconds: 10, failureThreshold: 3}
           livenessProbe: {httpGet: {path: /q/health/live, port: management}, periodSeconds: 15, failureThreshold: 3}
