@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.18.1...ledger-service-v1.18.2) (2026-08-03)
+
+
+### Bug Fixes
+
+* **governance:** gate the comments — prose naming a file or repo that does not exist ([#3515](https://github.com/JiRaska/open-bank-oss/issues/3515)) ([0e93874](https://github.com/JiRaska/open-bank-oss/commit/0e93874ea31eb43900bead5f6a4353b056a9977f))
+
 ## [1.18.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.18.0...ledger-service-v1.18.1) (2026-08-02)
 
 
