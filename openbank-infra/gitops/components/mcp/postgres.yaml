@@ -31,3 +31,37 @@ spec:
   postgresql:
     parameters:
       wal_keep_size: "64MB"
+      # Bound WAL so a checkpoint spike cannot fill the 2Gi volume (#1432) — mandatory once
+      # archiving is on, because an archive that falls behind keeps segments on the volume.
+      max_wal_size: "512MB"
+  # WAL archiving + daily base backups to S3 (ADR-0035, #863 pattern). Credentials via EKS Pod
+  # Identity on the mcp-db ServiceAccount (aws/.../db-backups.tf) — barman reads the SDK chain,
+  # no secret. Sandbox S3 lifecycle expires after 35d; prod needs compliance retention.
+  #
+  # This cluster had NO backup of any kind until #3555: `instances: 1`, no replica, no WAL
+  # archive, so a lost EBS volume or a failed node reclaim was total data loss. It went unseen
+  # because docs/runbooks/svc-mcp.md promised on-call "RPO target: <= 5 min (continuous
+  # archiving)" — the runbook generator decided "has a backup" with a whole-file substring test
+  # that matched the OPA bundle's embedded rules.yaml prose (#3508 removed the embed, #3551 made
+  # the detection structural, and only then did the gap become visible as a gap).
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/mcp-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: mcp-db-daily
+  namespace: platform
+spec:
+  schedule: "0 44 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: mcp-db

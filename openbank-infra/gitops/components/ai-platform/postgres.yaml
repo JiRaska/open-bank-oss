@@ -14,12 +14,21 @@
 # this repo has been bitten by before, and the reason a config-only `max_budget` was rejected as the
 # whole answer.
 #
-# NOTE: no S3 WAL/backup here, matching devops-agent's and the other control-plane agents' pattern —
-# that needs an EKS Pod Identity role (aws/.../db-backups.tf, #863). The stakes are deliberately
-# different from a banking DB: this holds spend counters and key metadata, not regulated records.
-# Losing it means budget windows restart and the virtual keys must be re-seeded, which is an
-# operational annoyance, not a retention breach. Backups become worth adding the day a key's spend
-# history is used as evidence rather than as a guardrail.
+# BACKUPS. This manifest used to say "no S3 WAL/backup here, matching devops-agent's and the other
+# control-plane agents' pattern". That premise expired before it was written: #1444/#1452 had
+# already given devops-agent, finops-agent, governance-auditor, docs-truth-agent,
+# authz-policy-auditor, flaky-test-hunter, control-liveness-sentinel and release-steward a
+# barmanObjectStore each — all 8 of them. So this cluster was not following a pattern, it was the
+# last exception to one, and nothing said so (#3555).
+#
+# The stakes argument was the weaker half anyway. Losing this database does not just restart budget
+# windows — the virtual keys ARE the mechanism that stops one agent burning the fleet's budget, and
+# re-seeding them is a manual, credential-handling step (#3276/#3284), not a self-healing one. Until
+# it is done every caller is back on the shared master key, which is the exact state the keys were
+# introduced to end. That is a control outage, not an annoyance.
+#
+# Credentials via EKS Pod Identity on the litellm-db ServiceAccount (aws/.../db-backups.tf, #863) —
+# barman reads the SDK chain, no secret. Sandbox S3 lifecycle expires after 35d.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -53,3 +62,24 @@ spec:
     initdb:
       database: litellm
       owner: litellm
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/litellm-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: litellm-db-daily
+  namespace: ai-platform
+spec:
+  schedule: "0 49 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: litellm-db

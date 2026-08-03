@@ -231,6 +231,19 @@ locals {
     # backups" has no judgement left to exercise, so advisory just made it mergeable. The gate
     # is now enforced.
     delegation = { namespace = "delegation", sa = "delegation-db" }
+    # Added by #3555 with their barmanObjectStore + ScheduledBackup in the same change — the two
+    # clusters that still declared NO backup at all, out of 55. Both are `instances: 1`, so they
+    # had neither a replica nor a recovery point: a lost EBS volume was total data loss.
+    #
+    # They are the counterpart to the second wave above, and they stayed hidden for a different
+    # reason. mcp-db's runbook actively asserted the opposite — "RPO target: <= 5 min (continuous
+    # archiving)" — because the runbook generator decided "has a backup" with a whole-file
+    # substring test that matched the OPA bundle's embedded rules.yaml prose (#3508, #3551).
+    # litellm-db carried a comment declining backups "matching devops-agent's pattern", written
+    # after #1444/#1452 had already given devops-agent and the other seven control-plane agent
+    # DBs a barmanObjectStore each. Two different kinds of false statement, one effect.
+    mcp     = { namespace = "platform", sa = "mcp-db" }
+    litellm = { namespace = "ai-platform", sa = "litellm-db" }
   }
 }
 
