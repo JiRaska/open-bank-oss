@@ -143,6 +143,12 @@ lending:
     # after the CZ reference pack is seeded and four-eyes-activated — with enforcement on and no
     # active pack for the request's (jurisdiction, productType), origination is REFUSED.
     enforce-pack: ${LENDING_ENFORCE_PACK:false}
+    # How often each pod re-reads the activation table to pick up a pack approved on a SIBLING
+    # replica (#3467). The registry is per-pod in-memory, so before this existed a pack was
+    # enforceable only on the pod that served the approval until every other pod restarted — an
+    # unbounded window in which the same application is judged against different rules. This is the
+    # bound on that window; it is not a cache TTL, and lowering it costs one indexed read per pod.
+    refresh-interval: ${LENDING_COMPLIANCE_REFRESH_INTERVAL:30s}
   # Customer self-service origination intake (ADR-0211 "Customer intake" row; CustomerIntakeResource).
   # Default OFF. `caller-principal` is the ONLY identity permitted to submit on a customer's behalf —
   # left blank, EVERY call is refused, deliberately: customer-edge's M2M token carries ROLE_OPERATOR
