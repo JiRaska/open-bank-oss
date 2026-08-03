@@ -424,6 +424,20 @@ jobs:
         id: rewrite
         run: |
           set -euo pipefail
+          # Recompute the bump against LIVE main, not against github.sha (#3194). The checkout
+          # above has no `ref:`, so on a push it holds the commit that triggered the build. The
+          # build takes minutes, admin-ui deploys are frequent, and if another one merges in that
+          # window create-pull-request branches from a main that no longer exists — both sides
+          # having rewritten the same `image:` line. The PR is then born CONFLICTED, which means
+          # no refs/pull/<n>/merge, which means NO workflow run at all: not skipped, absent. It
+          # reads as "waiting", never as broken, and the image is simply never deployed (four in
+          # one day, three closed undeployed).
+          #
+          # Safe because the rewrite is deterministic — set `image:` to the tag just built — so
+          # recomputing it against a newer main is always correct. It is what a human does when
+          # resolving this by hand.
+          git fetch origin main
+          git reset --hard origin/main
           TAG="${{ steps.build.outputs.tag }}"
           IMAGE="${ECR_REGISTRY}/${ECR_REPO}"
 
