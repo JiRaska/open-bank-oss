@@ -237,6 +237,60 @@ resource "kubectl_manifest" "nodepool_default" {
             # 22 instance types x 3 AZs = 66 spot pools.
             { key = "karpenter.k8s.aws/instance-size", operator = "In", values = ["xlarge", "2xlarge"] }
           ]
+          # NO `topology.kubernetes.io/zone` REQUIREMENT HERE, AND ADDING ONE
+          # WILL BREAK THE CLUSTER. Recorded 2026-08-03 (#3496) because pinning
+          # this pool to one AZ is the obvious answer to the account's largest
+          # controllable cost line, it was drafted, and it is wrong.
+          #
+          # THE COST IT IS MEANT TO FIX IS REAL. Cross-AZ transfer
+          # (EUN1-DataTransfer-Regional-Bytes) stepped 11x on 2026-07-27, from
+          # ~$3/day (07-20..07-26) to $31-37/day (07-28..08-01) — ~40% of a
+          # ~$85/day gross bill against a $50/day target. AWS bills inter-AZ at
+          # $0.01/GB in EACH direction, so ~3200 GB/day billed is ~1600 GB/day
+          # actually moved. It is DIFFUSE: two independent VPC flow-log captures
+          # (the second over 31 ENIs incl. both ECR interface endpoints) put
+          # cross-AZ at 16-20% of captured egress with no dominant pair. The
+          # named contributors are all structural, not one chatty workload:
+          #   - Pods reaching the Kubernetes API server. The EKS control-plane
+          #     ENIs exist ONLY in 1a (10.80.28.144) and 1c (10.80.238.102) —
+          #     there is NONE in 1b, so every node in 1b pays cross-AZ on 100%
+          #     of its API traffic. ArgoCD's application-controller and
+          #     repo-server, both in 1b, were the top two talkers measured.
+          #   - Prometheus, in 1c, scraping every node in 1a/1b.
+          #   - Alloy on all 31 nodes shipping to Loki, which sits in 1a.
+          #   - ONE private route table for all three subnets points 0.0.0.0/0
+          #     at the fck-nat ENI in 1a, so every internet byte from a 1b/1c
+          #     node crosses an AZ in both directions.
+          # (Ruled OUT by the same captures: the CI runners. They are the
+          # largest byte flow in the account at ~1.5 TB/day, but it is INBOUND
+          # from S3 over the gateway VPC endpoint — free, and AZ-less. Node
+          # `eni*` interfaces are pod veths and double-count; only `ens*` is the
+          # real NIC. Measuring the wrong device makes the runners look like the
+          # whole problem when their real egress is ~13 GB/day.)
+          #
+          # WHY THE PIN STILL CANNOT SHIP: EBS volumes are AZ-BOUND, and this
+          # pool's workloads are overwhelmingly stateful. Measured live
+          # 2026-08-03: of 88 PVs, 53 are in 1b and 19 in 1c — only 16 in 1a.
+          # A zone requirement drifts every node in the pool, and a drained
+          # stateful pod whose PV is in 1b/1c can NEVER be scheduled onto a 1a
+          # node. For the ~40 `instances: 1` CNPG clusters (aml, audit, kyc,
+          # interest, campaign, delegation, dispute, ...) there is no replica to
+          # fail over to, so each becomes permanently Pending — an outage with
+          # no automatic recovery, affecting most of the fleet at once.
+          # `observability` is no safer: Prometheus and Tempo both have their
+          # PVs in 1c, glitchtip-pg and goalert-db in 1b.
+          # Note that the usual CNPG safety check does NOT catch this — their
+          # anti-affinity is `kubernetes.io/hostname`, not zone, so nothing in
+          # any pod spec objects. Only the PV topology does.
+          #
+          # THE SUPPORTED PATH, if this is picked up: add a SECOND NodePool
+          # pinned to 1a with a higher `weight`, and leave this one as the
+          # unpinned fallback. Karpenter prefers the weighted pool for anything
+          # that can run there, while its volume-topology awareness keeps
+          # PVC-bound pods on a node in their volume's AZ — so stateless
+          # workloads migrate to 1a with no drift roll of this pool and nothing
+          # is ever stranded. Moving the existing volumes is a separate,
+          # per-database backup/restore exercise, not a NodePool edit.
           nodeClassRef = {
             group = "karpenter.k8s.aws"
             kind  = "EC2NodeClass"
@@ -313,9 +367,36 @@ resource "kubectl_manifest" "nodepool_default" {
       # expected to move it by less than $10/mo in either direction because
       # price per usable vCPU is unchanged. For scale: cross-AZ data transfer
       # (EUN1-DataTransfer-Regional-Bytes) is ~$809/mo on the same bill.
+      #
+      # 48 -> 72 vCPU / 192Gi -> 288Gi (2026-08-03, #3496). THE 48 CAP IS
+      # BINDING RIGHT NOW, and it is the third recurrence of the #809 stall the
+      # block above describes. Measured on the live cluster 2026-08-03 04:20Z:
+      # the pool held 22 nodes summing to EXACTLY 48/48 vCPU, and 12 pods had
+      # been Pending for ~35 min — audit, campaign, dispute, interest,
+      # notifications, card-issuance, standing-order, pid, copilot, psd2,
+      # statements — with Karpenter logging "all available instance types exceed
+      # limits for nodepool (NodePool=default)". No service was down (every
+      # Deployment read 1/1 Available; the Pending pods were blocked scale-ups,
+      # so HA was degraded, not lost).
+      #
+      # The deadlock is self-inflicted by the xlarge/2xlarge floor set on
+      # 2026-08-02: the 22 EXISTING nodes are the old `large` shape and already
+      # fill the cap, while the smallest node Karpenter is now allowed to
+      # provision is 4 vCPU. 48 + 4 > 48, so it can neither schedule a new pod
+      # nor surge a replacement — which also means it cannot roll the drift
+      # created by that change, or by the single-AZ pin above. A zone
+      # requirement drifts every node in the pool; without surge headroom that
+      # roll cannot start.
+      #
+      # 72 leaves 24 vCPU (6 xlarge nodes) of surge against a 50% disruption
+      # budget. It raises the CEILING, not the spend: actual `default`-pool
+      # instance spend is ~$61/mo, and the post-roll steady state should sit
+      # BELOW today's 48 because xlarge nodes pay the ~962Mi/0.26-vCPU per-node
+      # DaemonSet tax once instead of 22 times. Memory stays at 4x the CPU cap
+      # so CPU remains the single binding guardrail, per the note above.
       limits = {
-        cpu    = "48"
-        memory = "192Gi"
+        cpu    = "72"
+        memory = "288Gi"
       }
     }
   })
