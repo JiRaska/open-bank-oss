@@ -72,11 +72,12 @@ class LedgerWorkflowLivenessTest {
 
             job.onStart(StartupEvent())
 
-            // Registered, and never-succeeded reads as maximally stale (age from Instant.EPOCH) —
-            // decades, not seconds.
+            // Registered, and never-succeeded reads only as old as the registration (seeded at
+            // registration time, ADR-0237 — an EPOCH seed would read as decades and any staleness
+            // rule would fire for the whole window between a deploy and the first run).
             val neverRan = ageOf(registry, WORKFLOW)
             assertThat(neverRan).describedAs("liveness gauge was not registered at startup").isNotNull()
-            assertThat(neverRan!!).isGreaterThan(FIFTY_YEARS_SECONDS)
+            assertThat(neverRan!!).isLessThan(TOLERANCE_SECONDS)
 
             // The expected-interval gauge is the other half of the generic rule's expression;
             // without it the age has no threshold to be compared against.
@@ -104,17 +105,20 @@ class LedgerWorkflowLivenessTest {
         job.onStart(StartupEvent())
 
         // The scheduler swallows the failure by design (it must never crash) — the point of the
-        // assertion is that swallowing it must not look like a success.
+        // assertion is that swallowing it must not look like a success. With the gauge seeded at
+        // registration (ADR-0237) "not a success" means the age keeps ageing past the run instead
+        // of collapsing to ~0: wait past the tolerance, then a failed run must leave the age at or
+        // above it (a success would have reset the clock).
+        Thread.sleep(1100)
         job.revalueDaily()
 
         assertThat(ageOf(registry, WORKFLOW)!!)
             .describedAs("a failed run was recorded as a success")
-            .isGreaterThan(FIFTY_YEARS_SECONDS)
+            .isGreaterThanOrEqualTo(1.0)
     }
 
     private companion object {
         const val WORKFLOW = "ledger-fx-revaluation"
         const val TOLERANCE_SECONDS = 5.0
-        val FIFTY_YEARS_SECONDS = Duration.ofDays(50 * 365).toSeconds().toDouble()
     }
 }
