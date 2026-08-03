@@ -1,6 +1,9 @@
 # balance-service OIDC client secret from Vault → balance-service-oidc Secret
 # (key OIDC_CLIENT_SECRET), shared openbank-services realm client. creationPolicy
 # Owner: ESO creates/owns and re-creates the Secret (see es-account-service-oidc).
+#
+# Read from the SHARED KV entry `account-service`, not the `balance-service` entry this used to
+# name — one realm client, one entry (#3485, rules.yaml: oidc_client_secret_storage).
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
@@ -22,5 +25,5 @@ spec:
   data:
     - secretKey: OIDC_CLIENT_SECRET
       remoteRef:
-        key: balance-service
+        key: account-service
         property: OIDC_CLIENT_SECRET

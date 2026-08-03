@@ -74,19 +74,10 @@ Pull each current value from the live hand-made Secret and write it to Vault.
 The KV keys/properties below MUST match the `remoteRef` in each ExternalSecret.
 
 ```sh
-# account-service OIDC client secret
+# The shared openbank-services client secret. ONE entry, read by every service — see
+# "One credential, one entry" below. Historic path name; it is not account-service's own.
 vault kv put openbank/account-service \
   OIDC_CLIENT_SECRET="$(kubectl -n accounts get secret account-service-oidc \
-    -o jsonpath='{.data.OIDC_CLIENT_SECRET}' | base64 -d)"
-
-# balance-service OIDC client secret
-vault kv put openbank/balance-service \
-  OIDC_CLIENT_SECRET="$(kubectl -n balances get secret balance-service-oidc \
-    -o jsonpath='{.data.OIDC_CLIENT_SECRET}' | base64 -d)"
-
-# audit-service OIDC client secret (shared openbank-services realm client)
-vault kv put openbank/audit-service \
-  OIDC_CLIENT_SECRET="$(kubectl -n audit get secret audit-service-oidc \
     -o jsonpath='{.data.OIDC_CLIENT_SECRET}' | base64 -d)"
 
 # keycloak bootstrap admin
@@ -123,8 +114,45 @@ the original hand-made Secrets lacked, which let a prune delete them and left
 `Merge` unable to recreate them. Already-mounted env/volume secrets keep working
 across the cutover; a pod restart picks up future rotation.
 
+## One credential, one entry — the OIDC client secret convention
+
+The `openbank` realm defines exactly **one** confidential M2M client,
+`openbank-services` (`components/keycloak/realm-template.json`). Every service
+that mints a client-credentials token authenticates as it; there is no
+per-service realm client. So **every `OIDC_CLIENT_SECRET` ExternalSecret reads
+`remoteRef.key: account-service`** — the shared entry — and there is nothing to
+seed when a new service ships.
+
+That is the rule, not a habit. It is declared in `rules.yaml:
+oidc_client_secret_storage` and enforced by
+`.github/scripts/check-oidc-client-secret-wiring.py` (gate
+`oidc-client-secret-wiring`), which fails a manifest naming any other entry.
+
+Why not one entry per service: a per-service entry cannot hold a per-service
+credential — there is only one — so it holds a hand-copied duplicate. That buys
+no blast-radius isolation (rotating the client invalidates every copy at once),
+turns one rotation into N writes with nothing enumerating N, and adds a manual
+seed step per service. The seed step is the half that goes missing:
+`delegation-service` shipped pointing at an entry nobody had written and sat in
+`CreateContainerConfigError` for its whole life behind ~12 alerts naming
+everything but the cause (#3471); `mcp-service` had the same gap open, masked by
+`optional: true` (#3485). The estate was converged to the shared entry in #3485.
+
+A workload authenticating as a **different** realm client (admin-ui,
+customer-edge, the WebAuthn client) legitimately keeps its own entry. Those store
+the value under `client-secret`/`kc-client-secret`, and that property name is
+what puts them out of the rule's scope.
+
 ## Rotation (later)
 
 To rotate a secret: `vault kv put openbank/<entry> <key>=<new-value>`. ESO
 re-syncs within `refreshInterval` (1h) and updates the Secret; roll the
 consuming Deployment to pick up env-mounted values.
+
+Rotating the shared M2M client is therefore: set the new secret on
+`openbank-services` in Keycloak, `vault kv put openbank/account-service
+OIDC_CLIENT_SECRET=<new>` — **one** write — then roll every consuming Deployment.
+Env-mounted values do not hot-reload, so until the roll each pod keeps presenting
+the old secret and Keycloak rejects it: expect 401s on M2M calls between the KV
+write and the last roll. There is no way to make that window zero with a single
+client credential; sequence the roll money-path last.

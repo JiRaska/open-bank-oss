@@ -1,5 +1,10 @@
 # audit-service OIDC client secret from Vault → audit-service-oidc Secret
 # (key OIDC_CLIENT_SECRET), shared openbank-services realm client.
+#
+# Read from the SHARED KV entry `account-service`. It used to read `audit-service`, an entry that
+# seed-vault-gaps.sh populated by copying this very value out of `account-service` — one credential
+# in two places, with a Keycloak rotation obliged to find both (#3485,
+# rules.yaml: oidc_client_secret_storage).
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
@@ -21,5 +26,5 @@ spec:
   data:
     - secretKey: OIDC_CLIENT_SECRET
       remoteRef:
-        key: audit-service
+        key: account-service
         property: OIDC_CLIENT_SECRET

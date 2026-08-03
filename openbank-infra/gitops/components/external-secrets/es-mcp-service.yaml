@@ -3,16 +3,14 @@
 # OIDC_CLIENT_SECRET (openbank-services realm client, ADR-0104 D3) — the SAME shared M2M client
 # transaction-service/lending-service/settlement-service/agent-service already use, so
 # RealAccountReadPort's downstream calls (account/balance/transaction/consent-service) authenticate
-# as the identical least-privilege service principal those services already grant reads to. Own KV
-# copy per the fleet convention (each service reads its own <svc>/OIDC_CLIENT_SECRET property, all
-# holding the same underlying client secret value — see agent-service's es-agent-service.yaml).
+# as the identical least-privilege service principal those services already grant reads to. Read
+# from the SHARED KV entry `account-service` (rules.yaml: oidc_client_secret_storage).
 #
-# NOT YET SEEDED: this ExternalSecret declares the KV coordinate; an operator must still write the
-# `openbank-services` client's secret value into OpenBao at key `mcp-service`, property
-# `OIDC_CLIENT_SECRET` (manual step, same as agent-service's own bootstrap — mirrors the "Add the
-# key + restart -> real data" comment in agent-service.yaml). Until then the Deployment's
-# `optional: true` secretKeyRef keeps the pod healthy; a downstream M2M call just 401s — no
-# regression, since RealAccountReadPort is still @Vetoed (not CDI-wired) regardless.
+# This used to name key `mcp-service` and carried a "NOT YET SEEDED" note: the coordinate was
+# declared, nobody ever wrote the value, and the Deployment's `optional: true` secretKeyRef kept
+# the pod green while every downstream M2M call would have gone out unauthenticated. That is the
+# #3471 failure mode caught before it bit — and the reason a per-service KV entry is not free:
+# it adds a manual seed step, and the seed step is the half that goes missing (#3485).
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
@@ -29,5 +27,5 @@ spec:
   data:
     - secretKey: OIDC_CLIENT_SECRET
       remoteRef:
-        key: mcp-service
+        key: account-service
         property: OIDC_CLIENT_SECRET

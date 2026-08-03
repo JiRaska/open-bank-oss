@@ -2075,6 +2075,51 @@ gitops_ref_integrity:
   # naming `Secret payments/vop-oidc`; restored, it passes.
   incident: 2026-07-16
 
+# WHERE the shared M2M client secret is stored. Companion to gitops_ref_integrity above:
+# that rule asks "does the Secret this workload reads get created by anything?"; this one asks
+# "does the KV coordinate that ExternalSecret reads name the entry we agreed on?".
+oidc_client_secret_storage:
+  script: .github/scripts/check-oidc-client-secret-wiring.py
+  wired_into: .github/gates/gates.yaml    # gate id oidc-client-secret-wiring, enforced
+  # THE FACT THE RULE RESTS ON: the `openbank` realm defines exactly ONE confidential M2M client,
+  # `openbank-services` (openbank-infra/gitops/components/keycloak/realm-template.json). Every
+  # service that mints a client-credentials token authenticates as it -- there is no per-service
+  # realm client anywhere. So a per-service KV entry does not hold a per-service credential; it
+  # holds a COPY of the one credential, seeded by copying the shared entry's value
+  # (openbank-infra/scripts/seed-vault-gaps.sh does exactly that for audit-service).
+  #
+  # WHY SHARED WINS, and it is not a majority argument:
+  #   * Blast radius is a property of the CREDENTIAL, not of the KV path. One client secret,
+  #     N copies -> rotating it in Keycloak invalidates all N at once. Splitting the storage
+  #     buys no isolation it does not already lack.
+  #   * Rotation gets WORSE with copies: one Keycloak rotation becomes N KV writes, with nothing
+  #     enumerating N. The ExternalSecrets README documents rotation as a single
+  #     `vault kv put openbank/<entry>` -- true only under this convention.
+  #   * The per-service form requires a seed step per service, and that step is the one that gets
+  #     skipped. It was skipped for delegation-service (#3471: ESO `Secret does not exist`, pod in
+  #     CreateContainerConfigError for its whole life, ~12 alerts naming everything but the cause)
+  #     and it is skipped RIGHT NOW for mcp-service, whose own ExternalSecret says "NOT YET SEEDED"
+  #     while `optional: true` keeps the pod green and its M2M calls unauthenticated.
+  # WHAT IT COSTS: the ability to rotate one service's credential independently. Nothing has that
+  # today and nothing can until per-service realm clients exist -- if they ever do, this rule is
+  # wrong and should key off the client-id, not the path.
+  rule: >-
+    Every ExternalSecret data entry that delivers the shared openbank-services client secret
+    (secretKey or remoteRef.property == OIDC_CLIENT_SECRET) must read remoteRef.key ==
+    shared_kv_entry. A workload needing a DIFFERENT realm client uses a different property name
+    and is out of scope.
+  shared_kv_entry: account-service
+  # The path is historical -- it is the shared entry, not account-service's own (the seeding
+  # runbook has said so since the Vault cutover). Renaming it to something honest, e.g.
+  # openbank-services-oidc, needs an operator `vault kv put` plus a same-PR flip of every
+  # remoteRef.key; it is a one-line change HERE once that write has happened.
+  basis: one_realm_client_implies_one_kv_entry
+  # Shrink-only, and empty on purpose. An entry is an admission that a service reads a different
+  # credential under the same property name; the checker also fails on a STALE entry, so an
+  # exemption cannot quietly become the permanent state.
+  exemptions: {}
+  incident: 2026-08-02
+
 deploy_coverage:
   script: .github/scripts/check-deploy-coverage.sh
   wired_into: .github/workflows/ci.yml   # governance job -> all-green (a REQUIRED check)

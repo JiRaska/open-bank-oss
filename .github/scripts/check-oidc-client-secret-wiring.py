@@ -19,16 +19,42 @@ could not authenticate. Nothing had logged it, because the path had never execut
 `fx_conversions` is empty, so it would have failed on the FIRST conversion anyone performed. Same
 shape as the ČNB feed 404 in #2204 — correct-looking until exercised.
 
-WHAT IT CHECKS — all three from committed artifacts, so it needs no cluster access:
+WHAT IT CHECKS — all four from committed artifacts, so it needs no cluster access:
 
   1. A service whose `src/main` contains `OidcClientRequestReactiveFilter` (or the blocking
      variant) MUST have an `OIDC_CLIENT_SECRET` env ref in its Deployment.
   2. That ref must be `optional: false`. An authorization-bearing credential that is allowed to be
      missing does not degrade gracefully; it sends unauthenticated requests.
   3. The Secret it names must be created by an `ExternalSecret` in gitops.
+  4. That ExternalSecret must read the ONE agreed KV entry (`rules.yaml:
+     oidc_client_secret_storage.shared_kv_entry`), not a per-service one. See below.
 
 And the converse, which is what makes it a shape rather than a checklist: a service with NO
 OIDC-filtered client should not carry the env ref at all.
+
+Check 4 — one credential, one KV entry (#3485)
+---------------------------------------------
+Checks 1-3 answer "is this secret delivered?" and cannot answer "delivered from WHERE?". The
+estate had split into two storage conventions for one credential — measured on main 2026-08-02,
+29 ExternalSecret entries read `account-service` and 10 read `<their-own>-service` — with nothing
+recording which was intended. The split is arbitrary rather than meaningful because the `openbank`
+realm defines exactly one confidential M2M client, `openbank-services`: a per-service KV entry
+holds a COPY of the one credential, seeded by copying the shared entry
+(`openbank-infra/scripts/seed-vault-gaps.sh` does that verbatim for audit-service).
+
+That makes the copies pure cost. Rotation is per-CLIENT, so one Keycloak rotation must fan out to
+every copy, with nothing enumerating them; and each copy needs a seed step that only a human
+performs. That step is the one that gets skipped — `openbank-delegation-service` shipped pointing
+at an entry nobody had written, ESO answered `Secret does not exist`, and the pod sat in
+`CreateContainerConfigError` for its entire life behind ~12 alerts that named everything except
+the cause (#3471).
+
+Scope: an entry is IN scope when its `secretKey` or its `remoteRef.property` is
+`OIDC_CLIENT_SECRET` — the name the shared client's secret is stored under everywhere. Workloads
+authenticating as a DIFFERENT realm client (admin-ui, customer-edge, the WebAuthn client) store
+theirs under `client-secret`/`kc-client-secret` and are correctly per-entry; they are out of
+scope, and that is the distinction the property name carries. If per-service realm clients are
+ever introduced this rule becomes wrong and must key off the client-id instead of the path.
 
 Usage:  check-oidc-client-secret-wiring.py [--enforce] [--selftest]
 Advisory by default (prints ::warning, exits 0) per the repo convention; --enforce fails the build.
@@ -44,6 +70,7 @@ import yaml
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 GITOPS = REPO / "openbank-infra" / "gitops"
+RULES = REPO / "openbank-libs" / "governance" / "rules.yaml"
 FILTER_MARKERS = ("OidcClientRequestReactiveFilter", "OidcClientRequestFilter")
 ENV_NAME = "OIDC_CLIENT_SECRET"
 
@@ -103,6 +130,47 @@ def provisioned_secrets() -> set[tuple[str, str]]:
     return out
 
 
+def storage_policy() -> tuple[str, dict[str, str]]:
+    """(shared KV entry, {externalsecret-name: reason}) from rules.yaml — never a second copy."""
+    block = (yaml.safe_load(RULES.read_text(encoding="utf-8")) or {}).get(
+        "oidc_client_secret_storage",
+    ) or {}
+    shared = block.get("shared_kv_entry")
+    if not shared:
+        raise SystemExit(
+            "rules.yaml: oidc_client_secret_storage.shared_kv_entry is missing — the checker has "
+            "no convention to enforce and would silently pass everything.",
+        )
+    return shared, dict(block.get("exemptions") or {})
+
+
+def shared_client_secret_entries() -> list[tuple[str, str, str, str, pathlib.Path]]:
+    """[(namespace, externalsecret, secretKey, remoteRef.key, manifest)] delivering the shared
+    openbank-services client secret. In scope iff the secretKey or the remote property is
+    OIDC_CLIENT_SECRET — a different realm client stores its secret under a different name."""
+    out: list[tuple[str, str, str, str, pathlib.Path]] = []
+    for path in GITOPS.rglob("*.yaml"):
+        try:
+            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+        except (yaml.YAMLError, UnicodeDecodeError):
+            continue
+        for doc in docs:
+            if not isinstance(doc, dict) or doc.get("kind") != "ExternalSecret":
+                continue
+            meta = doc.get("metadata") or {}
+            for entry in (doc.get("spec") or {}).get("data") or []:
+                if not isinstance(entry, dict):
+                    continue
+                remote = entry.get("remoteRef") or {}
+                if ENV_NAME not in (entry.get("secretKey"), remote.get("property")):
+                    continue
+                out.append((
+                    meta.get("namespace", ""), meta.get("name", "?"),
+                    str(entry.get("secretKey")), str(remote.get("key")), path,
+                ))
+    return out
+
+
 def oidc_env_refs() -> dict[str, tuple[str, str, bool, pathlib.Path]]:
     """{workload: (namespace, secret-name, optional, manifest)} for every OIDC_CLIENT_SECRET ref."""
     refs: dict[str, tuple[str, str, bool, pathlib.Path]] = {}
@@ -129,8 +197,69 @@ def oidc_env_refs() -> dict[str, tuple[str, str, bool, pathlib.Path]]:
     return refs
 
 
+def storage_findings(
+    entries: list[tuple[str, str, str, str, pathlib.Path]],
+    shared: str,
+    exemptions: dict[str, str],
+) -> list[str]:
+    """One finding per ExternalSecret reading a KV entry other than the agreed shared one, plus
+    one per stale exemption. Pure, so --selftest can drive it with synthetic input."""
+    findings: list[str] = []
+    used: set[str] = set()
+    for namespace, name, secret_key, remote_key, manifest in sorted(entries):
+        if remote_key == shared:
+            continue
+        if name in exemptions:
+            used.add(name)
+            print(f"::notice::{name} reads KV entry {remote_key!r} by exemption — "
+                  f"{exemptions[name]}")
+            continue
+        findings.append(
+            f"::error file={manifest.relative_to(REPO)}::ExternalSecret {namespace}/{name} "
+            f"delivers {secret_key} from KV entry {remote_key!r}, but the shared "
+            f"openbank-services client secret lives at {shared!r} "
+            f"(rules.yaml: oidc_client_secret_storage). There is one realm client, so a "
+            f"per-service entry is a COPY somebody has to seed by hand — and that is the step "
+            f"that gets skipped, leaving ESO with `Secret does not exist` and the pod in "
+            f"CreateContainerConfigError (#3471, #3485).",
+        )
+    for stale in sorted(set(exemptions) - used):
+        findings.append(
+            f"::error::stale oidc_client_secret_storage.exemptions entry {stale!r} — it no longer "
+            f"reads a non-shared KV entry (or no longer exists). Remove it from rules.yaml, so "
+            f"the exemption list can only shrink.",
+        )
+    return findings
+
+
 def selftest() -> int:
     """Prove the scans can distinguish the states they exist to tell apart."""
+    shared, exemptions = storage_policy()
+    entries = shared_client_secret_entries()
+    if not entries:
+        print("selftest FAIL: no ExternalSecret delivers the shared client secret — the storage "
+              "scan came back empty, which passes every manifest vacuously.")
+        return 1
+    # Falsifiability, both directions, on synthetic input the tree cannot supply.
+    fake = pathlib.Path(REPO / "openbank-infra" / "gitops" / "selftest.yaml")
+    must_flag = storage_findings([("ns", "es-x", ENV_NAME, "some-other-service", fake)],
+                                 shared, {})
+    must_pass = storage_findings([("ns", "es-x", ENV_NAME, shared, fake)], shared, {})
+    if len(must_flag) != 1:
+        print(f"selftest FAIL: a per-service KV entry produced {len(must_flag)} finding(s), "
+              f"expected 1 — the convention check cannot go red.")
+        return 1
+    if must_pass:
+        print("selftest FAIL: the agreed shared KV entry was flagged — the check would fail every "
+              "conforming manifest and get switched off.")
+        return 1
+    if len(storage_findings([], shared, {"es-ghost": "gone"})) != 1:
+        print("selftest FAIL: a stale exemption was not reported — the list could grow silently.")
+        return 1
+    print(f"selftest OK (storage): {len(entries)} shared-client-secret entry/entries, "
+          f"shared_kv_entry={shared!r}; a per-service key flags, the shared key does not, "
+          f"a stale exemption flags.")
+
     minting = services_minting_tokens()
     refs = oidc_env_refs()
     provisioned = provisioned_secrets()
@@ -159,7 +288,9 @@ def main() -> int:
     minting = services_minting_tokens()
     refs = oidc_env_refs()
     provisioned = provisioned_secrets()
-    findings: list[str] = []
+    shared, exemptions = storage_policy()
+    entries = shared_client_secret_entries()
+    findings: list[str] = storage_findings(entries, shared, exemptions)
     used_pending: set[str] = set()
 
     for workload, (namespace, secret, optional, manifest) in sorted(refs.items()):
@@ -204,7 +335,8 @@ def main() -> int:
         print(line if args.enforce else line.replace("::error", "::warning", 1))
     verdict = "clean." if not findings else f"{len(findings)} finding(s) above."
     print(f"check-oidc-client-secret-wiring: {len(refs)} {ENV_NAME} ref(s), {len(minting)} "
-          f"token-minting service(s), {len(provisioned)} provisioned secret(s) — {verdict}")
+          f"token-minting service(s), {len(provisioned)} provisioned secret(s), {len(entries)} "
+          f"shared-client-secret KV read(s) against {shared!r} — {verdict}")
     return 1 if findings and args.enforce else 0
 
 
