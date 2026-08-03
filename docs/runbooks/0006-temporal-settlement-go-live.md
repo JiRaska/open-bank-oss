@@ -19,7 +19,7 @@ runbook flips settlement, in the safe order, with a stop/rollback at each gate.
 |------|-------|-----------|--------|
 | Temporal flag | `gitops/components/payments/payments-services.yaml` (settlement-service env) | `OPENBANK_TEMPORAL_ENABLED` **absent** ⇒ `openbank.temporal.enabled=false` | `true` |
 | Temporal server URL | same | `temporal-frontend.temporal.svc.cluster.local:7233` (set) | unchanged |
-| Temporal namespace | `openbank-settlement` (settlement's own `TemporalConfig` `@WithDefault`, like fx/statements — NOT `openbank-default`) | was **missing** from `temporal-namespace-registration.yaml` `NAMESPACES` → go-live NOT_FOUND | **added** ✅ |
+| Temporal namespace | `openbank-settlement` (settlement's own `TemporalConfig` `@WithDefault`, like fx/statements — NOT `openbank-default`) | was **missing** from the registration `NAMESPACES` list → go-live NOT_FOUND | **added** ✅ |
 | GL debit account | `SETTLEMENT_GL_DEBIT_ACCOUNT_ID` | `a0000000-…-0002` (2100 CZK deposit-control) | unchanged ✅ (correct for CZK) |
 | GL credit account | `SETTLEMENT_GL_CREDIT_ACCOUNT_ID` | `a0000000-…-0002` (same — payer/payee on subAccountId) | unchanged ✅ (correct for CZK) |
 | OPA enforcement | no `AUTHZ_ENFORCE` set ⇒ libs default (advisory) | `opa/settlement_activity.rego` deployed, advisory | `true` after validation |
@@ -54,7 +54,7 @@ per-currency control account.
    ```
    (SERVER_URL already present; NetworkPolicy `temporal-platform-ingress` already admits the
    payments namespace — PR #1600.) **The `openbank-settlement` namespace MUST be registered** in
-   `temporal-namespace-registration.yaml` `NAMESPACES` first — the first go-live (PR #1829) missed
+   `temporal-namespace-config.yaml` `NAMESPACES` first — the first go-live (PR #1829) missed
    this and the worker logged `NOT_FOUND: Namespace openbank-settlement is not found`; fixed by
    adding it to the registration. Verify the PostSync hook created it before relying on workflows.
 2. Roll ONE settlement replica first (canary) if running >1; otherwise watch the single pod's
@@ -101,6 +101,7 @@ flight (would fail GL currency validation until per-currency control accounts ar
 
 - ADR-0101 (Temporal durable execution) — settlement is P3 (#1471), real adapters + OPA (#1522).
 - New-Temporal-service checklist + namespace-registration mechanics: see the ADR-0101 notes and
-  `gitops/components/temporal/temporal-namespace-registration.yaml`.
+  `gitops/components/temporal/temporal-namespace-config.yaml` (the list and the script; the
+  PostSync hook and the daily reconcile CronJob both read it).
 - DST harness (ADR-0100, `openbank-simulation`) can model the settlement saga compensation under
   fault injection before/after this flip.
