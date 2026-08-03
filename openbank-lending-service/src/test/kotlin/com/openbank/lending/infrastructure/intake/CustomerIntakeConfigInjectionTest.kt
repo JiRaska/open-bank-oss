@@ -4,6 +4,7 @@
 
 package com.openbank.lending.infrastructure.intake
 
+import com.openbank.lending.infrastructure.compliance.OriginationConfig
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -53,11 +54,18 @@ class CustomerIntakeConfigInjectionTest {
             "lending.intake.nominal-annual-rate" to "0.123",
             "lending.intake.min-amount" to "77",
             "lending.intake.max-term-months" to "84",
+            // The single-default case, folded in here rather than given its own @QuarkusTest.
+            // A second test class with a different @TestProfile forces another full Quarkus boot,
+            // and the lending test task already OOM'd on this PR when it had two.
+            "lending.origination.auto-approve" to "true",
         )
     }
 
     @Inject
     lateinit var config: CustomerIntakeConfig
+
+    @Inject
+    lateinit var origination: OriginationConfig
 
     @Test
     fun `every field comes from configuration, not from the Kotlin constructor defaults`() {
@@ -78,5 +86,15 @@ class CustomerIntakeConfigInjectionTest {
         // Numeric bounds: Kotlin defaults 5000 and 120.
         assertThat(config.minAmount).isEqualByComparingTo(BigDecimal("77"))
         assertThat(config.maxTermMonths).isEqualTo(84)
+    }
+
+    @Test
+    fun `a single Kotlin default is enough to break injection`() {
+        // CustomerIntakeConfig had TEN defaulted parameters, so "all of them" was an available and
+        // wrong explanation. OriginationConfig has exactly ONE, and before the fix this assertion
+        // failed identically — which is what makes the rule per-parameter rather than per-class.
+        assertThat(origination.autoApprove)
+            .describedAs("lending.origination.auto-approve set to true in the profile")
+            .isTrue()
     }
 }
