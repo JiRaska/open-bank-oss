@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.90.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.90.1...admin-ui-v0.90.2) (2026-08-03)
+
+
+### Bug Fixes
+
+* **admin-ui:** refresh the customer-app dossier version — it is blocking every PR ([#3561](https://github.com/JiRaska/open-bank-oss/issues/3561)) ([653d1be](https://github.com/JiRaska/open-bank-oss/commit/653d1bed0ea6d20f493898252e30336beb798bbd))
+
 ## [0.90.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.90.0...admin-ui-v0.90.1) (2026-08-03)
 
 
