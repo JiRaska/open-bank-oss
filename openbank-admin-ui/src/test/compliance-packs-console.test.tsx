@@ -90,10 +90,16 @@ describe('compliance pack activation console', () => {
     vi.stubGlobal('fetch', mockFetch({}))
     render(React.createElement(Providers, null, React.createElement(CompliancePacksPage)))
 
-    await waitFor(() => expect(screen.getByTestId('no-active')).toBeTruthy())
+    // Wait on the TEXT, not on the node. `no-active` is rendered on the very first pass —
+    // `active` starts empty — so waiting for the node to exist succeeds before any fetch has
+    // resolved, and the cell still reads "Not loaded.". Written the old way this assertion
+    // passed or failed on timing alone, and it started failing the first time the admin-ui
+    // suite actually ran on a PR that touched this directory.
     // With enforcement on and no pack, origination is refused fleet-wide. That is the whole
     // reason this screen exists before the flag flip, so it has to be said on the screen.
-    expect(screen.getByTestId('no-active').textContent).toMatch(/LENDING_ENFORCE_PACK/)
+    await waitFor(() =>
+      expect(screen.getByTestId('no-active').textContent).toMatch(/LENDING_ENFORCE_PACK/),
+    )
   })
 
   it('a refused pending read never renders as "nothing pending"', async () => {
