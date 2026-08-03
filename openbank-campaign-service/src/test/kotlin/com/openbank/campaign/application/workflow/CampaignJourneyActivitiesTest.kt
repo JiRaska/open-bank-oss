@@ -89,6 +89,7 @@ class CampaignJourneyActivitiesTest {
             override suspend fun countByCampaign(campaignId: UUID, outcome: SendOutcome?) = 0L
             override suspend fun countByStepAndOutcome(campaignId: UUID) = emptyList<StepOutcomeCount>()
             override suspend fun countAllByCampaignAndOutcome() = emptyList<CampaignOutcomeCount>()
+            override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID) = 0
         }
         val notificationSend = object : NotificationSendPort {
             override suspend fun requestSend(
