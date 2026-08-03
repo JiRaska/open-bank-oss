@@ -1554,7 +1554,12 @@ class CustomerEdgeResource(
      * a query parameter and not `X-Customer-Party-Id`, because that header is the ownership guard
      * and would 404 exactly the delegate being asked about.
      */
-    private fun fetchDelegatedPaymentDecision(
+    // `internal`, not private: this method IS the outgoing request in the consumer pact
+    // (CustomerEdgeDelegatedPaymentPactConsumerTest), which drives it against the Pact mock server
+    // so the request under contract is the one production builds. Reflecting the request off the
+    // real code while the expectation stays a literal is the asymmetry that makes the pact able to
+    // fail (#2290); a test that built the URL itself would agree with itself and prove nothing.
+    internal fun fetchDelegatedPaymentDecision(
         accountId: UUID,
         partyId: UUID,
         amount: String,
