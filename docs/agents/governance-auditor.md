@@ -12,7 +12,9 @@ Post-hoc auditor of merged-PR governance compliance. For every PR merged to `mai
 the GitHub API that `rules.yaml`'s own review rules were actually followed: approval count against
 the money-path/default requirement, `docs/threat-models/<service>.md` presence for a money-path
 change, merge-commit GPG verification, a linked issue in the PR body, and (best-effort) an
-admin/override-flag bypass. Runs reactively on a PR-merged webhook — its natural trigger — plus a
+admin/override-flag bypass. ADR-0031 Phase 4 extends this charter into **money-path READ-ONLY
+scope** for governance/config/audit metadata only; it still cannot read raw transaction payloads or
+act on any money-path system. Runs reactively on a PR-merged webhook — its natural trigger — plus a
 daily 04:30 UTC catch-up sweep in case a webhook delivery is lost. Proposes a compliance-incident
 ticket through the HITL queue for a human to triage; it never merges, approves, or re-runs
 anything.
@@ -37,6 +39,8 @@ liveness, applied here to the governance axis instead.
   exception, a process gap, or a real bypass? The agent cannot make that call.
 - `every: proposal` — the agent never merges, approves, or re-runs anything; segregation of duties
   matches every other control-plane agent.
+- Money-path scope stays **metadata-only**: governance facts, config / policy state, and masked audit
+  evidence. The ADR-0030 threat model for this expansion is `docs/threat-models/governance-auditor.md`.
 - `tokens_per_run: 50000` — capped so the agent's own running cost stays a rounding error next to
   what a caught governance bypass is worth.
 
