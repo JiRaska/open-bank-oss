@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.91.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.91.1...admin-ui-v0.91.2) (2026-08-03)
+
+
+### Bug Fixes
+
+* **admin-ui:** build with webpack so GlitchTip gets source maps at all ([#3611](https://github.com/JiRaska/open-bank-oss/issues/3611)) ([7cf9ba1](https://github.com/JiRaska/open-bank-oss/commit/7cf9ba1912bf47c2291144c6a6b1cf572e2583c4))
+
 ## [0.91.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.91.0...admin-ui-v0.91.1) (2026-08-03)
 
 
