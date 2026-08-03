@@ -35,7 +35,7 @@ import java.util.UUID
 @ApplicationScoped
 // activity wiring: repos + ports + policy config in one place, per the worker-registrar pattern
 @Suppress("LongParameterList")
-class CampaignJourneyActivitiesImpl(
+open class CampaignJourneyActivitiesImpl(
     private val campaigns: CampaignRepository,
     private val enrolments: EnrolmentRepository,
     private val sendLog: SendLogRepository,
@@ -55,6 +55,11 @@ class CampaignJourneyActivitiesImpl(
         campaigns.findById(campaignId)?.steps ?: emptyList()
     }
 
+    // The publish failure below is caught broadly on purpose: the point is that NO handoff failure
+    // may leave the send log without a row, and narrowing the catch would re-open the gap for
+    // whichever exception type the Kafka client happens to raise next (#3581). It is rethrown, so
+    // nothing is swallowed.
+    @Suppress("TooGenericExceptionCaught")
     override fun deliverStep(campaignId: UUID, partyId: UUID, stepOrder: Int): StepOutcome = runBlockingOnWorker {
         val campaign = campaigns.findById(campaignId) ?: return@runBlockingOnWorker StepOutcome.SUPPRESSED
         val step =
@@ -78,7 +83,26 @@ class CampaignJourneyActivitiesImpl(
         }
 
         // ADR-0200 D3 — delivery goes through notification-service, never direct.
-        notificationSend.requestSend(partyId, step.template, recipientFor(partyId), step.variables)
+        //
+        // The order below is the fix for issue #3581: the send log may only be written AFTER the
+        // handoff has been observed to succeed, and a handoff that failed must leave a FAILED row
+        // rather than nothing. Previously a refused publish let the exception escape the activity
+        // with no row written at all, so the funnel silently lost the party — a campaign that
+        // reached nobody and a console that had no way to say so.
+        //
+        // What SENT claims here is exactly "notification-service accepted the request onto
+        // `openbank.notification.requests`", not "the customer received it": the address is
+        // resolved and the mail is sent on the far side, and no delivery outcome is fed back yet.
+        // That feedback loop is the remaining half of #3581 and is tracked separately.
+        try {
+            notificationSend.requestSend(partyId, step.template, recipientFor(partyId), step.variables)
+        } catch (e: Exception) {
+            record(campaignId, partyId, stepOrder, SendOutcome.FAILED)
+            // Rethrown on purpose: Temporal retries the activity, and the FAILED row above is the
+            // durable evidence that this attempt happened. FAILED rows do not consume the
+            // frequency cap (`countRecentForParty` counts SENT only), so a retry is not penalised.
+            throw e
+        }
         record(campaignId, partyId, stepOrder, SendOutcome.SENT)
         StepOutcome.SENT
     }
@@ -122,8 +146,17 @@ class CampaignJourneyActivitiesImpl(
         }
     }
 
-    // The recipient address is resolved by notification-service from party data; the campaign
-    // never carries an e-mail address itself (ADR-0200 D3 — no PII duplication).
+    /**
+     * The `recipient` field of the notification request, deliberately the party id and NOT an
+     * address (ADR-0200 D3 — the campaign holds no PII).
+     *
+     * This comment used to claim notification-service resolved the address from party data, and
+     * nothing did: the UUID reached `Mail.withHtml(req.recipient, …)` verbatim as the SMTP
+     * envelope (#3581). notification-service now resolves a non-address recipient against
+     * party-service and fails closed when it cannot, which is what makes this line true —
+     * account-service and sca-service pass the party id here too, so the resolution belongs
+     * there, once, rather than in each caller.
+     */
     private fun recipientFor(partyId: UUID): String = partyId.toString()
 
     /**
@@ -133,8 +166,13 @@ class CampaignJourneyActivitiesImpl(
      * class and deliver nothing (same shape as the @Scheduled sweep in #2148/#2187). Bridge
      * through [VertxContextSupport] instead, exactly as `DomesticPaymentActivitiesImpl.vtx` does
      * — safe here precisely because an activity thread is never an event loop.
+     *
+     * `protected open` for the same reason `FxActivitiesImpl.vtx` is: a unit test cannot supply a
+     * Vert.x context, so it overrides this one bridge with `runBlocking` and drives the real
+     * activity logic. Without the seam `deliverStep` has no test at any layer — which is how the
+     * ordering defect in #3581 shipped.
      */
-    private fun <T> runBlockingOnWorker(block: suspend () -> T): T =
+    protected open fun <T> runBlockingOnWorker(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni() }
 
     companion object {
