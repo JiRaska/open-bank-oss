@@ -13,7 +13,7 @@
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import React, { Suspense } from 'react'
-import { render, screen, cleanup, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, waitFor, act } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { SessionProvider } from '@/components/auth/SessionProvider'
 import {
@@ -151,7 +151,7 @@ describe('application flow page', () => {
 
   it('draws the real path and the actors behind each step', async () => {
     vi.stubGlobal('fetch', mockFetch({ status: 200, body: APPLICATION }, { status: 200, body: EVIDENCE }))
-    render(React.createElement(Providers, null, React.createElement(ApplicationFlowPage, { params })))
+    await act(async () => { render(React.createElement(Providers, null, React.createElement(ApplicationFlowPage, { params }))) })
 
     await waitFor(() => expect(screen.getByTestId('origination-flow')).toBeTruthy())
     expect(screen.getByTestId('node-KYC_PENDING').getAttribute('data-tone')).toBe('done')
@@ -165,7 +165,7 @@ describe('application flow page', () => {
       { status: 200, body: APPLICATION },
       { status: 403, body: { error: 'forbidden' } },
     ))
-    render(React.createElement(Providers, null, React.createElement(ApplicationFlowPage, { params })))
+    await act(async () => { render(React.createElement(Providers, null, React.createElement(ApplicationFlowPage, { params }))) })
 
     await waitFor(() => expect(screen.getByTestId('evidence-restricted')).toBeTruthy())
     expect(screen.queryByTestId('evidence-empty')).toBeNull()
@@ -174,7 +174,7 @@ describe('application flow page', () => {
 
   it('shows decision and disbursement as disabled with the reason, not hidden', async () => {
     vi.stubGlobal('fetch', mockFetch({ status: 200, body: APPLICATION }, { status: 200, body: EVIDENCE }))
-    render(React.createElement(Providers, null, React.createElement(ApplicationFlowPage, { params })))
+    await act(async () => { render(React.createElement(Providers, null, React.createElement(ApplicationFlowPage, { params }))) })
 
     await waitFor(() => expect(screen.getByTestId('decide-disabled')).toBeTruthy())
     // Hiding them would teach an operator the platform cannot do it; disabling with a reason
