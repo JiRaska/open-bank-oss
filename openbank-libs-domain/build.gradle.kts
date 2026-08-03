@@ -32,23 +32,16 @@ dependencies {
     // Internal detail of domain.identifiers.Ids — services mint ids via EntityId.random() factories.
     implementation(libs.java.uuid.generator)
 
-    // Logging API used by OutboxDispatch, FlagExposure, StaticServiceTokenProvider.
-    // compileOnly: jboss-logging is provided at runtime by every Quarkus app via quarkus-core.
-    // Not a framework dependency — it is a logging facade that runs standalone.
-    compileOnly("org.jboss.logging:jboss-logging:3.6.2.Final")
-
-    // CDI interceptor binding annotations used by Authorize and FeatureFlag (@InterceptorBinding,
-    // @Nonbinding). compileOnly: provided at runtime by every Quarkus app via quarkus-arc/cdi.
-    compileOnly("jakarta.interceptor:jakarta.interceptor-api:2.2.0")
-    compileOnly("jakarta.enterprise:jakarta.enterprise.cdi-api:4.1.0")
+    // ADR-0122: this module must stay framework-free (no jakarta/Quarkus/JBoss imports).
+    // Guarded by .github/scripts/check-libs-domain-purity.sh. Anything needing CDI
+    // (@Authorize, @FeatureFlag), HTTP (OpaSidecarPolicyDecisionPoint, FlagdProvider) or
+    // a logging facade (OutboxDispatch, LoggingExposurePublisher, StaticServiceTokenProvider)
+    // lives in openbank-libs-runtime under the same package names.
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    // FlagdProviderTest and OpaSidecarPolicyDecisionPointTest drive real HttpClient calls over
-    // a mock server; no framework needed — they are pure JVM.
-    testImplementation("org.jboss.logging:jboss-logging:3.6.2.Final")
     // Property-based tests on Money arithmetic invariants (ADR-0011 L1, issue #469). Same
     // version pin as openbank-ledger-service/openbank-balance-service's JournalEntryPropertyTest/
     // BalancePropertyTest — kept as a direct GAV like theirs rather than the shared catalog, since

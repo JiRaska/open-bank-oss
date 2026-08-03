@@ -48,31 +48,9 @@ data class FlagExposure(
  * Port for emitting [FlagExposure]s — the experimentation counterpart to
  * `AuditEventPublisher` / `ApprovalEventPublisher`. A service running an
  * experiment provides a Kafka-backed implementation (`@Alternative @Priority`);
- * the [LoggingExposurePublisher] default keeps services that run no experiments
- * working with zero wiring.
+ * the `LoggingExposurePublisher` default (openbank-libs-runtime) keeps services
+ * that run no experiments working with zero wiring.
  */
 interface ExposurePublisher {
     suspend fun publish(exposure: FlagExposure)
-}
-
-/**
- * Default [ExposurePublisher]: logs the exposure on a dedicated category so it is
- * visible without an analytics pipeline, and so an accidentally-shipped default
- * (where a Kafka impl was expected) is grep-able. Mirrors
- * `LoggingAuditEventPublisher`.
- */
-class LoggingExposurePublisher : ExposurePublisher {
-    private val log = org.jboss.logging.Logger.getLogger("openbank.flags.exposure")
-
-    override suspend fun publish(exposure: FlagExposure) {
-        log.infof(
-            "flag exposure exposureId=%s flag=%s variant=%s key=%s reason=%s traceId=%s",
-            exposure.exposureId,
-            exposure.flagKey,
-            exposure.variant,
-            exposure.targetingKey,
-            exposure.reason,
-            exposure.traceId,
-        )
-    }
 }

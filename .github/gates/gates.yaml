@@ -1249,6 +1249,20 @@ gates:
     run: |
       bash .github/scripts/check-exception-mapper-collision.sh .
 
+  # libs-domain must stay framework-free (ADR-0122, issue #3670). The split only
+  # works as a governance claim if the domain half has zero jakarta/Quarkus/JBoss
+  # imports — the @Authorize/@FeatureFlag interceptor bindings and a JBoss logging
+  # facade lived there for months while the docs claimed purity. Framework-bound
+  # classes move to libs-runtime under the same package name, so consumers never
+  # see the move. 0 violations on origin/main at introduction — regression guard.
+  # ENFORCED.
+  - id: libs-domain-framework-free
+    name: "openbank-libs-domain stays framework-free (ADR-0122, enforced)"
+    group: kotlin
+    mode: enforced
+    run: |
+      bash .github/scripts/check-libs-domain-purity.sh .
+
   # openbank.outbox.dispatch-enabled guard (the CLAUDE.md "outbox footgun":
   # a service whose OutboxDispatcher actually gates on this flag silently
   # never dispatches if it's left at its false default — no error,

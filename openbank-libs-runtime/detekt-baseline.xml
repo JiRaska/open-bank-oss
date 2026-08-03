@@ -20,9 +20,15 @@
     <ID>MagicNumber:DomainMetrics.kt$DomainMetrics$0.95</ID>
     <ID>MagicNumber:DomainMetrics.kt$DomainMetrics$0.99</ID>
     <ID>MagicNumber:FeatureFlagInterceptor.kt$FeatureFlagInterceptor$110</ID>
+    <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$200</ID>
+    <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$299</ID>
+    <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$404</ID>
+    <ID>MagicNumber:OpaSidecarPolicyDecisionPoint.kt$OpaSidecarPolicyDecisionPoint$200</ID>
+    <ID>MagicNumber:OpaSidecarPolicyDecisionPoint.kt$OpaSidecarPolicyDecisionPoint$299</ID>
     <ID>MagicNumber:RateLimitFilter.kt$RateLimitFilter$429</ID>
     <ID>MagicNumber:RedisIdempotencyStore.kt$RedisIdempotencyStore$3</ID>
     <ID>ThrowsCount:AuthorizeInterceptor.kt$AuthorizeInterceptor$@AroundInvoke fun authorize(ctx: InvocationContext): Any?</ID>
+    <ID>TooGenericExceptionCaught:OutboxDispatch.kt$OutboxDispatch$ex: Exception</ID>
     <ID>TooManyFunctions:DomainMetrics.kt$DomainMetrics</ID>
     <ID>UnusedParameter:ApiVersionResponseFilter.kt$ApiVersionResponseFilter$path: String</ID>
     <ID>UnusedParameter:DocsResourceSchemaGuardTest.kt$DocsResourceSchemaGuardTest$lang: String = "en"</ID>

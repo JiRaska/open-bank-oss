@@ -72,7 +72,7 @@ class OpaSidecarPolicyDecisionPoint(
             ),
         )
         put("action", action)
-        if (resource != null) put("resource", mapOf("type" to resource.type, "id" to resource.id))
+        resource?.let { put("resource", mapOf("type" to it.type, "id" to it.id)) }
         put("attributes", attributes)
     }
 

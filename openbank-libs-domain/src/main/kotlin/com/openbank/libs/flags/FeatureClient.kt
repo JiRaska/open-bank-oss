@@ -14,7 +14,7 @@ package com.openbank.libs.flags
  * upstream `dev.openfeature:sdk` is a drop-in and so that the FE (admin-ui via
  * BFF) and KMP customer app speak the same contract. Implementations:
  *
- *   - [FlagdProvider]          (prod)  → OFREP over `localhost:8016`
+ *   - `FlagdProvider`          (prod)  → OFREP over `localhost:8016` (openbank-libs-runtime)
  *   - [DefaultsFeatureClient]  (fallback / advisory) → always returns the default
  *   - [StaticFeatureClient]    (tests) → in-memory map of overrides
  *

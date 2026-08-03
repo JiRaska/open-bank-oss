@@ -54,7 +54,7 @@ data class PartitionMaintenanceReport(
 )
 
 /**
- * Orchestrates one maintenance pass. Analogous to [com.openbank.libs.persistence.outbox.OutboxDispatch]:
+ * Orchestrates one maintenance pass. Analogous to `OutboxDispatch` (openbank-libs-runtime):
  * the service annotates a `@Scheduled` method that calls [maintain], injecting its own
  * [PartitionExecutor]. No CDI, no reactive types here.
  *

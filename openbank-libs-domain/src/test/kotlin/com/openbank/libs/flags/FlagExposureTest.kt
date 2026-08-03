@@ -4,7 +4,6 @@
 
 package com.openbank.libs.flags
 
-import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -29,13 +28,5 @@ class FlagExposureTest {
         val eval = FlagEvaluation("ratio", 0.25, reason = EvaluationReason.STATIC)
 
         assertThat(FlagExposure.of(eval, targetingKey = null).variant).isEqualTo("0.25")
-    }
-
-    @Test
-    fun `logging publisher emits without throwing`(): Unit = runBlocking {
-        val publisher: ExposurePublisher = LoggingExposurePublisher()
-        val eval = FlagEvaluation("f", true, variant = "on", reason = EvaluationReason.TARGETING_MATCH)
-
-        publisher.publish(FlagExposure.of(eval, targetingKey = "k"))
     }
 }

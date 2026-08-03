@@ -77,9 +77,6 @@
     <ID>MagicNumber:Easter.kt$Easter$7</ID>
     <ID>MagicNumber:Easter.kt$Easter$8</ID>
     <ID>MagicNumber:FeatureFlagInterceptor.kt$FeatureFlagInterceptor$110</ID>
-    <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$200</ID>
-    <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$299</ID>
-    <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$404</ID>
     <ID>MagicNumber:Iban.kt$Iban$4</ID>
     <ID>MagicNumber:Iban.kt$Iban.Companion$10</ID>
     <ID>MagicNumber:Iban.kt$Iban.Companion$15</ID>
@@ -87,8 +84,6 @@
     <ID>MagicNumber:Iban.kt$Iban.Companion$4</ID>
     <ID>MagicNumber:AnalyticsIntegrity.kt$AnalyticsIntegrity$0xFF</ID>
     <ID>MagicNumber:AnalyticsIntegrity.kt$AnalyticsIntegrity$4</ID>
-    <ID>MagicNumber:OpaSidecarPolicyDecisionPoint.kt$OpaSidecarPolicyDecisionPoint$200</ID>
-    <ID>MagicNumber:OpaSidecarPolicyDecisionPoint.kt$OpaSidecarPolicyDecisionPoint$299</ID>
     <ID>MagicNumber:PiiMasking.kt$PiiMask$4</ID>
     <ID>MagicNumber:PiiMasking.kt$PiiMask$6</ID>
     <ID>MagicNumber:PiiMasking.kt$PiiMask$8</ID>
@@ -119,7 +114,6 @@
     <ID>NewLineAtEndOfFile:IbanTest.kt$com.openbank.libs.domain.account.IbanTest.kt</ID>
     <ID>NewLineAtEndOfFile:MoneyTest.kt$com.openbank.libs.domain.money.MoneyTest.kt</ID>
     <ID>ThrowsCount:AuthorizeInterceptor.kt$AuthorizeInterceptor$@AroundInvoke fun authorize(ctx: InvocationContext): Any?</ID>
-    <ID>TooGenericExceptionCaught:OutboxDispatch.kt$OutboxDispatch$ex: Exception</ID>
     <ID>TooManyFunctions:DomainMetrics.kt$DomainMetrics</ID>
     <ID>TooManyFunctions:Money.kt$Money</ID>
     <ID>UnusedParameter:ApiVersionResponseFilter.kt$ApiVersionResponseFilter$path: String</ID>
