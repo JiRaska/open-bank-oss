@@ -68,8 +68,45 @@ classify_describe() {  # stdin: stderr text; $1: exit code
   esac
 }
 
+# ── name validation ───────────────────────────────────────────────────────────────────────────
+# The `openbank-` prefix is the whole security boundary of the IAM grant this script depends on
+# (arc-runners.tf, EcrCreateServiceRepository, scoped to repository/openbank-*). IAM enforces it
+# server-side, which is the right place for it — but the caller is not always the fleet list:
+# auto-deploy.yml line ~180 fills CANDIDATES from `github.event.inputs.services`, so a
+# workflow_dispatch supplies this argument directly. Checking here means a bad name is refused
+# before it becomes an API call, with a message that says what is wrong, instead of an
+# AccessDenied that reads like a broken IAM grant.
+#
+# Hard failure, not the fail-open the rest of this script uses. Fail-open is the correct answer
+# when we cannot OBSERVE the registry — that is an outage, and the build should proceed. A name
+# that is not a fleet service name is a caller bug, and continuing would push an image to a
+# repository nobody meant to create.
+validate_repo_name() {
+  local repo="$1"
+  case "$repo" in
+    openbank-*) ;;
+    *)
+      echo "ERROR: refusing to touch ECR repository '${repo}': it does not start with 'openbank-'." >&2
+      echo "       That prefix is the boundary of the IAM grant (arc-runners.tf)." >&2
+      return 1 ;;
+  esac
+  # ECR's own rule, minus the paths and separators the fleet does not use: lowercase
+  # alphanumerics and hyphens, starting and ending alphanumeric, at most 256 characters.
+  if ! printf '%s' "$repo" | grep -qE '^openbank-[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
+    echo "ERROR: refusing to touch ECR repository '${repo}': not a valid fleet repository name." >&2
+    echo "       Expected openbank-<lowercase alphanumerics and hyphens>, ending alphanumeric." >&2
+    return 1
+  fi
+  if [ "${#repo}" -gt 256 ]; then
+    echo "ERROR: refusing to touch ECR repository '${repo}': longer than ECR's 256-character limit." >&2
+    return 1
+  fi
+  return 0
+}
+
 ensure() {
   local repo="$1" region="$2" err rc verdict
+  validate_repo_name "$repo" || return 1
   err="$(aws ecr describe-repositories --repository-names "$repo" --region "$region" 2>&1 >/dev/null)"
   rc=$?
   verdict="$(printf '%s' "$err" | classify_describe "$rc")"
@@ -200,9 +237,38 @@ STUB
     echo "selftest FAIL: absent + un-creatable exited 0 — the build would die at the push instead"; rm -rf "$tmp"; return 1
   fi
 
+  # ── name validation ─────────────────────────────────────────────────────────────────────────
+  # The point of each rejection case is that it must happen BEFORE any AWS call: the prefix is
+  # the IAM boundary, and an argument that reaches the API is one the boundary had to catch.
+  run_name_case() {  # $1 candidate name -> "<rc> <calls>"
+    : > "${tmp}/calls"
+    STUB_CALLS="${tmp}/calls" PATH="${tmp}:$PATH" DESCRIBE=present CREATE_OK=1 \
+      bash -c 'set -uo pipefail; source "$0" --lib; ensure "$1" eu-north-1' "$SELF" "$1" >"${tmp}/out" 2>&1
+    echo "$? $(wc -l < "${tmp}/calls" | tr -d ' ')"
+  }
+
+  local bad
+  for bad in "evil-repo" "docker-hub/nginx" "openbank-" "openbank-UPPER" "openbank-trailing-" \
+             "openbank-svc; rm -rf /" "../openbank-escape" ""; do
+    set -- $(run_name_case "$bad")
+    if [ "$1" = "0" ]; then
+      echo "selftest FAIL: name '${bad}' was accepted"; rm -rf "$tmp"; return 1
+    fi
+    if [ "${2:-0}" != "0" ]; then
+      echo "selftest FAIL: name '${bad}' was rejected but only AFTER calling aws"; rm -rf "$tmp"; return 1
+    fi
+  done
+
+  # ...and a legitimate name still goes through.
+  set -- $(run_name_case "openbank-delegation-service")
+  if [ "$1" != "0" ]; then
+    echo "selftest FAIL: a valid fleet name was rejected (rc=$1)"; rm -rf "$tmp"; return 1
+  fi
+
   rm -rf "$tmp"
   echo "selftest OK: present/denied/unknown/absent+ok/absent+denied all behave — denied and unknown"
   echo "             never create and never claim absence, which is the #3453 regression."
+  echo "             Names outside openbank-* are refused before any AWS call is made."
   return 0
 }
 
