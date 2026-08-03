@@ -169,10 +169,7 @@ class ConsentResource(
     @POST
     @Path("/{id}/activate")
     @Authorize(action = "consent.activate", resource = "#id")
-    suspend fun activate(
-        @PathParam("id") id: UUID,
-        @QueryParam("scaSessionId") scaSessionId: UUID?,
-    ): ConsentResponse {
+    suspend fun activate(@PathParam("id") id: UUID, @QueryParam("scaSessionId") scaSessionId: UUID?): ConsentResponse {
         // #3104 — nullable + guard, because a guard in a non-nullable parameter's body is dead code.
         requireNotNull(scaSessionId) { "query parameter 'scaSessionId' is required" }
         return ConsentResponse.from(activateConsent.activateConsent(id, scaSessionId))

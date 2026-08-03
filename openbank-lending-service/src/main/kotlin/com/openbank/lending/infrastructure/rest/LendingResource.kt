@@ -244,13 +244,13 @@ class LendingResource(
     fun getApplication(@PathParam("id") id: UUID): Uni<Response> = apply.getApplication(LoanApplicationId(id))
         .map { it?.let { a -> Response.ok(a).build() } ?: Response.status(404).build() }
 
+    // #3104 — non-suspend, so an absent `partyId` threw Intrinsics.checkNotNullParameter at the
+    // method boundary and answered 500. Nullable + requireNotNull is the only shape in which a
+    // guard runs at all; requireNotNull returns the value, so the expression body survives.
     @GET
     @Path("/applications")
     @Operation(summary = "List a party's loan applications")
     @Authorize(action = "lending.list", resource = "")
-    // #3104 — non-suspend, so an absent `partyId` threw Intrinsics.checkNotNullParameter at the
-    // method boundary and answered 500. Nullable + requireNotNull is the only shape in which a
-    // guard runs at all; requireNotNull returns the value, so the expression body survives.
     fun listApplications(@QueryParam("partyId") partyId: UUID?) =
         apply.listApplications(requireNotNull(partyId) { "query parameter 'partyId' is required" })
 
@@ -337,6 +337,7 @@ class LendingResource(
     @Authorize(action = "lending.read", resource = "#id")
     fun getSchedule(@PathParam("id") id: UUID) = servicing.getSchedule(LoanId(id))
 
+    // #3104 — see listApplications above.
     @GET
     @Path("/loans")
     @Operation(summary = "List a party's loans")
@@ -349,7 +350,6 @@ class LendingResource(
         "ROLE_ADMIN",
     )
     @Authorize(action = "lending.list", resource = "")
-    // #3104 — see listApplications above.
     fun listLoans(@QueryParam("partyId") partyId: UUID?) =
         servicing.listLoans(requireNotNull(partyId) { "query parameter 'partyId' is required" })
 

@@ -80,12 +80,12 @@ class SddResource(
         ),
     ).map { Response.status(Response.Status.CREATED).entity(MandateResponse.of(it)).build() }
 
+    // #3104 — non-suspend, so an absent `accountId` threw at the method boundary and answered 500.
     @GET
     @Path("/mandates")
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
     @Authorize(action = "sdd.list")
     @Operation(summary = "List an account's mandates")
-    // #3104 — non-suspend, so an absent `accountId` threw at the method boundary and answered 500.
     fun listMandates(@QueryParam("accountId") accountId: UUID?): Uni<Response> =
         list.list(requireNotNull(accountId) { "query parameter 'accountId' is required" })
             .map { ms -> Response.ok(ms.map(MandateResponse::of)).build() }
