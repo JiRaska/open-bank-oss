@@ -194,6 +194,16 @@ gates:
       python3 .github/scripts/check-agent-virtual-keys.py --self-test
       python3 .github/scripts/check-agent-virtual-keys.py --enforce
 
+  - id: single-replica-rollout-strategy
+    name: "one-replica workloads declare their rollout strategy (issue #3545, enforced, baseline-ratcheted)"
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-single-replica-rollout-strategy.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-single-replica-rollout-strategy.py --enforce \
+        --baseline .github/single-replica-rollout-strategy-baseline.txt
+
   - id: gen-network-policies-drift-gate
     name: "gen-network-policies drift gate (ADR-0081, issue #854)"
     group: gitops
