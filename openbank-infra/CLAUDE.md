@@ -19,6 +19,25 @@ out of it (they are path-scoped, not less important — several are live-inciden
   `check-roles-allowed-realm.py` was green the whole time: it compares the code to the TEMPLATE.
   Verify against the realm that actually runs (`kcadm.sh get roles -r openbank`) before believing any
   claim about which roles exist, and apply additions with `kcadm` — the file alone will not.
+- **"Template agrees with the live realm" is NOT "the realm is reproducible" — there is a THIRD
+  artifact, and it is the one a rebuild reads.** `keycloak.yaml`'s `realm-import` volume projects the
+  Secrets `keycloak-realm-import` / `keycloak-customers-realm-import`, which ExternalSecrets fills
+  from Vault KV; the committed template feeds nothing. So the two comparisons that existed
+  (`check-roles-allowed-realm.py` code→template, `check-realm-role-parity.py` template→live) can
+  BOTH be green about a realm that a green-field rebuild would not reproduce, and were: measured
+  2026-08-03 (#3246) the import artifact held 4 roles / 2 clients / 1 user against the template's
+  14 / 10 / 6, and 1 client against the customers template's 3 — while template and live agreed
+  exactly in both realms. It is a strict ANCESTOR, never a divergent fork, which is why the agreed
+  direction is Vault-converges-to-repo (nothing live is dropped) rather than scoping the enforced
+  gate down to the 4-role blob. `check-realm-import-parity.py` is the third comparison, run by the
+  `keycloak-realm-drift` CronJob off the SAME projected Secrets Keycloak mounts — never a second
+  copy, or it drifts from the one that deploys. It reads NAMES only: the template carries
+  `__PLACEHOLDER__` where the artifact carries real client secrets, and the report is a ConfigMap.
+  Today's gap is baselined in its `KNOWN_STALE` (#2540's ordering point: a detector shipped before
+  the reconcile is an alert that is the resting state from minute one, clearable only by a Vault
+  write). The reconcile procedure is `docs/runbooks/0009-keycloak-realm-import-reconcile.md`; the
+  `vault kv put` recipe in `components/external-secrets/README.md` reads the LIVE Secret back, so
+  re-running it as maintenance can only re-store the stale ancestor.
 - **ArgoCD does NOT diff hook resources — so anything a hook reads from its own manifest can never
   be changed in a way that triggers it.** A `argocd.argoproj.io/hook` object is excluded from the
   Application's desired-state comparison: `kubectl -n argocd get application <app> -o json` reports

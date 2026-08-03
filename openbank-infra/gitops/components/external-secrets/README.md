@@ -98,6 +98,14 @@ vault kv put openbank/keycloak-bootstrap \
 
 # keycloak realm import — whole JSON as a single property; KEY MUST be the
 # filename (openbank-realm.json) because the Deployment mounts it as a file.
+#
+# ONE-WAY CUTOVER ONLY. This reads the live Secret back into Vault, so it can
+# only ever re-store what is already there — and what is already there is a
+# stale ancestor of the committed template (#3246: 4 roles and 2 clients against
+# the template's 14 and 10). Re-running it as maintenance freezes that gap in
+# place. To CHANGE the realm-import content, follow
+# docs/runbooks/0009-keycloak-realm-import-reconcile.md, which writes the
+# committed template with its __PLACEHOLDER__ tokens substituted.
 vault kv put openbank/keycloak-realm-import \
   openbank-realm.json=@<(kubectl -n iam get secret keycloak-realm-import \
     -o jsonpath='{.data.openbank-realm\.json}' | base64 -d)
