@@ -37,15 +37,41 @@ spec:
         # prune, or raise the cap deliberately (an ADR-0173 decision), not in a
         # hurry during an incident.
         - alert: KarpenterNodePoolNearLimit
+          # EXCLUDES runners-warm, for exactly the reason KarpenterNodePoolAtLimit below
+          # already does (#3386) — that fix was applied to the AtLimit rule only, and this
+          # rule kept firing on the same pool for the same wrong reason.
+          #
+          # `karpenter_nodepools_usage` measures PROVISIONED capacity, not demand. For a
+          # fixed-size pool the ratio usage/limit is therefore a constant, not a
+          # utilisation signal: runners-warm is 2 on-demand nodes with `expireAfter: Never`
+          # (arc-runners.tf) against a limit of 8 CPU, so it sits at 8/8 = 1.0 forever.
+          # 1.0 > 0.85, so this rule can never NOT fire on it.
+          #
+          # Measured 2026-08-03 over the full retained window (Prometheus retention here is
+          # ~8.6h, not the 7d a naive range query assumes — check the span before trusting
+          # a percentage): runners-warm was firing 103/103 samples = 100%. It was also the
+          # ONLY detector=capacity alert active in Alertmanager at the time.
+          #
+          # That is the cost of leaving it: during the 2026-08-03 04:00Z cap stall the
+          # `default` pool alerts fired correctly and for an hour — AtLimit 03:35Z-04:35Z,
+          # NearLimit 96-97% of the window — and nobody acted on them. A capacity warning
+          # that is always on trains the reader to skip capacity warnings, so the one time
+          # it carried information it read as more of the same. Removing the permanent
+          # firer is what makes the real one legible; this is a SUBTRACT, not a new alert.
+          #
+          # `default` stays covered, and demonstrably still works: after #3570 raised the
+          # cap it sits at 56/72 = 78%, below this threshold, and the alert resolved on its
+          # own. The distinction drawn here is fixed-size pool vs elastic pool — the same
+          # one AtLimit draws — not "noisy alert vs quiet one".
           expr: |
             (
-              karpenter_nodepools_usage{resource_type="cpu"}
+              karpenter_nodepools_usage{resource_type="cpu", nodepool!="runners-warm"}
               / on(nodepool) group_left()
               karpenter_nodepools_limit{resource_type="cpu"} > 0.85
             )
             or
             (
-              karpenter_nodepools_usage{resource_type="memory"}
+              karpenter_nodepools_usage{resource_type="memory", nodepool!="runners-warm"}
               / on(nodepool) group_left()
               karpenter_nodepools_limit{resource_type="memory"} > 0.85
             )
@@ -102,10 +128,23 @@ spec:
             summary: "NodePool {{ $labels.nodepool }} is AT its declared {{ $labels.resource_type }} limit — provisioning is blocked"
             description: "Karpenter cannot provision new nodes for this pool (usage >= limit). Pods will go Pending. This is the exact #809 failure mode, now audible (ADR-0173 D1)."
 
-        # The symptom: any pod Pending for >15m. A pod that cannot schedule for a
-        # quarter of an hour in a pool with Karpenter available is either a cap
-        # bind (above), a taint/toleration bug, or an image pull wedge — all three
-        # are operator-actionable and none should be discovered by accident.
+        # The symptom: a pod Pending for ~30m. A pod that cannot schedule for half an
+        # hour in a pool with Karpenter available is either a cap bind (above), a
+        # taint/toleration bug, or an image pull wedge — all three are
+        # operator-actionable and none should be discovered by accident.
+        #
+        # THE TWO 15-MINUTE CLAUSES COMPOSE TO ~30, they do not overlap. The expression
+        # only becomes true once the pod is older than 900s, and `for: 15m` then requires
+        # it to STAY true for another 15m — so the first notification lands at ~30m, not
+        # 15. Measured 2026-08-03: audit-service-5c5dbb8679-lcp69 was created 03:44:58Z
+        # and this alert first went `firing` at 04:16Z — 31 minutes.
+        #
+        # The text used to claim ">15m", which is why this note exists. Behaviour is
+        # deliberately UNCHANGED here: dropping the `kube_pod_created` clause would make it
+        # fire twice as early and roughly twice as often, and the noise cost of that has
+        # not been measured. If you want a faster page, measure the false-positive rate on
+        # rollout churn first — ordinary rolling updates park pods in Pending briefly, and
+        # this rule sits one threshold away from alerting on every deploy.
         - alert: PodPendingUnschedulable
           expr: |
             sum by (namespace, pod) (
@@ -121,5 +160,5 @@ spec:
             detector: capacity
             team: platform
           annotations:
-            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} Pending for >15m"
-            description: "Unschedulable for 15+ minutes. Check KarpenterNodePoolAtLimit first (cap bind), then taints/tolerations, then image pull. kubectl describe pod for the scheduler event."
+            summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} Pending and unschedulable for ~30m"
+            description: "Unschedulable for ~30 minutes (a 15m staleness clause plus a 15m `for:`). Check KarpenterNodePoolAtLimit first (cap bind), then taints/tolerations, then image pull. kubectl describe pod for the scheduler event."
