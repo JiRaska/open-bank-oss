@@ -109,16 +109,15 @@ def owns_no_database(facts: dict) -> bool:
 
 def backup_configured(short: str) -> bool:
     """True iff a deployed manifest configures a backup for this service's datastore
-    (CNPG barmanObjectStore). Mirrors the readiness collector's C5 detection so the
-    runbook's DR text never claims a backup the cluster doesn't actually have."""
-    comp = GITOPS / "components"
-    if not comp.is_dir():
-        return False
-    for f in comp.rglob("*.yaml"):
-        t = read(f)
-        if "barmanObjectStore" in t and (short in t or f.parent.name.startswith(short)):
-            return True
-    return False
+    (a CNPG `kind: Cluster` declaring `spec.backup.barmanObjectStore`). Mirrors the readiness
+    collector's C5 detection so the runbook's DR text never claims a backup the cluster
+    doesn't actually have.
+
+    This used to be a whole-file substring test — `"barmanObjectStore" in text and short in text`
+    over every file under `components/` — which matched PROSE, not configuration. See
+    `gitops_facts.cnpg_backup_configured` for the collision it produced and why the answer is
+    now read structurally."""
+    return gitops_facts.cnpg_backup_configured(short, GITOPS)
 
 
 def dr_for(datastore: str, has_backup: bool, owns_no_db: bool = None) -> str:
