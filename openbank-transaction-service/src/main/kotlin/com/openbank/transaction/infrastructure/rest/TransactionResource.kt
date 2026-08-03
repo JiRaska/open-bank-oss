@@ -61,10 +61,13 @@ class TransactionResource(
     @Authorize(action = "transaction.list", resource = "")
     @Operation(summary = "List transactions for an account")
     suspend fun listTransactions(
-        @QueryParam("accountId") accountId: UUID,
+        @QueryParam("accountId") accountId: UUID?,
         @QueryParam("limit") @DefaultValue("20") limit: Int,
         @QueryParam("cursor") cursor: String?,
     ): Response {
+        // #3104 — listing "transactions for an account" with no account is a bad request, not a
+        // server fault. Absent, this reached ListTransactionsQuery as null and answered 500.
+        requireNotNull(accountId) { "query parameter 'accountId' is required" }
         val page = transactionUseCase.listTransactions(ListTransactionsQuery(accountId, limit, cursor))
         return Response.ok(page.toResponse()).build()
     }

@@ -248,7 +248,11 @@ class LendingResource(
     @Path("/applications")
     @Operation(summary = "List a party's loan applications")
     @Authorize(action = "lending.list", resource = "")
-    fun listApplications(@QueryParam("partyId") partyId: UUID) = apply.listApplications(partyId)
+    // #3104 — non-suspend, so an absent `partyId` threw Intrinsics.checkNotNullParameter at the
+    // method boundary and answered 500. Nullable + requireNotNull is the only shape in which a
+    // guard runs at all; requireNotNull returns the value, so the expression body survives.
+    fun listApplications(@QueryParam("partyId") partyId: UUID?) =
+        apply.listApplications(requireNotNull(partyId) { "query parameter 'partyId' is required" })
 
     @GET
     @Path("/applications/recent")
@@ -345,7 +349,9 @@ class LendingResource(
         "ROLE_ADMIN",
     )
     @Authorize(action = "lending.list", resource = "")
-    fun listLoans(@QueryParam("partyId") partyId: UUID) = servicing.listLoans(partyId)
+    // #3104 — see listApplications above.
+    fun listLoans(@QueryParam("partyId") partyId: UUID?) =
+        servicing.listLoans(requireNotNull(partyId) { "query parameter 'partyId' is required" })
 
     @GET
     @Path("/loans/active")

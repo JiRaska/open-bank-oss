@@ -85,8 +85,10 @@ class SddResource(
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")
     @Authorize(action = "sdd.list")
     @Operation(summary = "List an account's mandates")
-    fun listMandates(@QueryParam("accountId") accountId: UUID): Uni<Response> =
-        list.list(accountId).map { ms -> Response.ok(ms.map(MandateResponse::of)).build() }
+    // #3104 — non-suspend, so an absent `accountId` threw at the method boundary and answered 500.
+    fun listMandates(@QueryParam("accountId") accountId: UUID?): Uni<Response> =
+        list.list(requireNotNull(accountId) { "query parameter 'accountId' is required" })
+            .map { ms -> Response.ok(ms.map(MandateResponse::of)).build() }
 
     @GET
     @Path("/mandates/{id}")
@@ -166,9 +168,14 @@ class SddResource(
     @Operation(summary = "Assess a post-settlement refund claim (8-week unconditional / B2B none)")
     fun assessRefund(
         @PathParam("id") id: UUID,
-        @QueryParam("debitDate") debitDate: String,
+        @QueryParam("debitDate") debitDate: String?,
         @QueryParam("asOf") asOf: String?,
-    ): Uni<Response> =
-        refund.assessRefund(id, LocalDate.parse(debitDate), asOf?.let(LocalDate::parse) ?: LocalDate.now(clock))
+    ): Uni<Response> {
+        // #3104 — `asOf` was already optional; `debitDate` was not, and omitting it answered 500.
+        // An UNPARSEABLE debitDate is a different class and already 400 (DateTimeExceptionMapper).
+        requireNotNull(debitDate) { "query parameter 'debitDate' is required" }
+        return refund
+            .assessRefund(id, LocalDate.parse(debitDate), asOf?.let(LocalDate::parse) ?: LocalDate.now(clock))
             .map { Response.ok(RefundAssessmentResponse.of(it)).build() }
+    }
 }
