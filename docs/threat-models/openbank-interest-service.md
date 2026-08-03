@@ -58,6 +58,25 @@ money-path service, not adjacent.
 
 ## 6. Change log
 
+- **2026-08-03** — Prohibit service-account principals from interest writes (#3679 follow-up). The
+  `#3695` `AUTHZ_ENFORCE=true` flip exposed a trust-boundary widening the ext file itself did not
+  document: `operator-interest-write` was role-only, and the `rules.yaml` `role_action_matrix`
+  grants `interest.create/trigger/delete` to `ROLE_OPERATOR`. Two realm service accounts carry
+  that role — `service-account-openbank-edge` (customer-reachable via the edge namespace on 8125)
+  and `service-account-openbank-services` (shared backend client) — so both could reach these
+  writes via `matrix-allows`, even had the ext rule excluded them. Interest is money-path (posts
+  real GL journals, #1478) and the writes are bank-side actions invoked by admin-ui operators
+  only (fleet caller audit in the ext file). The tightening is two-layered: `operator-interest-
+  write` now excludes every `service-account-*` principal (delegation idiom), AND a prohibition
+  vetoes the three write actions for any service account at the allow head — so no reason,
+  present or future, can admit a backend client to a bank-side write. Reads are untouched (the
+  edge legitimately serves customer interest views). Falsified by
+  `interest_rest_ext_test.rego` — stripping either layer turns five tests red — and a new
+  `opa-policy.yml` step now runs every `*_rest_ext_test.rego` trio in CI, closing an existing
+  gap (those tests previously ran only by hand; the same sweep found a stale aml test whose
+  header cited a base-less invocation, corrected in this PR). Rollback: revert the ext file to
+  the pre-#3679-follow-up shape (role-only `operator-interest-write`, no prohibition, heredoc in
+  the generator) — the edge/M2M paths were never used, so revert loses no live caller.
 - **2026-07-24** — Freeze the tax profile at claim time (issue #1355). `capitalize()`'s claim froze the
   accrual SET (gross) before the ledger post but re-called `taxProfilePort.resolve(accountId)` fresh on
   every attempt, including retries. The ledger idempotency key is amount-blind, so a retry after a
