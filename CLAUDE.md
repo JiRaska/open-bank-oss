@@ -548,6 +548,31 @@ fire from *outside* it, so they stay here:
   grep -v '\${'` found the one line that did. Took three attempts on #3024 *after* the bullet
   above was already written, so treat "my grep found it" as a hypothesis until the match shows a
   value the script could not have contained.
+- **A gate is only as reachable as the JOB it sits in — check the job's `if:`, not just the
+  script.** `gates.yaml` exists so gates run unconditionally; a gate written as an inline `run:`
+  step inherits its host job's conditions instead, and a conditional host silently narrows the
+  gate's scope to something nobody declared. `check-dockerfile-no-build-stage.py` — the #3016
+  gate that owns per-service Dockerfile shape — lived in `ci.yml`'s `ui-build`, whose
+  `if: needs.changes-ui.outputs.changed == 'true'` fires only on `openbank-admin-ui/`,
+  `*/governance.yaml` or the governance schema. **So it could not run on a Dockerfile-only PR**,
+  the exact change it exists to catch. Not skipped-and-reported: the job is *absent*, the
+  aggregate check is green, and nothing anywhere says a gate was not consulted. Measured on
+  #3629 (53 Dockerfiles edited): `Validate manifests` SUCCESS with 3 steps — it is an aggregator
+  over the `gates (...)` shards — and `Admin UI build` SKIPPED. Read the *steps* of the job that
+  claims to have run your gate (`gh api .../actions/jobs/<id> --jq '.steps[]'`); a green job name
+  is not evidence your step was in it. Fix is always the same: declare it in
+  `.github/gates/gates.yaml` with a `group:`, never as an inline step in a conditional job.
+- **"Nothing reads this file" is a claim about the whole repo, not about the pipeline — grep
+  before you delete a declaration.** The per-service `openbank-*/Dockerfile` files are documented
+  as declaration-only with `EXPOSE` the single live field (#3016), so the tidy fix for a stale
+  `FROM` looks like deleting it. It is not:
+  `openbank-admin-ui/scripts/generate-cluster-topology.mjs` parses
+  `openbank-ledger-service/Dockerfile` in `imageFacts()` and renders the base image into the
+  /docs/cluster dossier (ADR-0081) — and when it cannot parse one it falls back to a HARDCODED
+  `eclipse-temurin:25-jre-alpine` literal, so removing the declaration would have resurrected the
+  fiction in the UI instead of retiring it (#3354, #3630). A second reader that is a *generator
+  in another tree* is invisible from the file, from the deploy pipeline, and from the gate that
+  owns the file's shape.
 - **An oversized `run:` script makes the WHOLE workflow unparseable — and GitHub says nothing.**
   Not a size error: the file stops being readable, every push yields a run with ZERO jobs titled
   after the file PATH, `name:` is never read, and it reads as an ordinary red run. It kills the
