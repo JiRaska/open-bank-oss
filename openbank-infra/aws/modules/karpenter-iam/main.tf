@@ -187,6 +187,28 @@ data "aws_iam_policy_document" "controller" {
       "iam:TagInstanceProfile",
       "iam:AddRoleToInstanceProfile",
       "iam:RemoveRoleFromInstanceProfile",
+      # ListInstanceProfiles is what the `instanceprofile.garbagecollection` controller calls,
+      # and it was the one verb missing — so that controller had thrown a 403 on every pass for
+      # the life of the cluster:
+      #
+      #   ERROR instanceprofile.garbagecollection  listing instance profiles ...
+      #   operation error IAM: ListInstanceProfiles ... StatusCode: 403
+      #
+      # measured 2026-08-03 firing every ~16 minutes. Two costs, and the second is the one that
+      # matters. (a) The GC cannot run, so an instance profile whose EC2NodeClass is deleted
+      # leaks permanently — invisible until the account nears the 1000-profile limit. Today the
+      # estate is clean (2 NodeClasses, 2 profiles), which is precisely why this is worth fixing
+      # now rather than during the incident. (b) A recurring ERROR that is always present and
+      # never actionable is how a log stops being read; this repo has paid for that lesson more
+      # than once.
+      #
+      # `Get`/`Create`/`Delete` here are already `Resource: "*"` — the AWS-published Karpenter
+      # policy scopes them by `aws:ResourceTag/kubernetes.io/cluster/<name>` instead, which is
+      # tighter and worth doing, but is a separate change. `ListInstanceProfiles` cannot be
+      # resource-scoped at all: it is a list operation over the account, so `"*"` is the only
+      # valid form and adding it grants no access to a profile the role could not already read
+      # by name via GetInstanceProfile.
+      "iam:ListInstanceProfiles",
     ]
     resources = ["*"]
   }
