@@ -19,6 +19,26 @@ out of it (they are path-scoped, not less important — several are live-inciden
   `check-roles-allowed-realm.py` was green the whole time: it compares the code to the TEMPLATE.
   Verify against the realm that actually runs (`kcadm.sh get roles -r openbank`) before believing any
   claim about which roles exist, and apply additions with `kcadm` — the file alone will not.
+- **ArgoCD does NOT diff hook resources — so anything a hook reads from its own manifest can never
+  be changed in a way that triggers it.** A `argocd.argoproj.io/hook` object is excluded from the
+  Application's desired-state comparison: `kubectl -n argocd get application <app> -o json` reports
+  every other resource `Synced` and the hook `status: None`, i.e. not compared at all. Editing only
+  the hook therefore produces no diff, no sync operation, and no hook run — the Application sits
+  `Synced/Healthy` at the new revision having done nothing. `temporal-namespace-registration` carried
+  its `NAMESPACES` list inline that way, and "add a namespace to the list" is the ONLY edit that file
+  ever receives, so the mechanism was inert for its sole use case; it had worked only when a namespace
+  addition happened to ride along with an unrelated change to a non-hook resource in the same
+  Application (settlement and campaign both reached production polling namespaces that did not exist,
+  and after #3475 `openbank-lending` needed a hand-issued sync). Its own comment asserted the
+  behaviour it did not have — the file was the only thing claiming the trigger existed. Fix, and the
+  general rule: **a hook's INPUT belongs on a resource ArgoCD compares** (a ConfigMap the hook reads
+  via `configMapKeyRef`/volume), so changing the input is what makes the app OutOfSync and the
+  resulting sync operation runs the hook. Enforced by
+  `check-temporal-namespace-registration.py` (#3507), which also rejects a second copy of the list
+  and a ConfigMap no workload consumes. Corollary for anything a hook provisions OUTSIDE Kubernetes
+  (a Temporal namespace, a realm, a bucket): ArgoCD cannot see it at all, so deletion out of band
+  produces no diff either — pair the hook with a reconciling CronJob that repairs the gap **and then
+  exits non-zero**, so KubeJobFailed carries it. A repair that exits 0 is one nobody ever learns about.
 - **A change under `openbank-libs-*/src/main/**` rebuilds the WHOLE fleet, and the deploy that
   follows fails on pacts that do not exist yet.** `Detect changed services` returned 58 modules for
   the #2475 role sweep; at `max-parallel: 4` and ~45 min a service that is ~11 h of queue. Auto-deploy

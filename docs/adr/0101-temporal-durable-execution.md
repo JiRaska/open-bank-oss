@@ -86,12 +86,18 @@ workflows gets its own Temporal namespace (`openbank-payments`, `openbank-fx`,
 service's worker starts — a missing namespace does not crash the pod (readiness is a TCP probe
 on the HTTP port, not on Temporal), so the worker poller silently spins on
 `NOT_FOUND: Namespace <x> is not found` while the pod reports Healthy. Namespace registration is
-**declarative in GitOps**, not a manual break-glass step: an idempotent ArgoCD **PostSync hook
-Job** in `openbank-infra/gitops/components/temporal/temporal-namespace-registration.yaml`
-(temporal admin-tools image, `describe`-then-`create` per namespace) reconciles the namespace set
-on every sync. **Adding a Temporal service is a two-line change**: add its namespace to the
-`NAMESPACES` list in that Job *and* add the service namespace to the `temporal-platform-ingress`
-NetworkPolicy (`temporal-network-policies.yaml`) so its worker can reach the frontend gRPC port.
+**declarative in GitOps**, not a manual break-glass step: the namespace set and the
+`describe`-then-`create` script live in the `temporal-namespace-registration` **ConfigMap**
+(`openbank-infra/gitops/components/temporal/temporal-namespace-config.yaml`), and two workloads
+run it — an idempotent ArgoCD **PostSync hook Job** on every sync, and a daily
+`temporal-namespace-reconcile` **CronJob** that registers whatever the sync path missed and then
+fails so the gap is alerted rather than merely repaired. The list lives on the ConfigMap and not
+on the hook deliberately: ArgoCD does not diff hook resources, so a list carried there could
+never be changed in a way that triggered its own registration (issue #3507) —
+`check-temporal-namespace-registration.py` now fails any PR that moves it back.
+**Adding a Temporal service is a two-line change**: add its namespace to the `NAMESPACES` key in
+that ConfigMap *and* add the service namespace to the `temporal-platform-ingress` NetworkPolicy
+(`temporal-network-policies.yaml`) so its worker can reach the frontend gRPC port.
 
 **Worker placement**: each service (`sepa-payment-service` etc.) runs its own Temporal Worker
 in-process (Quarkus startup lifecycle bean). No separate worker service — keeps the service
