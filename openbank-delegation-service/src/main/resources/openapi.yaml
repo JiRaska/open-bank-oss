@@ -5,7 +5,7 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.1.0
+  version: 1.2.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -31,7 +31,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
-        '400': { description: Validation or SCA failure }
+        '400':
+          description: >-
+            Validation or SCA failure. `code: CUMULATIVE_LIMIT_UNSUPPORTED` when the body carries
+            dailyLimit or monthlyLimit — ceilings this platform accepts nowhere because it enforces
+            nowhere. Refused before the SCA challenge is spent, so the customer keeps their ceremony.
         '403': { description: The authenticated party is not the grantor }
         '422': { description: Eligibility gate, or the grantor does not own the resource (ADR-0232 D5, threat model T1) }
   /api/v1/delegations/{id}:
@@ -270,9 +274,23 @@ components:
                    SAVINGS_WITHDRAW, SAVINGS_PROPOSE_WITHDRAW, OBJECT_READ, DELEGATION_MANAGE]
         approvalPolicy: { type: string, enum: [SOLO, ANY_ONE, ALL, N_OF_M] }
         requiredApprovals: { type: integer }
-        perTransactionLimit: { $ref: '#/components/schemas/MoneyDto' }
-        dailyLimit: { $ref: '#/components/schemas/MoneyDto' }
-        monthlyLimit: { $ref: '#/components/schemas/MoneyDto' }
+        perTransactionLimit:
+          allOf: [{ $ref: '#/components/schemas/MoneyDto' }]
+          description: >-
+            The only limit this platform enforces. Checked per payment amount; it never accumulates.
+        dailyLimit:
+          allOf: [{ $ref: '#/components/schemas/MoneyDto' }]
+          deprecated: true
+          description: >-
+            NOT SUPPORTED — sending this field is rejected with 400 CUMULATIVE_LIMIT_UNSUPPORTED.
+            No service in this platform counts cumulative spend against a grant, so a value here
+            would be stored and echoed back while never capping any payment. Omit it. ADR-0232 D1/D6
+            describes cumulative ceilings as intended; they are not built.
+        monthlyLimit:
+          allOf: [{ $ref: '#/components/schemas/MoneyDto' }]
+          deprecated: true
+          description: >-
+            NOT SUPPORTED — see dailyLimit. Rejected with 400 CUMULATIVE_LIMIT_UNSUPPORTED.
         exposure: { $ref: '#/components/schemas/ExposureDto' }
         validTo: { type: string, format: date-time }
         grantScaSessionId: { type: string, format: uuid }
@@ -308,8 +326,18 @@ components:
         approvalPolicy: { type: string }
         requiredApprovals: { type: integer }
         perTransactionLimit: { $ref: '#/components/schemas/MoneyDto' }
-        dailyLimit: { $ref: '#/components/schemas/MoneyDto' }
-        monthlyLimit: { $ref: '#/components/schemas/MoneyDto' }
+        dailyLimit:
+          allOf: [{ $ref: '#/components/schemas/MoneyDto' }]
+          deprecated: true
+          description: >-
+            Always null on grants offered after this API version — the field is refused on write.
+            A non-null value belongs to a grant stored before that and is NOT enforced: it is a
+            number on a record, not a cap on the delegate. Do not render it as a limit.
+        monthlyLimit:
+          allOf: [{ $ref: '#/components/schemas/MoneyDto' }]
+          deprecated: true
+          description: >-
+            See dailyLimit. Not enforced; do not render it as a limit.
         exposure: { $ref: '#/components/schemas/ExposureDto' }
         validFrom: { type: string, format: date-time }
         validTo: { type: string, format: date-time }

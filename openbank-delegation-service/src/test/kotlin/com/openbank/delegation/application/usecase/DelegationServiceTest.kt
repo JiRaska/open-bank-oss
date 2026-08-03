@@ -143,6 +143,86 @@ class DelegationServiceTest {
         assertThat(EventMoney.from(null)).isNull()
     }
 
+    /**
+     * The ceilings the API used to accept and nothing ever enforced. Asserting on the REFUSAL and
+     * on `save` never being called, because the defect was that both succeeded: a grantor could
+     * cap a delegate at 5 000 Kč/den, get a 201 back with the field echoed, and have every payment
+     * checked against `perTransactionLimit` alone. `DelegationOffered` does not even carry the two
+     * fields, so no projection could have applied them.
+     */
+    @Test
+    fun `offer refuses a dailyLimit because nothing enforces it`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+
+        assertThatThrownBy {
+            runBlocking { service.offer(offerCommand().copy(dailyLimit = Money.of(BigDecimal("5000.00"), "CZK"))) }
+        }
+            .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
+            .hasMessageContaining("dailyLimit")
+
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `offer refuses a monthlyLimit and names both fields when both are set`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+
+        assertThatThrownBy {
+            runBlocking { service.offer(offerCommand().copy(monthlyLimit = Money.of(BigDecimal("50000.00"), "CZK"))) }
+        }
+            .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
+            .hasMessageContaining("monthlyLimit")
+
+        val both = offerCommand().copy(
+            dailyLimit = Money.of(BigDecimal("5000.00"), "CZK"),
+            monthlyLimit = Money.of(BigDecimal("50000.00"), "CZK"),
+        )
+        assertThatThrownBy { runBlocking { service.offer(both) } }
+            .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
+            .hasMessageContaining("dailyLimit and monthlyLimit")
+
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    /**
+     * The refusal must not cost the customer their ceremony. SCA is the last of the four gates
+     * precisely because `consumeChallenge` SPENDS the challenge — a request that was always going
+     * to be refused must leave the grantor able to retry without re-authenticating.
+     */
+    @Test
+    fun `offer refuses an unenforced ceiling before spending the SCA challenge`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+
+        assertThatThrownBy {
+            runBlocking { service.offer(offerCommand().copy(dailyLimit = Money.of(BigDecimal("1.00"), "CZK"))) }
+        }
+            .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
+
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+    }
+
+    /**
+     * The control the refusal needs: `perTransactionLimit` is the one ceiling this platform
+     * actually checks, and it must still be accepted. Without this the two tests above would pass
+     * against a service that had simply stopped accepting limits altogether.
+     */
+    @Test
+    fun `offer still accepts a perTransactionLimit`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+        coEvery { repository.save(any<DelegationGrant>(), any()) } answers { firstArg() }
+
+        val limit = Money.of(BigDecimal("5000.00"), "CZK")
+        val grant = service.offer(offerCommand().copy(perTransactionLimit = limit))
+
+        assertThat(grant.perTransactionLimit).isEqualTo(limit)
+        assertThat(grant.dailyLimit).isNull()
+        coVerify(exactly = 1) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
     @Test
     fun `offer persists OFFERED grant and emits DelegationOffered`(): Unit = runBlocking {
         scaOk(grantor, "DELEGATION_GRANT")
