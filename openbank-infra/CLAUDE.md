@@ -204,6 +204,32 @@ out of it (they are path-scoped, not less important — several are live-inciden
   and changes nothing: a silent no-op indistinguishable from "already in sync". Always diff the
   regenerated `network-policies.yaml` files; never trust the generator's exit code.
 
+### OpenTofu / AWS substrate
+- **An `aws_instance` whose `ami` comes from a `most_recent = true` data source has a REPLACE
+  scheduled by a third party, on a timetable nobody here sets — and on the NAT that is an egress
+  outage waiting for an unrelated apply.** `modules/network`'s fck-nat instance (ADR-0058) took its
+  AMI straight from `data.aws_ami.fck_nat`, so every time the publisher shipped a patched image the
+  plan silently re-armed `~ ami = ... # forces replacement`, dragging `aws_route_table.private`
+  along with it because the default route points at the instance's primary ENI. Nothing was wrong
+  with the state; the ORDINARY command was the landmine, and it fired for whoever next planned this
+  stack for an unrelated reason — a one-line IAM fix is how it was found (#3602). Note that
+  `substrate-tofu.yml` DOES plan this root on every PR touching `envs/sandbox-substrate/**` or
+  `modules/**`, and applies it on manual dispatch; the preview was there and simply is not read on a
+  PR about something else, which is the more uncomfortable version of the story. Fix:
+  `var.nat_ami_id` pins the AMI and the data source is the bootstrap-only fallback, so a NAT upgrade
+  is a reviewable one-line diff applied in a window.
+  `check-nat-ami-pinned.py` (gate `nat-ami-pinned`) enforces both halves — the module must keep the
+  pin variable in the `ami` expression, and every `egress_mode = "fck_nat"` env must pass a concrete
+  `ami-...`. Generalize before reaching for `-target`: read the plan's `replace_paths`, and treat any
+  forcing attribute fed by a resolved-at-plan-time value as a landmine rather than a diff.
+- **A plan that is CLEAN of replaces can still carry a `create` for a resource that already exists
+  in AWS but is missing from state.** `aws_eip_association.fck_nat[0]` sat that way (a `-target`ed
+  apply is the likely cause), and its danger is entirely a function of what else the plan does: with
+  the instance being replaced it would have moved the EIP to a new instance; with the instance
+  unchanged the plan resolves `instance_id` to the SAME instance and the re-association is inert.
+  Read the resolved attribute values, not the action verb. The clean repair is `tofu import`, which
+  is a state write and therefore a deliberate operator step.
+
 ### OPA / Rego policies (ADR-0031/ADR-0034)
 - **Editing any shared policy source ripples the OPA bundle checksum of every service.** Each
   `openbank-infra/gitops/components/**/gen-*opa-bundle*.sh` embeds `rest.rego`, `agents.rego`,

@@ -1893,3 +1893,21 @@ gates:
       # disabled". Ratcheted against a baseline — new occurrences fail, today's are frozen
       # because removing a default makes config START applying and can flip live behaviour.
       python3 .github/scripts/check-configproperty-kotlin-defaults.py
+  - id: nat-ami-pinned
+    name: "NAT instance AMI is pinned (issue #3602, enforced)"
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-nat-ami-pinned.py --self-test
+    selftest_expect: pass
+    run: |
+      # The fck-nat instance IS the private subnets' only egress path, and its `ami` came
+      # from a most_recent aws_ami data source. `ami` forces replacement, so every upstream
+      # AMI publication silently re-armed a destroy-and-recreate of the live NAT — with no
+      # commit and no author behind it. The state was fine; the ORDINARY command was the
+      # landmine, and it fired for whoever next applied the stack for an unrelated reason.
+      #
+      # BOTH halves are required and neither alone blocks (#2392): the script prints
+      # ::warning and exits 0 without --enforce. Falsified against the real pre-fix tree,
+      # not only a fixture — it exits 1 on origin/main's network module + substrate env and
+      # 0 with the pin in place.
+      python3 .github/scripts/check-nat-ami-pinned.py --enforce
