@@ -500,6 +500,12 @@ jobs:
             bash "${GITHUB_WORKSPACE}/.github/scripts/ensure-ecr-repository.sh" "${svc}" \
               2>&1 | sed "s/^/[${svc}] /" || return 1
 
+            # ldd every bundled linux .so inside the real runtime base before pushing (#3354).
+            # No-op for a service shipping none. Reasoning is in the script header, not here
+            # — prose in a run: block costs the whole workflow (#3135).
+            python3 "${GITHUB_WORKSPACE}/.github/scripts/verify-image-native-libs.py" \
+              "${ctx}/quarkus-app/lib" --arch arm64 2>&1 | sed "s/^/[${svc}] /" || return 1
+
             echo "==> [${svc}] docker push → ${image}"
             docker buildx build \
               --platform linux/arm64 \

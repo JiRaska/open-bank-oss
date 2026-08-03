@@ -141,6 +141,11 @@ jobs:
             echo "COPY sbom/bom.json /app/sbom/bom.json" >> "${ctx}/Dockerfile"
             echo "ENV OPENBANK_SBOM_PATH=/app/sbom/bom.json" >> "${ctx}/Dockerfile"
           fi
+          # ldd every bundled linux .so inside the real runtime base before publishing (#3354).
+          # This image is multi-arch, so both loaders are checked. Reasoning lives in the script
+          # header — prose in a run: block costs the whole workflow (#3135).
+          python3 .github/scripts/verify-image-native-libs.py "${ctx}/quarkus-app/lib" --arch amd64
+          python3 .github/scripts/verify-image-native-libs.py "${ctx}/quarkus-app/lib" --arch arm64
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
             --provenance=false \
