@@ -13,6 +13,7 @@ import com.openbank.notification.application.port.out.OversightWebhookPublisher
 import com.openbank.notification.application.port.out.PushMessage
 import com.openbank.notification.application.port.out.PushSender
 import com.openbank.notification.domain.HtmlEscape
+import com.openbank.notification.domain.RecipientAddress
 import com.openbank.notification.domain.model.NotificationCategory
 import com.openbank.notification.domain.model.NotificationChannel
 import com.openbank.notification.domain.model.NotificationRequest
@@ -21,6 +22,7 @@ import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushPlatform
 import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.client.ConsentServiceClient
+import com.openbank.notification.infrastructure.client.PartyContactClient
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationPreferenceRepository
@@ -90,6 +92,11 @@ class NotificationConsumer {
     @Inject
     @RestClient
     lateinit var consentServiceClient: ConsentServiceClient
+
+    /** Resolves the EMAIL envelope address from `partyId` (issue #3581) — see [resolveEmailRecipient]. */
+    @Inject
+    @RestClient
+    lateinit var partyContactClient: PartyContactClient
 
     private val log = Logger.getLogger(NotificationConsumer::class.java)
 
@@ -366,14 +373,69 @@ class NotificationConsumer {
         }
     }
 
+    /**
+     * Resolves the EMAIL envelope address, then delivers (issue #3581).
+     *
+     * Every producer on this topic puts the **party id** in `recipient` — campaign-service,
+     * account-service and sca-service all do — and nothing ever resolved it, so the UUID went to
+     * `Mail.withHtml(...)` verbatim and the mail could not be delivered. PUSH never had the bug
+     * because it resolves its destination from `partyId` in the device-token registry; EMAIL now
+     * does the same, here, rather than in each caller.
+     *
+     * Fail CLOSED: an unresolvable address records FAILED and sends nothing. The alternative —
+     * handing the mailer whatever arrived — is what produced a permanently green send funnel over
+     * mail that never left.
+     */
     private fun sendEmail(
         req: NotificationRequest,
         subject: String,
         body: String,
         entity: NotificationEntity,
-    ): Uni<Void> = mailer.send(Mail.withHtml(req.recipient, subject, body))
+    ): Uni<Void> = resolveEmailRecipient(req).chain { address ->
+        if (address.isEmpty()) {
+            // The party id is logged, never a candidate address — an unresolved recipient is
+            // exactly where a malformed value would be, and it is still customer data.
+            log.errorf(
+                "EMAIL not sent: no deliverable address for party=%s template=%s — recorded FAILED (#3581)",
+                req.partyId,
+                req.template,
+            )
+            markStatus(entity, "FAILED")
+        } else {
+            deliverEmail(req, address, subject, body, entity)
+        }
+    }
+
+    /**
+     * The supplied `recipient` when it already is an address, otherwise party-service's.
+     *
+     * Emits `""` for "not resolvable", never a null item: a `Uni` carrying null is the shape that
+     * bites callers of `Uni.createFrom().item(...)` in this codebase, and the caller's only
+     * question is deliverable-or-not. The lookup result is never cached — an address the customer
+     * changed is precisely what a cache would get wrong — and a party-service outage resolves to
+     * "not deliverable", so an outage suppresses rather than sends to a UUID.
+     */
+    private fun resolveEmailRecipient(req: NotificationRequest): Uni<String> =
+        if (RecipientAddress.isEmailAddress(req.recipient)) {
+            Uni.createFrom().item(req.recipient.trim())
+        } else {
+            partyContactClient.getParty(req.partyId)
+                .map { party -> party.email?.trim()?.takeIf { RecipientAddress.isEmailAddress(it) } ?: "" }
+                .onFailure().recoverWithItem { e ->
+                    log.warnf(e, "Party lookup failed for party=%s — EMAIL not deliverable (#3581)", req.partyId)
+                    ""
+                }
+        }
+
+    private fun deliverEmail(
+        req: NotificationRequest,
+        recipient: String,
+        subject: String,
+        body: String,
+        entity: NotificationEntity,
+    ): Uni<Void> = mailer.send(Mail.withHtml(recipient, subject, body))
         .onFailure().invoke { e ->
-            log.warnf(e, "Email send failed: to=%s template=%s", req.recipient, req.template)
+            log.warnf(e, "Email send failed: party=%s template=%s", req.partyId, req.template)
         }
         .onFailure().recoverWithUni { _ ->
             Panache.withTransaction {
@@ -392,7 +454,7 @@ class NotificationConsumer {
                     }
             }.replaceWithVoid()
         }
-        .onItem().invoke { _ -> log.infof("Email sent: to=%s template=%s", req.recipient, req.template) }
+        .onItem().invoke { _ -> log.infof("Email sent: party=%s template=%s", req.partyId, req.template) }
         // Only reachable if the mail genuinely went out (the FAILED path above already recovered
         // any send failure into a completed Uni). Never marks the row FAILED — that would be a
         // lie about a message that was actually delivered — logs loudly instead, and swallows so
@@ -401,9 +463,9 @@ class NotificationConsumer {
         .onFailure().invoke { e ->
             log.warnf(
                 e,
-                "Email sent but recording SENT status failed: to=%s template=%s — row left as-is, " +
+                "Email sent but recording SENT status failed: party=%s template=%s — row left as-is, " +
                     "NOT marked FAILED (the email was actually delivered)",
-                req.recipient,
+                req.partyId,
                 req.template,
             )
         }

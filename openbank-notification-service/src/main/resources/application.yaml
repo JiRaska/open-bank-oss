@@ -63,6 +63,13 @@ quarkus:
       url: ${CONSENT_SERVICE_URL:http://localhost:8106}
       connect-timeout: 2000
       read-timeout: 2000
+    # EMAIL envelope-address resolution (issue #3581). Timeouts match consent-service: a party
+    # lookup that hangs must not hold a Kafka record open, and a timeout resolves to "not
+    # deliverable", which records FAILED rather than mailing a party id.
+    party-service:
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      connect-timeout: 2000
+      read-timeout: 2000
   smallrye-reactive-messaging:
     kafka:
       bootstrap-servers: localhost:29092
