@@ -141,6 +141,7 @@ six `SanctionsServiceClient` interfaces declare only `/screen`). Externally rout
 | C3 | **Repudiation** — a cleared hit with no attributable decider | `reviewed_by` / `review_note` / `reviewed_at` persisted on the check; a `SanctionChecked` outbox event is emitted in the **same transaction** as the update, so audit/AML consumers cannot miss a decision that was durably recorded | Outbox delivery is at-least-once, not exactly-once; consumers must dedupe. `OutboxMessage.createdAt` defaults to `Instant.EPOCH` fleet-wide (#3272), which inverts FIFO claim order |
 | C4 | **Tampering via lost update** — a review silently overwrites a concurrent one | Single-statement `merge` inside one transaction | **No optimistic locking**: the entity has no `@Version`, so two concurrent reviewers last-write-wins with no conflict surfaced. Low likelihood while the queue is worked by hand; revisit if #3334 makes review routine |
 | C5 | **Denial of the control itself** — the review path does not work at all | Covered by `SanctionsReviewUpdateIT` against a real Postgres | Was live until this change: `review()` called the insert path on an application-assigned `@Id`, so **every** review died at flush on `sanctions_checks_pkey` (ADR-0126 D3). Nothing alerted — see below |
+| C6 | **Information disclosure via the checker queue** — `GET /api/v1/sanctions/approvals` lists every pending four-eyes request with its `makerId` and age | Role-gated `ROLE_OPERATOR`/`ROLE_ADMIN` + `@Authorize(action = "sanctions.approval.read")`; the payload carries approval metadata only — the action name, the resource id and who asked — never the screened subject, their identifiers or the match detail, all of which stay behind `sanctions.read` | The queue is deliberately NOT filtered to exclude the caller's own requests: hiding a maker's request from them would not stop them attempting it (the guard is in `RedisApprovalStore.decide`, server-side) and would only make the queue lie about its own depth. `limit` is clamped to 200 — an unbounded query parameter over a Redis scan is a trivially reachable amplification |
 
 **Invariant (must never regress).** The review path performs an **UPDATE**. The insert path
 (`saveWithEvent`) and the update path (`updateWithEvent`) stay separate: `merge` cannot raise a
@@ -170,3 +171,15 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
   failure isolation. No new HTTP endpoint; no change to any REST contract; no DB schema change.
   Rollback: revert `SanctionsListService.scheduledRefresh()` to the prior stub (loses the fix, not
   a regression risk — the old code shipped no scheduled imports either way).
+
+- **2026-08-02** — **New inbound REST surface: `GET /api/v1/sanctions/approvals`** (issue #3472), the
+  checker's queue. Until now `ApprovalResource` served only `PATCH /{id}`, so a decision parked at 202
+  was discoverable *only* by whoever had been handed its id out of band — the four-eyes ceremony on
+  `sanctions.clear` completed only if the two operators were already talking, and the 24h Redis TTL
+  expired the request silently otherwise. This is an availability gap in a compliance control, not a
+  UX nicety: `rules.yaml` justifies this service's money-path entry on exactly that action.
+  Risk class = **information disclosure** (a new list endpoint over approval metadata, C6 above) and
+  **elevation of privilege** only in the sense that it makes the existing control usable — it grants
+  no new authority, since deciding still goes through `PATCH` and the self-approval guard.
+  `ApprovalResponse` additionally gained `makerId` and `createdAt`; both are approval metadata, not
+  screening data. Rollback: revert; the endpoint is additive and nothing depends on it yet.
