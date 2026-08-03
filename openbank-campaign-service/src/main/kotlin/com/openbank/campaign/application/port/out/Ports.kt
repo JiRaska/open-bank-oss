@@ -9,6 +9,7 @@ import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
+import com.openbank.campaign.domain.model.Channel
 import java.util.UUID
 
 interface CampaignRepository {
@@ -90,7 +91,13 @@ interface ConsentCheckPort {
 
 /** ADR-0200 D3: delivery goes through notification-service, never direct. */
 interface NotificationSendPort {
-    suspend fun requestSend(partyId: UUID, template: String, recipient: String, variables: Map<String, String>)
+    suspend fun requestSend(
+        partyId: UUID,
+        channel: Channel,
+        template: String,
+        recipient: String,
+        variables: Map<String, String>,
+    )
 }
 
 /** ADR-0200 D2 push: signals a live journey that consent was revoked for its party. */

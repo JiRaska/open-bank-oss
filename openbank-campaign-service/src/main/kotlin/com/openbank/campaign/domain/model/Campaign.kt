@@ -69,7 +69,12 @@ enum class CampaignState { DRAFT, PENDING_APPROVAL, ACTIVE, PAUSED, CLOSED }
 
 /**
  * One journey step: a catalogue template with declared variables, delivered on a channel after a
- * delay from the previous step. First slice is EMAIL-only (ADR-0200 D7).
+ * delay from the previous step.
+ *
+ * ADR-0200 D7 shipped this EMAIL-only behind three named blockers. Two have since cleared: the
+ * per-channel marketing consent scope exists (`MARKETING_COMMS_PUSH`, ADR-0198 D4) and #1182 is
+ * closed — push bodies are generic by construction. IN_APP and SMS remain out for the reasons on
+ * [Channel].
  */
 data class CampaignStep(
     val order: Int,
@@ -81,7 +86,13 @@ data class CampaignStep(
     init {
         require(order >= 0) { "step order must be >= 0" }
         require(delaySeconds >= 0) { "step delay must be >= 0" }
-        require(channel == Channel.EMAIL) { "first slice is EMAIL-only (ADR-0200 D7)" }
+        // The template decides the channel, and the step must agree. Two ways to get this wrong,
+        // both silent: an EMAIL step naming a push template renders a one-line title as a whole
+        // email, and a PUSH step naming an email template puts the offer body into an APNs payload
+        // — the leak #1182 closed. Neither surfaces until a real send.
+        require(TemplateCatalog.CHANNEL_OF[template] == null || TemplateCatalog.CHANNEL_OF[template] == channel) {
+            "template '$template' renders on ${TemplateCatalog.CHANNEL_OF[template]}, not $channel"
+        }
         // Rejected by construction, not validated at the edge: a step that names a template nobody
         // renders, or passes a variable nobody declared, is only discovered while composing the
         // notification — long after the campaign was approved (ADR-0221 D1, ADR-0176 D4).
@@ -99,7 +110,17 @@ data class CampaignStep(
     }
 }
 
-enum class Channel { EMAIL }
+/**
+ * Delivery channels a campaign step may use.
+ *
+ * EMAIL and PUSH only, and the omissions are decisions rather than gaps. SMS has no outbound port
+ * anywhere in the platform (ADR-0200 D7). IN_APP was *removed* from `NotificationChannel` by #2372
+ * because its dispatch branch silently dropped every message; re-adding it needs a terminal-status
+ * transition and a wake-signal design, not an enum entry. Listing either here would let a campaign
+ * be approved against a channel that delivers nothing — the "appearance of four channels" ADR-0200
+ * D7 explicitly refuses.
+ */
+enum class Channel { EMAIL, PUSH }
 
 /** A binding to a versioned segment artifact (ADR-0201 D1): never a query, always name@version. */
 data class SegmentRef(val name: String, val version: Int) {

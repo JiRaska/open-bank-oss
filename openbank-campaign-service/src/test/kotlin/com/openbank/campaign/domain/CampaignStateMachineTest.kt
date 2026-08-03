@@ -63,10 +63,21 @@ class CampaignStateMachineTest {
         }
     }
 
+    /**
+     * The channel set, asserted as a boundary rather than a count.
+     *
+     * This replaces an assertion that `Channel.valueOf("PUSH")` throws — true while the first slice
+     * was EMAIL-only (ADR-0200 D7), and now false: the two blockers that kept push out have cleared
+     * (per-channel marketing consent exists as MARKETING_COMMS_PUSH, and #1182 closed by making push
+     * bodies generic). What must NOT change is the other half of D7 — a campaign may never be
+     * approved against a channel that delivers nothing. SMS has no outbound port anywhere, and
+     * IN_APP was removed from notification-service's enum (#2372) because its dispatch branch
+     * dropped every message silently.
+     */
     @Test
-    fun `non-email channel is rejected in the first slice`() {
-        assertThrows<IllegalArgumentException> {
-            Channel.valueOf("PUSH")
-        }
+    fun `only channels that actually deliver are representable`() {
+        assertEquals(setOf(Channel.EMAIL, Channel.PUSH), Channel.entries.toSet())
+        assertThrows<IllegalArgumentException> { Channel.valueOf("SMS") }
+        assertThrows<IllegalArgumentException> { Channel.valueOf("IN_APP") }
     }
 }
