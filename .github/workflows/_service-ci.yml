@@ -485,6 +485,17 @@ jobs:
             -Dpact.provider.branch="${BRANCH}" \
             -Dpact.provider.tag="${BRANCH}"
 
+      # A Docker Hub pull failure surfaces as NAMED TEST FAILURES, ~900 lines above the actual
+      # cause, so the reader goes hunting for a test bug that is not there. The PR lane runs on
+      # `ubuntu-latest`, where the ECR pre-warm step above is skipped, so Testcontainers pulls
+      # straight from Docker Hub. Full reasoning in the script header. Diagnostic only: it reads
+      # JUnit XML already on disk, always exits 0, and can never change the build verdict.
+      - name: "Explain a Docker registry pull failure (diagnostic)"
+        if: failure()
+        run: |
+          python3 .github/scripts/check-testcontainers-registry-failure.py \
+            --service "${{ inputs.service }}"
+
       # rules.yaml: openapi_request_schema_conformance (advisory). Only the REQUEST-body half of
       # schema-vs-code — see the script header for why the response half is not attempted. The
       # existence guard is a bash `[ -f ]` rather than a YAML `if: hashFiles(...)` composition —
