@@ -15,6 +15,7 @@ import jakarta.persistence.Entity
 import jakarta.persistence.Table
 import kotlinx.coroutines.sync.withLock
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 @Entity
@@ -89,6 +90,14 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
                 find("ORDER BY id DESC").page(0, 1).firstResult()
             }.awaitSuspending()
             val prevHash = prev?.recordHash ?: GENESIS_HASH
+            // Persist exactly the value that gets hashed (#3505). `occurred_at`/`recorded_at` are
+            // TIMESTAMPTZ, which keeps MICROseconds, while a java.time.Instant carries nanoseconds
+            // — on Linux, where the pods run, Instant.now() really does produce them. Hashing the
+            // unrounded value and storing the rounded one makes every link permanently
+            // unverifiable: verifyChain rebuilds the entry from the row, so the lost digits can
+            // never come back. Normalising here (and again inside chainHash) makes the two sides
+            // agree by construction rather than by luck of the platform clock.
+            val stored = entry.normalisedForStorage()
             val e = AuditEntryEntity().also {
                 it.entryId = entry.id
                 it.eventType = entry.eventType
@@ -99,14 +108,14 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
                 it.payload = entry.payload
                 it.sourceService = entry.sourceService
                 it.correlationId = entry.correlationId
-                it.occurredAt = entry.occurredAt
-                it.recordedAt = entry.recordedAt
+                it.occurredAt = stored.occurredAt
+                it.recordedAt = stored.recordedAt
                 it.channel = entry.channel
                 it.actChain = entry.actChain.takeIf { chain -> chain.isNotEmpty() }
                     ?.let { chain -> actChainJson.writeValueAsString(chain) }
                 it.sessionId = entry.sessionId
                 it.prevHash = prevHash
-                it.recordHash = chainHash(prevHash, entry)
+                it.recordHash = chainHash(prevHash, stored)
             }
             Panache.withTransaction { persist(e) }.awaitSuspending()
         }
@@ -236,14 +245,27 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
          */
         internal fun chainHash(prevHash: String, entry: AuditEntry): String {
             val payloadHash = sha256(entry.payload)
+            val e = entry.normalisedForStorage()
             val canonical = listOf(
-                prevHash, entry.id.toString(), entry.eventType, entry.aggregateType,
-                entry.aggregateId, entry.actorId ?: "", entry.actorType ?: "", payloadHash,
-                entry.sourceService, entry.correlationId ?: "",
-                entry.occurredAt.toString(), entry.recordedAt.toString(),
+                prevHash, e.id.toString(), e.eventType, e.aggregateType,
+                e.aggregateId, e.actorId ?: "", e.actorType ?: "", payloadHash,
+                e.sourceService, e.correlationId ?: "",
+                e.occurredAt.toString(), e.recordedAt.toString(),
             ).joinToString("|")
             return sha256(canonical)
         }
+
+        /**
+         * The entry as the database will hold it. `occurred_at`/`recorded_at` are TIMESTAMPTZ —
+         * microsecond precision — so any nanosecond digits are dropped on persist. Hashing the
+         * pre-truncation value is what made every link unverifiable (#3505); truncating here means
+         * the write side and the read side hash the same characters whatever precision the source
+         * clock had.
+         */
+        internal fun AuditEntry.normalisedForStorage(): AuditEntry = copy(
+            occurredAt = occurredAt.truncatedTo(ChronoUnit.MICROS),
+            recordedAt = recordedAt.truncatedTo(ChronoUnit.MICROS),
+        )
 
         private fun sha256(input: String): String = java.security.MessageDigest.getInstance("SHA-256")
             .digest(input.toByteArray(Charsets.UTF_8))
