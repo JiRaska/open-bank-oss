@@ -238,6 +238,21 @@ RUN --mount=type=secret,id=glitchtip_token \
     SENTRY_AUTH_TOKEN="$(cat /run/secrets/glitchtip_token 2>/dev/null || true)" \
     npm run build
 
+# Client source maps NEVER enter the runtime image. The upload happens inside `npm run build`
+# above, so by this line the maps have already served their only purpose.
+#
+# @sentry/nextjs deletes them itself (`sourcemaps.deleteSourcemapsAfterUpload`), and that is the
+# path that normally runs — but it is a plugin option, conditional on the plugin being reached at
+# all, and `.next/static` is COPY'd wholesale into the runtime stage two stages down. One skipped
+# hook and every original source of the operator console is downloadable from a public URL. This
+# line makes that outcome structurally impossible instead of configured-away: it costs nothing when
+# the delete already happened, and is the only thing standing between a plugin regression and a full
+# source disclosure. Do not remove it as redundant (#3235).
+RUN echo "maps before prune: $(find .next/static -name '*.map' | wc -l)" \
+ && find .next/static -name '*.map' -type f -delete \
+ && test "$(find .next/static -name '*.map' | wc -l)" -eq 0 \
+ && echo "maps in .next/static after prune: 0"
+
 # ──────────────────────────────────────────────────────────────────────
 # Stage 4: Runtime image — minimal surface, non-root.
 # ──────────────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "prebuild": "node scripts/collect-prod-readiness.mjs && node scripts/generate-origination-graph.mjs",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start -p 3000",
     "lint": "eslint .",
     "generate:app-status": "node scripts/generate-app-status.mjs",

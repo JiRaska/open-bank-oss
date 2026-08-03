@@ -140,6 +140,31 @@ spec:
                   # …/files/difs/assemble/ shares this prefix, so it matches too.
                   - path: /api/0/projects/[^/]+/[^/]+/files/(difs|dsyms)/?
                     pathType: ImplementationSpecific
+                  # JS source-map bundles for the admin-ui (#3235). Same shape as the dSYM
+                  # case above and for the same reason: without it, GlitchTip records that
+                  # the console broke and cannot say where — every event stored a minified
+                  # title and an EMPTY culprit, which is the information the user already
+                  # had when they complained.
+                  #
+                  # This ONE path is the whole widening, and it was derived by measurement,
+                  # not by reading docs: pointing the bundler plugin's `sentryUrl` at a
+                  # request-logging stand-in showed sentry-cli 2.58 issuing exactly
+                  #   GET  /api/0/organizations/<org>/chunk-upload/     (already allowed)
+                  #   POST /api/0/organizations/<org>/chunk-upload/     (already allowed)
+                  #   POST /api/0/organizations/<org>/artifactbundle/assemble/   ← 404 here
+                  # The three release calls it also made by default are NOT allowed and must
+                  # not be: `/api/0/projects/<org>/<proj>/releases/<version>/` answers DELETE.
+                  # `release.create: false` in next.config.mjs suppresses them, and nothing is
+                  # lost — GlitchTip's own `assemble_artifacts` does `Release.get_or_create()`
+                  # from the bundle manifest, and symbolication joins on the debug ID anyway
+                  # (`javascript_event_processor.transform`), never on the release.
+                  #
+                  # Anchored to `artifactbundle/assemble` on purpose: it takes a chunk-checksum
+                  # list and needs the same org token the chunk upload already needs, so it adds
+                  # an authenticated write of the same kind rather than new surface. Widening it
+                  # to `/api/0/organizations/[^/]+/` would re-open the management API.
+                  - path: /api/0/organizations/[^/]+/artifactbundle/assemble/?
+                    pathType: ImplementationSpecific
             tls:
               - secretName: glitchtip-tls
                 hosts:

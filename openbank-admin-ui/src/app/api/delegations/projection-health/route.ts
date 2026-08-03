@@ -23,7 +23,10 @@ import { inCluster } from '@/lib/discovery'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-export const DELEGATION_TOPIC = 'openbank.delegation.events'
+// NOT exported: Next only permits its own route fields as exports from a route handler. Turbopack
+// tolerates an extra value export; webpack rejects the whole build with "is not a valid Route
+// export field" — and webpack is the only bundler that emits client source maps (#3235).
+const DELEGATION_TOPIC = 'openbank.delegation.events'
 const TIMEOUT_MS = 4000
 
 function kafkaUiBaseUrl(): string {
