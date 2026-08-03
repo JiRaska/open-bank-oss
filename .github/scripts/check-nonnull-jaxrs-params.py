@@ -171,6 +171,12 @@ def enclosing_type(src: str, offset: int):
     `kind` is the discriminator that matters: an `interface` is an outbound MicroProfile REST
     client, a `class` is an inbound resource. Files that hold both (a resource plus its client)
     resolve correctly because the LAST declaration before the offset wins.
+
+    Callers must exclude on `== "interface"`, NOT on `!= "class"`. A `companion object` declared
+    above a handler inside a resource class resolves to `object`, and excluding everything that is
+    not a `class` would then skip that handler silently — a false GREEN, which is the direction
+    that never announces itself. There are 0 such sites today; the point is that adding one must
+    not disarm the gate.
     """
     last = None
     for m in DECL_RE.finditer(src, 0, offset):
@@ -207,7 +213,7 @@ def scan_source(src: str, service: str, path: str):
             continue
 
         encl_kind, encl_name = enclosing_type(src, m.start())
-        if encl_kind != "class":
+        if encl_kind == "interface":
             continue  # outbound REST client — the caller supplies the argument
 
         yield {
@@ -265,6 +271,19 @@ class DemoResource {
 
     fun allowedPrimitive(@QueryParam("ok_primitive") g: Int): Response = TODO()
 
+    // A NAMED nested object above a handler must not disarm the check for handlers below it. With
+    // the exclusion written as `!= "class"` this site resolves to `object` and is silently skipped
+    // — a false GREEN, the direction that never announces itself. Excluding only `interface` keeps
+    // it flagged. (An unnamed `companion object` is NOT the hazard: DECL_RE requires a name after
+    // the keyword, so it never becomes the enclosing declaration. Measured — the first version of
+    // this fixture used `companion object` and passed against the broken exclusion too, i.e. it
+    // proved nothing.)
+    object Headers {
+        const val OPERATOR = "X-Operator-Id"
+    }
+
+    fun flaggedAfterNestedObject(@QueryParam("flag_after_object") i: String): Response = TODO()
+
     // A commented-out declaration must not count:
     // fun commentedOut(@QueryParam("comment_only") z: String): Response = TODO()
     fun stringLiteralIsNotADecl(): String = "@QueryParam(\\"literal_only\\") y: String"
@@ -277,7 +296,7 @@ interface DemoClient {
 }
 '''
 
-SELF_TEST_EXPECTED_FLAGGED = {"flag_plain", "flag_header", "flag_enum"}
+SELF_TEST_EXPECTED_FLAGGED = {"flag_plain", "flag_header", "flag_enum", "flag_after_object"}
 SELF_TEST_EXPECTED_ALLOWED = {
     "prose_only", "nested_prose", "ok_nullable", "ok_default_ann", "ok_kotlin_default",
     "ok_primitive", "comment_only", "literal_only", "ok_outbound",
