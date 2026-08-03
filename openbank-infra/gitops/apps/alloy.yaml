@@ -98,10 +98,30 @@ spec:
           # Karpenter's bin-packing and node count are unaffected. The cost is
           # headroom the pods may use, not capacity reserved up front — and the
           # alternative is a DaemonSet that crashloops and drops the fleet's logs.
+          #
+          # Request 320Mi → 640Mi (2026-08-02). Leaving the request alone was the
+          # right call for the limit-only change above, but it is what makes the
+          # bin-packing dishonest: Karpenter reserves 320Mi per node for a
+          # DaemonSet that actually holds ~2x that, so every node it sizes is
+          # short by the difference before a single workload pod lands.
+          # Prometheus, `container_memory_working_set_bytes`, 12h window over the
+          # 21 nodes of the `default` pool: p95 630Mi, max 654Mi. 640Mi ≈ p95 and
+          # still leaves 128Mi of burst under the 768Mi limit, so nothing about
+          # the OOM headroom above changes.
+          #
+          # Working set, not RSS, is the quantity chosen deliberately: it is what
+          # the kubelet compares against its eviction thresholds, so it is the
+          # only number that predicts an eviction.
+          #
+          # This is the larger half of a pair — see the `default` NodePool in
+          # openbank-infra/aws/envs/sandbox-platform/main.tf, which stops that
+          # per-node tax landing on 4 GiB nodes at all. Raising this request
+          # WITHOUT that change would push the pool into more small nodes and
+          # make things worse; the two must ship together.
           resources:
             requests:
               cpu: 50m
-              memory: 320Mi
+              memory: 640Mi
             limits:
               cpu: 300m
               memory: 768Mi

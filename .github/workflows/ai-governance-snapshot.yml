@@ -1,0 +1,58 @@
+# -----------------------------------------------------------------------------
+# AI governance snapshot drift gate (ADR-0029 D3 / ADR-0031).
+#
+# Fast echo workflow for the generated admin-ui IAOps governance snapshot. The binding,
+# required copy lives in `.github/gates/gates.yaml` under `Validate manifests`; this workflow
+# stays path-filtered so contributors get a seconds-fast signal on governance-only PRs.
+# -----------------------------------------------------------------------------
+name: AI governance snapshot
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'openbank-libs/governance/ai-rollout.yaml'
+      - 'openbank-libs/governance/agents.yaml'
+      - 'openbank-libs/governance/prompts/registry.yaml'
+      - 'openbank-libs/governance/evals/baselines.json'
+      - 'openbank-admin-ui/ai-governance-snapshot.json'
+      - '.github/scripts/gen-ai-governance-snapshot.py'
+      - '.github/workflows/ai-governance-snapshot.yml'
+      - 'openbank-devops-agent/build.gradle.kts'
+      - 'openbank-devops-agent/src/main/kotlin/**/*.kt'
+      - 'openbank-control-liveness-sentinel/build.gradle.kts'
+      - 'openbank-control-liveness-sentinel/src/main/kotlin/**/*.kt'
+  push:
+    branches: [main]
+    paths:
+      - 'openbank-libs/governance/ai-rollout.yaml'
+      - 'openbank-libs/governance/agents.yaml'
+      - 'openbank-libs/governance/prompts/registry.yaml'
+      - 'openbank-libs/governance/evals/baselines.json'
+      - 'openbank-admin-ui/ai-governance-snapshot.json'
+      - '.github/scripts/gen-ai-governance-snapshot.py'
+      - '.github/workflows/ai-governance-snapshot.yml'
+      - 'openbank-devops-agent/build.gradle.kts'
+      - 'openbank-devops-agent/src/main/kotlin/**/*.kt'
+      - 'openbank-control-liveness-sentinel/build.gradle.kts'
+      - 'openbank-control-liveness-sentinel/src/main/kotlin/**/*.kt'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-governance-snapshot-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ai-governance-snapshot:
+    name: ai-governance-snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - name: Check AI governance snapshot is in sync
+        run: python3 .github/scripts/gen-ai-governance-snapshot.py --check

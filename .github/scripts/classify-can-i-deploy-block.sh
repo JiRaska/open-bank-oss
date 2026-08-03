@@ -37,7 +37,12 @@
 # its own, so test-classify-can-i-deploy-block.sh can drive every branch.
 #
 # Usage:
-#   PACT_VERSION_PRESENT=yes|no|absent|unknown classify-can-i-deploy-block.sh <service> < cli-output
+#   PACT_VERSION_PRESENT=yes|no|absent|unknown [EVENT_NAME=<github.event_name>] \
+#     classify-can-i-deploy-block.sh <service> < cli-output
+#
+#   EVENT_NAME — the triggering event, same vocabulary and same default (push) as
+#     resolve-can-i-deploy-selector.sh. Only (no + workflow_dispatch) is treated specially;
+#     see the NOT_ASKED note below.
 #
 #   PACT_VERSION_PRESENT — the caller's probe of
 #     GET <broker>/pacticipants/<svc>/versions/<sha>:
@@ -51,22 +56,78 @@
 #   UNVERIFIED    — a version exists but no verification result yet. Usually the
 #                   counterpart provider lagging by minutes; treated as transient, but
 #                   named separately so it is not mistaken for a passed verification.
+#   NOT_ASKED     — the gate was never asked (#3454). resolve-can-i-deploy-selector.sh
+#                   REFUSEd to pick a selector, so no can-i-deploy verdict exists at all.
+#                   See the NOT_ASKED note below for why this is not PENDING_BUILD.
 #   UNKNOWN       — could not tell. Deliberately distinct from the three above: an
 #                   unclassifiable block must not borrow PENDING_BUILD's "it'll fix
 #                   itself" reassurance.
+#
+# WHY NOT_ASKED IS A CLASS AND NOT `PENDING_BUILD` (issue #3454)
+# The REFUSE branch in auto-deploy.yml recorded a blocked service with NO class, so every
+# refusal printed downstream as "[UNKNOWN] — no classification recorded for this service".
+# Measured on run 30765380309, a fleet workflow_dispatch of e4821ef6: all 54 services
+# refused, all 54 reported UNKNOWN, deployable=[].
+#
+# The tempting fix is to tag it PENDING_BUILD — the observable condition is byte-identical
+# (no published pact version for this sha). It is the wrong label, because PENDING_BUILD
+# does not only describe a state, it PROMISES one: "the 3-hourly reconcile re-drives it
+# automatically". That promise holds on a push, where the sha IS main's head and its
+# services-ci build is genuinely in flight. It does not hold for a dispatch, because
+# services-ci is PATH-SCOPED: on any given commit it builds only the services that commit
+# touched, so for the other ~53 no pact version for that sha will ever exist, no matter how
+# many reconcile ticks pass. Tagging those PENDING_BUILD asserts a self-clearing property
+# that is false — a confident label on a guess, which is the failure this file's header
+# already warns against.
+#
+# It is equally not UNKNOWN. UNKNOWN means "could not tell"; here we can tell exactly, and
+# the remedy is specific and different from every other class: nothing about the CONTRACTS
+# is wrong, the REQUEST is unanswerable. Deploy the sha services-ci actually built for this
+# service (let the push/reconcile lane carry it), or publish a pact version for this sha.
+#
+# WHY ONE CLASS AND NOT TWO. Two sub-cases hide behind one refusal — "dispatched sha is
+# main's head with a build in flight" (will gain a version) and "dispatched sha can never
+# gain one". Splitting them needs evidence this script does not have and cannot get without
+# a network call, and the two sub-cases have the SAME consequences everywhere the class is
+# consumed: neither is co-deploy evidence, neither may be silenced as transient, and
+# re-running the same dispatch fixes neither. A distinction with no distinct consequence,
+# bought with a guess, is exactly what the header forbids.
+#
+# WHY THE EVENT IS AN INPUT HERE TOO. NOT_ASKED must fire on precisely the inputs on which
+# resolve-can-i-deploy-selector.sh emits REFUSE, and nothing structural forces that: they
+# are two files. So both derive their answer from the SAME pair (PACT_VERSION_PRESENT,
+# EVENT_NAME) rather than the workflow hardcoding a class string next to the REFUSE branch,
+# and test-classify-can-i-deploy-block.sh asserts the equivalence over the whole input
+# cross-product. A future edit to either file's condition reddens that test.
+#
 # Always exits 0 — this is a labeller, not a gate.
 set -uo pipefail
 
 SVC="${1:-}"
 if [ -z "$SVC" ]; then
-  echo "usage: PACT_VERSION_PRESENT=yes|no|absent|unknown $0 <service> < cli-output" >&2
+  echo "usage: PACT_VERSION_PRESENT=yes|no|absent|unknown [EVENT_NAME=<event>] $0 <service> < cli-output" >&2
   exit 2
 fi
 
 PRESENT="${PACT_VERSION_PRESENT:-unknown}"
+# Same default as resolve-can-i-deploy-selector.sh: an absent EVENT_NAME behaves as a push,
+# so a caller that forgets to pass it keeps today's labelling instead of inventing NOT_ASKED.
+EVENT="${EVENT_NAME:-push}"
 OUT="$(cat)"
 
 emit() { printf '%s\t%s\n' "$1" "$2"; }
+
+# 0. NOT_ASKED is tested before EVERYTHING, including the regression check, and that is
+#    deliberate. On exactly these inputs resolve-can-i-deploy-selector.sh emits REFUSE, so
+#    can-i-deploy is never invoked and there is no verdict — whatever arrives on stdin (the
+#    caller sends nothing) is not one. Reporting REGRESSION from it would name a
+#    verification failure the gate never observed. Keeping this first also makes the
+#    NOT_ASKED ⇔ REFUSE equivalence hold for ANY stdin, which is what the cross-product
+#    test in test-classify-can-i-deploy-block.sh asserts.
+if [ "$PRESENT" = "no" ] && [ "$EVENT" = "workflow_dispatch" ]; then
+  emit NOT_ASKED "the contract gate was never asked about this commit — a manual dispatch of a sha with no published pact version for ${SVC}, so the selector REFUSEd rather than answer about a different commit (#3318). This is NOT self-clearing: services-ci is path-scoped, so a sha that did not touch ${SVC} never gains a version, and re-running the same dispatch cannot change that. Deploy the sha services-ci built for ${SVC} (the push/reconcile lane), or publish a pact version for this one"
+  exit 0
+fi
 
 # 1. A genuine verification failure is the only class that never self-clears, so it is
 #    tested FIRST — even when the broker probe says "no version for this sha". Those two

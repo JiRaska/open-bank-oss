@@ -37,6 +37,18 @@ interface AmlCaseRepository {
     suspend fun update(amlCase: AmlCase, event: OutboxMessage): AmlCase
 
     /**
+     * Cases whose `party_id` is a copy of `account_id` — i.e. never resolved to a real party
+     * (#3413). Bounded by [limit]; the sweep re-runs.
+     */
+    suspend fun findUnresolvedParty(limit: Int): List<Pair<UUID, UUID>>
+
+    /** Point [caseId] at its real owning party. */
+    suspend fun resolveParty(caseId: UUID, partyId: UUID)
+
+    /** How many cases still carry an account id in `party_id`. Published as a gauge. */
+    suspend fun countUnresolvedParty(): Long
+
+    /**
      * Anonymizes PII in all AML cases for the given party (GDPR Art. 17 right of erasure).
      *
      * Sets [AmlCase.customerReference] to `"ERASED-<partyId>"` and nulls [AmlCase.matchedEntity]

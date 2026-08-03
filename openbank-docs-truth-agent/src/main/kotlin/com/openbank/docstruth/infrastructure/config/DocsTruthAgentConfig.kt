@@ -12,6 +12,17 @@ import jakarta.enterprise.context.ApplicationScoped
 @ConfigMapping(prefix = "openbank.docs-truth-agent")
 @ApplicationScoped
 interface DocsTruthAgentConfig {
+    /**
+     * Cron for the periodic sweep (ADR-0166).
+     *
+     * Declared here because it lives under this mapping's prefix: SmallRye validates a
+     * `@ConfigMapping` prefix as a CLOSED set, so a key added to `application.yaml` with no
+     * matching accessor fails the whole application at boot with `ConfigValidationException` —
+     * not a warning about one property, a dead service.
+     */
+    @WithDefault("0 30 5 ? * SUN")
+    fun checkCron(): String
+
     @WithDefault("https://api.github.com")
     fun githubApiUrl(): String
 

@@ -17,6 +17,23 @@ metadata:
     app.kubernetes.io/part-of: delegation
 spec:
   replicas: 1
+  # Terminate-first, deliberately. With the default RollingUpdate (maxSurge 25% -> 1,
+  # maxUnavailable 25% -> 0) a ONE-replica Deployment must schedule the new pod BEFORE it may
+  # stop the old one, so the rollout needs room for two pods — and the old pod is holding exactly
+  # the resources the new one needs. On a cluster with no spare room that is a deadlock the
+  # rollout never escapes: observed 2026-08-03, the SCA-ceremony fix sat Pending for hours behind
+  # its own predecessor while `default` was at its Karpenter CPU limit (48/48) and no node had
+  # 448Mi free.
+  #
+  # The trade is a few seconds of unavailability per deploy. This service has one replica and no
+  # HA, so it is already unavailable for that moment whenever the pod is replaced; what changes is
+  # that the replacement can actually happen. A multi-replica money-path service should NOT copy
+  # this — there, surge is what buys zero-downtime and the capacity to do it is worth having.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: delegation-service
@@ -46,7 +63,7 @@ spec:
             # be DISPATCHED explicitly (`-f services=openbank-delegation-service`): the push
             # path only matches <svc>/src/main or build.gradle.kts, and this change touches
             # neither. The auto-deploy gitops PR then rewrites the pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-delegation-service:sandbox-f75fe6d3
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-delegation-service:sandbox-6261040e
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8126 and management 8090 — both read off the service's own

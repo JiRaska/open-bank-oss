@@ -1,0 +1,40 @@
+{
+  "consumer": {
+    "name": "openbank-delegation-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the card whose ownership is being verified",
+      "providerStates": [
+        {
+          "name": "a card held by a known party exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/cards/0a0a0a0a-1b1b-4c2c-8d3d-4e4e4e4e4e4e"
+      },
+      "response": {
+        "body": {
+          "id": "0a0a0a0a-1b1b-4c2c-8d3d-4e4e4e4e4e4e",
+          "partyId": "5f5f5f5f-6a6a-4b7b-8c8c-9d9d9d9d9d9d"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-card-issuance-service"
+  }
+}
