@@ -75,18 +75,14 @@ PARAM_ANNOTATIONS = ("QueryParam", "HeaderParam", "MatrixParam")
 # JVM primitives: JAX-RS supplies the zero value, never null, so no NPE is possible here.
 KOTLIN_PRIMITIVES = {"Int", "Long", "Double", "Float", "Boolean", "Short", "Byte", "Char"}
 
-# The tail left after the money-path fix in #3104. Each entry is "<service>|<Class>|<param>".
+# The tail left after the money-path fix in #3625, being worked through in #3624. psd2 and
+# card-issuance are done. Each entry is "<service>|<Class>|<param>".
 # The count per key is not recorded on purpose: several of these repeat the identical parameter
 # across sibling handlers (card-issuance's X-Operator-Id sevenfold), and pinning the count would
 # make an unrelated refactor fail the gate for no defect.
 BASELINE = {
     # openbank-aml-service — POST /api/v1/aml/cases
     "openbank-aml-service|AmlCaseResource|Idempotency-Key",
-    # openbank-card-issuance-service — operator attribution on every card lifecycle operation
-    "openbank-card-issuance-service|CardResource|Idempotency-Key",
-    "openbank-card-issuance-service|CardResource|X-Operator-Id",
-    "openbank-card-issuance-service|CardDelegationResource|partyId",
-    "openbank-card-issuance-service|CardDelegationResource|intent",
     # openbank-customer-edge — the mobile/web BFF
     "openbank-customer-edge|CustomerEdgeResource|currency",
     "openbank-customer-edge|CustomerEdgeResource|accountId",
@@ -98,10 +94,6 @@ BASELINE = {
     "openbank-pid-service|PartyResource|index",
     "openbank-pid-service|PartyResource|type",
     "openbank-pid-service|PartyResource|value",
-    # openbank-psd2-service — Berlin Group headers on AIS/PIS
-    "openbank-psd2-service|AisResource|Consent-ID",
-    "openbank-psd2-service|PisResource|Consent-ID",
-    "openbank-psd2-service|PisResource|Idempotency-Key",
     # openbank-statement-service
     "openbank-statement-service|StatementResource|from",
     "openbank-statement-service|StatementResource|to",
