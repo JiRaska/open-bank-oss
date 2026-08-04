@@ -9,6 +9,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.copilot.application.port.out.ConversationStore
 import com.openbank.copilot.domain.model.ChatMessage
 import com.openbank.copilot.domain.model.ChatRole
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.arc.properties.IfBuildProperty
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
@@ -124,7 +125,7 @@ class PostgresConversationStore(private val mapper: ObjectMapper) :
                         .takeLast(ConversationStore.MAX_MESSAGES)
                     val now = Instant.now()
                     val upsert = entity ?: ConversationHistoryEntity().apply {
-                        id = UUID.randomUUID()
+                        id = Ids.newId()
                         this.customerId = customerId
                         this.conversationId = conversationId
                         createdAt = now
