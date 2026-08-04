@@ -129,3 +129,21 @@ Domain layer is framework-free (ADR-0002).
 - **Dedicated OIDC credential (S2/I2):** per-service Vault path + dedicated confidential client before prod.
 - **DomainMetrics (I3, ADR-0077):** deferred to next libs ship to avoid a fleet rebuild.
 - **gitops/ArgoCD manifest:** the service is not yet deployed; deployment is a separate follow-up.
+
+## 6. Change log
+
+- **2026-08-04 (ADR-0238 T1, #3710):** Added Postgres conversation-history store. Trust-boundary
+  change: conversation messages (personal data — what the customer asked and the assistant answered)
+  now persist in `openbank_copilot` Postgres (CNPG, ADR-0009 database-per-service), not only in
+  Valkey. **New STRIDE findings:** (S) CNPG-operator-generated secret `copilot-db-app` in the
+  platform namespace — same protection model as every other CNPG cluster; secret never in git.
+  (T) `messages_json` column stores UTF-8 text; Hibernate Reactive serialises/deserialises via
+  Jackson — same tamper-evidence as every other service (no field-level encryption at rest in the
+  sandbox, prod deferred pending ADR-0189). (I) `customer_id` in the table is the JWT `sub`
+  (partyId); isolation is enforced by the `(customer_id, conversation_id)` UNIQUE constraint and
+  the `WHERE` clause in every query — no row ever crosses a customer boundary. (D) Postgres goes
+  DOWN → Flyway retries at boot, conversation load returns empty (fail-open for history, not for
+  tools), append silently drops (no retry queue). Retained as an **open item** — a retry queue
+  should land before production. (E) max TTL 90 days, rolling; a manual erasure hook is required
+  for GDPR Art. 17 (`PARTY_ERASED` consumer — open item, same as audit and analytics fleet-wide
+  pattern). Residency: CNPG cluster is in the same region as every other service datastore (ADR-0175).

@@ -34,6 +34,12 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(libs.quarkus.redis.client)
+    // ADR-0238 T1: durable conversation history (Postgres, #3710).
+    implementation(libs.quarkus.hibernate.reactive.panache)
+    implementation(libs.quarkus.hibernate.reactive.panache.base)
+    implementation(libs.quarkus.reactive.pg.client)
+    implementation(libs.quarkus.flyway)
+    implementation(libs.quarkus.jdbc.postgresql)
 
     // Shared runtime plumbing: model gateway seam (ADR-0031), OPA authz (ADR-0034),
     // feature flags (ADR-0067), AI-attributed audit (ADR-0031 D5).
@@ -43,6 +49,9 @@ dependencies {
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.junit)
+    testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.rest.assured.kotlin)
     // Consumer-driven contract with customer-edge (ADR-0063, issue #2322).
     testImplementation(libs.pact.consumer)

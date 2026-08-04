@@ -38,6 +38,24 @@ quarkus:
     hosts: ${REDIS_URL:redis://localhost:6379}
     timeout: 2s
 
+  # ADR-0238 T1: durable conversation history (Postgres). Dev defaults; gitops overrides via env.
+  datasource:
+    db-kind: postgresql
+    username: ${POSTGRES_USER:openbank}
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_copilot}
+    jdbc:
+      url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_copilot}
+  hibernate-orm:
+    database:
+      generation: none
+  flyway:
+    migrate-at-start: true
+    validate-on-migrate: false
+    connect-retries: 10
+    connect-retries-interval: 2S
+
   oidc:
     auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://keycloak.iam.svc:8080/realms/openbank-customers}
     client-id: ${QUARKUS_OIDC_CLIENT_ID:openbank-edge}
@@ -60,6 +78,7 @@ quarkus:
 # Customer copilot configuration (ADR-0089).
 copilot:
   token-store: redis
+  conversation-store: postgres
   # Feature flag is the runtime gate (ADR-0067); off by default everywhere.
   enabled: ${COPILOT_ENABLED:false}
   guardrail:
@@ -105,3 +124,11 @@ opa:
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
 authz:
   enforce: "${AUTHZ_ENFORCE:true}"
+
+"%test":
+  quarkus:
+    management:
+      enabled: false
+    datasource:
+      devservices:
+        enabled: true
