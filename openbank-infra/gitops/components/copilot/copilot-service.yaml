@@ -84,7 +84,7 @@ spec:
                   name: copilot-service-secrets
                   key: COPILOT_MODEL_API_KEY
                   optional: true
-            # ADR-0238 T1: Postgres conversation history (#3710). The CNPG operator injects
+            # Postgres conversation history (#3710). The CNPG operator injects
             # copilot-db-app with PG_USER/PG_PASSWORD; REACTIVE_URL and JDBC_URL resolve them.
             - name: REACTIVE_URL
               value: postgresql://copilot-db-rw.platform.svc:5432/openbank_copilot
