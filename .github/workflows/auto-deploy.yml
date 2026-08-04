@@ -1236,6 +1236,10 @@ jobs:
           if [ "${#UPDATED[@]}" -eq 0 ]; then
             echo "No manifests changed — all images already up to date."
             echo "changed=false" >> "$GITHUB_OUTPUT"
+            if [ "${GATE_RAN}" = "true" ] && [ "${DEPLOYABLE_SERVICES}" = "[]" ]; then
+              echo "::error::contract gate ran but no service was deployable — failing gitops-pr closed so the run is not silently green (issue #3432)"
+              exit 1
+            fi
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
             printf '%s\n' "${UPDATED[@]}"
