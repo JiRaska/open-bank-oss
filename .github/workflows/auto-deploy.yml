@@ -42,6 +42,11 @@ on:
       - "openbank-libs-domain/build.gradle.kts"
       - "openbank-libs-runtime/build.gradle.kts"
       - "build-logic/**"
+      # Release-please bumps version.txt, yet a release-only commit touches nothing
+      # under src/main/**. That left the new version with no image built, causing
+      # immediate deploy drift (issue #3597 et al.). Treat a version bump as a
+      # release marker that must deploy like a source change.
+      - "openbank-*/version.txt"
   # Self-heal reconcile (issue #2020). The per-push run is ONE-SHOT: a service that built
   # and pushed its image but was then blocked at the can-i-deploy contract gate by a
   # TRANSIENT verification lag (its build wave republished its consumer pact; the provider
