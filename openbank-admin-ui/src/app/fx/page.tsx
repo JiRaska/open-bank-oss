@@ -790,7 +790,7 @@ export default function FxPage() {
                     <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                       onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                      <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{new Date(c.createdAt || Date.now()).toLocaleString('cs-CZ')}</td>
+                      <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.createdAt ? new Date(c.createdAt).toLocaleString('cs-CZ') : '—'}</td>
                       <td style={{ padding: '10px 16px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <span style={{ fontSize: '14px' }}>{CURRENCY_META[c.fromCurrency]?.flag ?? '🏳️'}</span>
