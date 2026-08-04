@@ -67,6 +67,7 @@ function nextRunTime(hour: number, minute: number, days: string[]): string {
 }
 
 function formatNextRun(iso: string, t: (cs: string, en: string) => string): string {
+  // eslint-disable-next-line react-hooks/purity -- time-relative display; timestamps are stable server data.
   const diffMs = new Date(iso).getTime() - Date.now()
   if (diffMs < 0) return t('brzy', 'soon')
   const h = Math.floor(diffMs / 3600000)
