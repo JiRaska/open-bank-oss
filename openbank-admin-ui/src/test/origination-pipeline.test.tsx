@@ -64,6 +64,10 @@ describe('wrap', () => {
 })
 
 describe('OriginationPipeline', () => {
+  beforeEach(() => {
+    vi.spyOn(Date, 'now').mockReturnValue(NOW)
+  })
+
   it('tints a waiting stage by how long the oldest item has waited', () => {
     render(React.createElement(Providers, null, React.createElement(OriginationPipeline, {
       items: [item('ASSESSMENT', 1), item('FOUR_EYES', 100, 1, 2), item('KYC_PENDING', 30, 1, 3)],
