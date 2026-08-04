@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test
 import org.testcontainers.containers.PostgreSQLContainer
 
 /**
- * ADR-0238 T1: pins that PostgresConversationStore durably stores, retrieves and trims messages.
+ * copilot conversation memory T1 (#3710): pins that PostgresConversationStore durably stores, retrieves and trims messages.
  * Runs against a real Postgres — the only way to verify Flyway created the table correctly.
  */
 @QuarkusTest

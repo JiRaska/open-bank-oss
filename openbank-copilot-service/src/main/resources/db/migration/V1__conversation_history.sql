@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
 
--- ADR-0238 T1: durable conversation history (#3710). Stores per-(customer, conversation) message
+-- copilot conversation memory T1 (#3710): durable conversation history (#3710). Stores per-(customer, conversation) message
 -- arrays; expires_at is updated on every append (rolling TTL). A scheduled sweep removes expired
 -- rows (no separate JVM overhead — standard Flyway, the cleanup rides the existing Temporal
 -- scheduler pattern or a lightweight Quarkus @Scheduled job). Rollback: DROP TABLE conversation_history;

@@ -29,7 +29,7 @@ import org.jboss.logging.Logger
 import java.time.Instant
 import java.util.UUID
 
-/** Rolling TTL for durable conversation history (ADR-0238 T1). 90 days matches typical banking app session retention. */
+/** Rolling TTL for durable conversation history (copilot conversation memory T1 (#3710)). 90 days matches typical banking app session retention. */
 private const val T1_TTL_SECONDS = 90L * 24 * 3600
 
 @Entity
@@ -60,7 +60,7 @@ class ConversationHistoryEntity : PanacheEntityBase() {
 }
 
 /**
- * ADR-0238 T1 — durable conversation history in Postgres (#3710).
+ * copilot conversation memory T1 (#3710) — durable conversation history in Postgres (#3710).
  *
  * Replaces the Redis adapter as the production conversation store: history survives pod restarts,
  * is resumable across devices (any session presenting the same conversationId gets the same

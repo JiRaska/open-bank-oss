@@ -34,7 +34,7 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(libs.quarkus.redis.client)
-    // ADR-0238 T1: durable conversation history (Postgres, #3710).
+    // copilot conversation memory T1 (#3710): durable conversation history (Postgres, #3710).
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)

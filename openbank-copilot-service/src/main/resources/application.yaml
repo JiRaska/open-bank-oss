@@ -38,7 +38,7 @@ quarkus:
     hosts: ${REDIS_URL:redis://localhost:6379}
     timeout: 2s
 
-  # ADR-0238 T1: durable conversation history (Postgres). Dev defaults; gitops overrides via env.
+  # copilot conversation memory T1 (#3710): durable conversation history (Postgres). Dev defaults; gitops overrides via env.
   datasource:
     db-kind: postgresql
     username: ${POSTGRES_USER:openbank}

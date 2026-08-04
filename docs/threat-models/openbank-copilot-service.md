@@ -132,7 +132,7 @@ Domain layer is framework-free (ADR-0002).
 
 ## 6. Change log
 
-- **2026-08-04 (ADR-0238 T1, #3710):** Added Postgres conversation-history store. Trust-boundary
+- **2026-08-04 (copilot conversation memory T1 (#3710), #3710):** Added Postgres conversation-history store. Trust-boundary
   change: conversation messages (personal data — what the customer asked and the assistant answered)
   now persist in `openbank_copilot` Postgres (CNPG, ADR-0009 database-per-service), not only in
   Valkey. **New STRIDE findings:** (S) CNPG-operator-generated secret `copilot-db-app` in the
