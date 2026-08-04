@@ -5,11 +5,16 @@
 package com.openbank.interest.infrastructure.scheduler
 
 import com.openbank.interest.application.port.`in`.AccrueInterestUseCase
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.Duration
 import java.time.LocalDate
 
 /**
@@ -23,8 +28,17 @@ import java.time.LocalDate
  * interest was ever accrued despite the rate/accrual/capitalization machinery all existing.
  */
 @ApplicationScoped
-class InterestAccrualScheduler(private val accrueInterestUseCase: AccrueInterestUseCase, private val clock: Clock) {
+class InterestAccrualScheduler(
+    private val accrueInterestUseCase: AccrueInterestUseCase,
+    private val clock: Clock,
+    private val domainMetrics: DomainMetrics,
+) {
     private val log = Logger.getLogger(InterestAccrualScheduler::class.java)
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofDays(1))
+    }
 
     @Scheduled(
         cron = "{openbank.interest.accrual-cron}",
@@ -35,9 +49,16 @@ class InterestAccrualScheduler(private val accrueInterestUseCase: AccrueInterest
         val date = LocalDate.now(clock)
         log.infof("interest accrual tick starting for %s", date)
         return accrueInterestUseCase.accrueAll(date)
-            .onItem().invoke { count -> log.infof("interest accrual for %s wrote %d accrual(s)", date, count) }
+            .onItem().invoke { count ->
+                log.infof("interest accrual for %s wrote %d accrual(s)", date, count)
+                liveness?.recordSuccess()
+            }
             .onFailure().invoke { e -> log.errorf(e, "interest accrual for %s failed", date) }
             .onFailure().recoverWithItem(0)
             .replaceWithVoid()
+    }
+
+    private companion object {
+        const val WORKFLOW_NAME = "interest-accrual"
     }
 }
