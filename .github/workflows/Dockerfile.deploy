@@ -1,6 +1,17 @@
-FROM eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0
+ARG BASE_IMAGE=eclipse-temurin:25-jre-ubi10-minimal@sha256:6031e5480f5d5818252a348980a192af0eab09e3380a55f75927e019f4d8136c
+FROM ${BASE_IMAGE}
 WORKDIR /app
-RUN addgroup -S openbank && adduser -S openbank -G openbank
+
+# The deploy pipeline historically used an alpine base (musl). Issue #3354 moves the
+# fleet to a glibc runtime, so this Dockerfile must accept either base without a hard
+# rewrite. Alpine ships addgroup/adduser; RHEL-based bases (ubi-minimal) ship
+# groupadd/useradd via shadow-utils. Pick whichever is present and always drop to a
+# non-root user — the smoke gate (onnx-serving-smoke.yml) exercises the same path.
+RUN if command -v addgroup >/dev/null 2>&1 && command -v adduser >/dev/null 2>&1; then \
+        addgroup -S openbank && adduser -S openbank -G openbank; \
+    else \
+        groupadd -r openbank && useradd -r -g openbank openbank; \
+    fi
 USER openbank
 COPY quarkus-app/lib/ /app/lib/
 COPY quarkus-app/*.jar /app/

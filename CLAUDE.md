@@ -569,8 +569,8 @@ fire from *outside* it, so they stay here:
   `openbank-admin-ui/scripts/generate-cluster-topology.mjs` parses
   `openbank-ledger-service/Dockerfile` in `imageFacts()` and renders the base image into the
   /docs/cluster dossier (ADR-0081) — and when it cannot parse one it falls back to a HARDCODED
-  `eclipse-temurin:25-jre-alpine` literal, so removing the declaration would have resurrected the
-  fiction in the UI instead of retiring it (#3354, #3630). A second reader that is a *generator
+  `eclipse-temurin:25-jre-ubi10-minimal` literal, so removing the declaration would have resurrected
+  the fiction in the UI instead of retiring it (#3354, #3630). A second reader that is a *generator
   in another tree* is invisible from the file, from the deploy pipeline, and from the gate that
   owns the file's shape.
 - **An oversized `run:` script makes the WHOLE workflow unparseable — and GitHub says nothing.**

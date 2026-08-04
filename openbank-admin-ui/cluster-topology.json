@@ -1,7 +1,7 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-08-04T08:06:31.000Z",
+  "generatedAt": "2026-08-04T09:01:07.000Z",
   "counts": {
     "namespaces": 68,
     "networkPolicies": 108,
@@ -560,22 +560,22 @@
   ],
   "imageAnatomy": {
     "multiStage": false,
-    "buildBase": "eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0",
-    "runtimeBase": "eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0",
+    "buildBase": "eclipse-temurin:25-jre-ubi10-minimal@sha256:6031e5480f5d5818252a348980a192af0eab09e3380a55f75927e019f4d8136c",
+    "runtimeBase": "eclipse-temurin:25-jre-ubi10-minimal@sha256:6031e5480f5d5818252a348980a192af0eab09e3380a55f75927e019f4d8136c",
     "steps": [
       {
         "id": "build",
         "label": "Build stage (JDK)",
         "status": "live",
         "adr": [],
-        "detail": "Plný JDK (eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0) zkompiluje a sestaví aplikaci. Tento stage se NEDISTRIBUUJE — zůstává v něm jen nářadí."
+        "detail": "Plný JDK (eclipse-temurin:25-jre-ubi10-minimal@sha256:6031e5480f5d5818252a348980a192af0eab09e3380a55f75927e019f4d8136c) zkompiluje a sestaví aplikaci. Tento stage se NEDISTRIBUUJE — zůstává v něm jen nářadí."
       },
       {
         "id": "runtime",
         "label": "Runtime stage (JRE-only)",
         "status": "live",
         "adr": [],
-        "detail": "Distribuuje se jen štíhlý JRE (eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0) + aplikace. Menší image = menší útočná plocha, žádný kompilátor/shell nářadí navíc."
+        "detail": "Distribuuje se jen štíhlý JRE (eclipse-temurin:25-jre-ubi10-minimal@sha256:6031e5480f5d5818252a348980a192af0eab09e3380a55f75927e019f4d8136c) + aplikace. Menší image = menší útočná plocha, žádný kompilátor/shell nářadí navíc."
       },
       {
         "id": "nonroot",

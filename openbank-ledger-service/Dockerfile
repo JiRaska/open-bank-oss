@@ -15,9 +15,9 @@
 # Adding a build stage back here is enforced against by
 # .github/scripts/check-dockerfile-no-build-stage.py.
 
-FROM eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0
+FROM eclipse-temurin:25-jre-ubi10-minimal@sha256:6031e5480f5d5818252a348980a192af0eab09e3380a55f75927e019f4d8136c
 WORKDIR /app
-RUN addgroup -S openbank && adduser -S openbank -G openbank
+RUN groupadd -r openbank && useradd -r -g openbank openbank
 USER openbank
 COPY quarkus-app/lib/ /app/lib/
 COPY quarkus-app/*.jar /app/

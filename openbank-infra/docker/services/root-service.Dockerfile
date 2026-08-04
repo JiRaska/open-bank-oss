@@ -17,10 +17,10 @@ RUN chmod +x gradlew && \
     done; \
     exit 1
 
-FROM eclipse-temurin:21-jre-alpine@sha256:3f08b13888f595cc49edabea7250ba69499ba25602b267da591720769400e08c
+FROM eclipse-temurin:25-jre-ubi10-minimal@sha256:6031e5480f5d5818252a348980a192af0eab09e3380a55f75927e019f4d8136c
 WORKDIR /app
 
-RUN addgroup -S openbank && adduser -S openbank -G openbank
+RUN groupadd -r openbank && useradd -r -g openbank openbank
 USER openbank
 
 COPY --from=build /workspace/quarkus-run.jar /app/quarkus-run.jar
