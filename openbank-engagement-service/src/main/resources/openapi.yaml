@@ -1,0 +1,96 @@
+openapi: 3.1.0
+info:
+  title: Engagement Service API
+  # major == openbank.api.version == URL /api/v1 (ADR-0048).
+  version: 0.1.0
+  description: >-
+    Rewards hub (ADR-0220 D3): opt-in engagement profile, daily streak, XP points, badges.
+    Safety invariants are domain rules: no credit reward, opt-in only, no fake urgency,
+    yearly cap, vulnerable-customer exclusion.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+paths:
+  /api/v1/engagement/{partyId}:
+    get:
+      tags: [Engagement]
+      summary: Get engagement profile (lazy-creates with default state)
+      operationId: getEngagement
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Engagement profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngagementResponse'
+
+  /api/v1/engagement/{partyId}/opt-in:
+    post:
+      tags: [Engagement]
+      summary: Opt the party into the rewards hub
+      operationId: optIn
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngagementResponse'
+
+  /api/v1/engagement/{partyId}/opt-out:
+    post:
+      tags: [Engagement]
+      summary: Opt the party out of the rewards hub (earned value is kept)
+      operationId: optOut
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngagementResponse'
+
+components:
+  schemas:
+    EngagementResponse:
+      type: object
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        enrolled:
+          type: boolean
+        streakDays:
+          type: integer
+        totalPoints:
+          type: integer
+        badges:
+          type: array
+          items:
+            type: string
+            enum: [FIRST_SAVINGS_GOAL, STREAK_7_DAYS, STREAK_30_DAYS, BUDGET_KEEPER, VAMPIRE_SLAYER, EARLY_ADOPTER, LOAN_FINISHER]
+        updatedAt:
+          type: string
+          format: date-time

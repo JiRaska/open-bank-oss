@@ -1,0 +1,81 @@
+quarkus:
+  application:
+    name: openbank-engagement-service
+  http:
+    port: 8153
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,OPTIONS
+      headers: Content-Type,Authorization
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+
+  datasource:
+    db-kind: postgresql
+    username: ${POSTGRES_USER:openbank}
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_engagement}
+    jdbc:
+      url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_engagement}
+  hibernate-orm:
+    database:
+      generation: none
+  flyway:
+    migrate-at-start: true
+    validate-on-migrate: false
+    connect-retries: 10
+    connect-retries-interval: 2S
+
+  oidc:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+
+  management:
+    enabled: true
+    port: 8154
+
+mp:
+  messaging:
+    outgoing:
+      engagement-events-out:
+        connector: smallrye-kafka
+        topic: openbank.engagement.events
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+
+openbank:
+  engagement:
+    yearly-reward-cap: 5000
+  outbox:
+    dispatch-enabled: true
+    topic: openbank.engagement.events
+    batch-size: 50
+
+"%test":
+  quarkus:
+    management:
+      enabled: false
+  openbank:
+    engagement:
+      worker:
+        enabled: false
+    outbox:
+      dispatch-enabled: false

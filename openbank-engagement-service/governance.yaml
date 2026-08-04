@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service governance manifest (ADR-0071).
+dataDomain: crm
+primaryDatastore: PostgreSQL
+databaseName: openbank_engagement
+dataLineageRole: write
+dataClassification: confidential
+retentionPolicy: 2 years
+evidenceExported: false
+databaseLineage:
+  ownedDatabases:
+    - openbank_engagement

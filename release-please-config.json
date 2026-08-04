@@ -391,6 +391,12 @@
       "exclude-paths": [
         "openbank-vop-service/src/test"
       ]
+    },
+    "openbank-engagement-service": {
+      "component": "engagement-service",
+      "exclude-paths": [
+        "openbank-engagement-service/src/test"
+      ]
     }
   }
 }
