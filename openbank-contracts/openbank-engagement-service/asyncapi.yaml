@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006: AsyncAPI 3.0 contract for the engagement-service event channel.
+# Content is derived from the code; each claim names its source.
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Engagement Service — events
+  version: 1.0.0
+  description: |
+    Domain events emitted when a party's engagement profile changes (ADR-0220 D3).
+
+    Events are written to `engagement_outbox` in the same transaction as the state change
+    (EngagementRepositoryImpl.save(profile, event)) and dispatched afterwards by
+    EngagementOutboxDispatcher, so a published event always corresponds to a committed change.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+channels:
+  openbank.engagement.events:
+    address: openbank.engagement.events
+    description: Engagement profile state changes.
+    messages:
+      XpEarned:
+        $ref: '#/components/messages/XpEarned'
+      BadgeUnlocked:
+        $ref: '#/components/messages/BadgeUnlocked'
+      StreakUpdated:
+        $ref: '#/components/messages/StreakUpdated'
+
+operations:
+  publishEngagementEvent:
+    action: send
+    channel:
+      $ref: '#/channels/openbank.engagement.events'
+    description: engagement-service publishes profile state changes via the transactional outbox.
+
+components:
+  messages:
+    XpEarned:
+      name: XpEarned
+      payload:
+        type: object
+        properties:
+          partyId: { type: string, format: uuid }
+          points: { type: integer }
+          source: { type: string }
+          totalPoints: { type: integer }
+          occurredAt: { type: string, format: date-time }
+
+    BadgeUnlocked:
+      name: BadgeUnlocked
+      payload:
+        type: object
+        properties:
+          partyId: { type: string, format: uuid }
+          badge: { type: string }
+          occurredAt: { type: string, format: date-time }
+
+    StreakUpdated:
+      name: StreakUpdated
+      payload:
+        type: object
+        properties:
+          partyId: { type: string, format: uuid }
+          streakDays: { type: integer }
+          occurredAt: { type: string, format: date-time }
