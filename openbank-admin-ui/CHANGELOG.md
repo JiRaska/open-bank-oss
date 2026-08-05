@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.92.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.91.5...admin-ui-v0.92.0) (2026-08-05)
+
+
+### Features
+
+* **finops-agent:** wire ADR-0148 prompt registry and LLM gateway (ADR-0112 P4) ([407c1b3](https://github.com/JiRaska/open-bank-oss/commit/407c1b3cd175b32c443077edbcfcbf4e28cc0248))
+
 ## [0.91.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.91.4...admin-ui-v0.91.5) (2026-08-05)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/finops-agent-v0.4.0...finops-agent-v0.5.0) (2026-08-05)
+
+
+### Features
+
+* **finops-agent:** wire ADR-0148 prompt registry and LLM gateway (ADR-0112 P4) ([407c1b3](https://github.com/JiRaska/open-bank-oss/commit/407c1b3cd175b32c443077edbcfcbf4e28cc0248))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/finops-agent-v0.3.1...finops-agent-v0.4.0) (2026-08-02)
 
 
