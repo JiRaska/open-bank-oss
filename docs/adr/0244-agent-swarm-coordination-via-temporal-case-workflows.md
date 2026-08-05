@@ -97,6 +97,23 @@ governance action never reads as a swarm verdict.
 AGPL-3.0-only module registered in `rules.yaml: agpl_modules`, like every other
 agent-plane component.
 
+**D9 — Case-open authority, deduplication and rate are chartered.** Opening a case
+is itself a governed act, not a side effect of any agent feeling busy: only a
+chartered agent whose charter grants the `case-open` capability may open one, the
+open call names the disposition-target lineage (D4), passes the same OPA gate as
+any contribution (D2) and is AI-attributed (D7). Three bounds make proposal spam
+structurally impossible rather than merely audited: **(a) deduplication** — at most
+one open case per disposition target; a second open naming the same target is
+converted into a contribution signal to the existing case, so N detectors seeing
+one alert produce one case, not N; **(b) rate** — a per-agent open-rate limit in
+the charter, plus a fleet-wide ceiling of concurrent open cases per case-class in
+the `agents.yaml` defaults; at the ceiling a new finding queues as a contribution
+or is refused with an audit event — the refusal is visible, never silent;
+**(c) a convergence circuit-breaker** — a case-class whose contested-outcome rate
+(D6) crosses the threshold declared in `agents.yaml` has its `case-open` capability
+automatically suspended pending human charter review, so a swarm that repeatedly
+fails to converge cannot keep billing supervisors for its failure.
+
 ## Alternatives considered
 
 - **Blackboard over a Kafka topic + materialized view**: an `agent.case.v1` topic
@@ -122,10 +139,15 @@ agent-plane component.
 - An admin-ui "swarm thread" view becomes a pure projection of Temporal workflow
   history — no new data model; the UI surface is a separate follow-up ADR.
 - Contested proposals add HITL cognitive load; the disposition UI must render
-  dissent.
-- Follow-ups: `agents.yaml` extension; `case-coordinator` charter + eval scenarios
-  under the ADR-0148 evals gate; admin-ui thread-view ADR; registration in
-  `rules.yaml: agpl_modules`.
+  dissent. The load is bounded: case opens are capability-gated, deduplicated per
+  disposition target and rate-limited with a convergence circuit-breaker (D9), so
+  the HITL queue cannot be flooded by swarm activity — a case-class that keeps
+  failing to converge loses its opening privilege instead of the supervisor losing
+  their attention.
+- Follow-ups: `agents.yaml` extension (case budgets, swarm-participation and
+  `case-open` capabilities, per-case-class ceilings and contested-rate thresholds);
+  `case-coordinator` charter + eval scenarios under the ADR-0148 evals gate;
+  admin-ui thread-view ADR; registration in `rules.yaml: agpl_modules`.
 
 ## Compliance impact
 
