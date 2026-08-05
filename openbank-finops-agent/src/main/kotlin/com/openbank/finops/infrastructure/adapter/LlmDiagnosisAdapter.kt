@@ -7,42 +7,73 @@ package com.openbank.finops.infrastructure.adapter
 
 import com.openbank.finops.application.port.out.LlmDiagnosisPort
 import com.openbank.finops.domain.model.CostAnomaly
-import com.openbank.finops.infrastructure.config.FinOpsConfig
+import com.openbank.libs.llm.LlmGatewayPort
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import org.jboss.logging.Logger
 
 /**
- * LiteLLM gateway adapter for AI-assisted anomaly diagnosis and IaC fix proposals.
+ * LLM diagnosis adapter for the finops-agent (ADR-0112).
  *
- * Communicates with the internal LiteLLM proxy (ADR-0089) which routes to the
- * configured backend model (meta/llama-3.1-70b-instruct in sandbox).
- * Full implementation tracked separately; this stub logs and returns a placeholder
- * to keep the workflow structurally complete for ADR-0112 P3.
+ * Loads the registered system prompt from the ADR-0148 prompt registry, packaged at build time
+ * from `openbank-libs/governance/prompts/finops-agent/`. The runtime prompt equals the
+ * registry file byte-for-byte, so the `prompt_hash` in an AI-attributed AuditEvent resolves.
+ *
+ * `proposeIacFix` is still a stub returning `null` (ADR-0112 P4). The current wiring only
+ * covers the diagnosis seam; the IaC proposal seam is intentionally left for a follow-up so
+ * the prompt-registry migration stays focused and reviewable.
  */
 @ApplicationScoped
-class LlmDiagnosisAdapter(private val config: FinOpsConfig) : LlmDiagnosisPort {
+class LlmDiagnosisAdapter : LlmDiagnosisPort {
+
+    @Inject
+    lateinit var gateway: LlmGatewayPort
 
     private val log = Logger.getLogger(LlmDiagnosisAdapter::class.java)
 
     override suspend fun diagnose(anomaly: CostAnomaly, contextMetrics: Map<String, Double>): String {
         log.infof(
-            "LLM diagnosis requested for anomaly %s detector=%s (gateway=%s) — stub",
+            "LLM diagnosis requested for anomaly %s detector=%s",
             anomaly.id,
             anomaly.detector,
-            config.llmGatewayUrl(),
         )
-        // TODO(ADR-0112 P4): wire to LiteLLM /chat/completions with structured prompt
-        return "Automated diagnosis pending LiteLLM integration (ADR-0112 P4). " +
-            "Anomaly: ${anomaly.title}. Affected: ${anomaly.affectedResource}."
+        val user = buildString {
+            appendLine("Anomaly:")
+            appendLine("  id: ${anomaly.id}")
+            appendLine("  detector: ${anomaly.detector}")
+            appendLine("  severity: ${anomaly.severity}")
+            appendLine("  title: ${anomaly.title}")
+            appendLine("  rawMetricValue: ${anomaly.rawMetricValue}")
+            appendLine("  threshold: ${anomaly.threshold}")
+            appendLine("  affectedResource: ${anomaly.affectedResource}")
+            appendLine("  contextMetrics: $contextMetrics")
+        }
+        val diagnosis = gateway.chat(SYSTEM_PROMPT, user)
+            ?: "Automated diagnosis unavailable (gateway degraded). Anomaly: ${anomaly.title}."
+        log.infof("Diagnosis for anomaly %s: %s", anomaly.id, diagnosis)
+        return diagnosis
     }
 
     override suspend fun proposeIacFix(anomaly: CostAnomaly, diagnosis: String): String? {
         log.infof(
-            "LLM IaC fix proposal requested for anomaly %s detector=%s — stub",
+            "IaC fix proposal requested for anomaly %s detector=%s — stub (ADR-0112 P4)",
             anomaly.id,
             anomaly.detector,
         )
-        // TODO(ADR-0112 P4): generate OpenTofu diff via LiteLLM + retrieval from infra/
         return null
+    }
+
+    private companion object {
+        val SYSTEM_PROMPT = loadRegisteredPrompt()
+
+        private fun loadRegisteredPrompt(): String {
+            val path = "/governance-prompts/finops-agent/system.v1.md"
+            return LlmDiagnosisAdapter::class.java.getResourceAsStream(path)
+                ?.bufferedReader()?.use { it.readText() }
+                ?: error(
+                    "prompt registry resource missing: $path — packaged by build.gradle.kts from " +
+                        "openbank-libs/governance/prompts/finops-agent/system.v1.md (ADR-0148)",
+                )
+        }
     }
 }
