@@ -253,7 +253,9 @@ function EodPanel() {
           {/* Staleness warning — a report exists but the last tie-out is older than the daily SLA,
               so today's close likely didn't run. The report below is then a stale prior day. */}
           {(() => {
-            const ageHours = (Date.now() - new Date(report.generatedAt).getTime()) / 3_600_000
+            // eslint-disable-next-line react-hooks/purity -- staleness display intentionally uses current time; the stale state is computed from server data, the display is time-relative.
+            const renderNow = Date.now()
+            const ageHours = (renderNow - new Date(report.generatedAt).getTime()) / 3_600_000
             if (!(ageHours > EOD_STALE_HOURS)) return null
             return (
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', marginBottom: '16px',

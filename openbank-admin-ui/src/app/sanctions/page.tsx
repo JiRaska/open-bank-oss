@@ -299,6 +299,7 @@ export default function SanctionsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          // eslint-disable-next-line react-hooks/purity -- time-relative display; timestamps are stable server data.
           idempotencyKey: `manual-${Date.now()}`,
           entityType: searchType,
           name: searchName.trim(),
