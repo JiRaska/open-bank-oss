@@ -218,6 +218,26 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-08-05** — Prohibit the customer-edge M2M principal from every ledger write, including
+  year-close attestation (#3734). `operator-ledger-write` and `operator-year-close-attest` were
+  role-only, and `rules.yaml`'s `role_action_matrix` grants `ledger.create/reverse/trigger/
+  replay` to `ROLE_OPERATOR`. The customer-facing edge identity
+  (`service-account-openbank-edge`, HUMAN-classified, ROLE_OPERATOR) was therefore admitted to
+  the **book of record's** writes — post/reverse a journal, re-run an FX revaluation — via base
+  `matrix-allows`, and to `ledger.approve` via the attest rule, whose own comment has always
+  said no SERVICE principal must ever reach it. This is the single most sensitive row in the
+  #3734 matrix. Fleet caller audit: **no `ledgerServiceUrl` exists anywhere in customer-edge** —
+  no edge ledger caller at all; the legitimate M2M writers (transaction/lending/settlement via
+  the shared client) keep their identity-scoped `service-ledger-post` / `service-ledger-reverse`
+  rules. Tightening is two-layered: both operator rules now exclude every `service-account-*`
+  principal (also closing `ledger.trigger`/`replay` to the shared client, which the ext already
+  documented as intentionally unmapped — the matrix grant is a separate pre-existing over-grant
+  this PR does not touch), and an edge-scoped `prohibited` clause vetoes all five write actions
+  — `approve` included despite no matrix grant, so no future matrix edit can hand the edge a
+  statutory close event — at the allow head. Falsified by `ledger_rest_ext_test.rego` (stripping
+  either layer turns 7 of 12 tests red); the ext moved from a generator heredoc to a standalone
+  `ledger_rest_ext.rego` so `opa test` can load it. Rollback: revert the ext — no live caller is
+  lost, as no edge ledger path exists.
 - **2026-07-12** — Wired the four-eyes (maker-checker) enforcement *mechanism* (ADR-0155) onto
   `ledger.reverse`, mirroring the account/sepa-payment/lending rollouts (issue #413). This is
   ledger-service's first-ever Redis dependency: new in-namespace `redis` Deployment/Service
