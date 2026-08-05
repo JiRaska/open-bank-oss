@@ -50,6 +50,19 @@ AVD-AWS-0011
 # go-live condition (ADR-0027 C5). Sandbox cost-only scope.
 AVD-AWS-0095
 
+# ECR service-repository tags mutable (aws/envs/sandbox-platform/ecr-service-repositories.tf):
+# MUTABLE is load-bearing, not laziness — auto-deploy tags `sandbox-<sha>` and the
+# reconcile path (#2021, #3432) legitimately re-pushes a build for a sha it has
+# already pushed; under IMMUTABLE that re-push fails and the deploy self-heal
+# breaks. The one repository built off a version (openbank-admin-ui) is IMMUTABLE
+# in code and in the live account. Blast radius: the exemption is repo-wide, but
+# every openbank-* ECR repository flows through the single
+# `aws_ecr_repository.service` for_each resource, so the decision stays in one
+# reviewed place; a second ECR repository resource would need its own entry here.
+# Fleet-wide IMMUTABLE is a prod go-live condition (the sandbox re-dispatch loop
+# does not exist there).
+AVD-AWS-0031
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Kubernetes — hardening follow-ups (tracked in issue #854 and related issues)
 # ──────────────────────────────────────────────────────────────────────────────
