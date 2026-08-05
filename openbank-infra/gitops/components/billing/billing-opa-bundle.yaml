@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: billing-service
     app.kubernetes.io/part-of: billing
   annotations:
-    openbank.tech/policy-checksum: "0ed1121118c04aba"
+    openbank.tech/policy-checksum: "d5fb31769906ca66"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -537,10 +537,31 @@ data:
     # they land behind the four-eyes gate).
     allowed_reasons contains "operator-billing-write" if {
     	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	startswith(input.action, "billing.")
     }
+
+    # 2026-08-05 (#3734): operator-billing-write was role-only, and rules.yaml's role_action_matrix
+    # grants ALL THREE billing writes (post, reverse, approval.decide) to ROLE_OPERATOR — which
+    # service-account-openbank-edge carries — so both the role-only path and matrix-allows admitted
+    # the customer-facing proxy to fee posting, reversal, and four-eyes approval decisions. Billing
+    # has NO in-repo M2M caller at all (verified 2026-08-05: no edge URL, no backend REST client —
+    # account-service's billing-discovery read is INBOUND from billing, and product-catalog fees are
+    # read via catalog, not billing), so there is no identity-scoped grant to preserve: the
+    # exclusion closes the role-only path and this veto closes the matrix path for the edge (base
+    # rest.rego gates its allow head on `not prohibited`). billing.read stays reachable to M2M via
+    # base operator-read-any — the fleet-wide M2M read over-grant is tracked separately in #3734.
+    prohibited if {
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {
+    		"billing.post",
+    		"billing.reverse",
+    		"billing.approval.decide",
+    	}
+    }
+
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
