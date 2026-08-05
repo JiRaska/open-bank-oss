@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: balance-service
     app.kubernetes.io/part-of: balances
   annotations:
-    openbank.tech/policy-checksum: "95c5b50695bdc6ec"
+    openbank.tech/policy-checksum: "364f3cdd0cf87840"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -536,10 +536,24 @@ data:
     # Human operator/admin writes: the ops-console path for resolving a stuck hold, seeding a pocket
     # on behalf of an account, or (via credit/debit) a manual correction. Mirrors the existing
     # @RolesAllowed(SERVICE, OPERATOR, ADMIN) on every write endpoint below except overdraftLimit.
+    #
+    # The `service-account-` exclusion IS the load-bearing part of this rule (#3734): the realm
+    # grants ROLE_OPERATOR to BOTH M2M clients — `openbank-services` (shared backend) and
+    # `openbank-edge` (customer-facing, reachable from the internet via the edge namespace) — and
+    # AuthorizeInterceptor classifies every client_credentials principal as HUMAN, never "SERVICE".
+    # A role-only rule therefore hands the customer-facing edge the money-moving primitives
+    # (balance.credit/debit) — an unbounded privilege escalation, the same class fixed for interest
+    # in #3698 and documented verbatim in dispute_rest_ext.rego. The shared client's legitimate
+    # writes keep their own identity-scoped rule below (service-balance-m2m); the edge client has NO
+    # legitimate write caller (fleet audit: customer-edge only ever GETs /api/v1/balances/{id},
+    # CustomerEdgeResource.kt) and is additionally vetoed by the prohibition at the bottom of this
+    # file, which beats the rules.yaml role_action_matrix grant that would otherwise still admit it
+    # via base matrix-allows.
     allowed_reasons contains "operator-balance-write" if {
     	input.principal.type == "HUMAN"
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
+    	not startswith(input.principal.id, "service-account-")
     	input.action in {
     		"balance.read",
     		"balance.hold",
@@ -554,11 +568,13 @@ data:
 
     # The overdraft-limit override is a supervisory action (existing @RolesAllowed(SUPERVISOR, ADMIN) —
     # NOT operator). Kept as its own rule so enforcing OPA never silently widens who can raise a
-    # customer's overdraft limit.
+    # customer's overdraft limit. Same service-account exclusion: no M2M caller of overdraftLimit
+    # exists (it is deliberately not in service-balance-m2m below).
     allowed_reasons contains "supervisor-overdraft-limit" if {
     	input.principal.type == "HUMAN"
     	some role in {"ROLE_SUPERVISOR", "ROLE_ADMIN"}
     	role in input.principal.roles
+    	not startswith(input.principal.id, "service-account-")
     	input.action == "balance.overdraftLimit"
     }
 
@@ -634,6 +650,30 @@ data:
     		"balance.credit",
     		"balance.debit",
     		"balance.initialize",
+    	}
+    }
+
+    # Fail-closed veto for the customer-edge M2M identity on every balance write (#3734). The
+    # service-account exclusion on the rules above is NOT sufficient by itself: rules.yaml's
+    # role_action_matrix grants balance.credit/debit/hold/holdRelease/initialize/reconciliation.run
+    # to ROLE_OPERATOR, and base matrix-allows would still admit `service-account-openbank-edge`
+    # (HUMAN + ROLE_OPERATOR) through that path. This prohibition is checked at the allow head and
+    # beats ANY reason, present or future. Edge-scoped rather than all-service-accounts because the
+    # shared client IS a legitimate writer here (service-balance-m2m above) — interest (#3698) could
+    # prohibit every service-account because no M2M writer exists there; balance cannot.
+    #
+    # balance.overdraftLimit is included even though it is not in the matrix grant: the veto is
+    # cheap, and a future matrix edit must never be able to hand the edge a supervisory action.
+    prohibited if {
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {
+    		"balance.hold",
+    		"balance.holdRelease",
+    		"balance.credit",
+    		"balance.debit",
+    		"balance.initialize",
+    		"balance.reconciliation.run",
+    		"balance.overdraftLimit",
     	}
     }
   agents.rego: |
