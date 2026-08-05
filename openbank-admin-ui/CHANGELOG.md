@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.92.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.92.0...admin-ui-v0.92.1) (2026-08-05)
+
+
+### Security
+
+* **admin-ui:** GDPR privacy notice, a11y fixes, security.txt + DNS SPF drift fix ([#3788](https://github.com/JiRaska/open-bank-oss/issues/3788)) ([78a4f49](https://github.com/JiRaska/open-bank-oss/commit/78a4f49ca727451457e3c1483c626c0c60002e43))
+
 ## [0.92.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.91.5...admin-ui-v0.92.0) (2026-08-05)
 
 
