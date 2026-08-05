@@ -21,7 +21,8 @@ function LoginContent() {
         href="#main"
         style={{
           position: "absolute", left: "-9999px", top: "0", zIndex: 100,
-          padding: "10px 16px", background: "var(--sidebar-accent, #6366f1)", color: "#fff",
+          // #4f46e5, not --sidebar-accent (#6366f1) — same contrast fix as the sign-in button below.
+          padding: "10px 16px", background: "#4f46e5", color: "#fff",
           borderRadius: "0 0 8px 0", fontSize: "13px", fontWeight: 600,
         }}
         onFocus={e => { e.currentTarget.style.left = "0" }}
