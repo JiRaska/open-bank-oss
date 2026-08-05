@@ -155,4 +155,4 @@ charters:
   - id: case-coordinator
     status: pending
     blocked_by: ADR-0244
-    reason: New agent-plane charter; no module or LlmDiagnosisAdapter wiring yet.
+    reason: Module openbank-case-coordinator-agent exists; LlmDiagnosisAdapter and Temporal case-workflow wiring are still stubs.

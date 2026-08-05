@@ -1,0 +1,102 @@
+quarkus:
+  application:
+    name: case-coordinator-agent
+  http:
+    port: 8146
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      X-XSS-Protection:
+        value: "1; mode=block"
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  datasource:
+    db-kind: postgresql
+    username: ${POSTGRES_USER:openbank}
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    # Reactive client for the app (Panache); JDBC URL is for Flyway migrations only.
+    reactive:
+      url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_casecoordinator}
+    jdbc:
+      url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_casecoordinator}
+  hibernate-orm:
+    # Flyway owns the schema; Hibernate validates against it, never generates.
+    database:
+      generation: none
+  flyway:
+    migrate-at-start: true
+  shutdown:
+    timeout: 30S
+  log:
+    level: INFO
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+    oidc:
+      enabled: false
+
+"%test":
+  quarkus:
+    oidc:
+      enabled: false
+    management:
+      enabled: false
+    http:
+      # Ephemeral: avoid QuarkusBindException when multiple @QuarkusTest profiles boot.
+      test-port: 0
+
+  openbank:
+    case-coordinator:
+      # A cron that never fires (the 31st of February), NOT `quarkus.scheduler.enabled: false`.
+      # Disabling the scheduler makes the class structurally invisible to every test — which is how
+      # five schedulers in this fleet reached production having never run (#2148, #2187). With a
+      # real-but-unreachable expression the wiring is still built and validated at boot, and a test
+      # profile can override this key with a fast cron to drive the REAL schedule.
+      sweep-cron: "0 0 5 31 2 ?"
+
+openbank:
+  temporal:
+    enabled: ${TEMPORAL_ENABLED:false}
+    server-url: ${TEMPORAL_HOST:temporal-frontend.temporal:7233}
+    namespace: ${TEMPORAL_NAMESPACE:openbank}
+    task-queue: case-coordinator
+  case-coordinator:
+    # ADR-0244: case-coordinator sweep placeholder. The real schedule is disabled until
+    # Temporal case workflows are implemented; this key exists for test-profile override.
+    sweep-cron: ${CASE_COORDINATOR_SWEEP_CRON:0 0 5 * * ?}
