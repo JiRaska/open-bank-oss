@@ -86,6 +86,10 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+| Date | Change |
+|---|---|
+| 2026-08-05 | Trust-boundary change (#3734): `operator-account-write` now excludes `service-account-*` principals, and a new `prohibited` veto closes `account.{close, freeze, unfreeze, authorize, approval.decide}` to `service-account-openbank-edge`. The role_action_matrix grants ALL ten account.* actions to ROLE_OPERATOR (which the edge service-account carries) and matrix-allows bypasses rule-level exclusions, so both paths needed closing. The edge's verified customer self-service — `account.{create, update}` via `service-edge-account-m2m` (onboarding open-account, pocket add/close, savings goal, ADR-0104/ADR-0153) — is preserved; the shared client keeps `account.read`. Ext moved from generator heredoc to standalone `account_rest_ext.rego` with a 13-test opa suite. |
+
 - **2026-07-09** — Account opening validates against product-catalog (ADR-0158, issue #668).
   New outbound trust boundary: `account-service → product-catalog` (`GET /api/v1/products/{id}`,
   unauthenticated, sync). `openAccount` now rejects a `productId` product-catalog confirms does

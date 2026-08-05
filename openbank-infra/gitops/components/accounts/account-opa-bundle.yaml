@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: account-service
     app.kubernetes.io/part-of: accounts
   annotations:
-    openbank.tech/policy-checksum: "87018ffa052c2227"
+    openbank.tech/policy-checksum: "d3b2a9eb2e3e2060"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -540,6 +540,7 @@ data:
     # input, a SEPARATE principal/action namespace — this rule does not touch that surface).
     allowed_reasons contains "operator-account-write" if {
     	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	startswith(input.action, "account.")
@@ -592,6 +593,27 @@ data:
     	input.principal.id == "service-account-openbank-services"
     	input.action == "account.read"
     }
+
+    # 2026-08-05 (#3734): operator-account-write was role-only and rules.yaml's role_action_matrix
+    # grants EVERY account.* action (all ten) to ROLE_OPERATOR — which service-account-openbank-edge
+    # carries — so both the role-only path and matrix-allows admitted the customer-facing proxy to the
+    # sensitive lifecycle (close/freeze/unfreeze/authorize) and to four-eyes approval decisions. The
+    # exclusion above closes the role-only path; this veto closes the matrix path (base rest.rego gates
+    # its allow head on `not prohibited`). account.{create,update} are deliberately absent — the edge's
+    # verified customer self-service (onboarding open-account, pocket add/close, savings goal) rides
+    # service-edge-account-m2m. Reads ({read,list,search}) are out of scope here — the M2M read
+    # over-grant is tracked fleet-wide in #3734.
+    prohibited if {
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {
+    		"account.close",
+    		"account.freeze",
+    		"account.unfreeze",
+    		"account.authorize",
+    		"account.approval.decide",
+    	}
+    }
+
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
