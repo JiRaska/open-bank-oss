@@ -129,9 +129,10 @@ charters:
     reason: LlmDiagnosisAdapter is a stub; no /chat/completions call yet.
 
   - id: release-steward
-    status: pending
-    blocked_by: ADR-0165
-    reason: LlmDiagnosisAdapter is a stub; no /chat/completions call yet.
+    status: registered
+    prompts: [system.v1]
+    source: openbank-release-steward LlmDiagnosisAdapter.SYSTEM_PROMPT
+    placeholders: []
 
   - id: docs-truth-agent
     status: pending
