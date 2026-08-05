@@ -118,9 +118,10 @@ charters:
       cryptographic verification with `read: []`; no model, no prompt.
 
   - id: finops-agent
-    status: pending
-    blocked_by: ADR-0112 P4
-    reason: LlmDiagnosisAdapter is a stub that returns a placeholder; no /chat/completions call yet.
+    status: registered
+    prompts: [system.v1]
+    source: openbank-finops-agent LlmDiagnosisAdapter.SYSTEM_PROMPT
+    placeholders: []
 
   - id: governance-auditor
     status: pending

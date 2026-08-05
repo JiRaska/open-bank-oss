@@ -173,12 +173,12 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "b5d86b8212b2e8d8",
+      "sha256": "94512b13ba00c9ba",
       "counts": {
         "external": 2,
         "not-applicable": 2,
-        "pending": 6,
-        "registered": 5
+        "pending": 5,
+        "registered": 6
       },
       "idsByStatus": {
         "external": [
@@ -190,7 +190,6 @@
           "ap2-anonymous"
         ],
         "pending": [
-          "finops-agent",
           "governance-auditor",
           "release-steward",
           "docs-truth-agent",
@@ -202,7 +201,8 @@
           "ui-assistant",
           "customer-copilot",
           "devops-agent",
-          "control-liveness-sentinel"
+          "control-liveness-sentinel",
+          "finops-agent"
         ]
       }
     },
@@ -237,13 +237,21 @@
             "devops-agent"
           ],
           "buildFile": "openbank-devops-agent/build.gradle.kts"
+        },
+        {
+          "module": "openbank-finops-agent",
+          "charters": [
+            "finops-agent"
+          ],
+          "buildFile": "openbank-finops-agent/build.gradle.kts"
         }
       ],
-      "serviceCount": 3,
+      "serviceCount": 4,
       "registeredChartersLoadedFromRegistry": [
         "compliance-officer",
         "control-liveness-sentinel",
         "devops-agent",
+        "finops-agent",
         "ui-assistant"
       ],
       "registeredChartersStillInline": [
