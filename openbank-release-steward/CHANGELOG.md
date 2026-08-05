@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/release-steward-v0.4.1...release-steward-v0.5.0) (2026-08-05)
+
+
+### Features
+
+* **scheduler:** register workflow liveness for second non-money-path batch (ADR-0237) ([#3739](https://github.com/JiRaska/open-bank-oss/issues/3739)) ([735e8bd](https://github.com/JiRaska/open-bank-oss/commit/735e8bdc12fbf541464aeb4f15ce767cb7866e78))
+
 ## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/release-steward-v0.4.0...release-steward-v0.4.1) (2026-08-03)
 
 
