@@ -1499,6 +1499,24 @@ scheduled_methods:
 
 
 # ---------------------------------------------------------------------------------------
+# k6 performance smoke gate (issue #3348 / ADR-0243).
+# A failed weekly run opens a new issue. Once failure rate DCG stabilises, this
+# graduates to an enforced PR gate.
+# ---------------------------------------------------------------------------------------
+perf_gate:
+  pilot_services:
+    - openbank-product-catalog
+  detect: ["openbank-*/src/test/k6/*-smoke.js", ".github/workflows/perf-gate.yml"]
+  require:
+    - "k6 smoke script exists in src/test/k6/ matching perf-gate expectations"
+    - "weekly scheduled run reports into perf-reports-* artifact"
+  gate: perf-gate
+  enforced: advisory
+  target_enforce_date: "2026-11-01"
+  ci_producer: ".github/workflows/perf-gate.yml"
+
+
+# ---------------------------------------------------------------------------------------
 # Kafka topic existence (issue #2598). A service may only reference a topic that exists.
 # ---------------------------------------------------------------------------------------
 external_feeds:
