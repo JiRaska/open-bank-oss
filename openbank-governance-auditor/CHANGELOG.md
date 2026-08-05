@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/governance-auditor-v0.4.0...governance-auditor-v0.5.0) (2026-08-05)
+
+
+### Features
+
+* **scheduler:** register workflow liveness for second non-money-path batch (ADR-0237) ([#3739](https://github.com/JiRaska/open-bank-oss/issues/3739)) ([735e8bd](https://github.com/JiRaska/open-bank-oss/commit/735e8bdc12fbf541464aeb4f15ce767cb7866e78))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/governance-auditor-v0.3.2...governance-auditor-v0.4.0) (2026-08-02)
 
 
