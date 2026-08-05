@@ -42,16 +42,23 @@ Constraints inherited from the estate:
 *case*, executed as a single durable workflow (the "case workflow") started via the
 established per-service Temporal client pattern. Participating agents run as
 activities or child workflows of that case. Durability, retry, per-step history and
-visibility come from Temporal; no new orchestration substrate is introduced.
+visibility come from Temporal; no new orchestration substrate is introduced. The
+pipeline of ADR-0202 is the degenerate case of a swarm with a single participant —
+this ADR extends it rather than replacing it, and the case workflow still has
+exactly one owning agent (the `case-coordinator`, D3), as ADR-0202 D4 requires.
 
 **D2 — Mid-run participation happens through Temporal signals, gated per charter.**
 A chartered agent joins a running case by signalling the case workflow with a typed
 contribution (`evidence`, `objection`, `correction`, `endorsement`). The signal
 handler performs the signalling agent's charter capability check (OPA, principal id)
 before accepting the contribution — the policy gate sits at the workflow boundary,
-exactly as it does at the MCP boundary (ADR-0225 shapes discovery the same way:
-an agent never learns about a case it cannot join). Signal rate is bounded by the
-signalling agent's charter limits.
+exactly as it does at the MCP boundary. The wiring is a new call site of an existing
+mechanism, not a new mechanism: the signal-receiving path reuses the same
+`PolicyDecisionPoint` port that gates agent-service's MCP endpoint. Case discovery
+is capability-filtered the same way ADR-0225 filters `tools/list` — an agent
+enumerating open cases sees only those its charter lets it join, so it never learns
+about a case it cannot enter. Signal rate is bounded by the signalling agent's
+charter limits.
 
 **D3 — Coordination is a dedicated chartered agent: `case-coordinator`.** The agent
 that opened the case never coordinates it. Invitation of participants, budget
@@ -71,7 +78,10 @@ new evidence may short-circuit pending steps: affected steps are marked
 replay stays consistent. Queue-only commenting was rejected as the sole mechanism —
 it serializes away the speed benefit that justifies a swarm — and uncontrolled
 interruption was rejected because it breaks replay determinism. Every pre-emption is
-a history event naming the triggering signal id.
+a history event naming the triggering signal id. Contribution payloads influence
+workflow control flow only through deterministic predicates over typed fields;
+wall-clock reads, randomness and I/O stay inside activities and never enter the
+workflow's decision logic.
 
 **D6 — Every case carries a budget and a stop-condition.** Token and wall-clock
 budgets are declared at case open, with per-case-class defaults in `agents.yaml`.
@@ -79,7 +89,10 @@ The case ends on convergence (the coordinator's synthesis activity judges the
 contribution set sufficient), on budget exhaustion, or on deadline. A case that does
 not converge still produces one proposal, marked **contested**, with the dissenting
 contributions attached. Non-convergence is a disposition input, never a silent
-stall.
+stall. Merge semantics are citation, not voting: contributions are never overwritten
+or silently dropped — the synthesis cites the contribution ids it relied on, and any
+conflicting contribution it does not adopt is attached verbatim as dissent, so the
+human disposer can reconstruct exactly why the swarm said what it said.
 
 **D7 — The swarm's only output channel is the existing HITL path.** The synthesized
 proposal enters the ADR-0031 proposal flow (and the unified approval inbox of
@@ -91,7 +104,9 @@ case joins the cross-channel trail of ADR-0226 and one query answers "who
 contributed what to this case" across every participant. The global and per-agent
 kill switches cancel in-flight case workflows (Temporal cancel) without redeploy;
 a halted case emits a no-action finding naming the kill switch as the cause, so a
-governance action never reads as a swarm verdict.
+governance action never reads as a swarm verdict. (As-built note: today's kill
+switch halts agent runtimes but has no Temporal hook; wiring it to case-workflow
+cancellation is part of the follow-up, not the current state.)
 
 **D8 — The coordinator lives in the agent plane.** `case-coordinator` is an
 AGPL-3.0-only module registered in `rules.yaml: agpl_modules`, like every other
@@ -147,7 +162,8 @@ fails to converge cannot keep billing supervisors for its failure.
 - Follow-ups: `agents.yaml` extension (case budgets, swarm-participation and
   `case-open` capabilities, per-case-class ceilings and contested-rate thresholds);
   `case-coordinator` charter + eval scenarios under the ADR-0148 evals gate;
-  admin-ui thread-view ADR; registration in `rules.yaml: agpl_modules`.
+  kill-switch → Temporal case-cancellation wiring (D7); admin-ui thread-view ADR;
+  registration in `rules.yaml: agpl_modules`.
 
 ## Compliance impact
 
