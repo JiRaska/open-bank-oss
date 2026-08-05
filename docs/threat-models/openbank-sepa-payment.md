@@ -106,6 +106,10 @@ from clearing-simulator (cluster-internal, `ROLE_SERVICE`). New trust boundary:
 
 ## 6. Change log
 
+| Date | Change |
+|---|---|
+| 2026-08-05 | Trust-boundary change (#3734): `operator-sepa-payment-write` now excludes `service-account-*` principals, and a new `prohibited` veto closes `sepaPayment.{transitionStatus, handleReturn, approval.decide}` to `service-account-openbank-edge` (the role_action_matrix grants those to ROLE_OPERATOR, which the edge service-account carries; matrix-allows does not consult the ext exclusion). The edge's verified legitimate access — `sepaPayment.{create, read}` via `service-sepa-payment-edge-m2m` (customer transfer initiation after the edge's own ownership guard + SCA gate, ADR-0021) — is preserved; clearing-simulator keeps `handleReturn` via the shared-client identity rule. Ext moved from generator heredoc to standalone `sepa_payment_rest_ext.rego` with an opa test suite. |
+
 - **2026-07-24** — Retire the legacy in-service orchestration; Temporal is the sole orchestrator
   (ADR-0120 Phase 6, issue #1917). `createPayment` no longer branches on `openbank.temporal.enabled`
   (removed) — it always dispatches `SepaPaymentWorkflow` (screening → shadow fraud scoring → scheme
