@@ -100,3 +100,8 @@ openbank:
     # ADR-0244: case-coordinator sweep placeholder. The real schedule is disabled until
     # Temporal case workflows are implemented; this key exists for test-profile override.
     sweep-cron: ${CASE_COORDINATOR_SWEEP_CRON:0 0 5 * * ?}
+    # OpenAI-compatible model backend — DeepInfra + DeepSeek, same provider+model as the copilot
+    # (ADR-0089). The API key is read separately (case-coordinator.model.api-key) so an un-seeded
+    # key degrades the synthesis call instead of CrashLooping the pod.
+    model-endpoint: ${CASE_COORDINATOR_MODEL_ENDPOINT:https://api.deepinfra.com/v1/openai}
+    model-id: ${CASE_COORDINATOR_MODEL_ID:deepseek-ai/DeepSeek-V3.2}

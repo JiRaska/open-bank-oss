@@ -1,5 +1,7 @@
--- SPDX-License-Identifier: Apache-2.0
--- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
+-- A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
+-- See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 --
 -- ADR-0244: persisted case workflow metadata and agent contribution records.
 -- Rollback: DROP TABLE case_contribution; DROP TABLE case_workflow; (no dependents; the service degrades to no history on rollback)

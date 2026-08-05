@@ -153,6 +153,7 @@ charters:
     placeholders: []
 
   - id: case-coordinator
-    status: pending
-    blocked_by: ADR-0244
-    reason: Module openbank-case-coordinator-agent exists; LlmDiagnosisAdapter and Temporal case-workflow wiring are still stubs.
+    status: registered
+    prompts: [system.v1]
+    source: openbank-case-coordinator-agent CaseCoordinatorLlmAdapter.SYSTEM_PROMPT
+    placeholders: []
