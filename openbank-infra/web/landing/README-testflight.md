@@ -32,9 +32,17 @@ generate a new key from that inbox at https://web3forms.com and swap it in.
 ## Spam protection
 
 - **Honeypot** (`botcheck`) — always on.
-- **hCaptcha** — DONE. Widget `<div class="h-captcha" data-captcha="true" data-theme="dark">` in
-  `#tf-form`, rendered by `https://web3forms.com/client/script.js` (loaded before `</body>`) using
-  Web3Forms' shared free sitekey `50b2fe65-b00b-4b9e-ad62-3ba471098be2`. `main.js` blocks submit
+- **hCaptcha** — DONE. Widget `<div class="h-captcha" data-sitekey="50b2fe65-…" data-theme="dark">`
+  in `#tf-form`, rendered by `loadHcaptcha()` in our own `main.js`, which injects
+  `https://js.hcaptcha.com/1/api.js?recaptchacompat=off` with Web3Forms' shared free sitekey
+  `50b2fe65-b00b-4b9e-ad62-3ba471098be2`.
+  - We used to load `https://web3forms.com/client/script.js` for this. It was an **unversioned
+    third-party script with no SRI** — a compromise of that origin would have run attacker code
+    inside this form (the polyfill.io class of supply-chain attack), and an `integrity` hash on an
+    unversioned URL just swaps that risk for a silently broken form on the vendor's next release.
+    Its only other features (uploadcare / filepond file uploads) are unused here, so it is gone and
+    `web3forms.com` is out of `script-src`. `api.web3forms.com` still receives the POST.
+  `main.js` blocks submit
   until the challenge is solved and resets the widget after success. The token rides along in the
   FormData as `h-captcha-response`.
   - ⚠️ On `localhost` the widget shows "Warning: localhost detected" — that's the shared sitekey's
@@ -54,7 +62,7 @@ Required policy (set it in the CloudFront response-headers policy):
 
 ```
 default-src 'self';
-script-src 'self' https://web3forms.com https://js.hcaptcha.com https://*.hcaptcha.com;
+script-src 'self' https://js.hcaptcha.com https://*.hcaptcha.com;
 style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://*.hcaptcha.com;
 font-src 'self' https://fonts.gstatic.com;
 img-src 'self' data:;
