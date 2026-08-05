@@ -14,10 +14,22 @@ function LoginContent() {
 
   return (
     <div style={{
-      minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+      minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
     background: "var(--bg, #f8fafc)", fontFamily: "var(--font-sans, 'Inter', system-ui, sans-serif)",
     }}>
-      <div style={{
+      <a
+        href="#main"
+        style={{
+          position: "absolute", left: "-9999px", top: "0", zIndex: 100,
+          padding: "10px 16px", background: "var(--sidebar-accent, #6366f1)", color: "#fff",
+          borderRadius: "0 0 8px 0", fontSize: "13px", fontWeight: 600,
+        }}
+        onFocus={e => { e.currentTarget.style.left = "0" }}
+        onBlur={e => { e.currentTarget.style.left = "-9999px" }}
+      >
+        Přeskočit na obsah
+      </a>
+      <main id="main" style={{
         width: "380px", background: "var(--surface, #ffffff)", border: "1px solid var(--border, #e2e8f0)",
         borderRadius: "16px", padding: "40px", boxShadow: "var(--shadow-lg, 0 10px 15px -3px rgba(0,0,0,0.1))",
       }}>
@@ -38,9 +50,9 @@ function LoginContent() {
           </div>
         </div>
 
-        <div style={{ marginBottom: "8px", fontSize: "20px", fontWeight: 700, color: "var(--text-primary, #0f172a)" }}>
+        <h1 style={{ margin: "0 0 8px", fontSize: "20px", fontWeight: 700, color: "var(--text-primary, #0f172a)" }}>
           Přihlášení
-        </div>
+        </h1>
         <div style={{ marginBottom: "28px", fontSize: "13px", color: "var(--text-secondary, #475569)" }}>
           Přihlaste se pomocí firemního účtu Keycloak
         </div>
@@ -59,7 +71,10 @@ function LoginContent() {
           onClick={() => signIn("keycloak", { callbackUrl })}
           style={{
             width: "100%", padding: "12px", borderRadius: "8px",
-            background: "var(--sidebar-accent, #6366f1)", border: "none", color: "#ffffff",
+            // Darker than --sidebar-accent (#6366f1) on purpose: white-on-#6366f1
+            // measures ~4.47:1, just under WCAG 2.1 AA's 4.5:1 for normal text.
+            // #4f46e5 (~6.5:1) keeps the same hue with margin to spare.
+            background: "#4f46e5", border: "none", color: "#ffffff",
             fontSize: "14px", fontWeight: 600, cursor: "pointer",
             display: "flex", alignItems: "center", justifyContent: "center", gap: "10px",
             transition: "opacity 0.15s, background-color 0.15s",
@@ -79,7 +94,11 @@ function LoginContent() {
           <strong style={{ color: "var(--text-secondary, #475569)" }}>Zero-Trust Security</strong><br/>
           Přístup je řízen rolemi (RBAC). Všechny akce jsou auditovány dle EBA ICT Risk a PSD2 požadavků.
         </div>
-      </div>
+      </main>
+      <footer style={{ marginTop: "20px", fontSize: "11px" }}>
+        {/* var(--text-tertiary) fails contrast at this size (~2.4:1) — use --text-secondary (~7.2:1). */}
+        <a href="/privacy" style={{ color: "var(--text-secondary, #475569)" }}>Ochrana osobních údajů</a>
+      </footer>
     </div>
   )
 }
