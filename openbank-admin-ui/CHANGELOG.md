@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.91.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.91.4...admin-ui-v0.91.5) (2026-08-05)
+
+
+### Bug Fixes
+
+* **admin-ui:** Date.now() purity fixes + pin OriginationPipeline test clock ([#3717](https://github.com/JiRaska/open-bank-oss/issues/3717)) ([c0d881e](https://github.com/JiRaska/open-bank-oss/commit/c0d881eddb5d90e7318f9ee5a5924d009985d879))
+
 ## [0.91.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.91.3...admin-ui-v0.91.4) (2026-08-04)
 
 
