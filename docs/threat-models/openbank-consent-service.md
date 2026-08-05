@@ -52,6 +52,10 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 
 ## 6. Change log
 
+| Date | Change |
+|---|---|
+| 2026-08-05 | Trust-boundary change (#3734): `operator-consent-write`'s M2M exclusion widened from `service-account-openbank-services` to the `service-account-` prefix. ADR-0206 D5 closed the backend M2M identity but left `service-account-openbank-edge` admitted to every `consent.*` write. The edge's legitimate consent access ({consent.list, consent.revoke} via base edge-service-consent, the customer's PSD2 consent screen) is preserved; no prohibition clause needed — the role_action_matrix grants no `consent.*` write to ROLE_OPERATOR. |
+
 - **2026-07-17** — Completed ADR-0126 §D2: `/validate` response now carries `scopes`, `grantedAccounts`
   (covered IBANs; null = all of the party's accounts) and `frequencyPerDay` (PSD2 RTS Art. 10 AISP cap
   = 4) so a resource server can cache within that window. Additive optional fields (openapi
