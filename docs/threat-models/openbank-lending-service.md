@@ -293,6 +293,10 @@ against `lending.intake.caller-principal`, which refuses every call when unset.
 
 ## 10. Change log
 
+| Date | Change |
+|---|---|
+| 2026-08-05 | Trust-boundary change (#3734): `operator-lending-write` now excludes `service-account-*` principals, and a new `prohibited` veto closes the eight matrix-granted lending writes (`approve`, `collateralDecide`, `collateralRegister`, `create`, `disburse`, `repay`, `reschedule`, `writeoff`) to `service-account-openbank-edge` — the role_action_matrix grants them to ROLE_OPERATOR and matrix-allows bypasses rule-level exclusions. The edge's verified customer flow, `lending.intake` (loan application, `CustomerEdgeResource.applyForLoan`), is preserved via `edge-customer-intake`; the ~12 non-matrix writes (`acceleration.execute`, `advance`, `default.mark`, `approval.decide`, ...) are closed by the exclusion alone. Ext moved from generator heredoc to standalone `lending_rest_ext.rego` with a 16-test opa suite. |
+
 - **2026-07-31** — Termination and early-exit lifecycle (ADR-0215): termination
   sub-lifecycle states + guard, settlement quote (expired quote refused), statutory
   withdrawal with unwind journal + day interest, DPD/CRR-178 default gates, mandatory
