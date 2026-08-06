@@ -62,17 +62,17 @@ interface ExposurePublisher {
  * `LoggingAuditEventPublisher`.
  */
 class LoggingExposurePublisher : ExposurePublisher {
-    private val log = org.jboss.logging.Logger.getLogger("openbank.flags.exposure")
+    // JDK System.Logger, not org.jboss.logging.Logger: this module must stay framework-free
+    // (ADR-0002/ADR-0122, #3670). Under Quarkus the JDK logger resolves through the JUL
+    // bridge into the JBoss LogManager, so the category and the output format are unchanged.
+    private val log: System.Logger = System.getLogger("openbank.flags.exposure")
 
     override suspend fun publish(exposure: FlagExposure) {
-        log.infof(
-            "flag exposure exposureId=%s flag=%s variant=%s key=%s reason=%s traceId=%s",
-            exposure.exposureId,
-            exposure.flagKey,
-            exposure.variant,
-            exposure.targetingKey,
-            exposure.reason,
-            exposure.traceId,
+        log.log(
+            System.Logger.Level.INFO,
+            "flag exposure exposureId=${exposure.exposureId} flag=${exposure.flagKey} " +
+                "variant=${exposure.variant} key=${exposure.targetingKey} " +
+                "reason=${exposure.reason} traceId=${exposure.traceId}",
         )
     }
 }

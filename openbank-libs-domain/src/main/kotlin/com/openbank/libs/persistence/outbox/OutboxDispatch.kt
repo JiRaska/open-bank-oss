@@ -4,8 +4,6 @@
 
 package com.openbank.libs.persistence.outbox
 
-import org.jboss.logging.Logger
-
 /**
  * Shared outbox dispatch loop. Service-level dispatchers should:
  *   1. annotate their own `@Scheduled(every = "5s", ...)` method
@@ -23,7 +21,10 @@ import org.jboss.logging.Logger
  * `claimProcessable` default, this is behaviourally identical to the old unclaimed peek.
  */
 object OutboxDispatch {
-    private val log: Logger = Logger.getLogger(OutboxDispatch::class.java)
+    // JDK System.Logger, not org.jboss.logging.Logger — this module must stay framework-free
+    // (ADR-0002/ADR-0122, #3670). Same category, same destination: under Quarkus the JDK
+    // logger bridges into the JBoss LogManager via JUL.
+    private val log: System.Logger = System.getLogger(OutboxDispatch::class.java.name)
 
     const val DEFAULT_BATCH_SIZE = 25
 
@@ -33,7 +34,7 @@ object OutboxDispatch {
         publish: suspend (entry: OutboxEntry) -> Unit,
     ) {
         runCatching { repository.claimProcessable(batchSize) }
-            .onFailure { ex -> log.warnf(ex, "outbox.claimProcessable failed") }
+            .onFailure { ex -> log.log(System.Logger.Level.WARNING, "outbox.claimProcessable failed", ex) }
             .getOrNull()
             ?.forEach { entry ->
                 try {

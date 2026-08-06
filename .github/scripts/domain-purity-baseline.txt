@@ -1,6 +1,29 @@
 # Domain-purity baseline (ADR-0002) — grandfathered violations, BURN DOWN ONLY.
 # Never add entries: a new framework import in the domain layer fails CI outright.
 # Delete a line here in the same PR that fixes (or removes) the import.
+#
+# The eight openbank-libs-domain Jackson entries below were added by #3670, when the gate's
+# scope was widened from the `*/domain/*` PACKAGE PATH to the whole openbank-libs-domain
+# MODULE. They are NOT new code — they had been in the tree the whole time, in a part of the
+# module the gate never opened (80 of its 107 main sources). Widening a gate's scope always
+# uncovers pre-existing violations, and grandfathering them is what makes the widening
+# shippable; #3670 fixed the ten it could fix outright (the @Authorize/@FeatureFlag CDI
+# interceptor bindings moved to libs-runtime, three jboss-logging Loggers became the JDK's
+# System.Logger) and left these eight because each needs a real refactor, not a move:
+#   - ApiError / CursorPage: wire DTOs whose @JsonInclude shapes the HTTP envelope. Fixing
+#     them means a serialization boundary in libs-runtime, not deleting an annotation.
+#   - OpaSidecarPolicyDecisionPoint / FlagdProvider: HTTP+Jackson infrastructure adapters
+#     that sit in libs-domain and should move to libs-runtime (also flagged in #3670).
+#   - CompliancePackParser: parses a JSON compliance pack; needs a port/adapter split.
+# Tracked in #3670. Do not add further entries.
+openbank-libs-domain/src/main/kotlin/com/openbank/libs/api/error/ApiError.kt:import com.fasterxml.jackson.annotation.JsonInclude
+openbank-libs-domain/src/main/kotlin/com/openbank/libs/api/pagination/CursorPage.kt:import com.fasterxml.jackson.annotation.JsonInclude
+openbank-libs-domain/src/main/kotlin/com/openbank/libs/authz/OpaSidecarPolicyDecisionPoint.kt:import com.fasterxml.jackson.databind.ObjectMapper
+openbank-libs-domain/src/main/kotlin/com/openbank/libs/flags/FlagdProvider.kt:import com.fasterxml.jackson.databind.JsonNode
+openbank-libs-domain/src/main/kotlin/com/openbank/libs/flags/FlagdProvider.kt:import com.fasterxml.jackson.databind.ObjectMapper
+openbank-libs-domain/src/main/kotlin/com/openbank/libs/lending/compliance/CompliancePackParser.kt:import com.fasterxml.jackson.databind.ObjectMapper
+openbank-libs-domain/src/main/kotlin/com/openbank/libs/lending/compliance/CompliancePackParser.kt:import com.fasterxml.jackson.module.kotlin.readValue
+openbank-libs-domain/src/main/kotlin/com/openbank/libs/lending/compliance/CompliancePackParser.kt:import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 openbank-agent-service/src/main/kotlin/com/openbank/agent/domain/McpTypes.kt:import com.fasterxml.jackson.annotation.JsonInclude
 openbank-agent-service/src/main/kotlin/com/openbank/agent/domain/McpTypes.kt:import com.fasterxml.jackson.databind.JsonNode
 openbank-agent-service/src/main/kotlin/com/openbank/agent/domain/model/ModelTypes.kt:import com.fasterxml.jackson.databind.JsonNode
