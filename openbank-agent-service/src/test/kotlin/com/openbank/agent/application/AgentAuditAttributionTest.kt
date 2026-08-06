@@ -7,9 +7,8 @@ package com.openbank.agent.application
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.agent.application.port.`in`.CreateProposalUseCase
-import com.openbank.agent.application.port.out.DownstreamReadPort
-import com.openbank.agent.domain.proposal.AgentProposal
 import com.openbank.agent.domain.policy.AgentIdentity
+import com.openbank.agent.domain.proposal.AgentProposal
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import io.mockk.coEvery
@@ -184,29 +183,43 @@ class AgentAuditAttributionTest {
             .isEmpty()
     }
 
+    private fun stripComments(src: String): String = stripLineComments(stripBlockComments(src))
+
     /** Kotlin block comments NEST, so the depth counter must mirror that or a KDoc closes early. */
-    private fun stripComments(src: String): String {
+    private fun stripBlockComments(src: String): String {
         val out = StringBuilder()
         var i = 0
         var depth = 0
-        var inString = false
         while (i < src.length) {
             val two = if (i + 1 < src.length) src.substring(i, i + 2) else ""
             when {
-                depth > 0 && two == "/*" -> { depth++; i += 2 }
-                depth > 0 && two == "*/" -> { depth--; i += 2 }
-                depth > 0 -> i++
-                inString -> {
-                    if (src[i] == '\\') { out.append("  "); i += 2 } else {
-                        if (src[i] == '"') inString = false
-                        out.append(src[i]); i++
-                    }
+                two == "/*" -> {
+                    depth++
+                    i += 2
                 }
-                two == "/*" -> { depth = 1; i += 2 }
-                two == "//" -> { while (i < src.length && src[i] != '\n') i++ }
-                src[i] == '"' -> { inString = true; out.append(src[i]); i++ }
-                else -> { out.append(src[i]); i++ }
+                two == "*/" && depth > 0 -> {
+                    depth--
+                    i += 2
+                }
+                else -> {
+                    if (depth == 0) {
+                        out.append(src[i])
+                    }
+                    i++
+                }
             }
+        }
+        return out.toString()
+    }
+
+    /**
+     * Drop `//` comments, keeping string literals intact — a `//` inside a string (a URL, say) is
+     * code, not a comment, and cutting the line there would silently delete real tokens.
+     */
+    private fun stripLineComments(src: String): String {
+        val out = StringBuilder()
+        LINE_TOKEN.findAll(src).forEach { m ->
+            if (!m.value.startsWith("//")) out.append(m.value)
         }
         return out.toString()
     }
@@ -237,5 +250,10 @@ class AgentAuditAttributionTest {
             blocks += code.substring(start, i)
             from = i
         }
+    }
+
+    private companion object {
+        /** A string literal, a line comment, or any single character — in that priority order. */
+        private val LINE_TOKEN = Regex("""("(?:\\.|[^"\\])*")|(//[^\n]*)|([\s\S])""")
     }
 }
