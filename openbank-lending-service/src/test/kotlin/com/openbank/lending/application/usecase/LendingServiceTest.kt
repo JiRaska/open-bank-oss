@@ -106,24 +106,55 @@ class LendingServiceTest {
 
     private fun eur(v: String) = Money.of(v, "EUR")
 
+    /**
+     * The conditional UPDATE that claims an origination transition (issue #3850). [claimed] is the
+     * row count the database returns: `1` won the row, `0` lost the race to another caller.
+     */
+    private fun stubClaim(claimed: Int = 1) {
+        every { applications.compareAndSetStatus(any(), any(), any(), any(), any(), any()) } returns
+            Uni.createFrom().item(claimed)
+    }
+
+    private fun verifyClaims(times: Int) =
+        verify(exactly = times) { applications.compareAndSetStatus(any(), any(), any(), any(), any(), any()) }
+
     @Test
     fun `advance walks the canonical path skipping optional states by default`() {
         val app = proposedApplication().copy(status = OriginationState.SUBMITTED)
-        val slot: CapturingSlot<LoanApplication> = slot()
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)
-        every { applications.update(capture(slot)) } answers { Uni.createFrom().item(slot.captured) }
+        stubClaim()
 
         val result = service.advance(app.id, "officer-1").await().indefinitely()
 
         assertThat(result.status).isEqualTo(OriginationState.KYC_PENDING)
-        verify(exactly = 1) { applications.update(any()) }
+        verifyClaims(1)
+    }
+
+    /**
+     * The half `OriginationConcurrentAdvanceIT` can only observe indirectly (issue #3850). The
+     * service computes the transition BEFORE it writes, so when the conditional UPDATE claims no
+     * row it is already holding a fully-advanced application — it must refuse, and it must not emit
+     * the evidence or signal the workflow for a step it did not take. `events.emit` is stubbed here,
+     * so a regression that emitted anyway would be caught by the verify rather than by an error.
+     */
+    @Test
+    fun `losing the advance race refuses and emits no transition evidence`() {
+        val app = proposedApplication().copy(status = OriginationState.SUBMITTED)
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        stubClaim(claimed = 0)
+
+        assertThatThrownBy { service.advance(app.id, "officer-1").await().indefinitely() }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("no longer in SUBMITTED")
+
+        verify(exactly = 0) { events.emit(any<LendingOutboxMessage>()) }
     }
 
     @Test
     fun `advance from ASSESSMENT reaches DECISION_PENDING and cannot skip four-eyes`() {
         val app = proposedApplication().copy(status = OriginationState.ASSESSMENT)
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)
-        every { applications.update(any()) } answers { Uni.createFrom().item(firstArg<LoanApplication>()) }
+        stubClaim()
 
         val first = service.advance(app.id, "officer-1").await().indefinitely()
         assertThat(first.status).isEqualTo(OriginationState.DECISION_PENDING)
@@ -147,7 +178,7 @@ class LendingServiceTest {
         val app = proposedApplication().copy(status = OriginationState.SUBMITTED, packVersion = 1)
         val evidenceSlot: CapturingSlot<LendingOutboxMessage> = slot()
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)
-        every { applications.update(any()) } answers { Uni.createFrom().item(firstArg<LoanApplication>()) }
+        stubClaim()
         every { events.emit(capture(evidenceSlot)) } returns Uni.createFrom().item(Unit)
 
         service.advance(app.id, "officer-1").await().indefinitely()
@@ -166,7 +197,7 @@ class LendingServiceTest {
         val app = proposedApplication(proposer = "alice")
         val evidenceSlot: CapturingSlot<LendingOutboxMessage> = slot()
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)
-        every { applications.update(any()) } answers { Uni.createFrom().item(firstArg<LoanApplication>()) }
+        stubClaim()
         every { events.emit(capture(evidenceSlot)) } returns Uni.createFrom().item(Unit)
 
         service.decide(app.id, DecisionRequest(approve = true, reason = "solid affordability"), "bob")
@@ -188,10 +219,9 @@ class LendingServiceTest {
             productType = "CONSUMER_CREDIT",
             packVersion = 1,
         )
-        val updateSlot: CapturingSlot<LoanApplication> = slot()
         val evidenceSlot = mutableListOf<LendingOutboxMessage>()
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)
-        every { applications.update(capture(updateSlot)) } answers { Uni.createFrom().item(updateSlot.captured) }
+        stubClaim()
         every { events.emit(capture(evidenceSlot)) } returns Uni.createFrom().item(Unit)
 
         val result = service.advance(app.id, "officer-1").await().indefinitely()
@@ -212,7 +242,7 @@ class LendingServiceTest {
             residency = "CZ",
         )
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)
-        every { applications.update(any()) } answers { Uni.createFrom().item(firstArg<LoanApplication>()) }
+        stubClaim()
 
         val result = service.advance(app.id, "officer-1").await().indefinitely()
 
@@ -225,7 +255,7 @@ class LendingServiceTest {
     fun `advance from ASSESSMENT with a missing input refers, never silently approves`() {
         val app = proposedApplication().copy(status = OriginationState.ASSESSMENT)
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)
-        every { applications.update(any()) } answers { Uni.createFrom().item(firstArg<LoanApplication>()) }
+        stubClaim()
 
         val result = service.advance(app.id, "officer-1").await().indefinitely()
 
@@ -302,21 +332,20 @@ class LendingServiceTest {
         }.isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("Four-eyes")
 
-        verify(exactly = 0) { applications.update(any()) }
+        verifyClaims(0)
     }
 
     @Test
     fun `decide approves when a different officer signs off`() {
         val app = proposedApplication(proposer = "alice")
-        val slot: CapturingSlot<LoanApplication> = slot()
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)
-        every { applications.update(capture(slot)) } answers { Uni.createFrom().item(slot.captured) }
+        stubClaim()
 
         val result = service.decide(app.id, DecisionRequest(approve = true), "bob").await().indefinitely()
 
         assertThat(result.status).isEqualTo(OriginationState.OFFERED)
         assertThat(result.decidedBy).isEqualTo("bob")
-        verify(exactly = 1) { applications.update(any()) }
+        verifyClaims(1)
     }
 
     @Test
@@ -328,7 +357,7 @@ class LendingServiceTest {
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)
         every { loans.save(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
         every { installments.saveAll(capture(rowsSlot)) } answers { Uni.createFrom().item(rowsSlot.captured) }
-        every { applications.update(any()) } answers { Uni.createFrom().item(firstArg<LoanApplication>()) }
+        stubClaim()
         every { ledger.post(capture(postingSlot)) } returns Uni.createFrom().item(Unit)
         every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
 

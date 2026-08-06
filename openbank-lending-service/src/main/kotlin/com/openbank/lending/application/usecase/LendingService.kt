@@ -132,7 +132,7 @@ class LendingService(
             is OriginationTransitionResult.Rejected ->
                 Uni.createFrom().failure(IllegalStateException(result.reason))
             is OriginationTransitionResult.Applied ->
-                applications.update(outcome.recorded.copy(status = result.newState))
+                claimTransition(existing.status, outcome.recorded.copy(status = result.newState))
                     .signalWorkflow()
                     .call { _ -> events.emit(outcome.evidence) }
         }
@@ -146,6 +146,44 @@ class LendingService(
     private fun reflectionDaysFor(application: LoanApplication): Int? =
         complianceGuard.resolveOriginationPack(application.jurisdiction, application.productType)
             ?.pack?.reflectionPeriodDays
+
+    /**
+     * Claim an origination transition, or refuse.
+     *
+     * Every caller here has decided [updated] from a snapshot read in an earlier transaction, so it
+     * must not write blindly: the row may have moved on since. The conditional UPDATE re-tests the
+     * state the decision was taken against, and `0` rows claimed means someone else got there first
+     * — the same `IllegalStateException` the caller would have received a moment later, which the
+     * resource already maps (422 on advance, 409 on decide). Nothing downstream of a refusal runs:
+     * no evidence event, no workflow signal (issue #3850).
+     *
+     * On success the claimed application is returned from memory. `update` returned the re-read
+     * entity, which differs in one respect worth naming: `update` writes only status and the three
+     * decision fields, so the ASSESSMENT leg's engine outputs (`decisionOutcome`, price band, reason
+     * codes, input hash) were never persisted and the re-read blanked them out of the response. That
+     * persistence gap is pre-existing and is NOT fixed here — it needs its own change and its own
+     * test. What changes is only that the response now carries the values the engine computed
+     * instead of nulls.
+     */
+    private fun claimTransition(from: OriginationState, updated: LoanApplication): Uni<LoanApplication> =
+        applications.compareAndSetStatus(
+            updated.id,
+            from,
+            updated.status,
+            updated.decidedBy,
+            updated.decisionReason,
+            updated.decidedAt,
+        ).flatMap { claimed ->
+            if (claimed == 0) {
+                Uni.createFrom().failure(
+                    IllegalStateException(
+                        "Concurrent modification: application ${updated.id} is no longer in $from",
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(updated)
+            }
+        }
 
     private fun Uni<LoanApplication>.signalWorkflow(): Uni<LoanApplication> =
         call { app -> workflowPort.stateEntered(app.id, app.status, reflectionDaysFor(app)) }
@@ -287,7 +325,7 @@ class LendingService(
                             is OriginationTransitionResult.Rejected ->
                                 Uni.createFrom().failure(IllegalStateException(result.reason))
                             is OriginationTransitionResult.Applied ->
-                                applications.update(existing.copy(status = result.newState))
+                                claimTransition(existing.status, existing.copy(status = result.newState))
                                     .signalWorkflow()
                                     .emitEvidence(
                                         existing.status.name,
@@ -319,7 +357,7 @@ class LendingService(
                     is OriginationTransitionResult.Rejected ->
                         Uni.createFrom().failure(IllegalStateException(result.reason))
                     is OriginationTransitionResult.Applied ->
-                        applications.update(existing.copy(status = result.newState))
+                        claimTransition(existing.status, existing.copy(status = result.newState))
                             .signalWorkflow()
                             .emitEvidence(
                                 existing.status.name,
@@ -364,7 +402,8 @@ class LendingService(
                     when (val result = machine.apply(transition(existing, existing.status, target, decidedBy))) {
                         is OriginationTransitionResult.Rejected ->
                             Uni.createFrom().failure(IllegalStateException(result.reason))
-                        is OriginationTransitionResult.Applied -> applications.update(
+                        is OriginationTransitionResult.Applied -> claimTransition(
+                            existing.status,
                             existing.copy(
                                 status = result.newState,
                                 decidedBy = decidedBy,
@@ -468,7 +507,14 @@ class LendingService(
                     is OriginationTransitionResult.Rejected ->
                         Uni.createFrom().failure(IllegalStateException(st.reason))
                     is OriginationTransitionResult.Applied ->
-                        applications.update(application.copy(status = st.newState))
+                        // Claimed, not blind-written: without the predicate two concurrent
+                        // disbursements of one READY_TO_DISBURSE application both post cash to the
+                        // ledger. The claim runs before the posting, so the loser pays nothing.
+                        // It does NOT make disbursement atomic — the loan row and its schedule are
+                        // written before the claim, so a refused racer still leaves an unreferenced
+                        // loan behind. That is pre-existing (today BOTH racers book one) and needs
+                        // its own change; see the pull request for #3850.
+                        claimTransition(application.status, application.copy(status = st.newState))
                             .call { savedApp ->
                                 events.emit(
                                     transitionEvidence(
