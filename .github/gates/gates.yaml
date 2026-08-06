@@ -1899,6 +1899,32 @@ gates:
     mode: enforced
     run: |
       python3 .github/scripts/check-roles-allowed-realm.py
+  # Keycloak realm templates must be IMPORTABLE (issue #3246). The three existing realm checks
+  # all compare NAME SETS — @RolesAllowed vs template, template vs live, template vs the import
+  # artifact — and every one of them is perfectly happy with a document Keycloak refuses to
+  # parse. Measured against quay.io/keycloak/keycloak:26.6.3 (the tag keycloak.yaml runs), the
+  # customers template had FOUR independent import-blocking defects and could never have
+  # rebuilt its realm: five `"comment"` keys (Jackson fails the whole import on an unrecognized
+  # field), a 490-char client description over the 255 column cap, a 37-char authenticator in a
+  # VARCHAR(36) column, and a composite referencing built-in roles an explicit-roles import does
+  # not create. Plus two confidential clients with no `secret`, so a rebuilt realm would issue
+  # random credentials neither service presents.
+  # Nothing could have caught any of it: `--import-realm` runs on COLD START ONLY and skips a
+  # realm that already exists, so the template is inert on every deploy, restart and DR restore,
+  # and ArgoCD is Synced/Healthy about a Secret it does not manage. The first observation of the
+  # defect would have been the rebuild it existed to survive.
+  # ENFORCED, because every rule is a fact about the file (a column width, a duplicate key, a
+  # missing field), never a judgement. A static gate cannot enumerate Keycloak's schema, so it
+  # narrows the window rather than closing it — components/keycloak/README.md keeps the real
+  # `docker run ... --import-realm` recipe, which is still required before changing a template.
+  - id: realm-template-importable
+    name: "Keycloak realm templates must be importable (issue #3246, enforced)"
+    group: security
+    mode: enforced
+    selftest: python3 .github/scripts/check-realm-template-importable.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-realm-template-importable.py
   - id: opa-bundle-apply-size
     name: OPA bundle must be installable (client-side apply annotation ceiling)
     group: gitops
