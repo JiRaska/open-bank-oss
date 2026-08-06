@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/v0.13.0...v0.14.0) (2026-08-06)
+
+
+### Features
+
+* **campaign:** let a caller select the PUSH channel on a campaign step ([#3897](https://github.com/JiRaska/open-bank-oss/issues/3897)) ([ee9708f](https://github.com/JiRaska/open-bank-oss/commit/ee9708f2c5008cfa436a6010cf33eff4d842605b))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/v0.12.0...v0.13.0) (2026-08-06)
 
 
