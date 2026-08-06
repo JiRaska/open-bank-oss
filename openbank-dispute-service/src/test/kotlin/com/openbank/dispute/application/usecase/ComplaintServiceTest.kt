@@ -14,6 +14,7 @@ import com.openbank.dispute.domain.model.FileComplaintRequest
 import com.openbank.dispute.domain.model.InterimReplyRequest
 import com.openbank.dispute.domain.model.ResolveComplaintRequest
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.audit.AuditEventTime
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -47,6 +48,22 @@ class ComplaintServiceTest {
         channel = ComplaintChannel.APP,
         description = "Card payment debited twice",
     )
+
+    /**
+     * #3914: red before `complaintPayload` gained `occurredAt` — the filing instant was nowhere in
+     * the payload (`receivedDate`/`dueDate` are LocalDates), so every complaint audit row recorded
+     * the audit consumer's ingest clock as the filing time.
+     */
+    @Test
+    fun `the complaint payload carries the transition instant as the audit event time`() {
+        val today = LocalDate.of(2026, 6, 9)
+        val msg = slot<OutboxMessage>()
+        every { repo.save(any(), capture(msg)) } answers { Uni.createFrom().item(firstArg<Complaint>()) }
+
+        val filed = serviceAt(today).file(fileRequest()).await().indefinitely()
+
+        AuditEventTime.assertRecordedAsEventTime(msg.captured.payload, filed.updatedAt.toInstant())
+    }
 
     // ---- intake deadline clock (15 business days, CZK / CERTIS) ----
 
