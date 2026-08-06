@@ -43,7 +43,7 @@ class LlmDiagnosisAdapterTest {
         filePath = "openbank-ledger-service/src/test/kotlin/com/openbank/ledger/LedgerTest.kt",
         rawMetricValue = BigDecimal.ONE,
         threshold = BigDecimal.ONE,
-        rootCause = "builder=runBlocking, line=42, snippet=fun test() = runBlocking { ... }",
+        rootCause = "builder=runBlocking, line=42, snippet=fun test(): Unit = runBlocking { ... }",
         proposalUrl = null,
         proposedFixDiff = null,
         status = FindingStatus.OPEN,
