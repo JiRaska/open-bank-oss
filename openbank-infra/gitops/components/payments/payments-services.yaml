@@ -2224,8 +2224,13 @@ spec:
             # enough; safe to leave briefly, repair is a no-op once checksums already match).
             - name: QUARKUS_FLYWAY_REPAIR_AT_START
               value: "true"
-            - name: KAFKA_BOOTSTRAP_SERVERS
-              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            # `KAFKA_BOOTSTRAP_SERVERS: …:9092` stood here and was dead (issue #3393):
+            # openbank-settlement-service has no `mp.messaging` config and no Kafka client
+            # anywhere under src/main, so it opened no connection and the value was never read.
+            # It mattered only because it made settlement-service read as a plaintext-listener
+            # client in every audit of who is still on :9092 — including
+            # `gen-network-policies.py`, which derives the broker allow-list from exactly this
+            # kind of env URL and so admitted `payments` on 9092 partly on its account.
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET
