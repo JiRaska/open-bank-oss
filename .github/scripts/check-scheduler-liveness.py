@@ -70,7 +70,6 @@ BASELINE = [
     "openbank-interest-service/src/main/kotlin/com/openbank/interest/infrastructure/scheduler/InterestCapitalizationScheduler.kt",
     "openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/servicing/InterestAccrualScheduler.kt",
     "openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/servicing/ProvisioningCycleScheduler.kt",
-    "openbank-sdd-service/src/main/kotlin/com/openbank/sdd/infrastructure/scheduler/MandateExpiryScheduler.kt",
     # non-money-path
     "openbank-agent-service/src/main/kotlin/com/openbank/agent/application/OversightService.kt",
     "openbank-agent-service/src/main/kotlin/com/openbank/agent/infrastructure/observability/AgentMetricsAdapter.kt",
