@@ -179,6 +179,23 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   mass replay on money-path channels. `check-kafka-dotted-keys.py` ratchets it (enforced in
   `Validate manifests`) — new occurrences fail, today's six are baselined against #2945, and a
   baseline entry that becomes covered is reported too (#686, #2945).
+- **`Instant.EPOCH` as a data-class default is a lie every test agrees with, and a non-null
+  assertion is not a check.** `AuditEvent.timestamp` and `FlagExposure.timestamp` both defaulted to
+  it; 23 of the 25 fleet `AuditEvent(` sites take the default, and `FlagExposure.of` — the KDoc's
+  "typical call site" — never passed one. Nothing caught it because `isNotNull()` passes against
+  1970-01-01, and `FlagExposureTest` already asserted *every other* field of `of()`. Assert
+  **recency** (`isBetween(before, now)`), never non-nullity, for any field meaning "when did this
+  happen" (#3882). Grep the shape: `: Instant = Instant.EPOCH`.
+- **Before calling a wrong-looking value a live defect, find out whether anything READS it — a
+  field no code path consumes is a latent trap, not corruption, and the two need different fixes.**
+  The audit envelope above looked like the worst case (evidentiary record, append-only store), and
+  was not stored at all: the only `AuditEventPublisher` implementation is the logging fallback,
+  which did not reference `timestamp`; there is no entity, mapper or outbox for the type; and
+  `FlagExposure` has zero production consumers. Cheap to establish — enumerate the interface's
+  implementations, then grep the field name across `src/main` — and it changes the whole PR:
+  urgency, blast radius, and whether the honest fix is the value or the wiring. It also surfaces
+  the real bug next door, which here was that `AuditConsumer` keys on `occurredAt`, a field the
+  canonical envelope does not have, so the envelope's time is dropped at ingest (#3883).
 
 ### ktlint
 - Path-scoped CI only lints changed files, so a pre-existing wildcard import or a latent
@@ -396,6 +413,17 @@ fire from *outside* it, so they stay here:
   `a9381b256` -> `13335a859`) and the reported line no longer existed. Reporting a defect that is
   already gone sends the reader hunting for nothing. Diff the file at the CURRENT head, not the
   head the run used.
+- **A version bump computed against a STALE base can collide with a release-please version that
+  already shipped — read the version on fresh `origin/main`, never on the local base.** A branch in
+  a shallow worktree saw the release manifest at admin-ui `0.91.3`, so the manual bump went to
+  `0.91.4` — a version #3721 had already released the day before (tag `admin-ui-v0.91.4` existed).
+  It survived only because the numbers happened to agree on merge; release-please then correctly
+  proposed `0.91.5` (#3753) for the unreleased fixes, and a slightly different timeline yields a
+  skipped number or a released version with no tag. The version-sync gate checks
+  `version.txt == package.json`, not "is this number still free". Before `/bump`: `git fetch` (a
+  shallow worktree's `origin/main` ref does not move on its own), then read `version.txt` and the
+  manifest AS OF `origin/main` — same rule as acting on CI findings: the current head, not the
+  base you branched from.
 - **Omitting `--delete-branch` does NOT protect someone else's worktree — the repo sets
   `delete_branch_on_merge: true`.** That setting deletes the remote ref regardless of the merge
   flag, so the precaution is theatre. The local branch and working tree survive (verified on

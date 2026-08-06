@@ -42,6 +42,11 @@ on:
       - "openbank-libs-domain/build.gradle.kts"
       - "openbank-libs-runtime/build.gradle.kts"
       - "build-logic/**"
+      # Release-please bumps version.txt, yet a release-only commit touches nothing
+      # under src/main/**. That left the new version with no image built, causing
+      # immediate deploy drift (issue #3597 et al.). Treat a version bump as a
+      # release marker that must deploy like a source change.
+      - "openbank-*/version.txt"
   # Self-heal reconcile (issue #2020). The per-push run is ONE-SHOT: a service that built
   # and pushed its image but was then blocked at the can-i-deploy contract gate by a
   # TRANSIENT verification lag (its build wave republished its consumer pact; the provider
@@ -351,7 +356,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: |
@@ -1184,6 +1189,17 @@ jobs:
         id: rewrite
         run: |
           set -euo pipefail
+          # Recompute against LIVE main (#3194). Same exposure admin-ui-deploy.yml has: the
+          # checkout holds github.sha, the build takes minutes, and create-pull-request branches
+          # from that HEAD. If another deploy merges in the window, both sides have rewritten the
+          # same image: line and the PR is born CONFLICTED — which means no refs/pull/<n>/merge
+          # and therefore NO workflow run at all. Not skipped, absent. It renders as "waiting",
+          # never as broken, and the image is never deployed.
+          #
+          # Safe because the rewrite is deterministic — pin each image: to the tag just built —
+          # so recomputing against a newer main is always correct.
+          git fetch origin main
+          git reset --hard origin/main
           IMAGE_TAGS='${{ needs.build-push.outputs.image_tags }}'
           UPDATED=()
 
@@ -1236,6 +1252,10 @@ jobs:
           if [ "${#UPDATED[@]}" -eq 0 ]; then
             echo "No manifests changed — all images already up to date."
             echo "changed=false" >> "$GITHUB_OUTPUT"
+            if [ "${GATE_RAN}" = "true" ] && [ "${DEPLOYABLE_SERVICES}" = "[]" ]; then
+              echo "::error::contract gate ran but no service was deployable — failing gitops-pr closed so the run is not silently green (issue #3432)"
+              exit 1
+            fi
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
             printf '%s\n' "${UPDATED[@]}"

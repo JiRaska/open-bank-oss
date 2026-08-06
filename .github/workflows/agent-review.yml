@@ -43,6 +43,17 @@
 #     exits 0 on its own recorded failure, so a guard step reads the transcript and
 #     fails the job instead (check-claude-fallback-result.sh). The token being dead is
 #     now visible; before, a dead standby and a healthy one were indistinguishable.
+#   * PRIMARY REVIEWER IS DEAD TOO (#3488). GitHub Models was fully RETIRED on
+#     2026-07-30; every `actions/ai-inference` call now answers
+#     `410 GitHub Models is temporarily unavailable as part of a scheduled retirement
+#     brownout`. So the primary is permanently down, not flaky, and with the #2161
+#     fallback also dead this workflow currently reviews NOTHING: across 120 runs
+#     sampled 2026-08-02..03, zero reviews were submitted by any model — the apparent
+#     pass rate was runs that never called a model (sensitive scope deferred to a
+#     human, or the job `if:` skipping). Restoring a reviewer means pointing the
+#     primary at a live inference endpoint, which is a credential decision for the
+#     owner. Until then the terminal guard below states, on the PR, that no review
+#     happened — see .github/scripts/check-agent-review-happened.sh.
 #
 # Prerequisites (one-time, outside this file):
 #   1. Settings → Actions → General → "Allow GitHub Actions to approve pull
@@ -351,6 +362,7 @@ jobs:
 
       # --- Submit the GitHub Models verdict ----------------------------------
       - name: Submit review (GitHub Models)
+        id: submit
         if: steps.scope.outputs.skip == 'false' && steps.ghmodels.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -454,11 +466,43 @@ jobs:
       # job. The standby reviewer was dead and every available signal said it was fine.
       #
       # `always()` so a crashed action still reaches the guard; the `skipped` test keeps
-      # it silent on the overwhelmingly common path where the primary reviewer worked.
-      # Failing here is safe: this job is non-blocking and not a required check, so a red
-      # means "no review happened", never "this PR is rejected".
+      # it silent on the overwhelmingly common path where the fallback did not run.
+      # Failing here is safe: this job is non-blocking and not a required check.
+      #
+      # It deliberately does NOT carry `continue-on-error` — that would make it an advisory
+      # gate, which check-advisory-gate-registration.py (#2392, enforced) correctly refuses
+      # unless rules.yaml gives it a target_enforce_date. It is not advisory; it is enforced
+      # and its outcome is ALSO read by the terminal guard below, which is what turns a bare
+      # red into a named cause and a PR comment.
       - name: Verify the Claude fallback actually reviewed
+        id: fallback_guard
         if: always() && steps.claude.outcome != 'skipped'
         env:
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
         run: .github/scripts/check-claude-fallback-result.sh "$EXECUTION_FILE"
+
+      # --- A run that reviewed nothing must not be readable as a review ------------
+      # Terminal accountability guard (#3488). The step above is gated on the Claude step
+      # having RUN, so when the fallback is SKIPPED — a Dependabot or fork PR, where the
+      # OAuth secret is empty in the job context — that guard is skipped too and the job
+      # finishes GREEN having reviewed nothing. Measured twice in a 120-run sample, and it
+      # is the default reading once the fallback stops running for any reason.
+      #
+      # This step asks the whole question instead: did ANY review happen, and if not, which
+      # of the four causes was it. Rationale, the measured classification, and the HTTP 410
+      # that kills the primary reviewer are in the script header, not here (#3135: prose in
+      # a `run:` block can make the whole workflow unparseable).
+      #
+      # Failing is safe: this job is non-blocking and not a required check, so a red means
+      # "no review happened", never "this PR is rejected".
+      - name: Verify a review actually happened
+        if: always() && steps.scope.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          SCOPE_SKIP: ${{ steps.scope.outputs.skip }}
+          PRIMARY_OUTCOME: ${{ steps.ghmodels.outcome }}
+          SUBMIT_OUTCOME: ${{ steps.submit.outcome }}
+          CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
+          FALLBACK_GUARD_OUTCOME: ${{ steps.fallback_guard.outcome }}
+        run: .github/scripts/check-agent-review-happened.sh
