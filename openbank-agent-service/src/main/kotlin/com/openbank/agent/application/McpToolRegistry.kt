@@ -45,6 +45,15 @@ class McpToolRegistry {
 
     @Inject lateinit var auditPublisher: AuditEventPublisher
 
+    /**
+     * Charter lookup for AI attribution (ADR-0031 D5, issue #3667). The acting model id is derived
+     * from the actor's charter rather than threaded through every dispatch signature: the charter is
+     * the declaration of record for which model an agent runs, and it is keyed by exactly the
+     * `actorId` this class already carries. An unregistered actor yields
+     * [CharterRegistry.UNKNOWN_MODEL] — the attribution is then explicitly unknown, never absent.
+     */
+    @Inject lateinit var charters: CharterRegistry
+
     private val log = Logger.getLogger(McpToolRegistry::class.java)
 
     val tools: List<ToolDefinition> = listOf(
@@ -467,7 +476,9 @@ class McpToolRegistry {
                 "'$flagKey' defaultVariant to '$targetVariant'. Verify behaviour in staging " +
                 "before approving for production.",
             proposedBy = actorId,
-            modelId = null,
+            // ADR-0031 D5 (#3667): an MCP-drafted proposal is AI-attributed, so it records the
+            // acting agent's charter-declared model rather than a null the audit cannot interpret.
+            modelId = charters.modelId(actorId),
             correlationId = null,
         )
         auditFlip(
@@ -503,7 +514,9 @@ class McpToolRegistry {
             rationale = args.requiredString("rationale"),
             suggestedAction = args.requiredString("suggested_action"),
             proposedBy = actorId,
-            modelId = null,
+            // ADR-0031 D5 (#3667): an MCP-drafted proposal is AI-attributed, so it records the
+            // acting agent's charter-declared model rather than a null the audit cannot interpret.
+            modelId = charters.modelId(actorId),
             correlationId = null,
         )
         return objectMapper.createObjectNode()
@@ -528,7 +541,9 @@ class McpToolRegistry {
                     resourceType = "feature-flag",
                     resourceId = flagKey,
                     result = result,
-                    payload = payload,
+                    // AI attribution (ADR-0031 D5, #3667). A caller-supplied model_id is never
+                    // overwritten; today no caller supplies one, so the charter value applies.
+                    payload = payload + ("model_id" to (payload["model_id"] ?: charters.modelId(actorId))),
                 ),
             )
         }
@@ -551,6 +566,7 @@ class McpToolRegistry {
             payload = buildMap {
                 put("tool", toolName)
                 put("outcome", result.name)
+                put("model_id", charters.modelId(actorId))
                 errorKey?.let { put("error", it) }
             },
         )
