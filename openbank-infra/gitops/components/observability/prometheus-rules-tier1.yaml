@@ -36,6 +36,30 @@ spec:
           annotations:
             summary: "Payment service {{ $labels.container }} is down"
             description: "{{ $labels.container }} ({{ $labels.namespace }}) has been unreachable for >2m."
+        - alert: MoneyPathServiceDown
+          # The half of #3333's SLOMetricAbsent that was worth keeping, expressed on a signal that
+          # can actually carry it. The Pyrra absent rules were deleted because they watched Tempo
+          # span-metrics, which vanish when a service is merely idle; `up` comes from the fleet
+          # PodMonitor and is emitted whether or not anyone calls the service, so `up == 0` means
+          # "the pod is there and not answering", which is a fault in every environment.
+          #
+          # Scoped to the money-path namespaces that no other Down rule already covers —
+          # PaymentServiceDown owns payments+fx and LendingServiceDown owns lending, and a second
+          # rule over the same targets would just page twice for one outage. The remaining eleven
+          # are the money_path_services (rules.yaml) that live in a namespace of their own; ledger
+          # is among them, so the core money service had no liveness alert at all until now.
+          #
+          # `for: 10m` is measured, not guessed: over the retained window every `up == 0` on this
+          # job was a pod start or termination lasting at most 3 consecutive scrapes (~90s), so at
+          # 10m this rule contributes nothing to the idle alert set — which is the whole point of
+          # #3333. Pod-level churn is already covered by KubePodCrashLooping / KubePodNotReady.
+          expr: up{job="observability/openbank-services", namespace=~"ledger|accounts|balances|sdd|interest|sca|consent|fraud|billing|sanctions|delegation"} == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Money-path service {{ $labels.container }} is down"
+            description: "{{ $labels.container }} ({{ $labels.namespace }}) has failed scraping for >10m — the pod exists but is not answering."
         - alert: HighErrorRate
           # The ratio alone is meaningless at trivial throughput: a service doing
           # 0.2 req/s with a couple of expected error spans (e.g. the security

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/release-steward-v0.5.0...release-steward-v0.6.0) (2026-08-06)
+
+
+### Features
+
+* **release-steward:** wire prompt registry and LLM gateway ([#3785](https://github.com/JiRaska/open-bank-oss/issues/3785)) ([17679d7](https://github.com/JiRaska/open-bank-oss/commit/17679d7b6328208c6845e41a13ab6e034a4ce680)), closes [#3784](https://github.com/JiRaska/open-bank-oss/issues/3784)
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/release-steward-v0.4.1...release-steward-v0.5.0) (2026-08-05)
 
 

@@ -173,12 +173,12 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "e812efe9dd109de3",
+      "sha256": "4674eaf916282541",
       "counts": {
         "external": 2,
         "not-applicable": 2,
-        "pending": 4,
-        "registered": 7
+        "pending": 3,
+        "registered": 8
       },
       "idsByStatus": {
         "external": [
@@ -191,7 +191,6 @@
         ],
         "pending": [
           "governance-auditor",
-          "release-steward",
           "docs-truth-agent",
           "authz-policy-auditor"
         ],
@@ -202,6 +201,7 @@
           "devops-agent",
           "control-liveness-sentinel",
           "finops-agent",
+          "release-steward",
           "flaky-test-hunter"
         ]
       }
@@ -251,15 +251,23 @@
             "flaky-test-hunter"
           ],
           "buildFile": "openbank-flaky-test-hunter/build.gradle.kts"
+        },
+        {
+          "module": "openbank-release-steward",
+          "charters": [
+            "release-steward"
+          ],
+          "buildFile": "openbank-release-steward/build.gradle.kts"
         }
       ],
-      "serviceCount": 5,
+      "serviceCount": 6,
       "registeredChartersLoadedFromRegistry": [
         "compliance-officer",
         "control-liveness-sentinel",
         "devops-agent",
         "finops-agent",
         "flaky-test-hunter",
+        "release-steward",
         "ui-assistant"
       ],
       "registeredChartersStillInline": [
