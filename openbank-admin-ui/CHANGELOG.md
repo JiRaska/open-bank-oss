@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.99.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.98.0...admin-ui-v0.99.0) (2026-08-06)
+
+
+### Features
+
+* **campaign,notification:** tell a delivered message from an accepted handoff (ADR-0239) ([#3838](https://github.com/JiRaska/open-bank-oss/issues/3838)) ([789d662](https://github.com/JiRaska/open-bank-oss/commit/789d6626fde13ab48cd72806a07b7c4e6c19ed0e))
+
 ## [0.98.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.97.0...admin-ui-v0.98.0) (2026-08-06)
 
 
