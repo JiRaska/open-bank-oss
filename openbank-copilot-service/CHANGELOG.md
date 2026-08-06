@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.8.1...copilot-service-v0.9.0) (2026-08-06)
+
+
+### Features
+
+* **copilot:** ADR-0238 T1 — durable Postgres conversation history ([#3711](https://github.com/JiRaska/open-bank-oss/issues/3711)) ([c39b6c7](https://github.com/JiRaska/open-bank-oss/commit/c39b6c73b3b9893bad23aabd9943288354b3c447))
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.8.0...copilot-service-v0.8.1) (2026-08-02)
 
 
