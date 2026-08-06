@@ -41,6 +41,16 @@ open class CampaignJourneyActivitiesImpl(
     private val sendLog: SendLogRepository,
     private val contactGate: ContactPolicyGate,
     private val notificationSend: NotificationSendPort,
+    /**
+     * When true, a step runs every gate and then stops short of the transport: nothing is emitted to
+     * notification-service on any channel, and the send log records DRY_RUN.
+     *
+     * Defaults to TRUE — the safe direction. A non-production environment that forgets to set this
+     * would otherwise mail real people, and the failure is discovered by the recipient. Production
+     * sets it to false explicitly, which is a reviewable line in a manifest rather than an omission.
+     */
+    @ConfigProperty(name = "openbank.campaign.dry-run", defaultValue = "true")
+    private val dryRun: Boolean,
     @ConfigProperty(name = "openbank.campaign.marketing-scope", defaultValue = "MARKETING_COMMS_EMAIL")
     private val marketingScope: String,
 ) : CampaignJourneyActivities {
@@ -83,34 +93,44 @@ open class CampaignJourneyActivitiesImpl(
             )
         ) {
             ContactGateDecision.ALLOWED -> {
-                // ADR-0200 D3 — delivery goes through notification-service, never direct.
-                //
-                // The order below is the fix for issue #3581: the send log may only be written
-                // AFTER the handoff has been observed to succeed, and a handoff that failed must
-                // leave a FAILED row rather than nothing. What SENT claims here is exactly
-                // "notification-service accepted the request", not "the customer received it".
                 // The send-log row id is minted BEFORE the handoff, not by `record` after it
                 // (ADR-0239 D1): it is what goes on the wire as the correlation id, so the id has
                 // to exist first. It is used for whichever row this attempt ends up writing —
-                // SENT or FAILED — so an outcome that arrives for a handoff that then failed
-                // locally still lands on the right row.
+                // SENT, DRY_RUN or FAILED — so an outcome that arrives for a handoff that then
+                // failed locally still lands on the right row.
                 val sendId = Ids.newId()
-                try {
-                    notificationSend.requestSend(
-                        partyId,
-                        step.template,
-                        recipientFor(partyId),
-                        step.variables,
-                        correlationId = sendId,
-                    )
-                } catch (e: Exception) {
-                    record(sendId, campaignId, partyId, stepOrder, SendOutcome.FAILED)
-                    // Rethrown on purpose: Temporal retries the activity, and the FAILED row above
-                    // is the durable evidence that this attempt happened. FAILED rows do not
-                    // consume the frequency cap (SENT only), so a retry is not penalised.
-                    throw e
+                // Dry run stops HERE, after every gate above has run. Deliberately not earlier: the
+                // point of a rehearsal is that suppression, cap, quiet hours and consent are all
+                // exercised exactly as they would be, so a journey that would have been suppressed
+                // still reports SUPPRESSED and not DRY_RUN. Nothing is handed off, so this row's
+                // delivery status stays PENDING forever — correctly: no message ever left.
+                if (dryRun) {
+                    record(sendId, campaignId, partyId, stepOrder, SendOutcome.DRY_RUN)
+                } else {
+                    // ADR-0200 D3 — delivery goes through notification-service, never direct.
+                    //
+                    // The order below is the fix for issue #3581: the send log may only be written
+                    // AFTER the handoff has been observed to succeed, and a handoff that failed must
+                    // leave a FAILED row rather than nothing. What SENT claims here is exactly
+                    // "notification-service accepted the request", not "the customer received it".
+                    try {
+                        notificationSend.requestSend(
+                            partyId,
+                            step.channel,
+                            step.template,
+                            recipientFor(partyId),
+                            step.variables,
+                            correlationId = sendId,
+                        )
+                    } catch (e: Exception) {
+                        record(sendId, campaignId, partyId, stepOrder, SendOutcome.FAILED)
+                        // Rethrown on purpose: Temporal retries the activity, and the FAILED row
+                        // above is the durable evidence that this attempt happened. FAILED rows do
+                        // not consume the frequency cap (SENT only), so a retry is not penalised.
+                        throw e
+                    }
+                    record(sendId, campaignId, partyId, stepOrder, SendOutcome.SENT)
                 }
-                record(sendId, campaignId, partyId, stepOrder, SendOutcome.SENT)
                 StepOutcome.SENT
             }
             else -> {

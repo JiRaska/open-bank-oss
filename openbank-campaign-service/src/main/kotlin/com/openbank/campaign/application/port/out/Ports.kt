@@ -5,6 +5,7 @@
 package com.openbank.campaign.application.port.out
 
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SendOutcome
@@ -117,6 +118,7 @@ interface NotificationSendPort {
      */
     suspend fun requestSend(
         partyId: UUID,
+        channel: Channel,
         template: String,
         recipient: String,
         variables: Map<String, String>,

@@ -71,3 +71,35 @@ describe('campaign builder interaction', () => {
     expect(container.querySelector('[data-step="0"]')!.getAttribute('data-selected')).toBe('false')
   }, 25000)
 })
+
+/**
+ * The channel picker (ADR-0200 D7 as it now stands: EMAIL + PUSH).
+ *
+ * The rule worth protecting is not that a picker exists — it is that choosing PUSH changes what the
+ * panel can offer. A push renders a title plus a fixed generic body, so offering an email's body
+ * fields on a push step would promise a delivery the platform refuses to make (#1182).
+ */
+describe('campaign builder channels', () => {
+  it('switching a step to push narrows the fields to the ones that channel can carry', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (u: string) =>
+      String(u).includes('/preview')
+        ? { ok: true, json: async () => ({ size: 10, state: 'ok' }) }
+        : { ok: true, json: async () => ({ state: 'ok', items: [
+            { name: 'active-clients', version: 1, rules: ['party status is ACTIVE'] }] }) }))
+    const { container, getByText } = render(
+      React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
+    await waitFor(() => getByText('active-clients'), { timeout: 8000 })
+
+    // Email: the template's three declared variables.
+    expect(container.querySelectorAll('[id^="var-0-"]').length).toBe(3)
+
+    fireEvent.click(container.querySelector('[data-channel-pick="PUSH"]')!)
+
+    // Push: the headline, and nothing that would become body copy.
+    expect(container.querySelectorAll('[id^="var-0-"]').length).toBe(1)
+    expect(document.getElementById('var-0-offerTitle')).toBeTruthy()
+    expect(document.getElementById('var-0-offerText')).toBeNull()
+    // The canvas node reports the channel, so the journey is legible without opening each step.
+    expect(container.querySelector('[data-step="0"]')!.getAttribute('data-channel')).toBe('PUSH')
+  }, 25000)
+})

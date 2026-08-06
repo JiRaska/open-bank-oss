@@ -5,7 +5,7 @@
 'use client'
 
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import type { EditorStep } from '@/components/campaigns/JourneyEditor'
+import type { EditorChannel, EditorStep } from '@/components/campaigns/JourneyEditor'
 
 /**
  * Edits the step selected on the canvas.
@@ -23,6 +23,7 @@ export function StepEditor({
   index,
   step,
   templates,
+  templateChannel,
   templateLabels,
   variableLabels,
   onChange,
@@ -33,6 +34,8 @@ export function StepEditor({
   step: EditorStep
   /** template id → the variables it declares. Mirrors the service's catalogue. */
   templates: Record<string, string[]>
+  /** template id → the channel it renders on. The service refuses a mismatch. */
+  templateChannel: Record<string, EditorChannel>
   templateLabels: Record<string, string>
   /**
    * variable id → what to call it, and what a filled-in one looks like.
@@ -84,6 +87,49 @@ export function StepEditor({
         </button>
       </div>
 
+      {/* Channel first, because it changes what the rest of the panel can offer. A push carries a
+          title and nothing else — notification-service renders a fixed generic body so customer
+          content never reaches an APNs payload (#1182) — so offering an email's body fields on a
+          push step would promise something the platform refuses to deliver. */}
+      <div className="space-y-1.5">
+        <span className="text-sm font-medium">{t('Kanál', 'Channel')}</span>
+        <div className="flex gap-2">
+          {(['EMAIL', 'PUSH'] as EditorChannel[]).map(c => {
+            const first = Object.keys(templates).find(tpl => templateChannel[tpl] === c)
+            const active = step.channel === c
+            return (
+              <button
+                key={c}
+                type="button"
+                data-channel-pick={c}
+                data-selected={active ? 'true' : 'false'}
+                disabled={!first}
+                onClick={() => first && onChange({ ...step, channel: c, template: first, variables: {} })}
+                // `.btn` again rather than a hand-rolled box — the third time tonight that a
+                // house primitive existed and a worse copy was written next to it. `py-1.5` is not
+                // even generated in this build, so the copy rendered cramped.
+                className="btn disabled:opacity-40"
+                style={
+                  active
+                    ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' }
+                    : undefined
+                }
+              >
+                {c === 'EMAIL' ? t('E-mail', 'Email') : t('Push do aplikace', 'App push')}
+              </button>
+            )
+          })}
+        </div>
+        {step.channel === 'PUSH' && (
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'Push nese jen titulek. Nabídku si člověk přečte v aplikaci po klepnutí — do notifikace se osobní obsah nedává.',
+              'A push carries the headline only. The offer is read in the app after the tap — personal content never goes into a notification.',
+            )}
+          </p>
+        )}
+      </div>
+
       <div className="space-y-1.5">
         <label htmlFor={`tpl-${index}`} className="text-sm font-medium">
           {t('Co se pošle', 'What gets sent')}
@@ -94,7 +140,7 @@ export function StepEditor({
           value={step.template}
           onChange={e => onChange({ ...step, template: e.target.value, variables: {} })}
         >
-          {Object.keys(templates).map(tpl => (
+          {Object.keys(templates).filter(tpl => templateChannel[tpl] === step.channel).map(tpl => (
             <option key={tpl} value={tpl}>
               {templateLabels[tpl] ?? tpl}
             </option>
@@ -102,10 +148,15 @@ export function StepEditor({
         </select>
         {/* Said out loud so the absence of a rich-text box reads as a rule, not a missing feature. */}
         <p className="text-xs text-muted-foreground">
-          {t(
-            'Text e-mailu je v šabloně. Tady se vyplňují jen její pojmenované hodnoty.',
-            'The email copy lives in the template. Only its named values are filled in here.',
-          )}
+          {step.channel === 'PUSH'
+            ? t(
+                'Šablona notifikace je pevná. Tady se vyplňuje jen její titulek.',
+                'The notification template is fixed. Only its headline is filled in here.',
+              )
+            : t(
+                'Text e-mailu je v šabloně. Tady se vyplňují jen její pojmenované hodnoty.',
+                'The email copy lives in the template. Only its named values are filled in here.',
+              )}
         </p>
       </div>
 
