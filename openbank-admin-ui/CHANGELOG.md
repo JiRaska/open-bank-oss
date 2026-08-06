@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.98.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.97.0...admin-ui-v0.98.0) (2026-08-06)
+
+
+### Features
+
+* **docs-truth-agent:** wire prompt registry and LLM gateway ([#3787](https://github.com/JiRaska/open-bank-oss/issues/3787)) ([1d00fdd](https://github.com/JiRaska/open-bank-oss/commit/1d00fddf7c67c76f2c020bae669a61c15503b947)), closes [#3786](https://github.com/JiRaska/open-bank-oss/issues/3786)
+
 ## [0.97.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.96.0...admin-ui-v0.97.0) (2026-08-06)
 
 
