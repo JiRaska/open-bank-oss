@@ -116,6 +116,36 @@ def parse(text: str) -> list[dict]:
     return out
 
 
+def yaml_pairs(text: str) -> set[tuple[str, str]] | None:
+    """Every (service, key) pair a YAML reader sees. None if PyYAML is unavailable.
+
+    This exists to catch the one thing a mirror of the collector's grammar can never catch
+    on its own: an attestation written in BLOCK style. It is valid YAML and reads to a human
+    exactly like an attestation, and the collector's line grammar -- which requires a `{` on
+    the entry line -- skips it entirely. Without this cross-check both the collector and this
+    gate would be silent about it, which is the failure this gate exists to end.
+    """
+    try:
+        import yaml  # noqa: PLC0415 -- optional; the gate degrades rather than crashing
+    except ImportError:  # pragma: no cover
+        return None
+    try:
+        doc = yaml.safe_load(text)
+    except Exception:
+        # Not just YAMLError: a calendar-invalid timestamp such as 2026-02-30 raises a bare
+        # ValueError out of the constructor. The line-grammar rules report that case with a
+        # far better message, so degrade to skipping the cross-check rather than crashing.
+        return None
+    if not isinstance(doc, dict):
+        return set()
+    return {
+        (svc, key)
+        for svc, entries in doc.items()
+        if isinstance(entries, dict)
+        for key in entries
+    }
+
+
 def ref_resolves(repo: pathlib.Path, ref: str) -> bool:
     """A `ref` must point at something durable and checkable."""
     if ref.startswith(("http://", "https://")):
@@ -142,9 +172,22 @@ def check(
     if not path.is_file():
         return ([f"{file_rel}: not found"], [], 0)
 
-    records = parse(path.read_text(encoding="utf-8"))
+    text = path.read_text(encoding="utf-8")
+    records = parse(text)
     errors: list[str] = []
     warnings: list[str] = []
+
+    # Anything a YAML reader sees but the collector's grammar does not is an attestation
+    # that exists on the page and nowhere else.
+    seen = yaml_pairs(text)
+    if seen is not None:
+        ingested = {(r["service"], r["key"]) for r in records}
+        for svc, key in sorted(seen - ingested):
+            errors.append(
+                f"{file_rel}: `{svc}.{key}` is valid YAML but the collector's parser never "
+                f"ingests it -- an attestation must be written inline as "
+                f"`{key}: {{ date: ..., ttl_days: N, by: ..., ref: ... }}`, not in block style"
+            )
 
     for rec in records:
         where = f"{file_rel}:{rec['lineno']}"
@@ -378,6 +421,13 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
             "PROSE-VS-THING: a commented-out example must never be read as an attestation",
             "# ledger:\n#   pentest: { date: 2026-12-01, ttl_days: 0, by: nobody, ref: nothing }\n",
             "clean",
+            False,
+        ),
+        (
+            "BLOCK STYLE: valid YAML the collector's parser never ingests",
+            "ledger:\n  pentest:\n    date: 2026-08-01\n    ttl_days: 365\n    by: ci\n"
+            f"    ref: {good_ref}\n",
+            "error",
             False,
         ),
     ]
