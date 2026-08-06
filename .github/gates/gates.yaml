@@ -208,6 +208,21 @@ gates:
       python3 .github/scripts/check-agent-virtual-keys.py --self-test
       python3 .github/scripts/check-agent-virtual-keys.py --enforce
 
+  - id: oidc-secret-convention
+    name: "the OIDC client secret is read from ONE KV entry (issue #3485, enforced, baseline-ratcheted)"
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-oidc-secret-convention.py --self-test
+    selftest_expect: pass
+    run: |
+      # Falsified BOTH ways before wiring in. Detection: 13 cases including the exact #3471
+      # defect (a per-service key nobody wrote), a baselined path that migrated (reported
+      # stale), and a baselined path pointing at a THIRD key (still a violation). Scope: the
+      # gate prints how many manifests it walked and how many projections it found — 531 and
+      # 39 today — because a gate is green two independent ways and "it never opened the
+      # file" is the one a passing exit code hides.
+      python3 .github/scripts/check-oidc-secret-convention.py --enforce
+
   - id: single-replica-rollout-strategy
     name: "one-replica workloads declare their rollout strategy (issue #3545, enforced, baseline-ratcheted)"
     group: gitops
