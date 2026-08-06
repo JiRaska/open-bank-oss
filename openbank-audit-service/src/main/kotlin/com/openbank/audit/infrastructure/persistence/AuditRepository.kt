@@ -5,6 +5,7 @@
 package com.openbank.audit.infrastructure.persistence
 
 import com.openbank.audit.domain.model.AuditEntry
+import com.openbank.audit.domain.model.OccurredAtSource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntity
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
@@ -53,6 +54,25 @@ class AuditEntryEntity : PanacheEntity() {
 
     @Column(name = "recorded_at", nullable = false)
     lateinit var recordedAt: Instant
+
+    /**
+     * Provenance of [occurredAt] — `EVENT` or `INGEST` ([OccurredAtSource]), NULL on any row
+     * written before V11 (#3883).
+     *
+     * NULL is "unknown", and it has to stay unknown: `audit_entries` carries a
+     * `DO INSTEAD NOTHING` rule on UPDATE (V2), so a backfill would report success and change
+     * nothing — and there is no data to backfill FROM, since the discarded producer key was never
+     * stored in a column. The pre-V11 rows keep whatever `occurred_at` they were given; this
+     * column only stops NEW rows from being ambiguous the same way. Same shape as `hash_version`
+     * (V10): record the boundary rather than rewrite history.
+     *
+     * NOT part of [chainHash] — like the ADR-0226 channel columns, it is derived from the
+     * producer's raw JSON, which the chain already covers via the `payload` hash. Adding it to the
+     * canonical string would change the hash of every future row for no evidential gain and would
+     * split the chain a second time.
+     */
+    @Column(name = "occurred_at_source", length = 8)
+    var occurredAtSource: String? = null
 
     // ── Tamper-evidence (hash chain, ADR-0023 spirit applied to the operational log) ──
     @Column(name = "prev_hash")
@@ -126,6 +146,7 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
                 it.correlationId = entry.correlationId
                 it.occurredAt = stored.occurredAt
                 it.recordedAt = stored.recordedAt
+                it.occurredAtSource = entry.occurredAtSource.name
                 it.channel = entry.channel
                 it.actChain = entry.actChain.takeIf { chain -> chain.isNotEmpty() }
                     ?.let { chain -> actChainJson.writeValueAsString(chain) }
@@ -307,6 +328,9 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
     private fun AuditEntryEntity.toDomain() = AuditEntry(
         entryId, eventType, aggregateType, aggregateId, actorId, actorType,
         payload, sourceService, correlationId, occurredAt, recordedAt,
+        // NULL (pre-V11) reads back as INGEST: those rows may hold ingest time and cannot prove
+        // otherwise, so the weaker claim is the honest one.
+        occurredAtSource = occurredAtSource?.let { OccurredAtSource.valueOf(it) } ?: OccurredAtSource.INGEST,
         channel = channel,
         actChain = actChain?.let { actChainJson.readValue(it, stringListType) } ?: emptyList(),
         sessionId = sessionId,
