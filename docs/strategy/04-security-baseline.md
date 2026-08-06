@@ -30,7 +30,7 @@ Primary attack surfaces:
 | All ingress through WAF (ModSecurity OWASP CRS or vendor) | Required | Block OWASP Top 10 patterns at edge |
 | Public exposure only via API Gateway (Kong) | Required | No direct service exposure |
 | mTLS between all services in cluster | Required | Istio / Linkerd / SPIFFE-based |
-| Default-deny NetworkPolicy in K8s | Required | Whitelist explicit flows only |
+| Default-deny NetworkPolicy in K8s | Required | Whitelist explicit flows only. **Not met**: 108 explicit-allow policies, 0 default-deny baselines, 24 of 74 namespaces with no policy at all (measured 2026-08-06). Staged rollout in #2691; the measurement stage is runbook 0010. |
 | Egress filtering — no service may dial arbitrary internet | Required | Egress gateway with allowlist |
 | Private cluster control plane | Required | No public K8s API |
 | DNS over HTTPS / DNSSEC | Required | Prevent DNS hijacking |

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.13.2...audit-service-v0.13.3) (2026-08-05)
+
+
+### Bug Fixes
+
+* **audit:** let the chain walk cross the rows [#3586](https://github.com/JiRaska/open-bank-oss/issues/3586) could not fix ([#3649](https://github.com/JiRaska/open-bank-oss/issues/3649)) ([ba72389](https://github.com/JiRaska/open-bank-oss/commit/ba723892e11fba1c4eb46366178aa2bb9d644e69)), closes [#3505](https://github.com/JiRaska/open-bank-oss/issues/3505)
+
 ## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.13.1...audit-service-v0.13.2) (2026-08-03)
 
 

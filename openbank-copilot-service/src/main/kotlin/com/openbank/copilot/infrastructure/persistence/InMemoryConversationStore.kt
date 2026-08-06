@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
  * [InMemoryProposalTokenStore]). Same contract as [RedisConversationStore]; entries expire via [clock].
  */
 @ApplicationScoped
-@IfBuildProperty(name = "copilot.token-store", stringValue = "memory")
+@IfBuildProperty(name = "copilot.conversation-store", stringValue = "memory")
 class InMemoryConversationStore(private val clock: Clock) : ConversationStore {
     private val log = Logger.getLogger(InMemoryConversationStore::class.java)
 

@@ -10,7 +10,12 @@ import Link from 'next/link'
 import { ArrowLeft, Megaphone } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui'
-import { JourneyEditor, MAX_STEPS, type EditorStep } from '@/components/campaigns/JourneyEditor'
+import {
+  JourneyEditor,
+  MAX_STEPS,
+  type EditorChannel,
+  type EditorStep,
+} from '@/components/campaigns/JourneyEditor'
 import { StepEditor } from '@/components/campaigns/StepEditor'
 
 /**
@@ -42,10 +47,20 @@ interface Segment {
 /** Mirrors the service's catalogue; the service rejects anything not in its own copy. */
 const TEMPLATES: Record<string, string[]> = {
   MARKETING_PRODUCT_OFFER: ['offerTitle', 'offerText', 'ctaText'],
+  // One variable, and that is the channel's rule rather than a simplification: a push renders its
+  // title plus a fixed generic body, so there is nowhere for offer copy to go (#1182).
+  MARKETING_PRODUCT_OFFER_PUSH: ['offerTitle'],
+}
+
+/** Which channel each template renders on. The service refuses a step whose two disagree. */
+const TEMPLATE_CHANNEL: Record<string, EditorChannel> = {
+  MARKETING_PRODUCT_OFFER: 'EMAIL',
+  MARKETING_PRODUCT_OFFER_PUSH: 'PUSH',
 }
 
 const newStep = (): EditorStep => ({
-  template: Object.keys(TEMPLATES)[0],
+  template: 'MARKETING_PRODUCT_OFFER',
+  channel: 'EMAIL',
   variables: {},
   delaySeconds: 0,
 })
@@ -66,6 +81,7 @@ export default function NewCampaignPage() {
 
   const templateLabels: Record<string, string> = {
     MARKETING_PRODUCT_OFFER: t('Nabídka produktu', 'Product offer'),
+    MARKETING_PRODUCT_OFFER_PUSH: t('Nabídka produktu', 'Product offer'),
   }
 
   // The template declares `offerTitle`; a marketer writes a headline. Same field, and only one of
@@ -145,6 +161,7 @@ export default function NewCampaignPage() {
         steps: steps.map((s, i) => ({
           order: i + 1,
           template: s.template,
+          channel: s.channel,
           variables: s.variables,
           delaySeconds: s.delaySeconds,
         })),
@@ -290,6 +307,7 @@ export default function NewCampaignPage() {
             index={selected}
             step={steps[selected]}
             templates={TEMPLATES}
+            templateChannel={TEMPLATE_CHANNEL}
             templateLabels={templateLabels}
             variableLabels={variableLabels}
             onChange={next => updateStep(selected, next)}

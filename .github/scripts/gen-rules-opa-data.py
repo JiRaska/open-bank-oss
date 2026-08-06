@@ -189,14 +189,63 @@ def build() -> tuple[str, list[str]]:
     return text, missing
 
 
-def report_missing(missing: list[str]) -> None:
+# A referenced key that cannot be selected is DECLARED debt, not a warning.
+#
+# `shared_m2m_write_prohibition` sat here as a ::warning:: on every run and nobody acted, because a
+# warning over a GENERATED artifact says "the committed document does not match reality" — there is
+# no judgement left to exercise, so advisory only makes the drift mergeable (the repo's own lesson,
+# #2156/#2216). Meanwhile `rest.rego:482` reads it, the register is undefined in-cluster, `r in
+# <undefined>` iterates nothing, and the `prohibited` rule that mitigates GHSA-58jq-9hq3-66jr has
+# never denied anything. Measured against the live bundles: 128 writes reachable by the shared M2M
+# client on services already running AUTHZ_ENFORCE=true (#3765/#3734).
+#
+# What made it invisible for so long: `rest_test.rego`'s regression test SUPPLIES the register it
+# tests against — `with data.rules.shared_m2m_write_prohibition.reasons as ["operator-ledger-write"]`
+# — so it is green about a rule that works given data production never has. Neither the policy source
+# nor its tests can reveal this; only evaluating against the deployed bundle can.
+#
+# So: today's one occurrence is declared with its reason and its issue, and anything NEW fails. A
+# declaration that becomes resolvable is reported too, so this cannot quietly become permanent.
+UNRESOLVABLE_DECLARED: dict[str, str] = {
+    "shared_m2m_write_prohibition": (
+        "nested under `change_requirements:` in rules.yaml, so it cannot be selected as a top-level "
+        "key. Promoting it is a POLICY DECISION, not an edit: 128 currently-reachable writes depend "
+        "on the very reasons the register names, so promotion denies live money-path callers. "
+        "Tracked in #3765/#3734 — remove this entry in the same change that promotes the key."
+    ),
+}
+
+
+def report_missing(missing: list[str]) -> int:
+    """Return 0 when every unresolvable key is declared, 1 otherwise."""
+    rc = 0
     for k in missing:
+        if k in UNRESOLVABLE_DECLARED:
+            print(
+                f"::notice::`data.rules.{k}` is referenced by a policy and is undefined in the "
+                f"cluster — declared debt: {UNRESOLVABLE_DECLARED[k]}",
+                file=sys.stderr,
+            )
+            continue
+        rc = 1
         print(
-            f"::warning::`data.rules.{k}` is referenced by a policy but is not a "
-            "top-level key of rules.yaml — it is undefined in the cluster today, and "
-            "stays undefined here. Promoting it would change policy decisions.",
+            f"::error::`data.rules.{k}` is referenced by a policy but is not a top-level key of "
+            "rules.yaml, so it is UNDEFINED in every deployed bundle. In rego `r in <undefined>` "
+            "iterates nothing, so the rule reading it cannot fire — and its unit tests can still be "
+            "green, because a test may supply the data with `with data.rules... as [...]`. Either "
+            "make it a top-level key (a policy decision — it changes live decisions) or declare it "
+            "in UNRESOLVABLE_DECLARED with the reason and the issue.",
             file=sys.stderr,
         )
+    stale = sorted(set(UNRESOLVABLE_DECLARED) - set(missing))
+    for k in stale:
+        rc = 1
+        print(
+            f"::error::`{k}` is declared unresolvable but IS now selectable — the debt is paid, so "
+            "drop its UNRESOLVABLE_DECLARED entry.",
+            file=sys.stderr,
+        )
+    return rc
 
 
 def self_test() -> int:
@@ -235,6 +284,20 @@ def self_test() -> int:
         print("FAIL: a real reference was stripped as a comment")
         ok = False
 
+    # The unresolvable-key ratchet, both directions. A rego rule reading a key the subset
+    # cannot carry resolves to `undefined`, which is indistinguishable from an empty list —
+    # both read as "nothing prohibited" — so silence here is the failure mode, not the pass.
+    if report_missing(["a_key_nobody_declared"]) == 0:
+        print("FAIL: an undeclared unresolvable key did not fail the check")
+        ok = False
+    if report_missing(sorted(UNRESOLVABLE_DECLARED)) != 0:
+        print("FAIL: a declared unresolvable key failed the check")
+        ok = False
+    # A declaration that is no longer missing is a paid debt still being claimed.
+    if report_missing([]) == 0 and UNRESOLVABLE_DECLARED:
+        print("FAIL: a stale UNRESOLVABLE_DECLARED entry was not reported")
+        ok = False
+
     print("self-test: PASS" if ok else "self-test: FAIL")
     return 0 if ok else 1
 
@@ -249,7 +312,7 @@ def main() -> int:
         return self_test()
 
     text, missing = build()
-    report_missing(missing)
+    missing_rc = report_missing(missing)
 
     if args.check:
         current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
@@ -262,11 +325,13 @@ def main() -> int:
             )
             return 1
         print(f"rules-opa-data.yaml is in sync ({len(text)} bytes)")
-        return 0
+        # In sync is not the same as sound: a policy can reference a key the subset cannot carry,
+        # in which case the file is correct AND the rule reading it is dead. Both must hold.
+        return missing_rc
 
     OUT.write_text(text, encoding="utf-8")
     print(f"wrote {OUT.relative_to(REPO)} ({len(text)} bytes)")
-    return 0
+    return missing_rc
 
 
 if __name__ == "__main__":

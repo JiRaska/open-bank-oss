@@ -7,11 +7,15 @@ package com.openbank.govaudit.infrastructure.schedule
 
 import com.openbank.govaudit.application.port.incoming.RunGovernanceAuditUseCase
 import com.openbank.govaudit.domain.model.RunTrigger
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.libs.temporal.TemporalConfig
 import io.quarkus.scheduler.Scheduled
+import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.jboss.logging.Logger
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -43,8 +47,17 @@ class GovernanceAuditScheduler {
     @Inject
     lateinit var temporalConfig: TemporalConfig
 
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+
     private val log = Logger.getLogger(GovernanceAuditScheduler::class.java)
     private val fires = AtomicLong(0)
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    @PostConstruct
+    fun registerLiveness() {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
 
     /**
      * How many times the cron has actually fired in this pod.
@@ -66,6 +79,12 @@ class GovernanceAuditScheduler {
             return
         }
         val workflowId = runAudit.startDetached(RunTrigger.SCHEDULED)
+        liveness?.recordSuccess()
         log.infof("Scheduled governance-auditor sweep dispatched as workflow %s", workflowId)
+    }
+
+    private companion object {
+        const val WORKFLOW_NAME = "governance-audit"
+        val EXPECTED_INTERVAL: Duration = Duration.ofDays(1)
     }
 }

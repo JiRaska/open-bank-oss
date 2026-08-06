@@ -20,10 +20,23 @@ import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.util.UUID
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class PidPartyResponse(val id: UUID, val status: String, val kycAttributes: PidKycAttributes?)
+data class PidPartyResponse(
+    val id: UUID,
+    val status: String,
+    val kycAttributes: PidKycAttributes?,
+    val coreAttributes: PidCoreAttributes? = null,
+)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class PidKycAttributes(val kycLevel: String?)
+
+/**
+ * Only the two name fields, out of a `PartyResponse.coreAttributes` that also carries birthdate,
+ * birth number, gender, birthplace, nationalities and identity documents. `@JsonIgnoreProperties`
+ * drops the rest at the parser, so none of it is ever materialised in this service (issue #3604).
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class PidCoreAttributes(val givenName: String? = null, val familyName: String? = null)
 
 @Path("/api/v1/parties")
 @RegisterRestClient(configKey = "pid-service")
@@ -46,6 +59,17 @@ class ResilientPartyEligibilityClient @Inject constructor(@RestClient private va
             partyId = party.id,
             active = party.status == "ACTIVE",
             kycLevel = party.kycAttributes?.kycLevel ?: "NONE",
+            displayName = displayNameOf(party.coreAttributes),
         )
     }
+
+    /**
+     * Null rather than an empty or half-formed string: the consumer of this field renders the
+     * party id when it is absent, and a blank label on a consent screen is worse than a UUID
+     * because it looks like a name that failed to load.
+     */
+    private fun displayNameOf(core: PidCoreAttributes?): String? = core
+        ?.let { listOfNotNull(it.givenName, it.familyName).joinToString(" ") { part -> part.trim() } }
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
 }

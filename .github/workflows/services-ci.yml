@@ -7,9 +7,30 @@
 #  build    -> calls the reusable _service-ci.yml once per changed module (matrix),
 #              so each service reports its own green/red status check.
 #
-# Minutes governance (GitHub Free, private repo = 2000 min/mo):
+# Why the matrix is path-scoped and runs are superseded:
 #  - path-scoped matrix: a typical PR builds only the handful of touched services
-#  - concurrency: cancel superseded runs on the same ref
+#  - concurrency: cancel superseded runs on the same ref (PR pushes only — a push to
+#    main gets a per-commit lane, see the concurrency block below)
+#
+# NOT a hosted-minutes budget. This header used to read "Minutes governance (GitHub Free,
+# private repo = 2000 min/mo)". That stopped being true when the repository went public:
+# GitHub-hosted minutes on a public repo are free and UNLIMITED — there is no monthly
+# allowance to govern and nothing here is billed by GitHub. The comment at the nightly
+# matrix further down this same file already said so, so the file contradicted itself and
+# the stale half was the one framing the whole design.
+#
+# The two constraints that are real are different resources, and conflating them is how the
+# wrong thing gets optimised:
+#
+#  - COST is AWS, not GitHub. The self-hosted ARC pool runs on EKS nodes we pay for, and it
+#    has a hard capacity ceiling as well (#2039: maxRunners is far below a full-fleet run,
+#    so an unscoped fan-out starves the queue for hours). That is the resource worth being
+#    careful with, and the only one attached to a bill.
+#  - WALL-CLOCK LATENCY is everyone's, on either pool. A full-fleet fan-out is minutes of
+#    waiting per PR whether or not anyone is charged for it.
+#
+# GitHub's own limit is a throughput cap, not a cost: the Free plan allows 20 concurrent
+# hosted jobs account-wide, shared with other repositories.
 name: Services CI
 
 on:
@@ -378,7 +399,7 @@ jobs:
           echo "modules=${mods}" >> "$GITHUB_OUTPUT"
           echo "changed modules: ${mods:-<none>}"
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         if: steps.mods.outputs.modules != ''
         with:
           distribution: temurin

@@ -77,7 +77,6 @@
           }
         },
         {
-          "comment": "This realm import defines explicit (non-default) client scopes, so Keycloak does NOT attach the built-in 'basic' and 'roles' scopes that normally carry `sub` and realm_access.roles. Both are declared directly on the client so customer-edge can resolve identity (sub→partyId, ADR-0065/0069) and authorize (@RolesAllowed ROLE_CUSTOMER).",
           "name": "sub",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-sub-mapper",
@@ -102,7 +101,6 @@
           }
         },
         {
-          "comment": "Adds openbank-edge to the JWT aud claim so that the copilot-service (OIDC client-id=openbank-edge, application-type=service) accepts customer bearer tokens. Quarkus service-type rejects JWTs whose aud is present but does not include client-id; tokens without an explicit audience mapper carry only Keycloak's built-in 'account' audience, which causes Quarkus to fall back to introspection (denied — public client, no secret). id.token.claim=false keeps the ID token lean.",
           "name": "openbank-edge-audience",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-audience-mapper",
@@ -114,7 +112,6 @@
           }
         },
         {
-          "comment": "Adds openbank-rum to the JWT aud claim. The mobile-RUM ingest gateway (ADR-0088 §D4, rum.open-bank.tech) is an OTel collector whose OIDC authenticator requires audience=openbank-rum, and openbank-rum is not a Keycloak client — it is a resource name — so it needs a CUSTOM audience, not a client one. Without this the app's session token carries only openbank-edge and every OTLP export is rejected 401: mobile RUM produced literally zero spans from the day it was switched on, and a crash's trace_id pointed at a trace that did not exist. id.token.claim=false keeps the ID token lean.",
           "name": "openbank-rum-audience",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-audience-mapper",
@@ -133,6 +130,7 @@
       "description": "Service-account client for customer-edge: sets party_id user attribute after identity re-link (issue #1270 PR3 / ADR-0072 §5). Has manage-users on this realm only.",
       "enabled": true,
       "publicClient": false,
+      "secret": "__CUSTOMER_EDGE_ADMIN_CLIENT_SECRET__",
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
@@ -145,9 +143,10 @@
     {
       "clientId": "openbank-edge-webauthn",
       "name": "Customer Edge WebAuthn RP",
-      "description": "Service-account client for customer-edge's own WebAuthn RP (ADR-0066 F2, variant B1, WebAuthnKeycloakClient). Creates the Keycloak user for a party enrolling a native passkey (manage-users), then mints that user a real session via RFC 8693 token-exchange scoped to the openbank-app audience (impersonation + a token-exchange fine-grained-authz permission on openbank-app). Kept separate from customer-edge-admin, whose blast radius is deliberately narrower (party_id attribute writes only).",
+      "description": "Service-account client for customer-edge's WebAuthn RP (ADR-0066 F2 variant B1). Creates the Keycloak user for a party enrolling a passkey, then token-exchanges it into an openbank-app session. Separate from customer-edge-admin; see README.md.",
       "enabled": true,
       "publicClient": false,
+      "secret": "__EDGE_WEBAUTHN_CLIENT_SECRET__",
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
@@ -160,7 +159,6 @@
   ],
   "clientScopes": [
     {
-      "comment": "This explicit-scope realm import does NOT get Keycloak's built-in client scopes. The app's authorize request includes scope=openid profile (OAuth2/OIDC standard), so 'profile' must exist as an assigned scope or Keycloak rejects the request ('Invalid scopes: openid profile'). The app reads identity via the sub + realm-roles mappers on openbank-app, not profile claims, so this scope is intentionally claim-less — it only satisfies request validation.",
       "name": "profile",
       "description": "OIDC profile scope (request-validation only; claims come from mappers)",
       "protocol": "openid-connect",
@@ -220,7 +218,6 @@
       }
     },
     {
-      "comment": "RUM O4 consent enforcement (ADR-0088/O4). When the app requests this optional scope and the user consents, Keycloak fires the openbank-rum audience mapper, adding 'openbank-rum' to the JWT aud claim. The RUM gateway OIDC extension accepts only audience=openbank-rum; tokens with only aud=openbank-app are rejected 401 — server-side enforcement without custom OTel processors.",
       "name": "telemetry:rum",
       "description": "Allow the app to send anonymised performance telemetry to the RUM gateway",
       "protocol": "openid-connect",
@@ -251,6 +248,14 @@
         "description": "Authenticated retail customer — access to own resources only (deny-by-default via OPA, ADR-0065)"
       },
       {
+        "name": "offline_access",
+        "description": "${role_offline-access}"
+      },
+      {
+        "name": "uma_authorization",
+        "description": "${role_uma_authorization}"
+      },
+      {
         "name": "default-roles-openbank-customers",
         "description": "${role_default-roles}",
         "composite": true,
@@ -266,7 +271,6 @@
     "description": "${role_default-roles}"
   },
   "protocolMappers": [],
-  "authenticationFlows": [],
   "requiredActions": [
     {
       "alias": "VERIFY_EMAIL",
@@ -370,7 +374,7 @@
           "userSetupAllowed": false
         },
         {
-          "authenticator": "webauthn-register-passwordless-action",
+          "authenticator": "webauthn-register-passwordless",
           "authenticatorFlow": false,
           "requirement": "REQUIRED",
           "priority": 50,
