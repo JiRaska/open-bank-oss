@@ -8,6 +8,7 @@ import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.SegmentRef
+import com.openbank.campaign.domain.model.StopCondition
 import com.openbank.libs.authz.Authorize
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
@@ -24,7 +25,11 @@ data class CreateCampaignRequest(
     val segmentName: String,
     val segmentVersion: Int,
     val steps: List<StepRequest>,
+    val stopCondition: StopConditionRequest? = null,
 )
+
+/** Optional on create (ADR-0200 D1, #3585): absent means the journey runs every step, as before. */
+data class StopConditionRequest(val maxSendsPerParty: Int)
 
 data class StepRequest(
     val order: Int,
@@ -91,6 +96,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
             SegmentRef(request.segmentName, request.segmentVersion),
             steps,
             createdBy,
+            request.stopCondition?.let { StopCondition(it.maxSendsPerParty) },
         )
         return Response.status(Response.Status.CREATED).entity(campaign).build()
     }

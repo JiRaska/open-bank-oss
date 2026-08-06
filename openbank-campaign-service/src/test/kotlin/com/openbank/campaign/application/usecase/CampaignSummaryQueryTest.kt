@@ -54,6 +54,7 @@ class CampaignSummaryQueryTest {
     private class Sends(private val cells: List<CampaignOutcomeCount>, var calls: Int = 0) : SendLogRepository {
         override suspend fun record(send: SendRecord) = Unit
         override suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long) = 0
+        override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID) = 0
         override suspend fun listByCampaign(campaignId: UUID, outcome: SendOutcome?, page: Int, size: Int) =
             emptyList<SendRecord>()
         override suspend fun countByCampaign(campaignId: UUID, outcome: SendOutcome?) = 0L
@@ -62,6 +63,13 @@ class CampaignSummaryQueryTest {
             calls += 1
             return cells
         }
+
+        override suspend fun applyDeliveryOutcome(
+            sendId: UUID,
+            outcome: String,
+            reason: String?,
+            occurredAt: Instant,
+        ) = false
     }
 
     private class Enrolments(private val counts: List<CampaignEnrolmentCount>) : EnrolmentRepository {

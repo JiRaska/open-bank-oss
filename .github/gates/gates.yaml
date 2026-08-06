@@ -208,6 +208,47 @@ gates:
       python3 .github/scripts/check-agent-virtual-keys.py --self-test
       python3 .github/scripts/check-agent-virtual-keys.py --enforce
 
+  - id: model-residency-claims
+    name: "a `sensitivity: self-hosted` model entry points in-cluster (ADR-0175 D3, issue #3599)"
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-model-residency-claims.py --self-test
+    selftest_expect: pass
+    run: |
+      # Falsified BOTH ways before wiring in — the distinction this gate exists for is
+      # routed-to-EU vs routed-ANYWHERE, and a check that cannot tell those apart is
+      # worthless as a residency control.
+      #   Detection: 24 self-test cases, the first being the exact defect — a `self-hosted`
+      #   LABEL on `https://api.groq.com/openai/v1`. Also the underscore/mixed-case spellings
+      #   ModelGateway.parseSensitivity accepts, an env placeholder with an off-cluster
+      #   default, one with NO default, a userinfo smuggling attempt, and the near-misses it
+      #   must NOT flag (a `hosted` entry on the same US endpoint; a typo'd sensitivity,
+      #   which the Kotlin also reads as hosted).
+      #   Scope: both real service shapes were fed the violation and both went red with the
+      #   real path — agent-service's top-level `model-gateway` and copilot-service's nested
+      #   `copilot.model-gateway`. In that state the Kotlin fail-closed test stays GREEN
+      #   (a self-hosted model IS registered), which is precisely why the gate is needed.
+      # LIMIT, stated so nobody reads this as more than it is: CONFIG-LEVEL only. It proves
+      # the committed config cannot express an off-cluster self-hosted tier. It observes no
+      # request and cannot prove the host behind an in-cluster address is EU-resident — the
+      # egress NetworkPolicy is what constrains that, not this.
+      python3 .github/scripts/check-model-residency-claims.py --enforce
+
+  - id: oidc-secret-convention
+    name: "the OIDC client secret is read from ONE KV entry (issue #3485, enforced, baseline-ratcheted)"
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-oidc-secret-convention.py --self-test
+    selftest_expect: pass
+    run: |
+      # Falsified BOTH ways before wiring in. Detection: 13 cases including the exact #3471
+      # defect (a per-service key nobody wrote), a baselined path that migrated (reported
+      # stale), and a baselined path pointing at a THIRD key (still a violation). Scope: the
+      # gate prints how many manifests it walked and how many projections it found — 531 and
+      # 39 today — because a gate is green two independent ways and "it never opened the
+      # file" is the one a passing exit code hides.
+      python3 .github/scripts/check-oidc-secret-convention.py --enforce
+
   - id: single-replica-rollout-strategy
     name: "one-replica workloads declare their rollout strategy (issue #3545, enforced, baseline-ratcheted)"
     group: gitops
@@ -1884,6 +1925,32 @@ gates:
     mode: enforced
     run: |
       python3 .github/scripts/check-roles-allowed-realm.py
+  # Keycloak realm templates must be IMPORTABLE (issue #3246). The three existing realm checks
+  # all compare NAME SETS — @RolesAllowed vs template, template vs live, template vs the import
+  # artifact — and every one of them is perfectly happy with a document Keycloak refuses to
+  # parse. Measured against quay.io/keycloak/keycloak:26.6.3 (the tag keycloak.yaml runs), the
+  # customers template had FOUR independent import-blocking defects and could never have
+  # rebuilt its realm: five `"comment"` keys (Jackson fails the whole import on an unrecognized
+  # field), a 490-char client description over the 255 column cap, a 37-char authenticator in a
+  # VARCHAR(36) column, and a composite referencing built-in roles an explicit-roles import does
+  # not create. Plus two confidential clients with no `secret`, so a rebuilt realm would issue
+  # random credentials neither service presents.
+  # Nothing could have caught any of it: `--import-realm` runs on COLD START ONLY and skips a
+  # realm that already exists, so the template is inert on every deploy, restart and DR restore,
+  # and ArgoCD is Synced/Healthy about a Secret it does not manage. The first observation of the
+  # defect would have been the rebuild it existed to survive.
+  # ENFORCED, because every rule is a fact about the file (a column width, a duplicate key, a
+  # missing field), never a judgement. A static gate cannot enumerate Keycloak's schema, so it
+  # narrows the window rather than closing it — components/keycloak/README.md keeps the real
+  # `docker run ... --import-realm` recipe, which is still required before changing a template.
+  - id: realm-template-importable
+    name: "Keycloak realm templates must be importable (issue #3246, enforced)"
+    group: security
+    mode: enforced
+    selftest: python3 .github/scripts/check-realm-template-importable.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-realm-template-importable.py
   - id: opa-bundle-apply-size
     name: OPA bundle must be installable (client-side apply annotation ceiling)
     group: gitops
@@ -1930,3 +1997,20 @@ gates:
       # not only a fixture — it exits 1 on origin/main's network module + substrate env and
       # 0 with the pin in place.
       python3 .github/scripts/check-nat-ami-pinned.py --enforce
+  - id: enforcement-reachability
+    name: "a declared enforcement function has a production caller (ADR-0232, issue #3615)"
+    group: kotlin
+    mode: enforced
+    selftest: python3 .github/scripts/check-enforcement-reachability.py --self-test
+    selftest_expect: pass
+    run: |
+      # AuthorizationService.isAuthorizedForAmount is the only amount-aware account guard in
+      # the fleet and the only enforcer of ADR-0232's perTransactionLimit — and every one of
+      # its call sites is a test. Nothing else in the repo can see that: the function compiles,
+      # is a CDI bean method, has a port declaring it and a green test class, and coverage
+      # INVERTS the signal (a well-tested unreachable guard scores higher than a lightly-tested
+      # reachable one). The registry in rules.yaml records what was measured; this gate fails in
+      # both directions, so an entry can neither rot into permanent furniture nor be silently
+      # closed. Falsified against the real tree before wiring in: injecting one production
+      # caller and, separately, flipping the declared status each produce exactly one finding.
+      python3 .github/scripts/check-enforcement-reachability.py --enforce

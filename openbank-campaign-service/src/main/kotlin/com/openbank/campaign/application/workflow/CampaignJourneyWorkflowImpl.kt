@@ -44,10 +44,19 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
     }
 
     override fun run(campaignId: UUID, partyId: UUID) {
-        val steps = activities.loadSteps(campaignId)
-        for (step in steps.sortedBy { it.order }) {
+        val definition = activities.loadDefinition(campaignId)
+        for (step in definition.steps.sortedBy { it.order }) {
             if (revoked) {
                 activities.markTerminated(campaignId, partyId, TerminationReason.CONSENT_REVOKED)
+                return
+            }
+            // ADR-0200 D1 stop condition (#3585): evaluated BEFORE each step — including the first,
+            // so a re-enrolled party already over the cap stops immediately — and only ever against
+            // observable state (the send log's SENT count), never a fabricated signal.
+            if (definition.stopCondition != null &&
+                definition.stopCondition.reachedBy(activities.sendsSoFar(campaignId, partyId))
+            ) {
+                activities.markTerminated(campaignId, partyId, TerminationReason.STOPPED_MAX_SENDS)
                 return
             }
             if (step.delaySeconds > 0) {

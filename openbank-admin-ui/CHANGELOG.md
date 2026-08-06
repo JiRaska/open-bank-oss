@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.99.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.98.0...admin-ui-v0.99.0) (2026-08-06)
+
+
+### Features
+
+* **campaign,notification:** tell a delivered message from an accepted handoff (ADR-0239) ([#3838](https://github.com/JiRaska/open-bank-oss/issues/3838)) ([789d662](https://github.com/JiRaska/open-bank-oss/commit/789d6626fde13ab48cd72806a07b7c4e6c19ed0e))
+
+## [0.98.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.97.0...admin-ui-v0.98.0) (2026-08-06)
+
+
+### Features
+
+* **docs-truth-agent:** wire prompt registry and LLM gateway ([#3787](https://github.com/JiRaska/open-bank-oss/issues/3787)) ([1d00fdd](https://github.com/JiRaska/open-bank-oss/commit/1d00fddf7c67c76f2c020bae669a61c15503b947)), closes [#3786](https://github.com/JiRaska/open-bank-oss/issues/3786)
+
+## [0.97.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.96.0...admin-ui-v0.97.0) (2026-08-06)
+
+
+### Features
+
+* **campaign:** deliver campaign steps on push as well as email ([#3584](https://github.com/JiRaska/open-bank-oss/issues/3584)) ([d5fdaf3](https://github.com/JiRaska/open-bank-oss/commit/d5fdaf3f321e433c6a602892bd99398cf517f12a))
+
+## [0.96.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.95.0...admin-ui-v0.96.0) (2026-08-06)
+
+
+### Features
+
+* **governance-auditor:** wire prompt registry and LLM gateway seam ([#3783](https://github.com/JiRaska/open-bank-oss/issues/3783)) ([226f9bf](https://github.com/JiRaska/open-bank-oss/commit/226f9bf131b48fe4ccac85481f4c93455a1bb640))
+
+## [0.95.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.94.0...admin-ui-v0.95.0) (2026-08-06)
+
+
+### Features
+
+* **campaign:** stop journeys at the campaign's own send cap (ADR-0200 D1, [#3585](https://github.com/JiRaska/open-bank-oss/issues/3585) slice 1) ([#3635](https://github.com/JiRaska/open-bank-oss/issues/3635)) ([9c513e8](https://github.com/JiRaska/open-bank-oss/commit/9c513e83dfc19300a9afe543026ec891063783d3))
+
+## [0.94.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.93.0...admin-ui-v0.94.0) (2026-08-06)
+
+
+### Features
+
+* **delegation:** snapshot counterparty display names onto a grant ([#3797](https://github.com/JiRaska/open-bank-oss/issues/3797)) ([5bc41f6](https://github.com/JiRaska/open-bank-oss/commit/5bc41f6f4735384fc65388d9a5854a3ce88f4b1d))
+* **flaky-test-hunter:** register prompt registry and wire LlmDiagnosisAdapter to shared gateway ([#3810](https://github.com/JiRaska/open-bank-oss/issues/3810)) ([8b94785](https://github.com/JiRaska/open-bank-oss/commit/8b9478502942572d819d78f4ef32c8b8a2d16224))
+
 ## [0.93.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.92.1...admin-ui-v0.93.0) (2026-08-06)
 
 

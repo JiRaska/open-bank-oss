@@ -79,6 +79,7 @@ class CampaignJourneyActivitiesImplTest {
             sendLog,
             gate,
             notificationSend,
+            dryRun = false,
             marketingScope = "MARKETING_COMMS_EMAIL",
         ) {
             override fun <T> runBlockingOnWorker(block: suspend () -> T): T = runBlocking { block() }
@@ -114,7 +115,7 @@ class CampaignJourneyActivitiesImplTest {
     @Test
     fun `a refused notification handoff records FAILED and never SENT`() {
         givenDeliverableStep()
-        coEvery { notificationSend.requestSend(partyId, any(), any(), any()) } throws
+        coEvery { notificationSend.requestSend(partyId, any(), any(), any(), any(), any()) } throws
             IllegalStateException("broker refused the publish")
 
         assertThatThrownBy { activities.deliverStep(campaignId, partyId, 1) }
@@ -130,7 +131,9 @@ class CampaignJourneyActivitiesImplTest {
         givenDeliverableStep()
         val recordedBeforeSend = mutableListOf<SendOutcome>()
         var handedOff = false
-        coEvery { notificationSend.requestSend(partyId, any(), any(), any()) } answers { handedOff = true }
+        coEvery {
+            notificationSend.requestSend(partyId, any(), any(), any(), any(), any())
+        } answers { handedOff = true }
         coEvery { sendLog.record(any()) } answers {
             if (!handedOff) recordedBeforeSend += firstArg<SendRecord>().outcome
             Unit
