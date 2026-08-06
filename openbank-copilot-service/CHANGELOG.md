@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.9.0...copilot-service-v0.10.0) (2026-08-06)
+
+
+### Features
+
+* **copilot:** give conversation history a deletion path ([#3875](https://github.com/JiRaska/open-bank-oss/issues/3875)) ([227fd95](https://github.com/JiRaska/open-bank-oss/commit/227fd95a30fc5cdb8a4951f1814d7270dbd8880e)), closes [#3870](https://github.com/JiRaska/open-bank-oss/issues/3870)
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.8.1...copilot-service-v0.9.0) (2026-08-06)
 
 

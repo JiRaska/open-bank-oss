@@ -14,7 +14,7 @@
   "openbank-clearing-simulator": "0.4.7",
   "openbank-consent-service": "0.16.6",
   "openbank-control-liveness-sentinel": "0.7.1",
-  "openbank-copilot-service": "0.9.0",
+  "openbank-copilot-service": "0.10.0",
   "openbank-customer-edge": "0.54.1",
   "openbank-devops-agent": "0.8.0",
   "openbank-dispute-service": "0.8.5",
