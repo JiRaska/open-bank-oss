@@ -2274,6 +2274,33 @@ governance_manifest:
     - each_rule_has_a_test_that_fails_without_it
   incident: 2026-07-25
 
+# A function this repo describes as ENFORCING something must have a production caller. Nothing
+# else notices when it does not: it compiles, it is a bean method, its port declares it, and its
+# unit tests are green — about a function no request reaches. Coverage inverts the signal, since a
+# well-tested unreachable guard scores HIGHER than a lightly-tested reachable one.
+# Enforced by .github/scripts/check-enforcement-reachability.py (gate: enforcement-reachability).
+enforcement_reachability:
+  principle: >
+    Reachability is a property of the call graph, not of the code's docstring. An entry declares
+    what was MEASURED, and the gate fails in both directions — a `reachable` entry that loses its
+    last caller, and an `unreachable` entry that quietly gains one — so a known gap can neither rot
+    into permanent furniture nor be closed without the record being updated.
+  declared:
+    - symbol: isAuthorizedForAmount
+      module: openbank-account-service
+      status: unreachable
+      issue: 3615
+      declared_in:
+        - openbank-account-service/src/main/kotlin/com/openbank/account/application/usecase/AuthorizationService.kt
+        - openbank-account-service/src/main/kotlin/com/openbank/account/application/port/in/AccountPorts.kt
+      why: >
+        ADR-0232 D3's amount-aware guard and the only enforcer of perTransactionLimit in
+        account-service. Measured 2026-08-03: every call site is in AuthorizationServiceDelegationTest.
+        The endpoint that looks like its front door, GET /api/v1/accounts/{id}/authorizations/check,
+        calls the amount-free isAuthorized instead, and no money-moving service reads a delegation
+        grant at all — so there is no debit for a limit check to attach to yet. Flip to `reachable`
+        when the delegated payment path lands (#3615), not before.
+
 knowledge_capture:
   principle: >
     A corrected non-obvious mistake, a hard-won lesson, or a direction we keep must be
