@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.sca.application.port.`in`.ConsumeScaCommand
 import com.openbank.sca.application.port.`in`.ConsumeScaUseCase
@@ -58,6 +59,7 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
+import java.time.Instant
 import java.util.UUID
 
 data class InitiateScaRequest(
@@ -380,8 +382,13 @@ class ScaResource(
     private fun scaCreateKey(partyId: UUID, requestKey: String) = "sca:initiate:$partyId:$requestKey"
 }
 
-private fun err(code: ErrorCode, msg: String) =
-    ApiError(traceId = UUID.randomUUID().toString(), status = code.httpStatus, code = code.code, message = msg)
+private fun err(code: ErrorCode, msg: String) = ApiError(
+    traceId = Ids.randomId().toString(),
+    status = code.httpStatus,
+    code = code.code,
+    message = msg,
+    timestamp = Instant.now(),
+)
 
 @Provider
 class ScaNotFoundMapper : ExceptionMapper<ScaChallengeNotFoundException> {
