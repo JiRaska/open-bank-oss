@@ -396,6 +396,17 @@ fire from *outside* it, so they stay here:
   `a9381b256` -> `13335a859`) and the reported line no longer existed. Reporting a defect that is
   already gone sends the reader hunting for nothing. Diff the file at the CURRENT head, not the
   head the run used.
+- **A version bump computed against a STALE base can collide with a release-please version that
+  already shipped — read the version on fresh `origin/main`, never on the local base.** A branch in
+  a shallow worktree saw the release manifest at admin-ui `0.91.3`, so the manual bump went to
+  `0.91.4` — a version #3721 had already released the day before (tag `admin-ui-v0.91.4` existed).
+  It survived only because the numbers happened to agree on merge; release-please then correctly
+  proposed `0.91.5` (#3753) for the unreleased fixes, and a slightly different timeline yields a
+  skipped number or a released version with no tag. The version-sync gate checks
+  `version.txt == package.json`, not "is this number still free". Before `/bump`: `git fetch` (a
+  shallow worktree's `origin/main` ref does not move on its own), then read `version.txt` and the
+  manifest AS OF `origin/main` — same rule as acting on CI findings: the current head, not the
+  base you branched from.
 - **Omitting `--delete-branch` does NOT protect someone else's worktree — the repo sets
   `delete_branch_on_merge: true`.** That setting deletes the remote ref regardless of the merge
   flag, so the precaution is theatre. The local branch and working tree survive (verified on
