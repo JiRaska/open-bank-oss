@@ -16,6 +16,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
 import org.jboss.logging.Logger
+import java.time.Instant
 
 /**
  * Production conversation memory (Valkey/Redis). Stores one JSON array of [StoredMessage] per
@@ -31,6 +32,7 @@ class RedisConversationStore @Inject constructor(
 ) : ConversationStore {
     private val log = Logger.getLogger(RedisConversationStore::class.java)
     private val values by lazy { redis.value(String::class.java) }
+    private val keys by lazy { redis.key(String::class.java) }
 
     /** Wire form — deliberately minimal so a schema drift in [ChatMessage] can't corrupt history. */
     data class StoredMessage(val role: ChatRole = ChatRole.USER, val content: String = "")
@@ -67,6 +69,34 @@ class RedisConversationStore @Inject constructor(
             ConversationStore.TTL_SECONDS,
         )
     }
+
+    // ---- Erasure (GDPR Art. 17 / ADR-0117, #3870) --------------------------------------------
+
+    override suspend fun deleteForCustomer(customerId: String): Long {
+        val prefix = "copilot:conv:$customerId:"
+        // KEYS takes a glob, and customerId is caller-derived, so a metacharacter in it could widen
+        // the pattern across customers. The returned keys are therefore re-filtered on the LITERAL
+        // prefix before anything is deleted — the glob only narrows the scan, it never authorises.
+        val matched = keys.keys("$prefix*").awaitSuspending()
+            .filter { it.startsWith(prefix) }
+        if (matched.isEmpty()) return 0L
+        // Deleted one key at a time rather than with a spread vararg: an erasure set is tiny (a
+        // customer's open conversations), and the spread would copy the array on every call.
+        matched.forEach { keys.del(it).awaitSuspending() }
+        log.infof("RedisConversationStore: erased %d conversation(s) for a customer", matched.size)
+        return matched.size.toLong()
+    }
+
+    override suspend fun deleteConversation(customerId: String, conversationId: String): Long {
+        if (!ConversationStore.persistable(conversationId)) return 0L
+        return keys.del(key(customerId, conversationId)).awaitSuspending().toLong()
+    }
+
+    /**
+     * No-op by construction: Redis evicts on its own TTL, so there is never a past-expiry key left
+     * to sweep. Returning 0 is the honest answer, not a silent success.
+     */
+    override suspend fun deleteExpired(now: Instant): Long = 0L
 
     // customerId precedes conversationId, so a crafted conversationId can only ever land inside the
     // SAME customer's namespace — it can never escape to another customer's history.
