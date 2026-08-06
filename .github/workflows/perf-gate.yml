@@ -177,3 +177,60 @@ jobs:
           name: perf-reports-${{ matrix.service }}
           path: perf-reports/
           retention-days: 30
+
+  # ── The alarm (ADR-0243 decision 2, issue #3768) ──────────────────────────────
+  # ADR-0243 and this file's own header both promise that an advisory-phase threshold
+  # breach "creates issues rather than blocking merges". Until now nothing did: a breach
+  # only turned the weekly scheduled run red, and a red scheduled workflow on main is
+  # addressed to nobody (dependency-submission.yml, #1449). Same raise-or-refresh shape
+  # as fleet-attestation.yml and dependency-submission.yml — deliberately not a new one.
+  #
+  # Scheduled runs only: a workflow_dispatch failure is already in front of the person
+  # who dispatched it, and filing a repo issue for it would be noise. All reasoning about
+  # HOW the body is derived lives in the script header, not in a run: block — an oversized
+  # run: step makes the whole workflow silently unparseable (19000-char gate).
+  raise-issue:
+    name: Raise issue on perf-gate failure
+    needs: perf
+    if: ${{ failure() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      actions: read   # gh run download reads this run's own artifacts
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Artifacts may legitimately be absent (failure before the matrix, or upload itself
+      # failed); the renderer handles an empty directory and says so rather than implying
+      # a clean measurement. `|| true` so that case does not mask the real escalation.
+      - name: Download perf reports from this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "${GITHUB_RUN_ID}" --dir perf-artifacts || true
+
+      - name: Open or refresh the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          BODY_FILE="${RUNNER_TEMP:-/tmp}/perf-gate-issue-body.md"
+          TITLE="$(python3 .github/scripts/perf-gate-issue-body.py --print-title)"
+          python3 .github/scripts/perf-gate-issue-body.py \
+            --reports-dir perf-artifacts \
+            --run-url "${RUN_URL}" \
+            --event "${EVENT}" \
+            --out "${BODY_FILE}"
+          cat "${BODY_FILE}" >> "${GITHUB_STEP_SUMMARY}"
+          existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file "${BODY_FILE}"
+          else
+            gh issue create --title "$TITLE" --body-file "${BODY_FILE}" \
+              --label tech-debt --label "severity:medium"
+          fi
