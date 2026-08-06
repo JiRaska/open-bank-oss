@@ -11,6 +11,16 @@ metadata:
     app.kubernetes.io/part-of: pid
 spec:
   replicas: 1
+  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
+  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
+  # resources - on a full cluster the rollout never completes and reports 1/1 READY.
+  # This workload is single-replica BY CONSTRAINT: it holds per-pod in-memory state, so
+  # scaling it past 1 needs the #3467-class fix first, not a replica bump.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: pid-service
