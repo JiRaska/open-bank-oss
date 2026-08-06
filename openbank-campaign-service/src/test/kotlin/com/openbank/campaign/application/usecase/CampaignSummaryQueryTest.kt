@@ -63,6 +63,13 @@ class CampaignSummaryQueryTest {
             calls += 1
             return cells
         }
+
+        override suspend fun applyDeliveryOutcome(
+            sendId: UUID,
+            outcome: String,
+            reason: String?,
+            occurredAt: Instant,
+        ) = false
     }
 
     private class Enrolments(private val counts: List<CampaignEnrolmentCount>) : EnrolmentRepository {

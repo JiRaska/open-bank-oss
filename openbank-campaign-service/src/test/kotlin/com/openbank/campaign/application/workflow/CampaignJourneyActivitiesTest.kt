@@ -15,6 +15,7 @@ import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SendOutcome
@@ -66,6 +67,9 @@ class CampaignJourneyActivitiesTest {
         val recorded = mutableListOf<SendRecord>()
         var sendsRequested = 0
 
+        /** Correlation ids put on the wire, in order (ADR-0239 D1). */
+        val correlationIds = mutableListOf<UUID>()
+
         val campaigns = object : CampaignRepository {
             override suspend fun findById(id: UUID) = if (id == campaignId) campaign else null
             override suspend fun list() = listOf(campaign)
@@ -89,6 +93,13 @@ class CampaignJourneyActivitiesTest {
             override suspend fun countByCampaign(campaignId: UUID, outcome: SendOutcome?) = 0L
             override suspend fun countByStepAndOutcome(campaignId: UUID) = emptyList<StepOutcomeCount>()
             override suspend fun countAllByCampaignAndOutcome() = emptyList<CampaignOutcomeCount>()
+            override suspend fun applyDeliveryOutcome(
+                sendId: UUID,
+                outcome: String,
+                reason: String?,
+                occurredAt: Instant,
+            ) = false
+
             override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID) = 0
         }
         val notificationSend = object : NotificationSendPort {
@@ -98,8 +109,10 @@ class CampaignJourneyActivitiesTest {
                 template: String,
                 recipient: String,
                 variables: Map<String, String>,
+                correlationId: UUID,
             ) {
                 sendsRequested += 1
+                correlationIds += correlationId
             }
         }
 
@@ -142,6 +155,52 @@ class CampaignJourneyActivitiesTest {
         assertThat(outcome).isEqualTo(StepOutcome.SENT)
         assertThat(h.sendsRequested).isEqualTo(1)
         assertThat(h.recorded.map { it.outcome }).containsExactly(SendOutcome.SENT)
+    }
+
+    /**
+     * ADR-0239 D1, issue #3663. The correlation id on the wire must be the id of the send-log row
+     * this attempt writes — otherwise the outcome that comes back names a row that does not exist
+     * and the funnel is no better off than before.
+     *
+     * Asserting EQUALITY, not merely that some id was sent, is the point: minting the row id after
+     * the handoff (which is what the code did before this change) sends a valid, well-formed UUID
+     * that happens to correlate with nothing, and every weaker assertion passes against it.
+     */
+    @Test
+    fun `the correlation id on the wire is the send-log row id`() {
+        val h = Harness()
+        runBlocking { h.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(h.correlationIds).hasSize(1)
+        assertThat(h.recorded).hasSize(1)
+        assertThat(h.correlationIds.single()).isEqualTo(h.recorded.single().id)
+    }
+
+    /**
+     * A newly recorded send has no delivery outcome yet, and must not pretend otherwise: `SENT` is
+     * the handoff, `PENDING` is the honest statement about the message itself.
+     */
+    @Test
+    fun `a freshly recorded send claims no delivery`() {
+        val h = Harness()
+        runBlocking { h.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(h.recorded.single().deliveryStatus).isEqualTo(DeliveryStatus.PENDING)
+        assertThat(h.recorded.single().deliveryUpdatedAt).isNull()
+    }
+
+    /**
+     * A gate-denied send never reached notification-service, so no outcome can ever arrive for it.
+     * Its correlation id is therefore never published — asserting that keeps a future refactor from
+     * "helpfully" emitting one and creating a row that waits forever for a reply.
+     */
+    @Test
+    fun `a gate-denied send publishes no correlation id at all`() {
+        val h = Harness().apply { sends = 2 }
+        runBlocking { h.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(h.correlationIds).isEmpty()
+        assertThat(h.recorded.single().deliveryStatus).isEqualTo(DeliveryStatus.PENDING)
     }
 
     @Test

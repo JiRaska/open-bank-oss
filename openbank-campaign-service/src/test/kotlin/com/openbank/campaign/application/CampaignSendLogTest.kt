@@ -62,6 +62,12 @@ class CampaignSendLogTest {
                     .map { (k, v) -> StepOutcomeCount(k.first, k.second, v.size.toLong()) }
 
             override suspend fun countAllByCampaignAndOutcome() = emptyList<CampaignOutcomeCount>()
+            override suspend fun applyDeliveryOutcome(
+                sendId: UUID,
+                outcome: String,
+                reason: String?,
+                occurredAt: Instant,
+            ) = false
         },
     )
 

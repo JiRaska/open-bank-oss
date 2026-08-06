@@ -10,6 +10,7 @@ import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
+import java.time.Instant
 import java.util.UUID
 
 interface CampaignRepository {
@@ -70,6 +71,16 @@ interface SendLogRepository {
     suspend fun countByStepAndOutcome(campaignId: UUID): List<StepOutcomeCount>
 
     /**
+     * Record one delivery outcome against the send-log row the producer correlated it with
+     * (ADR-0239 D3/D4). Returns true only if the row's delivery status actually moved.
+     *
+     * Takes the raw `outcome` STRING, not an enum, on purpose: the outcomes contract is additive
+     * and open-ended, so a value this build has never seen must be ignorable rather than a
+     * deserialization failure that wedges the channel.
+     */
+    suspend fun applyDeliveryOutcome(sendId: UUID, outcome: String, reason: String?, occurredAt: Instant): Boolean
+
+    /**
      * Sends tallied for EVERY campaign at once (issue #3296).
      *
      * One grouped query, deliberately. The per-campaign `summary()` runs one count per
@@ -98,12 +109,20 @@ interface ConsentCheckPort {
 
 /** ADR-0200 D3: delivery goes through notification-service, never direct. */
 interface NotificationSendPort {
+    /**
+     * [correlationId] is the send-log row id this request belongs to (ADR-0239 D1).
+     *
+     * Required, not optional: the whole reason the campaign publishes here is to hear back what
+     * became of the message, and a nullable parameter is one a caller forgets. The receiving
+     * contract keeps it optional for producers that genuinely do not care — this one does.
+     */
     suspend fun requestSend(
         partyId: UUID,
         channel: Channel,
         template: String,
         recipient: String,
         variables: Map<String, String>,
+        correlationId: UUID,
     )
 }
 

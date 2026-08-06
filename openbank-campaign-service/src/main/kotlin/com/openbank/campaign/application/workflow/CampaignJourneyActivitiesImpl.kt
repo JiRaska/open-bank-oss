@@ -93,12 +93,19 @@ open class CampaignJourneyActivitiesImpl(
             )
         ) {
             ContactGateDecision.ALLOWED -> {
+                // The send-log row id is minted BEFORE the handoff, not by `record` after it
+                // (ADR-0239 D1): it is what goes on the wire as the correlation id, so the id has
+                // to exist first. It is used for whichever row this attempt ends up writing —
+                // SENT, DRY_RUN or FAILED — so an outcome that arrives for a handoff that then
+                // failed locally still lands on the right row.
+                val sendId = Ids.newId()
                 // Dry run stops HERE, after every gate above has run. Deliberately not earlier: the
                 // point of a rehearsal is that suppression, cap, quiet hours and consent are all
                 // exercised exactly as they would be, so a journey that would have been suppressed
-                // still reports SUPPRESSED and not DRY_RUN.
+                // still reports SUPPRESSED and not DRY_RUN. Nothing is handed off, so this row's
+                // delivery status stays PENDING forever — correctly: no message ever left.
                 if (dryRun) {
-                    record(campaignId, partyId, stepOrder, SendOutcome.DRY_RUN)
+                    record(sendId, campaignId, partyId, stepOrder, SendOutcome.DRY_RUN)
                 } else {
                     // ADR-0200 D3 — delivery goes through notification-service, never direct.
                     //
@@ -113,15 +120,16 @@ open class CampaignJourneyActivitiesImpl(
                             step.template,
                             recipientFor(partyId),
                             step.variables,
+                            correlationId = sendId,
                         )
                     } catch (e: Exception) {
-                        record(campaignId, partyId, stepOrder, SendOutcome.FAILED)
+                        record(sendId, campaignId, partyId, stepOrder, SendOutcome.FAILED)
                         // Rethrown on purpose: Temporal retries the activity, and the FAILED row
                         // above is the durable evidence that this attempt happened. FAILED rows do
                         // not consume the frequency cap (SENT only), so a retry is not penalised.
                         throw e
                     }
-                    record(campaignId, partyId, stepOrder, SendOutcome.SENT)
+                    record(sendId, campaignId, partyId, stepOrder, SendOutcome.SENT)
                 }
                 StepOutcome.SENT
             }
@@ -129,7 +137,7 @@ open class CampaignJourneyActivitiesImpl(
                 if (decision.denyReason == ContactDenyReason.GATE_UNAVAILABLE) {
                     throw ContactGateUnavailableException("contact gate state unavailable — activity will retry")
                 }
-                record(campaignId, partyId, stepOrder, outcomeFor(decision.denyReason))
+                record(Ids.newId(), campaignId, partyId, stepOrder, outcomeFor(decision.denyReason))
                 StepOutcome.SUPPRESSED
             }
         }
@@ -161,8 +169,12 @@ open class CampaignJourneyActivitiesImpl(
         Unit
     }
 
-    private suspend fun record(campaignId: UUID, partyId: UUID, stepOrder: Int, outcome: SendOutcome) {
-        sendLog.record(SendRecord(Ids.newId(), campaignId, partyId, stepOrder, outcome, Instant.now()))
+    // `id` is a parameter rather than minted here: on the ALLOWED path it was already published as
+    // the correlation id, and a second id would be a row nothing can ever correlate back to.
+    // A gate-denied send never reached notification-service, so its id correlates with nothing and
+    // its delivery status stays PENDING forever — correctly: no message was ever handed off.
+    private suspend fun record(id: UUID, campaignId: UUID, partyId: UUID, stepOrder: Int, outcome: SendOutcome) {
+        sendLog.record(SendRecord(id, campaignId, partyId, stepOrder, outcome, Instant.now()))
     }
 
     // The recipient address is resolved by notification-service from party data; the campaign

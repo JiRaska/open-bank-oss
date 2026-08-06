@@ -16,6 +16,8 @@ import com.openbank.campaign.application.port.out.StepOutcomeCount
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
+import com.openbank.campaign.domain.model.DeliveryStatus
+import com.openbank.campaign.domain.model.DeliveryTransition
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.Segment
@@ -130,6 +132,16 @@ class SendLogEntity : PanacheEntityBase() {
 
     @Column(nullable = false)
     lateinit var occurredAt: Instant
+
+    /** ADR-0239 D3. Stored as the enum NAME, like [outcome] — never an ordinal. */
+    @Column(nullable = false)
+    var deliveryStatus: String = DeliveryStatus.PENDING.name
+
+    @Column
+    var deliveryReason: String? = null
+
+    @Column
+    var deliveryUpdatedAt: Instant? = null
 }
 
 @Entity
@@ -270,6 +282,9 @@ class PanacheSendLogRepository :
                     stepOrder = send.stepOrder
                     outcome = send.outcome.name
                     occurredAt = send.occurredAt
+                    deliveryStatus = send.deliveryStatus.name
+                    deliveryReason = send.deliveryReason
+                    deliveryUpdatedAt = send.deliveryUpdatedAt
                 },
             )
         }.awaitSuspending()
@@ -282,16 +297,57 @@ class PanacheSendLogRepository :
         size: Int,
     ): List<SendRecord> = Panache.withSession {
         query(campaignId, outcome).page<SendLogEntity>(Page.of(page, size)).list<SendLogEntity>()
-    }.awaitSuspending().map {
-        SendRecord(
-            id = it.id,
-            campaignId = it.campaignId,
-            partyId = it.partyId,
-            stepOrder = it.stepOrder,
-            outcome = SendOutcome.valueOf(it.outcome),
-            occurredAt = it.occurredAt,
-        )
-    }
+    }.awaitSuspending().map { it.toDomain() }
+
+    /**
+     * Apply one delivery outcome to the row the producer correlated it with (ADR-0239 D3/D4).
+     *
+     * Read-decide-write inside ONE transaction, and the decision is [DeliveryTransition.next] —
+     * not `update ... set delivery_status = ?`. Delivery is at-least-once and the outcomes topic
+     * is partitioned by notification id, so two events for one send arrive in no guaranteed order;
+     * a blind write would let a stale duplicate clobber a fresher terminal state.
+     *
+     * Returns false when nothing moved: an unknown correlation id (an outcome for somebody else's
+     * request — expected, since the topic is shared and carries every producer's traffic), or a
+     * transition the rule refuses. Neither is an error.
+     */
+    override suspend fun applyDeliveryOutcome(
+        sendId: UUID,
+        outcome: String,
+        reason: String?,
+        occurredAt: Instant,
+    ): Boolean = Panache.withTransaction {
+        // Explicit type argument: this is the Java Panache variant, whose query methods are generic
+        // in the entity type, so Kotlin cannot infer it from the receiver (the same reason
+        // `listByCampaign` above writes `.page<SendLogEntity>(…).list<SendLogEntity>()`).
+        find("id", sendId).firstResult<SendLogEntity>().map { entity ->
+            if (entity == null) {
+                false
+            } else {
+                val next = DeliveryTransition.next(DeliveryStatus.valueOf(entity.deliveryStatus), outcome)
+                if (next == null) {
+                    false
+                } else {
+                    entity.deliveryStatus = next.name
+                    entity.deliveryReason = reason
+                    entity.deliveryUpdatedAt = occurredAt
+                    true
+                }
+            }
+        }
+    }.awaitSuspending()
+
+    private fun SendLogEntity.toDomain(): SendRecord = SendRecord(
+        id = id,
+        campaignId = campaignId,
+        partyId = partyId,
+        stepOrder = stepOrder,
+        outcome = SendOutcome.valueOf(outcome),
+        occurredAt = occurredAt,
+        deliveryStatus = DeliveryStatus.valueOf(deliveryStatus),
+        deliveryReason = deliveryReason,
+        deliveryUpdatedAt = deliveryUpdatedAt,
+    )
 
     /** `GROUP BY campaignId, outcome` — the whole estate in one round trip (issue #3296). */
     override suspend fun countAllByCampaignAndOutcome(): List<CampaignOutcomeCount> = Panache

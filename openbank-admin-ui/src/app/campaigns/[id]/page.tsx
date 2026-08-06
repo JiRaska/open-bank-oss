@@ -38,6 +38,13 @@ interface Send {
   stepOrder: number
   outcome: string
   occurredAt: string
+  /**
+   * ADR-0239 D3, added to the campaign API in 1.8.0. Optional here because a response from an
+   * older deployment simply does not carry it — the column then reads "—" rather than claiming
+   * PENDING, which would be a statement this UI cannot support.
+   */
+  deliveryStatus?: string
+  deliveryReason?: string | null
 }
 
 interface SendPage {
@@ -72,6 +79,19 @@ const OUTCOMES = ['SENT', 'DRY_RUN', 'FAILED', 'SUPPRESSED_CONSENT', 'SUPPRESSED
 function outcomeTone(outcome: string): Tone {
   if (outcome === 'SENT') return 'success'
   if (outcome === 'FAILED') return 'danger'
+  return 'neutral'
+}
+
+/**
+ * Delivery colouring (ADR-0239 D3). `PENDING` is NEUTRAL, never a warning: no outcome has arrived
+ * yet, which is the normal state for a send made moments ago and the permanent state for a send the
+ * contact gate denied — nothing was handed off, so nothing can ever report back. Colouring it as a
+ * problem would make the common case look like an incident, which is the mistake `outcomeTone`
+ * above already avoids for suppressions.
+ */
+function deliveryTone(status: string): Tone {
+  if (status === 'CONFIRMED') return 'success'
+  if (status === 'FAILED') return 'danger'
   return 'neutral'
 }
 
@@ -232,6 +252,21 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       case 'SUPPRESSED_QUIET_HOURS': return t('Tiché hodiny', 'Quiet hours')
       case 'FAILED': return t('Selhalo', 'Failed')
       default: return o
+    }
+  }
+
+  /**
+   * Human phrasing for the delivery state. Deliberately worded so it cannot be read as a synonym
+   * of the outcome beside it: "Accepted" (the handoff) and "Delivered" (the message) are the two
+   * facts this column exists to keep apart (ADR-0239 D3, issue #3663).
+   */
+  const deliveryLabel = (d: string): string => {
+    switch (d) {
+      case 'PENDING': return t('Čeká na potvrzení', 'Awaiting confirmation')
+      case 'CONFIRMED': return t('Doručeno', 'Delivered')
+      case 'SUPPRESSED': return t('Potlačeno', 'Suppressed')
+      case 'FAILED': return t('Nedoručeno', 'Not delivered')
+      default: return d
     }
   }
 
@@ -402,8 +437,8 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             <h2 className="text-sm font-semibold">{t('Log odeslání', 'Send log')}</h2>
             <p className="text-xs text-muted-foreground">
               {t(
-                'Včetně potlačených pokusů — výsledek je jediné místo, kde je vidět odvolaný souhlas, limit četnosti nebo tiché hodiny.',
-                'Includes suppressed attempts — the outcome is the only place a consent withdrawal, frequency cap or quiet-hours skip is visible.',
+                'Včetně potlačených pokusů. Předání je rozhodnutí kampaně; Doručení je to, co hlásí notification-service — běžně se liší a jen druhé se týká zákazníka.',
+                'Includes suppressed attempts. Handoff is what the campaign decided; Delivery is what notification-service reported back — they routinely differ, and only the second one is about the customer.',
               )}
             </p>
             {/* Stated on screen because an evening test run produces nothing but quiet-hours
@@ -457,7 +492,14 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                     <tr>
                       <th>{t('Party', 'Party')}</th>
                       <th>{t('Krok', 'Step')}</th>
-                      <th>{t('Výsledek', 'Outcome')}</th>
+                      <th title={t(
+                        'Co rozhodla kampaň — že požadavek byl předán notification-service.',
+                        'What the campaign decided — that the request was handed to notification-service.',
+                      )}>{t('Předání', 'Handoff')}</th>
+                      <th title={t(
+                        'Co se se zprávou skutečně stalo, podle notification-service.',
+                        'What actually became of the message, as reported by notification-service.',
+                      )}>{t('Doručení', 'Delivery')}</th>
                       <th>{t('Kdy', 'When')}</th>
                     </tr>
                   </thead>
@@ -474,6 +516,19 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                           <span title={s.outcome}>
                             <StatusBadge status={s.outcome} tone={outcomeTone(s.outcome)} label={outcomeLabel(s.outcome)} />
                           </span>
+                        </td>
+                        <td>
+                          {s.deliveryStatus ? (
+                            <span title={s.deliveryReason ? `${s.deliveryStatus} — ${s.deliveryReason}` : s.deliveryStatus}>
+                              <StatusBadge
+                                status={s.deliveryStatus}
+                                tone={deliveryTone(s.deliveryStatus)}
+                                label={deliveryLabel(s.deliveryStatus)}
+                              />
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
                         </td>
                         <td className="text-xs whitespace-nowrap">{fmtDateTime(s.occurredAt)}</td>
                       </tr>
