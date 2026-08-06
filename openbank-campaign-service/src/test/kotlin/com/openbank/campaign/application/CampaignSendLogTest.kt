@@ -47,6 +47,7 @@ class CampaignSendLogTest {
         object : SendLogRepository {
             override suspend fun record(send: SendRecord) = Unit
             override suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long) = 0
+            override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID) = 0
 
             // Filters and pages the way SQL does, so the test exercises the real contract rather
             // than a fake that always answers with everything.

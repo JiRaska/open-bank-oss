@@ -99,6 +99,8 @@ class CampaignJourneyActivitiesTest {
                 reason: String?,
                 occurredAt: Instant,
             ) = false
+
+            override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID) = 0
         }
         val notificationSend = object : NotificationSendPort {
             override suspend fun requestSend(

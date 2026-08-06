@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.94.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.93.0...admin-ui-v0.94.0) (2026-08-06)
+
+
+### Features
+
+* **delegation:** snapshot counterparty display names onto a grant ([#3797](https://github.com/JiRaska/open-bank-oss/issues/3797)) ([5bc41f6](https://github.com/JiRaska/open-bank-oss/commit/5bc41f6f4735384fc65388d9a5854a3ce88f4b1d))
+* **flaky-test-hunter:** register prompt registry and wire LlmDiagnosisAdapter to shared gateway ([#3810](https://github.com/JiRaska/open-bank-oss/issues/3810)) ([8b94785](https://github.com/JiRaska/open-bank-oss/commit/8b9478502942572d819d78f4ef32c8b8a2d16224))
+
 ## [0.93.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.92.1...admin-ui-v0.93.0) (2026-08-06)
 
 

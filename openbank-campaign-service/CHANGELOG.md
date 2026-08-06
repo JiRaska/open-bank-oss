@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/v0.9.2...v0.10.0) (2026-08-06)
+
+
+### Features
+
+* **campaign:** route journey delivery through the ADR-0219 ContactPolicyGate ([#3665](https://github.com/JiRaska/open-bank-oss/issues/3665)) ([34a8093](https://github.com/JiRaska/open-bank-oss/commit/34a80938df33dfb5d72309ce7a2eb41ed9c9f1b5))
+
 ## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/v0.9.1...v0.9.2) (2026-08-03)
 
 

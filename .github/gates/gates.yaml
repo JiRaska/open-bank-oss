@@ -208,6 +208,21 @@ gates:
       python3 .github/scripts/check-agent-virtual-keys.py --self-test
       python3 .github/scripts/check-agent-virtual-keys.py --enforce
 
+  - id: oidc-secret-convention
+    name: "the OIDC client secret is read from ONE KV entry (issue #3485, enforced, baseline-ratcheted)"
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-oidc-secret-convention.py --self-test
+    selftest_expect: pass
+    run: |
+      # Falsified BOTH ways before wiring in. Detection: 13 cases including the exact #3471
+      # defect (a per-service key nobody wrote), a baselined path that migrated (reported
+      # stale), and a baselined path pointing at a THIRD key (still a violation). Scope: the
+      # gate prints how many manifests it walked and how many projections it found — 531 and
+      # 39 today — because a gate is green two independent ways and "it never opened the
+      # file" is the one a passing exit code hides.
+      python3 .github/scripts/check-oidc-secret-convention.py --enforce
+
   - id: single-replica-rollout-strategy
     name: "one-replica workloads declare their rollout strategy (issue #3545, enforced, baseline-ratcheted)"
     group: gitops
@@ -1930,3 +1945,20 @@ gates:
       # not only a fixture — it exits 1 on origin/main's network module + substrate env and
       # 0 with the pin in place.
       python3 .github/scripts/check-nat-ami-pinned.py --enforce
+  - id: enforcement-reachability
+    name: "a declared enforcement function has a production caller (ADR-0232, issue #3615)"
+    group: kotlin
+    mode: enforced
+    selftest: python3 .github/scripts/check-enforcement-reachability.py --self-test
+    selftest_expect: pass
+    run: |
+      # AuthorizationService.isAuthorizedForAmount is the only amount-aware account guard in
+      # the fleet and the only enforcer of ADR-0232's perTransactionLimit — and every one of
+      # its call sites is a test. Nothing else in the repo can see that: the function compiles,
+      # is a CDI bean method, has a port declaring it and a green test class, and coverage
+      # INVERTS the signal (a well-tested unreachable guard scores higher than a lightly-tested
+      # reachable one). The registry in rules.yaml records what was measured; this gate fails in
+      # both directions, so an entry can neither rot into permanent furniture nor be silently
+      # closed. Falsified against the real tree before wiring in: injecting one production
+      # caller and, separately, flipping the declared status each produce exactly one finding.
+      python3 .github/scripts/check-enforcement-reachability.py --enforce

@@ -25,6 +25,7 @@ import com.openbank.campaign.domain.model.SegmentCatalog
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
+import com.openbank.campaign.domain.model.StopCondition
 import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
@@ -63,6 +64,12 @@ class CampaignEntity : PanacheEntityBase() {
     // jsonb array column, which cannot be cast to String — every read threw ClassCastException.
     @Column(nullable = false, columnDefinition = "text")
     lateinit var stepsJson: String
+
+    // Nullable (V3): a campaign without a stop condition has no row content here — null, not an
+    // empty object, so "no condition" and "condition" can never be confused. Same text-not-jsonb
+    // reason as stepsJson.
+    @Column(columnDefinition = "text")
+    var stopConditionJson: String? = null
 
     @Column(nullable = false)
     lateinit var state: String
@@ -182,6 +189,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         segmentName = this@toEntity.segmentRef.name
         segmentVersion = this@toEntity.segmentRef.version
         stepsJson = mapper.writeValueAsString(this@toEntity.steps)
+        stopConditionJson = this@toEntity.stopCondition?.let { mapper.writeValueAsString(it) }
         state = this@toEntity.state.name
         createdBy = this@toEntity.createdBy
         approvedBy = this@toEntity.approvedBy
@@ -195,6 +203,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         goal = goal,
         segmentRef = SegmentRef(segmentName, segmentVersion),
         steps = mapper.readValue<List<CampaignStep>>(stepsJson),
+        stopCondition = stopConditionJson?.let { mapper.readValue<StopCondition>(it) },
         state = CampaignState.valueOf(state),
         createdBy = createdBy,
         approvedBy = approvedBy,
@@ -399,6 +408,15 @@ class PanacheSendLogRepository :
             partyId,
             SendOutcome.SENT.name,
             Instant.ofEpochSecond(sinceEpochSeconds),
+        )
+    }.awaitSuspending().toInt()
+
+    override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID): Int = Panache.withSession {
+        count(
+            "campaignId = ?1 and partyId = ?2 and outcome = ?3",
+            campaignId,
+            partyId,
+            SendOutcome.SENT.name,
         )
     }.awaitSuspending().toInt()
 }

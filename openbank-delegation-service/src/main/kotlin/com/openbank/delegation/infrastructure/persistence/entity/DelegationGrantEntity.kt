@@ -40,6 +40,13 @@ class DelegationGrantEntity : PanacheEntityBase() {
     @Column(name = "grantee_party_id", nullable = false)
     lateinit var granteePartyId: UUID
 
+    /** Nullable by design — see [DelegationGrant.grantorName] (issue #3604). */
+    @Column(name = "grantor_name", length = NAME_MAX_LENGTH)
+    var grantorName: String? = null
+
+    @Column(name = "grantee_name", length = NAME_MAX_LENGTH)
+    var granteeName: String? = null
+
     @Enumerated(EnumType.STRING)
     @Column(name = "resource_type", nullable = false)
     lateinit var resourceType: DelegationResourceType
@@ -130,6 +137,8 @@ class DelegationGrantEntity : PanacheEntityBase() {
         id = id,
         grantorPartyId = grantorPartyId,
         granteePartyId = granteePartyId,
+        grantorName = grantorName,
+        granteeName = granteeName,
         resourceType = resourceType,
         resourceId = resourceId,
         capabilities = capabilities.toSet(),
@@ -169,10 +178,15 @@ class DelegationGrantEntity : PanacheEntityBase() {
     }
 
     companion object {
+        /** Matches the `varchar(200)` in V3__delegation_counterparty_names.sql. */
+        const val NAME_MAX_LENGTH = 200
+
         fun fromDomain(g: DelegationGrant): DelegationGrantEntity = DelegationGrantEntity().apply {
             id = g.id
             grantorPartyId = g.grantorPartyId
             granteePartyId = g.granteePartyId
+            grantorName = g.grantorName?.take(NAME_MAX_LENGTH)
+            granteeName = g.granteeName?.take(NAME_MAX_LENGTH)
             resourceType = g.resourceType
             resourceId = g.resourceId
             capabilities = g.capabilities.toMutableSet()
