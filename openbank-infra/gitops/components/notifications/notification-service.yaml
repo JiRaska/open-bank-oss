@@ -184,6 +184,19 @@ spec:
                   name: notification-service-apns
                   key: APNS_PRIVATE_KEY
                   optional: true
+            # PUSH delivery via FCM (FcmPushSender) — wired but deliberately OFF: enabling
+            # before the Vault key is seeded would record every Android push as a CONFIG
+            # failure instead of a skip. Activation is operational, not a code change:
+            # seed openbank/notification-service FCM_SERVICE_ACCOUNT_JSON (see
+            # fcm-externalsecret.yaml), flip FCM_ENABLED to "true", restart the service.
+            - name: FCM_ENABLED
+              value: "false"
+            - name: FCM_SERVICE_ACCOUNT_JSON
+              valueFrom:
+                secretKeyRef:
+                  name: notification-service-fcm
+                  key: FCM_SERVICE_ACCOUNT_JSON
+                  optional: true
             # Dotted-key YAML config bug workaround (issue #686): load the
             # notification-events-in / party-events-in group.id and auto.offset.reset
             # override (notification-service-msg-override ConfigMap, mounted below) as
