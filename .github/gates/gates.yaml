@@ -687,6 +687,23 @@ gates:
     run: |
       bash .github/scripts/probe-pact-version.sh --self-test
 
+  # The counterpart-verifiability probe (#3223). The classifier above says WHY a block
+  # happened; two of its classes end in a promise ("clears within one reconcile tick",
+  # "the reconcile re-drives it automatically") that was a hardcoded constant, not an
+  # observation — and on run 31080511057 all six blocked money-path services carried it
+  # while every counterpart version named was unverifiable by construction. This probe is
+  # what turns that promise into evidence, so its failure directions are what must be
+  # exercised: a contentless counterpart dominating a healthy one, and every probe failure
+  # degrading to `unknown` rather than to the reassuring answer.
+  - id: blocking-counterpart-probe-unit-test
+    name: "can-i-deploy counterpart verifiability probe (issue #3223, enforced)"
+    group: supplychain
+    mode: enforced
+    selftest: |
+      bash .github/scripts/probe-blocking-counterparts.sh --self-test
+    run: |
+      bash .github/scripts/probe-blocking-counterparts.sh --self-test
+
   # Workflow `run:` step size (#3082). GitHub rejects an oversized run script by making the
   # WHOLE workflow unparseable — zero jobs, no error message, every contributor's runs of that
   # file dead until someone reverts. It happened to auto-deploy.yml (#3135 -> #3139) and NOTHING
