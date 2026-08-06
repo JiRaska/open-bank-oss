@@ -70,8 +70,6 @@ BASELINE = [
     "openbank-domestic-payment/src/main/kotlin/com/openbank/domestic/infrastructure/scheduler/ScreeningRedriveScheduler.kt",
     "openbank-interest-service/src/main/kotlin/com/openbank/interest/infrastructure/scheduler/InterestAccrualScheduler.kt",
     "openbank-interest-service/src/main/kotlin/com/openbank/interest/infrastructure/scheduler/InterestCapitalizationScheduler.kt",
-    "openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/partition/JournalPartitionMaintainer.kt",
-    "openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/schedule/TieOutFreshnessWatchdog.kt",
     "openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/servicing/InterestAccrualScheduler.kt",
     "openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/servicing/ProvisioningCycleScheduler.kt",
     "openbank-sdd-service/src/main/kotlin/com/openbank/sdd/infrastructure/scheduler/MandateExpiryScheduler.kt",
