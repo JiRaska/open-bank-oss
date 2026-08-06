@@ -31,9 +31,19 @@ data class CreateCampaignRequest(
 /** Optional on create (ADR-0200 D1, #3585): absent means the journey runs every step, as before. */
 data class StopConditionRequest(val maxSendsPerParty: Int)
 
+/**
+ * A step on the create body.
+ *
+ * [channel] defaults to EMAIL so every body written before PUSH existed keeps its meaning. It was
+ * absent entirely until #3584's PUSH support was reachable only from the domain: the resource
+ * hardcoded `Channel.EMAIL`, so the openapi enum documented a value no caller could ever select.
+ * Validation is the [CampaignStep] init invariant — the template's catalogue channel must agree
+ * with the step channel — not a second edge-level check that could drift from it.
+ */
 data class StepRequest(
     val order: Int,
     val template: String,
+    val channel: Channel = Channel.EMAIL,
     val variables: Map<String, String> = emptyMap(),
     val delaySeconds: Long = 0,
 )
@@ -88,7 +98,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
     suspend fun create(request: CreateCampaignRequest): Response {
         val createdBy = jwt.principalName()
         val steps = request.steps.map {
-            CampaignStep(it.order, it.template, Channel.EMAIL, it.variables, it.delaySeconds)
+            CampaignStep(it.order, it.template, it.channel, it.variables, it.delaySeconds)
         }
         val campaign = service.createDraft(
             request.name,
