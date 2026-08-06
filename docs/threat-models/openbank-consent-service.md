@@ -75,3 +75,20 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 - **2026-05-30** — Added `consent_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/
   surface/boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
   Rollback: `DROP SEQUENCE`.
+
+- **2026-08-06** — **Error-envelope disclosure: `ApiError.timestamp` now carries a real
+  clock reading.** `#3874` — the shared `ApiError` envelope (openbank-libs-domain) defaulted
+  `timestamp` to `Instant.EPOCH` and no call site passed it, so every error this service served
+  carried `1970-01-01T00:00:00Z`. The field is now a required constructor argument, stamped
+  `Instant.now()` at construction in this service's mappers. **Risk class = information
+  disclosure**, and it is a deliberate, bounded increase: error responses now reveal the server's
+  wall-clock time to any caller who can provoke an error, including an unauthenticated one on
+  endpoints that answer 401/403 through this envelope. Assessed as acceptable — the value is
+  second-resolution UTC already implied by the HTTP `Date` header on the same response, so it
+  discloses nothing a caller could not already read, and it is what makes the envelope's own
+  instruction ("contact support with traceId=…") actionable by letting support bind a trace to a
+  moment. No new field, no new endpoint, no authorization or ingress change; the response SHAPE is
+  unchanged (`string`/`date-time`), so no API-contract bump under ADR-0048. Not a timing oracle:
+  the stamp is taken when the error object is built, not measured against request start, so it
+  does not expose per-request processing duration. Rollback: revert; the field is
+  serialisation-only and nothing persists it.
