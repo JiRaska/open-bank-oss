@@ -208,6 +208,32 @@ gates:
       python3 .github/scripts/check-agent-virtual-keys.py --self-test
       python3 .github/scripts/check-agent-virtual-keys.py --enforce
 
+  - id: model-residency-claims
+    name: "a `sensitivity: self-hosted` model entry points in-cluster (ADR-0175 D3, issue #3599)"
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-model-residency-claims.py --self-test
+    selftest_expect: pass
+    run: |
+      # Falsified BOTH ways before wiring in — the distinction this gate exists for is
+      # routed-to-EU vs routed-ANYWHERE, and a check that cannot tell those apart is
+      # worthless as a residency control.
+      #   Detection: 24 self-test cases, the first being the exact defect — a `self-hosted`
+      #   LABEL on `https://api.groq.com/openai/v1`. Also the underscore/mixed-case spellings
+      #   ModelGateway.parseSensitivity accepts, an env placeholder with an off-cluster
+      #   default, one with NO default, a userinfo smuggling attempt, and the near-misses it
+      #   must NOT flag (a `hosted` entry on the same US endpoint; a typo'd sensitivity,
+      #   which the Kotlin also reads as hosted).
+      #   Scope: both real service shapes were fed the violation and both went red with the
+      #   real path — agent-service's top-level `model-gateway` and copilot-service's nested
+      #   `copilot.model-gateway`. In that state the Kotlin fail-closed test stays GREEN
+      #   (a self-hosted model IS registered), which is precisely why the gate is needed.
+      # LIMIT, stated so nobody reads this as more than it is: CONFIG-LEVEL only. It proves
+      # the committed config cannot express an off-cluster self-hosted tier. It observes no
+      # request and cannot prove the host behind an in-cluster address is EU-resident — the
+      # egress NetworkPolicy is what constrains that, not this.
+      python3 .github/scripts/check-model-residency-claims.py --enforce
+
   - id: oidc-secret-convention
     name: "the OIDC client secret is read from ONE KV entry (issue #3485, enforced, baseline-ratcheted)"
     group: gitops
