@@ -6,6 +6,7 @@ package com.openbank.campaign.application.port.out
 
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SendOutcome
@@ -48,6 +49,18 @@ interface SendLogRepository {
      * party's cap covers every send the campaign ever made to them.
      */
     suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID): Int
+
+    /**
+     * The delivery status of the most recent send to [partyId] in [campaignId] at a step BELOW
+     * [stepOrder], or null when there is none — the observable state an ADR-0200 D1 branch
+     * condition (#3585) is evaluated against.
+     *
+     * Null and `PENDING` are different answers and both are returned as themselves: null means no
+     * predecessor send exists at all (nothing was ever attempted), `PENDING` means one was and no
+     * outcome has come back. The branch treats both as "not confirmed", but the repository must
+     * not be the layer that decides that.
+     */
+    suspend fun latestDeliveryStatusBeforeStep(campaignId: UUID, partyId: UUID, stepOrder: Int): DeliveryStatus?
 
     /**
      * One page of send attempts for a campaign, newest first — the operator view of what happened.

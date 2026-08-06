@@ -8,6 +8,7 @@ import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.SegmentRef
+import com.openbank.campaign.domain.model.StepCondition
 import com.openbank.campaign.domain.model.StopCondition
 import com.openbank.libs.authz.Authorize
 import jakarta.enterprise.context.ApplicationScoped
@@ -46,6 +47,8 @@ data class StepRequest(
     val channel: Channel = Channel.EMAIL,
     val variables: Map<String, String> = emptyMap(),
     val delaySeconds: Long = 0,
+    /** Optional branch condition (ADR-0200 D1, #3585). Absent means the step always runs. */
+    val condition: StepCondition? = null,
 )
 
 /**
@@ -98,7 +101,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
     suspend fun create(request: CreateCampaignRequest): Response {
         val createdBy = jwt.principalName()
         val steps = request.steps.map {
-            CampaignStep(it.order, it.template, it.channel, it.variables, it.delaySeconds)
+            CampaignStep(it.order, it.template, it.channel, it.variables, it.delaySeconds, it.condition)
         }
         val campaign = service.createDraft(
             request.name,

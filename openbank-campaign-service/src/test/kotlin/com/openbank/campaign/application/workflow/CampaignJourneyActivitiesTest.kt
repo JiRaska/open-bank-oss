@@ -101,6 +101,11 @@ class CampaignJourneyActivitiesTest {
             ) = false
 
             override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID) = 0
+            override suspend fun latestDeliveryStatusBeforeStep(
+                campaignId: UUID,
+                partyId: UUID,
+                stepOrder: Int,
+            ): DeliveryStatus? = null
         }
         val notificationSend = object : NotificationSendPort {
             override suspend fun requestSend(

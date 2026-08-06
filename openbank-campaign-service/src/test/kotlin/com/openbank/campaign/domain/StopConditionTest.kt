@@ -3,6 +3,8 @@
 
 package com.openbank.campaign.domain
 
+import com.openbank.campaign.domain.model.DeliveryStatus
+import com.openbank.campaign.domain.model.StepCondition
 import com.openbank.campaign.domain.model.StopCondition
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -35,5 +37,32 @@ class StopConditionTest {
     @Test
     fun `past the cap stops too — a re-enrolled party is already over`() {
         assertTrue(StopCondition(2).reachedBy(5))
+    }
+}
+
+/**
+ * The ADR-0200 D1 branch condition (#3585). The vocabulary is deliberately narrow — it names the
+ * ADR-0239 delivery status and nothing else — so the only thing to pin here is that the honest
+ * resting state `PENDING`, and a missing predecessor, both count as NOT confirmed.
+ */
+class StepConditionTest {
+
+    @Test
+    fun `IF_PREVIOUS_CONFIRMED holds only for a confirmed delivery`() {
+        assertTrue(StepCondition.IF_PREVIOUS_CONFIRMED.holdsFor(DeliveryStatus.CONFIRMED))
+        assertFalse(StepCondition.IF_PREVIOUS_CONFIRMED.holdsFor(DeliveryStatus.PENDING))
+        assertFalse(StepCondition.IF_PREVIOUS_CONFIRMED.holdsFor(DeliveryStatus.FAILED))
+        assertFalse(StepCondition.IF_PREVIOUS_CONFIRMED.holdsFor(null))
+    }
+
+    @Test
+    fun `IF_PREVIOUS_NOT_CONFIRMED is its exact complement`() {
+        listOf(DeliveryStatus.CONFIRMED, DeliveryStatus.PENDING, DeliveryStatus.FAILED, null).forEach {
+            assertTrue(
+                StepCondition.IF_PREVIOUS_CONFIRMED.holdsFor(
+                    it,
+                ) != StepCondition.IF_PREVIOUS_NOT_CONFIRMED.holdsFor(it),
+            )
+        }
     }
 }
