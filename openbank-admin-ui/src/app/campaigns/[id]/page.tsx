@@ -238,6 +238,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       case 'COMPLETED': return t('Dokončeno', 'Completed')
       case 'TERMINATED_CONSENT_REVOKED': return t('Ukončeno — odvolaný souhlas', 'Ended — consent withdrawn')
       case 'TERMINATED_SUPPRESSED': return t('Ukončeno — potlačeno', 'Ended — suppressed')
+      case 'STOPPED_MAX_SENDS': return t('Zastaveno — limit odeslání', 'Stopped — send cap reached')
       default: return s
     }
   }

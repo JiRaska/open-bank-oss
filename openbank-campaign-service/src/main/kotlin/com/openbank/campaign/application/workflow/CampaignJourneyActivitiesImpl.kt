@@ -8,7 +8,6 @@ import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
 import com.openbank.campaign.application.port.out.SendLogRepository
-import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
@@ -46,8 +45,13 @@ open class CampaignJourneyActivitiesImpl(
     private val marketingScope: String,
 ) : CampaignJourneyActivities {
 
-    override fun loadSteps(campaignId: UUID): List<CampaignStep> = runBlockingOnWorker {
-        campaigns.findById(campaignId)?.steps ?: emptyList()
+    override fun loadDefinition(campaignId: UUID): JourneyDefinition = runBlockingOnWorker {
+        val campaign = campaigns.findById(campaignId)
+        JourneyDefinition(campaign?.steps ?: emptyList(), campaign?.stopCondition)
+    }
+
+    override fun sendsSoFar(campaignId: UUID, partyId: UUID): Int = runBlockingOnWorker {
+        sendLog.countSendsForPartyInCampaign(campaignId, partyId)
     }
 
     // The publish failure below is caught broadly on purpose: the point is that NO handoff failure
@@ -125,6 +129,7 @@ open class CampaignJourneyActivitiesImpl(
         val state = when (reason) {
             TerminationReason.CONSENT_REVOKED -> EnrolmentState.TERMINATED_CONSENT_REVOKED
             TerminationReason.SUPPRESSED -> EnrolmentState.TERMINATED_SUPPRESSED
+            TerminationReason.STOPPED_MAX_SENDS -> EnrolmentState.STOPPED_MAX_SENDS
         }
         enrolments.findByCampaignAndParty(campaignId, partyId)?.let {
             enrolments.save(it.copy(state = state, completedAt = Instant.now()))
