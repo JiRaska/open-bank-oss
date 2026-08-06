@@ -86,6 +86,35 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-03** — Propose-only savings withdrawal: the owner's approval now SPENDS an SCA
+  challenge (ADR-0232 AC8). **New outbound trust boundary** `account-service → sca-service`
+  (`POST /api/v1/sca/challenges/{id}/consume`) — this service can now consume a customer's
+  single-use authentication factor, which it previously could not do at all.
+
+  Three defects made the flow impossible and each is a threat in its own right:
+
+  - **Replay (fixed).** The challenge was READ and never consumed, so one approved ceremony
+    authorised unlimited proposals. RTS Art. 5 single-use was not met. `consume` is atomic on
+    `consumedAt`, so two concurrent approvals cannot both win.
+  - **Availability (fixed).** `verifyOwnerSca` pre-checked `status == "COMPLETED"` before consuming
+    — the same defect as #3537 in delegation-service, in a second service. Nothing a customer can
+    reach promotes a decoupled challenge (customer-edge exposes create/read/decision only;
+    `decision` records the signed device decision without promoting), so every owner approval
+    failed. Party and purpose are checked here; promotion and approval enforcement belong to
+    `consume`, which owns them.
+  - **`SAVINGS_WITHDRAW_APPROVAL` was absent from `ScaPurpose`**, a closed enum, so the challenge
+    could not be created. Found only by trying to falsify the fix; the suite was green either way.
+
+  Expiry: a 7-day window with a `suspend fun` sweep (`rules.yaml: scheduled_methods` — a plain
+  `@Scheduled` method has no Vert.x context and would never run). The decision path reads the
+  window rather than the stored status, and expiry is checked BEFORE the SCA leg so a doomed
+  decision does not burn the owner's one-shot factor.
+
+  **Residual, stated plainly: no money moves.** Nothing consumes `SavingsWithdrawalApproved`, and
+  customer-edge exposes no route for these paths, so approval produces an event and a row. AC8 is
+  not done. `consume` is exercised only against a stub — no consumer pact, no provider replay — so
+  the outbound edge introduced here is the least verified part of the change.
+
 - **2026-07-09** — Account opening validates against product-catalog (ADR-0158, issue #668).
   New outbound trust boundary: `account-service → product-catalog` (`GET /api/v1/products/{id}`,
   unauthenticated, sync). `openAccount` now rejects a `productId` product-catalog confirms does
