@@ -1218,6 +1218,27 @@ gates:
     run: |
       python3 .github/scripts/check-compliance-matrix.py --enforce
 
+  # docs/compliance/openssf-gold-gap.md feeds the OpenSSF BadgeApp form -- a public
+  # attestation to a third party. It shipped scoring crypto_used_network/crypto_tls12 as
+  # met on the justification "TLS + Istio mTLS", while the live cluster has zero Istio
+  # CRDs and zero Istio namespaces (#1914 is open for exactly that), and nine other rows
+  # were scored met on justifications naming nothing checkable at all ("Attest"). An
+  # assessor checks the evidence, not the tick. Nothing read this file before #3884.
+  #
+  # Structural, not a word deny-list: a met row must cite a resolvable anchor (existing
+  # repo path / issue ref / URL), and every path-shaped citation must resolve. Partial and
+  # not-met rows are exempt, so the prose explaining the mesh gap cannot trip it -- the
+  # gate-over-prose trap. Falsified both ways against the real pre-fix document: 10
+  # findings before, 0 after. Prints the row count, so a green cannot mean "never opened".
+  - id: openssf-gold-evidence
+    name: "OpenSSF Gold gap-doc evidence citations (#3884, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-openssf-gold-evidence.py --self-test
+    run: |
+      python3 .github/scripts/check-openssf-gold-evidence.py
+
   # rules.yaml' shared_m2m_write_prohibition names this script as its own `ci_producer`, and
   # nothing invoked it — so reading rules.yaml gave every impression the rule was enforced
   # while the check had never executed (#3240). The surrounding rule is not a small one: it
