@@ -8,7 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.copilot.application.port.out.ConversationStore
 import com.openbank.copilot.domain.model.ChatMessage
 import com.openbank.copilot.domain.model.ChatRole
-import io.quarkus.arc.properties.UnlessBuildProperty
+import io.quarkus.arc.properties.IfBuildProperty
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import io.quarkus.redis.datasource.value.SetArgs
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -24,7 +24,7 @@ import org.jboss.logging.Logger
  * Only role + content are persisted (see [ConversationStore]); tool calls/results are never stored.
  */
 @ApplicationScoped
-@UnlessBuildProperty(name = "copilot.token-store", stringValue = "memory")
+@IfBuildProperty(name = "copilot.conversation-store", stringValue = "redis")
 class RedisConversationStore @Inject constructor(
     private val redis: ReactiveRedisDataSource,
     private val mapper: ObjectMapper,
