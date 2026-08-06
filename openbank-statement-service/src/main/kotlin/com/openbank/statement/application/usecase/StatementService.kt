@@ -225,6 +225,15 @@ class StatementService(
         }
     }
 
+    /**
+     * `occurredAt` is [StatementPeriod.closedAt] — the period-close instant this event announces —
+     * and NOT a clock read taken while serialising (#3914).
+     *
+     * That distinction is load-bearing in this service specifically: closedAt is the anchor every
+     * renderer takes its timestamps from ("determinism is load-bearing", see the service's
+     * CLAUDE.md), so it is the one instant a statement is already defined by. A close replayed or
+     * re-emitted later must carry the same `occurredAt`, which a serialisation-time clock would not.
+     */
     private fun periodClosedEvent(account: PocketAccountInfo, period: StatementPeriod): StatementOutboxMessage {
         val payload = """
             {"eventType":"account.statement.period.closed.v1",
@@ -238,7 +247,8 @@ class StatementService(
             "openingBalance":${period.openingBalance.toPlainString()},
             "closingBalance":${period.closingBalance.toPlainString()},
             "entryCount":${period.entryCount},
-            "closedAt":"${period.closedAt}"}
+            "closedAt":"${period.closedAt}",
+            "occurredAt":"${period.closedAt}"}
         """.trimIndent().replace("\n", "")
         return StatementOutboxMessage(
             eventId = UUID.randomUUID(),

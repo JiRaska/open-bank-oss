@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.statement.application.usecase
 
+import com.openbank.libs.testing.audit.AuditEventTime
 import com.openbank.statement.Fixtures
 import com.openbank.statement.application.port.out.AccountInfoPort
 import com.openbank.statement.application.port.out.BalancePort
@@ -17,6 +18,7 @@ import com.openbank.statement.domain.model.StatementFormat
 import com.openbank.statement.domain.model.StatementPeriod
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
@@ -79,6 +81,30 @@ class StatementServiceTest {
             )
         }
         verify(exactly = 0) { periods.save(any()) }
+    }
+
+    /**
+     * #3914: red before the payload gained `occurredAt` — the close instant was in the payload only
+     * as `closedAt`, a name `AuditConsumer` does not read, so the audit row for a statutory
+     * period-close recorded the audit consumer's ingest clock as the close time.
+     *
+     * Asserts the value equals the period's own `closedAt`, not merely that a parseable instant is
+     * present: a serialisation-time clock read would also be parseable, and would make a replayed
+     * or re-emitted close claim a different business time each time.
+     */
+    @Test
+    fun `the period-closed payload carries the close instant as the audit event time`() {
+        every { periods.findByPeriod(any(), any(), any(), any()) } returns Uni.createFrom().nullItem()
+        every { balance.closingBalance(Fixtures.ACCOUNT_ID, "CZK", to) } returns
+            Uni.createFrom().item(BalanceAnchor(BigDecimal("1075.00"), "CZK", to))
+        every { periods.nextLegalSequence(Fixtures.ACCOUNT_ID, "CZK") } returns Uni.createFrom().item(7L)
+        val msg = slot<StatementOutboxMessage>()
+        every { periods.saveWithOutbox(any(), capture(msg)) } answers
+            { Uni.createFrom().item(firstArg<StatementPeriod>()) }
+
+        val closed = service.closeMonth(Fixtures.ACCOUNT_ID, from, to).await().indefinitely().first()
+
+        AuditEventTime.assertRecordedAsEventTime(msg.captured.payload, closed.closedAt)
     }
 
     @Test
