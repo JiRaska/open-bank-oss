@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.security.infrastructure.outbox
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.security.infrastructure.persistence.repository.SecurityOutboxRepositoryImpl
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.Multi
@@ -11,7 +12,6 @@ import io.smallrye.reactive.messaging.kafka.Record
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Emitter
-import java.util.UUID
 
 @ApplicationScoped
 class SecurityOutboxDispatcher(
@@ -41,7 +41,7 @@ class SecurityOutboxDispatcher(
                 // those as SENT. Verify a publish on the BROKER, never on outbox status.
                 Uni.createFrom().completionStage {
                     emitter.send(
-                        Record.of(UUID.randomUUID().toString(), event.payload),
+                        Record.of(Ids.randomId().toString(), event.payload),
                     )
                 }
                     .chain { _ -> outboxRepository.markSentUni(event.eventId) }
