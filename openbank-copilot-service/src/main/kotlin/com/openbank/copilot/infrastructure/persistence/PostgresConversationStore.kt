@@ -139,6 +139,24 @@ class PostgresConversationStore(private val mapper: ObjectMapper) :
         }
     }
 
+    // ---- Erasure (GDPR Art. 17 / ADR-0117, #3870) --------------------------------------------
+    // These are `suspend` and deliberately do NOT go through the `vtx` bridge below: their callers
+    // (PartyErasureConsumer, ConversationRetentionScheduler) are suspend functions already dispatched
+    // on a Vert.x context, and `VertxContextSupport.subscribeAndAwait` throws when invoked from an
+    // event loop. A DELETE also removes the row outright — unlike `load`, which merely stops serving
+    // it once `expires_at` passes.
+
+    override suspend fun deleteForCustomer(customerId: String): Long =
+        Panache.withTransaction { delete("customerId = ?1", customerId) }.awaitSuspending()
+
+    override suspend fun deleteConversation(customerId: String, conversationId: String): Long =
+        Panache.withTransaction {
+            delete("customerId = ?1 and conversationId = ?2", customerId, conversationId)
+        }.awaitSuspending()
+
+    override suspend fun deleteExpired(now: Instant): Long =
+        Panache.withTransaction { delete("expiresAt <= ?1", now) }.awaitSuspending()
+
     data class StoredMessage(val role: ChatRole = ChatRole.USER, val content: String = "")
 
     private fun <T> vtx(block: suspend () -> T): T =

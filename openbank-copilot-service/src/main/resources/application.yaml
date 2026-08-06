@@ -116,6 +116,23 @@ copilot:
   # once copilot-opa-bundle.yaml is deployed and the sidecar is live (issue #998 advisory→enforce).
   opa:
     enforce: ${COPILOT_OPA_ENFORCE:false}
+  # Hard-delete of past-expires_at conversation rows (#3870). Without this the 90-day TTL is a
+  # read-side filter only: expired conversations stop being served but stay on disk forever.
+  retention:
+    conversation:
+      enabled: ${COPILOT_RETENTION_ENABLED:true}
+
+# PARTY_ERASED consumer (GDPR Art. 17 / ADR-0117), mirroring the seven services already on this
+# topic. group.id / auto.offset.reset are deliberately NOT set here: SmallRye's YAML source quotes a
+# leaf key containing a literal dot, so `group.id:` would register as `..."group.id"` and never be
+# read (#686). They belong in the copilot-service msg-override ConfigMap in gitops.
+mp:
+  messaging:
+    incoming:
+      party-events-in:
+        connector: smallrye-kafka
+        topic: openbank.party.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 # OPA sidecar (ADR-0034). Advisory mode by default.
 opa:
@@ -132,3 +149,17 @@ authz:
     datasource:
       devservices:
         enabled: true
+    # No broker under test: the PARTY_ERASED consumer is covered by a plain unit test, and a Kafka
+    # Dev Services container would only slow every @QuarkusTest in this module down. health-enabled
+    # false keeps the unreachable channel from failing readiness in the boot smoke test.
+    kafka:
+      devservices:
+        enabled: false
+  mp:
+    messaging:
+      incoming:
+        party-events-in:
+          health-enabled: false
+  kafka:
+    bootstrap:
+      servers: localhost:9092
