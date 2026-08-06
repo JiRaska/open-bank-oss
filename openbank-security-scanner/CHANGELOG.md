@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.6.0...security-scanner-v0.6.1) (2026-08-06)
+
+
+### Bug Fixes
+
+* **security-scanner:** a publish the broker rejects must not be marked SENT ([#3646](https://github.com/JiRaska/open-bank-oss/issues/3646)) ([a4cc68b](https://github.com/JiRaska/open-bank-oss/commit/a4cc68b1e95a22486f830b804023e719148c06df))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.5.7...security-scanner-v0.6.0) (2026-08-05)
 
 
