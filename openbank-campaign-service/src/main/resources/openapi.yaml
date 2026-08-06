@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.7.0
+  version: 1.8.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -501,9 +501,41 @@ components:
         partyId: { type: string, format: uuid }
         stepOrder: { type: integer }
         outcome:
+          description: >-
+            What THIS service decided and observed: the handoff. `SENT` means notification-service
+            accepted the request onto its topic — never that the customer received anything. Use
+            `deliveryStatus` for that (ADR-0239 D3, issue #3663).
           type: string
-          enum: [SENT, SUPPRESSED_CAP, SUPPRESSED_QUIET_HOURS, SUPPRESSED_CONSENT, FAILED]
+          enum:
+            - SENT
+            - SUPPRESSED_CAP
+            - SUPPRESSED_QUIET_HOURS
+            - SUPPRESSED_CONSENT
+            # Present in SendOutcome since ADR-0219 and missing from this enum until 1.8.0 — the
+            # spec understated the values a client could receive.
+            - SUPPRESSED_LIST
+            - FAILED
         occurredAt: { type: string, format: date-time }
+        deliveryStatus:
+          description: >-
+            What notification-service reported back about the message (ADR-0239 D3). `PENDING` means
+            no outcome has arrived — the honest resting state, and NOT on its own evidence of a
+            problem: a send made moments ago has not had time to be reported, and a gate-denied send
+            was never handed off at all, so it stays `PENDING` forever. Added in 1.8.0; absent on a
+            response from an older deployment.
+          type: string
+          enum: [PENDING, CONFIRMED, SUPPRESSED, FAILED]
+          default: PENDING
+        deliveryReason:
+          description: >-
+            The reported cause, verbatim (e.g. `no_active_consent`, `no_deliverable_recipient`).
+            Open-ended and additive by contract — do not switch exhaustively on it. Null while
+            `deliveryStatus` is `PENDING` or when the outcome carried no reason.
+          type: [string, 'null']
+        deliveryUpdatedAt:
+          description: When `deliveryStatus` last moved. Null while it has never moved off `PENDING`.
+          type: [string, 'null']
+          format: date-time
 
     Enrolment:
       type: object

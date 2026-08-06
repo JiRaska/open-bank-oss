@@ -13,9 +13,14 @@ import java.util.UUID
 
 /**
  * ADR-0200 D3: delivery goes through notification-service, never direct. The payload shape mirrors
- * notification-service's `NotificationRequest` (partyId, channel, template, recipient, variables);
- * the template name resolves against the notification-service catalogue there, so an unknown
- * template fails closed at the choke point, not here.
+ * notification-service's `NotificationRequest` (partyId, channel, template, recipient, variables,
+ * correlationId); the template name resolves against the notification-service catalogue there, so an
+ * unknown template fails closed at the choke point, not here.
+ *
+ * The payload is hand-built as a map rather than shared as a type — the two services do not share a
+ * module — so this map and that data class are two artifacts that can drift. Nothing in the build
+ * compares them; what does is `NotificationRequestMessagePactConsumerTest` on the other side and the
+ * AsyncAPI document, both of which have to be updated by hand when a field is added here.
  */
 @ApplicationScoped
 class KafkaNotificationSendAdapter(
@@ -28,6 +33,7 @@ class KafkaNotificationSendAdapter(
         template: String,
         recipient: String,
         variables: Map<String, String>,
+        correlationId: UUID,
     ) {
         val payload = mapper.writeValueAsString(
             mapOf(
@@ -36,6 +42,10 @@ class KafkaNotificationSendAdapter(
                 "template" to template,
                 "recipient" to recipient,
                 "variables" to variables,
+                // ADR-0239 D1 — the send-log row id. notification-service echoes it back on
+                // `openbank.notification.outcomes.v1`, which is the only way this service can learn
+                // that a send it recorded as SENT was in fact suppressed or never delivered (#3663).
+                "correlationId" to correlationId.toString(),
             ),
         )
         emitter.send(payload).toCompletableFuture().join()

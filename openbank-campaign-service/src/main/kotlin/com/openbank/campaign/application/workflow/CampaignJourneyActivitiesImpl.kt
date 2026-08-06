@@ -85,23 +85,35 @@ open class CampaignJourneyActivitiesImpl(
                 // AFTER the handoff has been observed to succeed, and a handoff that failed must
                 // leave a FAILED row rather than nothing. What SENT claims here is exactly
                 // "notification-service accepted the request", not "the customer received it".
+                // The send-log row id is minted BEFORE the handoff, not by `record` after it
+                // (ADR-0239 D1): it is what goes on the wire as the correlation id, so the id has
+                // to exist first. It is used for whichever row this attempt ends up writing —
+                // SENT or FAILED — so an outcome that arrives for a handoff that then failed
+                // locally still lands on the right row.
+                val sendId = Ids.newId()
                 try {
-                    notificationSend.requestSend(partyId, step.template, recipientFor(partyId), step.variables)
+                    notificationSend.requestSend(
+                        partyId,
+                        step.template,
+                        recipientFor(partyId),
+                        step.variables,
+                        correlationId = sendId,
+                    )
                 } catch (e: Exception) {
-                    record(campaignId, partyId, stepOrder, SendOutcome.FAILED)
+                    record(sendId, campaignId, partyId, stepOrder, SendOutcome.FAILED)
                     // Rethrown on purpose: Temporal retries the activity, and the FAILED row above
                     // is the durable evidence that this attempt happened. FAILED rows do not
                     // consume the frequency cap (SENT only), so a retry is not penalised.
                     throw e
                 }
-                record(campaignId, partyId, stepOrder, SendOutcome.SENT)
+                record(sendId, campaignId, partyId, stepOrder, SendOutcome.SENT)
                 StepOutcome.SENT
             }
             else -> {
                 if (decision.denyReason == ContactDenyReason.GATE_UNAVAILABLE) {
                     throw ContactGateUnavailableException("contact gate state unavailable — activity will retry")
                 }
-                record(campaignId, partyId, stepOrder, outcomeFor(decision.denyReason))
+                record(Ids.newId(), campaignId, partyId, stepOrder, outcomeFor(decision.denyReason))
                 StepOutcome.SUPPRESSED
             }
         }
@@ -132,8 +144,12 @@ open class CampaignJourneyActivitiesImpl(
         Unit
     }
 
-    private suspend fun record(campaignId: UUID, partyId: UUID, stepOrder: Int, outcome: SendOutcome) {
-        sendLog.record(SendRecord(Ids.newId(), campaignId, partyId, stepOrder, outcome, Instant.now()))
+    // `id` is a parameter rather than minted here: on the ALLOWED path it was already published as
+    // the correlation id, and a second id would be a row nothing can ever correlate back to.
+    // A gate-denied send never reached notification-service, so its id correlates with nothing and
+    // its delivery status stays PENDING forever — correctly: no message was ever handed off.
+    private suspend fun record(id: UUID, campaignId: UUID, partyId: UUID, stepOrder: Int, outcome: SendOutcome) {
+        sendLog.record(SendRecord(id, campaignId, partyId, stepOrder, outcome, Instant.now()))
     }
 
     // The recipient address is resolved by notification-service from party data; the campaign
