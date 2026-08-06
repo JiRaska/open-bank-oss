@@ -16,6 +16,7 @@ import com.openbank.delegation.application.port.`in`.RevokeDelegationUseCase
 import com.openbank.delegation.application.port.`in`.SuspendDelegationCommand
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.application.port.out.OwnershipVerdict
+import com.openbank.delegation.application.port.out.PartyEligibility
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
 import com.openbank.delegation.application.port.out.ResourceOwnershipClient
 import com.openbank.delegation.application.port.out.ScaChallengeClient
@@ -442,6 +443,17 @@ class DelegationService(
         if (!grantee.active) {
             throw DelegationEligibilityException("grantee party ${command.granteePartyId} is not active")
         }
+        requireGranteeKyc(command, grantee)
+        return CounterpartyNames(grantorName = grantor.displayName, granteeName = grantee.displayName)
+    }
+
+    /**
+     * Split out of [verifyEligibility] only because that function now RETURNS the counterparty
+     * labels (issue #3604): detekt's `ThrowsCount` excludes trailing guard clauses, and a
+     * function with a real return value has none — so the same three unchanged throws crossed the
+     * threshold. The gate is behaviourally identical.
+     */
+    private fun requireGranteeKyc(command: OfferDelegationCommand, grantee: PartyEligibility) {
         val needsFullKyc = command.capabilities.any { it in DelegationGrant.EXECUTION_CAPABILITIES }
         val requiredKyc = if (needsFullKyc) "FULL" else "BASIC"
         if (KYC_RANK.getValue(grantee.kycLevel) < KYC_RANK.getValue(requiredKyc)) {
@@ -450,7 +462,6 @@ class DelegationService(
                     "is below required $requiredKyc for capabilities ${command.capabilities}",
             )
         }
-        return CounterpartyNames(grantorName = grantor.displayName, granteeName = grantee.displayName)
     }
 
     /** The two labels the eligibility lookup yields as a by-product (issue #3604). */
