@@ -1184,6 +1184,17 @@ jobs:
         id: rewrite
         run: |
           set -euo pipefail
+          # Recompute against LIVE main (#3194). Same exposure admin-ui-deploy.yml has: the
+          # checkout holds github.sha, the build takes minutes, and create-pull-request branches
+          # from that HEAD. If another deploy merges in the window, both sides have rewritten the
+          # same image: line and the PR is born CONFLICTED — which means no refs/pull/<n>/merge
+          # and therefore NO workflow run at all. Not skipped, absent. It renders as "waiting",
+          # never as broken, and the image is never deployed.
+          #
+          # Safe because the rewrite is deterministic — pin each image: to the tag just built —
+          # so recomputing against a newer main is always correct.
+          git fetch origin main
+          git reset --hard origin/main
           IMAGE_TAGS='${{ needs.build-push.outputs.image_tags }}'
           UPDATED=()
 
