@@ -41,6 +41,13 @@ interface SendLogRepository {
     suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long): Int
 
     /**
+     * Lifetime SENT rows for one party in one campaign — the observable state the ADR-0200 D1
+     * stop condition (#3585) is evaluated against. Counts across journeys, so a re-enrolled
+     * party's cap covers every send the campaign ever made to them.
+     */
+    suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID): Int
+
+    /**
      * One page of send attempts for a campaign, newest first — the operator view of what happened.
      *
      * Paged at the repository, not in the caller: a campaign's send log has one row per party per

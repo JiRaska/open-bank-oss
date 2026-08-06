@@ -173,12 +173,12 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "b5d86b8212b2e8d8",
+      "sha256": "4d284a55df49ca2a",
       "counts": {
         "external": 2,
         "not-applicable": 2,
-        "pending": 6,
-        "registered": 5
+        "pending": 2,
+        "registered": 9
       },
       "idsByStatus": {
         "external": [
@@ -190,19 +190,19 @@
           "ap2-anonymous"
         ],
         "pending": [
-          "finops-agent",
-          "governance-auditor",
-          "release-steward",
           "docs-truth-agent",
-          "authz-policy-auditor",
-          "flaky-test-hunter"
+          "authz-policy-auditor"
         ],
         "registered": [
           "compliance-officer",
           "ui-assistant",
           "customer-copilot",
           "devops-agent",
-          "control-liveness-sentinel"
+          "control-liveness-sentinel",
+          "finops-agent",
+          "governance-auditor",
+          "release-steward",
+          "flaky-test-hunter"
         ]
       }
     },
@@ -237,13 +237,45 @@
             "devops-agent"
           ],
           "buildFile": "openbank-devops-agent/build.gradle.kts"
+        },
+        {
+          "module": "openbank-finops-agent",
+          "charters": [
+            "finops-agent"
+          ],
+          "buildFile": "openbank-finops-agent/build.gradle.kts"
+        },
+        {
+          "module": "openbank-flaky-test-hunter",
+          "charters": [
+            "flaky-test-hunter"
+          ],
+          "buildFile": "openbank-flaky-test-hunter/build.gradle.kts"
+        },
+        {
+          "module": "openbank-governance-auditor",
+          "charters": [
+            "governance-auditor"
+          ],
+          "buildFile": "openbank-governance-auditor/build.gradle.kts"
+        },
+        {
+          "module": "openbank-release-steward",
+          "charters": [
+            "release-steward"
+          ],
+          "buildFile": "openbank-release-steward/build.gradle.kts"
         }
       ],
-      "serviceCount": 3,
+      "serviceCount": 7,
       "registeredChartersLoadedFromRegistry": [
         "compliance-officer",
         "control-liveness-sentinel",
         "devops-agent",
+        "finops-agent",
+        "flaky-test-hunter",
+        "governance-auditor",
+        "release-steward",
         "ui-assistant"
       ],
       "registeredChartersStillInline": [

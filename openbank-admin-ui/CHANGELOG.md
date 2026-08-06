@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.96.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.95.0...admin-ui-v0.96.0) (2026-08-06)
+
+
+### Features
+
+* **governance-auditor:** wire prompt registry and LLM gateway seam ([#3783](https://github.com/JiRaska/open-bank-oss/issues/3783)) ([226f9bf](https://github.com/JiRaska/open-bank-oss/commit/226f9bf131b48fe4ccac85481f4c93455a1bb640))
+
+## [0.95.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.94.0...admin-ui-v0.95.0) (2026-08-06)
+
+
+### Features
+
+* **campaign:** stop journeys at the campaign's own send cap (ADR-0200 D1, [#3585](https://github.com/JiRaska/open-bank-oss/issues/3585) slice 1) ([#3635](https://github.com/JiRaska/open-bank-oss/issues/3635)) ([9c513e8](https://github.com/JiRaska/open-bank-oss/commit/9c513e83dfc19300a9afe543026ec891063783d3))
+
+## [0.94.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.93.0...admin-ui-v0.94.0) (2026-08-06)
+
+
+### Features
+
+* **delegation:** snapshot counterparty display names onto a grant ([#3797](https://github.com/JiRaska/open-bank-oss/issues/3797)) ([5bc41f6](https://github.com/JiRaska/open-bank-oss/commit/5bc41f6f4735384fc65388d9a5854a3ce88f4b1d))
+* **flaky-test-hunter:** register prompt registry and wire LlmDiagnosisAdapter to shared gateway ([#3810](https://github.com/JiRaska/open-bank-oss/issues/3810)) ([8b94785](https://github.com/JiRaska/open-bank-oss/commit/8b9478502942572d819d78f4ef32c8b8a2d16224))
+
+## [0.93.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.92.1...admin-ui-v0.93.0) (2026-08-06)
+
+
+### Features
+
+* **release-steward:** wire prompt registry and LLM gateway ([#3785](https://github.com/JiRaska/open-bank-oss/issues/3785)) ([17679d7](https://github.com/JiRaska/open-bank-oss/commit/17679d7b6328208c6845e41a13ab6e034a4ce680)), closes [#3784](https://github.com/JiRaska/open-bank-oss/issues/3784)
+
+## [0.92.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.92.0...admin-ui-v0.92.1) (2026-08-05)
+
+
+### Security
+
+* **admin-ui:** GDPR privacy notice, a11y fixes, security.txt + DNS SPF drift fix ([#3788](https://github.com/JiRaska/open-bank-oss/issues/3788)) ([78a4f49](https://github.com/JiRaska/open-bank-oss/commit/78a4f49ca727451457e3c1483c626c0c60002e43))
+
+## [0.92.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.91.5...admin-ui-v0.92.0) (2026-08-05)
+
+
+### Features
+
+* **finops-agent:** wire ADR-0148 prompt registry and LLM gateway (ADR-0112 P4) ([407c1b3](https://github.com/JiRaska/open-bank-oss/commit/407c1b3cd175b32c443077edbcfcbf4e28cc0248))
+
+## [0.91.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.91.4...admin-ui-v0.91.5) (2026-08-05)
+
+
+### Bug Fixes
+
+* **admin-ui:** Date.now() purity fixes + pin OriginationPipeline test clock ([#3717](https://github.com/JiRaska/open-bank-oss/issues/3717)) ([c0d881e](https://github.com/JiRaska/open-bank-oss/commit/c0d881eddb5d90e7318f9ee5a5924d009985d879))
+
+## [0.91.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.91.3...admin-ui-v0.91.4) (2026-08-04)
+
+
+### Bug Fixes
+
+* **admin-ui:** make cluster-topology image fallback honest about unknowns ([#3720](https://github.com/JiRaska/open-bank-oss/issues/3720)) ([1e607cd](https://github.com/JiRaska/open-bank-oss/commit/1e607cd2f31ded70e63749f35427bd473c10a2b1)), closes [#3630](https://github.com/JiRaska/open-bank-oss/issues/3630)
+
 ## [0.91.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.91.2...admin-ui-v0.91.3) (2026-08-03)
 
 

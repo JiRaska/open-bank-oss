@@ -79,6 +79,15 @@ data class DelegationGrant(
     val id: UUID = Ids.newId(),
     val grantorPartyId: UUID,
     val granteePartyId: UUID,
+    /**
+     * Counterparty labels SNAPSHOTTED at offer time from the eligibility lookup this service
+     * already performs (issue #3604). Deliberately part of the authorisation record rather than a
+     * live lookup: a grant says who agreed to what at the moment they agreed, and a later rename
+     * must not silently rewrite that. Null for grants created before this field existed, and for
+     * a party pid-service returns no usable name for — consumers fall back to the party id.
+     */
+    val grantorName: String? = null,
+    val granteeName: String? = null,
     val resourceType: DelegationResourceType,
     val resourceId: UUID,
     val capabilities: Set<DelegationCapability>,

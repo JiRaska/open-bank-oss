@@ -61,6 +61,22 @@ class AuditEntryEntity : PanacheEntity() {
     @Column(name = "record_hash")
     var recordHash: String? = null
 
+    /**
+     * Which canonical form [AuditRepository.chainHash] used for [recordHash].
+     *
+     * NULL means the pre-#3586 form, which hashed nanosecond `Instant.toString()` while
+     * `timestamptz` keeps microseconds — those rows are permanently unverifiable because the lost
+     * digits are not in the database (#3505). They are counted on their own rather than reported
+     * as broken: a failure to VERIFY is not evidence of tampering, and the pre-V5 `unchained`
+     * bucket already means something else ("never had a hash at all").
+     *
+     * It is a version number and not a boolean so the next canonical change — if there ever is
+     * one — is a new value rather than a second ad-hoc column, and so the boundary stays legible
+     * in the data instead of living in a comment.
+     */
+    @Column(name = "hash_version")
+    var hashVersion: Short? = null
+
     // ── Cross-channel correlation (ADR-0226): query indexes, NOT part of the chain hash — the
     // producer's raw event JSON (already hashed via `payload`) carries these fields verbatim, so
     // tamper-evidence covers them without recomputing every pre-V9 row.
@@ -116,6 +132,7 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
                 it.sessionId = entry.sessionId
                 it.prevHash = prevHash
                 it.recordHash = chainHash(prevHash, stored)
+                it.hashVersion = HASH_VERSION_MICROS
             }
             Panache.withTransaction { persist(e) }.awaitSuspending()
         }
@@ -132,14 +149,22 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
      *   The anchor row's own prevHash is used as the expected-previous for the walk, so
      *   the check is self-contained from that point onward.
      *   If the id is not found the walk starts from the beginning (fail-safe).
+     *
+     * Rows in the legacy segment ([isLegacyHashVersion]) are counted and skipped, and the walk then
+     * re-anchors `expectedPrev` on the first verifiable row's OWN prevHash. Without that re-anchor
+     * the boundary link would be compared against a hash from the other canonical form, and the
+     * first GOOD row would report as tampering — the same false positive this exists to remove,
+     * moved one row along.
      */
-    @Suppress("LoopWithTooManyJumpStatements", "NestedBlockDepth")
+    @Suppress("LoopWithTooManyJumpStatements", "NestedBlockDepth", "CyclomaticComplexMethod")
     suspend fun verifyChain(fromEntryId: UUID? = null): ChainVerification {
         var checked = 0L
         var unchained = 0L
+        var unverifiableLegacy = 0L
         var expectedPrev = GENESIS_HASH
         var page = 0
         var found = fromEntryId == null // skip scan if no anchor requested
+        var reAnchorAtNextVerifiable = false
 
         while (true) {
             val batch = Panache.withSession {
@@ -161,14 +186,25 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
                     unchained++
                     continue
                 }
+                // A chained row whose hash_version is NULL was written with the pre-#3586
+                // canonical form, which hashed nanosecond precision the database then truncated
+                // (#3505). Its original digits are not in the database, so no rendering of the
+                // stored row can reproduce its hash — it is unverifiable, permanently, and that
+                // is NOT evidence of tampering. Counting it separately is the whole point: the
+                // pre-V5 `unchained` bucket means "never had a hash", which is a different fact,
+                // and merging the two would let a real gap hide inside a known one.
+                if (isLegacyHashVersion(e)) {
+                    unverifiableLegacy++
+                    reAnchorAtNextVerifiable = true
+                    continue
+                }
+                if (reAnchorAtNextVerifiable) {
+                    expectedPrev = e.prevHash ?: GENESIS_HASH
+                    reAnchorAtNextVerifiable = false
+                }
                 val recomputed = chainHash(e.prevHash ?: GENESIS_HASH, e.toDomain())
                 if (chainLinkBroken(e.prevHash, expectedPrev, e.recordHash!!, recomputed)) {
-                    return ChainVerification(
-                        intact = false,
-                        checked = checked,
-                        unchained = unchained,
-                        firstBrokenEntryId = e.entryId,
-                    )
+                    return ChainVerification(false, checked, unchained, unverifiableLegacy, e.entryId)
                 }
                 expectedPrev = e.recordHash!!
                 checked++
@@ -176,15 +212,66 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
             page++
         }
         if (anchorMissed(found, fromEntryId)) {
-            return ChainVerification(intact = false, checked = 0, unchained = 0, anchorNotFound = true)
+            return ChainVerification(false, 0, 0, 0, anchorNotFound = true)
         }
-        return ChainVerification(
-            intact = true,
-            checked = checked,
-            unchained = unchained,
-            firstBrokenEntryId = null,
-        )
+        return ChainVerification(true, checked, unchained, unverifiableLegacy)
     }
+
+    /**
+     * Appends a row with the chain fields supplied verbatim, bypassing [save].
+     *
+     * Test seam, and it has to look like this for two reasons that are properties of the schema
+     * rather than choices:
+     *
+     * 1. `audit_entries` is append-only at the DATABASE level — `V2__compliance_fields.sql`
+     *    installs `RULE no_update_audit ... DO INSTEAD NOTHING`, which *silently discards* an
+     *    UPDATE rather than refusing it. A legacy row can therefore only be appended, never
+     *    demoted. (That same rule is why the legacy hashes could not have been backfilled even if
+     *    rewriting tamper-evidence had been acceptable.)
+     * 2. The id comes from `nextval('audit_entries_seq')` — the SAME allocator Hibernate uses — so
+     *    ids stay monotonic. Mixing allocators broke two earlier attempts: `MAX(id)+1` collides
+     *    with an id Hibernate has already reserved from its cached block (`V4` gives the sequence
+     *    `INCREMENT BY 50`), and letting Hibernate write a neighbouring row lands it at a LOWER id
+     *    than a raw `nextval`, scrambling chain order. A test needing consecutive rows must write
+     *    BOTH of them through this seam.
+     *
+     * Returns rows inserted so the caller can assert the seam did something — a seam that no-ops
+     * makes the test it supports pass for the wrong reason, which is how the first version of this
+     * test went green against unchanged code.
+     */
+    @Suppress("LongParameterList")
+    suspend fun appendRawRow(entry: AuditEntry, prevHash: String, recordHash: String, hashVersion: Short?): Int =
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery<Any>(
+                    """
+                    INSERT INTO audit_entries
+                      (id, entry_id, event_type, aggregate_type, aggregate_id, actor_id, actor_type,
+                       payload, source_service, correlation_id, occurred_at, recorded_at,
+                       prev_hash, record_hash, hash_version)
+                    VALUES
+                      (nextval('audit_entries_seq'), :entryId, :eventType, :aggregateType,
+                       :aggregateId, :actorId, :actorType, :payload, :sourceService, :correlationId,
+                       :occurredAt, :recordedAt, :prevHash, :recordHash, :hashVersion)
+                    """.trimIndent(),
+                )
+                    .setParameter("entryId", entry.id)
+                    .setParameter("eventType", entry.eventType)
+                    .setParameter("aggregateType", entry.aggregateType)
+                    .setParameter("aggregateId", entry.aggregateId)
+                    .setParameter("actorId", entry.actorId)
+                    .setParameter("actorType", entry.actorType)
+                    .setParameter("payload", entry.payload)
+                    .setParameter("sourceService", entry.sourceService)
+                    .setParameter("correlationId", entry.correlationId)
+                    .setParameter("occurredAt", entry.occurredAt.truncatedTo(ChronoUnit.MICROS))
+                    .setParameter("recordedAt", entry.recordedAt.truncatedTo(ChronoUnit.MICROS))
+                    .setParameter("prevHash", prevHash)
+                    .setParameter("recordHash", recordHash)
+                    .setParameter("hashVersion", hashVersion)
+                    .executeUpdate()
+            }
+        }.awaitSuspending()
 
     suspend fun findByAggregateId(aggregateId: String, limit: Int = 100): List<AuditEntry> = Panache.withSession {
         find("aggregateId = ?1 ORDER BY occurredAt DESC", aggregateId).page(0, limit).list()
@@ -234,6 +321,13 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
         private const val GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000"
         private const val CHAIN_PAGE_SIZE = 500
 
+        /**
+         * Canonical form 2: every timestamp truncated to microseconds before hashing, so the value
+         * hashed is the value `timestamptz` can give back. Form 1 is implicit (NULL) and is never
+         * written again — it exists only as the marker on rows that predate #3586.
+         */
+        internal const val HASH_VERSION_MICROS: Short = 2
+
         private val actChainJson = com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
         private val stringListType = object : com.fasterxml.jackson.core.type.TypeReference<List<String>>() {}
 
@@ -273,6 +367,15 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
     }
 }
 
+/**
+ * A chained row written with the pre-#3586 canonical form: its hash covered nanoseconds the
+ * database truncated (#3505), so it can never be recomputed — unverifiable, not tampered with.
+ *
+ * File-scope rather than a method: it is a predicate about a ROW, and keeping it off the repository
+ * also keeps that class under detekt's function-count threshold.
+ */
+private fun isLegacyHashVersion(e: AuditEntryEntity) = e.recordHash != null && e.hashVersion == null
+
 /** Chain head snapshot used to capture a signed anchor (see [AuditRepository.chainHead]). */
 data class ChainHead(
     val entryId: UUID,
@@ -287,6 +390,14 @@ data class ChainVerification(
     val checked: Long,
     /** Rows written before the chain existed (V5) — counted, not verifiable. */
     val unchained: Long,
+    /**
+     * Rows that DO carry a `record_hash` but were written with the pre-#3586 canonical form, which
+     * hashed nanoseconds the database truncated (#3505). Permanently unverifiable — the lost digits
+     * are not in the database — and deliberately not folded into [unchained], which means the
+     * different fact "never had a hash at all". Keeping them apart is what stops a real gap hiding
+     * inside a known one.
+     */
+    val unverifiableLegacy: Long = 0,
     val firstBrokenEntryId: UUID? = null,
     /** True when the requested fromEntryId anchor was not found in the chain; intact is false. */
     val anchorNotFound: Boolean = false,

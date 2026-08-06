@@ -148,6 +148,11 @@ DECLARED: dict[str, tuple[str, str]] = {
         "setup-java",
         "Same setup-java keying as pitest.",
     ),
+    "perf-gate.yml::perf": (
+        "read-only",
+        "Consumer; restores fleet-lint's home. Weekly advisory k6 gate (ADR-0243) — "
+        "never a writer, so it costs the pool nothing.",
+    ),
 }
 
 

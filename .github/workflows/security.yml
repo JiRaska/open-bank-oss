@@ -193,7 +193,7 @@ jobs:
         include: ${{ fromJSON(needs.detect-deps.outputs.codeql_matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         if: matrix.language == 'java-kotlin'
         with:
           distribution: temurin
@@ -217,7 +217,7 @@ jobs:
         with:
           node-version: "20"
 
-      - uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+      - uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -266,7 +266,7 @@ jobs:
             echo "compile tasks executed: $executed"
           fi
 
-      - uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+      - uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
         with:
           category: "/language:${{ matrix.language }}"
 
@@ -393,14 +393,14 @@ jobs:
       # this repo went public failed here). Distinct categories per file fixes it.
       - name: Upload Trivy fs SARIF
         if: always() && steps.verify-trivy.outcome == 'success' && github.event.repository.private == false
-        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
 
       - name: Upload Trivy config SARIF
         if: always() && steps.verify-trivy.outcome == 'success' && github.event.repository.private == false
-        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
         with:
           sarif_file: trivy-config.sarif
           category: trivy-config
@@ -453,7 +453,7 @@ jobs:
     if: needs.detect-deps.outputs.run_sbom == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: "25"

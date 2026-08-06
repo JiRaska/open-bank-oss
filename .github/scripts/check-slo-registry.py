@@ -75,6 +75,14 @@ def main() -> int:
                     f"{name}: metadata.labels['openbank.io/money-path-service']={label_service!r} "
                     f"does not match the owning service {service!r}."
                 )
+            if spec.get("alerting", {}).get("absent") is not False:
+                violations.append(
+                    f"{name}: spec.alerting.absent must be explicitly false (issue #3333). Pyrra "
+                    f"defaults it to true, which emits a critical SLOMetricAbsent on "
+                    f"absent(<span-metric>) — a condition an IDLE service satisfies permanently, "
+                    f"since Tempo span-metrics only exist while traffic flows. Liveness is carried "
+                    f"by the up==0 rules in prometheus-rules-tier1.yaml instead."
+                )
 
     # An SLO object naming a service that isn't (or no longer is) money-path is orphaned data.
     money_path_shorts = {short_name(s) for s in money_path_services}
@@ -98,5 +106,29 @@ def main() -> int:
     return 0
 
 
+def self_test() -> int:
+    """Feed the absent-flag rule (issue #3333) an input it MUST reject and one it must accept.
+
+    The gate itself reads the real manifest, which is the only case it will ever see in CI; that
+    makes the failure path unexercised code. This harness exercises it directly on the predicate,
+    so a refactor that stops rejecting `absent: true` is caught at the point of change.
+    """
+    cases = [
+        ({"alerting": {"absent": False}}, False, "explicit false — the only accepted shape"),
+        ({}, True, "no alerting block at all — Pyrra defaults absent to true"),
+        ({"alerting": {}}, True, "alerting block without the key — same default"),
+        ({"alerting": {"absent": True}}, True, "explicitly re-enabled"),
+        ({"alerting": {"absent": "false"}}, True, "string, not bool — YAML would not disable it"),
+    ]
+    failures = 0
+    for spec, must_flag, why in cases:
+        flagged = spec.get("alerting", {}).get("absent") is not False
+        ok = flagged == must_flag
+        print(f"  {'ok  ' if ok else 'FAIL'} flagged={flagged!s:5} expected={must_flag!s:5}  {why}")
+        failures += not ok
+    print("SLO registry self-test:", "OK" if not failures else f"{failures} FAILED")
+    return 1 if failures else 0
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(self_test() if "--self-test" in sys.argv else main())

@@ -34,6 +34,7 @@ const EXEMPT = new Set<string>([
   'auth/login/page.tsx',
   'auth/error/page.tsx',
   'auth/forbidden/page.tsx',
+  'privacy/page.tsx',
 ])
 
 function walk(dir: string): string[] {
