@@ -15,7 +15,6 @@ import com.openbank.statement.application.port.out.PocketAccountInfo
 import com.openbank.statement.application.port.out.StatementOutboxMessage
 import com.openbank.statement.application.port.out.StatementPeriodRepository
 import com.openbank.statement.domain.model.BalanceAnchor
-import com.openbank.statement.domain.model.CreditDebit
 import com.openbank.statement.domain.model.PeriodCloseStatus
 import com.openbank.statement.domain.model.StatementEntry
 import com.openbank.statement.domain.model.StatementFormat
@@ -96,7 +95,7 @@ class StatementService(
     ): Uni<StatementPeriod> = bookedEntries.bookedEntries(account.accountId, currency, from, to).flatMap { entries ->
         openingBalance(account.accountId, currency, from).flatMap { opening ->
             balance.closingBalance(account.accountId, currency, to).flatMap { reported ->
-                val net = netMovement(entries)
+                val net = netMovementOf(entries)
                 when (val r = ReconciliationPolicy.reconcile(opening, net, reported.amount)) {
                     is ReconciliationPolicy.Result.Mismatch ->
                         Uni.createFrom().failure(
@@ -175,7 +174,7 @@ class StatementService(
     ): Uni<StatementRenderer.Rendered> = accountInfo.pocketAccount(accountId).flatMap { account ->
         bookedEntries.bookedEntries(accountId, currency, from, to).flatMap { entries ->
             openingBalance(accountId, currency, from).map { opening ->
-                val closing = opening.add(netMovement(entries))
+                val closing = opening.add(netMovementOf(entries))
                 // Non-sequenced informational export (legal/electronic sequence = 0).
                 val model = StatementModel(
                     accountId = accountId,
@@ -217,13 +216,6 @@ class StatementService(
         closedAt = period.closedAt,
         supersedesSequence = period.supersedesSequence,
     )
-
-    private fun netMovement(entries: List<StatementEntry>): BigDecimal = entries.fold(BigDecimal.ZERO) { acc, e ->
-        when (e.creditDebit) {
-            CreditDebit.CRDT -> acc.add(e.amount)
-            CreditDebit.DBIT -> acc.subtract(e.amount)
-        }
-    }
 
     private fun periodClosedEvent(account: PocketAccountInfo, period: StatementPeriod): StatementOutboxMessage {
         val payload = """
