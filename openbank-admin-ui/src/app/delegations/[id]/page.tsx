@@ -25,7 +25,6 @@ import { EntityChip } from '@/components/entities/EntityChip'
 import {
   DelegationStatusBadge,
   capabilityLabels,
-  counterpartyLabel,
   formatCeiling,
   type Grant,
 } from '@/components/delegations/GrantView'
@@ -87,10 +86,10 @@ export default function DelegationDetailPage() {
               <dd><DelegationStatusBadge status={grant.status} /></dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Udělil', 'Grantor')}</dt>
-              <dd><EntityChip type="party" id={grant.grantorPartyId} label={counterpartyLabel(grant.grantorName)} /></dd>
+              <dd><EntityChip type="party" id={grant.grantorPartyId} /></dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Obdržel', 'Grantee')}</dt>
-              <dd><EntityChip type="party" id={grant.granteePartyId} label={counterpartyLabel(grant.granteeName)} /></dd>
+              <dd><EntityChip type="party" id={grant.granteePartyId} /></dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Typ zdroje', 'Resource type')}</dt>
               <dd>{grant.resourceType}</dd>

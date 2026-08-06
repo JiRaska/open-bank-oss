@@ -42,29 +42,6 @@ class DelegationDtosTest {
         assertThat(response.status).isEqualTo(DelegationStatus.ACTIVE)
     }
 
-    /**
-     * Issue #3604. The whole fix is worthless if the snapshotted label stops at the aggregate —
-     * the accept screen only ever sees `DelegationResponse`.
-     */
-    @Test
-    fun `DelegationResponse carries the snapshotted counterparty names to the client`() {
-        val named = grant().copy(grantorName = "Alice Testerova", granteeName = "Bob Zkousky")
-
-        val response = DelegationResponse.from(named)
-
-        assertThat(response.grantorName).isEqualTo("Alice Testerova")
-        assertThat(response.granteeName).isEqualTo("Bob Zkousky")
-    }
-
-    /** A pre-#3604 grant carries no label, and the response must say so rather than invent one. */
-    @Test
-    fun `a grant with no snapshotted name responds with nulls`() {
-        val response = DelegationResponse.from(grant())
-
-        assertThat(response.grantorName).isNull()
-        assertThat(response.granteeName).isNull()
-    }
-
     @Test
     fun `ExposureDto round-trips through the domain`() {
         val dto = ExposureDto(

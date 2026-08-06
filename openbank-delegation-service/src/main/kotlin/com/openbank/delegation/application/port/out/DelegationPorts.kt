@@ -27,21 +27,8 @@ interface DelegationRepository {
     fun markExpired(id: UUID, expiredAt: OffsetDateTime, event: DomainEvent): Uni<Boolean>
 }
 
-/**
- * ADR-0232 D5 — what the eligibility gate needs to know about a party, nothing more.
- *
- * [displayName] is the ONE extra field, and it is not an eligibility input: it is the
- * counterparty label snapshotted onto the grant at offer time (issue #3604). It is deliberately
- * a single already-composed string rather than the party's core attributes — the grant record has
- * no use for a birthdate, and the narrower the shape the less PII travels into this service.
- * Null when pid-service returns no usable name; the caller must then fall back to the id.
- */
-data class PartyEligibility(
-    val partyId: UUID,
-    val active: Boolean,
-    val kycLevel: String,
-    val displayName: String? = null,
-)
+/** ADR-0232 D5 — what the eligibility gate needs to know about a party, nothing more. */
+data class PartyEligibility(val partyId: UUID, val active: Boolean, val kycLevel: String)
 
 interface PartyEligibilityClient {
     suspend fun eligibilityOf(partyId: UUID): PartyEligibility

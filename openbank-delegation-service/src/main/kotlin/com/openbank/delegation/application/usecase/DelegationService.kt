@@ -16,7 +16,6 @@ import com.openbank.delegation.application.port.`in`.RevokeDelegationUseCase
 import com.openbank.delegation.application.port.`in`.SuspendDelegationCommand
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.application.port.out.OwnershipVerdict
-import com.openbank.delegation.application.port.out.PartyEligibility
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
 import com.openbank.delegation.application.port.out.ResourceOwnershipClient
 import com.openbank.delegation.application.port.out.ScaChallengeClient
@@ -84,7 +83,7 @@ class DelegationService(
         val now = OffsetDateTime.now(clock)
         requireCallerIs(command.callerPartyId, command.grantorPartyId)
         verifyResourceOwnership(command)
-        val parties = verifyEligibility(command)
+        verifyEligibility(command)
         // SCA last of the three gates: it SPENDS the challenge, so a request that was going to be
         // refused anyway must not cost the customer their ceremony.
         verifyAndConsumeSca(
@@ -97,10 +96,6 @@ class DelegationService(
         val grant = DelegationGrant(
             grantorPartyId = command.grantorPartyId,
             granteePartyId = command.granteePartyId,
-            // Snapshotted from the eligibility lookup that just ran — no extra call, and no new
-            // authority anywhere: this service is already permitted to read both parties (#3604).
-            grantorName = parties.grantorName,
-            granteeName = parties.granteeName,
             resourceType = command.resourceType,
             resourceId = command.resourceId,
             capabilities = command.capabilities,
@@ -434,7 +429,7 @@ class DelegationService(
      * offers, never wave them through. KYC requirements: FULL for execution
      * capabilities (they move money), BASIC for everything read-only/propose-only.
      */
-    private suspend fun verifyEligibility(command: OfferDelegationCommand): CounterpartyNames {
+    private suspend fun verifyEligibility(command: OfferDelegationCommand) {
         val grantor = partyEligibilityClient.eligibilityOf(command.grantorPartyId)
         if (!grantor.active) {
             throw DelegationEligibilityException("grantor party ${command.grantorPartyId} is not active")
@@ -443,17 +438,6 @@ class DelegationService(
         if (!grantee.active) {
             throw DelegationEligibilityException("grantee party ${command.granteePartyId} is not active")
         }
-        requireGranteeKyc(command, grantee)
-        return CounterpartyNames(grantorName = grantor.displayName, granteeName = grantee.displayName)
-    }
-
-    /**
-     * Split out of [verifyEligibility] only because that function now RETURNS the counterparty
-     * labels (issue #3604): detekt's `ThrowsCount` excludes trailing guard clauses, and a
-     * function with a real return value has none — so the same three unchanged throws crossed the
-     * threshold. The gate is behaviourally identical.
-     */
-    private fun requireGranteeKyc(command: OfferDelegationCommand, grantee: PartyEligibility) {
         val needsFullKyc = command.capabilities.any { it in DelegationGrant.EXECUTION_CAPABILITIES }
         val requiredKyc = if (needsFullKyc) "FULL" else "BASIC"
         if (KYC_RANK.getValue(grantee.kycLevel) < KYC_RANK.getValue(requiredKyc)) {
@@ -463,9 +447,6 @@ class DelegationService(
             )
         }
     }
-
-    /** The two labels the eligibility lookup yields as a by-product (issue #3604). */
-    private data class CounterpartyNames(val grantorName: String?, val granteeName: String?)
 
     private companion object {
         const val SCA_PURPOSE_GRANT = "DELEGATION_GRANT"

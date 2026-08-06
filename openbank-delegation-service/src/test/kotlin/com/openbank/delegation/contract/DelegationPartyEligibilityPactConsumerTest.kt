@@ -70,14 +70,6 @@ class DelegationPartyEligibilityPactConsumerTest {
                 o.stringValue("id", PARTY_ID)
                 o.stringValue("status", "ACTIVE")
                 o.`object`("kycAttributes") { kyc -> kyc.stringValue("kycLevel", "FULL") }
-                // issue #3604 — the counterparty display name snapshotted onto a grant comes from
-                // here. `stringType`, not `stringValue`: unlike status and kycLevel these are not
-                // a closed vocabulary the consumer ranks, so the contract is the PATH and the type,
-                // not the literal. The values match the provider's @State seed (synthetic).
-                o.`object`("coreAttributes") { core ->
-                    core.stringType("givenName", "Pact")
-                    core.stringType("familyName", "Verifier")
-                }
             }.build(),
         )
         .toPact()
@@ -97,11 +89,5 @@ class DelegationPartyEligibilityPactConsumerTest {
         // Asserted at the nested path the client actually reads — not `kycLevel` at the root,
         // which is exactly the shape change the elvis default would swallow.
         assertThat(body.getString("kycAttributes.kycLevel")).isEqualTo("FULL")
-        // Asserted at the nested paths ResilientPartyEligibilityClient reads to build the grant's
-        // counterparty label. If pid-service moved these, the client would snapshot null and the
-        // accept screen would silently go back to showing a UUID (issue #3604) — a fail-quiet
-        // regression the provider replay is what actually catches.
-        assertThat(body.getString("coreAttributes.givenName")).isEqualTo("Pact")
-        assertThat(body.getString("coreAttributes.familyName")).isEqualTo("Verifier")
     }
 }

@@ -70,18 +70,6 @@ data class DelegationResponse(
     val id: UUID,
     val grantorPartyId: UUID,
     val granteePartyId: UUID,
-    /**
-     * Counterparty labels as snapshotted on the grant (issue #3604). Null on grants offered
-     * before the field existed; a client must fall back to the party id rather than render a
-     * blank, which on a consent screen reads as a name that failed to load.
-     *
-     * Disclosure boundary: every read path is party-scoped — `getDelegation` 404s a caller who is
-     * neither grantor nor grantee, and the list endpoints refuse a party id other than the
-     * authenticated one — so these names reach only the two parties to the grant and role-gated
-     * bank staff. They are NOT a party-name lookup: nothing here resolves an arbitrary id.
-     */
-    val grantorName: String?,
-    val granteeName: String?,
     val resourceType: DelegationResourceType,
     val resourceId: UUID,
     val capabilities: Set<DelegationCapability>,
@@ -105,8 +93,6 @@ data class DelegationResponse(
             id = g.id,
             grantorPartyId = g.grantorPartyId,
             granteePartyId = g.granteePartyId,
-            grantorName = g.grantorName,
-            granteeName = g.granteeName,
             resourceType = g.resourceType,
             resourceId = g.resourceId,
             capabilities = g.capabilities,

@@ -26,10 +26,6 @@ class DelegationGrantEntityTest {
             id = UUID.randomUUID(),
             grantorPartyId = UUID.randomUUID(),
             granteePartyId = UUID.randomUUID(),
-            // #3604 — the snapshotted counterparty labels are columns like any other, and this
-            // assertion is `isEqualTo(grant)`, so a mapping that dropped them would fail here.
-            grantorName = "Alice Testerova",
-            granteeName = "Bob Zkousky",
             resourceType = DelegationResourceType.PAYMENT,
             resourceId = UUID.randomUUID(),
             capabilities = setOf(DelegationCapability.OBJECT_READ),

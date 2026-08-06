@@ -76,21 +76,6 @@ import java.util.concurrent.TimeUnit
  * because it serves whatever the pact says; only asking the real `PartyResource` for the real
  * `PartyResponse` can (#2269).
  *
- * Since issue #3604 the same interaction also pins `coreAttributes.givenName` / `familyName`,
- * and the identical argument applies with a customer-visible consequence: delegation-service
- * snapshots those two fields into the counterparty label shown on the ACCEPT screen, tolerating
- * their absence by design (null label -> the client falls back to the party id). So moving or
- * renaming them would silently return that screen to showing an unidentifiable UUID — the exact
- * defect #3604 fixed — with every consumer-side test still green. This replay is the only thing
- * that goes red.
- *
- * Consequence for [stateActiveFullKycParty]: its `givenName`/`familyName` are no longer incidental
- * fixture noise. They are the values the pact matches (by type, not literal), so the seed must
- * keep populating both. Note that CI reaches this class only when pid-service is in the build
- * set, which on a PR means a file under `openbank-pid-service/` changed — a diff confined to the
- * `pacts` directory does NOT pull the provider in on the PR lane (only the push lane maps a pact
- * file to both ends). A PR that edits a pact this class replays should touch this file too.
- *
  * `@TestSecurity` matches `PartyResource.getById`'s `@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)`.
  * Note what that means for the contract: this replay proves the ROUTE and the SHAPE, and asserts
  * nothing about who may call it. The M2M authorization of delegation-service against pid-service

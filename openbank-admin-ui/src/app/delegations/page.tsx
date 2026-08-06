@@ -28,7 +28,6 @@ import { EntityChip } from '@/components/entities/EntityChip'
 import {
   DelegationStatusBadge,
   capabilityLabels,
-  counterpartyLabel,
   formatCeiling,
   type Grant,
 } from '@/components/delegations/GrantView'
@@ -277,7 +276,7 @@ function GrantTable({
               {grants.map(g => (
                 <tr key={g.id}>
                   <td><DelegationStatusBadge status={g.status} /></td>
-                  <td><EntityChip type="party" id={g.granteePartyId} label={counterpartyLabel(g.granteeName)} /></td>
+                  <td><EntityChip type="party" id={g.granteePartyId} /></td>
                   <td style={{ fontSize: '12px' }}>{g.resourceType}</td>
                   <td style={{ fontSize: '12px' }}>{capabilityLabels(g.capabilities)}</td>
                   <td style={{ fontSize: '12px' }}>{formatCeiling(g.perTransactionLimit)}</td>

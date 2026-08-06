@@ -86,57 +86,9 @@ class DelegationServiceTest {
         )
     }
 
-    private fun eligibilityOk(
-        grantorKyc: String = "FULL",
-        granteeKyc: String = "FULL",
-        grantorName: String? = null,
-        granteeName: String? = null,
-    ) {
-        coEvery { eligibilityClient.eligibilityOf(grantor) } returns
-            PartyEligibility(grantor, true, grantorKyc, grantorName)
-        coEvery { eligibilityClient.eligibilityOf(grantee) } returns
-            PartyEligibility(grantee, true, granteeKyc, granteeName)
-    }
-
-    /**
-     * Issue #3604 — the accept screen showed the counterparty as a truncated UUID, so the person
-     * asked to hand over authority over their money could not tell who was asking.
-     *
-     * Asserted on the SAVED AGGREGATE, not on the returned response: the point of the fix is that
-     * the label is persisted at the moment of consent, so it survives a later rename of the party
-     * and needs no runtime lookup (and therefore no new authority for customer-edge). A test that
-     * only read the response would still pass against an implementation that resolved the name
-     * on the way out.
-     */
-    @Test
-    fun `the offered grant snapshots both counterparty display names`(): Unit = runBlocking {
-        scaOk(grantor, "DELEGATION_GRANT")
-        eligibilityOk(grantorName = "Alice Testerova", granteeName = "Bob Zkousky")
-        val saved = slot<DelegationGrant>()
-        coEvery { repository.save(capture(saved), any()) } answers { firstArg() }
-
-        service.offer(offerCommand())
-
-        assertThat(saved.captured.grantorName).isEqualTo("Alice Testerova")
-        assertThat(saved.captured.granteeName).isEqualTo("Bob Zkousky")
-    }
-
-    /**
-     * A party pid-service returns no usable name for must leave the field NULL, never an empty
-     * string: consumers render the party id when the label is absent, and a blank chip on a
-     * consent screen looks like a name that failed to load rather than one never captured.
-     */
-    @Test
-    fun `a party with no name leaves the snapshot null rather than blank`(): Unit = runBlocking {
-        scaOk(grantor, "DELEGATION_GRANT")
-        eligibilityOk()
-        val saved = slot<DelegationGrant>()
-        coEvery { repository.save(capture(saved), any()) } answers { firstArg() }
-
-        service.offer(offerCommand())
-
-        assertThat(saved.captured.grantorName).isNull()
-        assertThat(saved.captured.granteeName).isNull()
+    private fun eligibilityOk(grantorKyc: String = "FULL", granteeKyc: String = "FULL") {
+        coEvery { eligibilityClient.eligibilityOf(grantor) } returns PartyEligibility(grantor, true, grantorKyc)
+        coEvery { eligibilityClient.eligibilityOf(grantee) } returns PartyEligibility(grantee, true, granteeKyc)
     }
 
     private fun offerCommand(
