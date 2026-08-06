@@ -194,8 +194,23 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `FlagExposure` has zero production consumers. Cheap to establish — enumerate the interface's
   implementations, then grep the field name across `src/main` — and it changes the whole PR:
   urgency, blast radius, and whether the honest fix is the value or the wiring. It also surfaces
-  the real bug next door, which here was that `AuditConsumer` keys on `occurredAt`, a field the
-  canonical envelope does not have, so the envelope's time is dropped at ingest (#3883).
+  the real bug next door — here, that `AuditConsumer` substitutes ingest time whenever a producer
+  sends no event time, which 7 of its 21 topics do, so the row asserts business time it never
+  measured (#3883, fixed by #3907). Note what the same rule then did to my own framing: I filed
+  that as "the consumer reads `occurredAt`, the canonical envelope says `timestamp`", and the
+  envelope reaches that topic never — `DomainEvent` declares `occurredAt`, so the consumer was
+  right and only the missing-time case was real.
+- **Event payloads are built two ways here, and grepping for the JSON key finds only one of
+  them.** Hand-built maps spell the key literally (`"settledAt" to batch.settledAt` in
+  `ClearingEventPublisherImpl`) and a string grep sees them; a serialised data class
+  (`objectMapper.writeValueAsString(DocumentGenerated(..., at = now))`) has no literal anywhere,
+  the key existing only at runtime as a Kotlin property name. So `grep '"at"'` over
+  `openbank-document-service` returns **nothing** while all three of its event types put `at` on
+  the wire — a clean-looking no-hits answer about producers the probe structurally cannot observe
+  (#3883). Enumerate event-time keys by reading the serialised TYPE, or a real message's payload,
+  never by grepping quoted field names; and treat "no hits" over a codebase with two idioms as a
+  fact about the probe. Same shape as the Pact bullet below on grepping `src/test` for the word
+  "contract".
 
 ### ktlint
 - Path-scoped CI only lints changed files, so a pre-existing wildcard import or a latent
