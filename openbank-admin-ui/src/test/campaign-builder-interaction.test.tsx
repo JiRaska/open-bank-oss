@@ -103,3 +103,55 @@ describe('campaign builder channels', () => {
     expect(container.querySelector('[data-step="0"]')!.getAttribute('data-channel')).toBe('PUSH')
   }, 25000)
 })
+
+/**
+ * Conditions, which the domain has had since #3585 and the console could not author.
+ *
+ * The rules worth protecting are the honest ones: a condition names a delivery status and nothing
+ * richer, the first step is warned about because it has no predecessor, and the cap is stated on the
+ * canvas rather than only in a form field a marketer has scrolled past.
+ */
+describe('campaign builder conditions', () => {
+  const stub = () => vi.stubGlobal('fetch', vi.fn(async (u: string) =>
+    String(u).includes('/preview')
+      ? { ok: true, json: async () => ({ size: 10, state: 'ok' }) }
+      : { ok: true, json: async () => ({ state: 'ok', items: [
+          { name: 'active-clients', version: 1, rules: ['party status is ACTIVE'] }] }) }))
+
+  it('a step condition is offered and lands on the connector, not inside the node', async () => {
+    stub()
+    const { container, getByText } = render(
+      React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
+    await waitFor(() => getByText('active-clients'), { timeout: 8000 })
+    fireEvent.click(container.querySelector('[data-add-step]')!)
+
+    expect(container.querySelector('[data-edge-condition]')).toBeNull()
+    fireEvent.click(container.querySelector('[data-condition-pick="IF_PREVIOUS_CONFIRMED"]')!)
+    // The gate belongs to the hop, so it renders on the edge the journey may not cross.
+    expect(container.querySelector('[data-edge-condition="IF_PREVIOUS_CONFIRMED"]')).toBeTruthy()
+  }, 25000)
+
+  it('warns that a condition on the first step has nothing to test', async () => {
+    stub()
+    const { container, getByText, queryByText } = render(
+      React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
+    await waitFor(() => getByText('active-clients'), { timeout: 8000 })
+
+    expect(queryByText(/has no predecessor/)).toBeNull()
+    fireEvent.click(container.querySelector('[data-condition-pick="IF_PREVIOUS_CONFIRMED"]')!)
+    // Silently accepting it would let someone build a step that can never run.
+    expect(getByText(/has no predecessor/)).toBeTruthy()
+  }, 25000)
+
+  it('the stop cap is stated on the canvas, where it changes the outcome', async () => {
+    stub()
+    const { container, getByText } = render(
+      React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
+    await waitFor(() => getByText('active-clients'), { timeout: 8000 })
+
+    expect(container.querySelector('[data-stop-after]')).toBeNull()
+    fireEvent.click(container.querySelector('[data-stop-enabled]')!)
+    expect(container.querySelector('svg [data-stop-after]')).toBeTruthy()
+    expect(getByText(/Stops after 2 messages per person/)).toBeTruthy()
+  }, 25000)
+})
