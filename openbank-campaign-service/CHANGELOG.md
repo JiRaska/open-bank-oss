@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/v0.14.0...v0.15.0) (2026-08-06)
+
+
+### Features
+
+* **campaign:** branch a journey on what the platform can actually observe (ADR-0200 D1) ([#3895](https://github.com/JiRaska/open-bank-oss/issues/3895)) ([4b6eb7e](https://github.com/JiRaska/open-bank-oss/commit/4b6eb7e4d96e15d6020e31cab36a25647227a7e4))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/v0.13.0...v0.14.0) (2026-08-06)
 
 
