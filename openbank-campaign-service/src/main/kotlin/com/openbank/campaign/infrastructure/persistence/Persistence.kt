@@ -337,18 +337,6 @@ class PanacheSendLogRepository :
         }
     }.awaitSuspending()
 
-    private fun SendLogEntity.toDomain(): SendRecord = SendRecord(
-        id = id,
-        campaignId = campaignId,
-        partyId = partyId,
-        stepOrder = stepOrder,
-        outcome = SendOutcome.valueOf(outcome),
-        occurredAt = occurredAt,
-        deliveryStatus = DeliveryStatus.valueOf(deliveryStatus),
-        deliveryReason = deliveryReason,
-        deliveryUpdatedAt = deliveryUpdatedAt,
-    )
-
     /** `GROUP BY campaignId, outcome` — the whole estate in one round trip (issue #3296). */
     override suspend fun countAllByCampaignAndOutcome(): List<CampaignOutcomeCount> = Panache
         .withSession {
@@ -411,6 +399,30 @@ class PanacheSendLogRepository :
         )
     }.awaitSuspending().toInt()
 
+    /**
+     * The predecessor send's delivery status (#3585 branch conditions).
+     *
+     * Ordered by step DESC then time DESC, and limited to one row: a retried step can leave more
+     * than one row at the same order, and the branch must read the newest attempt rather than
+     * whichever the database happened to return first. `SKIPPED_CONDITION` rows are excluded —
+     * a step that never ran is not a predecessor delivery, and counting it would make a chain of
+     * conditional steps read the skip's own PENDING as evidence about the real send before it.
+     */
+    override suspend fun latestDeliveryStatusBeforeStep(
+        campaignId: UUID,
+        partyId: UUID,
+        stepOrder: Int,
+    ): DeliveryStatus? = Panache.withSession {
+        find(
+            "campaignId = ?1 and partyId = ?2 and stepOrder < ?3 and outcome <> ?4 " +
+                "order by stepOrder desc, occurredAt desc",
+            campaignId,
+            partyId,
+            stepOrder,
+            SendOutcome.SKIPPED_CONDITION.name,
+        ).firstResult<SendLogEntity>()
+    }.awaitSuspending()?.let { DeliveryStatus.valueOf(it.deliveryStatus) }
+
     override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID): Int = Panache.withSession {
         count(
             "campaignId = ?1 and partyId = ?2 and outcome = ?3",
@@ -461,3 +473,18 @@ class PanacheSegmentRegistry(private val mapper: ObjectMapper) :
         return SegmentCatalog.ALL + legacy.filterNot { (it.name to it.version) in catalogKeys }
     }
 }
+
+// A top-level private rather than a member of PanacheSendLogRepository: that class sits at
+// detekt's TooManyFunctions threshold of 11, which fires AT the limit, and the branch-condition
+// query (#3585) needed the slot.
+private fun SendLogEntity.toDomain(): SendRecord = SendRecord(
+    id = id,
+    campaignId = campaignId,
+    partyId = partyId,
+    stepOrder = stepOrder,
+    outcome = SendOutcome.valueOf(outcome),
+    occurredAt = occurredAt,
+    deliveryStatus = DeliveryStatus.valueOf(deliveryStatus),
+    deliveryReason = deliveryReason,
+    deliveryUpdatedAt = deliveryUpdatedAt,
+)
