@@ -48,6 +48,22 @@ class InMemoryConversationStore(private val clock: Clock) : ConversationStore {
         log.debugf("InMemoryConversationStore: appended %d turn(s) key=%s", newTurns.size, k)
     }
 
+    override suspend fun deleteForCustomer(customerId: String): Long {
+        val prefix = "$customerId|"
+        val victims = store.keys.filter { it.startsWith(prefix) }
+        victims.forEach { store.remove(it) }
+        return victims.size.toLong()
+    }
+
+    override suspend fun deleteConversation(customerId: String, conversationId: String): Long =
+        if (store.remove(key(customerId, conversationId)) != null) 1L else 0L
+
+    override suspend fun deleteExpired(now: Instant): Long {
+        val victims = store.entries.filter { !now.isBefore(it.value.expiresAt) }.map { it.key }
+        victims.forEach { store.remove(it) }
+        return victims.size.toLong()
+    }
+
     private fun evictExpired() {
         val now = Instant.now(clock)
         store.entries.removeIf { now.isAfter(it.value.expiresAt) }

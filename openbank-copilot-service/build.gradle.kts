@@ -40,6 +40,10 @@ dependencies {
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
+    // PARTY_ERASED consumer — GDPR Art. 17 erasure of conversation history (#3870).
+    implementation(libs.quarkus.smallrye.kafka)
+    // Retention sweep that hard-deletes past-expires_at conversations (#3870).
+    implementation(libs.quarkus.scheduler)
 
     // Shared runtime plumbing: model gateway seam (ADR-0031), OPA authz (ADR-0034),
     // feature flags (ADR-0067), AI-attributed audit (ADR-0031 D5).
