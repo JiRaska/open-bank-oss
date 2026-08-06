@@ -404,7 +404,18 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-          cache: gradle
+
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        if: steps.mods.outputs.modules != ''
+        with:
+          # READ-ONLY. This job cannot get an exact-key hit from setup-java's own
+          # `cache: gradle` — that key hashes `**/*.gradle*`, and this job only runs
+          # when a build file changed, so the key's input has changed by construction.
+          # What it did instead was WRITE a fresh ~1.1 GB Gradle-home entry per PR into
+          # a pool already over the 10 GB ceiling, evicting other jobs' caches (#3299).
+          # Reading the shared entry maintained by the writing lanes (_service-ci.yml's
+          # self-hosted lane, auto-deploy.yml) is a better hit and costs the pool nothing.
+          cache-read-only: true
 
       - name: Check verification metadata covers the changed modules
         if: steps.mods.outputs.modules != ''
