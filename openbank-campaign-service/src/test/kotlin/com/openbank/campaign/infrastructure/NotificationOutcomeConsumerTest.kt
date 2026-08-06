@@ -51,6 +51,7 @@ class NotificationOutcomeConsumerTest {
 
         override suspend fun countByCampaign(campaignId: UUID, outcome: SendOutcome?) = 0L
         override suspend fun countByStepAndOutcome(campaignId: UUID) = emptyList<StepOutcomeCount>()
+        override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID) = 0
         override suspend fun countAllByCampaignAndOutcome() = emptyList<CampaignOutcomeCount>()
     }
 

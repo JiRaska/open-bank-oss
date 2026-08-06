@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.8.0
+  version: 1.9.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -524,8 +524,8 @@ components:
             - SUPPRESSED_CAP
             - SUPPRESSED_QUIET_HOURS
             - SUPPRESSED_CONSENT
-            # Present in SendOutcome since ADR-0219 and missing from this enum until 1.8.0 — the
-            # spec understated the values a client could receive.
+            # Present in SendOutcome since ADR-0219 and missing from this enum until now — the
+            # spec understated the values a client could receive (corrected in 1.9.0).
             - SUPPRESSED_LIST
             - FAILED
         occurredAt: { type: string, format: date-time }
@@ -534,7 +534,7 @@ components:
             What notification-service reported back about the message (ADR-0239 D3). `PENDING` means
             no outcome has arrived — the honest resting state, and NOT on its own evidence of a
             problem: a send made moments ago has not had time to be reported, and a gate-denied send
-            was never handed off at all, so it stays `PENDING` forever. Added in 1.8.0; absent on a
+            was never handed off at all, so it stays `PENDING` forever. Added in 1.9.0; absent on a
             response from an older deployment.
           type: string
           enum: [PENDING, CONFIRMED, SUPPRESSED, FAILED]
