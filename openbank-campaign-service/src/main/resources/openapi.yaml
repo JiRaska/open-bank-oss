@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.10.0
+  version: 1.12.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -426,8 +426,15 @@ components:
           # PUSH added in 1.8.0. SMS and IN_APP are deliberately absent: SMS has no outbound port
           # in the platform, and IN_APP was removed from notification-service's channel enum by
           # #2372 because its dispatch branch dropped every message silently.
+          #
+          # Selectable on create since 1.11.0. Until then the create body had no channel field at
+          # all and the resource hardcoded EMAIL, so PUSH was documented here and unreachable.
           enum: [EMAIL, PUSH]
           default: EMAIL
+          description: >-
+            Optional on create; absent means EMAIL. Must agree with the template's own channel —
+            MARKETING_PRODUCT_OFFER renders on EMAIL, MARKETING_PRODUCT_OFFER_PUSH on PUSH — and a
+            mismatch is rejected with 400.
         variables:
           type: object
           additionalProperties: { type: string }
