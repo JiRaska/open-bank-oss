@@ -36,8 +36,12 @@ class LoggingAuditEventPublisher : AuditEventPublisher {
 
     override suspend fun publish(event: AuditEvent) {
         log.infof(
-            "audit event eventId=%s actor=%s actorType=%s op=%s resource=%s resourceId=%s result=%s traceId=%s",
+            // `timestamp` is logged explicitly: the log line's own time is when the fallback ran,
+            // not when the operation happened, and only the envelope's field survives a replay
+            // through a durable publisher (DORA Art. 17 reconstruction).
+            "audit event eventId=%s at=%s actor=%s actorType=%s op=%s resource=%s resourceId=%s result=%s traceId=%s",
             event.eventId,
+            event.timestamp,
             event.actorId,
             event.actorType,
             event.operation,
