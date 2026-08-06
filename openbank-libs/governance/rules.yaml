@@ -2301,6 +2301,47 @@ enforcement_reachability:
         grant at all — so there is no debit for a limit check to attach to yet. Flip to `reachable`
         when the delegated payment path lands (#3615), not before.
 
+readiness_attestations:
+  principle: >
+    openbank-libs/governance/attestations.yaml is the ONLY hand-entered input to the
+    production-readiness matrix — every other dimension the collector scores is derived from the
+    repo. An entry there raises a money-path dimension from 2 to 3, and the runbooks, the OpenSSF
+    gap doc and the threat models all read the resulting matrix as fact. No gate can prove the
+    attested event happened; this one makes a fabrication require a deliberate lie — a real date,
+    a resolvable reference, a service that exists — rather than a careless line (#2365).
+  file: openbank-libs/governance/attestations.yaml
+  consumer: openbank-admin-ui/scripts/collect-prod-readiness.mjs
+  ci_producer: .github/scripts/check-readiness-attestations.py   # gate readiness-attestation-format
+  service_key: >
+    The SHORT name the collector looks up (`consent`, never `consent-service`) — it resolves the
+    directory as openbank-<key>-service. A wrong key is invisible from both ends: the file reads
+    as attested and the matrix reads as underscored, and neither points at the other. Measured
+    2026-08-06: `consent-service:` had matched nothing since the day it was written; renaming the
+    one key flips consent C7 from 2 to 3.
+  required_fields: [date, ttl_days, by, ref]
+  attestation_keys:                       # exactly the keys collect-prod-readiness.mjs consults;
+    - code_complete                       # any other key parses fine and influences nothing
+    - coverage_floor
+    - contract_verified
+    - restore_drill
+    - dr_drill
+    - pentest
+    - slo_defined
+    - oncall
+  ref_must_resolve_to: >
+    a URL, a #issue, an existing repo path, or runbook-NNNN matching docs/runbooks/NNNN-*.md.
+    An entry whose ref resolves to nothing is treated as absent — a sentence is not evidence.
+  enforcement: >
+    AUTHORING defects FAIL the build (missing field, non-date, future date, unknown service,
+    unknown attestation key, unresolvable ref): each is introduced and fixable by the PR that
+    writes it. DECAY only WARNS, because the collector's TTL is already the real enforcement —
+    an expired entry stops counting, so a lapse cannot buy a green cell, and failing the whole
+    fleet the morning a pentest TTL rolls over is the alert-fatigue trade this repo has already
+    paid for. Expired for more than 30 days IS an error: that is stale bookkeeping, not a lapse.
+  never: >
+    Do not write an entry ahead of the event to raise the count. A green cell bought with a
+    fabricated line is worse than a red one, because the red one is true.
+
 knowledge_capture:
   principle: >
     A corrected non-obvious mistake, a hard-won lesson, or a direction we keep must be
