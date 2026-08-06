@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/v0.10.0...v0.11.0) (2026-08-06)
+
+
+### Features
+
+* **campaign:** stop journeys at the campaign's own send cap (ADR-0200 D1, [#3585](https://github.com/JiRaska/open-bank-oss/issues/3585) slice 1) ([#3635](https://github.com/JiRaska/open-bank-oss/issues/3635)) ([9c513e8](https://github.com/JiRaska/open-bank-oss/commit/9c513e83dfc19300a9afe543026ec891063783d3))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/v0.9.2...v0.10.0) (2026-08-06)
 
 

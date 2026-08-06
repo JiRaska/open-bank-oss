@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.95.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.94.0...admin-ui-v0.95.0) (2026-08-06)
+
+
+### Features
+
+* **campaign:** stop journeys at the campaign's own send cap (ADR-0200 D1, [#3585](https://github.com/JiRaska/open-bank-oss/issues/3585) slice 1) ([#3635](https://github.com/JiRaska/open-bank-oss/issues/3635)) ([9c513e8](https://github.com/JiRaska/open-bank-oss/commit/9c513e83dfc19300a9afe543026ec891063783d3))
+
 ## [0.94.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.93.0...admin-ui-v0.94.0) (2026-08-06)
 
 
