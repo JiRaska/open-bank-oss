@@ -33,10 +33,11 @@ spec:
     initdb:
       database: openbank_copilots
       owner: openbank
-  # WAL archiving + base backups to S3. The send_log is the ADR-0219 D2 frequency-cap
-  # durable source and copilots/enrolments are the marketing audit record — losing
-  # this DB loses both. Credentials from EKS Pod Identity on the copilot-db
-  # ServiceAccount (aws/envs/sandbox-platform/db-backups.tf).
+  # WAL archiving + base backups to S3. This cluster holds conversation_history — customer
+  # chat transcripts, so it is a PII store, not an operational cache. Losing it loses every
+  # resumable conversation; note the flip side, that a base backup keeps those transcripts
+  # for the bucket's retention regardless of the app-level 90-day TTL. Credentials from EKS
+  # Pod Identity on the copilot-db ServiceAccount (aws/envs/sandbox-platform/db-backups.tf).
   backup:
     retentionPolicy: "30d"
     barmanObjectStore:
@@ -48,7 +49,7 @@ spec:
       data:
         compression: gzip
 ---
-# Daily base backup at 04:20 (outside every sender's quiet-hours window).
+# Daily base backup at 04:20, off the fleet's busy window.
 apiVersion: postgresql.cnpg.io/v1
 kind: ScheduledBackup
 metadata:
