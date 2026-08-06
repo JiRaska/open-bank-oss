@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.statement.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.statement.application.port.`in`.RestatePeriodUseCase
 import com.openbank.statement.application.port.out.AccountInfoPort
 import com.openbank.statement.application.port.out.BalancePort
@@ -135,7 +136,7 @@ class StatementRestatementService(
         closing: BigDecimal,
     ): Uni<StatementPeriod> = periods.nextLegalSequence(account.accountId, currency).flatMap { seq ->
         val replacement = StatementPeriod(
-            id = UUID.randomUUID(),
+            id = Ids.newId(),
             accountId = account.accountId,
             pocketCurrency = currency,
             periodFrom = from,
@@ -181,7 +182,7 @@ class StatementRestatementService(
             "closedAt":"${period.closedAt}"}
         """.trimIndent().replace("\n", "")
         return StatementOutboxMessage(
-            eventId = UUID.randomUUID(),
+            eventId = Ids.newId(),
             aggregateId = period.id,
             eventType = "account.statement.period.restated.v1",
             payload = payload,
