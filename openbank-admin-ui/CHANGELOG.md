@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.97.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.96.0...admin-ui-v0.97.0) (2026-08-06)
+
+
+### Features
+
+* **campaign:** deliver campaign steps on push as well as email ([#3584](https://github.com/JiRaska/open-bank-oss/issues/3584)) ([d5fdaf3](https://github.com/JiRaska/open-bank-oss/commit/d5fdaf3f321e433c6a602892bd99398cf517f12a))
+
 ## [0.96.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.95.0...admin-ui-v0.96.0) (2026-08-06)
 
 
