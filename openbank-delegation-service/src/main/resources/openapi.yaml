@@ -5,7 +5,7 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.2.0
+  version: 1.3.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -272,8 +272,21 @@ components:
             enum: [ACCOUNT_READ_BALANCES, ACCOUNT_READ_TRANSACTIONS, ACCOUNT_INITIATE_PAYMENT,
                    ACCOUNT_PROPOSE_PAYMENT, CARD_VIEW, CARD_MANAGE_LIMITS, SAVINGS_DEPOSIT,
                    SAVINGS_WITHDRAW, SAVINGS_PROPOSE_WITHDRAW, OBJECT_READ, DELEGATION_MANAGE]
-        approvalPolicy: { type: string, enum: [SOLO, ANY_ONE, ALL, N_OF_M] }
-        requiredApprovals: { type: integer }
+        approvalPolicy:
+          type: string
+          enum: [SOLO, ANY_ONE, ALL, N_OF_M]
+          default: SOLO
+          description: >-
+            Only SOLO is enforced. Any other value is rejected with 400 APPROVAL_POLICY_UNSUPPORTED:
+            no service counts approvals against a grant, so a co-signing requirement set here would
+            be stored and echoed while a single owner decision still releases the money. The enum
+            values remain listed because ADR-0232 D8 describes them as intended; they are not built.
+          x-unsupported-values: [ANY_ONE, ALL, N_OF_M]
+        requiredApprovals:
+          type: integer
+          deprecated: true
+          description: >-
+            Meaningful only with approvalPolicy=N_OF_M, which is rejected. Nothing counts approvals.
         perTransactionLimit:
           $ref: '#/components/schemas/MoneyDto'
           description: >-
