@@ -13,6 +13,22 @@
 #
 # Targets are REFERENCE defaults (rules.yaml: slo comment) — not calibrated against real
 # production traffic. Revisit once the load-benchmark / DR-drill scope of issue #669 lands.
+#
+# `alerting.absent: false` on EVERY object (issue #3333), and it is not a downgrade — the rule it
+# suppresses cannot express a fault at all. Pyrra defaults to emitting one critical `SLOMetricAbsent`
+# per indicator metric, `absent(<metric>) == 1`. Both indicators here are Tempo span-metrics, which
+# exist only while the service is RECEIVING TRAFFIC, so `absent` means "nobody called it recently",
+# never "it is gone" — and no `for:` duration helps, because on an idle service the condition is
+# permanent rather than transient. Measured 2026-08-06 in the sandbox: 64 such rules, all critical,
+# 12 of them firing — and `up{job="observability/openbank-services"}` was `1` for all five services
+# they named, i.e. every pod was alive and scraped while its SLO alert paged. Two of those services
+# emitted ZERO span samples in the whole retained window, so their rules could never have cleared.
+# Zero of the 64 have ever fired on a state that a down service produces and an idle one does not.
+# "Is the service gone" IS answerable without traffic, and by a different signal: `up == 0`, which
+# is what MoneyPathServiceDown / PaymentServiceDown / LendingServiceDown in
+# prometheus-rules-tier1.yaml assert. Deleting the absent rules therefore removes noise without
+# removing coverage. check-slo-registry.py enforces the flag so a new SLO cannot reintroduce it.
+# Burn-rate alerting is untouched: a real SLO breach still pages.
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -28,6 +44,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-ledger-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -50,6 +68,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-ledger-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -72,6 +92,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-transaction-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -94,6 +116,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-transaction-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -116,6 +140,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-account-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -138,6 +164,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-account-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -160,6 +188,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-balance-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -182,6 +212,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-balance-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -204,6 +236,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-sepa-payment availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -226,6 +260,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-sepa-payment latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -248,6 +284,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-sepa-instant availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -270,6 +308,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-sepa-instant latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -292,6 +332,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-domestic-payment availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -314,6 +356,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-domestic-payment latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -336,6 +380,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-clearing-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -358,6 +404,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-clearing-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -380,6 +428,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-swift-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -402,6 +452,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-swift-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -424,6 +476,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-fx-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -446,6 +500,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-fx-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -468,6 +524,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-lending-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -490,6 +548,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-lending-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -512,6 +572,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-sca-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -534,6 +596,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-sca-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -556,6 +620,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-consent-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -578,6 +644,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-consent-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -600,6 +668,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-fraud-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -622,6 +692,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-fraud-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -644,6 +716,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-billing-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -666,6 +740,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-billing-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -688,6 +764,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-settlement-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -710,6 +788,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-settlement-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -732,6 +812,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-sanctions-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -754,6 +836,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-sanctions-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -776,6 +860,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   # NOTE (ADR-0171): VoP fails OPEN, so an error here does not fail a payment — the caller
   # renders no_data and the payment proceeds with a warning. This SLO therefore measures the
   # health of a *regulatory* control (IPR Art. 5c: the payer must be told), not payment
@@ -803,6 +889,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   # The fleet-uniform 1s threshold is tight for VoP: a verify is a two-hop lookup
   # (account-service -> party-service, ADR-0171 §4) on the payer's critical path, so this is
   # the SLO most likely to surface the latency cost the ADR accepts as a known negative.
@@ -828,6 +916,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-sdd-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -850,6 +940,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-sdd-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -872,6 +964,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-interest-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -894,6 +988,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-interest-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -916,6 +1012,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-delegation-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -938,6 +1036,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-delegation-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
