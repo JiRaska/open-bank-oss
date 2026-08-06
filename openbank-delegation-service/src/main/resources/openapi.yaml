@@ -275,11 +275,11 @@ components:
         approvalPolicy: { type: string, enum: [SOLO, ANY_ONE, ALL, N_OF_M] }
         requiredApprovals: { type: integer }
         perTransactionLimit:
-          allOf: [{ $ref: '#/components/schemas/MoneyDto' }]
+          $ref: '#/components/schemas/MoneyDto'
           description: >-
             The only limit this platform enforces. Checked per payment amount; it never accumulates.
         dailyLimit:
-          allOf: [{ $ref: '#/components/schemas/MoneyDto' }]
+          $ref: '#/components/schemas/MoneyDto'
           deprecated: true
           description: >-
             NOT SUPPORTED — sending this field is rejected with 400 CUMULATIVE_LIMIT_UNSUPPORTED.
@@ -287,7 +287,7 @@ components:
             would be stored and echoed back while never capping any payment. Omit it. ADR-0232 D1/D6
             describes cumulative ceilings as intended; they are not built.
         monthlyLimit:
-          allOf: [{ $ref: '#/components/schemas/MoneyDto' }]
+          $ref: '#/components/schemas/MoneyDto'
           deprecated: true
           description: >-
             NOT SUPPORTED — see dailyLimit. Rejected with 400 CUMULATIVE_LIMIT_UNSUPPORTED.
@@ -327,14 +327,14 @@ components:
         requiredApprovals: { type: integer }
         perTransactionLimit: { $ref: '#/components/schemas/MoneyDto' }
         dailyLimit:
-          allOf: [{ $ref: '#/components/schemas/MoneyDto' }]
+          $ref: '#/components/schemas/MoneyDto'
           deprecated: true
           description: >-
             Always null on grants offered after this API version — the field is refused on write.
             A non-null value belongs to a grant stored before that and is NOT enforced: it is a
             number on a record, not a cap on the delegate. Do not render it as a limit.
         monthlyLimit:
-          allOf: [{ $ref: '#/components/schemas/MoneyDto' }]
+          $ref: '#/components/schemas/MoneyDto'
           deprecated: true
           description: >-
             See dailyLimit. Not enforced; do not render it as a limit.
