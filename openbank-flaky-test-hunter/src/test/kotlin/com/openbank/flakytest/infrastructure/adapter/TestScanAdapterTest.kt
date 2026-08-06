@@ -36,6 +36,8 @@ class TestScanAdapterTest {
 
         override fun llmGatewayUrl() = "http://litellm.ai-platform:4000"
 
+        override fun modelId() = "deepseek-ai/DeepSeek-V3.2"
+
         override fun repoRoot() = root.toString()
     }
 

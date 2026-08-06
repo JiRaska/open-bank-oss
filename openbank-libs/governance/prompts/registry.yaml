@@ -144,6 +144,7 @@ charters:
     reason: LlmDiagnosisAdapter is a stub; no /chat/completions call yet.
 
   - id: flaky-test-hunter
-    status: pending
-    blocked_by: ADR-0168
-    reason: LlmDiagnosisAdapter is a stub; no /chat/completions call yet.
+    status: registered
+    prompts: [system.v1]
+    source: openbank-flaky-test-hunter LlmDiagnosisAdapter.SYSTEM_PROMPT
+    placeholders: []
