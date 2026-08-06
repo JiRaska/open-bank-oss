@@ -1303,6 +1303,30 @@ gates:
     run: |
       python3 .github/scripts/check-operator-write-naming.py
 
+  # The OTHER half of the same exposure, and the half no policy can veto (#3765, #3734).
+  # check-operator-write-naming above governs role-only write RULES, so that a rule can at
+  # least become a candidate for `shared_m2m_write_prohibition.reasons`. It cannot see the
+  # matrix: `matrix-allows` grants straight out of `rules.yaml: authz.role_action_matrix`,
+  # is a base-layer reason no per-service ext can exclude, and can never join a register
+  # keyed by reason name without vetoing every legitimate matrix-granted call. So a write
+  # action added to the ROLE_OPERATOR grant list is a grant to whichever M2M service-account
+  # holds that role, with nothing anywhere to object.
+  #
+  # ENFORCED, not advisory, and the difference from its sibling is that the tree is CLEAN:
+  # the register was seeded with the measured 68 grants in the same change, so this blocks
+  # only what is NEW. Falsified against the real diff of PR #3697 (five sdd grants, one of
+  # them sdd.authorise — the call that books a debtor debit): 5 ::error:: lines, rc=1.
+  # `mode:` alone would be vacuous here as it was on threat-model-diff (#2392) — the script
+  # exits 0 without --enforce, so the flag below is the load-bearing half.
+  - id: matrix-write-grants
+    name: "matrix write grants reachable by an M2M service-account are declared (#3765, enforced)"
+    group: registry
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-matrix-write-grants.py --enforce
+    selftest: python3 .github/scripts/check-matrix-write-grants.py --self-test
+    selftest_expect: pass
+
   # Admin-ui IAOps governance snapshot drift (ADR-0029 D3 / ADR-0031).
   # openbank-admin-ui/ai-governance-snapshot.json is DERIVED from curated rollout prose
   # plus machine-checkable repo facts (agents.yaml, prompt-registry coverage, evals
