@@ -58,7 +58,7 @@ type Detail = {
 }
 
 /** Outcomes the send-log filter offers, in the order an operator scans them. */
-const OUTCOMES = ['SENT', 'FAILED', 'SUPPRESSED_CONSENT', 'SUPPRESSED_CAP', 'SUPPRESSED_QUIET_HOURS'] as const
+const OUTCOMES = ['SENT', 'DRY_RUN', 'FAILED', 'SUPPRESSED_CONSENT', 'SUPPRESSED_CAP', 'SUPPRESSED_QUIET_HOURS'] as const
 
 /**
  * Outcome colouring, passed explicitly rather than added to the shared tone map (see `tone.ts`:
@@ -224,6 +224,9 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   const outcomeLabel = (o: string): string => {
     switch (o) {
       case 'SENT': return t('Odesláno', 'Sent')
+      // Said as plainly as possible: a rehearsal is not a delivery, and the two must never read
+      // as the same number on a screen someone reports upwards.
+      case 'DRY_RUN': return t('Nazkoušeno (neodesláno)', 'Rehearsed (not sent)')
       case 'SUPPRESSED_CONSENT': return t('Odvolaný souhlas', 'Consent withdrawn')
       case 'SUPPRESSED_CAP': return t('Limit četnosti', 'Frequency cap')
       case 'SUPPRESSED_QUIET_HOURS': return t('Tiché hodiny', 'Quiet hours')

@@ -51,4 +51,21 @@ data class SendRecord(
     val occurredAt: Instant,
 )
 
-enum class SendOutcome { SENT, SUPPRESSED_CAP, SUPPRESSED_QUIET_HOURS, SUPPRESSED_CONSENT, SUPPRESSED_LIST, FAILED }
+/**
+ * What happened to one step for one party.
+ *
+ * `DRY_RUN` is a distinct outcome, not a flavour of SENT. A non-production environment must be able
+ * to exercise a whole journey — enrolment, cap, quiet hours, consent, ordering, delays — without a
+ * single message leaving the platform, and the send log has to say which of those two it was.
+ * Folding it into SENT would make the console report deliveries that never happened, and the first
+ * person to compare it with an inbox would be right and the screen wrong.
+ */
+enum class SendOutcome {
+    SENT,
+    DRY_RUN,
+    SUPPRESSED_CAP,
+    SUPPRESSED_QUIET_HOURS,
+    SUPPRESSED_CONSENT,
+    SUPPRESSED_LIST,
+    FAILED,
+}

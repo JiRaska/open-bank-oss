@@ -10,6 +10,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Emitter
 import java.util.UUID
+import com.openbank.campaign.domain.model.Channel as CampaignChannel
 
 /**
  * ADR-0200 D3: delivery goes through notification-service, never direct. The payload shape mirrors
@@ -25,6 +26,7 @@ class KafkaNotificationSendAdapter(
 
     override suspend fun requestSend(
         partyId: UUID,
+        channel: CampaignChannel,
         template: String,
         recipient: String,
         variables: Map<String, String>,
@@ -32,7 +34,10 @@ class KafkaNotificationSendAdapter(
         val payload = mapper.writeValueAsString(
             mapOf(
                 "partyId" to partyId.toString(),
-                "channel" to "EMAIL",
+                // Was hardcoded "EMAIL". A step's channel now travels with it — with the constant in place a
+                // PUSH step was delivered as an email, silently, because notification-service believed
+                // the payload over the campaign.
+                "channel" to channel.name,
                 "template" to template,
                 "recipient" to recipient,
                 "variables" to variables,

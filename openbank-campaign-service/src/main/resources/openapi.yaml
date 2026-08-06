@@ -269,7 +269,7 @@ paths:
             "no suppressions here".
           schema:
             type: string
-            enum: [SENT, FAILED, SUPPRESSED_CONSENT, SUPPRESSED_CAP, SUPPRESSED_QUIET_HOURS]
+            enum: [SENT, DRY_RUN, FAILED, SUPPRESSED_CONSENT, SUPPRESSED_CAP, SUPPRESSED_QUIET_HOURS]
         - name: page
           in: query
           required: false
@@ -421,7 +421,11 @@ components:
         template: { type: string, description: notification-service catalogue template id }
         channel:
           type: string
-          enum: [EMAIL]
+          # PUSH added in 1.8.0. SMS and IN_APP are deliberately absent: SMS has no outbound port
+          # in the platform, and IN_APP was removed from notification-service's channel enum by
+          # #2372 because its dispatch branch dropped every message silently.
+          enum: [EMAIL, PUSH]
+          default: EMAIL
         variables:
           type: object
           additionalProperties: { type: string }
@@ -515,7 +519,7 @@ components:
         stepOrder: { type: integer }
         outcome:
           type: string
-          enum: [SENT, SUPPRESSED_CAP, SUPPRESSED_QUIET_HOURS, SUPPRESSED_CONSENT, FAILED]
+          enum: [SENT, DRY_RUN, SUPPRESSED_CAP, SUPPRESSED_QUIET_HOURS, SUPPRESSED_CONSENT, FAILED]
         occurredAt: { type: string, format: date-time }
 
     Enrolment:
