@@ -245,10 +245,16 @@ two authenticated principals to alter.
 | Repudiation — "who activated this rule set?" | Durable Postgres record per activation (`compliance_pack_activation`: maker, checker, reason, timestamps) + canonical SHA-256 `content_hash` pinned into the audit evidence (ADR-0214); unlike the Redis-backed ADR-0155 layer this trail is permanent |
 | DoS — boot bricked by a corrupt activation row | Deliberate fail-loud: boot refuses to start over a corrupt activation rather than originate unprotected; operator remediation is to fix the row (the in-memory registry cannot silently run with a partial rule set) |
 | Elevation of privilege — maker self-approves | Server-side identity from the JWT subject (never request body); segregation enforced twice: `Proposal.approve` and registry re-assertion |
+| Tampering — two decisions arriving together are BOTH applied, and a rejected pack is enforced anyway (#3467) | The decision is a conditional UPDATE (`... where id = :id and state = PROPOSED`), so exactly one of any number of concurrent deciders claims the row and the rest are refused. Previously `decide()` tested the state against a snapshot read in a separate transaction and then wrote unconditionally, so two decisions both passed; worse, the approve leg called `registry.activate` whether or not its write survived, leaving a REJECTED row beside a pod enforcing the pack that rejection refused — and `CompliancePackRegistry` has no de-activation path (ADR-0212 D3), so that pod enforced it until restart. `CompliancePackConcurrentDecideIT` measures the race over real HTTP; on the previous code it observed both decisions accepted in 10 of 12 rounds |
 
 **Residual risk:** pack enforcement ships behind the bootstrap flag (default `false`) until the
 CZ reference pack is seeded and activated — the guard cannot protect origination while off.
 Tracked as the named bootstrap follow-up (ADR-0212 D4).
+
+**Residual risk (concurrency):** the conditional UPDATE makes the *decision* atomic; it does not
+make the in-memory registry shared. A pack approved on one replica still reaches its siblings only
+by the convergence path, so the at-most-once guarantee here is about the durable decision, not about
+every pod agreeing at the same instant (#3467, and see the replica-convergence work tracked there).
 
 ## 9. Customer self-service origination intake (ADR-0211) — STRIDE supplement
 
