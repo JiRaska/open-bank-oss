@@ -8,7 +8,7 @@ import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
 import com.openbank.campaign.application.port.out.SendLogRepository
-import com.openbank.campaign.domain.model.CampaignStep
+import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
@@ -42,12 +42,42 @@ open class CampaignJourneyActivitiesImpl(
     private val sendLog: SendLogRepository,
     private val contactGate: ContactPolicyGate,
     private val notificationSend: NotificationSendPort,
+    /**
+     * When true, a step runs every gate and then stops short of the transport: nothing is emitted to
+     * notification-service on any channel, and the send log records DRY_RUN.
+     *
+     * Defaults to TRUE — the safe direction. A non-production environment that forgets to set this
+     * would otherwise mail real people, and the failure is discovered by the recipient. Production
+     * sets it to false explicitly, which is a reviewable line in a manifest rather than an omission.
+     */
+    @ConfigProperty(name = "openbank.campaign.dry-run", defaultValue = "true")
+    private val dryRun: Boolean,
     @ConfigProperty(name = "openbank.campaign.marketing-scope", defaultValue = "MARKETING_COMMS_EMAIL")
     private val marketingScope: String,
 ) : CampaignJourneyActivities {
 
-    override fun loadSteps(campaignId: UUID): List<CampaignStep> = runBlockingOnWorker {
-        campaigns.findById(campaignId)?.steps ?: emptyList()
+    override fun loadDefinition(campaignId: UUID): JourneyDefinition = runBlockingOnWorker {
+        val campaign = campaigns.findById(campaignId)
+        JourneyDefinition(campaign?.steps ?: emptyList(), campaign?.stopCondition)
+    }
+
+    override fun sendsSoFar(campaignId: UUID, partyId: UUID): Int = runBlockingOnWorker {
+        sendLog.countSendsForPartyInCampaign(campaignId, partyId)
+    }
+
+    override fun previousDeliveryStatus(campaignId: UUID, partyId: UUID, stepOrder: Int): DeliveryStatus? =
+        runBlockingOnWorker {
+            sendLog.latestDeliveryStatusBeforeStep(campaignId, partyId, stepOrder)
+        }
+
+    override fun skipStep(campaignId: UUID, partyId: UUID, stepOrder: Int) = runBlockingOnWorker {
+        sendLog.record(
+            SendRecord(Ids.newId(), campaignId, partyId, stepOrder, SendOutcome.SKIPPED_CONDITION, Instant.now()),
+        )
+        enrolments.findByCampaignAndParty(campaignId, partyId)?.let {
+            enrolments.save(it.copy(currentStep = stepOrder + 1))
+        }
+        Unit
     }
 
     // The publish failure below is caught broadly on purpose: the point is that NO handoff failure
@@ -79,29 +109,51 @@ open class CampaignJourneyActivitiesImpl(
             )
         ) {
             ContactGateDecision.ALLOWED -> {
-                // ADR-0200 D3 — delivery goes through notification-service, never direct.
-                //
-                // The order below is the fix for issue #3581: the send log may only be written
-                // AFTER the handoff has been observed to succeed, and a handoff that failed must
-                // leave a FAILED row rather than nothing. What SENT claims here is exactly
-                // "notification-service accepted the request", not "the customer received it".
-                try {
-                    notificationSend.requestSend(partyId, step.template, recipientFor(partyId), step.variables)
-                } catch (e: Exception) {
-                    record(campaignId, partyId, stepOrder, SendOutcome.FAILED)
-                    // Rethrown on purpose: Temporal retries the activity, and the FAILED row above
-                    // is the durable evidence that this attempt happened. FAILED rows do not
-                    // consume the frequency cap (SENT only), so a retry is not penalised.
-                    throw e
+                // The send-log row id is minted BEFORE the handoff, not by `record` after it
+                // (ADR-0239 D1): it is what goes on the wire as the correlation id, so the id has
+                // to exist first. It is used for whichever row this attempt ends up writing —
+                // SENT, DRY_RUN or FAILED — so an outcome that arrives for a handoff that then
+                // failed locally still lands on the right row.
+                val sendId = Ids.newId()
+                // Dry run stops HERE, after every gate above has run. Deliberately not earlier: the
+                // point of a rehearsal is that suppression, cap, quiet hours and consent are all
+                // exercised exactly as they would be, so a journey that would have been suppressed
+                // still reports SUPPRESSED and not DRY_RUN. Nothing is handed off, so this row's
+                // delivery status stays PENDING forever — correctly: no message ever left.
+                if (dryRun) {
+                    sendLog.record(sendId, campaignId, partyId, stepOrder, SendOutcome.DRY_RUN)
+                } else {
+                    // ADR-0200 D3 — delivery goes through notification-service, never direct.
+                    //
+                    // The order below is the fix for issue #3581: the send log may only be written
+                    // AFTER the handoff has been observed to succeed, and a handoff that failed must
+                    // leave a FAILED row rather than nothing. What SENT claims here is exactly
+                    // "notification-service accepted the request", not "the customer received it".
+                    try {
+                        notificationSend.requestSend(
+                            partyId,
+                            step.channel,
+                            step.template,
+                            recipientFor(partyId),
+                            step.variables,
+                            correlationId = sendId,
+                        )
+                    } catch (e: Exception) {
+                        sendLog.record(sendId, campaignId, partyId, stepOrder, SendOutcome.FAILED)
+                        // Rethrown on purpose: Temporal retries the activity, and the FAILED row
+                        // above is the durable evidence that this attempt happened. FAILED rows do
+                        // not consume the frequency cap (SENT only), so a retry is not penalised.
+                        throw e
+                    }
+                    sendLog.record(sendId, campaignId, partyId, stepOrder, SendOutcome.SENT)
                 }
-                record(campaignId, partyId, stepOrder, SendOutcome.SENT)
                 StepOutcome.SENT
             }
             else -> {
                 if (decision.denyReason == ContactDenyReason.GATE_UNAVAILABLE) {
                     throw ContactGateUnavailableException("contact gate state unavailable — activity will retry")
                 }
-                record(campaignId, partyId, stepOrder, outcomeFor(decision.denyReason))
+                sendLog.record(Ids.newId(), campaignId, partyId, stepOrder, outcomeFor(decision.denyReason))
                 StepOutcome.SUPPRESSED
             }
         }
@@ -125,20 +177,13 @@ open class CampaignJourneyActivitiesImpl(
         val state = when (reason) {
             TerminationReason.CONSENT_REVOKED -> EnrolmentState.TERMINATED_CONSENT_REVOKED
             TerminationReason.SUPPRESSED -> EnrolmentState.TERMINATED_SUPPRESSED
+            TerminationReason.STOPPED_MAX_SENDS -> EnrolmentState.STOPPED_MAX_SENDS
         }
         enrolments.findByCampaignAndParty(campaignId, partyId)?.let {
             enrolments.save(it.copy(state = state, completedAt = Instant.now()))
         }
         Unit
     }
-
-    private suspend fun record(campaignId: UUID, partyId: UUID, stepOrder: Int, outcome: SendOutcome) {
-        sendLog.record(SendRecord(Ids.newId(), campaignId, partyId, stepOrder, outcome, Instant.now()))
-    }
-
-    // The recipient address is resolved by notification-service from party data; the campaign
-    // never carries an e-mail address itself (ADR-0200 D3 — no PII duplication).
-    private fun recipientFor(partyId: UUID): String = partyId.toString()
 
     /**
      * Every repository here is reactive Panache, and a Temporal activity runs on a plain worker
@@ -169,3 +214,27 @@ open class CampaignJourneyActivitiesImpl(
 
 /** Thrown when the contact gate cannot reach its state — a retry signal, never a policy outcome. */
 class ContactGateUnavailableException(message: String) : RuntimeException(message)
+
+// Two helpers as top-level privates rather than members: CampaignJourneyActivitiesImpl sits at
+// detekt's TooManyFunctions threshold of 11, which fires AT the limit, so the branch-condition
+// activities (#3585) had to buy their room somewhere.
+
+/**
+ * Write one send-log row.
+ *
+ * `id` is a parameter rather than minted here: on the ALLOWED path it was already published as the
+ * correlation id, and a second id would be a row nothing can ever correlate back to. A gate-denied
+ * send never reached notification-service, so its id correlates with nothing and its delivery
+ * status stays PENDING forever — correctly: no message was ever handed off.
+ */
+private suspend fun SendLogRepository.record(
+    id: UUID,
+    campaignId: UUID,
+    partyId: UUID,
+    stepOrder: Int,
+    outcome: SendOutcome,
+) = record(SendRecord(id, campaignId, partyId, stepOrder, outcome, Instant.now()))
+
+// The recipient address is resolved by notification-service from party data; the campaign never
+// carries an e-mail address itself (ADR-0200 D3 — no PII duplication).
+private fun recipientFor(partyId: UUID): String = partyId.toString()

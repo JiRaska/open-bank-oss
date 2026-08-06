@@ -179,6 +179,23 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   mass replay on money-path channels. `check-kafka-dotted-keys.py` ratchets it (enforced in
   `Validate manifests`) — new occurrences fail, today's six are baselined against #2945, and a
   baseline entry that becomes covered is reported too (#686, #2945).
+- **`Instant.EPOCH` as a data-class default is a lie every test agrees with, and a non-null
+  assertion is not a check.** `AuditEvent.timestamp` and `FlagExposure.timestamp` both defaulted to
+  it; 23 of the 25 fleet `AuditEvent(` sites take the default, and `FlagExposure.of` — the KDoc's
+  "typical call site" — never passed one. Nothing caught it because `isNotNull()` passes against
+  1970-01-01, and `FlagExposureTest` already asserted *every other* field of `of()`. Assert
+  **recency** (`isBetween(before, now)`), never non-nullity, for any field meaning "when did this
+  happen" (#3882). Grep the shape: `: Instant = Instant.EPOCH`.
+- **Before calling a wrong-looking value a live defect, find out whether anything READS it — a
+  field no code path consumes is a latent trap, not corruption, and the two need different fixes.**
+  The audit envelope above looked like the worst case (evidentiary record, append-only store), and
+  was not stored at all: the only `AuditEventPublisher` implementation is the logging fallback,
+  which did not reference `timestamp`; there is no entity, mapper or outbox for the type; and
+  `FlagExposure` has zero production consumers. Cheap to establish — enumerate the interface's
+  implementations, then grep the field name across `src/main` — and it changes the whole PR:
+  urgency, blast radius, and whether the honest fix is the value or the wiring. It also surfaces
+  the real bug next door, which here was that `AuditConsumer` keys on `occurredAt`, a field the
+  canonical envelope does not have, so the envelope's time is dropped at ingest (#3883).
 
 ### ktlint
 - Path-scoped CI only lints changed files, so a pre-existing wildcard import or a latent

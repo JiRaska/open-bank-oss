@@ -16,8 +16,11 @@ import java.util.Currency
  * are not obliged to honour it, and the caller here is a model that composes its own arguments. So
  * every field arrived unchecked, straight through to the port.
  *
- * That is tolerable only while [com.openbank.mcp.infrastructure.read.StubProposalPort] is the
- * binding, because a stub cannot act on a malformed amount. #2414's remaining work — a real
+ * That was tolerable only while a stub was the binding, because a stub cannot act on a malformed
+ * amount; since #2414 the binding
+ * ([com.openbank.mcp.infrastructure.read.UnwiredProposalPort]) refuses outright, and validation
+ * still runs first so a caller learns its arguments were wrong rather than only that the tool is
+ * unavailable. #2414's remaining work — a real
  * `PROPOSED`-only state machine behind the port — needs its own design and is blocked on
  * copilot-service's `ActionProposal` not being a cross-service endpoint. Validation is NOT blocked
  * on that: it belongs at the tool boundary regardless of what the port turns out to be, and doing

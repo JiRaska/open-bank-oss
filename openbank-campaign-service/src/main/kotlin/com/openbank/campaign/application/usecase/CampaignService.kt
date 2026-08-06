@@ -15,6 +15,7 @@ import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.SegmentRef
+import com.openbank.campaign.domain.model.StopCondition
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
@@ -52,6 +53,7 @@ class CampaignService(
         segmentRef: SegmentRef,
         steps: List<CampaignStep>,
         createdBy: String,
+        stopCondition: StopCondition? = null,
     ): Campaign {
         val segment = segments.load(segmentRef.name, segmentRef.version)
             ?: throw NoSuchElementException("segment ${segmentRef.name}@${segmentRef.version} not found")
@@ -61,6 +63,7 @@ class CampaignService(
             goal = goal,
             segmentRef = SegmentRef(segment.name, segment.version),
             steps = steps.sortedBy { it.order },
+            stopCondition = stopCondition,
             state = CampaignState.DRAFT,
             createdBy = createdBy,
             approvedBy = null,
