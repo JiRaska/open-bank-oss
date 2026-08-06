@@ -9,13 +9,13 @@ import com.openbank.balance.application.port.out.BalanceRepository
 import com.openbank.balance.domain.model.BalanceEvent
 import com.openbank.balance.domain.model.BalanceEventType
 import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.lock.ClusterLock
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.time.OffsetDateTime
-import java.util.UUID
 
 /**
  * ADR-0178 Phase 2 (#1745) — the daily **value-date roll**.
@@ -119,7 +119,8 @@ class ValueDateRollScheduler(
             )
             eventPublisher.publish(
                 BalanceEvent(
-                    eventId = UUID.randomUUID(),
+                    // UUIDv7 (ADR-0106): a durable, index-ordered event id.
+                    eventId = Ids.newId(),
                     eventType = BalanceEventType.BALANCE_UPDATED,
                     accountId = key.accountId,
                     currency = key.currency,
