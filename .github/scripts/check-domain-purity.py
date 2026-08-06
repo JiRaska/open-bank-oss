@@ -100,6 +100,24 @@ DOMAIN_MODULE = "openbank-libs-domain"
 # The framework side of the same split; exempt even though its packages say "domain".
 EXEMPT_MODULE = "openbank-libs-runtime"
 
+# Floor on the number of files the scan must open. A gate whose scope silently collapses
+# reports a clean tree, which is precisely how #3670 survived: `*/domain/*` never matched
+# openbank-libs-domain's own packages and the gate was green about 80 unread files. The
+# tree scans 279 domain-layer sources today (measured, not estimated — the first draft of
+# this constant guessed ~470 and the floor rejected the healthy tree).
+#
+# 250 is chosen against the ACTUAL regression, not by feel: reverting in_scope() to the old
+# path-only rule takes the count 279 -> 201, so a floor of 200 would have sat just under the
+# very collapse it exists to catch. Measured both ways.
+#
+# Honest scope of this check: it is a coarse backstop for a scope that collapses wholesale.
+# It cannot see a scope bug that drops a handful of files, and it is NOT the primary
+# detector even for the #3670 collapse — the stale-baseline ratchet is, because a baselined
+# libs-domain file that stops being scanned is reported by name. The floor's value is that
+# it still fires when the baseline happens to be empty, which is the state a future
+# burn-down is aiming for.
+MIN_FILES_SCANNED = 250
+
 
 def strip_kotlin_noise(src: str) -> str:
     """Blank out comments and string literals, preserving line structure.
@@ -175,8 +193,18 @@ def in_scope(rel: Path) -> bool:
     return "domain" in parts
 
 
-def scan(root: Path) -> list[str]:
+def scan(root: Path) -> tuple[list[str], int]:
+    """Return (violations, files_scanned).
+
+    The file COUNT is returned, printed and floor-checked because this gate's whole
+    history is a green that meant "it never looked": the bash version's `*/domain/*`
+    scope silently skipped 80 of libs-domain's 107 main sources, and a scope bug is
+    indistinguishable from a clean tree if the only output is "0 new". A count makes
+    the difference visible, and MIN_FILES_SCANNED makes it fail rather than merely
+    be visible — see run().
+    """
     violations: list[str] = []
+    scanned = 0
     for module in sorted(root.glob("openbank-*")):
         src_root = module / "src" / "main" / "kotlin"
         if not src_root.is_dir():
@@ -189,6 +217,7 @@ def scan(root: Path) -> list[str]:
                 text = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
+            scanned += 1
             clean = strip_kotlin_noise(text)
             for raw, stripped in zip(text.splitlines(), clean.splitlines()):
                 if not FQ_REF.search(stripped):
@@ -196,7 +225,7 @@ def scan(root: Path) -> list[str]:
                 # Report the ORIGINAL line so a baseline entry stays human-readable and the
                 # existing `path:import com.x.Y` entries keep matching byte for byte.
                 violations.append(f"{rel.as_posix()}:{raw.strip()}")
-    return violations
+    return violations, scanned
 
 
 def read_baseline() -> list[str]:
@@ -211,7 +240,16 @@ def read_baseline() -> list[str]:
 
 
 def run(root: Path) -> int:
-    violations = scan(root)
+    violations, scanned = scan(root)
+    if scanned < MIN_FILES_SCANNED:
+        print(
+            f"::error::domain-purity: scanned only {scanned} file(s), expected at least "
+            f"{MIN_FILES_SCANNED} — the SCOPE has collapsed, so a clean result here means "
+            "nothing. This is the #3670 failure mode: the old gate skipped 75% of "
+            "openbank-libs-domain and reported green. Fix in_scope()/the layout, or lower "
+            "MIN_FILES_SCANNED deliberately if the tree really did shrink."
+        )
+        return 1
     baseline = read_baseline()
     baseline_set = set(baseline)
 
@@ -235,7 +273,8 @@ def run(root: Path) -> int:
             stale = True
 
     print(
-        f"check-domain-purity: {len(violations)} violation(s) found, {new_count} new, "
+        f"check-domain-purity: scanned {scanned} domain-layer file(s); "
+        f"{len(violations)} violation(s) found, {new_count} new, "
         f"{len(baseline)} baseline entr(y/ies)."
     )
     return 1 if (fail or stale) else 0
