@@ -6,6 +6,14 @@
 # policy (kyverno or future NetworkPolicy) restricts access to the messaging
 # namespace + admin-ui pod; this matches the posture of Apicurio registry
 # (also internal-only, no app-layer auth).
+#
+# Kafka side: mTLS on :9093 as `User:kafka-ui` (ADR-0137, issue #3393). Identity and the ACL
+# reasoning are in kafka-ui-mtls.yaml. Until 2026-08-03 this pointed at the anonymous plaintext
+# listener :9092 and every request was refused — `Principal = User:ANONYMOUS is Denied operation =
+# DESCRIBE … based on rule DefaultDeny`, once per 30s poll — which the UI renders as a cluster with
+# no topics rather than as an error. Note that the ACLs deliberately stop short of anything
+# destructive, so the UI is also pinned READONLY below: an offered button that fails with an
+# authorization error is a worse way to learn that than a button that is not offered.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -49,9 +57,40 @@ spec:
             - name: KAFKA_CLUSTERS_0_NAME
               value: openbank
             - name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS
-              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             - name: KAFKA_CLUSTERS_0_SCHEMAREGISTRY
               value: http://apicurio-registry.messaging.svc:8080/apis/ccompat/v6
+            # Everything under KAFKA_CLUSTERS_0_PROPERTIES_* is passed verbatim to the underlying
+            # Kafka AdminClient/Consumer (Spring relaxed binding turns the underscores into the
+            # dots of a real client property: …_SECURITY_PROTOCOL -> `security.protocol`). That is
+            # the same mechanism kafka-ui's own SASL/MSK docs use, and it is why the keystore is
+            # configured here rather than through the cluster-level `ssl.*` block, whose shape has
+            # moved between 0.x releases.
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka-keystore/user.p12
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-ui-kafka-keystore
+                  key: user.password
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka-truststore/ca.p12
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
+            # Matches the ACL set (no Write/Create/Delete/Alter anywhere, no group Delete): the UI
+            # hides topic creation, message production and offset resets instead of offering them
+            # and failing at the broker.
+            - name: KAFKA_CLUSTERS_0_READONLY
+              value: "true"
             - name: DYNAMIC_CONFIG_ENABLED
               value: "false"
             - name: AUTH_TYPE
@@ -80,6 +119,24 @@ spec:
             capabilities:
               drop:
                 - ALL
+          volumeMounts:
+            # Deliberately NOT `optional: true`: if the ESO projection has not landed, the pod must
+            # stay at ContainerCreating rather than boot and fall back to a plaintext-shaped client
+            # that renders an empty cluster — which is precisely the failure this change exists to
+            # end (openbank-infra CLAUDE.md, the #1284 trade).
+            - name: kafka-keystore
+              mountPath: /mnt/kafka-keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka-truststore
+              readOnly: true
+      volumes:
+        - name: kafka-keystore
+          secret:
+            secretName: kafka-ui-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
 ---
 apiVersion: v1
 kind: Service
