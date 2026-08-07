@@ -142,8 +142,8 @@
   "facts": {
     "agentCharters": {
       "source": "openbank-libs/governance/agents.yaml",
-      "sha256": "7feff1674a83d5ea",
-      "count": 15,
+      "sha256": "bfc4b4639efd5846",
+      "count": 16,
       "ids": [
         "compliance-officer",
         "ledger-domain-engineer",
@@ -159,10 +159,11 @@
         "release-steward",
         "docs-truth-agent",
         "authz-policy-auditor",
-        "flaky-test-hunter"
+        "flaky-test-hunter",
+        "case-coordinator"
       ],
       "byPlane": {
-        "control": 10,
+        "control": 11,
         "development": 2,
         "customer": 3
       },
@@ -173,12 +174,12 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "eb2029193a2f2c6e",
+      "sha256": "07eb0af8e87295d1",
       "counts": {
         "external": 2,
         "not-applicable": 2,
         "pending": 0,
-        "registered": 11
+        "registered": 12
       },
       "idsByStatus": {
         "external": [
@@ -201,7 +202,8 @@
           "release-steward",
           "docs-truth-agent",
           "authz-policy-auditor",
-          "flaky-test-hunter"
+          "flaky-test-hunter",
+          "case-coordinator"
         ]
       }
     },
@@ -229,6 +231,13 @@
             "authz-policy-auditor"
           ],
           "buildFile": "openbank-authz-policy-auditor/build.gradle.kts"
+        },
+        {
+          "module": "openbank-case-coordinator-agent",
+          "charters": [
+            "case-coordinator"
+          ],
+          "buildFile": "openbank-case-coordinator-agent/build.gradle.kts"
         },
         {
           "module": "openbank-control-liveness-sentinel",
@@ -280,9 +289,10 @@
           "buildFile": "openbank-release-steward/build.gradle.kts"
         }
       ],
-      "serviceCount": 9,
+      "serviceCount": 10,
       "registeredChartersLoadedFromRegistry": [
         "authz-policy-auditor",
+        "case-coordinator",
         "compliance-officer",
         "control-liveness-sentinel",
         "devops-agent",

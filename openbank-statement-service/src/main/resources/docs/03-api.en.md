@@ -22,6 +22,18 @@ Close a month for **every pocket** of an account. Assigns the next legal/electro
 - `200` → array of `StatementPeriod` (one per pocket).
 - `409` → fail-closed reconciliation mismatch; **no statement is issued** (body `{ "error": "..." }`).
 
+### `POST /api/v1/statements/{accountId}/{currency}/restate`
+
+Restate a closed period after a correction to the underlying booked data (ADR-0035 §D). The existing record is **never edited**: the service re-reads the booked entries and balance-service's closing balance, reconciles fail-closed exactly as a first close does, and issues a **new** close carrying the next legal sequence with `supersedesSequence` pointing at the record it replaces; that record flips to `SUPERSEDED` in the same transaction.
+
+- Roles: `ROLE_OPERATOR`, `ROLE_ADMIN` (an operator action — deliberately **not** `ROLE_API`).
+- Query params: `from` (date, required), `to` (date, required).
+- If the recomputed figures are unchanged, **no sequence is burnt** and the standing record is returned as-is.
+- The superseded record is retained and stays renderable by its own legal sequence for its full retention period.
+- `200` → the standing `StatementPeriod` after the restatement.
+- `404` → no closed period for that window; a restatement never mints a first close.
+- `409` → fail-closed reconciliation mismatch; the standing close is left **untouched**.
+
 ### `GET /api/v1/statements/{accountId}`
 
 List the retained period-close records for an account. `200` → array of `StatementPeriod`.

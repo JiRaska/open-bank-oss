@@ -18,6 +18,7 @@ enum class WithdrawalProposalStatus {
     APPROVED,
     REJECTED,
     CANCELLED,
+    EXPIRED,
 }
 
 private const val ISO_CURRENCY_CODE_LENGTH = 3
@@ -35,14 +36,25 @@ data class WithdrawalProposal(
     val decidedAt: OffsetDateTime? = null,
     val scaSessionId: UUID? = null,
     val createdAt: OffsetDateTime,
+    val expiresAt: OffsetDateTime,
 ) {
     init {
         require(amountMinor > 0) { "amountMinor must be positive" }
         require(currency.length == ISO_CURRENCY_CODE_LENGTH) { "currency must be ISO 4217" }
+        require(expiresAt.isAfter(createdAt)) { "expiresAt must be after createdAt" }
     }
+
+    /**
+     * A proposal past its window is dead on read, whatever the stored status says. The sweep
+     * writes EXPIRED eventually; this makes the *decision* path independent of the sweep having
+     * run, so a late approval cannot slip through the gap between the two.
+     */
+    fun isExpiredAt(now: OffsetDateTime): Boolean =
+        status == WithdrawalProposalStatus.PENDING && !now.isBefore(expiresAt)
 
     fun approve(by: UUID, scaSessionId: UUID, now: OffsetDateTime): WithdrawalProposal {
         check(status == WithdrawalProposalStatus.PENDING) { "only a PENDING proposal can be approved (is $status)" }
+        check(!isExpiredAt(now)) { "proposal expired at $expiresAt and can no longer be approved" }
         return copy(
             status = WithdrawalProposalStatus.APPROVED,
             decidedBy = by,
@@ -59,5 +71,10 @@ data class WithdrawalProposal(
     fun cancel(now: OffsetDateTime): WithdrawalProposal {
         check(status == WithdrawalProposalStatus.PENDING) { "only a PENDING proposal can be cancelled (is $status)" }
         return copy(status = WithdrawalProposalStatus.CANCELLED, decidedAt = now)
+    }
+
+    fun expire(now: OffsetDateTime): WithdrawalProposal {
+        check(status == WithdrawalProposalStatus.PENDING) { "only a PENDING proposal can expire (is $status)" }
+        return copy(status = WithdrawalProposalStatus.EXPIRED, decidedAt = now)
     }
 }

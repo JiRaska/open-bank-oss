@@ -31,6 +31,8 @@ class SegmentQueryTest {
             evaluated = segment
             return cohort
         }
+
+        override suspend fun matches(segment: Segment, partyId: UUID): Boolean = partyId in cohort
     }
 
     private val query = SegmentQuery(evaluation, Clock.fixed(fixedNow, ZoneOffset.UTC))

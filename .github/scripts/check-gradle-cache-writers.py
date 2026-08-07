@@ -154,10 +154,6 @@ DECLARED: dict[str, tuple[str, str]] = {
         "on PR refs, not one shared entry. Its check also passes `--refresh-dependencies` "
         "deliberately, so a warm Gradle home is what it is designed not to lean on.",
     ),
-    "dependabot-verification-metadata.yml::refresh-metadata": (
-        "setup-java",
-        "Same setup-java keying as pitest.",
-    ),
     "perf-gate.yml::perf": (
         "read-only",
         "Consumer; restores fleet-lint's home. Weekly advisory k6 gate (ADR-0243) — "
