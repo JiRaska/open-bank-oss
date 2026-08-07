@@ -72,6 +72,11 @@ quarkus:
     party-api:
       url: ${PARTY_SERVICE_URL:http://localhost:8111}
       scope: jakarta.inject.Singleton
+    # ADR-0248: synchronous, on-demand call to document-service's non-persisting preview endpoint —
+    # a new outbound trust-boundary edge (rules.yaml: trust_boundary_diff_change).
+    document-api:
+      url: ${DOCUMENT_SERVICE_URL:http://localhost:8143}
+      scope: jakarta.inject.Singleton
   shutdown:
     timeout: 30S
   log:
