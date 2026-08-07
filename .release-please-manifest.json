@@ -31,7 +31,7 @@
   "openbank-interest-service": "0.15.0",
   "openbank-kyc-service": "0.10.6",
   "openbank-ledger-service": "1.20.0",
-  "openbank-lending-service": "0.23.0",
+  "openbank-lending-service": "0.23.1",
   "openbank-mcp-service": "0.14.5",
   "openbank-notification-service": "0.18.0",
   "openbank-onboarding-service": "0.5.9",
