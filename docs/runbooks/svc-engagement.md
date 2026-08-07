@@ -13,7 +13,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Field | Value |
 |---|---|
 | Service | `openbank-engagement-service` |
-| HTTP port | `?` |
+| HTTP port | `8153` |
 | Data domain | — |
 | Datastore | — (database `—`) |
 | Classification | — |
@@ -30,7 +30,7 @@ triaging an incident that starts on `engagement`.
 
 ## Health & probes
 
-- Readiness: `GET :?/q/health/ready` · Liveness: `GET :?/q/health/live`
+- Readiness: `GET :8153/q/health/ready` · Liveness: `GET :8153/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `engagement`); dashboards in Grafana.
 - Logs: `kubectl logs -n engagement deploy/engagement-service -f`, or Loki
   `{namespace="engagement"}`.

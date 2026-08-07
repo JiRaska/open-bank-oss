@@ -1,0 +1,131 @@
+# engagement-service: ADR-0220 in-app surfaces, first infrastructure slice.
+#
+# INERT: not in auto-deploy.yml's ALL_SERVICES, so no image is ever built or pushed for this
+# workload — Kyverno's SBOM-attestation/cosign-signature admission policies reject a tag that was
+# never pushed, so this Deployment never actually schedules a running pod. It exists to satisfy
+# this repo's gitops-presence gates (kafka-topic-existence, oidc-client-secret-wiring) for the
+# service code merged ahead of a real rollout.
+#
+# Deliberately absent, all follow-up scope for when the service is turned on for real:
+#   - a real CNPG Postgres cluster (no idle DB cost for a pod that never runs);
+#   - Kafka mTLS (KafkaUser + keystore/truststore Secrets) — KAFKA_BOOTSTRAP_SERVERS below has no
+#     SSL config, which is fine only because openbank.outbox.dispatch-enabled defaults false;
+#   - the OPA sidecar / policy bundle — SurfaceResource carries no @Authorize annotation yet, and
+#     the shared rest.rego has no rule for these two actions, so the platform-wide
+#     `default allow := false` denies them fail-closed under enforcement regardless;
+#   - NetworkPolicy.
+# Reachable only in-cluster via ClusterIP, no ingress.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: engagement-service
+  namespace: engagement
+  labels:
+    app.kubernetes.io/name: engagement-service
+    app.kubernetes.io/part-of: engagement
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: engagement-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: engagement-service
+        app.kubernetes.io/part-of: engagement
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: engagement-service
+          # Placeholder — never resolves to a real image while this workload stays out of
+          # ALL_SERVICES (see the file header). Not `sandbox-pending`: that string is not this
+          # repo's actual convention anywhere today: it names the FAILURE MODE this comment
+          # documents, not a tag any pipeline writes.
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-engagement-service:unreleased
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8153
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://engagement-db-rw.engagement.svc:5432/openbank_engagement
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://engagement-db-rw.engagement.svc:5432/openbank_engagement
+            - name: DB_USER
+              value: openbank
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: engagement-db-app
+                  key: password
+            # No SSL config — see the file header on Kafka mTLS being deferred.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: CONSENT_SERVICE_URL
+              value: http://consent-service.consent.svc:8106
+            - name: KEYCLOAK_URL
+              value: http://keycloak.iam.svc:8080
+            # optional:true — see check-oidc-client-secret-wiring.py's OPTIONAL_TRUE_PENDING_LIVE_CHECK.
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: engagement-service-oidc
+                  key: OIDC_CLIENT_SECRET
+                  optional: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: 8085
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: 8085
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: engagement-service
+  namespace: engagement
+  labels:
+    app.kubernetes.io/name: engagement-service
+spec:
+  selector:
+    app.kubernetes.io/name: engagement-service
+  ports:
+    - name: http
+      port: 8153
+      targetPort: 8153
+    - name: management
+      port: 8085
+      targetPort: 8085
