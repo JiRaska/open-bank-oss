@@ -20,6 +20,15 @@ interface CompliancePackActivationRepository {
     fun findById(id: UUID): Uni<CompliancePackActivationEntity?>
     fun findByState(state: ProposalState): Uni<List<CompliancePackActivationEntity>>
     fun findActivated(): Uni<List<CompliancePackActivationEntity>>
+
+    /**
+     * Apply a four-eyes decision to [entity] **only if** the stored row is still
+     * [ProposalState.PROPOSED], as a single statement. Returns the number of rows claimed: `1` when
+     * this caller won the decision, `0` when someone else already decided it.
+     *
+     * The caller must treat `0` as a refusal and must not perform any side effect of the decision.
+     */
+    fun compareAndSetDecision(entity: CompliancePackActivationEntity): Uni<Int>
 }
 
 @ApplicationScoped
@@ -42,6 +51,37 @@ class JpaCompliancePackActivationRepository :
     override fun save(entity: CompliancePackActivationEntity): Uni<CompliancePackActivationEntity> =
         Panache.getSession().flatMap { it.merge(entity) }
 
+    /**
+     * The decision leg does NOT go through [save].
+     *
+     * `save` is a blind upsert: it writes whatever the caller loaded, whenever the caller gets round
+     * to it. The checker leg reads the row in one transaction (`findById`, `@WithSession`), decides
+     * against that snapshot in memory, and writes in another — so two decisions arriving together
+     * both observe `PROPOSED`, both pass the service's `require(state == PROPOSED)` guard, and both
+     * write. A lost update on a segregation-of-duties control, and worse than a lost update: the
+     * approve leg activates the pack in the in-memory registry whether or not its write survived, so
+     * a REJECTED row can coexist with a pod enforcing the pack that rejection refused.
+     *
+     * Making the state test part of the UPDATE closes the window without a lock, a version column or
+     * a schema change — the database evaluates `state = PROPOSED` and the assignment in one
+     * statement, so exactly one of any number of concurrent deciders can claim the row and the rest
+     * get `0` back. `CompliancePackConcurrentDecideIT` measures it; on the previous code it observed
+     * both decisions accepted in 10 of 12 rounds.
+     */
+    @WithTransaction
+    override fun compareAndSetDecision(entity: CompliancePackActivationEntity): Uni<Int> =
+        Panache.getSession().flatMap { session ->
+            session.createMutationQuery(DECIDE_HQL)
+                .setParameter("state", entity.state)
+                .setParameter("decidedBy", entity.decidedBy)
+                .setParameter("decidedAt", entity.decidedAt)
+                .setParameter("reason", entity.decisionReason)
+                .setParameter("updatedAt", entity.updatedAt)
+                .setParameter("id", entity.id)
+                .setParameter("from", ProposalState.PROPOSED)
+                .executeUpdate()
+        }
+
     @WithSession
     override fun findById(id: UUID): Uni<CompliancePackActivationEntity?> = find("id", id).firstResult()
 
@@ -54,4 +94,17 @@ class JpaCompliancePackActivationRepository :
         "state in ?1 order by jurisdiction, productType, packVersion",
         listOf(ProposalState.APPROVED, ProposalState.EXECUTED),
     )
+
+    private companion object {
+        /**
+         * The `and state = :from` clause is the whole point — without it this is [save] with extra
+         * steps. Named parameters because [CompliancePackActivationEntity.decisionReason] is
+         * nullable and Panache's positional `update(String, vararg Any)` cannot carry a null.
+         */
+        const val DECIDE_HQL =
+            "update CompliancePackActivationEntity " +
+                "set state = :state, decidedBy = :decidedBy, decidedAt = :decidedAt, " +
+                "decisionReason = :reason, updatedAt = :updatedAt " +
+                "where id = :id and state = :from"
+    }
 }

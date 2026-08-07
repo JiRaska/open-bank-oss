@@ -58,6 +58,22 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 
 - **2026-08-05** — Trust-boundary change (#3734): `operator-consent-write`'s M2M exclusion widened from `service-account-openbank-services` to the `service-account-` prefix. ADR-0206 D5 closed the backend M2M identity but left `service-account-openbank-edge` admitted to every `consent.*` write. The edge's legitimate consent access ({consent.list, consent.revoke} via base edge-service-consent, the customer's PSD2 consent screen) is preserved; no prohibition clause needed — the role_action_matrix grants no `consent.*` write to ROLE_OPERATOR.
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. Four parameters on the consent lifecycle: `partyId` on revoke, `scaSessionId` on activate, `reason` on reject, `scope` on hasActiveConsent. `scaSessionId` is the evidence that SCA completed, so a null reaching activate is a state transition with no SCA reference attached — the request must be rejected, not half-processed. hasActiveConsent already answered 400 by accident (`runCatching` swallowed the NPE); it now says which parameter is missing. No new caller or boundary. Rollback: revert.
+- **2026-08-03** — ADR-0219 D3 suppression store (#3656 slice 2): new inbound REST surface
+  `/api/v1/suppressions` (create / list-active-by-party / revoke) over a new `suppressions` table,
+  with `SuppressionCreated`/`SuppressionRevoked` events written in the same transaction (the
+  gate's near-real-time invalidation signal). **Spoofing:** writes are `suppression.manage`,
+  HUMAN-operator-only — the shared M2M client is explicitly excluded, because a role-only check
+  would have granted every backend service the write (the same defect class `operator-consent-write`
+  already fixed); reads (`suppression.read`) serve operators and the gate's M2M callers — a
+  low-sensitivity stop-list (partyId + reason code, no content). **Tampering:** the ALL/SCOPE/TOPIC
+  shape is validated by construction AND by a DB check constraint, so an ALL entry cannot carry a
+  scoping value; revoke is a one-way transition with actor recorded. **Info disclosure:** the
+  per-party list is the gate's read shape — it reveals only that a stop exists, never why the
+  person is vulnerable; reason codes are coarse by design. **Repudiation:** every transition is an
+  outbox event in the same commit (ADR-0126 §D3 pattern). Risk class = **integrity** (a forged
+  suppression silences a customer; a deleted one re-enables contact the law forbids) — both need
+  the write path above, which is why it stays operator-only. Verified by `SuppressionTest`
+  (covers(), shape, one-way revoke) + the consent ext rego tests (4 new rules).
 - **2026-07-17** — Completed ADR-0126 §D2: `/validate` response now carries `scopes`, `grantedAccounts`
   (covered IBANs; null = all of the party's accounts) and `frequencyPerDay` (PSD2 RTS Art. 10 AISP cap
   = 4) so a resource server can cache within that window. Additive optional fields (openapi

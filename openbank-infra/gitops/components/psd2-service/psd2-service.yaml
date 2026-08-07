@@ -27,7 +27,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-psd2-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "bb4b483713900a24"
+        openbank.tech/policy-checksum: "2206734711723848"
       labels: {app.kubernetes.io/name: psd2-service, app.kubernetes.io/part-of: psd2}
     spec:
       securityContext:
@@ -38,7 +38,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: psd2-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-psd2-service:sandbox-e532b32e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-psd2-service:sandbox-c1474794
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8107}

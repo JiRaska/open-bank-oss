@@ -78,8 +78,11 @@ class OnnxFraudModel(
 
     companion object {
         private val log = Logger.getLogger(OnnxFraudModel::class.java)
-        private const val MODEL_RESOURCE_PATH = "ml/baseline-fraud-v1.onnx"
-        private const val MODEL_CARD_PATH = "ml/baseline-fraud-v1.card.json"
+
+        // internal (not private): OnnxServingSmoke runs the identical load path in-image, and
+        // OnnxFraudModelTest exercises the load-failure branch directly.
+        internal const val MODEL_RESOURCE_PATH = "ml/baseline-fraud-v1.onnx"
+        internal const val MODEL_CARD_PATH = "ml/baseline-fraud-v1.card.json"
         private const val INPUT_NAME = "features"
         private val INPUT_SHAPE = longArrayOf(1, 2)
         private val mapper = ObjectMapper()
