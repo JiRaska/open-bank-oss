@@ -13,6 +13,7 @@ import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.within
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 
@@ -34,6 +35,29 @@ class OnnxFraudModelTest {
         val second = model.scoreShadow(features)
         assertThat(first).isNotNull().isBetween(0.0, 1.0)
         assertThat(first).isEqualTo(second)
+    }
+
+    /**
+     * The model REALLY runs, and computes the documented logistic — not merely "something in
+     * [0,1]". The graph is `sigmoid(-4.0 + 0.30*h1 + 0.05*h24)` (gen_onnx_baseline_model.py), so
+     * h1=5, h24=12 has exactly one right answer. A stubbed adapter, a constant, or a degraded
+     * session returning null all fail this; the bounded/monotonic assertions above do not
+     * distinguish those.
+     *
+     * What this CANNOT catch, and why it needed a second mechanism (#3354): it runs on the CI
+     * runner's libc, not the runtime image's. The deploy image was musl while libonnxruntime.so is
+     * glibc-linked, so this test was green for the entire life of an adapter that had never once
+     * loaded in a deployed environment. `.github/scripts/verify-image-native-libs.py` is the half
+     * that runs the real loader against the real base image before any push.
+     */
+    @Test
+    fun `scores the documented logistic exactly, so a real inference must have happened`() {
+        val score = model.scoreShadow(
+            mapOf(VELOCITY_TXN_COUNT_H1.name to 5.0, VELOCITY_TXN_COUNT_H24.name to 12.0),
+        )
+        val logit = -4.0 + 0.30 * 5.0 + 0.05 * 12.0
+        val expected = 1.0 / (1.0 + kotlin.math.exp(-logit))
+        assertThat(score).isNotNull().isCloseTo(expected, within(1e-6))
     }
 
     @Test

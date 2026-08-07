@@ -63,12 +63,20 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           token: ${{ secrets.METADATA_REFRESH_PAT }}
 
+      # No `cache: gradle`. That input produced `setup-java-Linux-x64-gradle`, a single 1181 MB
+      # entry — 12% of the repo's 10 GB Actions-cache ceiling — for a job that runs only on a
+      # Dependabot PR that also has METADATA_REFRESH_PAT set, i.e. rarely (#3299). The cache was
+      # over the ceiling, so GitHub was evicting least-recently-used entries continuously and
+      # silently; every eviction is some other job re-resolving from scratch.
+      #
+      # It is also the wrong job to warm. This step REGENERATES verification metadata by resolving
+      # the dependency graph and hashing what it finds, so what is already on disk is exactly what
+      # it must not take for granted. The cost is a slower resolve on a job nobody waits on.
       - if: steps.tok.outputs.have == 'true'
-        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           java-version: "25"
           distribution: temurin
-          cache: gradle
 
       - name: Regenerate verification metadata
         if: steps.tok.outputs.have == 'true'

@@ -28,7 +28,8 @@ data class FlagExposure(
     val variant: String,
     val targetingKey: String?,
     val reason: EvaluationReason,
-    val timestamp: Instant = Instant.EPOCH,
+    /** When the subject saw the variant. Defaults to construction time; [of] never passes one. */
+    val timestamp: Instant = Instant.now(),
     /** Ties the exposure back to the request log line (DORA reconstruction). */
     val traceId: String? = null,
 ) {
@@ -62,17 +63,18 @@ interface ExposurePublisher {
  * `LoggingAuditEventPublisher`.
  */
 class LoggingExposurePublisher : ExposurePublisher {
-    private val log = org.jboss.logging.Logger.getLogger("openbank.flags.exposure")
+    // JDK System.Logger, not org.jboss.logging.Logger: this module must stay framework-free
+    // (ADR-0002/ADR-0122, #3670). Under Quarkus the JDK logger resolves through the JUL
+    // bridge into the JBoss LogManager, so the category and the output format are unchanged.
+    private val log: System.Logger = System.getLogger("openbank.flags.exposure")
 
     override suspend fun publish(exposure: FlagExposure) {
-        log.infof(
-            "flag exposure exposureId=%s flag=%s variant=%s key=%s reason=%s traceId=%s",
-            exposure.exposureId,
-            exposure.flagKey,
-            exposure.variant,
-            exposure.targetingKey,
-            exposure.reason,
-            exposure.traceId,
+        log.log(
+            System.Logger.Level.INFO,
+            "flag exposure exposureId=${exposure.exposureId} at=${exposure.timestamp} " +
+                "flag=${exposure.flagKey} variant=${exposure.variant} " +
+                "key=${exposure.targetingKey} reason=${exposure.reason} " +
+                "traceId=${exposure.traceId}",
         )
     }
 }

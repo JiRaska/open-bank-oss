@@ -56,12 +56,22 @@ jobs:
       HEAD_REF: ${{ github.event.pull_request.head.ref }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # `gh pr diff` shells out to git and needs either a checkout or an explicit repo. This job
-      # has no checkout, so without --repo it dies "not a git repository", returns nothing, and
+      # `gh pr diff` shells out to git and needs either a checkout or an explicit repo. Everything
+      # here is API-only, so without --repo it dies "not a git repository", returns nothing, and
       # every run silently records zero services ("nothing to record") — the deploy tracking then
       # goes stale with no error. Pass the repo explicitly so it works API-only.
       GH_REPO: ${{ github.repository }}
     steps:
+      # SHALLOW on purpose. The only things needed from the repo are two files —
+      # .github/scripts/resolve-record-deployment-version.sh and release-please-config.json —
+      # and the equivalence proof is made through the compare API, not through git history
+      # (#3223). A full-history checkout on every gitops merge would buy nothing here.
+      - name: Check out the resolver and the exclude-paths it reads
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Record deployed services in the broker
         if: ${{ vars.PACT_BROKER_URL != '' }}
         run: |
@@ -135,23 +145,23 @@ jobs:
             SHA="${FULL[$short]:-}"
             [ -n "$SHA" ] || continue  # unresolvable tag already counted via resolve_failed
             echo "==> record-deployment ${svc} @ ${short} → sandbox"
-            # record-deployment needs the version to exist in the broker. A version that CI
-            # never published (path-scoped build skipped this service on that sha) 404s; create
-            # it idempotently first, matching the old in-gitops-pr behaviour.
-            ver_code="$(curl -s -o /dev/null -w '%{http_code}' \
-              -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
-              "${PACT_BROKER_URL}/pacticipants/${svc}/versions/${SHA}")"
-            if [ "$ver_code" = "404" ]; then
-              echo "  version not in broker yet — creating it via REST (idempotent PUT)"
-              curl -s -o /dev/null -w '  PUT version → HTTP %{http_code}\n' \
-                -X PUT -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
-                -H "Content-Type: application/json" -d '{}' \
-                "${PACT_BROKER_URL}/pacticipants/${svc}/versions/${SHA}"
-            fi
+            # WHICH version to record is decided by resolve-record-deployment-version.sh (#3223).
+            # It never fabricates: `exact` when the broker has this sha, `equivalent:<sha>` when a
+            # published version is byte-identical in every build input of this service, `none`
+            # otherwise. The old code PUT an empty version on 404, which made 45 of 56 deployed
+            # versions unverifiable and left 13 of 19 providers permanently blocking consumers.
+            sel="$(bash .github/scripts/resolve-record-deployment-version.sh "$svc" "$SHA")"
+            case "$sel" in
+              exact:*)      REC_VER="${sel#exact:}" ;;
+              equivalent:*) REC_VER="${sel#equivalent:}"
+                            echo "  no version for ${SHA:0:8}; ${REC_VER:0:8} is byte-identical in every build input — recording that (#3223, #3432)" ;;
+              *)            echo "::warning::${svc}: no published version for ${SHA:0:8} and none provably equivalent — recording NOTHING rather than a version nothing can verify (#3223). can-i-deploy for its consumers will report no deployed version, which is the honest state."
+                            continue ;;
+            esac
             ok=0
             for attempt in 1 2 3; do
               if "$CLI" record-deployment \
-                   --pacticipant "$svc" --version "$SHA" --environment sandbox \
+                   --pacticipant "$svc" --version "$REC_VER" --environment sandbox \
                    --broker-base-url "$PACT_BROKER_URL" \
                    --broker-username "$PACT_BROKER_USERNAME" \
                    --broker-password "$PACT_BROKER_PASSWORD"; then

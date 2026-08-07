@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/docs-truth-agent-v0.5.0...docs-truth-agent-v0.6.0) (2026-08-07)
+
+
+### Features
+
+* **scheduler:** register workflow liveness for five non-money-path jobs (ADR-0237) ([#3735](https://github.com/JiRaska/open-bank-oss/issues/3735)) ([90801b2](https://github.com/JiRaska/open-bank-oss/commit/90801b203c4eec229180321e869c926be3a99ee8))
+
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/docs-truth-agent-v0.4.0...docs-truth-agent-v0.5.0) (2026-08-06)
+
+
+### Features
+
+* **docs-truth-agent:** wire prompt registry and LLM gateway ([#3787](https://github.com/JiRaska/open-bank-oss/issues/3787)) ([1d00fdd](https://github.com/JiRaska/open-bank-oss/commit/1d00fddf7c67c76f2c020bae669a61c15503b947)), closes [#3786](https://github.com/JiRaska/open-bank-oss/issues/3786)
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/docs-truth-agent-v0.3.3...docs-truth-agent-v0.4.0) (2026-08-02)
 
 

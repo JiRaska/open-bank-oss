@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.7.10...aml-service-v0.8.0) (2026-08-07)
+
+
+### Features
+
+* **scheduler:** register workflow liveness for five non-money-path jobs (ADR-0237) ([#3735](https://github.com/JiRaska/open-bank-oss/issues/3735)) ([90801b2](https://github.com/JiRaska/open-bank-oss/commit/90801b203c4eec229180321e869c926be3a99ee8))
+
 ## [0.7.10](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.7.9...aml-service-v0.7.10) (2026-08-02)
 
 

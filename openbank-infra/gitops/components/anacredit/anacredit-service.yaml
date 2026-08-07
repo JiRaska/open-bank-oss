@@ -21,6 +21,16 @@ metadata:
     app.kubernetes.io/part-of: anacredit
 spec:
   replicas: 1
+  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
+  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
+  # resources - on a full cluster the rollout never completes and reports 1/1 READY.
+  # This workload is single-replica BY CONSTRAINT: it holds per-pod in-memory state, so
+  # scaling it past 1 needs the #3467-class fix first, not a replica bump.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: anacredit-service
@@ -32,7 +42,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-anacredit-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "743e052201b20b0a"
+        openbank.tech/policy-checksum: "cd4a415b98d2401a"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -43,7 +53,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: anacredit-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-anacredit-service:sandbox-95b652dd
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-anacredit-service:sandbox-ee974ea3
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

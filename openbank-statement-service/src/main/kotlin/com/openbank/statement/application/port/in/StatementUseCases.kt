@@ -24,6 +24,23 @@ interface ClosePocketUseCase {
     fun closePocketMonth(accountId: UUID, currency: String, from: LocalDate, to: LocalDate): Uni<StatementPeriod>
 }
 
+/**
+ * Restates an already-closed period after a correction to the underlying booked data (ADR-0035 §D,
+ * issue #1302 item 5).
+ *
+ * A close is **immutable**: this never edits the existing record. It re-reads the booked entries and
+ * balance-service's closing balance, reconciles fail-closed exactly as a first close does, and — if
+ * the figures actually changed — writes a **new** period close with the next legal sequence and
+ * `supersedesSequence` pointing at the record it replaces, flipping that record to
+ * [com.openbank.statement.domain.model.PeriodCloseStatus.SUPERSEDED] in the same transaction.
+ *
+ * Idempotent in the sense that matters for a legal sequence: if the recomputed figures are identical
+ * to the standing close, **no** sequence is burnt and the existing record is returned unchanged.
+ */
+interface RestatePeriodUseCase {
+    fun restatePocketPeriod(accountId: UUID, currency: String, from: LocalDate, to: LocalDate): Uni<StatementPeriod>
+}
+
 /** Renders an already-closed period on demand — nothing is stored (ADR-0035 §F.2). */
 interface RenderStatementUseCase {
     fun render(

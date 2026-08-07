@@ -9,6 +9,7 @@ import com.openbank.fx.application.port.`in`.ConvertCommand
 import com.openbank.fx.application.port.`in`.FxUseCase
 import com.openbank.fx.application.port.`in`.GetRateHistoryQuery
 import com.openbank.fx.application.port.`in`.GetRateQuery
+import com.openbank.fx.application.port.`in`.ResolvedRate
 import com.openbank.fx.application.port.out.AmlCasePort
 import com.openbank.fx.application.port.out.AmlCaseRiskLevel
 import com.openbank.fx.application.port.out.FraudScoreCommand
@@ -79,11 +80,14 @@ class FxService(
      * customer edge turns the resulting null into `fx_rate_unavailable` + HTTP 502, so the app
      * reports a gateway error for what is really a missing derivation.
      *
-     * Inversion swaps bid and ask — see [FxRate.inverted].
+     * Inversion swaps bid and ask — see [FxRate.inverted]. A derived quote is reported with
+     * [ResolvedRate.derivedFrom] naming the stored row, so the REST layer can null the response
+     * `id` (#3374); the domain rate keeps the source id either way, so `FxConversion.rateId`
+     * always references a real `fx_rates` row.
      */
-    private suspend fun resolveRate(base: String, quote: String, type: RateType): FxRate? =
-        rateRepo.findLatest(base, quote, type)
-            ?: rateRepo.findLatest(quote, base, type)?.inverted()
+    private suspend fun resolveRate(base: String, quote: String, type: RateType): ResolvedRate? =
+        rateRepo.findLatest(base, quote, type)?.let { ResolvedRate(it, derivedFrom = null) }
+            ?: rateRepo.findLatest(quote, base, type)?.inverted()?.let { ResolvedRate(it, derivedFrom = it.id) }
 
     override suspend fun getAllRates() = rateRepo.findAll()
 
@@ -101,7 +105,7 @@ class FxService(
         convRepo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return it }
         // Same resolution as the read path: a conversion must not be refused for a pair the bank
         // can price perfectly well from the other side.
-        val rate = resolveRate(cmd.fromCurrency, cmd.toCurrency, RateType.SPOT)
+        val rate = resolveRate(cmd.fromCurrency, cmd.toCurrency, RateType.SPOT)?.rate
             ?: error("No FX rate available for ${cmd.fromCurrency}/${cmd.toCurrency}")
         require(rate.isValid(Instant.now(clock))) { "FX rate expired for ${cmd.fromCurrency}/${cmd.toCurrency}" }
 

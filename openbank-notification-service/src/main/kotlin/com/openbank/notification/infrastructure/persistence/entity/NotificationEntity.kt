@@ -36,6 +36,14 @@ class NotificationEntity : PanacheEntity() {
     @Column(nullable = false)
     lateinit var status: String
 
+    /**
+     * The producer's own id for this request (ADR-0239 D1), echoed unchanged. Nullable: most
+     * producers never set one. Persisted rather than only carried in memory so an operator can join
+     * a notification row back to whatever asked for it, which is the whole forensic value.
+     */
+    @Column(name = "correlation_id")
+    var correlationId: UUID? = null
+
     @Column(name = "sent_at")
     var sentAt: Instant? = null
 
