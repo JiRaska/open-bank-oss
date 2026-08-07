@@ -9,8 +9,17 @@ package com.openbank.agent.domain.policy
  * Who is calling a tool. In phase 1 (ADR-0031 D9) the identity is asserted by the
  * `X-Agent-Id` header; ADR-0031 D3 replaces this with a SPIFFE/SPIRE SVID. A null
  * identity is the unauthenticated case and is denied by default.
+ *
+ * [modelId] is the charter-declared LiteLLM model id (ADR-0031 D5, issue #3667). It is
+ * carried here so AgentPolicyGate can record it in the audit payload without touching the
+ * model gateway.
  */
-data class AgentIdentity(val agentId: String, val plane: String? = null, val skill: String? = null)
+data class AgentIdentity(
+    val agentId: String,
+    val plane: String? = null,
+    val skill: String? = null,
+    val modelId: String = "unknown",
+)
 
 /**
  * The question put to the policy engine, mirroring the OPA input contract of
