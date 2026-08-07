@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.29.0
+  version: 1.30.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -579,14 +579,28 @@ paths:
   /domestic-payments:
     post:
       tags: [Payments]
-      summary: Initiate a domestic payment from one of the caller's own accounts (ownership-enforced; instruction only, no settlement)
+      summary: Initiate a domestic payment from an account the caller owns OR holds a payment delegation over (instruction only, no settlement)
       description: >-
         The client sends a lightweight body; the edge enriches it into the full instruction the
         payment service needs — resolving the debtor's own account number + bank code from its Czech
         IBAN and the debtor's legal name from party-service, splitting the creditor "number/bankcode",
-        defaulting priority to STANDARD and mapping reference→messageForPayee. Ownership is enforced
-        (debtorAccountId must belong to the JWT party); malformed currency / IBAN / creditor format
-        are rejected with 400. Initiation creates + screens only; money movement stays SCA-gated.
+        defaulting priority to STANDARD and mapping reference→messageForPayee. Malformed currency /
+        IBAN / creditor format are rejected with 400. Initiation creates + screens only; money
+        movement stays SCA-gated.
+
+
+        Debit authority (ADR-0232 D3/D5): the debtorAccountId must belong to the JWT party, OR the
+        JWT party must hold an ACTIVE, in-window, owner-issued delegation grant carrying
+        `ACCOUNT_INITIATE_PAYMENT` whose per-transaction ceiling covers this amount. account-service
+        makes that decision — the edge asks it, supplying the party from the validated token and
+        never from the body. A delegated payment carries the ACCOUNT HOLDER's legal name as
+        debtorName (not the initiator's) and is recorded in the tamper-evident audit chain with
+        `onBehalfOf` = the grantor and `delegationId` = the grant.
+
+
+        The delegate still authenticates as themselves: SCA is unchanged and a grant is not a
+        substitute for it. Every refusal — not yours, no grant, expired, over the ceiling — returns
+        the identical 403, so this route is not an oracle for other parties' accounts or grants.
       operationId: createDomesticPayment
       security:
         - customerOidc: [payments:initiate]
@@ -615,7 +629,10 @@ paths:
         '400':
           description: Malformed currency, debtor IBAN, creditor account, or incomplete body
         '403':
-          description: Debtor account does not belong to caller
+          description: >-
+            Caller may not debit this account — not the owner and no authorising delegation grant
+            (indistinguishable from an expired grant, an over-ceiling amount, or an unknown
+            account, by design), or SCA missing/rejected.
 
   /domestic-payments/{paymentId}:
     get:
@@ -1496,6 +1513,50 @@ paths:
         - customerOidc: [delegations:read]
       responses:
         '200': {description: Grants received by the caller}
+
+  /delegations/activity:
+    get:
+      tags: [Delegation]
+      summary: What the caller's delegates actually did on their behalf (ADR-0232 D5)
+      description: >-
+        The data behind "what did they do with my account". Returns every audited action taken
+        under a grant the CALLER issued, newest first, sourced from audit-service's tamper-evident
+        chain — a grant records what someone MAY do, this records what they DID.
+
+
+        Distinct from `/privacy/access-log`: on a delegated action the grantor is neither the actor
+        nor the aggregate, so that view contains none of these rows. The grantor is taken from the
+        token and cannot be chosen by the client; the optional filters only ever narrow a set
+        already scoped to the caller, so a guessed value returns an empty list.
+
+
+        Declared before `/delegations/{id}` — JAX-RS prefers the literal segment, so the two do not
+        collide.
+      operationId: listDelegatedActivity
+      security:
+        - customerOidc: [delegations:read]
+      parameters:
+        - {name: delegatePartyId, in: query, required: false, schema: {type: string, format: uuid}, description: Narrow to one delegate}
+        - {name: delegationId, in: query, required: false, schema: {type: string, format: uuid}, description: Narrow to one grant}
+        - {name: limit, in: query, required: false, schema: {type: integer, default: 100, maximum: 500}}
+      responses:
+        '200':
+          description: Delegated actions taken on the caller's behalf, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    entryId: {type: string, format: uuid, description: 'Audit chain entry; verifiable via audit-service /integrity?fromEventId='}
+                    eventType: {type: string}
+                    operation: {type: string, nullable: true, example: payments.domestic}
+                    delegatePartyId: {type: string, nullable: true, description: Who acted — the delegate, never the grantor}
+                    delegationId: {type: string, nullable: true, description: The grant that permitted it}
+                    resourceType: {type: string}
+                    sourceService: {type: string}
+                    occurredAt: {type: string, format: date-time}
 
   /delegations/{id}:
     get:

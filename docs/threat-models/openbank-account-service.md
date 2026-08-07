@@ -308,3 +308,25 @@ not change any existing request's outcome until explicitly flipped.
   never had, and that property is the mitigation this edge depends on. Rollback: drop the
   `namespaceSelector` entry for `delegation`. Recorded here because #3431's measurement showed this
   change landed with no threat-model update.
+
+- **2026-08-03** — **The delegation projection reaches the money path** (ADR-0232 D3/D5, issue
+  #2990 AC9). `AuthorizationService.authorizeDelegatedPayment` and
+  `GET /api/v1/accounts/{accountId}/delegation/payment-authorization` (Authorize action
+  `account.read`, edge-proxy role set — same gate as the savings-goal `/check`) answer whether a
+  NON-OWNER may debit an account, and customer-edge's domestic-payment route now calls it. Until
+  now `isAuthorizedForAmount` had **zero callers**: the grant, the events and the projection were
+  live while a delegate could not actually pay, so this is the change that turns a stored grant
+  into money movement. Risk class = **elevation of privilege**. Structural properties relied on:
+  (a) the decision stays HERE, because this is the only service holding both the projection and the
+  account's true owner — a caller-side copy would be a second rule free to drift, with the
+  money-path copy the stale one; (b) the `issuedBy(ownerPartyId)` gate is re-evaluated on every
+  request, so a revoked or non-owner-issued grant cannot authorise a debit even if it once did;
+  (c) the response carries `delegationId`/`grantorPartyId` **only** on an authorising DELEGATED
+  outcome, so a refusal does not disclose that a grant exists; (d) refusals are classified
+  (NO_GRANT / LIMIT_EXCEEDED / ACCOUNT_NOT_FOUND) for the audit trail, and the edge is required to
+  collapse all of them to one opaque 403 — if a future caller surfaces the outcome verbatim this
+  becomes an enumeration oracle for other parties' accounts and sharing arrangements, which is the
+  most likely way to regress this design. Deliberate narrowing vs `isAuthorizedForAmount`: the
+  legacy `account_authorizations.transaction_limit` **is** enforced on this path, because wiring
+  the old behaviour to a live debit route would have made an operator-set per-transaction ceiling
+  decoration. Rollback: revert the edge call site — the endpoint alone moves no money.

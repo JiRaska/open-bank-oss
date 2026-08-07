@@ -37,6 +37,8 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.time.Clock
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -1680,6 +1682,114 @@ class CustomerEdgeResource(
             .toList()
     }
 
+    /**
+     * Who is allowed to debit this account, and under what authority (ADR-0232 D3/D5, #2990 AC9).
+     *
+     * Before this existed the answer was "the owner, or nobody": the route 403'd on any account the
+     * JWT party did not own, so a delegation grant carrying `ACCOUNT_INITIATE_PAYMENT` was
+     * enforceable everywhere except the one place it means anything. The grant lifecycle, the
+     * events, the projection and `AuthorizationService`'s amount-aware guard were all live and had
+     * zero callers on the money path.
+     *
+     * **The decision is NOT made here.** The edge asks account-service, which is the only service
+     * holding both the delegation projection and the account's true owner, and which re-evaluates
+     * it on every request instead of trusting a verdict reached once at offer time. The edge's job
+     * is the part only the edge can do: establish WHO is asking, from the validated JWT and never
+     * from the body ([customer] is resolved from the `party_id` claim upstream of this call).
+     *
+     * On the delegated path the account is then re-fetched **as the grantor**. That is not the edge
+     * self-authorizing: account-service's `X-Customer-Party-Id` guard is an OWNERSHIP guard and
+     * 404s a delegate by design, so the only way to read the account the delegate was just
+     * authoritatively told they may debit is to ask as its owner — whose identity came from that
+     * same authoritative answer, one call earlier, and is never client-supplied.
+     */
+    private fun resolveDebitAuthority(
+        customer: CustomerIdentity,
+        debtorAccountId: UUID,
+        amount: String,
+        currency: String,
+    ): DebitAuthorityResult {
+        // Direct path first and unchanged: the owner's own payment costs exactly one call, as before.
+        val ownJson = fetchAccount(debtorAccountId, customer.partyId)
+        if (ownJson != null && extractOwnerPartyId(ownJson) == customer.partyId.toString()) {
+            return DebitAuthorityResult.Allowed(DebitAuthority(ownJson, customer.partyId))
+        }
+        val decision = fetchDelegatedPaymentDecision(debtorAccountId, customer.partyId, amount, currency)
+        val grantor = decision?.grantorPartyId
+        if (decision?.authorized != true || grantor == null) {
+            // One refusal for "not yours", "no grant", "grant expired" and "over the ceiling" — the
+            // classified outcome goes to the audit trail, never to the caller, so this route cannot
+            // be used to enumerate other people's accounts or grants.
+            audit.emit(
+                eventType = "CUSTOMER_PAYMENT_REFUSED",
+                partyId = customer.partyId.toString(),
+                operation = "payments.domestic",
+                result = "DENIED",
+                resourceId = debtorAccountId.toString(),
+                details = mapOf(
+                    "reason" to "DEBIT_NOT_AUTHORIZED",
+                    "delegationOutcome" to (decision?.outcome ?: "UNAVAILABLE"),
+                    "amount" to amount,
+                    "currency" to currency,
+                ),
+            )
+            return DebitAuthorityResult.Refused(forbidden("Debtor account does not belong to caller"))
+        }
+        val ownerJson = fetchAccount(debtorAccountId, grantor)
+            ?: return DebitAuthorityResult.Refused(forbidden("Debtor account does not belong to caller"))
+        // Belt and braces: the account we are about to debit must actually be owned by the party
+        // account-service named as the grantor. If those ever disagree, something is wrong enough
+        // that refusing is the only safe move.
+        if (extractOwnerPartyId(ownerJson) != grantor.toString()) {
+            return DebitAuthorityResult.Refused(forbidden("Debtor account does not belong to caller"))
+        }
+        return DebitAuthorityResult.Allowed(
+            DebitAuthority(
+                accountJson = ownerJson,
+                accountOwnerPartyId = grantor,
+                onBehalfOf = grantor,
+                delegationId = decision.delegationId,
+            ),
+        )
+    }
+
+    /**
+     * Ask account-service whether [partyId] may debit [accountId] for this amount, and under which
+     * grant. A null return means the question could not be answered (upstream down, non-200,
+     * unparseable) and MUST be treated as a refusal by the caller — never as a pass. `partyId` is
+     * a query parameter and not `X-Customer-Party-Id`, because that header is the ownership guard
+     * and would 404 exactly the delegate being asked about.
+     */
+    // `internal`, not private: this method IS the outgoing request in the consumer pact
+    // (CustomerEdgeDelegatedPaymentPactConsumerTest), which drives it against the Pact mock server
+    // so the request under contract is the one production builds. Reflecting the request off the
+    // real code while the expectation stays a literal is the asymmetry that makes the pact able to
+    // fail (#2290); a test that built the URL itself would agree with itself and prove nothing.
+    internal fun fetchDelegatedPaymentDecision(
+        accountId: UUID,
+        partyId: UUID,
+        amount: String,
+        currency: String,
+    ): DelegatedPaymentDecision? {
+        val url = "$accountServiceUrl/api/v1/accounts/$accountId/delegation/payment-authorization" +
+            "?partyId=$partyId&amount=${URLEncoder.encode(amount, StandardCharsets.UTF_8)}" +
+            "&currency=${URLEncoder.encode(currency, StandardCharsets.UTF_8)}"
+        val resp = upstream.get(url, partyId.toString())
+        if (resp.status != 200) return null
+        val node = runCatching { objectMapper.readTree(resp.entity?.toString() ?: return null) }.getOrNull()
+            ?: return null
+
+        // `.takeIf { it.isTextual }` and not `asText(null)`: Jackson answers the STRING "null" for
+        // an explicit JSON null, which would turn an absent grant id into a stored literal "null".
+        fun text(field: String) = node.path(field).takeIf { it.isTextual }?.asText()
+        return DelegatedPaymentDecision(
+            authorized = node.path("authorized").asBoolean(false),
+            outcome = text("outcome"),
+            delegationId = text("delegationId"),
+            grantorPartyId = text("grantorPartyId")?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+        )
+    }
+
     // Resolve the caller's legal name from party-service (for the debtorName a domestic payment needs).
     // Party-scoped by the JWT party; null on any non-200 / missing field.
     private fun fetchPartyLegalName(partyId: UUID): String? {
@@ -1772,17 +1882,28 @@ class CustomerEdgeResource(
         // ownership-check is exactly the one we forward — closing the double-`debtorAccountId` IDOR bypass.
         val debtor = parseDebtorAccountId(objectMapper, body)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
             ?: return forbidden("Missing or malformed debtorAccountId")
-        // Fetch the debtor account once: it both proves ownership AND carries the debtor's own IBAN.
-        val accountJson = fetchAccount(debtor, customer.partyId)
-            ?: return forbidden("Debtor account does not belong to caller")
-        if (extractOwnerPartyId(accountJson) != customer.partyId.toString()) {
-            return forbidden("Debtor account does not belong to caller")
+        // The amount is read BEFORE the debit guard, not just before the SCA gate: the delegation
+        // ceiling is per-transaction, so an authorization asked without the amount is a different
+        // (and weaker) question than the one this route has to ask.
+        val amount = extractAmountField(objectMapper, body) ?: return badRequest("Missing amount")
+        val currency = extractTextField(objectMapper, body, "currency") ?: "CZK"
+        // Owner OR delegate (ADR-0232 D3/D5). `resolveDebitAuthority` returns the account JSON, the
+        // party whose money is moving, and — when this is a delegated debit — the grant that
+        // permitted it, or an audited refusal.
+        val debit = when (val authority = resolveDebitAuthority(customer, debtor, amount, currency)) {
+            is DebitAuthorityResult.Refused -> return authority.response
+            is DebitAuthorityResult.Allowed -> authority.authority
         }
+        val accountJson = debit.accountJson
         val debtorIban = extractTextField(objectMapper, accountJson, "accountNumber")
             ?: return badRequest("Cannot resolve debtor account number")
         val (debtorAcctNo, debtorBank) = czechIbanToBban(debtorIban)
             ?: return badRequest("Debtor account is not a Czech IBAN")
-        val debtorName = fetchPartyLegalName(customer.partyId)
+        // The debtor NAME on the instruction is the account HOLDER's, not the initiator's. On a
+        // delegated payment those differ, and getting it wrong would put the delegate's name on the
+        // grantor's outgoing transfer — wrong on the counterparty's statement, and wrong for every
+        // downstream screening/AML party resolution that reads it.
+        val debtorName = fetchPartyLegalName(debit.accountOwnerPartyId)
             ?: return badRequest("Cannot resolve debtor name")
         // NearbyPay (ADR-0087): if a paymentSessionToken is present, resolve the real creditor from
         // the in-edge session store — the true account never reaches the payer's device; for SCA
@@ -1821,8 +1942,9 @@ class CustomerEdgeResource(
         ) ?: return badRequest("Malformed or incomplete payment body")
         // Settlement gate (ADR-0021): no money path without a device-signed, amount+payee-bound,
         // single-use SCA approval. The compare-and-consume happens in sca-service, atomically.
-        val amount = extractAmountField(objectMapper, body) ?: return badRequest("Missing amount")
-        val currency = extractTextField(objectMapper, body, "currency") ?: "CZK"
+        // The challenge belongs to the INITIATOR (the delegate's own device), not to the account
+        // holder — a delegate authenticates as themselves; the grant is what makes it their debit
+        // to make. So `customer` here stays the delegate on the delegated path, deliberately.
         scaGate(scaChallengeId, customer, amount, currency, creditorForSca, "payments.domestic")?.let { return it }
         val resp = upstream.post(
             "$domesticPaymentServiceUrl/api/v1/domestic-payments",
@@ -1839,7 +1961,7 @@ class CustomerEdgeResource(
             extractTextField(objectMapper, respBody, "id")?.let { sessions.attachPayment(sessionTokenRaw, it) }
             if (extractTextField(objectMapper, respBody, "status") == "SETTLED") sessions.markPaid(sessionTokenRaw)
         }
-        auditPayment(resp, customer, "payments.domestic", amount, currency, creditorRaw, scaChallengeId)
+        auditPayment(resp, customer, "payments.domestic", amount, currency, creditorRaw, scaChallengeId, debit)
         return resp
     }
 
@@ -3551,6 +3673,21 @@ class CustomerEdgeResource(
         return resp
     }
 
+    /**
+     * The tamper-evident record of a customer payment (ADR-0086/0133).
+     *
+     * `partyId` is the INITIATOR and stays the initiator on a delegated payment: who moved the
+     * money does not change because they were permitted to. What a delegated payment adds is
+     * [debit] — `onBehalfOf` (the account holder whose money moved) and `delegationId` (the grant
+     * that permitted it). Both are omitted entirely for a direct payment rather than written as
+     * empty strings, so `on_behalf_of IS NOT NULL` is a true predicate for "this was delegated"
+     * and audit-service's partial index stays selective.
+     *
+     * The grant id in particular is only knowable HERE. It is revocable, and a revoked grant's
+     * projection row is closed, so once the money has moved nothing can reconstruct which grant
+     * was live at the time. Not recording it would leave the grantor's transparency view able to
+     * say "someone you shared with paid" and never "under the arrangement you agreed to".
+     */
     @Suppress("LongParameterList")
     private fun auditPayment(
         resp: Response,
@@ -3560,6 +3697,7 @@ class CustomerEdgeResource(
         currency: String,
         creditor: String?,
         scaChallengeId: String?,
+        debit: DebitAuthority? = null,
     ) = audit.emit(
         eventType = "CUSTOMER_PAYMENT_INITIATED",
         partyId = customer.partyId.toString(),
@@ -3571,6 +3709,9 @@ class CustomerEdgeResource(
             "currency" to currency,
             "creditor" to creditor,
             "scaChallengeId" to scaChallengeId,
+            // EdgeAuditPublisher drops null-valued details, so a direct payment emits neither key.
+            "onBehalfOf" to debit?.onBehalfOf?.toString(),
+            "delegationId" to debit?.delegationId,
         ),
     )
 
@@ -4365,3 +4506,37 @@ class CustomerEdgeResource(
         data class Rejected(val status: Response.Status, val code: String, val message: String) : SweepPlan
     }
 }
+
+/**
+ * Under what authority the debit leg of a payment is being made (ADR-0232 D3/D5).
+ *
+ * [accountOwnerPartyId] is whose money moves — the initiator on a direct payment, the grantor on a
+ * delegated one. [onBehalfOf] and [delegationId] are non-null ONLY on a delegated payment, and are
+ * exactly what the audit chain needs to record it as one.
+ */
+internal data class DebitAuthority(
+    val accountJson: String,
+    val accountOwnerPartyId: UUID,
+    val onBehalfOf: UUID? = null,
+    val delegationId: String? = null,
+)
+
+/** Allowed-with-authority, or an already-audited refusal to hand straight back to the caller. */
+internal sealed interface DebitAuthorityResult {
+    data class Allowed(val authority: DebitAuthority) : DebitAuthorityResult
+    data class Refused(val response: Response) : DebitAuthorityResult
+}
+
+/**
+ * account-service's answer to "may this party debit this account for this amount".
+ *
+ * [outcome] is carried for the audit record only (NO_GRANT vs LIMIT_EXCEEDED vs ACCOUNT_NOT_FOUND);
+ * it must never reach a customer response, or the route becomes an oracle for other people's
+ * accounts and grants.
+ */
+internal data class DelegatedPaymentDecision(
+    val authorized: Boolean,
+    val outcome: String?,
+    val delegationId: String?,
+    val grantorPartyId: UUID?,
+)
