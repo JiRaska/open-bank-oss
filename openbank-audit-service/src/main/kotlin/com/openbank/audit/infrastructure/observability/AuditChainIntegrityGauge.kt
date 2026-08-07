@@ -79,6 +79,7 @@ class AuditChainIntegrityGauge {
     private val intact = AtomicLong(0)
     private val checked = AtomicLong(0)
     private val unchained = AtomicLong(0)
+    private val unverifiableLegacy = AtomicLong(0)
     private val lastVerifiedEpochSeconds = AtomicLong(0)
 
     @PostConstruct
@@ -93,6 +94,17 @@ class AuditChainIntegrityGauge {
             .register(registry)
         Gauge.builder("openbank.audit.chain.entries.unchained") { unchained.get().toDouble() }
             .description("Audit entries predating the hash chain (no record_hash) — counted, not verifiable")
+            .strongReference(true)
+            .register(registry)
+        // Separate from `unchained` on purpose. These rows DO carry a hash; it simply cannot be
+        // recomputed, because the pre-#3586 canonical form hashed nanoseconds the database
+        // truncated (#3505). Reporting them as unchained would say "never had a hash", which is a
+        // different fact, and would let a genuine gap hide inside a known one. This series is
+        // expected to be CONSTANT: if it ever grows, something is writing the old form again.
+        Gauge.builder("openbank.audit.chain.entries.unverifiable.legacy") { unverifiableLegacy.get().toDouble() }
+            .description(
+                "Chained entries written with the pre-#3586 canonical form — permanently unverifiable, not broken",
+            )
             .strongReference(true)
             .register(registry)
         Gauge.builder("openbank.audit.chain.last.verified.timestamp.seconds") {
@@ -137,6 +149,7 @@ class AuditChainIntegrityGauge {
         intact.set(if (result.intact) 1 else 0)
         checked.set(result.checked)
         unchained.set(result.unchained)
+        unverifiableLegacy.set(result.unverifiableLegacy)
         lastVerifiedEpochSeconds.set(Instant.now().epochSecond)
 
         if (result.intact) {

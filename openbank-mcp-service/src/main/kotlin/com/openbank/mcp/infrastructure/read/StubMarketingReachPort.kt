@@ -10,7 +10,7 @@ import com.openbank.mcp.application.port.out.MarketingReachPort
 import jakarta.enterprise.context.ApplicationScoped
 
 /**
- * PHASE 1 deterministic stub behind [MarketingReachPort] (ADR-0209 D5), mirroring [StubProposalPort].
+ * PHASE 1 deterministic stub behind [MarketingReachPort] (ADR-0209 D5), the last remaining phase-1 stub in this service.
  *
  * It is a stub on purpose rather than an oversight: the real read is
  * `GET /api/v1/consents/grantee/party-service:marketing-comms` on consent-service, which returns the
@@ -18,7 +18,7 @@ import jakarta.enterprise.context.ApplicationScoped
  * charter grant — until a charter carries `query.marketing.readonly`, the OPA PDP denies every call to
  * this tool, so a real client would be unreachable code that nothing could exercise.
  *
- * `phase: 1-stub` is in the response for the same reason `StubProposalPort` carries it: a caller must
+ * `phase: 1-stub` is in the response for the reason the retired `StubProposalPort` should have: a caller must
  * be able to tell a placeholder from an answer. A stub that returns plausible-looking numbers with no
  * marker is indistinguishable from real reach data, and reach data is what a campaign gets sized on.
  */

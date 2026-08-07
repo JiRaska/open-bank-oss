@@ -1,6 +1,9 @@
 # FinOps cost anomaly detection rules (ADR-0112). Five detectors correspond to the
 # recurring AWS cost incidents documented in the ADR: NAT drain, cross-AZ traffic,
 # Karpenter node churn, EBS attachment failures, and CI runner pool pressure.
+# That sentence was aspirational until #3496: D1, D3, D4 and D5 were here and D2 —
+# the cross-AZ one — was not, so the file described a detector nobody had written.
+# Count the `detector:` labels below, not this paragraph, when auditing coverage.
 # All alerts route to GoAlert (which triggers the finops-agent Temporal workflow).
 # The openbank.finops.ai-costs group used to live here, holding one alert:
 # FinOpsAgentTokenBudgetExceeded, written against langfuse_agent_tokens_total,
@@ -70,6 +73,74 @@ spec:
           annotations:
             summary: "NAT egress 2× rolling avg — {{ $labels.namespace }}"
             description: "{{ $labels.namespace }} current egress rate is {{ $value | humanizePercentage }} of its 7-day average. Possible overnight batch runaway. Note: subquery requires 7d of retention — alert may be absent on fresh clusters."
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0006-nat-egress-drain.md"
+
+    - name: openbank.finops.fleet-egress
+      interval: 5m
+      rules:
+        # D2: fleet-wide node egress. The header of this file has claimed a cross-AZ
+        # detector since the file was written; there was no D2 rule in it until #3496.
+        # That is the failure class this repo keeps meeting — a detector that exists in
+        # the prose and not in the ruleset reads as covered on every dashboard that
+        # counts detectors, and D1 sitting next to it (which watches per-namespace pod
+        # egress, i.e. a different thing) made the gap harder to see, not easier.
+        #
+        # What it would have caught: EUN1-DataTransfer-Regional-Bytes stepped 11x on
+        # 2026-07-27 and held for six days at ~$33/day (~$809/mo), which was ~70% of the
+        # entire AWS bill for that window. Nothing alerted. It was found by hand while
+        # pricing an unrelated node-shape change, and the cause (#3278: Loki's PVC hit
+        # 100%, so every Alloy push was rejected and retried indefinitely from all ~23
+        # nodes) was diagnosed and fixed for other reasons a week later.
+        #
+        # Why fleet-total rather than per-node or per-namespace:
+        #   - per-namespace (D1) cannot see it. Alloy's retry traffic is one DaemonSet
+        #     whose per-namespace share stayed under D1's 50 GB/day bar while the fleet
+        #     total went to ~3600 GB/day.
+        #   - per-node cannot get a threshold. The incident put ordinary nodes at
+        #     100-315 GB/day, but registry-cache's node legitimately serves ~108 GB/day
+        #     today, so any per-node bar either misses the low end or pages on images.
+        #   - the incident was a per-node MULTIPLIER (every long-lived node stepped
+        #     15-20x on the same day), which is exactly what a fleet sum expresses.
+        #
+        # Threshold calibration, measured on THIS series (not on CloudWatch — the two
+        # do not agree and the alert can only read this one):
+        #   quiet fleet today ........................ ~330 GB/day
+        #   busiest normal CI day observed (07-25) ... ~385 GB/day equivalent
+        #   incident plateau ......................... ~1700 GB/day equivalent
+        # 800 GB/day sits >2x above the busiest healthy day and >2x below the plateau.
+        #
+        # The two "equivalent" figures are DERIVED, and this is the number most likely
+        # to be wrong: node-exporter reads ~1.94x lower than EC2 NetworkOut here
+        # (measured over one 6 h window), because a node that is terminated mid-window
+        # stops contributing to `rate()` while CloudWatch keeps its bytes. Node churn is
+        # heavy on this cluster, so that factor moves. If this rule proves noisy or
+        # silent, re-derive the ratio before moving the bar.
+        #
+        # `device=~"ens[0-9]+"` restricts to the primary/secondary ENIs. Summing every
+        # device counts each byte ~7x, because the per-pod `eni*` veth legs and
+        # `pod-id-link*` carry the same traffic as the ENI it leaves through.
+        #
+        # This is a PROXY, and deliberately not what ADR-0112 D2 specifies. The ADR
+        # asks for "CloudWatch VPC FlowLogs cross-AZ bytes (via CW Metric Stream ->
+        # Prometheus)"; no metric stream has ever been deployed, which is why D2 was
+        # never written. Total node egress cannot separate the cross-AZ half from the
+        # same-AZ and internet halves — it fires on any egress runaway, cross-AZ or
+        # not. That is a deliberate trade: an approximate detector that exists beats
+        # an exact one that is waiting on infrastructure nobody has built. If the
+        # metric stream ever lands, replace this expression rather than adding to it.
+        - alert: FinOpsFleetEgressHigh
+          expr: |
+            sum(rate(node_network_transmit_bytes_total{device=~"ens[0-9]+"}[30m]))
+              * 86400 / 1e9 > 800
+          for: 1h
+          labels:
+            severity: warning
+            detector: D2
+            team: platform
+            route: finops-agent
+          annotations:
+            summary: "Fleet node egress {{ $value | printf \"%.0f\" }} GB/day — >2x normal"
+            description: "Summed node egress has held above 800 GB/day for an hour (healthy fleet is ~330, busiest observed CI day ~385). Roughly half of this cluster's egress crosses an AZ boundary and is billed in both directions, so a sustained step here lands on EUN1-DataTransfer-Regional-Bytes at ~$0.01/GB. Look for a retry storm before a workload: a rejected sink (Loki full, Kafka unavailable, a 5xx endpoint) makes every client resend, which is fleet-wide and uniform, whereas a real workload change is concentrated. Check per node with topk(10, sum by (instance) (rate(node_network_transmit_bytes_total{device=~\"ens[0-9]+\"}[30m]))) — uniform across nodes means an agent, one node means that node."
             runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0006-nat-egress-drain.md"
 
     - name: openbank.finops.karpenter-churn

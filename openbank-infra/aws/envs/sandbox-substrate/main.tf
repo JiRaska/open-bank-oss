@@ -6,6 +6,13 @@ module "network" {
   az_count    = 3
   egress_mode = "fck_nat" # ADR-0058: replace managed NAT GW with fck-nat t4g.nano to remove per-GB processing fee
 
+  # The AMI the live NAT instance is ALREADY running. Pinned so that a newly
+  # published upstream fck-nat AMI cannot turn an unrelated `tofu apply` into a
+  # rebuild of the single NAT instance — which drops all private-subnet egress
+  # (issue #3602). Changing this line IS the NAT upgrade: it must be its own PR,
+  # applied in a window. See modules/network/variables.tf for the lookup command.
+  nat_ami_id = "ami-08c439a446e724124"
+
   tags = {
     Project     = "openbank"
     ManagedBy   = "opentofu"

@@ -333,6 +333,23 @@ components:
         id: { type: string, format: uuid }
         grantorPartyId: { type: string, format: uuid }
         granteePartyId: { type: string, format: uuid }
+        grantorName:
+          type: string
+          description: |
+            Counterparty display name snapshotted onto the grant at offer time (issue #3604),
+            from the pid-service eligibility lookup this service already performs. It is what was
+            true when the grant was made, not a live value — an authorisation record must not be
+            silently rewritten by a later rename.
+
+            Null on grants offered before this field existed, and when pid-service returns no
+            usable name. Clients fall back to the party id; they must not render a blank, which
+            on a consent screen reads as a name that failed to load.
+
+            Only ever returned to a party of the grant (the read paths are party-scoped) or to
+            role-gated bank staff. This is not a party-name lookup.
+        granteeName:
+          type: string
+          description: As grantorName, for the party receiving the grant.
         resourceType: { type: string }
         resourceId: { type: string, format: uuid }
         capabilities: { type: array, items: { type: string } }

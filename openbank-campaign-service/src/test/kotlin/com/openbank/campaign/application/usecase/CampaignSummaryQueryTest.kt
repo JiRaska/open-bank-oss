@@ -14,6 +14,7 @@ import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SendOutcome
@@ -52,8 +53,18 @@ class CampaignSummaryQueryTest {
     )
 
     private class Sends(private val cells: List<CampaignOutcomeCount>, var calls: Int = 0) : SendLogRepository {
+        // ADR-0245: this fake asserts nothing about conversion, so nothing ever converted.
+        override suspend fun conversionContextFor(campaignId: java.util.UUID, partyId: java.util.UUID) =
+            com.openbank.campaign.application.port.out.ConversionContext(null, false)
+
         override suspend fun record(send: SendRecord) = Unit
         override suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long) = 0
+        override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID) = 0
+        override suspend fun latestDeliveryStatusBeforeStep(
+            campaignId: UUID,
+            partyId: UUID,
+            stepOrder: Int,
+        ): DeliveryStatus? = null
         override suspend fun listByCampaign(campaignId: UUID, outcome: SendOutcome?, page: Int, size: Int) =
             emptyList<SendRecord>()
         override suspend fun countByCampaign(campaignId: UUID, outcome: SendOutcome?) = 0L
@@ -62,6 +73,13 @@ class CampaignSummaryQueryTest {
             calls += 1
             return cells
         }
+
+        override suspend fun applyDeliveryOutcome(
+            sendId: UUID,
+            outcome: String,
+            reason: String?,
+            occurredAt: Instant,
+        ) = false
     }
 
     private class Enrolments(private val counts: List<CampaignEnrolmentCount>) : EnrolmentRepository {

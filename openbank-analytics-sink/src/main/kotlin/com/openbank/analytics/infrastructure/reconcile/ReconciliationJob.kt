@@ -12,12 +12,16 @@ import com.openbank.libs.analytics.AggregateKey
 import com.openbank.libs.analytics.Completeness
 import com.openbank.libs.analytics.CountDelta
 import com.openbank.libs.analytics.Reconciliation
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.quarkus.scheduler.Scheduled
+import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
 
@@ -46,8 +50,16 @@ class ReconciliationJob {
 
     @Inject lateinit var worm: WormArchive
 
+    @Inject lateinit var domainMetrics: DomainMetrics
+
     private val log = Logger.getLogger(ReconciliationJob::class.java)
     private val lastRun = AtomicReference<ReconciliationResult?>(null)
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    @PostConstruct
+    fun registerLiveness() {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
 
     @Scheduled(cron = "{openbank.analytics.reconcile.cron}", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     fun scheduled() {
@@ -97,6 +109,7 @@ class ReconciliationJob {
             status = if (diff.inSync && countDrift.isEmpty() && completeness.complete) "IN_SYNC" else "DRIFT",
         )
         lastRun.set(result)
+        liveness?.recordSuccess()
         log.infof(
             "analytics reconciliation trigger=%s status=%s checked=%d drift=%d (missingWh=%d orphan=%d mismatch=%d) countDrift=%d gaps=%d fp=%s",
             trigger,
@@ -114,6 +127,11 @@ class ReconciliationJob {
     }
 
     fun lastResult(): ReconciliationResult? = lastRun.get()
+
+    private companion object {
+        const val WORKFLOW_NAME = "analytics-reconciliation"
+        val EXPECTED_INTERVAL: Duration = Duration.ofDays(1)
+    }
 }
 
 data class ReconciliationResult(

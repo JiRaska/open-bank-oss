@@ -44,8 +44,11 @@ class CardResource(private val cardUseCase: CardUseCase) {
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "card.create", resource = "")
     @Operation(summary = "Issue a new card")
-    suspend fun issueCard(req: IssueCardRequest, @HeaderParam("Idempotency-Key") key: String): Response {
-        require(key.isNotBlank()) { "Idempotency-Key header required" }
+    suspend fun issueCard(req: IssueCardRequest, @HeaderParam("Idempotency-Key") key: String?): Response {
+        // #3624 — this guard answered 500 in exactly the case it was written for. `suspend` emits no
+        // Intrinsics.checkNotNullParameter, so an ABSENT header arrived as null and
+        // `null.isNotBlank()` threw NPE; only a BLANK header ever reached the intended 400.
+        require(!key.isNullOrBlank()) { "Idempotency-Key header required" }
         val card = cardUseCase.issueCard(req.toCommand(key))
         return Response.created(URI.create("/api/v1/cards/${card.id}")).entity(card.toResponse()).build()
     }
@@ -116,8 +119,10 @@ class CardResource(private val cardUseCase: CardUseCase) {
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "card.activate", resource = "#id")
     @Operation(summary = "Activate a pending card")
-    suspend fun activate(@PathParam("id") id: UUID, @HeaderParam("X-Operator-Id") operatorId: String): Response =
-        Response.ok(cardUseCase.activateCard(CardStatusCommand(id, null, operatorId)).toResponse()).build()
+    suspend fun activate(@PathParam("id") id: UUID, @HeaderParam("X-Operator-Id") operatorId: String?): Response {
+        requireNotNull(operatorId) { OPERATOR_ID_REQUIRED }
+        return Response.ok(cardUseCase.activateCard(CardStatusCommand(id, null, operatorId)).toResponse()).build()
+    }
 
     @POST
     @Path("/{id}/block")
@@ -127,8 +132,11 @@ class CardResource(private val cardUseCase: CardUseCase) {
     suspend fun block(
         @PathParam("id") id: UUID,
         req: CardStatusRequest,
-        @HeaderParam("X-Operator-Id") operatorId: String,
-    ): Response = Response.ok(cardUseCase.blockCard(CardStatusCommand(id, req.reason, operatorId)).toResponse()).build()
+        @HeaderParam("X-Operator-Id") operatorId: String?,
+    ): Response {
+        requireNotNull(operatorId) { OPERATOR_ID_REQUIRED }
+        return Response.ok(cardUseCase.blockCard(CardStatusCommand(id, req.reason, operatorId)).toResponse()).build()
+    }
 
     @POST
     @Path("/{id}/cancel")
@@ -138,25 +146,31 @@ class CardResource(private val cardUseCase: CardUseCase) {
     suspend fun cancel(
         @PathParam("id") id: UUID,
         req: CardStatusRequest,
-        @HeaderParam("X-Operator-Id") operatorId: String,
-    ): Response =
-        Response.ok(cardUseCase.cancelCard(CardStatusCommand(id, req.reason, operatorId)).toResponse()).build()
+        @HeaderParam("X-Operator-Id") operatorId: String?,
+    ): Response {
+        requireNotNull(operatorId) { OPERATOR_ID_REQUIRED }
+        return Response.ok(cardUseCase.cancelCard(CardStatusCommand(id, req.reason, operatorId)).toResponse()).build()
+    }
 
     @POST
     @Path("/{id}/suspend")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "card.suspend", resource = "#id")
     @Operation(summary = "Suspend a card temporarily")
-    suspend fun suspend(@PathParam("id") id: UUID, @HeaderParam("X-Operator-Id") operatorId: String): Response =
-        Response.ok(cardUseCase.suspendCard(CardStatusCommand(id, null, operatorId)).toResponse()).build()
+    suspend fun suspend(@PathParam("id") id: UUID, @HeaderParam("X-Operator-Id") operatorId: String?): Response {
+        requireNotNull(operatorId) { OPERATOR_ID_REQUIRED }
+        return Response.ok(cardUseCase.suspendCard(CardStatusCommand(id, null, operatorId)).toResponse()).build()
+    }
 
     @POST
     @Path("/{id}/resume")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "card.resume", resource = "#id")
     @Operation(summary = "Resume a suspended card")
-    suspend fun resume(@PathParam("id") id: UUID, @HeaderParam("X-Operator-Id") operatorId: String): Response =
-        Response.ok(cardUseCase.resumeCard(CardStatusCommand(id, null, operatorId)).toResponse()).build()
+    suspend fun resume(@PathParam("id") id: UUID, @HeaderParam("X-Operator-Id") operatorId: String?): Response {
+        requireNotNull(operatorId) { OPERATOR_ID_REQUIRED }
+        return Response.ok(cardUseCase.resumeCard(CardStatusCommand(id, null, operatorId)).toResponse()).build()
+    }
 
     @PUT
     @Path("/{id}/limits")
@@ -167,12 +181,15 @@ class CardResource(private val cardUseCase: CardUseCase) {
     suspend fun updateLimits(
         @PathParam("id") id: UUID,
         req: UpdateLimitsRequest,
-        @HeaderParam("X-Operator-Id") operatorId: String,
-    ): Response = Response.ok(
-        cardUseCase.updateLimits(
-            UpdateLimitsCommand(id, req.dailyLimitMinorUnits, req.monthlyLimitMinorUnits, operatorId),
-        ).toResponse(),
-    ).build()
+        @HeaderParam("X-Operator-Id") operatorId: String?,
+    ): Response {
+        requireNotNull(operatorId) { OPERATOR_ID_REQUIRED }
+        return Response.ok(
+            cardUseCase.updateLimits(
+                UpdateLimitsCommand(id, req.dailyLimitMinorUnits, req.monthlyLimitMinorUnits, operatorId),
+            ).toResponse(),
+        ).build()
+    }
 
     @PUT
     @Path("/{id}/controls")
@@ -183,17 +200,32 @@ class CardResource(private val cardUseCase: CardUseCase) {
     suspend fun updateControls(
         @PathParam("id") id: UUID,
         req: UpdateControlsRequest,
-        @HeaderParam("X-Operator-Id") operatorId: String,
-    ): Response = Response.ok(
-        cardUseCase.updateControls(
-            UpdateControlsCommand(
-                id,
-                req.contactlessEnabled,
-                req.onlineEnabled,
-                req.atmEnabled,
-                req.abroadEnabled,
-                operatorId,
-            ),
-        ).toResponse(),
-    ).build()
+        @HeaderParam("X-Operator-Id") operatorId: String?,
+    ): Response {
+        requireNotNull(operatorId) { OPERATOR_ID_REQUIRED }
+        return Response.ok(
+            cardUseCase.updateControls(
+                UpdateControlsCommand(
+                    id,
+                    req.contactlessEnabled,
+                    req.onlineEnabled,
+                    req.atmEnabled,
+                    req.abroadEnabled,
+                    operatorId,
+                ),
+            ).toResponse(),
+        ).build()
+    }
+
+    private companion object {
+        // #3624 — X-Operator-Id is the AUDIT attribution on every card lifecycle write, so a null
+        // flowing through is worse than the 500 it actually produced. These are `suspend` handlers:
+        // no Intrinsics.checkNotNullParameter is emitted, and the null was carried into
+        // CardStatusCommand / UpdateLimitsCommand / UpdateControlsCommand. libs-runtime maps
+        // IllegalArgumentException to 400 with the ApiError envelope and a traceId.
+        //
+        // Deliberately NOT the `?: "unknown"` fallback secureDetails uses: that read is a lookup,
+        // these seven change a card's state and must not be attributed to a placeholder operator.
+        const val OPERATOR_ID_REQUIRED = "header 'X-Operator-Id' is required"
+    }
 }

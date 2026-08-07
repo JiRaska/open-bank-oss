@@ -38,7 +38,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
-import { render, cleanup } from '@testing-library/react'
+import { render, cleanup, act } from '@testing-library/react'
 import { readFileSync } from 'fs'
 import path from 'path'
 
@@ -207,11 +207,18 @@ describe('admin-ui render-smoke — every page mounts', () => {
 
       try {
         if (isClientPage(rel)) {
-          render(React.createElement(Providers, null, React.createElement(Page!, props)))
+          // Awaited act: a client page reading use(params) suspends inside render()'s
+          // synchronous act scope and never resumes otherwise — the #3512 flake class the
+          // setup.ts gate now fails on. lending/applications/[id] is that page today.
+          await act(async () => {
+            render(React.createElement(Providers, null, React.createElement(Page!, props)))
+          })
         } else {
           // Async RSC: invoke it, await the tree, then really render it.
           const tree = await Page!(props)
-          render(React.createElement(Providers, null, tree as React.ReactNode))
+          await act(async () => {
+            render(React.createElement(Providers, null, tree as React.ReactNode))
+          })
         }
       } catch (err) {
         // A page that redirects/notFounds instead of returning a tree did its job.

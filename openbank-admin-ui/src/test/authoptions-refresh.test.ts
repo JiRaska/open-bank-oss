@@ -53,7 +53,7 @@ describe('authOptions — refresh failure surfaces as a session error', () => {
   it('does NOT refresh (or error) while the access token is still valid', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
-    const valid: JWT = { accessToken: 'ok', accessTokenExpires: Date.now() + 60_000 }
+    const valid: JWT = { accessToken: 'ok', accessTokenExpires: Date.now() + 300_000 }
     const out = await callJwt(valid)
     expect(out.error).toBeUndefined()
     expect(fetchSpy).not.toHaveBeenCalled()
@@ -72,6 +72,106 @@ describe('authOptions — refresh failure surfaces as a session error', () => {
     expect(out.error).toBeUndefined()
     expect(out.accessToken).toBe(rotated)
     expect(out.roles).toEqual(['ROLE_OPERATOR'])
+  })
+
+  it('refreshes ahead of expiry, not after it (skew)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ access_token: fakeJwt([]), expires_in: 300, refresh_token: 'skew-2' }),
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    // Not expired yet, but inside the skew window: an upstream call made with this token
+    // could still land after it expires, so it must be refreshed now.
+    const nearlyExpired: JWT = {
+      accessToken: 'stale', refreshToken: 'skew-1', accessTokenExpires: Date.now() + 30_000,
+    }
+    const out = await callJwt(nearlyExpired)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(out.refreshToken).toBe('skew-2')
+  })
+
+  // The realm sets revokeRefreshToken + refreshTokenMaxReuse: 0, so a refresh token is
+  // single-use. Both tests below fail against a plain per-call refresh: the second grant
+  // gets invalid_grant and the session is marked expired while the operator is active.
+
+  it('collapses concurrent refreshes of the same token into ONE grant', async () => {
+    const rotated = fakeJwt(['ROLE_ADMIN'])
+    let grants = 0
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => {
+      grants += 1
+      // Only the FIRST presentation of a single-use refresh token can succeed.
+      if (grants > 1) return { ok: false, json: async () => ({ error: 'invalid_grant' }) }
+      return {
+        ok: true,
+        json: async () => ({ access_token: rotated, expires_in: 300, refresh_token: 'conc-2' }),
+      }
+    }))
+    const expired = (): JWT => ({
+      accessToken: 'stale', refreshToken: 'conc-1', accessTokenExpires: Date.now() - 1_000,
+    })
+    // The middleware, a route handler and /api/gate all decode the same cookie at once.
+    const outs = await Promise.all([callJwt(expired()), callJwt(expired()), callJwt(expired())])
+    expect(grants).toBe(1)
+    for (const out of outs) {
+      expect(out.error).toBeUndefined()
+      expect(out.refreshToken).toBe('conc-2')
+    }
+  })
+
+  it('answers a caller still holding the SPENT token with the rotated one', async () => {
+    const rotated = fakeJwt(['ROLE_ADMIN'])
+    let grants = 0
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => {
+      grants += 1
+      if (grants > 1) return { ok: false, json: async () => ({ error: 'invalid_grant' }) }
+      return {
+        ok: true,
+        json: async () => ({ access_token: rotated, expires_in: 300, refresh_token: 'lost-2' }),
+      }
+    }))
+    const expired = (): JWT => ({
+      accessToken: 'stale', refreshToken: 'lost-1', accessTokenExpires: Date.now() - 1_000,
+    })
+    // First caller is an nginx auth subrequest / Server Component: it spends the token but
+    // its Set-Cookie never reaches the browser, so the next request still carries 'lost-1'.
+    await callJwt(expired())
+    const second = await callJwt(expired())
+    expect(grants).toBe(1)
+    expect(second.error).toBeUndefined()
+    expect(second.accessToken).toBe(rotated)
+    expect(second.refreshToken).toBe('lost-2')
+  })
+
+  it('does not remember a FAILED grant — the next request retries', async () => {
+    let grants = 0
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => {
+      grants += 1
+      // Keycloak briefly unreachable, then healthy.
+      if (grants === 1) return { ok: false, json: async () => ({ error: 'temporarily_unavailable' }) }
+      return {
+        ok: true,
+        json: async () => ({ access_token: fakeJwt([]), expires_in: 300, refresh_token: 'retry-2' }),
+      }
+    }))
+    const expired = (): JWT => ({
+      accessToken: 'stale', refreshToken: 'retry-1', accessTokenExpires: Date.now() - 1_000,
+    })
+    expect((await callJwt(expired())).error).toBe('RefreshAccessTokenError')
+    const second = await callJwt(expired())
+    expect(grants).toBe(2)
+    expect(second.error).toBeUndefined()
+  })
+
+  it('clears a previous RefreshAccessTokenError once a refresh succeeds', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ access_token: fakeJwt([]), expires_in: 300, refresh_token: 'heal-2' }),
+    }))
+    const out = await callJwt({
+      accessToken: 'stale', refreshToken: 'heal-1',
+      accessTokenExpires: Date.now() - 1_000, error: 'RefreshAccessTokenError',
+    })
+    expect(out.error).toBeUndefined()
   })
 
   it('session callback propagates token.error to session.user.error', async () => {

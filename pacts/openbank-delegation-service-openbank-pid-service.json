@@ -16,6 +16,10 @@
       },
       "response": {
         "body": {
+          "coreAttributes": {
+            "familyName": "Verifier",
+            "givenName": "Pact"
+          },
           "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
           "kycAttributes": {
             "kycLevel": "FULL"
@@ -24,6 +28,26 @@
         },
         "headers": {
           "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.coreAttributes.familyName": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.coreAttributes.givenName": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
         },
         "status": 200
       }

@@ -47,7 +47,9 @@ export default function DisputesPage() {
   const slaStatus = (deadline: string, status: string) => {
     if (['RESOLVED', 'CLOSED'].includes(status)) return null
     if (!deadline) return null
-    const daysLeft = Math.ceil((new Date(deadline).getTime() - Date.now()) / 86400000)
+    // eslint-disable-next-line react-hooks/purity -- SLA days-remaining display is inherently time-relative; the deadline is stable server data.
+    const now = Date.now()
+    const daysLeft = Math.ceil((new Date(deadline).getTime() - now) / 86400000)
     if (daysLeft < 0) return <span style={{ fontSize: '11px', color: 'var(--danger)', fontWeight: 700 }}>{t('PORUŠENÍ SLA', 'SLA BREACH')}</span>
     if (daysLeft <= 5) return <span style={{ fontSize: '11px', color: 'var(--warning)', fontWeight: 600 }}>{daysLeft}{t('d zbývá', 'd left')}</span>
     return <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{daysLeft}{t('d zbývá', 'd left')}</span>

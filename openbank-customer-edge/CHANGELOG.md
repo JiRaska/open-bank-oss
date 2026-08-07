@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.54.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.54.1...customer-edge-v0.54.2) (2026-08-06)
+
+
+### Bug Fixes
+
+* **customer-edge:** follow the ADR-0179 merged_into pointer at the identity chokepoint ([#3901](https://github.com/JiRaska/open-bank-oss/issues/3901)) ([d9b4876](https://github.com/JiRaska/open-bank-oss/commit/d9b487643480fd1947ff177b1e5f2e2182e90002)), closes [#1984](https://github.com/JiRaska/open-bank-oss/issues/1984)
+
 ## [0.54.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.54.0...customer-edge-v0.54.1) (2026-08-02)
 
 

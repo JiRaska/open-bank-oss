@@ -11,7 +11,11 @@ is now stated in the row rather than implied away.
 ## Assets
 
 - `DelegationGrant` records — who may do what on whose resources (confidential; contract
-  evidence under the ADR-0118 retention schedule).
+  evidence under the ADR-0118 retention schedule). Since issue #3604 a grant also carries the two
+  counterparty **display names**, snapshotted at offer time from the eligibility lookup — so this
+  service now holds personal names at rest, not only party ids. Nothing else about the party is
+  stored: the pid client materialises `givenName`/`familyName` and drops the rest of
+  `coreAttributes` (birthdate, birth number, documents, nationality) at the parser.
 - Enforcement integrity of the whole platform: every product service's delegation
   projection trusts this service's event stream.
 - SCA ceremony integrity (grant + acceptance).
@@ -39,6 +43,34 @@ is now stated in the row rather than implied away.
 | T10 | Object-level grant used as execution channel | Aggregate invariant: EXECUTION capabilities rejected on object resource types; object grants are read-only disclosure. |
 | T11 | Unauthorized revoke / forged revoker | `revokedBy` is derived: a customer revoke acts as the party the edge authenticated and must be the grantor; the query parameter survives only on the role-gated bank path. Previously it was a required, trusted query parameter that both authorised the act and wrote the audit field, so any authenticated caller could revoke any grant and sign it as somebody else. `suspend`/`reinstate` are additionally narrowed to ROLE_OPERATOR/ROLE_ADMIN and reject a customer-scoped call. |
 | T12 | A grant outliving its `validTo` in the product projections | Hourly expiry sweep flips ACTIVE → EXPIRED and enqueues `DelegationExpired`, so projections close their rows. The sweep is a `suspend fun` (rules.yaml: scheduled_methods): as a plain `@Scheduled` method it ran with no Vert.x context, so every reactive Panache call threw HR000068 into a single ERROR line and the sweep had **never expired a grant**. A grant past `validTo` still reads as inactive to anything that computes it, so the exposure was the projections that need the event. |
+| T13 | Counterparty display name used as a party-name oracle, or leaked to a non-party (issue #3604) | The name is **snapshotted onto the grant at offer time**, never resolved at read time, so no lookup surface is created and customer-edge gains **no new authority** — its party OPA grants stay `party.consent.update` + `party:resolve` (the ADR-0072 blind-index dedup gate, not an id lookup). It rides the existing `DelegationResponse`, which T8 already scopes: a customer sees only grants they are grantor or grantee of, a list for another party is 403, and a grant the caller is not party to is 404. Both parties are by construction already identified to each other by the grant itself, so the name discloses nothing the relationship does not. The two alternatives were rejected for exactly this row: granting the edge `party.read` would let it read ANY party (the usage is scoped, the *grant* is what gets reviewed), and a dedicated display-name endpoint would create a new lookup surface for a value that does not need to be live. Residual: role-gated bank staff (`ROLE_OPERATOR`/`ROLE_ADMIN`) can read grants for any party and now see the names too — unchanged in scope from the ids they already saw, but a wider PII surface; and a snapshot goes stale on a legitimate rename, which is deliberate (an authorisation record states what was true at consent) but means the label is not an identity assertion. |
+
+## Outbound authentication (added 2026-08-06)
+
+Every REST client this service owns — sca-service, pid-service, account-service, card-issuance —
+carries the shared `openbank-services` client-credentials token via
+`OidcClientRequestReactiveFilter`. Before this, all four called out with **no Authorization header**
+and every one 401'd, so the service could not complete a single ceremony: offers refused with the
+ownership gate's `UNVERIFIABLE`, accepts never reached the SCA read.
+
+Two things worth carrying from how that was found and what it means:
+
+- **A fail-closed verdict names the CHECK, not the CAUSE.** The offer reported "ownership of
+  ACCOUNT/… could not be established", which is literally true and completely misleading: the
+  account belonged to the grantor and the real error was `Unauthorized, status code 401` in the pod
+  log. Any `UNVERIFIABLE` here should be read as "the check could not run", and the first question
+  is whether the call was even authenticated.
+- **`quarkus.oidc` and `quarkus.oidc-client` are different things with confusingly similar names.**
+  The first validates bearers this service RECEIVES and mints nothing; only the second produces an
+  outbound token. Having the first configured is what made the omission invisible.
+
+Residual: the token is the SHARED `openbank-services` identity, which carries ROLE_OPERATOR
+fleet-wide. delegation-service's outbound calls are therefore indistinguishable at the callee from
+any other backend service's — the same pre-existing fleet design point recorded in the account OPA
+bundle, not introduced here. It is why the callee-side rules gate on action, not merely on role.
+
+No test could see this: every test mocks the client interface, so nothing exercises the wire. The
+gap closes only with a consumer pact or a run against a deployed stack.
 
 ## Out of scope (tracked as follow-ups)
 
@@ -68,3 +100,7 @@ is now stated in the row rather than implied away.
   status and KYC level only.
 - **The ADR-0232 D5 SME bridge is unimplemented**: nothing requires a LEGAL_ENTITY grantor's
   acting person to hold `delegation.manage` on that entity.
+
+## Change log
+
+- **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. Four parameters on the grantee-response endpoints: `granteePartyId` on accept/decline/renounce and `scaSessionId` on accept. Both are authorization-relevant — `granteePartyId` names WHO is responding to the grant and `scaSessionId` is the SCA evidence for accepting it — so a null reaching the use case is a delegation transition with no identified actor. The `X-Customer-Party-Id` header stays nullable by design (its absence is what distinguishes a bank-initiated call). No new caller or boundary. Rollback: revert.

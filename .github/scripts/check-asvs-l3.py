@@ -14,7 +14,13 @@ What it checks, per ASVS 4.0 chapter, and why each is mechanical here:
     may appear in a service's build files. Token VALIDATION libs (smallrye-jwt) are fine.
   V8.1 Data protection cryptography — baseline pins AES-256-GCM, RSA-3072/Ed25519, SHA-256+
     and bans MD5, SHA-1, DES, 3DES, RC4 (Layer 3): those names must not appear in service
-    Kotlin sources. SHA-256+ and MD5-for-checksums-in-comments are not matches by pattern.
+    Kotlin CODE. Comments are stripped before matching — this docstring claimed that
+    ("MD5-for-checksums-in-comments are not matches by pattern") while `find_v8` scanned
+    every raw line, so the property was asserted and not implemented. #3594 is what it
+    costs: a money-path PR that deliberately chose SHA-256 over SHA-1 was blocked by the
+    KDoc sentence explaining that choice — the guard flagging the prose that documents
+    why the banned primitive was avoided. Kotlin block comments NEST, so the stripper
+    tracks depth rather than scanning for the first `*/`.
   V9.1 Communications — no plaintext http:// URL for an inter-service call in gitops env
     values (Layer 1 says mTLS everywhere; until then, at least no NEW plaintext edges).
     Exemptions: localhost/127.0.0.1, the in-cluster Keycloak http leg (documented as the
@@ -81,12 +87,46 @@ def find_v2() -> list[str]:
     return findings
 
 
+def strip_kotlin_comments(text: str) -> list[str]:
+    """Blank out comments, preserving line numbering so findings still point at the source.
+
+    Kotlin block comments NEST — `/* /* */ */` closes once, not twice — so this tracks
+    depth instead of looking for the first `*/`. A stripper that does not mirror that
+    ends a comment early and starts matching prose again from the middle of a KDoc.
+
+    String literals are deliberately NOT parsed. `MessageDigest.getInstance("SHA-1")` is
+    the exact call this rule exists to catch, and it lives in a string.
+    """
+    out: list[str] = []
+    depth = 0
+    for line in text.splitlines():
+        buf: list[str] = []
+        i = 0
+        while i < len(line):
+            two = line[i:i + 2]
+            if depth == 0 and two == "//":
+                break
+            if two == "/*":
+                depth += 1
+                i += 2
+                continue
+            if two == "*/" and depth > 0:
+                depth -= 1
+                i += 2
+                continue
+            if depth == 0:
+                buf.append(line[i])
+            i += 1
+        out.append("".join(buf))
+    return out
+
+
 def find_v8() -> list[str]:
     findings = []
     for svc in service_dirs():
         for kt in (svc / "src/main/kotlin").rglob("*.kt"):
             text = kt.read_text(encoding="utf-8", errors="ignore")
-            for i, line in enumerate(text.splitlines(), 1):
+            for i, line in enumerate(strip_kotlin_comments(text), 1):
                 if BANNED_CRYPTO.search(line):
                     findings.append(f"V8.1 {svc.name}:{kt.relative_to(REPO)}:{i}: banned crypto primitive")
     return findings
@@ -127,9 +167,59 @@ def find_v13() -> list[str]:
     return findings
 
 
+SELF_TEST_CASES = [
+    # (label, kotlin source, must_flag)
+    # The first two are the pair that matters: prose ABOUT a banned primitive must not
+    # flag, and the same name inside a real call must. A stripper that satisfies only the
+    # first has silently turned V8.1 off.
+    (
+        "KDoc explaining why SHA-1 was avoided (#3594)",
+        '/**\n * v5 is defined as SHA-1, so this uses v8.\n */\n'
+        'val d = MessageDigest.getInstance("SHA-256")\n',
+        False,
+    ),
+    (
+        "a real banned call",
+        'val d = MessageDigest.getInstance("SHA-1")\n',
+        True,
+    ),
+    ("line comment", "// legacy used MD5 here\nval x = 1\n", False),
+    (
+        "NESTED block comment does not reopen matching",
+        "/* outer /* inner */ still comment: SHA-1 */\nval ok = 1\n",
+        False,
+    ),
+    (
+        "code after a nested block comment is still scanned",
+        '/* /* */ */ val d = MessageDigest.getInstance("SHA-1")\n',
+        True,
+    ),
+    (
+        "a trailing comment does not hide code before it",
+        'val d = MessageDigest.getInstance("SHA-1") // why\n',
+        True,
+    ),
+]
+
+
+def self_test() -> int:
+    failures = 0
+    for label, src, must_flag in SELF_TEST_CASES:
+        flagged = any(BANNED_CRYPTO.search(ln) for ln in strip_kotlin_comments(src))
+        ok = flagged == must_flag
+        failures += not ok
+        print(f"  [{'ok' if ok else 'FAIL'}] {label}: flagged={flagged}, expected={must_flag}")
+    if failures:
+        print(f"\nself-test: {failures} case(s) wrong — V8.1 does not measure what it claims.")
+        return 1
+    print("\nself-test: OK — prose about a banned primitive is ignored, a real call is not.")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--enforce", action="store_true")
+    ap.add_argument("--self-test", action="store_true")
     ap.add_argument(
         "--baseline",
         help="declared-debt file (one finding per line). A finding NOT in the baseline fails "
@@ -138,6 +228,9 @@ def main() -> int:
         "backlog (in-cluster plaintext until mTLS, agent services without a published spec).",
     )
     args = ap.parse_args()
+
+    if args.self_test:
+        return self_test()
 
     baseline: set[str] = set()
     if args.baseline:

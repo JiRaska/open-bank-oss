@@ -40,7 +40,13 @@ data class AuditEvent(
     val operation: String,
     val resourceType: String,
     val resourceId: String?,
-    val timestamp: Instant = Instant.EPOCH,
+    /**
+     * When the audited operation happened. Defaults to construction time, which is what every
+     * call site means — it previously defaulted to [Instant.EPOCH], and 23 of the 25 fleet
+     * construction sites take the default, so the whole trail claimed 1970-01-01T00:00:00Z.
+     * Pass an explicit value only when replaying or back-dating a historical operation.
+     */
+    val timestamp: Instant = Instant.now(),
     val ipAddress: String? = null,
     val userAgent: String? = null,
     val result: AuditResult = AuditResult.SUCCESS,

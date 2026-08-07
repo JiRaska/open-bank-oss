@@ -13,7 +13,13 @@ const securityHeaders = [
 ]
 
 const nextConfig = {
-  productionBrowserSourceMaps: true,
+  // NOTE: `productionBrowserSourceMaps` is deliberately NOT set — see the withSentryConfig block at
+  // the bottom of this file. It forces webpack's `devtool: 'source-map'`, which appends a
+  // `//# sourceMappingURL=` comment to all ~200 client chunks; @sentry/nextjs instead selects
+  // `hidden-source-map`, which writes the same maps for upload but leaves no pointer in the served
+  // bundle. Measured on this tree: with the option set, 198 client chunks advertised a .map that had
+  // already been deleted after upload — a 404 per chunk in devtools, and an index of exactly where
+  // the sources would be if a build ever skipped the delete.
   poweredByHeader: false,
   output: process.env.NEXT_STANDALONE === 'true' ? 'standalone' : undefined,
   // `pg` (node-postgres) uses dynamic requires (pg-native, connection-string).
@@ -48,16 +54,11 @@ const nextConfig = {
   },
 }
 
-// Upload wiring for GlitchTip (#3235) — a PREREQUISITE, not the fix.
-//
-// Measured on Next 16.2.12: this build runs Turbopack, which emits no CLIENT source maps
-// (`.next/static` has zero `.map` files, with or without a token) — `productionBrowserSourceMaps` is
-// a webpack-era option Turbopack ignores, and @sentry/nextjs says as much about its own hooks. So
-// there is currently nothing to upload and this block is a no-op until that is solved.
-//
-// It is here because the token plumbing and the release naming are the parts that CAN be got right
-// now, and because the alternative — wiring it later together with the Turbopack work — is how the
-// release string came to be pinned at a version nobody shipped.
+// Source-map upload to GlitchTip (#3235). This block only does anything under WEBPACK — hence
+// `next build --webpack` in package.json. Turbopack emits no client source maps at all (measured on
+// Next 16.2.12: `.next/static` had 0 `.map` files while `.next/server` had 1056), and
+// `productionBrowserSourceMaps` is read only by `next/dist/build/webpack*`, so under Turbopack there
+// is simply nothing for any plugin to upload.
 //
 // `telemetry: false` is not optional here — the plugin phones home to sentry.io by default, and this
 // estate reports to a self-hosted GlitchTip on an internal origin precisely so it does not.
@@ -70,10 +71,34 @@ export default withSentryConfig(nextConfig, {
   sentryUrl: 'https://glitchtip.open-bank.tech',
   authToken: process.env.SENTRY_AUTH_TOKEN,
   // Must equal what the SDK tags events with, or maps and events never join.
-  release: { name: `openbank-admin-ui@${process.env.BUILD_VERSION || 'dev'}` },
+  //
+  // The three `false`s are a SECURITY choice, not a preference, and each was measured by pointing
+  // `sentryUrl` at a request-logging stand-in and reading the traffic rather than the docs. On the
+  // defaults sentry-cli calls, per webpack compilation:
+  //   POST /api/0/projects/{org}/{proj}/releases/            ← create
+  //   PUT  /api/0/projects/{org}/{proj}/releases/{version}/  ← finalize
+  //   GET  /api/0/organizations/{org}/repos/                 ← setCommits auto-detect
+  // The GlitchTip ingress deliberately allow-lists ingest plus a couple of upload verbs and 404s
+  // the rest of the management API, so honouring those would mean exposing a release path that
+  // also answers DELETE on a host with no identity gate. Turning them off leaves the upload using
+  // ONLY chunk-upload + artifactbundle/assemble — the whole flow fits inside the allow-list, so
+  // nothing here depends on a 404 being tolerated.
+  //
+  // Nothing is lost: GlitchTip's own `assemble_artifacts` does `Release.objects.get_or_create()`
+  // from the bundle manifest, so the release still appears — and symbolication does not depend on
+  // it either way, it joins events to bundles on the injected debug ID
+  // (`javascript_event_processor.transform`).
+  release: {
+    name: `openbank-admin-ui@${process.env.BUILD_VERSION || 'dev'}`,
+    create: false,
+    finalize: false,
+    setCommits: false,
+  },
   sourcemaps: {
     // Uploaded, then deleted from the image: a .map served next to the bundle hands the whole
     // source to anyone who opens the console, which is the opposite of what this is for.
+    // The Dockerfile prunes `.next/static/**/*.map` again after the build, so a regression in this
+    // option cannot become a source disclosure.
     deleteSourcemapsAfterUpload: true,
   },
   silent: true,

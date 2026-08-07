@@ -11,20 +11,23 @@
 # admintools pod (`temporal operator namespace create ...`); this Job makes it
 # declarative and idempotent so the namespace set lives in git.
 #
-# WHEN A SERVICE ADOPTS TEMPORAL: add its namespace to NAMESPACES below AND to the
-# `temporal-platform-ingress` NetworkPolicy (temporal-network-policies.yaml) — both
-# are required, the NetworkPolicy gates frontend gRPC reachability and this Job
-# gates namespace existence.
+# THE LIST AND THE SCRIPT ARE NOT HERE — they are in `temporal-namespace-config.yaml`,
+# deliberately, and that file explains why at length (issue #3507). Short form: this
+# Job is a HOOK, and ArgoCD does not diff hooks. Editing this file alone produces no
+# diff, so no sync operation runs and this hook never fires — which made the one edit
+# anyone ever performs ("add a namespace") the one edit that could not trigger it. The
+# namespace set now lives in a ConfigMap, a resource ArgoCD DOES compare, so changing
+# it makes the Application OutOfSync and the resulting sync operation runs this hook.
+# Do not move `NAMESPACES` back onto this Job; `check-temporal-namespace-registration.py`
+# fails the PR that tries.
 #
 # Hook choice — PostSync, NOT PreSync: a PreSync hook runs before the Application's
 # own resources are applied, so on first install the Temporal frontend would not yet
-# be running and namespace registration would fail. PostSync runs after sync; the
-# container additionally waits for the frontend to answer before registering, which
-# also covers frontend pod restarts. ArgoCD holds the Application in Progressing
-# until the Job completes, so a registration failure is visible (not silently green).
-#
-# Idempotency: each namespace is `describe`d first and only created if absent;
-# a lost race on create is tolerated when the error is "already exists".
+# be running and namespace registration would fail. PostSync runs after sync — after
+# the ConfigMap it reads has been applied — and the script additionally waits for the
+# frontend to answer before registering, which also covers frontend pod restarts.
+# ArgoCD holds the Application in Progressing until the Job completes, so a
+# registration failure is visible (not silently green).
 ---
 apiVersion: batch/v1
 kind: Job
@@ -36,15 +39,16 @@ metadata:
     app.kubernetes.io/component: namespace-registration
     openbank.io/derived: gitops-manual
   annotations:
-    # Runs after the Temporal server resources are synced. BeforeHookCreation keeps
-    # the last run visible for debugging and recreates the Job on every sync (so
-    # adding a namespace to the list below re-runs registration on the next sync).
+    # Runs after the Temporal server resources are synced. BeforeHookCreation keeps the
+    # last run visible for debugging and recreates the Job on every sync — so this Job
+    # re-runs whenever a sync operation happens, which (see above) is what changing the
+    # ConfigMap now causes. It is NOT what changing this file causes.
     argocd.argoproj.io/hook: PostSync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
   backoffLimit: 5
   # Hard ceiling so a permanently-unreachable frontend fails the hook instead of
-  # hanging the sync forever (wait loop below is 60 × 5s = 5m per attempt).
+  # hanging the sync forever (wait loop is 60 × 5s = 5m per attempt).
   activeDeadlineSeconds: 900
   ttlSecondsAfterFinished: 86400
   template:
@@ -82,77 +86,23 @@ spec:
               value: /tmp
             - name: TEMPORAL_ADDRESS
               value: "temporal-frontend.temporal.svc.cluster.local:7233"
-            # Space-separated list of Temporal NAMESPACES (not task queues) — the set
-            # of distinct `openbank.temporal.namespace` values across services that run
-            # workflows. Today: payments (sepa+domestic) → openbank-payments;
-            # fx → openbank-fx; statements → openbank-statements; settlement →
-            # openbank-settlement (its own TemporalConfig @WithDefault, like fx/statements —
-            # NOT openbank-default; an earlier comment here was wrong. The live worker polls
-            # namespace="openbank-settlement", confirmed by NOT_FOUND on go-live — runbook 0006).
-            # campaign → openbank-campaign (ADR-0200 journeys), added on its first rollout:
-            # its Deployment had no OPENBANK_TEMPORAL_NAMESPACE, so the worker defaulted to
-            # the bare `openbank` and hit exactly the NOT_FOUND this Job exists to prevent.
-            # lending → openbank-lending, the THIRD time this list has been the thing that
-            # drifted. Measured in the sandbox 2026-08-02: the namespace was absent, so
-            # lending-service's workflow AND activity pollers both retried forever against a
-            # namespace Temporal has never held — ~2,000 ERROR lines/hour into Loki, and no
-            # origination workflow could start. Nothing went red: the pod is 2/2 and its
-            # readiness probe does not touch Temporal, so the only evidence was the log volume.
-            # This list is now DERIVED-checked by check-temporal-namespace-registration.py, on
-            # the repo's rule that a hand-kept list of the thing a gate covers reads as
-            # *passing* when it is short rather than as *unchecked*.
+            # sync-hook: creating a namespace is the expected path here (first install,
+            # or one just added to the list), so a create is not an error.
+            - name: REGISTRATION_MODE
+              value: "sync-hook"
             - name: NAMESPACES
-              value: "openbank-default openbank-payments openbank-fx openbank-statements openbank-settlement openbank-finops openbank-devops openbank-liveness openbank-governance openbank-release openbank-docstruth openbank-authzaudit openbank-flakytest openbank-campaign openbank-lending"
+              valueFrom:
+                configMapKeyRef:
+                  name: temporal-namespace-registration
+                  key: NAMESPACES
             - name: RETENTION
-              value: "168h"
+              valueFrom:
+                configMapKeyRef:
+                  name: temporal-namespace-registration
+                  key: RETENTION
           command:
             - /bin/sh
-            - -c
-            - |
-              set -eu
-              echo "Temporal frontend: ${TEMPORAL_ADDRESS}"
-              echo "Namespaces:        ${NAMESPACES}"
-              echo "Retention:         ${RETENTION}"
-
-              # Wait for the frontend to answer (covers first-install + restarts).
-              ready=0
-              i=1
-              while [ "$i" -le 60 ]; do
-                if temporal operator namespace list --address "${TEMPORAL_ADDRESS}" >/dev/null 2>&1; then
-                  ready=1
-                  break
-                fi
-                echo "waiting for temporal frontend... (${i}/60)"
-                i=$((i + 1))
-                sleep 5
-              done
-              if [ "$ready" -ne 1 ]; then
-                echo "ERROR: temporal frontend ${TEMPORAL_ADDRESS} not reachable" >&2
-                exit 1
-              fi
-
-              rc=0
-              for ns in ${NAMESPACES}; do
-                if temporal operator namespace describe --namespace "$ns" \
-                     --address "${TEMPORAL_ADDRESS}" >/dev/null 2>&1; then
-                  echo "[ok] ${ns} already exists"
-                  continue
-                fi
-                echo "[create] ${ns} retention=${RETENTION}"
-                if temporal operator namespace create --namespace "$ns" \
-                     --retention "${RETENTION}" \
-                     --address "${TEMPORAL_ADDRESS}" 2>/tmp/create.err; then
-                  echo "[created] ${ns}"
-                elif grep -qi "already exists" /tmp/create.err; then
-                  # Lost the race with another replica / a concurrent sync — fine.
-                  echo "[ok] ${ns} already exists (raced)"
-                else
-                  echo "ERROR creating ${ns}:" >&2
-                  cat /tmp/create.err >&2
-                  rc=1
-                fi
-              done
-              exit "$rc"
+            - /scripts/register.sh
           resources:
             requests:
               cpu: 50m
@@ -163,6 +113,16 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: scripts
+          configMap:
+            name: temporal-namespace-registration
+            defaultMode: 0555
+            items:
+              - key: register.sh
+                path: register.sh

@@ -1,0 +1,75 @@
+# Workflow-liveness staleness alerts (ADR-0237, issue #3345).
+#
+# Every domain @Scheduled job and every external feed registers the ADR-0160
+# mechanism-3 primitive (DomainMetrics.registerWorkflowLiveness), which emits two
+# gauges per workflow: openbank_workflow_last_success_age_seconds (scrape-time age
+# of the last recordSuccess, seeded at registration — a never-run job reads as old
+# as its pod, never as decades) and openbank_workflow_expected_interval_seconds.
+#
+# The two rules below are deliberately not one rule, and deliberately warnings.
+# absent() catches a fleet-level registration/scrape collapse; the staleness rule
+# catches a single job that stopped succeeding — including one that never started,
+# once its own grace elapses. severity: warning even for money-path jobs (ADR-0237
+# point 3): staleness at 2x grace is a liveness gap, not an active outage — the
+# outage signals downstream (outbox stuck, SLO burn) already carry critical rules,
+# and #3346 keeps critical reserved for page-now conditions. The
+# control-liveness-sentinel (ADR-0163) correlates repeated staleness across
+# controls into one triaged finding; these rules are the raw signal it reads.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-workflow-liveness-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.workflow.liveness
+      interval: 5m
+      rules:
+        # 1. Nothing in the fleet reports a heartbeat at all. That is not "all jobs
+        # healthy" — it is the metric pipeline or the adoption itself being gone
+        # (the #2187 shape: the consumer queried a name nothing emitted, and the
+        # sentinel could only ever report "no stale heartbeats"). Per-workflow
+        # adoption gaps are CI's job (check-scheduler-liveness), not this rule's.
+        - alert: WorkflowLivenessHeartbeatAbsent
+          expr: absent(openbank_workflow_last_success_age_seconds)
+          for: 2h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "No workflow-liveness heartbeats in the fleet for 2h"
+            description: >-
+              The openbank_workflow_last_success_age_seconds series is absent
+              fleet-wide. Either every registering service stopped being scraped,
+              or the metric pipeline dropped the family — in both cases every
+              other liveness verdict derived from these gauges is void. Check the
+              Prometheus targets for the app namespaces before trusting any
+              "schedulers are fine" claim.
+
+        # 2. A job missed its own cadence twice over. The comparison is 1:1 on the
+        # full label set — both gauges are registered together by
+        # registerWorkflowLiveness with identical tags, so no join modifier is
+        # needed or wanted. Boot-safe by construction (ADR-0237): the age gauge is
+        # seeded at registration time, so a fresh pod cannot read as stale until
+        # its own grace period elapses. for: 15m absorbs one slow run overrunning
+        # its slot; it cannot absorb a missed run — that is the point.
+        - alert: WorkflowLivenessStale
+          expr: openbank_workflow_last_success_age_seconds > 2 * openbank_workflow_expected_interval_seconds
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "{{ $labels.workflow }} last succeeded {{ $value | humanizeDuration }} ago (2x interval exceeded)"
+            description: >-
+              The scheduled workflow {{ $labels.workflow }} in {{ $labels.namespace }}
+              has not recorded a success for more than twice its expected interval.
+              Either the job stopped running (HR000068 class — check the pod log
+              for "should exclusively be invoked from a Vert.x EventLoop thread"),
+              or it runs but fails every time (an external feed returning 404 —
+              check for fetch/parse ERRORs), or the pod is being restarted faster
+              than the job's cadence (check availability alerts). A workflow tag
+              prefixed feed- is the external-feed freshness signal: "job ran" and
+              "feed delivered" alert independently (ADR-0237 point 2).

@@ -290,20 +290,45 @@ class McpEndpoint(
             return toolError(id, "Rate limit exceeded: ${limit.reason}")
         }
 
-        return try {
-            val result = registry.call(toolName, arguments, ctx)
-            audit(capability, McpCallAuditor.Decision.ALLOW, AuditResult.SUCCESS)
-            Response.ok(McpResponse(id = id, result = result)).build()
-        } catch (ex: IllegalArgumentException) {
-            audit(capability, McpCallAuditor.Decision.ALLOW, AuditResult.FAILURE, "invalid params")
-            error(id, McpErrorCode.INVALID_PARAMS, ex.message ?: "invalid params")
-        } catch (ex: Exception) {
-            log.warnf("tool %s failed: %s", toolName, ex.message)
-            audit(capability, McpCallAuditor.Decision.ALLOW, AuditResult.FAILURE, "tool error")
-            Response.ok(
-                McpResponse(id = id, result = ToolCallResult(listOf(ToolContent(text = "tool error")), isError = true)),
-            ).build()
+        return execute(id, toolName, arguments, ctx) { result, reason ->
+            audit(capability, McpCallAuditor.Decision.ALLOW, result, reason)
         }
+    }
+
+    /**
+     * Run one authorized tool and turn its outcome into a JSON-RPC response, auditing through
+     * [record]. Extracted from [handleToolCall] to keep that method under detekt's cyclomatic
+     * threshold — the branching here is the tool-failure taxonomy, which is a separate concern from
+     * the authorization sequence above it.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun execute(
+        id: JsonNode,
+        toolName: String,
+        arguments: JsonNode,
+        ctx: ConsentContext,
+        record: (AuditResult, String?) -> Unit,
+    ): Response = try {
+        val result = registry.call(toolName, arguments, ctx)
+        record(AuditResult.SUCCESS, null)
+        Response.ok(McpResponse(id = id, result = result)).build()
+    } catch (ex: IllegalArgumentException) {
+        record(AuditResult.FAILURE, "invalid params")
+        error(id, McpErrorCode.INVALID_PARAMS, ex.message ?: "invalid params")
+    } catch (ex: UnsupportedOperationException) {
+        // A tool that is advertised but has nothing behind it (today: propose_payment, see
+        // UnwiredProposalPort, #2414). Its reason is relayed VERBATIM — unlike the opaque "tool
+        // error" below — because the caller is a model that will otherwise narrate the silence as a
+        // success to a person. The message is a constant in the port and carries no customer data;
+        // a tool must not put anything caller-specific in it.
+        record(AuditResult.FAILURE, "tool unavailable")
+        toolError(id, ex.message ?: "Tool unavailable")
+    } catch (ex: Exception) {
+        log.warnf("tool %s failed: %s", toolName, ex.message)
+        record(AuditResult.FAILURE, "tool error")
+        Response.ok(
+            McpResponse(id = id, result = ToolCallResult(listOf(ToolContent(text = "tool error")), isError = true)),
+        ).build()
     }
 
     // Resolve the caller's identity + consent, or audit the failure and return null (the caller

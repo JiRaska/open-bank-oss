@@ -1,0 +1,132 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ---------------------------------------------------------------------------
+# Temporal namespace reconciler — the half that RUNS (issue #3507).
+#
+# WHAT THE SYNC PATH CANNOT COVER
+#   Moving the namespace list into a ConfigMap makes "declare a namespace" produce a
+#   real ArgoCD diff, so the PostSync hook fires on the merge that needs it. That fixes
+#   the trigger; it does not make a GAP observable. Two cases stay silent otherwise:
+#     * a namespace deleted out of band (the sync path only runs on a diff, and a
+#       deleted Temporal namespace produces none — Temporal namespaces are not
+#       Kubernetes objects, so ArgoCD cannot see them at all); and
+#     * a sync operation that ran and whose hook did not succeed for any reason.
+#   In both, the symptom is the one this whole component exists to avoid: workers
+#   poll a namespace that does not exist, the pods stay Ready, ArgoCD stays
+#   Synced/Healthy, and the only evidence is log volume.
+#
+# WHY IT REPAIRS **AND** FAILS
+#   It runs the same `register.sh` from the same ConfigMap the hook uses, in
+#   `reconcile` mode: missing namespaces are created (workers unblock without anyone
+#   being paged awake), and then the Job exits 1 *because it had to*. A repair that
+#   exits 0 is a repair nobody ever learns about — the failure is the signal that the
+#   sync path did not do its job, and kube-prometheus-stack's KubeJobFailed carries it
+#   with the detail already in the log. A clean run is a no-op and exits 0.
+#
+#   The obvious false positive — "the CronJob fires between a merge and its sync" —
+#   cannot happen: both this CronJob and the hook read the SAME ConfigMap, and ArgoCD
+#   applies that ConfigMap and runs the hook in one operation. This CronJob can never
+#   see a namespace the hook has not already been asked to register.
+#
+# NO KUBERNETES API ACCESS: it talks Temporal gRPC only, so the ServiceAccount token
+# is dropped exactly as on the hook Job. Intra-namespace ingress to the frontend is
+# already allowed by `temporal-intra-namespace` (podSelector: {}), so no NetworkPolicy
+# change is needed.
+# ---------------------------------------------------------------------------
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: temporal-namespace-reconcile
+  namespace: temporal
+  labels:
+    app.kubernetes.io/part-of: temporal
+    app.kubernetes.io/component: namespace-registration
+    openbank.io/derived: gitops-manual
+spec:
+  # 04:10 UTC daily — after keycloak-realm-drift's 03:40 and sbom-drift-scanner's
+  # 03:10, so the in-cluster drift detectors do not contend for one window.
+  schedule: "10 4 * * *"
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  # failedJobsHistoryLimit: 1 — KubeJobFailed fires per surviving failed Job OBJECT, so
+  # a higher limit turns one recurring failure into several permanent alerts (the
+  # 2026-08-02 alert drain: 11 of 37 firing alerts were KubeJobFailed tombstones).
+  failedJobsHistoryLimit: 1
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      # The wait loop is 60 × 5s; allow one pass plus registration headroom.
+      activeDeadlineSeconds: 600
+      # No retry: a second attempt would find the namespaces this one just created and
+      # exit 0, erasing the very signal the first attempt raised.
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: temporal
+            app.kubernetes.io/component: namespace-registration
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: reconcile-namespaces
+              image: docker.io/temporalio/admin-tools:1.29.7-tctl-1.18.4-cli-1.7.2
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: TEMPORAL_ADDRESS
+                  value: "temporal-frontend.temporal.svc.cluster.local:7233"
+                - name: REGISTRATION_MODE
+                  value: "reconcile"
+                - name: NAMESPACES
+                  valueFrom:
+                    configMapKeyRef:
+                      name: temporal-namespace-registration
+                      key: NAMESPACES
+                - name: RETENTION
+                  valueFrom:
+                    configMapKeyRef:
+                      name: temporal-namespace-registration
+                      key: RETENTION
+              command:
+                - /bin/sh
+                - /scripts/register.sh
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 128Mi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: tmp
+              emptyDir: {}
+            - name: scripts
+              configMap:
+                name: temporal-namespace-registration
+                defaultMode: 0555
+                items:
+                  - key: register.sh
+                    path: register.sh

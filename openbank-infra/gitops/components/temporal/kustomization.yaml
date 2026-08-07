@@ -9,5 +9,7 @@ resources:
   - temporal-namespace.yaml
   - temporal-helmrelease.yaml
   - temporal-network-policies.yaml
+  - temporal-namespace-config.yaml
   - temporal-namespace-registration.yaml
+  - temporal-namespace-reconcile.yaml
   - temporal-server-podmonitor.yaml
