@@ -6,10 +6,22 @@
 # SAME Dockerfile.deploy the deploy pipeline uses and runs a tiny no-container main inside it
 # that forces the real load path.
 #
-# Two legs run on every PR:
-#   - alpine (the historical base) MUST fail — it is the negative control that proves the gate
-#     can go red, not only green.
-#   - eclipse-temurin:25-jre-ubi10-minimal (glibc) MUST pass — it is the candidate runtime for PR2.
+# ONE leg runs: the image the fleet actually ships, built from Dockerfile.deploy with no
+# override. The base is pinned there (#3618/#3629 settled it on eclipse-temurin:25-jre) and
+# `verify-image-native-libs.py` refuses a second copy of it, so this workflow must not carry one.
+#
+# WHERE THE NEGATIVE CONTROL WENT. An earlier revision built a second leg on the old alpine base
+# and required it to FAIL, proving the gate could go red. That leg is gone, and deliberately:
+#   - it needed `ARG BASE_IMAGE` in Dockerfile.deploy, which is exactly the second copy of the
+#     base that verify-image-native-libs.py forbids — and with the ARG removed, `--build-arg`
+#     is accepted with a warning and silently builds the SAME base, so the leg would have
+#     "proved" a failure while testing the passing image. A negative control that cannot fail is
+#     worse than none.
+#   - the regression it guarded (going back to musl) is now caught on every push by
+#     verify-image-native-libs.py, which runs `ldd` over the bundled .so INSIDE the pinned base.
+# So this gate answers the narrower question that script cannot: does the serving path actually
+# WORK in the shipped image — native library, model, and ADR-0141 card, through the same
+# companion functions the bean uses.
 #
 # The smoke is intentionally not a @QuarkusTest: it needs no DB, no Kafka, no config; it only
 # needs the image filesystem and the bundled model/card.
@@ -31,8 +43,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Candidate glibc runtime for the fleet-wide base swap (PR2 of #3354).
-  GLIBC_BASE: eclipse-temurin:25-jre-ubi10-minimal@sha256:6031e5480f5d5818252a348980a192af0eab09e3380a55f75927e019f4d8136c
+  # No base pinned here on purpose: Dockerfile.deploy is the single source, and a second copy
+  # is what verify-image-native-libs.py exists to prevent. (This used to pin ubi10-minimal —
+  # the candidate that was NOT adopted, so the gate would have tested an image nobody ships.)
   SERVICE: openbank-fraud-service
   SMOKE_CLASS: com.openbank.fraud.infrastructure.ml.OnnxServingSmokeKt
 
@@ -70,58 +83,24 @@ jobs:
             -Dquarkus.package.jar.type=fast-jar \
             --console=plain
 
-      # Pre-pull both bases so build errors are clearly attributable to the image, not to a
-      # registry timeout, and so the negative-control leg starts from a known state.
-      - name: Pull base images
+      # Pre-pull the base Dockerfile.deploy pins, so a build error is attributable to the image
+      # rather than to a registry timeout. Read from the file — never hardcoded here.
+      - name: Pull the pinned runtime base
         run: |
-          docker pull eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0
-          docker pull ${{ env.GLIBC_BASE }}
+          set -euo pipefail
+          base="$(grep -m1 '^FROM ' .github/workflows/Dockerfile.deploy | awk '{print $2}')"
+          echo "runtime base (from Dockerfile.deploy): $base"
+          docker pull "$base"
 
-      # Negative control: the current alpine base is EXPECTED to fail because onnxruntime's
-      # libonnxruntime.so is built against glibc. A "pass" here means the gate is broken.
-      - name: "Smoke: alpine base (must FAIL)"
-        id: alpine
-        continue-on-error: true
+      # The shipped image, built exactly as the deploy pipeline builds it — no --build-arg,
+      # no override. If this fails, the ONNX serving path does not work in what we deploy.
+      - name: "Smoke: the shipped image must serve"
         run: |
           set -euo pipefail
           docker build \
             -f .github/workflows/Dockerfile.deploy \
-            -t fraud-smoke-alpine \
+            -t fraud-smoke \
             "${{ env.SERVICE }}/build"
-          docker run --rm --entrypoint="" fraud-smoke-alpine \
+          docker run --rm --entrypoint="" fraud-smoke \
             java -cp "/app/lib/boot/*:/app/lib/main/*:/app/app/*" \
               ${{ env.SMOKE_CLASS }}
-
-      # Positive control: the candidate glibc base should load the native library, verify the
-      # model card and return a sane shadow score.
-      - name: "Smoke: glibc base (must PASS)"
-        id: glibc
-        run: |
-          set -euo pipefail
-          docker build \
-            --build-arg BASE_IMAGE=${{ env.GLIBC_BASE }} \
-            -f .github/workflows/Dockerfile.deploy \
-            -t fraud-smoke-glibc \
-            "${{ env.SERVICE }}/build"
-          docker run --rm --entrypoint="" fraud-smoke-glibc \
-            java -cp "/app/lib/boot/*:/app/lib/main/*:/app/app/*" \
-              ${{ env.SMOKE_CLASS }}
-
-      # Report the verdict explicitly. The step names above make the raw logs readable; this
-      # step turns the alpine failure into an expected pass and a glibc failure into a real fail.
-      - name: Verify red/green outcome
-        run: |
-          set -euo pipefail
-          alpine_ok="${{ steps.alpine.outcome }}"
-          glibc_ok="${{ steps.glibc.outcome }}"
-          echo "alpine outcome: $alpine_ok (expected: failure)"
-          echo "glibc outcome:  $glibc_ok (expected: success)"
-          if [ "$alpine_ok" != "failure" ]; then
-            echo "::error::negative-control alpine leg did NOT fail — the gate cannot go red"
-            exit 1
-          fi
-          if [ "$glibc_ok" != "success" ]; then
-            echo "::error::positive-control glibc leg did NOT pass — the base swap is not safe"
-            exit 1
-          fi
-          echo "SMOKE GATE OK: alpine fails as expected, glibc passes"
