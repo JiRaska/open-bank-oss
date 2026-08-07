@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.103.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.102.0...admin-ui-v0.103.0) (2026-08-07)
+
+
+### Features
+
+* **agent:** capture the charter-declared model id on every MCP tool-call audit event ([#3693](https://github.com/JiRaska/open-bank-oss/issues/3693)) ([9292c7d](https://github.com/JiRaska/open-bank-oss/commit/9292c7db493925530ce22b0a2638186de3d9eb3e)), closes [#3667](https://github.com/JiRaska/open-bank-oss/issues/3667)
+
 ## [0.102.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.101.0...admin-ui-v0.102.0) (2026-08-07)
 
 
