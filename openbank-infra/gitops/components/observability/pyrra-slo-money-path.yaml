@@ -1060,6 +1060,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-standing-order-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -1082,6 +1084,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-standing-order-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:
@@ -1104,6 +1108,8 @@ metadata:
 spec:
   target: "99.9"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-psd2-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
   indicator:
     ratio:
@@ -1126,6 +1132,8 @@ metadata:
 spec:
   target: "99"
   window: 30d
+  alerting:
+    absent: false
   description: "openbank-psd2-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
   indicator:
     latency:

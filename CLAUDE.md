@@ -444,6 +444,17 @@ fire from *outside* it, so they stay here:
   flag, so the precaution is theatre. The local branch and working tree survive (verified on
   #2960), so nothing is lost, but if the branch had unpushed commits their only off-machine copy
   would be gone. Check the repo setting before promising the protection, not after.
+- **A GitHub-hosted job wedged at RUN level reads as "queued" forever — patience fixes nothing;
+  cancel the run and retrigger.** A PR sat with 16 checks pending for 2.5 h: every queued job on
+  `ubuntu-latest`, GitHub status "operational", the self-hosted fleet verifiably healthy (27 runs
+  in_progress on main). Diagnostic order that avoids the wrong rabbit hole: `gh run list --branch
+  <b>` (RUN queued ≠ any job started), the jobs' `labels` (ubuntu-latest ⇒ the self-hosted pool
+  is irrelevant — do not debug runners), then repo-wide `actions/runs?status=in_progress` to see
+  whether anything moves at all. The three wedged runs were cancelled and an empty commit pushed;
+  the fresh runs started in seconds and finished green in two minutes. Related, and silent: **a
+  push whose delivery GitHub dropped never acquires runs retroactively** — `head_sha` stays at
+  `total_count: 0` forever, so if a merge "should have" triggered CI and did not, it never will
+  on its own; retrigger or push again instead of waiting.
 
 ### CI gates — exercise the failure path before trusting the green
 - **Gates are DECLARED in [`.github/gates/gates.yaml`](.github/gates/gates.yaml), not written as

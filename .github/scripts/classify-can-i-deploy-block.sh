@@ -44,6 +44,14 @@
 #     resolve-can-i-deploy-selector.sh. Only (no + workflow_dispatch) is treated specially;
 #     see the NOT_ASKED note below.
 #
+#   COUNTERPART_STATE / COUNTERPART_DETAIL — the caller's probe of the counterpart versions
+#     this verdict names, from probe-blocking-counterparts.sh (#3223):
+#       contentless → at least one of them carries NO pacts, so nothing can ever verify it
+#       has-pacts   → all of them have pacts; a missing verification really is the gap
+#       none        → the verdict names no counterpart version
+#       unknown     → the probe failed; neither durability nor transience is established
+#     Unset behaves as `none`, so a caller that does not probe keeps today's labelling.
+#
 #   PACT_VERSION_PRESENT — the caller's probe of
 #     GET <broker>/pacticipants/<svc>/versions/<sha>:
 #       no      → 404, this commit's build has published nothing yet
@@ -56,6 +64,8 @@
 #   UNVERIFIED    — a version exists but no verification result yet. Usually the
 #                   counterpart provider lagging by minutes; treated as transient, but
 #                   named separately so it is not mistaken for a passed verification.
+#   UNVERIFIABLE  — the block names a counterpart version that carries NO pacts, so no
+#                   verification can ever target it. Durable; waiting cannot help (#3223).
 #   NOT_ASKED     — the gate was never asked (#3454). resolve-can-i-deploy-selector.sh
 #                   REFUSEd to pick a selector, so no can-i-deploy verdict exists at all.
 #                   See the NOT_ASKED note below for why this is not PENDING_BUILD.
@@ -100,6 +110,27 @@
 # and test-classify-can-i-deploy-block.sh asserts the equivalence over the whole input
 # cross-product. A future edit to either file's condition reddens that test.
 #
+# WHY UNVERIFIABLE IS DERIVED FROM THE BROKER AND NOT HARDCODED PER VERDICT (issue #3223)
+# Two of the classes above end in a promise — PENDING_BUILD's "the 3-hourly reconcile
+# re-drives it automatically" and UNVERIFIED's "normally clears within one reconcile tick".
+# Both were written as constants attached to a verdict, and neither is a property this
+# script could observe: it makes no network call, so it cannot know whether waiting helps.
+#
+# For a large share of real blocks the promise is false. The version a verdict names as
+# "currently in <env>" is often a bookkeeping version with ZERO pacts, PUT into the broker
+# by record-deployment-on-merge.yml because the deployed sha published none (services-ci is
+# path-scoped). Nothing ever verifies a version with no pacts, so no number of reconcile
+# ticks changes the answer. Measured on run 31080511057 (2026-08-06): six money-path
+# services blocked, ALL labelled PENDING_BUILD, and every one of the seven distinct
+# counterpart versions the verdicts named carried 0 pacts — one of them created 13 days
+# earlier. Same false promise, third label; it has already been attached to PENDING_BUILD,
+# to UNVERIFIED, and (until #3454) to NOT_ASKED.
+#
+# So the durable/transient distinction now comes from evidence: probe-blocking-counterparts.sh
+# asks the broker about the exact versions the verdict named, and this script reports what
+# that probe found. When the probe cannot answer, the promise is qualified rather than
+# repeated — an unprovable reassurance is the failure mode, not a missing one.
+#
 # Always exits 0 — this is a labeller, not a gate.
 set -uo pipefail
 
@@ -113,9 +144,22 @@ PRESENT="${PACT_VERSION_PRESENT:-unknown}"
 # Same default as resolve-can-i-deploy-selector.sh: an absent EVENT_NAME behaves as a push,
 # so a caller that forgets to pass it keeps today's labelling instead of inventing NOT_ASKED.
 EVENT="${EVENT_NAME:-push}"
+CP_STATE="${COUNTERPART_STATE:-none}"
+CP_DETAIL="${COUNTERPART_DETAIL:-}"
 OUT="$(cat)"
 
 emit() { printf '%s\t%s\n' "$1" "$2"; }
+
+# A self-clearing claim may only be made when the counterpart probe SUPPORTS it. When the
+# probe could not answer, the claim is kept but marked unproven — silently dropping the
+# qualifier would leave the reader with the same unearned confidence.
+maybe_unproven() {
+  if [ "$CP_STATE" = "unknown" ]; then
+    printf '%s' "$1 — NOTE: the counterpart versions this verdict names could not be probed, so the self-clearing part of this message is unproven (#3223)"
+  else
+    printf '%s' "$1"
+  fi
+}
 
 # 0. NOT_ASKED is tested before EVERYTHING, including the regression check, and that is
 #    deliberate. On exactly these inputs resolve-can-i-deploy-selector.sh emits REFUSE, so
@@ -140,6 +184,18 @@ if grep -qiE 'pact (verification )?failed|verification.*(^| )failed|failed verif
   exit 0
 fi
 
+# 2. #3223. Tested before the PACT_VERSION_PRESENT case split, because it is the only
+#    branch here backed by a measurement and it contradicts what BOTH of the reachable
+#    branches would otherwise say. It is independent of whether THIS service published a
+#    version for THIS sha: the block is on the counterpart side, and a version with no
+#    pacts is unverifiable no matter what the consumer did. Run 31080511057 is the worked
+#    example — PACT_VERSION_PRESENT was `no` for all six blocked services, so every one
+#    reported PENDING_BUILD and promised a reconcile that could not deliver.
+if [ "$CP_STATE" = "contentless" ]; then
+  emit UNVERIFIABLE "blocked on counterpart version(s) that carry ZERO pacts — ${CP_DETAIL:-see the verdict}. No verification run targets a version with no pacts, so this will NOT clear on its own and waiting for a reconcile tick cannot help (#3223). The counterpart has to be deployed at a version that actually published pacts, or co-deployed with ${SVC}"
+  exit 0
+fi
+
 case "$PRESENT" in
   # #3432: the gate WAS asked, and by version number — the probe proved from git that the version
   # it named is byte-identical to the sha being deployed in every build input of this service. So
@@ -147,19 +203,19 @@ case "$PRESENT" in
   # PENDING_BUILD would be a lie (nothing is building; the answer arrived).
   equivalent:*)
     if grep -q 'There is no verified pact' <<< "$OUT"; then
-      emit UNVERIFIED "the counterpart has not verified this version yet — normally clears within one reconcile tick"
+      emit UNVERIFIED "$(maybe_unproven "the counterpart has not verified this version yet — normally clears within one reconcile tick")"
       exit 0
     fi
     emit UNKNOWN "blocked with a proven-equivalent version asked about by number and no recognised reason in the CLI output — read the job log for ${SVC}"
     exit 0
     ;;
   no)
-    emit PENDING_BUILD "no pact version published for this commit yet — its main-push build has not finished (one ARC runner, ~45 min/service); the 3-hourly reconcile re-drives it automatically"
+    emit PENDING_BUILD "$(maybe_unproven "no pact version published for this commit yet — its main-push build has not finished (one ARC runner, ~45 min/service); the 3-hourly reconcile re-drives it automatically")"
     exit 0
     ;;
   yes)
     if grep -q 'There is no verified pact' <<< "$OUT"; then
-      emit UNVERIFIED "a version exists for this commit but the counterpart has not verified it yet — normally clears within one reconcile tick"
+      emit UNVERIFIED "$(maybe_unproven "a version exists for this commit but the counterpart has not verified it yet — normally clears within one reconcile tick")"
       exit 0
     fi
     emit UNKNOWN "blocked with a version present and no recognised reason in the CLI output — read the job log for ${SVC}"

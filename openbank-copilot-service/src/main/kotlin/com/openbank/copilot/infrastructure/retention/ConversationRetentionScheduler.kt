@@ -5,12 +5,17 @@
 package com.openbank.copilot.infrastructure.retention
 
 import com.openbank.copilot.application.port.out.ConversationStore
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.quarkus.scheduler.Scheduled.ConcurrentExecution.SKIP
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 
 /**
@@ -35,6 +40,21 @@ import java.time.Instant
  * [enabled] defaults to **true**: unlike a brand-new retention policy, deleting past-`expires_at`
  * rows only removes conversations the service already refuses to serve, so the sweep cannot destroy
  * anything reachable through the API.
+ *
+ * ## Liveness heartbeat (ADR-0237)
+ *
+ * The sweep swallows a failed tick so one bad run cannot kill the schedule — which means a
+ * permanently broken sweep is indistinguishable from a clean one from the outside: no exception
+ * escapes, no metric moves, and "no conversations deleted" is what a healthy quiet day looks like
+ * too. [DomainMetrics.registerWorkflowLiveness] publishes the last-success age so the staleness
+ * rule and `openbank-control-liveness-sentinel` can see a schedule that stopped succeeding.
+ * [recordSuccess] is called only after a delete actually returned, never in the `catch` and never
+ * on the disabled short-circuit — a heartbeat on the failure path would assert exactly the thing
+ * it exists to disprove.
+ *
+ * Registration hangs off [StartupEvent], not `@PostConstruct`: `@ApplicationScoped` is lazy, so a
+ * `@PostConstruct` here would first run when the cron first fires — up to a day after boot, leaving
+ * the gauge absent for that whole window, and absent is not the same signal as stale.
  */
 @ApplicationScoped
 class ConversationRetentionScheduler(
@@ -42,9 +62,16 @@ class ConversationRetentionScheduler(
     private val clock: Clock,
     @ConfigProperty(name = "copilot.retention.conversation.enabled", defaultValue = "true")
     private val enabled: Boolean,
+    private val domainMetrics: DomainMetrics,
 ) {
 
     private val log = Logger.getLogger(ConversationRetentionScheduler::class.java)
+
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    fun registerLiveness(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
 
     @Suppress("TooGenericExceptionCaught") // one failed tick must not kill the schedule
     @Scheduled(
@@ -56,6 +83,7 @@ class ConversationRetentionScheduler(
         val now = Instant.now(clock)
         try {
             val deleted = conversationStore.deleteExpired(now)
+            liveness?.recordSuccess()
             if (deleted > 0) {
                 log.infof(
                     "[retention] Hard-deleted %d copilot conversation(s) with expires_at <= %s",
@@ -66,5 +94,10 @@ class ConversationRetentionScheduler(
         } catch (e: Exception) {
             log.errorf(e, "[retention] copilot conversation retention sweep failed at %s", now)
         }
+    }
+
+    private companion object {
+        const val WORKFLOW_NAME = "copilot-conversation-retention"
+        val EXPECTED_INTERVAL: Duration = Duration.ofDays(1)
     }
 }
