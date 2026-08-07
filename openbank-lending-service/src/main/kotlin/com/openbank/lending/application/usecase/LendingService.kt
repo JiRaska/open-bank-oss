@@ -1113,7 +1113,15 @@ class LendingService(
                     LendingOutboxMessage(
                         aggregateId = loan.id.value,
                         eventType = "loan.stage_changed",
-                        payload = """{"loanId":"${loan.id.value}","previousStage":"${prior!!.stage}",""" +
+                        // partyId is additive (#4044-era engagement work): ADR-0220 D1's
+                        // vulnerable-customer exclusion needs to know WHO fell into arrears, and a
+                        // consumer holding only a loanId would have to call back into this service
+                        // on the app-open hot path to find out. Every other lending event that
+                        // crosses a service boundary already carries it; this one did not, which
+                        // made it unusable as an adverse-state feed. Additive, so existing
+                        // consumers are unaffected.
+                        payload = """{"loanId":"${loan.id.value}","partyId":"${loan.partyId}",""" +
+                            """"previousStage":"${prior!!.stage}",""" +
                             """"newStage":"${snapshot.stage}","daysPastDue":${snapshot.daysPastDue},""" +
                             """"period":"$period","asOf":"${snapshot.asOf}"}""",
                     ),
