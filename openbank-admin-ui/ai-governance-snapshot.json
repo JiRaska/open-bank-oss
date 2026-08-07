@@ -142,8 +142,8 @@
   "facts": {
     "agentCharters": {
       "source": "openbank-libs/governance/agents.yaml",
-      "sha256": "7feff1674a83d5ea",
-      "count": 15,
+      "sha256": "bfc4b4639efd5846",
+      "count": 16,
       "ids": [
         "compliance-officer",
         "ledger-domain-engineer",
@@ -159,10 +159,11 @@
         "release-steward",
         "docs-truth-agent",
         "authz-policy-auditor",
-        "flaky-test-hunter"
+        "flaky-test-hunter",
+        "case-coordinator"
       ],
       "byPlane": {
-        "control": 10,
+        "control": 11,
         "development": 2,
         "customer": 3
       },
@@ -173,11 +174,11 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "7b03a0fa5c08758f",
+      "sha256": "48f2f75ee17aa764",
       "counts": {
         "external": 2,
         "not-applicable": 2,
-        "pending": 1,
+        "pending": 2,
         "registered": 10
       },
       "idsByStatus": {
@@ -190,7 +191,8 @@
           "ap2-anonymous"
         ],
         "pending": [
-          "authz-policy-auditor"
+          "authz-policy-auditor",
+          "case-coordinator"
         ],
         "registered": [
           "compliance-officer",
