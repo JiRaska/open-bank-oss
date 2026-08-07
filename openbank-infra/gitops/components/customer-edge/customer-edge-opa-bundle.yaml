@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: customer-edge
     app.kubernetes.io/part-of: customer-edge
   annotations:
-    openbank.tech/policy-checksum: "1b5a85b0af2c058a"
+    openbank.tech/policy-checksum: "9e6b95854986a6c1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1091,11 +1091,21 @@ data:
         - operator-ledger-write         # service-ledger-post / service-ledger-reverse
         - operator-balance-write        # service-balance-m2m
         - operator-fraud-write          # service-fraud-scoring
-        - operator-sca-write            # service-sca-edge-m2m + service-sca-shared-client-m2m
-        - operator-sepa-payment-write   # service-sepa-payment-shared-client-m2m
+        # SAFE TODAY ONLY BY CO-ADMISSION, not by the rule named here: that rule covers
+        # sepaPayment.handleReturn alone, but ROLE_OPERATOR also grants sepaPayment.create /
+        # .transitionStatus / .approval.decide, so `matrix-allows` co-admits and this reason
+        # never becomes the only one. standing-order POSTs sepaPayment.create via the shared
+        # client. When ADR-0223 D2(b) retires those matrix grants, this entry starts denying it.
+        - operator-sepa-payment-write   # service-sepa-payment-shared-client-m2m (see note above)
       # NOT listed, and why. Each needs an identity-scoped rule for its real callers FIRST;
       # adding it here before that is a money-path outage, not a test failure.
       deferred:
+        operator-sca-write: "service-sca-shared-client-m2m covers scaChallenge.read ONLY, while
+          sca-service exposes consume/decide/initiate/verify and device.enroll. document-service
+          calls POST /challenges/{id}/consume through the shared client (ScaChallengeClient carries
+          OidcClientRequestReactiveFilter with oidc-client.client-id openbank-services) and
+          sca-service runs AUTHZ_ENFORCE=true, so listing this reason 403s the document-signing
+          gate. Needs #3748 (scaChallenge.consume for the shared client) to land first."
         operator-transaction-write: "6 verified callers of transaction.create via the shared client; no identity-scoped rule exists"
         operator-settlement-write: "settlement.create is resourceless with no alternative rule"
         operator-swift-write: "no identity-scoped rule; callers unverified"
