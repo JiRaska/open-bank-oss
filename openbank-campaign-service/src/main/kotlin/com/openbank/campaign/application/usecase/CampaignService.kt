@@ -20,6 +20,7 @@ import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.ScheduleCatalog
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.StopCondition
+import com.openbank.campaign.domain.model.TriggerCatalog
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
@@ -61,6 +62,7 @@ class CampaignService(
         stopCondition: StopCondition? = null,
         conversionRule: String? = null,
         schedule: CampaignSchedule? = null,
+        trigger: String? = null,
     ): Campaign {
         val segment = segments.load(segmentRef.name, segmentRef.version)
             ?: throw NoSuchElementException("segment ${segmentRef.name}@${segmentRef.version} not found")
@@ -69,6 +71,11 @@ class CampaignService(
         // asked why it converted zero people (ADR-0245 D1).
         require(conversionRule == null || ConversionCatalog.exists(conversionRule)) {
             "unknown conversion rule '$conversionRule' — must be one of ${ConversionCatalog.ALL.keys.sorted()}"
+        }
+        // Same reasoning as the conversion rule: a key nobody watches would be approved, run, and
+        // never enrol anyone, and the first person to notice would ask why the campaign was empty.
+        require(trigger == null || TriggerCatalog.exists(trigger)) {
+            "unknown trigger '$trigger' — must be one of ${TriggerCatalog.ALL.keys.sorted()}"
         }
         val campaign = Campaign(
             id = Ids.newId(),
@@ -82,6 +89,7 @@ class CampaignService(
             // firing against a campaign that has not passed four-eyes would enrol real people into
             // an unapproved journey (ADR-0200 D5).
             schedule = schedule,
+            trigger = trigger,
             state = CampaignState.DRAFT,
             createdBy = createdBy,
             approvedBy = null,

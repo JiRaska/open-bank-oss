@@ -33,6 +33,11 @@ data class CreateCampaignRequest(
     val conversionRule: String? = null,
     /** Absent means one-shot: enrolment happens only on POST /{id}/enrol, as it always has. */
     val schedule: ScheduleRequest? = null,
+    /**
+     * A TriggerCatalog key, or absent. When set, a matching product event enrols a party at once —
+     * but only one the segment still contains: the trigger decides when, the segment decides who.
+     */
+    val trigger: String? = null,
 )
 
 /** Optional on create (ADR-0200 D1, #3585): absent means the journey runs every step, as before. */
@@ -130,6 +135,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
             request.stopCondition?.let { StopCondition(it.maxSendsPerParty) },
             request.conversionRule,
             request.schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
+            request.trigger,
         )
         return Response.status(Response.Status.CREATED).entity(campaign).build()
     }

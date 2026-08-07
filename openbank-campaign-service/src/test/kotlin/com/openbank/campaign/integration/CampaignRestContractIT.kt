@@ -316,6 +316,60 @@ class CampaignRestContractIT {
         }
     }
 
+    /** A trigger key survives the round trip, so a campaign can declare what wakes it. */
+    @Test
+    fun `a campaign can declare a trigger and reads it back`() {
+        val body = """
+            {"name":"trig-${UUID.randomUUID()}","goal":"prove the trigger round trip",
+             "segmentName":"actives","segmentVersion":1,"trigger":"ACCOUNT_OPENED",
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                       "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("trigger", org.hamcrest.Matchers.equalTo("ACCOUNT_OPENED"))
+        }
+    }
+
+    /**
+     * An uncatalogued trigger is a 400.
+     *
+     * Stored, it would be a campaign that looks event-driven and waits forever, because no consumer
+     * watches a topic nobody named — the same dead-capability shape as an unknown cadence.
+     */
+    @Test
+    fun `an unknown trigger is rejected rather than stored`() {
+        val body = """
+            {"name":"badtrig-${UUID.randomUUID()}","goal":"prove the catalogue rejects invented triggers",
+             "segmentName":"actives","segmentVersion":1,"trigger":"CUSTOMER_SNEEZED",
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                       "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
+        """.trimIndent()
+
+        Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(400)
+        }
+    }
+
     @Test
     fun `the segment catalogue is served over HTTP with its rules in words`() {
         When {

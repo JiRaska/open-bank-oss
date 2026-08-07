@@ -97,6 +97,7 @@ class CampaignEnrolmentFailureTest {
             override suspend fun findById(id: UUID): Campaign? = campaign.takeIf { it.id == id }
             override suspend fun list(): List<Campaign> = listOf(campaign)
             override suspend fun save(campaign: Campaign): Campaign = campaign
+            override suspend fun findActiveByTrigger(trigger: String): List<Campaign> = emptyList()
         },
         enrolments = enrolments,
         segments = object : SegmentRegistry {
@@ -106,6 +107,7 @@ class CampaignEnrolmentFailureTest {
         },
         segmentEvaluation = object : SegmentEvaluationPort {
             override suspend fun evaluate(segment: Segment): List<UUID> = parties
+            override suspend fun matches(segment: Segment, partyId: UUID): Boolean = true
         },
         journeys = journeys,
         // Enrolment never touches the scheduler — a stub that throws proves it, and would fail
