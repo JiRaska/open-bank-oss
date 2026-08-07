@@ -58,6 +58,24 @@ is the **authentication assurance gate** for payments and consent — defeating 
 
 ## 6. Change log
 
+- **2026-08-05** — Close the role-only M2M path on the SCA ceremony; widen the shared-client
+  identity rule to `scaChallenge.consume` FIRST (#3734). `operator-sca-write` was role-only over
+  the whole `scaChallenge.*`/`device.*` families, so both M2M clients (HUMAN-classified,
+  ROLE_OPERATOR) were admitted to every SCA write — including `scaChallenge.verify` (the OTP
+  fallback, documented human-channel-only) and any future action in those families. SCA differs
+  from the other #3734 rows: the edge IS a legitimate ceremony caller (initiate/read/decide/
+  consume via `service-sca-edge-m2m`; `device.*` via base `edge-service-notification`) and the
+  shared client legitimately consumes challenges — delegation-service's grant-accept ceremony
+  and document-service's DOCUMENT_SIGNING ceremony (ADR-0169 D2) both POST
+  `/api/v1/sca/challenges/{id}/consume` and rode the role-only hole until now. So the ordering
+  is the #3734 "identity-scoped rule FIRST" pattern: `service-sca-shared-client-m2m` gains
+  `scaChallenge.consume`, THEN `operator-sca-write` excludes every `service-account-*`
+  principal. No prohibition clause: `rules.yaml`'s matrix grants no `scaChallenge.*`/`device.*`
+  write to ROLE_OPERATOR, so `matrix-allows` admits nothing the exclusion doesn't close (unlike
+  balance/ledger/fraud). Falsified by `sca_rest_ext_test.rego` — stripping the exclusion turns
+  4 of 11 red; removing the consume widening turns the delegation/document regression test red.
+  The ext moved from a generator heredoc to a standalone `sca_rest_ext.rego` so `opa test` can
+  load it. Rollback: revert the ext — the ceremonies keep working via the widened identity rule.
 - **2026-06-11** — Domain metrics + outbox-backlog gauge (ADR-0077 / ADR-0079). New `DomainMetrics`
   call sites: `scaChallengeIssued(method)` after a challenge is persisted in `initiate`, and
   `scaChallengeResolved(method, outcome)` once a challenge reaches a terminal `ScaStatus`

@@ -27,7 +27,10 @@ fails=0
 check() {
   local name="$1" want="$2" present="$3" out="$4" event="${5:-}"
   local got
-  got="$(PACT_VERSION_PRESENT="$present" EVENT_NAME="$event" bash "$CLASSIFY" openbank-demo-service <<< "$out" | cut -f1)"
+  # COUNTERPART_STATE is pinned to `none` here so a leaked environment variable cannot
+  # decide a case; the #3223 cases below set it explicitly via check_cp.
+  got="$(PACT_VERSION_PRESENT="$present" EVENT_NAME="$event" COUNTERPART_STATE=none \
+    bash "$CLASSIFY" openbank-demo-service <<< "$out" | cut -f1)"
   if [ "$got" = "$want" ]; then
     echo "  ok   ${name} → ${got}"
   else
@@ -133,6 +136,60 @@ for p in yes no absent unknown "equivalent:${SHA_FIXTURE}"; do
     fi
   done
 done
+
+# 14-17 (#3223). The counterpart probe decides DURABILITY, and it must beat both classes
+#     that carry a self-clearing promise. The measured case is the one that matters: on run
+#     31080511057 every blocked service had PACT_VERSION_PRESENT=no, so all six reported
+#     PENDING_BUILD and promised a reconcile, while all seven counterpart versions the
+#     verdicts named carried zero pacts. Case 14 is that exact input.
+check_cp() { # <name> <want> <present> <cp-state> [event]
+  local name="$1" want="$2" present="$3" cp="$4" event="${5:-}" got
+  got="$(PACT_VERSION_PRESENT="$present" EVENT_NAME="$event" COUNTERPART_STATE="$cp" \
+    COUNTERPART_DETAIL="openbank-ledger-service@a5e5d32a" \
+    bash "$CLASSIFY" openbank-demo-service <<< "$NO_VERIFIED_PACT" | cut -f1)"
+  if [ "$got" = "$want" ]; then
+    echo "  ok   ${name} → ${got}"
+  else
+    echo "  FAIL ${name}: want ${want}, got ${got}"
+    fails=$((fails + 1))
+  fi
+}
+check_cp "contentless counterpart beats PENDING_BUILD" UNVERIFIABLE no contentless
+check_cp "contentless counterpart beats UNVERIFIED"    UNVERIFIABLE yes contentless
+check_cp "healthy counterparts keep PENDING_BUILD"     PENDING_BUILD no has-pacts
+check_cp "healthy counterparts keep UNVERIFIED"        UNVERIFIED yes has-pacts
+check_cp "unprobed counterparts keep the class"        PENDING_BUILD no unknown
+# A REGRESSION is an observed verification FAILURE and outranks everything: relabelling it
+# UNVERIFIABLE would hide a real broken contract behind a bookkeeping explanation.
+got_reg="$(PACT_VERSION_PRESENT=yes COUNTERPART_STATE=contentless bash "$CLASSIFY" \
+  openbank-demo-service <<< "$VERIFICATION_FAILED" | cut -f1)"
+if [ "$got_reg" = "REGRESSION" ]; then
+  echo "  ok   regression outranks contentless → REGRESSION"
+else
+  echo "  FAIL regression outranks contentless: got ${got_reg}"
+  fails=$((fails + 1))
+fi
+# The UNVERIFIABLE message must NAME the versions and must not promise a reconcile.
+msg_uv="$(PACT_VERSION_PRESENT=no COUNTERPART_STATE=contentless \
+  COUNTERPART_DETAIL="openbank-ledger-service@a5e5d32a" bash "$CLASSIFY" \
+  openbank-demo-service <<< "$NO_VERIFIED_PACT" | cut -f2-)"
+case "$msg_uv" in
+  *"openbank-ledger-service@a5e5d32a"*) echo "  ok   UNVERIFIABLE names the version" ;;
+  *) echo "  FAIL UNVERIFIABLE does not name the version: ${msg_uv}"; fails=$((fails + 1)) ;;
+esac
+if grep -qE 'clears within one reconcile|re-drives it automatically' <<< "$msg_uv"; then
+  echo "  FAIL UNVERIFIABLE repeats a self-clearing promise: ${msg_uv}"
+  fails=$((fails + 1))
+else
+  echo "  ok   UNVERIFIABLE makes no self-clearing promise"
+fi
+# An unprovable promise must be MARKED unprovable, not silently repeated.
+msg_unk="$(PACT_VERSION_PRESENT=no COUNTERPART_STATE=unknown bash "$CLASSIFY" \
+  openbank-demo-service <<< "$NO_VERIFIED_PACT" | cut -f2-)"
+case "$msg_unk" in
+  *unproven*) echo "  ok   unprobed counterparts qualify the promise" ;;
+  *) echo "  FAIL unprobed counterparts do not qualify the promise: ${msg_unk}"; fails=$((fails + 1)) ;;
+esac
 
 # 7. Missing argument is a usage error, not a silent classification.
 if PACT_VERSION_PRESENT=no bash "$CLASSIFY" </dev/null >/dev/null 2>&1; then

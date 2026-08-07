@@ -44,6 +44,7 @@ class FraudResource {
     @Authorize(action = "fraud.score")
     @Operation(summary = "Score a payment intent and return a fraud verdict (ALLOW/CHALLENGE/REVIEW/DECLINE)")
     suspend fun score(req: ScoreFraudRequest): Response {
+        req.validate()
         val result: FraudScore = scoreFraud.score(req.toDomain())
         return Response.ok(result.toResponse()).build()
     }
@@ -66,6 +67,32 @@ data class ScoreFraudRequest(
     val accountId: UUID? = null,
     val counterpartyId: UUID? = null,
 )
+
+/**
+ * Reject a malformed scoring request at the HTTP boundary, as a 400.
+ *
+ * Nothing validated `currency` before this, and Jackson **coerces** a JSON scalar of the wrong type
+ * into a `String` rather than rejecting it: `{"currency": false}` deserialises to the five-character
+ * `"false"`. That reached `fraud_scores.currency`, a `varchar(3)`, and Postgres raised
+ * `22001 value too long`, which surfaced as a Hibernate `DataException` and — with no mapper for it
+ * — a **500** from `GenericExceptionMapper`. The 2026-08-03 `api-fuzz-authenticated` run
+ * (30804842325, job 91657718387) reported it as this service's only `Server error`, on exactly that
+ * body. A wrongly-typed field is a client error; reporting it as 5xx also charges a money-path
+ * service's error budget for someone else's bad request.
+ *
+ * Deliberately `require` (-> `IllegalArgumentException` -> 400 via `openbank-libs-runtime`'s
+ * `CommonExceptionMappers`) rather than a service-local `ExceptionMapper`: libs owns the mappers for
+ * JDK types, and a second mapper for one type is picked non-deterministically per request.
+ *
+ * The bound is the *storage* contract, so it cannot silently drift back: `currency` must be exactly
+ * the three upper-case letters ISO 4217 defines and the column holds.
+ */
+private fun ScoreFraudRequest.validate() {
+    require(currency.matches(ISO_4217)) { "currency must be a 3-letter ISO 4217 code" }
+    require(rail.isNotBlank()) { "rail is required" }
+}
+
+private val ISO_4217 = Regex("^[A-Z]{3}$")
 
 data class ScoreFraudResponse(val verdict: String, val score: Int, val reasons: List<String>, val ruleVersion: String)
 

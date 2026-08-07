@@ -7,6 +7,7 @@ package com.openbank.delegation.infrastructure.client
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.delegation.application.port.out.PartyEligibility
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
+import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
@@ -15,6 +16,7 @@ import jakarta.ws.rs.PathParam
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.util.UUID
@@ -39,6 +41,17 @@ data class PidKycAttributes(val kycLevel: String?)
 data class PidCoreAttributes(val givenName: String? = null, val familyName: String? = null)
 
 @Path("/api/v1/parties")
+/**
+ * Carries the shared `openbank-services` client-credentials token. Every endpoint this client
+ * reaches is `@RolesAllowed`, so without the filter the call goes out with no Authorization header
+ * and 401s — which the caller then reports as its fail-closed verdict, not as a misconfiguration.
+ *
+ * Invisible to this repo's tests: they all mock the client interface, so nothing exercises the
+ * wire. It surfaced only against the deployed sandbox, where the offer refused every grant with
+ * "ownership could not be established" while the underlying cause was `Unauthorized, status
+ * code 401` in the pod log.
+ */
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterRestClient(configKey = "pid-service")
 interface PidServiceRestClient {
     @GET

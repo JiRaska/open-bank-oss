@@ -11,6 +11,15 @@ metadata:
     app.kubernetes.io/part-of: sdd
 spec:
   replicas: 1
+  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
+  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
+  # resources - on a full cluster the rollout never completes while reporting 1/1 READY.
+  # No HA to lose: this workload is already unavailable for the moment its pod is replaced.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: sdd-service
@@ -19,6 +28,10 @@ spec:
       labels:
         app.kubernetes.io/name: sdd-service
         app.kubernetes.io/part-of: sdd
+      annotations:
+        # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-sdd-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "da47778490e58194"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -29,7 +42,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sdd-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sdd-service:sandbox-95b652dd
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sdd-service:sandbox-7316bb12
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -90,13 +103,26 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
-            # OPA advisory mode (ADR-0034): sdd-service has no OPA policy-decision sidecar
-            # (unlike money-path services such as lending/payments/accounts), so @Authorize
-            # would otherwise fail closed ("OPA call failed") on every endpoint. Same posture
-            # as interest-service / anacredit — non-money-path services run authz advisory.
-            # Access stays enforced by JAX-RS @RolesAllowed (operator/viewer roles) and, for
-            # customer traffic, by the customer-edge ownership (IDOR) check before it ever
-            # reaches this service. Refs #1730.
+            # OPA advisory mode (ADR-0034 Phase 5). STILL false — deliberately, and this is the
+            # one remaining step of #3679, not an oversight.
+            #
+            # The comment that stood here was wrong on its own terms: it justified advisory mode
+            # with "non-money-path services run authz advisory", and sdd-service IS in
+            # rules.yaml: money_path_services — it posts a real debtor debit through
+            # TransactionServiceClient for every authorised collection (#1478). It also asserted
+            # that no sidecar existed, which was true and is what this change fixes: the `opa`
+            # container below now serves data.openbank.rest.allow, so every @Authorize decision is
+            # EVALUATED and LOGGED ("advisory: would DENY") instead of failing at the PDP call with
+            # nothing to record.
+            #
+            # Flipping this to "true" is a separate, deliberate change and must not ride along with
+            # the bootstrap: enforcement is only safe once the live decision log confirms the
+            # would-DENY population is empty for real callers. Two callers exist today — admin-ui
+            # operators (their own session token) and customer-edge (service-account-openbank-edge)
+            # — and sdd_rest_ext.rego grants both; the log is what proves there is no third.
+            # Access meanwhile stays enforced by JAX-RS @RolesAllowed and, for customer traffic, by
+            # the customer-edge ownership (IDOR) check before it ever reaches this service.
+            # Refs #1730, #3679.
             - name: AUTHZ_ENFORCE
               value: "false"
           startupProbe:
@@ -138,9 +164,76 @@ spec:
             limits:
               cpu: "1"
               memory: 512Mi
+        # OPA policy-decision sidecar (ADR-0034 Phase 5 bootstrap, issue #3679). Serves
+        # data.openbank.rest.allow for all @Authorize-annotated endpoints in sdd-service (sdd.*).
+        # Bundle mounted from the sdd-opa-bundle ConfigMap (gen-sdd-opa-bundle.sh).
+        # Reached over loopback only (OpaSidecarPolicyDecisionPoint defaults to
+        # http://localhost:8181) — 8181 needs no cross-namespace ingress.
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet: {path: "/health?bundles=true", port: 8181}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /health, port: 8181}
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/sdd_rest_ext.rego
+              subPath: sdd_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: sdd-opa-bundle
         - name: kafka-keystore
           secret:
             secretName: sdd-service-kafka-keystore

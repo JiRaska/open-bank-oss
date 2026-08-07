@@ -11,6 +11,7 @@ import com.openbank.delegation.application.usecase.DelegationNotGranteeException
 import com.openbank.delegation.application.usecase.DelegationNotGrantorException
 import com.openbank.delegation.application.usecase.DelegationResourceOwnershipException
 import com.openbank.delegation.application.usecase.DelegationScaException
+import com.openbank.delegation.application.usecase.DelegationUnsupportedConstraintException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
@@ -54,6 +55,22 @@ class DelegationEligibilityExceptionMapper : ExceptionMapper<DelegationEligibili
 class DelegationCallerMismatchExceptionMapper : ExceptionMapper<DelegationCallerMismatchException> {
     override fun toResponse(exception: DelegationCallerMismatchException): Response =
         Response.status(Response.Status.FORBIDDEN).entity(errorBody(403, exception.message)).build()
+}
+
+/**
+ * 400, not 422: the field is not merely unacceptable in this instance, it is not a field this
+ * version of the API supports at all — no value of it would be accepted, so there is nothing for
+ * the caller to retry with different content. Carries a machine-readable `code` so a client can
+ * distinguish "you sent a ceiling we do not enforce" from every other 400 on this route.
+ */
+@Provider
+class DelegationUnsupportedConstraintExceptionMapper : ExceptionMapper<DelegationUnsupportedConstraintException> {
+    override fun toResponse(exception: DelegationUnsupportedConstraintException): Response =
+        Response.status(Response.Status.BAD_REQUEST)
+            .entity(
+                errorBody(Response.Status.BAD_REQUEST.statusCode, exception.message) + ("code" to exception.code),
+            )
+            .build()
 }
 
 /**

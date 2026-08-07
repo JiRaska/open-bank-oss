@@ -5,7 +5,7 @@
 'use client'
 
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import type { EditorChannel, EditorStep } from '@/components/campaigns/JourneyEditor'
+import type { EditorChannel, EditorCondition, EditorStep } from '@/components/campaigns/JourneyEditor'
 
 /**
  * Edits the step selected on the canvas.
@@ -174,6 +174,54 @@ export function StepEditor({
           />
         </div>
       ))}
+
+      {/* The gate, next to the delay, because the two together answer "when does this go out, and to
+          whom". `CONFIRMED` is delivery as notification-service reports it (ADR-0239 D3) — never
+          opened and never converted, because no such signal exists in the platform. Saying so here
+          is cheaper than letting someone build a follow-up they believe fires on a click. */}
+      <div className="space-y-1.5">
+        <span className="text-sm font-medium">{t('Kdy krok proběhne', 'When this step runs')}</span>
+        <div className="flex flex-wrap gap-2">
+          {([undefined, 'IF_PREVIOUS_CONFIRMED', 'IF_PREVIOUS_NOT_CONFIRMED'] as (EditorCondition | undefined)[])
+            .map(c => (
+              <button
+                key={c ?? 'ALWAYS'}
+                type="button"
+                data-condition-pick={c ?? 'ALWAYS'}
+                data-selected={(step.condition ?? undefined) === c ? 'true' : 'false'}
+                onClick={() => onChange({ ...step, condition: c })}
+                className="btn"
+                style={
+                  (step.condition ?? undefined) === c
+                    ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' }
+                    : undefined
+                }
+              >
+                {c === undefined
+                  ? t('Vždy', 'Always')
+                  : c === 'IF_PREVIOUS_CONFIRMED'
+                    ? t('Jen když předchozí dorazil', 'Only if the previous arrived')
+                    : t('Jen když předchozí nedorazil', 'Only if the previous did not arrive')}
+              </button>
+            ))}
+        </div>
+        {index === 0 && step.condition && (
+          <p className="text-xs text-amber-600">
+            {t(
+              'První krok nemá co předcházet — „dorazil" tu nikdy neplatí, „nedorazil" vždy.',
+              'The first step has no predecessor — "arrived" never holds here, "did not" always does.',
+            )}
+          </p>
+        )}
+        {step.condition === 'IF_PREVIOUS_NOT_CONFIRMED' && (
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'Nedoručeno zahrnuje i „zatím nevíme". Dejte kroku dost dlouhou prodlevu, ať výsledek stihne dorazit.',
+              'Not delivered includes "we do not know yet". Give the step a delay long enough for the outcome to arrive.',
+            )}
+          </p>
+        )}
+      </div>
 
       <div className="space-y-1.5">
         <label htmlFor={`delay-${index}`} className="text-sm font-medium">

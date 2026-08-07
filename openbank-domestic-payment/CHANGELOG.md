@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.11.4...domestic-payment-v0.12.0) (2026-08-07)
+
+
+### Features
+
+* **domestic-payment:** register workflow liveness on stranded-gauge and screening-redrive (ADR-0237) ([#3704](https://github.com/JiRaska/open-bank-oss/issues/3704)) ([7db0e56](https://github.com/JiRaska/open-bank-oss/commit/7db0e56efb819439965aebb602dc63ed92b20681))
+
 ## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.11.3...domestic-payment-v0.11.4) (2026-08-02)
 
 

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: statement-service
     app.kubernetes.io/part-of: statements
   annotations:
-    openbank.tech/policy-checksum: "295fea349a6a7b8a"
+    openbank.tech/policy-checksum: "63023f96fa57e8d7"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -306,6 +306,18 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
     	input.action in {"consent.list", "consent.revoke"}
+    }
+
+    # The customer-edge proxying the app's in-app engagement surfaces (ADR-0220 D1): the app
+    # resolves what to show in a slot and records the customer's reaction to it. Same edge
+    # principal and same guard as edge-service-consent — the edge injects the caller's
+    # authoritative partyId from the JWT, so a client-supplied partyId never reaches
+    # engagement-service on its own authority. Scoped to the two exact actions the app uses —
+    # NOT an `engagement.` family — least privilege, matching edge-service-consent's shape.
+    allowed_reasons contains "edge-service-engagement" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
     }
 
     # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log
@@ -891,15 +903,15 @@ data:
         - governance-auditor           # LLM_GATEWAY_URL
         - release-steward              # LLM_GATEWAY_URL
         - authz-policy-auditor         # LLM_GATEWAY_URL
-      not_routed:
-        - agent-service                # AGENT_MODEL_ENDPOINT repoint merged (#2209), but the deployed
-                                       # image resolves the baked-in api.groq.com URL until the rebuilt
-                                       # image rolls out. Promote it to `routed` only after re-reading
-                                       # the live Deployment — merged is not deployed.
-      egress_enforced: partial         # ai-platform is egress-locked; `platform` is NOT. agent-service's
-                                       # component still declares policyTypes: [Ingress] only, so the
-                                       # gateway is bypassable from that pod. #2210 adds the Egress half,
-                                       # gated on the agent-service repoint actually being deployed.
+        - agent-service                # AGENT_MODEL_ENDPOINT. Promoted only after re-reading the LIVE
+                                       # Deployment, which is what the previous note required: it now
+                                       # resolves http://litellm.ai-platform.svc:4000/v1, the baked-in
+                                       # api.groq.com URL having been removed by #3300.
+      not_routed: []                   # every agent reaches a model through the gateway
+      egress_enforced: full            # `platform` is no longer the hole. networkpolicy/
+                                       # agent-service-egress-allow-list (#2210) is present in that
+                                       # namespace, so the pod can no longer bypass the gateway; with
+                                       # ai-platform already egress-locked, the choke point is closed.
       budgets_enforced_at: charter     # CharterRateLimiter in openbank-agent-service — NOT the gateway.
       providers:                       # both terminate INSIDE the gateway pod; no agent holds either key
         deepinfra:                     # api.deepinfra.com, deepseek-ai/DeepSeek-V3.2. US-hosted, no region
@@ -963,15 +975,67 @@ data:
         - secrets.read.raw
 
     # ---------------------------------------------------------------------------------------
+    # Case classes for agent swarm coordination (ADR-0244). A case is one long-running
+    # Temporal workflow opened for a single disposition target. Default budgets and
+    # convergence thresholds live here; per-class overrides are merged over default.
+    # Every case names exactly one class. The case-coordinator charter owns convergence
+    # judgement and budget enforcement; other charters may be granted case.join (and later
+    # case.contribute) once the signal-handling wiring lands.
+    # ---------------------------------------------------------------------------------------
+    case_classes:
+      default:
+        budget:
+          tokens_per_case: 500000
+          max_contributions: 100
+          wall_clock_minutes: 60
+        concurrency:
+          max_open_cases: 10
+        convergence:
+          contested_rate_threshold: 0.30   # suspend case-open for this class above 30% contested
+      classes:
+        fraud-investigation:
+          budget:
+            tokens_per_case: 1000000
+            max_contributions: 200
+            wall_clock_minutes: 120
+          concurrency:
+            max_open_cases: 5
+          convergence:
+            contested_rate_threshold: 0.25
+        aml-alert:
+          budget:
+            tokens_per_case: 300000
+            max_contributions: 50
+            wall_clock_minutes: 30
+          concurrency:
+            max_open_cases: 20
+          convergence:
+            contested_rate_threshold: 0.40
+        incident-response:
+          budget:
+            tokens_per_case: 200000
+            max_contributions: 40
+            wall_clock_minutes: 20
+          concurrency:
+            max_open_cases: 15
+          convergence:
+            contested_rate_threshold: 0.35
+
+    # ---------------------------------------------------------------------------------------
     # Agents. plane = control (oversight, proposal-only) | development (per-domain engineering)
     #                | customer (customer-facing assistant, ADR-0089 — its own SCA-gated regime).
     # Each charter answers: data_scope (what it reads), tools (what it calls), requires_human
-    # (what must be approved), limits (budget/quota).
+    # (what must be approved), limits (budget/quota). Swarm participants additionally declare
+    # case_capabilities (ADR-0244).
     # ---------------------------------------------------------------------------------------
     agents:
 
       - id: compliance-officer
         plane: control
+        # model: the LLM this agent invokes when run. Charter-declared so the policy gate can record
+        # it on every agent.mcp.tool_call audit event (ADR-0031 D5, issue #3667) without consulting
+        # the model gateway at gate time. Value is the LiteLLM model id the gateway serves.
+        model: llama-3.3-70b-versatile
         charter: "AML/sanctions/GDPR/PSD2 oversight of the running bank; produces proposals only."
         data_scope:
           read: [transaction, sanction-screening, consent, audit, aml, sanctions, dispute, clearing, sepa-instant]
@@ -991,6 +1055,7 @@ data:
 
       - id: ledger-domain-engineer
         plane: development
+        model: llama-3.3-70b-versatile
         charter: "Maintains its owned services via skills + rules.yaml + ADRs; opens PRs, never merges."
         owns: [openbank-ledger-service]            # a money_path service (rules.yaml) -> stricter HITL
         skills: [ship-check, bump, open-pr, release]   # run.skill is constrained to THIS list
@@ -1008,6 +1073,7 @@ data:
 
       - id: ui-assistant
         plane: control
+        model: llama-3.3-70b-versatile
         charter: "The admin-UI bot. Answers operator questions from read-only tools; proposal-only, never acts on money."
         data_scope:
           read: [account, transaction, balance, catalog, ledger,
@@ -1036,6 +1102,7 @@ data:
 
       - id: rca-investigator
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "On a firing alert, investigates metrics, logs, traces and k8s state and proposes a likely root cause (HolmesGPT, ADR-0088). Read-only oversight — emits a finding, never acts."
         data_scope:
           read: [observability, audit]             # Prometheus / Loki / Tempo / Alertmanager + cluster state
@@ -1050,6 +1117,7 @@ data:
 
       - id: customer-copilot
         plane: customer
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "Customer-facing mobile assistant (ADR-0089). Reads the signed-in customer's OWN data; action tools emit PROPOSALS only — money never moves on the model's word. The app routes each proposal into the existing edge payment/card/dispute + SCA flow."
         data_scope:
           # The signed-in customer's own data, audience-scoped via an on-behalf-of token; ownership is
@@ -1072,6 +1140,7 @@ data:
 
       - id: mcp-anonymous
         plane: customer
+        model: unknown
         charter: "The first-party MCP server's acting identity (ADR-0181). Exposes a curated, PSD2-consent-scoped tool set — read the granted accounts/balances/transactions/consents, and PROPOSE a payment — to governed AI agents over the Model Context Protocol. Reads only; propose.payment is a reviewable artifact a human + SCA disposes, never a debit."
         # `mcp-anonymous` is the phase-1 FIXED principal id McpEndpoint.resolveContext() sets
         # (ctx.agentId = "agent:mcp-anonymous"); the shared ADR-0034 PDP classifies it AI_AGENT and
@@ -1099,6 +1168,7 @@ data:
 
       - id: ap2-anonymous
         plane: customer
+        model: unknown
         charter: "The bank-side AP2 mandate verifier's acting identity (ADR-0193). Verifies a presented AP2 (Agent Payments Protocol) signed mandate — its signature chain + constraints (payee, amount cap, currency, expiry) — as an authorization-evidence type. Verification only: it moves NO funds; a valid verdict is an input to the SCA/payment decision, never a payment."
         # `ap2-anonymous` is the phase-1 FIXED principal id Ap2VerifyEndpoint sets when the X-Agent-Id
         # header is absent (ANONYMOUS_AGENT = "agent:ap2-anonymous"); the shared ADR-0034 PDP classifies
@@ -1123,6 +1193,7 @@ data:
 
       - id: finops-agent
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0112"
         description: >
           Proactive AWS cost monitoring and optimization agent. Detects NAT egress spikes,
@@ -1175,6 +1246,7 @@ data:
 
       - id: devops-agent
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0119"
         description: >
           Proactive SSDLC, CI/CD and DORA reliability agent — the delivery-pipeline twin of the
@@ -1228,6 +1300,7 @@ data:
 
       - id: control-liveness-sentinel
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0163"
         description: >
           Fleet-wide correlator for the ADR-0160 liveness/drift-detection mechanisms — watches
@@ -1279,6 +1352,7 @@ data:
 
       - id: governance-auditor
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0164"
         description: >
           Post-hoc auditor of merged-PR governance compliance. For every PR merged to main, re-verifies
@@ -1338,6 +1412,7 @@ data:
 
       - id: release-steward
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0165"
         description: >
           Periodic guardian of the release-please / version-axis invariants. Checks
@@ -1396,6 +1471,7 @@ data:
 
       - id: docs-truth-agent
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0166"
         description: >
           Periodic ADR-status-vs-code drift detector. On a weekly sweep plus reactively when any
@@ -1451,6 +1527,7 @@ data:
 
       - id: authz-policy-auditor
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0167"
         description: >
           Static analyzer for the fleet's OPA/Rego authorization policies (rest.rego, agents.rego,
@@ -1514,6 +1591,7 @@ data:
 
       - id: flaky-test-hunter
         plane: development
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0168"
         description: >
           Static analyzer for fleet-wide silent-test-failure patterns in Kotlin test sources.
@@ -1568,6 +1646,67 @@ data:
         compliance:
           eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
           dora: "Art. 9 ICT risk detection; Art. 5 ICT risk management framework — fleet-wide static verification that a test suite's reported green state reflects tests that actually ran"
+
+      - id: case-coordinator
+        plane: control
+        charter: "ADR-0244"
+        description: >
+          Owns a running Temporal case workflow: invites chartered agents to contribute,
+          enforces the per-case-class budget and deadline, judges convergence, and emits
+          exactly one HITL proposal per case. Every swarm is bounded to one disposition
+          target; pre-emption is deterministic and replay-safe. The coordinator never
+          coordinates a case it opened; who detected is never who converged.
+        enabled: true
+        enforcement: block
+        data_scope:
+          read:
+            - case-workflow-history       # Temporal workflow history of cases it coordinates
+            - agent-proposals-readonly    # existing proposal queue metadata (no raw payload)
+            - read.governance             # agents.yaml case classes and charter capabilities
+          pii: masked
+        tools:
+          allow:
+            - tier: read
+              resources: [case-workflow, governance]
+            - tier: write_proposal
+              resources: [agent-proposal]   # emits one HITL proposal per case
+            - tier: execute
+              resources: [case-workflow-signal]  # sends deterministic pre-emption / convergence signals
+          deny:
+            - tier: write
+              resources: ["*"]             # never writes to a business record directly
+            - tier: execute
+              resources: [money.*, gh.pr.*, secrets.*]
+        case_capabilities:
+          # The coordinator is the only charter that may open, coordinate, and synthesize a case.
+          # Other agents may be granted case.join (and later case.contribute) in their own charters.
+          - case.open
+          - case.coordinate
+          - case.synthesize
+          - case.preempt
+        requires_human:
+          - every: proposal               # every synthesized proposal is a HITL proposal
+          - approver_must_differ_from: author
+          - record: reason
+        limits:
+          tokens_per_run: 50000
+          runs_per_day: 48                # one per active case hour is common; cap prevents runaway
+          kill_switch: true
+        audit:
+          capture:
+            - model_id
+            - prompt_hash
+            - tool_calls
+            - policy_decision
+            - case_id
+            - disposition_target
+            - case_class
+            - contributions_received
+            - synthesis_cited_contribution_ids
+            - human_approved_by
+        compliance:
+          eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, human disposes; not Annex III high-risk"
+          dora: "ICT change management (Art. 8–10); operational resilience via durable, bounded case coordination"
   rules-data.yaml: |
     # GENERATED by .github/scripts/gen-rules-opa-data.py — do not hand-edit.
     #
@@ -1644,6 +1783,29 @@ data:
                                                 # sanctions.clear (deciding a screening hit) — the highest-risk action in this
                                                 # service, since a wrongly-cleared true positive is a real sanctions violation.
       - openbank-vop-service                   # ADR-0171: Verification of Payee (IPR Art. 5c) — sits on the pre-execution path of
+                                                # every euro credit transfer. Money-path for the same reason sca/consent/fraud are:
+                                                # it gates money movement without moving money itself.
+                                                # four-eyes assessed: the only REST surface is POST /vop/verify (vop.verify), a
+                                                # read-shaped check that mints nothing and decides nothing a human could collude on
+                                                # — there is nothing to maker-checker gate. The action that WOULD deserve a gate is
+                                                # a runtime change to `openbank.vop.max-edit-distance`: widening it silently turns
+                                                # genuine mismatches into reassuring amber warnings (threat model §3 Tampering).
+                                                # It is gitops-only config today, so it is covered by PR review rather than
+                                                # four_eyes.verbs; add a `vop.flip` verb here if it ever becomes operator-tunable.
+      - openbank-standing-order-service        # issue #2188: StandingOrderDueConsumer POSTs a real SCT to
+                                                # sepa-payment `/api/v1/sepa-payments` for every due order (#889, merged) —
+                                                # initiates money movement like sdd, not adjacent to it. Same class as sdd:
+                                                # it shapes the instruction, the irreversible debit lives downstream in a
+                                                # gated money-path service. Threat model:
+                                                # docs/threat-models/openbank-standing-order-service.md.
+                                                # four-eyes assessed: the only money-moving path is the scheduler-driven
+                                                # consumer (no human in the loop by design); the REST surface is
+                                                # customer/operator CRUD on orders (create/amend/pause/resume/cancel), whose
+                                                # effect is a FUTURE scheduled debit, not an immediate one — pausing or
+                                                # cancelling an order REDUCES money movement. There is no operator
+                                                # force-execute endpoint to maker-checker gate; add a verb here if one is
+                                                # ever added. Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
+      - openbank-psd2-service                  # issue #2188 sibling sweep: PaymentInitiationService (PIS) calls
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
@@ -1931,5 +2093,63 @@ data:
             - lending.collateralDecide
             - lending.approval.read
             - lending.approval.decide
+
+    shared_m2m_write_prohibition:
+      # GHSA-58jq-9hq3-66jr. rest.rego denies the shared M2M identity
+      # (`service-account-openbank-services`, which carries ROLE_OPERATOR in the realm) when the
+      # ONLY reasons admitting it are the role-only write reasons listed here.
+      #
+      # OPT-IN, and the reason a name pattern was rejected: matching every `operator-*-write`
+      # would have 403'd transaction.create from six live callers (account-service's
+      # welcome-bonus credit, sepa-instant, domestic-payment, swift, interest, sdd) and
+      # settlement.create — both AUTHZ_ENFORCE=true money paths whose services have no
+      # identity-scoped rule to fall back on. transaction-service's rego states the exposure
+      # itself ("RESIDUAL RISK — shared identity, no per-caller narrowing"), which is precisely
+      # why removing its only path is not the fix.
+      #
+      # A reason joins this list once its service carries a rule that NAMES the caller and
+      # enumerates its actions, so denying the role-only path removes an over-grant rather than
+      # the only path. Each entry below was verified to have such a rule.
+      reasons:
+        - operator-consent-write        # service-consent-m2m + service-consent-m2m-marketing
+        - operator-ledger-write         # service-ledger-post / service-ledger-reverse
+        - operator-balance-write        # service-balance-m2m
+        - operator-fraud-write          # service-fraud-scoring
+        # SAFE TODAY ONLY BY CO-ADMISSION, not by the rule named here: that rule covers
+        # sepaPayment.handleReturn alone, but ROLE_OPERATOR also grants sepaPayment.create /
+        # .transitionStatus / .approval.decide, so `matrix-allows` co-admits and this reason
+        # never becomes the only one. standing-order POSTs sepaPayment.create via the shared
+        # client. When ADR-0223 D2(b) retires those matrix grants, this entry starts denying it.
+        - operator-sepa-payment-write   # service-sepa-payment-shared-client-m2m (see note above)
+        # Restored once #3748 landed: service-sca-shared-client-m2m now admits the shared client
+        # for scaChallenge.read AND scaChallenge.consume, so document-service's consume call
+        # (ScaChallengeClient, oidc-client.client-id openbank-services) keeps an identity-scoped
+        # reason and this entry no longer 403s the document-signing gate. device.list is covered
+        # by matrix-allows. Still uncovered for the shared client: decide/initiate/verify and
+        # device.enroll — no in-repo caller invokes them on that principal.
+        - operator-sca-write            # service-sca-edge-m2m + service-sca-shared-client-m2m
+      # NOT listed, and why. Each needs an identity-scoped rule for its real callers FIRST;
+      # adding it here before that is a money-path outage, not a test failure.
+      deferred:
+        operator-transaction-write: "6 verified callers of transaction.create via the shared client; no identity-scoped rule exists"
+        operator-settlement-write: "settlement.create is resourceless with no alternative rule"
+        operator-swift-write: "no identity-scoped rule; callers unverified"
+        operator-sepa-instant-write: "no identity-scoped rule; callers unverified"
+        operator-billing-write: "no identity-scoped rule; callers unverified"
+        operator-interest-write: "no identity-scoped rule; callers unverified"
+        operator-lending-write: "no identity-scoped rule; callers unverified"
+        operator-sanctions-write: "no identity-scoped rule; m2m-sanctions-screening covers create only"
+        operator-identity-write: "no identity-scoped rule; callers unverified"
+        operator-card-write: "no identity-scoped rule; callers unverified"
+        # These DO carry an identity-pinned rule, but "a rule exists" is not "the rule covers the
+        # actions the role-only path was serving". Listing them on that basis would repeat, one
+        # level down, the guess that made the first revision break transaction.create. Each needs
+        # its identity-scoped rule read against its real callers before it moves up.
+        operator-fx-write: "2 identity-pinned rules; action coverage vs real callers unverified"
+        operator-account-write: "2 identity-pinned rules; action coverage unverified"
+        operator-clearing-write: "1 identity-pinned rule; action coverage unverified"
+        operator-domestic-payment-write: "1 identity-pinned rule; action coverage unverified"
+        operator-party-write: "1 identity-pinned rule, but onboarding-service PUTs party.kyc-status via the shared client (latent: AUTHZ_ENFORCE=false there today)"
+      adr: ADR-0034
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}

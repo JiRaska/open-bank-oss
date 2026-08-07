@@ -12,9 +12,9 @@
 # Lokální brána před PR
 ./gradlew detekt ktlintCheck koverVerify build
 
-# Kontejnerový image (vícefázový Dockerfile)
-#   build fáze: eclipse-temurin:20-jdk + gradlew quarkusBuild (fast-jar)
-#   runtime fáze: eclipse-temurin:25-jre-alpine, non-root uživatel, -XX:+UseZGC
+# Kontejnerový image (jednofázový; recept je .github/workflows/Dockerfile.deploy)
+#   build: hostem, ./gradlew build -Dquarkus.package.jar.type=fast-jar
+#   runtime: eclipse-temurin:25-jre (glibc, #3354), non-root uživatel, -XX:+UseZGC
 ```
 
 > Build používá host-side Gradle build, fast-jar packaging (`-Dquarkus.package.jar.type=fast-jar`) dle GitOps pravidel repa — nikdy in-Docker Gradle, nikdy uber-jar.

@@ -1046,3 +1046,99 @@ spec:
       total:
         metric: traces_spanmetrics_calls_total{service="openbank-delegation-service"}
 ---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-standing-order-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-standing-order-service
+spec:
+  target: "99.9"
+  window: 30d
+  alerting:
+    absent: false
+  description: "openbank-standing-order-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-standing-order-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-standing-order-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-standing-order-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-standing-order-service
+spec:
+  target: "99"
+  window: 30d
+  alerting:
+    absent: false
+  description: "openbank-standing-order-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-standing-order-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-standing-order-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-psd2-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-psd2-service
+spec:
+  target: "99.9"
+  window: 30d
+  alerting:
+    absent: false
+  description: "openbank-psd2-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-psd2-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-psd2-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-psd2-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-psd2-service
+spec:
+  target: "99"
+  window: 30d
+  alerting:
+    absent: false
+  description: "openbank-psd2-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-psd2-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-psd2-service"}
+---

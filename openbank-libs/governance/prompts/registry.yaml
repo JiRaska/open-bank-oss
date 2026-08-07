@@ -151,3 +151,9 @@ charters:
     prompts: [system.v1]
     source: openbank-flaky-test-hunter LlmDiagnosisAdapter.SYSTEM_PROMPT
     placeholders: []
+
+  - id: case-coordinator
+    status: registered
+    prompts: [system.v1]
+    source: openbank-case-coordinator-agent CaseCoordinatorLlmAdapter.SYSTEM_PROMPT
+    placeholders: []

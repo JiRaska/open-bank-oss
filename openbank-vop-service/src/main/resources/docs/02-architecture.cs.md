@@ -1,6 +1,6 @@
 # 02 — Architektura
 
-Hexagonální podle [ADR-0002](../../../../docs/adr/0002-hexagonal-architecture-per-service.md). Doména má nula frameworkových importů; vynucuje `check-domain-purity.sh`.
+Hexagonální podle [ADR-0002](../../../../docs/adr/0002-hexagonal-architecture-per-service.md). Doména má nula frameworkových importů; vynucuje `check-domain-purity.py`.
 
 ## Vrstvy
 

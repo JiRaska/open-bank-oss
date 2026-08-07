@@ -259,6 +259,7 @@ agent:
   charter:
     charters:
       - agent-id: ui-assistant
+        model: llama-3.3-70b-versatile
         tokens-per-run: 100000
         runs-per-day: 500
         # ADR-0080 P0: mirrors tools.allow for ui-assistant in agents.yaml. The gate denies any
@@ -276,6 +277,7 @@ agent:
       # runtime grant must be a subset (least privilege; the model is never offered the schema).
       # Unlike the blanket admin bot this agent IS allowed the compliance/payments/disputes reads.
       - agent-id: compliance-officer
+        model: llama-3.3-70b-versatile
         tokens-per-run: 200000
         runs-per-day: 48
         allowed-capabilities:

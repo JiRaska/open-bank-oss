@@ -72,27 +72,23 @@ cp -r "${QA}" "${CTX}/quarkus-app"
 # Gradle produces quarkus-app files with 600 permissions (owner-only). The container
 # runs as a non-root 'openbank' user who can't read them → ClassNotFoundException.
 chmod -R a+r "${CTX}/quarkus-app"
-# Stage the SBOM (if produced) so the runtime stage can COPY it in.
-SBOM_COPY=""; SBOM_ENV=""
+# The runtime recipe is NOT written here. This script used to keep its own copy of it, and that
+# copy had drifted into a THIRD definition of how an OpenBank image is made — unpinned (no digest)
+# where the CI producers pinned one, and still on the musl base after #3354 moved the fleet to
+# glibc, so a laptop deploy of fraud-service would have re-shipped the exact defect CI had just
+# fixed. Copy the one file both CI producers copy, and append the same two variable parts they do.
+cp "${REPO_ROOT}/.github/workflows/Dockerfile.deploy" "${CTX}/Dockerfile"
 if [ -f "$BOM" ]; then
   mkdir -p "${CTX}/sbom"; cp "$BOM" "${CTX}/sbom/bom.json"; chmod a+r "${CTX}/sbom/bom.json"
-  SBOM_COPY=$'COPY sbom/bom.json /app/sbom/bom.json'
-  SBOM_ENV=$'ENV OPENBANK_SBOM_PATH=/app/sbom/bom.json'
+  echo "COPY sbom/bom.json /app/sbom/bom.json" >> "${CTX}/Dockerfile"
+  echo "ENV OPENBANK_SBOM_PATH=/app/sbom/bom.json" >> "${CTX}/Dockerfile"
 fi
-cat > "${CTX}/Dockerfile" <<EOF
-FROM eclipse-temurin:25-jre-alpine
-WORKDIR /app
-RUN addgroup -S openbank && adduser -S openbank -G openbank
-USER openbank
-COPY quarkus-app/lib/ /app/lib/
-COPY quarkus-app/*.jar /app/
-COPY quarkus-app/app/ /app/app/
-COPY quarkus-app/quarkus/ /app/quarkus/
-${SBOM_COPY}
-${SBOM_ENV}
-EXPOSE ${PORT}
-ENTRYPOINT ["java", "-XX:+UseZGC", "-Djava.util.logging.manager=org.jboss.logmanager.LogManager", "-jar", "/app/quarkus-run.jar"]
-EOF
+echo "EXPOSE ${PORT}" >> "${CTX}/Dockerfile"
+
+# ldd every bundled linux .so inside that base before pushing — a musl/glibc mismatch is invisible
+# to the build, to the health probes and to every test that runs on a glibc host (#3354).
+python3 "${REPO_ROOT}/.github/scripts/verify-image-native-libs.py" \
+  "${CTX}/quarkus-app/lib" --arch "${PLATFORM#linux/}"
 
 echo "==> ECR login + buildx push"
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY" >/dev/null

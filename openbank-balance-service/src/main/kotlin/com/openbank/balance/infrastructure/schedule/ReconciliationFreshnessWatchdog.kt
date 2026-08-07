@@ -5,9 +5,13 @@
 package com.openbank.balance.infrastructure.schedule
 
 import com.openbank.balance.application.port.out.ReconciliationRecordRepository
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.libs.persistence.lock.ClusterLock
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Duration
@@ -36,12 +40,19 @@ class ReconciliationFreshnessWatchdog(
     private val recordRepo: ReconciliationRecordRepository,
     private val clock: Clock,
     private val clusterLock: ClusterLock,
+    private val domainMetrics: DomainMetrics,
 ) {
     private val log = Logger.getLogger(ReconciliationFreshnessWatchdog::class.java)
+
+    private var liveness: WorkflowLivenessRecorder? = null
 
     // The daily run fires at 23:30, so a healthy tie-out is at most ~24h old; allow a 1h grace
     // for run duration or a delayed scheduler before we call it a missed control.
     private val staleAfter = Duration.ofHours(DAILY_SLA_HOURS)
+
+    fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofHours(1))
+    }
 
     @Scheduled(
         cron = "{openbank.reconciliation.freshness-cron:0 20 * * * ?}",
@@ -50,29 +61,34 @@ class ReconciliationFreshnessWatchdog(
     )
     suspend fun checkFreshness() {
         clusterLock.tryRunExclusively(JOB_NAME) {
-            val latest = recordRepo.findLatest()
-            if (latest == null) {
-                log.error(
-                    "Balance reconciliation freshness: NO tie-out has ever succeeded — the daily " +
-                        "control-account ⇄ sub-ledger reconciliation (ADR-0039) is absent. Investigate.",
-                )
-                return@tryRunExclusively
-            }
-            val ageHours = Duration.between(latest.generatedAt.toInstant(), Instant.now(clock)).toHours()
-            if (ageHours > staleAfter.toHours()) {
-                log.errorf(
-                    "Balance reconciliation freshness: STALE — last successful tie-out was %dh ago " +
-                        "(as-of %s), past the %dh daily SLA; a scheduled run was likely missed.",
-                    ageHours,
-                    latest.asOf,
-                    staleAfter.toHours(),
-                )
-            } else {
-                log.debugf(
-                    "Balance reconciliation freshness OK: last tie-out %dh ago (as-of %s).",
-                    ageHours,
-                    latest.asOf,
-                )
+            try {
+                val latest = recordRepo.findLatest()
+                if (latest == null) {
+                    log.error(
+                        "Balance reconciliation freshness: NO tie-out has ever succeeded — the daily " +
+                            "control-account ⇄ sub-ledger reconciliation (ADR-0039) is absent. Investigate.",
+                    )
+                } else {
+                    val ageHours = Duration.between(latest.generatedAt.toInstant(), Instant.now(clock)).toHours()
+                    if (ageHours > staleAfter.toHours()) {
+                        log.errorf(
+                            "Balance reconciliation freshness: STALE — last successful tie-out was %dh ago " +
+                                "(as-of %s), past the %dh daily SLA; a scheduled run was likely missed.",
+                            ageHours,
+                            latest.asOf,
+                            staleAfter.toHours(),
+                        )
+                    } else {
+                        log.debugf(
+                            "Balance reconciliation freshness OK: last tie-out %dh ago (as-of %s).",
+                            ageHours,
+                            latest.asOf,
+                        )
+                    }
+                }
+                liveness?.recordSuccess()
+            } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {
+                log.errorf(ex, "Balance reconciliation freshness check failed: %s", ex.message)
             }
         }
     }
@@ -81,5 +97,6 @@ class ReconciliationFreshnessWatchdog(
         // 24h daily cadence + 1h grace for run duration / a delayed scheduler.
         const val DAILY_SLA_HOURS = 25L
         const val JOB_NAME = "balance.reconciliation.freshness"
+        const val WORKFLOW_NAME = "balance-reconciliation-freshness"
     }
 }

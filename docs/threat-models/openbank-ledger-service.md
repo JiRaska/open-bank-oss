@@ -67,7 +67,7 @@ isolation from transport/persistence.
 | D1 | Posting path | **DoS** — flood of postings / expensive trial-balance scans | Cursor pagination on journals; partial index on `(sub_account_id, base_currency)`; reactive non-blocking stack; per-service resource limits (k8s) | Rate-limiting at gateway — infra scope |
 | D2 | Outbox relay | **DoS** — a poison outbox row retried forever starves the dispatch batch | **Bounded retries → terminal `DEAD` + operator alert** (ADR-0050 N5); `concurrentExecution=SKIP`; sequential per-aggregate dispatch | `FOR UPDATE SKIP LOCKED` claim for multi-writer — *planned* |
 | E1 | Roles | **Elevation** — reader triggers a posting | Mutations gated by `ROLE_OPERATOR`; read roles exclude write capability; no posting logic on read endpoints; **OPA enforce mode is now ON (ADR-0034 Phase 5)** — a call with no matching `allowed_reasons` (e.g. a compliance/viewer role attempting `ledger.create`) is 403'd by `data.openbank.rest.allow`'s default-deny, in addition to the `@RolesAllowed` outer gate | Two independent gates (RBAC + OPA) both currently key off the SAME role set (`ROLE_OPERATOR`/`ROLE_ADMIN`) — OPA does not yet add attribute-based conditions (e.g. tenant/value-band) beyond role membership for ledger writes — *open* |
-| E2 | Attestation / year-close | **Elevation** — a SERVICE principal or a non-operator attests a fiscal year | `ledger.approve` (year-close attest) has **NO service-* OPA rule at all** — deliberately excluded from `ledger_rest_ext.rego`'s M2M grants (no in-repo caller invokes it, and none ever should: attestation is a human sign-off by design); only `operator-year-close-attest` (HUMAN `ROLE_OPERATOR`/`ROLE_ADMIN`) can allow it; in-service four-eyes (draftedBy ≠ attestedBy, see §4) is a second, independent control on top | Low — two independent controls (OPA role gate + in-service four-eyes) must both be defeated |
+| E2 | Attestation / year-close | **Elevation** — a SERVICE principal or a non-operator attests a fiscal year | `ledger.approve` (year-close attest) has **NO service-\* OPA grant**, and since #3765 the `operator-year-close-attest` rule also **excludes every `service-account-*` identity outright** (`not startswith(input.principal.id, "service-account-")`). That exclusion is what makes the "no M2M path" claim true: *absence of a service-\* rule was never sufficient* — the rule was role-only, and both `service-account-openbank-services` and `service-account-openbank-edge` are classified `HUMAN` while holding `ROLE_OPERATOR` in a realm, so `opa eval` against the deployed bundle returned `allow=true, reason="operator-year-close-attest"` for both. Measured before and after: the fix denies exactly `ledger.approve` for both service-accounts and changes no other decision, with staff (`ROLE_OPERATOR`/`ROLE_ADMIN`) still allowed. In-service four-eyes (draftedBy ≠ attestedBy, see §4) is a second, independent control on top | Low — two independent controls (OPA identity+role gate and in-service four-eyes) must both be defeated. **Was Medium until #3765**: a single compromised shared-client credential satisfied the OPA gate on its own |
 | T4 | Outbox/Kafka | **Tampering** — downstream consumes a non-emitted, reordered or duplicated event | Transactional outbox (single DB tx with the posting); dispatch runs on the Vert.x event loop so it actually drains (ADR-0050 N1, was `HR000068`); **deterministic Kafka key = `aggregate_id`** preserves per-account order (N2); **`event.id` carried as `ce-id`/`idempotency-key` header** for consumer dedup (N3); idempotency key on posting dedupes retries | Schema-compat on event change (advisory gate); signed event provenance — *planned* |
 | S2 | OIDC client secret | **Spoofing (shared-credential blast radius)** — ledger's `OIDC_CLIENT_SECRET` is projected from the **shared** Vault key `account-service` (all services reuse the single `openbank-services` Keycloak confidential client, see `gitops/components/ledger/oidc-externalsecret.yaml`). Compromise of that one Vault key would let an attacker mint bearer tokens accepted by **both** account-service and the ledger money path — a single secret is a single point of forgery across services. | Secret is Vault-projected (never in git/state); ExternalSecret `deletionPolicy: Retain`; the Keycloak client is **confidential** (not public), so the secret alone is required and it is access-controlled in Vault; ledger write endpoints additionally require `ROLE_OPERATOR` (S1/E1), so a forged service token still cannot post without the operator role claim. | **Shared-credential blast radius is accepted for sandbox only.** Tightening = a dedicated Vault path + per-service Keycloak client for ledger (planned, §5). **Production go-live requires the second money-path approver to explicitly sign off this residual** (ADR-0030). — *open* |
 
@@ -113,7 +113,17 @@ isolation from transport/persistence.
   `principal.type == "SERVICE"` — PR #403 / `rules.yaml: authz_policy`; verified against the
   realm's Keycloak client definitions, which assign that client's service-account user NO
   realm roles). `ledger.approve` (year-close attest) and `ledger.trigger` (FX revaluation ops
-  re-run) have no M2M grant at all — no in-repo caller invokes either. Residual: OPA cannot
+  re-run) have no M2M grant at all — no in-repo caller invokes either.
+  **Correction (#3765):** "no M2M grant" did not mean "not reachable by an M2M caller", and for
+  `ledger.approve` it was measurably false — the role-only `operator-year-close-attest` rule
+  admitted the shared and edge service-accounts, which carry `ROLE_OPERATOR` and are classified
+  `HUMAN`. That rule now excludes `service-account-*`. `ledger.trigger` and `ledger.replay` are
+  **still reachable** by any caller holding a `ROLE_OPERATOR` token, by TWO independent paths —
+  `operator-ledger-write` and base `rest.rego`'s `matrix-allows`, since `rules.yaml:
+  authz.role_action_matrix` grants both to `ROLE_OPERATOR`. Excluding service-accounts from
+  `operator-ledger-write` alone would close neither, because `matrix-allows` lives in base
+  `rest.rego` and no per-service extension can veto it. Tracked as the fleet decision on #3765,
+  not fixable here. Residual: OPA cannot
   name WHICH of the four services sharing the `openbank-services` client is calling
   (fleet-wide principal-model limitation, not ledger-specific) — see PR body "Residual risk"
   for the accepted scope. Four-eyes
@@ -218,6 +228,26 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-08-05** — Prohibit the customer-edge M2M principal from every ledger write, including
+  year-close attestation (#3734). `operator-ledger-write` and `operator-year-close-attest` were
+  role-only, and `rules.yaml`'s `role_action_matrix` grants `ledger.create/reverse/trigger/
+  replay` to `ROLE_OPERATOR`. The customer-facing edge identity
+  (`service-account-openbank-edge`, HUMAN-classified, ROLE_OPERATOR) was therefore admitted to
+  the **book of record's** writes — post/reverse a journal, re-run an FX revaluation — via base
+  `matrix-allows`, and to `ledger.approve` via the attest rule, whose own comment has always
+  said no SERVICE principal must ever reach it. This is the single most sensitive row in the
+  #3734 matrix. Fleet caller audit: **no `ledgerServiceUrl` exists anywhere in customer-edge** —
+  no edge ledger caller at all; the legitimate M2M writers (transaction/lending/settlement via
+  the shared client) keep their identity-scoped `service-ledger-post` / `service-ledger-reverse`
+  rules. Tightening is two-layered: both operator rules now exclude every `service-account-*`
+  principal (also closing `ledger.trigger`/`replay` to the shared client, which the ext already
+  documented as intentionally unmapped — the matrix grant is a separate pre-existing over-grant
+  this PR does not touch), and an edge-scoped `prohibited` clause vetoes all five write actions
+  — `approve` included despite no matrix grant, so no future matrix edit can hand the edge a
+  statutory close event — at the allow head. Falsified by `ledger_rest_ext_test.rego` (stripping
+  either layer turns 7 of 12 tests red); the ext moved from a generator heredoc to a standalone
+  `ledger_rest_ext.rego` so `opa test` can load it. Rollback: revert the ext — no live caller is
+  lost, as no edge ledger path exists.
 - **2026-07-12** — Wired the four-eyes (maker-checker) enforcement *mechanism* (ADR-0155) onto
   `ledger.reverse`, mirroring the account/sepa-payment/lending rollouts (issue #413). This is
   ledger-service's first-ever Redis dependency: new in-namespace `redis` Deployment/Service

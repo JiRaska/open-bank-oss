@@ -8,48 +8,14 @@ AGENTS_YAML=$REPO/openbank-libs/governance/agents.yaml
 RULES_YAML=$REPO/openbank-libs/governance/rules-opa-data.yaml
 MANIFEST=$REPO/openbank-infra/opa/bundle.manifest
 
-# Interest-service REST extension (ADR-0034 Phase 5 bootstrap, issue #938) — no OPA enforcement
-# infrastructure existed for this service before this bootstrap.
-INTEREST_REST_EXT=$(cat << 'REGO'
-# SPDX-License-Identifier: Apache-2.0
-# Interest-service REST extension (ADR-0034 Phase 5 bootstrap, issue #938).
-# Extends openbank.rest with interest-domain allow reasons.
-# Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
-#
-# Actions gated (InterestResource, WithholdingRemittanceResource):
-#   interest.create  — accrue, capitalize (#accountId), createRateConfig, assemble (withholding)
-#   interest.trigger — accrueAll (daily batch accrual)
-#   interest.delete  — deactivateRateConfig (#id)
-#   interest.list    — listAllAccruals, listRateConfigs, list (withholding)
-#   interest.read    — getAccruals/getSummary/getCapitalizations/getRateConfig (#id), get (withholding)
-#
-# Base rest.rego already grants operator-read-any (ROLE_OPERATOR/ROLE_ADMIN) and
-# compliance-read-any (ROLE_COMPLIANCE) for interest.list/.read — no extension needed for those.
-# The write/trigger/delete actions have no generic base-rego grant.
-#
-# No verified M2M caller for the write actions: audited the fleet for callers of
-# interest-service — agent-service's InterestServiceClient is read-only (listAccruals/
-# getAccruals). accrueAll's documented "external scheduler" does not exist yet (confirmed live:
-# no @Scheduled annotation, no CronJob in gitops or in-cluster — see
-# interest-service-http-scaledobject.yaml's own trigger investigation). Today interest.create/
-# .trigger/.delete are invoked synchronously by admin-ui operators only.
-
-package openbank.rest
-
-import rego.v1
-
-allowed_reasons contains "operator-interest-write" if {
-	input.principal.type == "HUMAN"
-	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-	role in input.principal.roles
-	input.action in {"interest.create", "interest.trigger", "interest.delete"}
-}
-REGO
-)
+# Standalone interest_rest_ext.rego (matches delegation/consent/kyc/psd2/aml), so `opa test` can
+# load it directly rather than a heredoc trapped inside this script — interest_rest_ext_test.rego
+# needs a real file.
+INTEREST_REST_EXT=$REPO/openbank-infra/gitops/components/interest-service/interest_rest_ext.rego
 
 CHECKSUM=$(printf '%s\n' \
     "$(cat "$REST_REGO")" \
-    "$(echo "$INTEREST_REST_EXT")" \
+    "$(cat "$INTEREST_REST_EXT")" \
     "$(cat "$AGENTS_REGO")" \
     "$(cat "$AGENTS_YAML")" \
     "$(cat "$RULES_YAML")" \
@@ -75,7 +41,7 @@ OUT=$REPO/openbank-infra/gitops/components/interest-service/interest-opa-bundle.
   echo "  rest.rego: |"
   sed 's/^/    /' "$REST_REGO" | sed 's/[[:space:]]*$//'
   echo "  interest_rest_ext.rego: |"
-  echo "$INTEREST_REST_EXT" | sed 's/^/    /' | sed 's/[[:space:]]*$//'
+  sed 's/^/    /' "$INTEREST_REST_EXT" | sed 's/[[:space:]]*$//'
   echo "  agents.rego: |"
   sed 's/^/    /' "$AGENTS_REGO" | sed 's/[[:space:]]*$//'
   echo "  agents-data.yaml: |"

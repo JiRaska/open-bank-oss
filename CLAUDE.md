@@ -111,6 +111,24 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   (RestAssured + `@TestSecurity`) and assert the row with a plain JDBC read. This is also the only
   way to prove transactional-outbox atomicity (status change + outbox row commit together) — a mocked
   repo can't. Pattern: `LendingOutboxWriteIT`, `ConsentRevocationOutboxIT`.
+- **A non-nullable `@QueryParam`/`@HeaderParam` is a 500, and `requireNotNull` in the body is DEAD
+  CODE — the parameter must be declared nullable.** JAX-RS injects `null` for an absent parameter;
+  Kotlin's null-safety is compile-time only, so the declared type only decides *where* the failure
+  lands, and every landing is a 500 (`GenericExceptionMapper`). Measured with `javap`: a plain `fun`
+  emits `Intrinsics.checkNotNullParameter` at **offset 0**, so a guard written in the body compiles
+  to nothing — the NPE already threw. A **`suspend fun` emits no intrinsic at all**, so the null
+  flows into the body and fails at the first dereference; where nothing dereferences it, the request
+  proceeds with a null the signature promised could not exist, which is worse than the 500 and
+  invisible. That is how three services shipped
+  `require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }` that answered
+  **500 for the absent header** — the exact case it was written for — and 400 only for a blank one.
+  Write `@QueryParam("x") x: String?` + `requireNotNull(x) { "query parameter 'x' is required" }`;
+  libs-runtime maps `IllegalArgumentException` to 400 (never add a service-local mapper, #526). The
+  primitive case differs and is out of scope: JAX-RS supplies `0`, not null. `@DefaultValue` is the
+  other correct answer where one exists. Enforced by `check-nonnull-jaxrs-params.py` (gate
+  `nonnull-jaxrs-param-ratchet`) — money-path fixed, the tail baselined (#3104, #3624). Counting
+  trap: an outbound REST-client **`interface`** carries the identical annotation and is NOT a defect
+  (the caller supplies the argument, compile-time checked), which is half of every naive grep.
 - **A Kotlin annotation binds to the NEXT declaration — a top-level function between `@Path` and its
   class silently steals it.** `McpEndpoint` had `@Path("/mcp")`, then a top-level
   `private fun String?.sanitizeForLog()`, then `class McpEndpoint`. The `@Path` bound to the
@@ -194,8 +212,23 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `FlagExposure` has zero production consumers. Cheap to establish — enumerate the interface's
   implementations, then grep the field name across `src/main` — and it changes the whole PR:
   urgency, blast radius, and whether the honest fix is the value or the wiring. It also surfaces
-  the real bug next door, which here was that `AuditConsumer` keys on `occurredAt`, a field the
-  canonical envelope does not have, so the envelope's time is dropped at ingest (#3883).
+  the real bug next door — here, that `AuditConsumer` substitutes ingest time whenever a producer
+  sends no event time, which 7 of its 21 topics do, so the row asserts business time it never
+  measured (#3883, fixed by #3907). Note what the same rule then did to my own framing: I filed
+  that as "the consumer reads `occurredAt`, the canonical envelope says `timestamp`", and the
+  envelope reaches that topic never — `DomainEvent` declares `occurredAt`, so the consumer was
+  right and only the missing-time case was real.
+- **Event payloads are built two ways here, and grepping for the JSON key finds only one of
+  them.** Hand-built maps spell the key literally (`"settledAt" to batch.settledAt` in
+  `ClearingEventPublisherImpl`) and a string grep sees them; a serialised data class
+  (`objectMapper.writeValueAsString(DocumentGenerated(..., at = now))`) has no literal anywhere,
+  the key existing only at runtime as a Kotlin property name. So `grep '"at"'` over
+  `openbank-document-service` returns **nothing** while all three of its event types put `at` on
+  the wire — a clean-looking no-hits answer about producers the probe structurally cannot observe
+  (#3883). Enumerate event-time keys by reading the serialised TYPE, or a real message's payload,
+  never by grepping quoted field names; and treat "no hits" over a codebase with two idioms as a
+  fact about the probe. Same shape as the Pact bullet below on grepping `src/test` for the word
+  "contract".
 
 ### ktlint
 - Path-scoped CI only lints changed files, so a pre-existing wildcard import or a latent
@@ -230,6 +263,21 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   literal `quarkus.datasource.jdbc.url` in the file, since Flyway migrates the DEFAULT (Agroal/JDBC)
   datasource and a service that only boots because the env supplied one cannot start from this repo
   alone (#3080).
+- **Two branches can claim the SAME migration version and git will never say so.** The version is
+  the *filename prefix*, so `V10__delegated_action_index.sql` on a branch and `V10__hash_version.sql`
+  on main are different files: the merge is textually clean, nothing conflicts, and the service then
+  refuses to boot with `FlywayException: Found more than one migration with version 10`. Renumber to
+  the next free version — safe only while the migration has never been applied, since after that the
+  checksum rule above forbids touching it. The trap is what the failure HIDES: Quarkus cannot start,
+  so every `@QuarkusTest` integration test in the module reports as **SKIPPED**, and the module reads
+  `73 tests / 10 skipped / 0 failures` — which scans as a pass, because the number anyone looks at is
+  the failure count. After the fix it was `73 / 0 / 0`: ten integration tests had silently stopped
+  running. Generalize past Flyway: **after merging main into a branch, build and test the merged
+  result and read the SKIPPED count, not just failures.** The collisions to expect are shared
+  *namespaces* rather than shared lines — migration versions, enum and `@Id` values, JSON/YAML map
+  keys, and the constructor or field shape of any class a test instantiates by hand (a `lateinit`
+  added upstream fails every such test at once). Sibling of the multi-agent note that a clean merge
+  can silently DELETE a list entry: same cause, git merges text and not meaning, opposite direction.
 
 ### Contract tests (Pact)
 - **One BROKER-sourced `@Provider` test per provider.** Two verification classes with the same
@@ -314,6 +362,28 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `service-account-<clientId>` convention) instead — gating on `HUMAN` + `ROLE_OPERATOR` alone is
   NOT equivalent, since real staff also carry `ROLE_OPERATOR` and would over-grant. Enforced by
   `.github/scripts/check-no-service-principal-type.sh` (`rules.yaml: authz_policy`).
+- **A line added to `rules.yaml: authz.role_action_matrix` is a grant to a MACHINE, and no policy
+  can veto it.** `rest.rego`'s `matrix-allows` turns every entry into a permit for any HUMAN holding
+  that role, and the Keycloak service-accounts the platform authenticates as are classified HUMAN
+  and hold `ROLE_OPERATOR` in at least one realm. `shared_m2m_write_prohibition` cannot help: it is
+  keyed by REASON NAME, and listing `matrix-allows` there would veto every legitimate matrix call;
+  a per-service `*_rest_ext.rego` cannot help either, because `matrix-allows` lives in base
+  `rest.rego` and consults no per-service exclusion. So the only gate is at build time — a write
+  action must be declared in `rules.yaml: shared_m2m_matrix_write_grants.declared`
+  (`check-matrix-write-grants.py`, enforced). Two things this cost: the "graduated ⇒ denied" column
+  of the audits was never true, because `data.rules.shared_m2m_write_prohibition` **is not emitted
+  into any bundle** (it is nested under `change_requirements:`, so `gen-rules-opa-data.py` cannot
+  select it) and the veto has therefore never fired anywhere; and `ledger.approve`, documented as
+  "NEVER reachable by any SERVICE principal", resolved `allow=true` for both service-accounts on the
+  live bundle. **Measure a policy claim with `opa eval` against the bundle ConfigMap** — materialise
+  it to the sidecar's own directory layout (`rules-data.yaml` → `rules/data.yaml`) and probe
+  `data.openbank.rest.allow` per (principal, action), with a must-DENY and a must-ALLOW control in
+  every run. Reading the rego cannot tell you which of several reasons actually fires (#3765/#3734).
+- **The three realm JSONs in this tree disagree about which roles the M2M accounts hold** — the
+  deployed gitops template gives `service-account-openbank-services` only `ROLE_API`, while the
+  docker and CI realms also give it `ROLE_OPERATOR`. Any statement of the form "the shared client
+  carries ROLE_OPERATOR" is environment-specific; take the union when reasoning about exposure, and
+  say which realm you read.
 
 ### GitOps / Kubernetes / OPA policy bundles
 Full pitfalls — node livelock, `optional: true` secret refs, Argo Rollout dead-`stable` deadlock,
@@ -429,6 +499,17 @@ fire from *outside* it, so they stay here:
   flag, so the precaution is theatre. The local branch and working tree survive (verified on
   #2960), so nothing is lost, but if the branch had unpushed commits their only off-machine copy
   would be gone. Check the repo setting before promising the protection, not after.
+- **A GitHub-hosted job wedged at RUN level reads as "queued" forever — patience fixes nothing;
+  cancel the run and retrigger.** A PR sat with 16 checks pending for 2.5 h: every queued job on
+  `ubuntu-latest`, GitHub status "operational", the self-hosted fleet verifiably healthy (27 runs
+  in_progress on main). Diagnostic order that avoids the wrong rabbit hole: `gh run list --branch
+  <b>` (RUN queued ≠ any job started), the jobs' `labels` (ubuntu-latest ⇒ the self-hosted pool
+  is irrelevant — do not debug runners), then repo-wide `actions/runs?status=in_progress` to see
+  whether anything moves at all. The three wedged runs were cancelled and an empty commit pushed;
+  the fresh runs started in seconds and finished green in two minutes. Related, and silent: **a
+  push whose delivery GitHub dropped never acquires runs retroactively** — `head_sha` stays at
+  `total_count: 0` forever, so if a merge "should have" triggered CI and did not, it never will
+  on its own; retrigger or push again instead of waiting.
 
 ### CI gates — exercise the failure path before trusting the green
 - **Gates are DECLARED in [`.github/gates/gates.yaml`](.github/gates/gates.yaml), not written as
@@ -451,6 +532,73 @@ fire from *outside* it, so they stay here:
   plain red while having silently left half the fleet unlinted — 455 actionable findings against a
   true 920 (#2177). Feed every new gate an input it MUST flag, and read what it *prints*, not just
   its exit code.
+- **An advisory gate's "these findings are all benign" note is an unverified claim, and advisory
+  mode is what removes the pressure to check it.** The repo already knows a gate that has only ever
+  passed is unfalsified; the sharper form is that a gate can fire CORRECTLY and have its *triage* be
+  the unfalsified artifact. `incluster-hostname-resolution` landed advisory with 6 findings and a
+  note — repeated in `gates.yaml` and `rules.yaml` — saying all six were dead `openbank-<svc>`
+  rest-client defaults "on services whose pods override them by env". Three were. The other three
+  were live: settlement-service's Rollout and onboarding-service's Deployment carried no
+  `*_SERVICE_URL` at all, so `openbank-balance-service:8080` / `openbank-ledger-service:8080` /
+  `openbank-party-service:8090` were the values those pods actually dialled — names that resolve in
+  no namespace, on ports wrong even for the right name (8103 / 8101 / 8111). Every settlement
+  debit/credit and GL posting, and onboarding's abandoned-registration party lookup, went nowhere
+  (#3931). The note was written from the SHAPE of the config line — a bare `openbank-` default, of a
+  kind several peers DO override — instead of from the deployed manifest, and that heuristic gets
+  the benign cases right and the live ones wrong. **Grade a finding against the deployed state, one
+  workload at a time; "several of these are overridden" is not a fact about the rest.** The trap
+  that makes it cheap to misread: `payments-services.yaml` DOES declare `LEDGER_SERVICE_URL` +
+  `BALANCE_SERVICE_URL` — for transaction-service, ~2000 lines from settlement's Rollout, so a grep
+  of the file confirms the wrong thing. And settlement is a `kind: Rollout`, so a Deployment-only
+  parse reports it as having no workload rather than as having no override.
+- **A red advisory check and a verified-benign one are indistinguishable — so an advisory finding
+  needs a dated verification note or it decays into permanent background noise.** This is what makes
+  the bullet above a structural problem rather than one bad call: nothing downstream of a triage note
+  re-derives it, no gate covers it, and the longer it sits the more it reads as settled. If you write
+  "known, benign", write what you checked and when; if you can't, leave the finding untriaged, which
+  is at least honest.
+- **A gate over `application.yaml` says nothing about the gitops env that overrides it — and moving
+  a URL into gitops moves it OUT of scope.** `incluster-hostname-resolution` reads
+  `openbank-*/src/main/resources/application.yaml` only. So the fleet-standard fix for a bad host
+  (localhost dev default + real URL in the workload env) hands the checked claim to an unchecked
+  file. Not hypothetical: vop-service's ADR-0171 payee-name hop declares
+  `PARTY_SERVICE_URL: http://party-service.parties.svc:8100` in `payments-services.yaml` — namespace
+  `parties` does not exist (it is `party`) and 8100 is account-service's port — alongside
+  `ACCOUNT_SERVICE_URL: …accounts.svc:8101`, where 8101 is ledger's. Both ports transposed, live on
+  the pod, invisible to the gate. When a gate's subject can be overridden, either extend it to the
+  overriding layer or say in its own header which layer it does not cover.
+- **Evidence cannot corroborate the layer it is DERIVED FROM — extending a gate to that layer
+  silently makes it vacuous, and it still reads as green.** `check-incluster-hostnames.py` widens
+  its known-good set with every host a gitops workload env dials ("if the deployment manifest
+  dials it, the platform believes it exists"), which is sound while the CLAIM comes from
+  `application.yaml` and the CORROBORATION from gitops — two independently-authored places. Point
+  the same gate at the gitops env and that becomes the same statement twice: every host vouches
+  for itself, nothing can ever be flagged, and the output still says OK. The fix is not more
+  cleverness but a parameter — the caller passes what it accepts as existing, so the two layers
+  cannot share a believed-set by accident, and a self-test asserts a corroborated-only host stays
+  clean in one layer and IS flagged in the other (#3966). **Before reusing any "known-good" set on
+  a new input, ask what that set is derived from**; the same shape appears wherever a baseline, an
+  allow-list or a cache is built from the artifact it is about.
+- **The derived alternative to a hand-kept list is not automatically better — measure it against
+  the known cases before preferring it on principle.** This repo rightly distrusts hand-kept lists
+  (a gate whose scope is one reads as PASSING when the list is short). So the instinct for the
+  above was a derived rule: believe a host that ≥2 distinct workloads dial. Measured against the
+  real tree it was wrong in BOTH directions at once — it would have believed two live defects
+  (`tpp-registry-service.tpp.svc` and `sepa-payment-service.payments.svc`, each dialled twice) and
+  flagged three real Helm-provisioned Services dialled only once. A 10-entry list, each entry
+  verified with `kubectl` and **checked both ways** so a stale one fails, beat it outright. The
+  rule that survives is narrower than "never hand-keep a list": never let a gate's SCOPE be
+  hand-kept, because a short list then reads as full coverage — but a hand-kept list of external
+  FACTS is fine when the gate fails on a stale entry, since it can only shrink by being noticed.
+- **A comment that explains away a symptom is worse than no comment — it retires the question.**
+  psd2's manifest annotated its TPP-registry URL "Not yet deployed -> calls 503 until it lands".
+  The service was deployed and serving; the URL named a namespace that has never existed. Anyone
+  who noticed the failing lookup found it already accounted for, so the note survived as long as
+  the bug did. Same family as the stale-prose rule under ktlint/detekt above, but the failure is
+  worse: stale prose merely misinforms, whereas an explanation of a symptom suppresses the
+  investigation. When you write one, name what you VERIFIED and when — and when you fix a defect
+  whose comment predicted it, correct the comment in place rather than deleting it, so the next
+  reader learns the note was wrong rather than that it was never there.
 - **An advisory check over a *generated* artifact is a contradiction.** On a hand-written artifact a
   red advisory check means "someone should look"; on a generated one it means "the committed document
   does not match reality" — there is no judgement left to exercise, so advisory just makes the drift
@@ -771,6 +919,28 @@ Rationale + what does *not* cover it: `rules.yaml: dependencies.pr_time_cve_gate
 - **Use 3-dot diff for pre-merge review:** `git diff origin/main...origin/<branch>` is the actual
   squash delta; 2-dot includes main's post-divergence commits and makes stale branches look like
   regressions.
+
+### ADR registry
+- **Order is `gen-index.sh` → COMMIT → `check-adr-registry.sh`, never regen → check → commit.** A
+  failing check restores the three derived files (`README.md`, `DIGEST.md`, `index.json`) to HEAD
+  on exit, so committing after a failed check commits the *restored* content — and the next regen
+  then disagrees with what you committed, failing the gate on content you never wrote (#3983).
+  **Same trap in the sibling derived-file checks:** `check-eu-ai-act.sh` restores
+  `docs/compliance/eu-ai-act.md` to HEAD on a failing run (its line 25 `git checkout -- "$DOC"`),
+  so a regen you ran *before* the check is silently reverted and your later `git add` stages the
+  old version (#4002). Universal order for every derived file: regenerate → stage+commit → run
+  the check.
+- **`git mv` + a follow-up edit = a PURE RENAME commit — the edit stays unstaged.** When
+  renumbering an ADR after a number collision with main, `git mv` the file, edit the H1, `git add`
+  the file AGAIN, then commit — or the registry gate fails with "H1 says number N but filename is
+  M" on a file that looks correct in your working tree (#3983).
+- **An `agents.yaml` change has THREE derived tails, not one.** Regenerate all of them or the
+  enforced gates fail on main: `docs/compliance/eu-ai-act.md` (`gen-eu-ai-act.py`), the 40 OPA
+  bundle ConfigMaps + pod-roll `policy-checksum` annotations (every
+  `gen-*opa-bundle*.sh` under `openbank-infra/gitops/components`), and
+  `openbank-admin-ui/ai-governance-snapshot.json` (`gen-ai-governance-snapshot.py`; also stale
+  after a `prompts/registry.yaml` change). #3771 regenerated none and red-gated main; #4002 is the
+  regeneration template.
 
 ### gh CLI
 - **Always write a PR/issue body to a file and pass `--body-file`. Never `--body` with an

@@ -17,6 +17,7 @@ import io.quarkus.hibernate.reactive.panache.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.OffsetDateTime
 import java.util.UUID
 
 @ApplicationScoped
@@ -60,4 +61,11 @@ class WithdrawalProposalRepositoryImpl(
             find("accountId = ?1 and status = ?2", accountId, status).list<WithdrawalProposalEntity>()
         }
     }.awaitSuspending().map { it.toDomain() }
+
+    override suspend fun findExpirable(now: OffsetDateTime, limit: Int): List<WithdrawalProposal> =
+        Panache.withSession {
+            find("status = ?1 and expiresAt <= ?2 order by expiresAt asc", WithdrawalProposalStatus.PENDING, now)
+                .page<WithdrawalProposalEntity>(0, limit)
+                .list<WithdrawalProposalEntity>()
+        }.awaitSuspending().map { it.toDomain() }
 }

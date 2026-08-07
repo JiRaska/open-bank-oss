@@ -23,6 +23,15 @@ metadata:
     app.kubernetes.io/part-of: delegation
 spec:
   replicas: 1
+  # Terminate-first, deliberately (#3545). This is a single-writer cache on an emptyDir
+  # behind one ClusterIP Service: a SURGED second pod would answer half the traffic from an
+  # empty keyspace, so surge is not a property worth keeping here. It also makes the roll
+  # possible at all when the cluster has no room for two pods.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: redis

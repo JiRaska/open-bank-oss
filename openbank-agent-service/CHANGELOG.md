@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.16.3...agent-service-v1.17.0) (2026-08-07)
+
+
+### Features
+
+* **agent:** capture the charter-declared model id on every MCP tool-call audit event ([#3693](https://github.com/JiRaska/open-bank-oss/issues/3693)) ([9292c7d](https://github.com/JiRaska/open-bank-oss/commit/9292c7db493925530ce22b0a2638186de3d9eb3e)), closes [#3667](https://github.com/JiRaska/open-bank-oss/issues/3667)
+
 ## [1.16.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.16.2...agent-service-v1.16.3) (2026-08-02)
 
 

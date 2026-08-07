@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.57.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.56.0...customer-edge-v0.57.0) (2026-08-07)
+
+
+### Features
+
+* **customer-edge:** honour a shared DOCUMENT, so the share button leads somewhere ([#4115](https://github.com/JiRaska/open-bank-oss/issues/4115)) ([c79f442](https://github.com/JiRaska/open-bank-oss/commit/c79f44251ac7a5ac6605824ae98e1ac84350955a))
+
+## [0.56.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.55.0...customer-edge-v0.56.0) (2026-08-07)
+
+
+### Features
+
+* let a delegate pay from a shared account, and audit it as delegated ([#3633](https://github.com/JiRaska/open-bank-oss/issues/3633)) ([568686b](https://github.com/JiRaska/open-bank-oss/commit/568686bfc3ba15e824252f3502b0fddc856c7d37))
+
+## [0.55.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.54.2...customer-edge-v0.55.0) (2026-08-07)
+
+
+### Features
+
+* **customer-edge:** honour delegated read access, so a shared account can actually be seen ([#4021](https://github.com/JiRaska/open-bank-oss/issues/4021)) ([7a93bd4](https://github.com/JiRaska/open-bank-oss/commit/7a93bd4327fae7d26d45aa47419e85da87e6b332))
+* **customer-edge:** resolve a directory hit to a payable target without disclosing the account ([#4014](https://github.com/JiRaska/open-bank-oss/issues/4014)) ([8ea271f](https://github.com/JiRaska/open-bank-oss/commit/8ea271f85811f1a44b168bf1c75c1827e996afc2))
+
+
+### Bug Fixes
+
+* **delegation:** refuse dailyLimit/monthlyLimit — ADR-0232's cumulative ceilings are enforced nowhere ([#3613](https://github.com/JiRaska/open-bank-oss/issues/3613)) ([841d20e](https://github.com/JiRaska/open-bank-oss/commit/841d20e7f6f5e8674a20bdbd08e9488f64365fc6))
+
+## [0.54.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.54.1...customer-edge-v0.54.2) (2026-08-06)
+
+
+### Bug Fixes
+
+* **customer-edge:** follow the ADR-0179 merged_into pointer at the identity chokepoint ([#3901](https://github.com/JiRaska/open-bank-oss/issues/3901)) ([d9b4876](https://github.com/JiRaska/open-bank-oss/commit/d9b487643480fd1947ff177b1e5f2e2182e90002)), closes [#1984](https://github.com/JiRaska/open-bank-oss/issues/1984)
+
 ## [0.54.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.54.0...customer-edge-v0.54.1) (2026-08-02)
 
 
