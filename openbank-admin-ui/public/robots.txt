@@ -1,0 +1,5 @@
+# admin.open-bank.tech is an internal, login-gated operator console — every
+# route already answers with 302 -> /auth/login for an unauthenticated crawler,
+# but keep search engines and AI bots from wasting a crawl budget on it too.
+User-agent: *
+Disallow: /

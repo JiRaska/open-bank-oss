@@ -9,6 +9,15 @@ metadata:
   labels: {app.kubernetes.io/name: interest-service, app.kubernetes.io/part-of: interest}
 spec:
   replicas: 1
+  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
+  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
+  # resources - on a full cluster the rollout never completes while reporting 1/1 READY.
+  # No HA to lose: this workload is already unavailable for the moment its pod is replaced.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector: {matchLabels: {app.kubernetes.io/name: interest-service}}
   template:
     metadata:
@@ -16,7 +25,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-interest-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "095cbc2a932f316b"
+        openbank.tech/policy-checksum: "aef81e896164e05d"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -26,7 +35,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: interest-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-interest-service:sandbox-e88849d6
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-interest-service:sandbox-e532b32e
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8125}

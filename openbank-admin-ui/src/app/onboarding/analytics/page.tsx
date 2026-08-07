@@ -59,6 +59,7 @@ export default function OnboardingAnalyticsPage() {
   )
 
   const [to, setTo] = useState(() => isoDay(new Date()))
+  // eslint-disable-next-line react-hooks/purity -- time-relative display; timestamps are stable server data.
   const [from, setFrom] = useState(() => isoDay(new Date(Date.now() - 30 * 864e5)))
 
   const [data, setData] = useState<FunnelAnalytics | null>(null)

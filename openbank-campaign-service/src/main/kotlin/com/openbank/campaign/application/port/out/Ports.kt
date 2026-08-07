@@ -5,10 +5,13 @@
 package com.openbank.campaign.application.port.out
 
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
+import java.time.Instant
 import java.util.UUID
 
 interface CampaignRepository {
@@ -41,6 +44,25 @@ interface SendLogRepository {
     suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long): Int
 
     /**
+     * Lifetime SENT rows for one party in one campaign — the observable state the ADR-0200 D1
+     * stop condition (#3585) is evaluated against. Counts across journeys, so a re-enrolled
+     * party's cap covers every send the campaign ever made to them.
+     */
+    suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID): Int
+
+    /**
+     * The delivery status of the most recent send to [partyId] in [campaignId] at a step BELOW
+     * [stepOrder], or null when there is none — the observable state an ADR-0200 D1 branch
+     * condition (#3585) is evaluated against.
+     *
+     * Null and `PENDING` are different answers and both are returned as themselves: null means no
+     * predecessor send exists at all (nothing was ever attempted), `PENDING` means one was and no
+     * outcome has come back. The branch treats both as "not confirmed", but the repository must
+     * not be the layer that decides that.
+     */
+    suspend fun latestDeliveryStatusBeforeStep(campaignId: UUID, partyId: UUID, stepOrder: Int): DeliveryStatus?
+
+    /**
      * One page of send attempts for a campaign, newest first — the operator view of what happened.
      *
      * Paged at the repository, not in the caller: a campaign's send log has one row per party per
@@ -60,6 +82,16 @@ interface SendLogRepository {
      * read as the whole picture by definition.
      */
     suspend fun countByStepAndOutcome(campaignId: UUID): List<StepOutcomeCount>
+
+    /**
+     * Record one delivery outcome against the send-log row the producer correlated it with
+     * (ADR-0239 D3/D4). Returns true only if the row's delivery status actually moved.
+     *
+     * Takes the raw `outcome` STRING, not an enum, on purpose: the outcomes contract is additive
+     * and open-ended, so a value this build has never seen must be ignorable rather than a
+     * deserialization failure that wedges the channel.
+     */
+    suspend fun applyDeliveryOutcome(sendId: UUID, outcome: String, reason: String?, occurredAt: Instant): Boolean
 
     /**
      * Sends tallied for EVERY campaign at once (issue #3296).
@@ -90,7 +122,21 @@ interface ConsentCheckPort {
 
 /** ADR-0200 D3: delivery goes through notification-service, never direct. */
 interface NotificationSendPort {
-    suspend fun requestSend(partyId: UUID, template: String, recipient: String, variables: Map<String, String>)
+    /**
+     * [correlationId] is the send-log row id this request belongs to (ADR-0239 D1).
+     *
+     * Required, not optional: the whole reason the campaign publishes here is to hear back what
+     * became of the message, and a nullable parameter is one a caller forgets. The receiving
+     * contract keeps it optional for producers that genuinely do not care — this one does.
+     */
+    suspend fun requestSend(
+        partyId: UUID,
+        channel: Channel,
+        template: String,
+        recipient: String,
+        variables: Map<String, String>,
+        correlationId: UUID,
+    )
 }
 
 /** ADR-0200 D2 push: signals a live journey that consent was revoked for its party. */

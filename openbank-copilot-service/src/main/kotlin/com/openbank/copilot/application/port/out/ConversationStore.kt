@@ -5,6 +5,7 @@
 package com.openbank.copilot.application.port.out
 
 import com.openbank.copilot.domain.model.ChatMessage
+import java.time.Instant
 
 /**
  * Outbound port: short-lived conversation memory for the copilot (ADR-0089): without it every turn is stateless,
@@ -35,6 +36,30 @@ interface ConversationStore {
      * conversation, trimming to the most recent [MAX_MESSAGES] and (re)setting the TTL.
      */
     fun append(customerId: String, conversationId: String, newTurns: List<ChatMessage>)
+
+    /**
+     * Erase every conversation held for [customerId], returning how many were removed (GDPR Art. 17 /
+     * ADR-0117). Called by the `PARTY_ERASED` consumer.
+     *
+     * This is a **hard delete**, not the read-side `expires_at` filter [load] applies: an expired
+     * conversation stops being *served* but its free-text message bodies stay on disk (and in every
+     * base backup) until something removes the row. For an erasure request the difference between
+     * "not served" and "not held" is the whole question.
+     *
+     * `suspend`, deliberately: both callers (the Kafka consumer and the retention sweep) already run
+     * on a Vert.x context, where the blocking `VertxContextSupport.subscribeAndAwait` bridge the
+     * read/write path uses would throw. Keeping erasure suspending means it never needs that bridge.
+     */
+    suspend fun deleteForCustomer(customerId: String): Long
+
+    /** Erase one conversation. Scoped by [customerId], so it can never remove another customer's row. */
+    suspend fun deleteConversation(customerId: String, conversationId: String): Long
+
+    /**
+     * Hard-delete every conversation whose `expires_at` is at or before [now], returning the count.
+     * This is what turns the rolling TTL from a read filter into an actual retention guarantee.
+     */
+    suspend fun deleteExpired(now: Instant): Long
 
     companion object {
         /** Sliding TTL. A chat left idle past this loses its context — matches typical session UX. */

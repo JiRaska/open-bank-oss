@@ -5,6 +5,8 @@ package com.openbank.aml.infrastructure.scheduler
 
 import com.openbank.aml.application.port.out.AmlCaseRepository
 import com.openbank.aml.infrastructure.client.AccountServiceClient
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.Startup
@@ -17,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -71,6 +74,9 @@ class PartyResolutionScheduler {
     @Inject
     lateinit var registryInstance: Instance<MeterRegistry>
 
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+
     @ConfigProperty(name = "openbank.aml.party-resolution.enabled", defaultValue = "true")
     var enabled: Boolean = true
 
@@ -79,14 +85,17 @@ class PartyResolutionScheduler {
 
     private val log = Logger.getLogger(PartyResolutionScheduler::class.java)
     private val unresolved = AtomicLong(0)
+    private var liveness: WorkflowLivenessRecorder? = null
 
     @PostConstruct
     fun register() {
-        if (!registryInstance.isResolvable) return
-        Gauge.builder("openbank.aml.cases.party_unresolved", unresolved) { it.get().toDouble() }
-            .tag("service", "aml")
-            .strongReference(true)
-            .register(registryInstance.get())
+        if (registryInstance.isResolvable) {
+            Gauge.builder("openbank.aml.cases.party_unresolved", unresolved) { it.get().toDouble() }
+                .tag("service", "aml")
+                .strongReference(true)
+                .register(registryInstance.get())
+        }
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
     }
 
     @Scheduled(
@@ -124,9 +133,12 @@ class PartyResolutionScheduler {
         // Recomputed every tick, including a tick that resolved nothing, so the gauge reflects the
         // backlog rather than the last batch size.
         unresolved.set(caseRepository.countUnresolvedParty())
+        liveness?.recordSuccess()
     }
 
     private companion object {
         const val DEFAULT_BATCH_LIMIT = 50
+        const val WORKFLOW_NAME = "aml-party-resolution"
+        val EXPECTED_INTERVAL: Duration = Duration.ofMinutes(30)
     }
 }

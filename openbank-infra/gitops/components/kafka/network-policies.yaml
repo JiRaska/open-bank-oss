@@ -140,7 +140,7 @@ spec:
               kubernetes.io/metadata.name: tpp-registry
       ports:
         - protocol: TCP
-          port: 9092
+          port: 9093
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
