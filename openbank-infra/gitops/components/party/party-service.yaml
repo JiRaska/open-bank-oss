@@ -22,7 +22,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-party-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "9f8d16f5cfd73fd6"
+        openbank.tech/policy-checksum: "db804557c6821c28"
       labels:
         app.kubernetes.io/name: party-service
         app.kubernetes.io/part-of: party

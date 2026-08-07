@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: balance-service
     app.kubernetes.io/part-of: balances
   annotations:
-    openbank.tech/policy-checksum: "3194a4ceb7f5eafe"
+    openbank.tech/policy-checksum: "78ae30fc2a21cb4c"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -972,15 +972,15 @@ data:
         - governance-auditor           # LLM_GATEWAY_URL
         - release-steward              # LLM_GATEWAY_URL
         - authz-policy-auditor         # LLM_GATEWAY_URL
-      not_routed:
-        - agent-service                # AGENT_MODEL_ENDPOINT repoint merged (#2209), but the deployed
-                                       # image resolves the baked-in api.groq.com URL until the rebuilt
-                                       # image rolls out. Promote it to `routed` only after re-reading
-                                       # the live Deployment — merged is not deployed.
-      egress_enforced: partial         # ai-platform is egress-locked; `platform` is NOT. agent-service's
-                                       # component still declares policyTypes: [Ingress] only, so the
-                                       # gateway is bypassable from that pod. #2210 adds the Egress half,
-                                       # gated on the agent-service repoint actually being deployed.
+        - agent-service                # AGENT_MODEL_ENDPOINT. Promoted only after re-reading the LIVE
+                                       # Deployment, which is what the previous note required: it now
+                                       # resolves http://litellm.ai-platform.svc:4000/v1, the baked-in
+                                       # api.groq.com URL having been removed by #3300.
+      not_routed: []                   # every agent reaches a model through the gateway
+      egress_enforced: full            # `platform` is no longer the hole. networkpolicy/
+                                       # agent-service-egress-allow-list (#2210) is present in that
+                                       # namespace, so the pod can no longer bypass the gateway; with
+                                       # ai-platform already egress-locked, the choke point is closed.
       budgets_enforced_at: charter     # CharterRateLimiter in openbank-agent-service — NOT the gateway.
       providers:                       # both terminate INSIDE the gateway pod; no agent holds either key
         deepinfra:                     # api.deepinfra.com, deepseek-ai/DeepSeek-V3.2. US-hosted, no region
