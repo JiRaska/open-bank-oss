@@ -37,3 +37,12 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
 }
+
+// openbank.static-analysis pins detekt's own languageVersion to 21 (JVM-version-detection quirk
+// in its IntelliJ-derived parser) — that is unrelated to the module's compile/runtime toolchain,
+// which openbank-libs-domain fixes at 25. Omitting this here left Gradle pick whatever JVM was on
+// the PATH, which is 21 on the CodeQL tracing runner but not locally, so CodeQL's build step could
+// not resolve against libs-domain's 25 while everything else stayed green.
+kotlin {
+    jvmToolchain(25)
+}
