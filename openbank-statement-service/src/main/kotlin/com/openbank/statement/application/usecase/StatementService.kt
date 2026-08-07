@@ -8,6 +8,7 @@ import com.openbank.statement.application.port.`in`.ClosePeriodUseCase
 import com.openbank.statement.application.port.`in`.ClosePocketUseCase
 import com.openbank.statement.application.port.`in`.ListStatementsUseCase
 import com.openbank.statement.application.port.`in`.RenderStatementUseCase
+import com.openbank.statement.application.port.`in`.SummarizeStatementUseCase
 import com.openbank.statement.application.port.out.AccountInfoPort
 import com.openbank.statement.application.port.out.BalancePort
 import com.openbank.statement.application.port.out.BookedEntryPort
@@ -51,7 +52,8 @@ class StatementService(
     ClosePocketUseCase,
     RenderStatementUseCase,
     ListStatementsUseCase,
-    AdHocExportUseCase {
+    AdHocExportUseCase,
+    SummarizeStatementUseCase {
 
     /** Clock seam: `closedAt` is stamped at close time and then *stored*, so renders stay deterministic
      *  (ADR-0035 §F). Overridable in tests; CDI uses the default. */
@@ -152,18 +154,24 @@ class StatementService(
         currency: String,
         legalSequence: Long,
         format: StatementFormat,
-    ): Uni<StatementRenderer.Rendered> = periods.findBySequence(accountId, currency, legalSequence).flatMap { period ->
-        if (period == null) {
-            Uni.createFrom().failure(StatementNotFoundException(accountId, currency, legalSequence))
-        } else {
-            accountInfo.pocketAccount(accountId).flatMap { account ->
-                bookedEntries.bookedEntries(accountId, currency, period.periodFrom, period.periodTo)
-                    .map { entries ->
-                        StatementRenderer.render(modelFromPeriod(account, period, entries), format)
-                    }
+    ): Uni<StatementRenderer.Rendered> =
+        closedModel(accountId, currency, legalSequence).map { model -> StatementRenderer.render(model, format) }
+
+    /** [SummarizeStatementUseCase]: the same closed period as [render], as the canonical model — no renderer. */
+    override fun summary(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementModel> =
+        closedModel(accountId, currency, legalSequence)
+
+    private fun closedModel(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementModel> =
+        periods.findBySequence(accountId, currency, legalSequence).flatMap { period ->
+            if (period == null) {
+                Uni.createFrom().failure(StatementNotFoundException(accountId, currency, legalSequence))
+            } else {
+                accountInfo.pocketAccount(accountId).flatMap { account ->
+                    bookedEntries.bookedEntries(accountId, currency, period.periodFrom, period.periodTo)
+                        .map { entries -> modelFromPeriod(account, period, entries) }
+                }
             }
         }
-    }
 
     override fun export(
         accountId: UUID,

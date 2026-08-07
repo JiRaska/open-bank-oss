@@ -10,7 +10,6 @@ import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.rest.client.inject.RestClient
-import java.util.UUID
 
 /**
  * The real read adapter behind [AccountReadPort] (ADR-0195 step 2). Every method LIVE-validates the
@@ -42,8 +41,14 @@ class RealAccountReadPort(
     private val mapper: ObjectMapper,
 ) : AccountReadPort {
 
+    // Built from the injected client rather than CDI-injected itself: this keeps the constructor
+    // shape the plain-unit RealAccountReadPortTest already constructs positionally (consent,
+    // accounts, balances, transactions, mapper) — adding a 6th constructor parameter here would
+    // break every one of those call sites for a refactor that changes no behaviour.
+    private val gate = ConsentGate(consent)
+
     override fun listAccounts(consentContext: ConsentContext): JsonNode {
-        val validated = validate(consentContext, ConsentScopes.ACCOUNTS_READ, accountIban = null)
+        val validated = gate.validate(consentContext, ConsentScopes.ACCOUNTS_READ, accountIban = null)
         val ibans = validated.grantedAccounts.orEmpty()
         val result = mapper.createArrayNode()
         ibans.forEach { iban -> result.add(accounts.getAccountByIban(iban)) }
@@ -51,13 +56,13 @@ class RealAccountReadPort(
     }
 
     override fun getBalance(consentContext: ConsentContext, accountId: String): JsonNode {
-        validate(consentContext, ConsentScopes.BALANCES_READ, accountIban = accountId)
+        gate.validate(consentContext, ConsentScopes.BALANCES_READ, accountIban = accountId)
         val internalId = resolveAccountId(accountId)
         return balances.getBalances(internalId)
     }
 
     override fun listTransactions(consentContext: ConsentContext, accountId: String, limit: Int): JsonNode {
-        validate(consentContext, ConsentScopes.TRANSACTIONS_READ, accountIban = accountId)
+        gate.validate(consentContext, ConsentScopes.TRANSACTIONS_READ, accountIban = accountId)
         val internalId = resolveAccountId(accountId)
         return transactions.listTransactions(internalId, limit, cursor = null)
     }
@@ -67,35 +72,8 @@ class RealAccountReadPort(
         // ConsentResource has getById(#id) only, no query-by-grantee route) — the presented consent
         // IS the one consent this call can honestly report on. Validating it also proves it is
         // still live (not revoked/expired), which a bare GET-by-id would not.
-        val validated = validate(consentContext, ConsentScopes.ACCOUNTS_READ, accountIban = null)
+        val validated = gate.validate(consentContext, ConsentScopes.ACCOUNTS_READ, accountIban = null)
         return mapper.createArrayNode().add(mapper.valueToTree(validated))
-    }
-
-    /**
-     * Live-validates [consentContext]'s consent for [scope] (and, when given, that [accountIban] is
-     * within its granted accounts). Throws (fails closed — never returns a partially-checked result)
-     * when the consent is invalid, revoked, expired, or does not cover the requested account.
-     */
-    private fun validate(
-        consentContext: ConsentContext,
-        scope: String,
-        accountIban: String?,
-    ): ConsentValidationResponse {
-        val consentId = runCatching { UUID.fromString(consentContext.consentId) }.getOrElse {
-            error("consent id '${consentContext.consentId}' is not a valid PSD2 consent id")
-        }
-        val response = consent.validate(
-            consentId,
-            ValidateConsentRequest(consentContext.agentId, scope, accountIban),
-        )
-        if (!response.valid) {
-            error("consent denied: ${response.reason ?: response.code ?: "not valid"}")
-        }
-        val granted = response.grantedAccounts
-        if (accountIban != null && granted != null && accountIban !in granted) {
-            error("account '$accountIban' is not within the granted consent scope")
-        }
-        return response
     }
 
     private fun resolveAccountId(iban: String): String = accounts.getAccountByIban(iban).path("id").asText()
