@@ -2175,3 +2175,23 @@ gates:
       # closed. Falsified against the real tree before wiring in: injecting one production
       # caller and, separately, flipping the declared status each produce exactly one finding.
       python3 .github/scripts/check-enforcement-reachability.py --enforce
+  - id: required-param-nullability
+    name: "a missing query/header parameter answers 400, not 500 (issue #3104)"
+    group: kotlin
+    mode: enforced
+    selftest: python3 .github/scripts/check-required-param-nullability.py --self-test
+    selftest_expect: pass
+    run: |
+      # A non-nullable @QueryParam/@HeaderParam on a NON-suspend function is not a stylistic
+      # choice: the Kotlin compiler emits Intrinsics.checkNotNullParameter at bytecode offset 0,
+      # so an absent parameter throws before the first statement of the body and no guard inside
+      # the method can ever run. GenericExceptionMapper renders that as 500, and the caller cannot
+      # tell "I sent a bad request" from "the server is broken" — which on a money path decides
+      # whether they retry. Nothing else here can see it: it compiles, the handler has tests (they
+      # all pass the parameter), and the OpenAPI spec says `required: true` either way.
+      # A suspend fun carries no such intrinsic and @DefaultValue is substituted by JAX-RS, so
+      # both are excluded — that precision is why this is a gate and not a 130-site sweep.
+      # Baselined per service (49 handlers / 26 services) and falsified in BOTH directions on the
+      # real tree: an injected handler in an unbaselined service and an inflated baseline entry
+      # each exit 1.
+      python3 .github/scripts/check-required-param-nullability.py
