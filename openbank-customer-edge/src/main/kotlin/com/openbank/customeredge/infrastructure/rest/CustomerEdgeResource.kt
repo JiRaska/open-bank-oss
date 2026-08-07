@@ -1389,6 +1389,108 @@ class CustomerEdgeResource(
         )
     }
 
+    /**
+     * Turn a directory hit into something payable, WITHOUT ever telling the payer the payee's
+     * account. Body: {"phoneHash":"<hex sha-256>"}.
+     *
+     * This closes pay-to-phone. Until now the directory resolved a number to a partyId and nothing
+     * could be done with it: the customer still typed the account number by hand, so a lookup
+     * bought them a name and nothing else (issue #3176).
+     *
+     * **Why a session token and not an IBAN.** Answering with the payee's account number would turn
+     * this route into a harvester: phone numbers are guessable in a way account numbers are not, so
+     * anyone could walk a range of numbers and collect IBANs. Instead the edge resolves the account
+     * privately and hands back the SAME opaque token the nearby-pay rail already uses (ADR-0087):
+     * the payer sees a name and a masked account, signs SCA against that masked form, and
+     * [createDomesticPayment] resolves the token back to the real account inside the edge. The
+     * payee's account number never reaches another customer's device.
+     *
+     * **Why the hash and not the partyId.** The caller must prove they already know the number, not
+     * merely an id they saw once. Taking a partyId from the body would let anyone with a party id —
+     * ids appear in shared payloads and delegation offers — mint a payment target for a stranger.
+     *
+     * **Opt-in is re-checked here, at payment time.** The lookup that produced the hit may be
+     * minutes or days old; someone who has since turned findability off must stop being payable
+     * immediately. A non-discoverable party is reported exactly like a number nobody holds — 404
+     * with the same body — so this route cannot be used as an existence oracle either.
+     */
+    @POST
+    @Path("/directory/payee")
+    @Authorize(action = "customer.directory.lookup")
+    @Blocking
+    fun directoryPayee(body: String): Response {
+        val customer = customer()
+        val phoneHash = extractTextField(objectMapper, body, "phoneHash")
+            ?.takeIf { it.matches(SHA256_HEX) }
+            ?: return badRequest("phoneHash (hex sha-256) is required")
+
+        // Re-run the directory lookup rather than trusting anything the caller carried over. This is
+        // the opt-in gate: party-service answers only for parties who are currently discoverable.
+        val lookup = upstream.post(
+            "$partyServiceUrl/api/v1/parties/directory/lookup",
+            customer.partyId.toString(),
+            """{"phoneHashes":["$phoneHash"]}""",
+        )
+        if (lookup.status != 200) return notFoundPayee()
+        val match = runCatching { objectMapper.readTree(lookup.entity?.toString() ?: "") }.getOrNull()
+            ?.path("matches")?.takeIf { it.isArray && it.size() > 0 }?.get(0)
+            ?: return notFoundPayee()
+        val payeePartyId = match.path("partyId").asText(null) ?: return notFoundPayee()
+        val payeeName = match.path("legalName").asText(null) ?: return notFoundPayee()
+
+        // Paying yourself through the contact picker is a mistake, not a feature: it would create a
+        // self-transfer that looks like a payment to someone else in the history.
+        if (payeePartyId == customer.partyId.toString()) return badRequest("That is your own number")
+
+        val target = resolvePayableAccount(payeePartyId) ?: return notFoundPayee()
+        val token = sessions.create(
+            creditorAccountId = target.first,
+            creditorPartyId = payeePartyId,
+            displayName = payeeName,
+            requestedAmount = null,
+            creditorMasked = PaymentSessionStore.maskIban(target.second),
+        )
+        val out = objectMapper.createObjectNode()
+        out.put("paymentSessionToken", token)
+        out.put("displayName", payeeName)
+        out.put("creditorMasked", PaymentSessionStore.maskIban(target.second))
+        out.put("expiresInSeconds", PaymentSessionStore.TTL_MS / MILLIS_PER_SECOND)
+        return Response.ok(objectMapper.writeValueAsString(out)).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /** Same answer for "no such number", "not discoverable" and "nothing payable" — see [directoryPayee]. */
+    private fun notFoundPayee(): Response = Response.status(Response.Status.NOT_FOUND)
+        .entity("""{"error":"no payee for that number"}""")
+        .type(MediaType.APPLICATION_JSON).build()
+
+    /**
+     * The account a contact payment lands on, as (accountId, iban), or null when the party has none
+     * worth crediting.
+     *
+     * Deterministic on purpose: a payee with several accounts must always receive on the same one,
+     * or the payer's history and the payee's expectations drift apart. The rule is the narrowest
+     * that can be stated honestly — an ACTIVE, CURRENT, CZK account, oldest first, since the account
+     * someone has held longest is the one they think of as theirs. SAVINGS is deliberately excluded:
+     * crediting a savings account from a stranger's payment is not what either side means, and some
+     * savings products restrict inbound transfers.
+     */
+    private fun resolvePayableAccount(payeePartyId: String): Pair<String, String>? {
+        val resp = upstream.get("$accountServiceUrl/api/v1/accounts?partyId=$payeePartyId", payeePartyId)
+        if (resp.status != 200) return null
+        val accounts = runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") }.getOrNull()
+            ?.takeIf { it.isArray } ?: return null
+        return accounts
+            .filter { it.path("status").asText() == "ACTIVE" }
+            .filter { it.path("accountType").asText() == "CURRENT" }
+            .filter { it.path("currencyCode").asText() == "CZK" }
+            .sortedBy { it.path("openedAt").asText("") }
+            .firstNotNullOfOrNull { node ->
+                val id = node.path("id").asText(null) ?: return@firstNotNullOfOrNull null
+                val iban = node.path("accountNumber").asText(null) ?: return@firstNotNullOfOrNull null
+                id to iban
+            }
+    }
+
     // --- Transactions ---
 
     /**
@@ -3489,6 +3591,11 @@ class CustomerEdgeResource(
 
         /** Upper bound on address-book hashes forwarded in one directory lookup. */
         internal const val MAX_DIRECTORY_HASHES = 500
+
+        /** A directory hash is a hex sha-256 and nothing else — anything looser is a bad request. */
+        internal val SHA256_HEX = Regex("^[0-9a-f]{64}$")
+
+        private const val MILLIS_PER_SECOND = 1000L
 
         internal const val CARD_TYPE_VIRTUAL = "VIRTUAL"
         internal const val CARD_TYPE_SINGLE_USE = "SINGLE_USE"
