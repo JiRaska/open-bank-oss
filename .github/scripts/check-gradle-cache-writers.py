@@ -130,6 +130,12 @@ DECLARED: dict[str, tuple[str, str]] = {
         "disabled",
         "Boot probe; builds one service and needs no cross-run Gradle state.",
     ),
+    "onnx-serving-smoke.yml::smoke": (
+        "read-only",
+        "Consumer; restores fleet-lint's home. Builds one service's quarkusBuild to smoke "
+        "the ONNX serving path inside the shipped image (#3354), on a schedule rather than "
+        "per-push, so it neither needs nor should store a per-run entry.",
+    ),
     "pitest.yml::pitest": (
         "read-only",
         "Demoted from setup-java. Consumer; restores fleet-lint's home. The setup-java "
