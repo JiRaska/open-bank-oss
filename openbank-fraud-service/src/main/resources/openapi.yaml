@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Fraud Service API
-  version: 1.1.0
+  version: 1.2.0
   description: >-
     Real-time transaction fraud scoring (ADR-0084). Returns a verdict
     (ALLOW/CHALLENGE/REVIEW/DECLINE) for a payment intent. Phase 1 is a deterministic, versioned
@@ -54,6 +54,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScoreFraudResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -67,6 +69,14 @@ components:
       bearerFormat: JWT
 
   responses:
+    BadRequest:
+      description: >-
+        The request body failed validation at the HTTP boundary — e.g. `currency`
+        is not a 3-letter ISO 4217 code, or `rail` is blank
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
     Unauthorized:
       description: Missing or invalid bearer token
       content:
@@ -93,11 +103,17 @@ components:
           example: "1250.00"
         currency:
           type: string
-          description: ISO-4217 currency code
+          description: >-
+            ISO-4217 currency code — exactly three upper-case letters. Enforced by
+            `FraudResource.validate` (400); `fraud_scores.currency` is a `varchar(3)`,
+            so anything longer used to overflow the column and answer 500. Stated as
+            prose, not a `pattern`, on purpose: adding a request-side constraint is a
+            BREAKING oasdiff change (major + a `/api/v2` URL), and the spec was never
+            the wrong side here — the missing guard was.
           example: "CZK"
         rail:
           type: string
-          description: Payment rail / type (e.g. SEPA, SEPA_INSTANT, DOMESTIC, FX)
+          description: Payment rail / type (e.g. SEPA, SEPA_INSTANT, DOMESTIC, FX). Must be non-blank.
           example: "SEPA_INSTANT"
         accountId:
           type: string
