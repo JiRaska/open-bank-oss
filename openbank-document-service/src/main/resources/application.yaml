@@ -218,6 +218,16 @@ mp:
         group.id: openbank-document-service
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         auto.offset.reset: earliest
+      # ADR-0248: the annual statement of fees is the one template family that still needs an
+      # async push trigger (PAD Art. 5 duty — the bank must send it, not wait for the customer).
+      # billing-service's own billing-outbox drains to Kafka on this topic (mirrors this service's
+      # own document-events-out naming: openbank.<domain>.<aggregate>.event).
+      billing-outbox-events-in:
+        connector: smallrye-kafka
+        topic: openbank.billing.billing.event
+        group.id: openbank-document-service
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: earliest
 
 # OPA sidecar (ADR-0034). Advisory mode by default.
 opa:
