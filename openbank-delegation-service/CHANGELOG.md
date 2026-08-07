@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.5.0...delegation-service-v0.5.1) (2026-08-07)
+
+
+### Bug Fixes
+
+* **delegation:** attach the M2M token to every outbound REST client ([#3937](https://github.com/JiRaska/open-bank-oss/issues/3937)) ([9a7212a](https://github.com/JiRaska/open-bank-oss/commit/9a7212a51196ae39975902b3e7cee670c0e1326b))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.4.1...delegation-service-v0.5.0) (2026-08-06)
 
 
