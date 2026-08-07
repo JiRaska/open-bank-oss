@@ -151,3 +151,8 @@ charters:
     prompts: [system.v1]
     source: openbank-flaky-test-hunter LlmDiagnosisAdapter.SYSTEM_PROMPT
     placeholders: []
+
+  - id: case-coordinator
+    status: pending
+    blocked_by: ADR-0244
+    reason: New agent-plane charter; no module or LlmDiagnosisAdapter wiring yet.
