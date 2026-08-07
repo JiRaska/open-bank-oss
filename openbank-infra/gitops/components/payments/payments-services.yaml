@@ -2260,6 +2260,16 @@ spec:
                 secretKeyRef:
                   name: settlement-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # Downstream money-path dependencies (issue #3931). Until now this Rollout carried
+            # NEITHER, so both rest-clients fell back to application.yaml's defaults — which
+            # named `openbank-balance-service:8080` / `openbank-ledger-service:8080`, hostnames
+            # no Service in this cluster has ever had. Every settlement debit/credit and every
+            # GL posting therefore dialled an unresolvable name. Same shape and same values as
+            # transaction-service above.
+            - name: BALANCE_SERVICE_URL
+              value: http://balance-service.balances.svc:8103
+            - name: LEDGER_SERVICE_URL
+              value: http://ledger-service.ledger.svc:8101
             # Temporal go-live (ADR-0101 P3, runbook 0006 Gate 1): settlement now runs its
             # durable workflow. Namespace openbank-default + SERVER_URL + the temporal-platform
             # NetworkPolicy are already in place; rollback = set this back to "false".

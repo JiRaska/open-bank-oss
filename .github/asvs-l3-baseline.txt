@@ -205,6 +205,12 @@ V9.1 openbank-infra/gitops/components/billing/billing-service.yaml:70: plaintext
 V9.1 openbank-infra/gitops/components/billing/billing-service.yaml:78: plaintext http:// env value http://ledger-service.ledger.svc:8101
 V9.1 openbank-infra/gitops/components/billing/billing-service.yaml:97: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/onboarding/onboarding-service.yaml:134: plaintext http:// env value http://tempo.observability.svc:4317
+# onboarding -> party-service (issue #3931). Genuinely a NEW plaintext edge and declared as
+# such: the rest-client existed but its URL default named `openbank-party-service`, a hostname
+# no Service has, so the call never left the pod. Making it resolve turns a dead edge into a
+# live one, on the same plaintext in-cluster transport as the other 200+ lines here — deleting
+# this line is the mesh-mTLS work (baseline Layer 1), not a per-service change.
+V9.1 openbank-infra/gitops/components/onboarding/onboarding-service.yaml:138: plaintext http:// env value http://party-service.party.svc:8111
 V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:79: plaintext http:// env value http://clickhouse.analytics.svc:8123
 # analytics-sink -> Apicurio schema registry (issue #1916). Same declared debt as every other
 # in-cluster edge here: the Service exposes exactly one port, named `http`, on 8080
