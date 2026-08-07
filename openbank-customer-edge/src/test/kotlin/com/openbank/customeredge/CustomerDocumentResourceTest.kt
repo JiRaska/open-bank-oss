@@ -5,6 +5,7 @@
 package com.openbank.customeredge
 
 import com.openbank.customeredge.infrastructure.rest.CustomerDocumentResource
+import com.openbank.customeredge.infrastructure.rest.DelegationGrants
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
 import io.mockk.every
 import io.mockk.mockk
@@ -23,14 +24,19 @@ class CustomerDocumentResourceTest {
     private val caller: UUID = UUID.randomUUID()
     private val docSvc = "http://document-service.documents.svc:8143"
 
-    private fun resource(upstream: UpstreamClient): CustomerDocumentResource =
-        CustomerDocumentResource(upstream).apply {
-            jwt = mockk {
-                every { getClaim<String>("party_id") } returns caller.toString()
-                every { subject } returns caller.toString()
-            }
-            documentServiceUrl = docSvc
+    private fun resource(upstream: UpstreamClient): CustomerDocumentResource = CustomerDocumentResource(
+        upstream,
+        // These tests are about ownership, not delegation; a checker pointed at an
+        // unreachable service denies every share, which is the pre-existing behaviour
+        // each case here asserts.
+        DelegationGrants(upstream).apply { delegationServiceUrl = "http://delegation.invalid" },
+    ).apply {
+        jwt = mockk {
+            every { getClaim<String>("party_id") } returns caller.toString()
+            every { subject } returns caller.toString()
         }
+        documentServiceUrl = docSvc
+    }
 
     @Test
     fun `ensureAgreement forces partyRef to the token and passes the chosen language`() {
@@ -48,12 +54,19 @@ class CustomerDocumentResourceTest {
     @Test
     fun `listDocuments queries upstream with the token party, never a client-supplied one`() {
         val upstream = mockk<UpstreamClient>()
-        val urlSlot = slot<String>()
-        every { upstream.get(capture(urlSlot), any()) } returns Response.ok("[]").build()
+        // Capture ALL urls, not the last one: listDocuments also asks delegation-service which
+        // documents were shared with the caller, so "the last call" is no longer the documents
+        // read. The property under test is unchanged — the party in the documents query is the
+        // token's, never one the client supplied.
+        val urls = mutableListOf<String>()
+        every { upstream.get(capture(urls), any()) } returns Response.ok("[]").build()
 
         resource(upstream).listDocuments()
 
-        assertThat(urlSlot.captured).isEqualTo("$docSvc/api/v1/documents?partyRef=$caller")
+        assertThat(urls).contains("$docSvc/api/v1/documents?partyRef=$caller")
+        assertThat(urls.filter { it.startsWith(docSvc) }).allSatisfy {
+            assertThat(it).contains(caller.toString())
+        }
     }
 
     @Test
