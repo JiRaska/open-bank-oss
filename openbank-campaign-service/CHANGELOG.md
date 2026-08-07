@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/v0.15.0...v0.16.0) (2026-08-07)
+
+
+### Features
+
+* **campaign:** record conversions from product events (ADR-0245) ([#3977](https://github.com/JiRaska/open-bank-oss/issues/3977)) ([0a14c46](https://github.com/JiRaska/open-bank-oss/commit/0a14c46c3793c6f8ada3a42717f44f0b1cb02885))
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/v0.14.0...v0.15.0) (2026-08-07)
+
+
+### Features
+
+* **campaign:** branch a journey on what the platform can actually observe (ADR-0200 D1) ([#3895](https://github.com/JiRaska/open-bank-oss/issues/3895)) ([4b6eb7e](https://github.com/JiRaska/open-bank-oss/commit/4b6eb7e4d96e15d6020e31cab36a25647227a7e4))
+* **campaign:** record conversions from product events (ADR-0245) ([#3977](https://github.com/JiRaska/open-bank-oss/issues/3977)) ([0a14c46](https://github.com/JiRaska/open-bank-oss/commit/0a14c46c3793c6f8ada3a42717f44f0b1cb02885))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/v0.13.0...v0.14.0) (2026-08-07)
 
 
