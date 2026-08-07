@@ -1549,6 +1549,21 @@ gates:
     run: |
       python3 .github/scripts/check-pacticipant-matches-module.py
 
+  # The resolver decides what record-deployment writes into the broker's environment record
+  # (#3223). Its core is a pure path classifier, so the self-test drives every branch — including
+  # the prefix-sibling near-miss (openbank-ledger vs openbank-ledger-service) and the
+  # "no exclude-paths declared" case, where src/test must COUNT rather than be assumed excluded.
+  # Falsified both ways before wiring in: breaking the exclusion makes it exit 1 with 4 failures.
+  - id: record-deployment-version-resolver
+    name: "record-deployment version resolver (issue #3223, enforced)"
+    group: api
+    mode: enforced
+    selftest: |
+      bash .github/scripts/resolve-record-deployment-version.sh --self-test
+    selftest_expect: pass
+    run: |
+      bash .github/scripts/resolve-record-deployment-version.sh --self-test
+
   - id: pact-provider-replay-coverage
     name: "Pact provider-replay coverage (issue #2338, enforced)"
     group: api
