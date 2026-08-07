@@ -17,9 +17,6 @@ lineage:
     - serviceName: agent-service
       relationType: api
       description: policy decision point for tool-call authorization
-    - serviceName: openbank-libs
-      relationType: library
-      description: reactive Panache entities + governance outbox ports
 databaseLineage:
   ownedDatabases:
     - openbank_casecoordinator
