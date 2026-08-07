@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/v0.16.0...v0.17.0) (2026-08-07)
+
+
+### Features
+
+* **campaign:** schedule recurring enrolment on a catalogued cadence ([#4051](https://github.com/JiRaska/open-bank-oss/issues/4051)) ([1f3ba2f](https://github.com/JiRaska/open-bank-oss/commit/1f3ba2fd9d62f2039f700278399fda10a2af5c7f))
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/v0.15.0...v0.16.0) (2026-08-07)
 
 
