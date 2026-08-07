@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [documents, statements, psd2-api]
-summary: "Adds monthly statement, PAD Art. 5 annual fee statement, and payment confirmation as new document-service templates, triggered off each owning service's outbox, off the money path."
+summary: "Adds monthly statement, PAD Art. 5 annual fee statement, and payment confirmation as document-service templates, rendered on demand via the non-persisting preview endpoint and never stored, off the money path."
 ---
 
 # ADR-0248 — Statement and payment confirmation document templates
@@ -60,31 +60,35 @@ in Art. 45/48 — this ADR only closes the statement/confirmation gap; Art.
 ## Decision
 
 We will add three new customer-facing document template families to
-`openbank-document-service`, all triggered **asynchronously off each
-owning service's existing outbox**, mirroring the trust-boundary pattern
-`AccountCreatedConsumer.kt` already establishes (poison-pill safe, ack on
-business-logic failure, idempotent use case) — never a synchronous call
-from the originating service, so a slow or unreachable document-service can
-never block a statement close or a payment settlement.
+`openbank-document-service`. None of the three is ever persisted:
+document-service's existing **non-persisting**
+`POST /api/v1/documents/templates/preview` endpoint (already used today
+for template-authoring previews, reused here as-is) renders each one on
+demand, hands the bytes straight to the caller or the delivery channel,
+and discards them — nothing rendered from any of these three templates is
+ever written to document-service's object store, and no `Document` row or
+`document.generated` outbox event is created for them.
 
 `openbank-statement-service`'s own camt.053/MT940/pocket-PDF rendering is
 **unchanged** — this ADR adds a document layer on top of it, it does not
-replace the "persist the model, not the files" design of ADR-0035.
+replace the "persist the model, not the files" design of ADR-0035. All
+three new templates extend that same guarantee to this new styled/PDF
+layer.
 
-For the two **statement** documents specifically (monthly, annual) we
-extend that same "persist the model, not the files" guarantee to this new
-styled/PDF layer: the rendered document is never written to
-document-service's object store. It is generated on demand — at the
-moment the customer requests a download (monthly) or at the moment the
-push-send action fires (annual) — via document-service's existing
-**non-persisting** `POST /api/v1/documents/templates/preview` endpoint
-(already used today for template-authoring previews, reused here as-is),
-handed straight to the caller or the delivery channel, and discarded.
-Nothing rendered from a statement template is stored anywhere on the
-platform. Payment confirmation is a different kind of document — evidence
-that a specific payment executed, not a reproducible view over data we
-already retain — and keeps the persisted `POST /api/v1/documents/render`
-path; this asymmetry is deliberate, not an oversight (see Consequences).
+Two of the three (monthly statement, payment confirmation) are rendered
+**synchronously, only when the customer explicitly asks for them** — a
+download click in the customer-facing edge — directly against
+document-service's `preview` endpoint, with no Kafka involved at all: the
+data they need (`StatementModel` for the statement, the payment's own
+persisted status record for the confirmation) already lives in the owning
+service, so there is nothing to trigger in advance. The third (annual
+statement) is a genuine **push** duty — PAD Art. 5 requires the bank to
+send it, not wait for the customer to ask — so it alone keeps an
+asynchronous trigger: a new document-service Kafka consumer on
+billing-service's annual-aggregation outbox event fires the render, at
+send time, through the same non-persisting `preview` endpoint, then hands
+the bytes to the delivery channel and discards them exactly like the
+other two.
 
 ### 1. Monthly statement — `MESICNI_VYPIS_CS` / `MESICNI_VYPIS_EN`
 
@@ -136,11 +140,18 @@ path; this asymmetry is deliberate, not an oversight (see Consequences).
 
 - Legal basis: PSD2 Art. 45/48 — information to be given to the payer/payee
   after a payment is executed.
-- Trigger: `SepaPaymentStatusChangedEvent` / `DomesticPaymentStatusChangedEvent`
-  reaching a terminal successful status (`COMPLETED` for SEPA, `SETTLED`
-  for domestic); new document-service Kafka consumers, one per source
-  service.
-- Data owner: the originating payment service's own event payload.
+- Trigger: synchronous, on customer request only (e.g. "download
+  confirmation" in payment/transaction history) — no pre-generation on
+  `SepaPaymentStatusChangedEvent`/`DomesticPaymentStatusChangedEvent`, no
+  document-service Kafka consumer for this template. The originating
+  payment service (or the customer-facing edge calling it) invokes
+  document-service's non-persisting
+  `POST /api/v1/documents/templates/preview` at request time with data
+  read from its own already-persisted payment record; the response is
+  streamed to the customer and never persisted a second time.
+- Data owner: the originating payment service's own persisted payment
+  record (SEPA or domestic) — that record is already the durable
+  evidentiary copy; document-service never becomes a second copy of it.
 - Required fields: payment reference and unique end-to-end ID; execution
   or settlement date and time; amount and currency; payer and payee IBAN;
   payee name; remittance information / variable symbol; terminal status;
@@ -151,25 +162,25 @@ All six rows (three families × CS/EN) follow the existing
 `status = PUBLISHED`, `classification = "restricted"`, the shared
 `LETTERHEAD_CS`/`LETTERHEAD_EN` inline-SVG header, and no external
 resource fetch (the existing SSRF mitigation). Adding new `templateCode`
-string values to the existing, unconstrained `RenderDocumentRequest` /
-`CreateTemplateRequest` / preview-request schema is not an OpenAPI-breaking
-or even additive change — no `info.version` bump is required, and no new
-endpoint is added: both `/api/v1/documents/render` (payment confirmation)
-and `/api/v1/documents/templates/preview` (both statement documents)
-already exist.
+string values to the existing, unconstrained `CreateTemplateRequest` /
+preview-request schema is not an OpenAPI-breaking or even additive
+change — no `info.version` bump is required, and no new endpoint is
+added: `/api/v1/documents/templates/preview` already exists and is the
+only render path any of the six rows use.
 
-These are still trust-boundary changes under `rules.yaml:
-trust_boundary_diff_change` — one new inbound Kafka consumer for the
-annual-statement trigger, two for payment confirmation (SEPA + domestic),
-plus a new synchronous inbound call path into document-service's preview
-endpoint from statement-service — even though none of statement-service,
-document-service or billing-service is on the `money_path_services` list.
-`openbank-statement-service` has no threat model today
-(`docs/threat-models/statement-service.md` does not exist) — this decision
-requires authoring one, and updating `docs/threat-models/document-service.md`
-for the new consumers and the new synchronous caller.
+This is still a trust-boundary change under `rules.yaml:
+trust_boundary_diff_change` — one new inbound Kafka consumer (the
+annual-statement trigger) plus two new synchronous inbound call paths
+into document-service's `preview` endpoint (from statement-service, and
+from each of SEPA/domestic payment services) — even though none of
+statement-service, document-service, billing-service, sepa-payment or
+domestic-payment is on the `money_path_services` list. `openbank-statement-service`
+has no threat model today (`docs/threat-models/statement-service.md` does
+not exist) — this decision requires authoring one, and updating
+`docs/threat-models/document-service.md` for the new consumer and the new
+synchronous callers.
 
-Implementation (the new Kafka consumers, the billing-service annual
+Implementation (the new Kafka consumer, the billing-service annual
 aggregation use case, the actual Handlebars template bodies, and the
 threat model documents) is tracked as a follow-up issue per ADR-0052,
 not delivered by this ADR itself.
@@ -197,15 +208,26 @@ not delivered by this ADR itself.
   files" determinism guarantee (every re-render must stay byte-identical
   off `StatementPeriod`); this ADR only adds a new, separately-generated
   customer document, it does not change what statement-service persists.
-- **Pre-render both statement documents and persist them in
-  document-service's object store, the same as payment confirmation.**
-  Rejected: it would store a full copy of exactly the personal financial
-  data ADR-0035 deliberately keeps out of storage, for documents PSD2/PAD
-  only require *making available* or *sending* — never retaining a
-  rendered copy of. Render-on-demand via the existing non-persisting
-  `preview` endpoint gives the same customer experience with strictly
-  less personal data at rest, and needs no new object-store retention
-  policy for these two template families.
+- **Pre-render all three documents and persist them in document-service's
+  object store** (the ADR's original shape for payment confirmation).
+  Rejected across the board, including for payment confirmation: it would
+  store a second full copy of personal financial data the owning service
+  (statement-service or the payment service) already holds durably, for
+  documents PSD2/PAD only require *making available*, *sending*, or
+  *informing* — never retaining a rendered copy of. Render-on-demand via
+  the existing non-persisting `preview` endpoint gives the same customer
+  experience with strictly less personal data at rest, and needs no
+  object-store retention policy for any of the three template families.
+- **Keep payment confirmation on the persisted `/render` + Kafka-consumer
+  path while only the two statement documents go non-persisting.**
+  Considered as the ADR's first draft. Rejected on reflection: the
+  payment's own status record in sepa-payment/domestic-payment-service is
+  already the durable evidentiary copy, so a second stored PDF in
+  document-service adds PII at rest and its own retention/threat-model
+  burden for no compliance benefit — the same data-minimisation argument
+  that ruled out persisting the statements applies identically here, once
+  actually examined instead of assumed away by "it documents a specific
+  event."
 
 ## Consequences
 
@@ -213,53 +235,59 @@ not delivered by this ADR itself.
 - Closes the two document-type gaps ADR-0162 already flagged as intended
   but unbuilt, using document-service's existing generic templating
   pipeline rather than a new one.
-- Payment confirmation and both statement documents stay off every money
-  path — none of the three trigger sources block payment execution,
-  period-close, or fee assessment.
-- Reuses one rendering mechanism for all three template families instead
-  of three bespoke ones — the non-persisting `preview` path for the two
-  statement documents, the persisting `render` path for payment
-  confirmation, both already existing endpoints.
-- No new PII document store for the two statement types: the styled PDF is
-  rendered and discarded, never written to document-service's object
-  store, keeping ADR-0035's minimal-persistence guarantee intact for this
-  new layer too — and one fewer service holding a copy of the customer's
-  full transaction history at rest.
+- All three documents stay off every money path — none of the three
+  trigger sources block payment execution, period-close, or fee
+  assessment.
+- One rendering discipline for all three template families: render via
+  the non-persisting `preview` endpoint, hand off, discard. No per-family
+  retention policy to design or audit.
+- No new PII document store anywhere in this ADR: every rendered document
+  is generated and discarded, never written to document-service's object
+  store — zero new `Document` rows, zero new `document.generated` outbox
+  events, one fewer service holding a copy of the customer's transaction
+  and payment history at rest.
+- Simpler trigger surface than the original draft: two of the three
+  templates need no Kafka consumer at all, since rendering happens
+  synchronously at the moment the customer asks — only the annual
+  statement's push duty still needs one.
 
 **Negative**
 - Adds a genuinely new cross-service dependency: billing-service must ship
   an annual aggregation use case it does not have today before the annual
   statement can exist.
-- Three new Kafka consumers in document-service (annual statement, plus
-  one each for SEPA/domestic payment confirmation) and a new synchronous
-  caller relationship (statement-service → document-service's preview
-  endpoint) each add a trust-boundary surface that has to be covered by a
-  threat model before this can ship as `delivery-status: shipped`.
+- One new Kafka consumer (the annual-statement trigger) and three new
+  synchronous caller relationships into document-service's `preview`
+  endpoint (from statement-service, sepa-payment-service and
+  domestic-payment-service) each add a trust-boundary surface that has to
+  be covered by a threat model before this can ship as `delivery-status:
+  shipped`.
 - The annual statement's push-delivery path has no persisted copy to
   retry from on a failed send — a delivery failure must re-invoke the
   synchronous render, not retry a stored file; the annual-aggregation use
   case needs to be designed with that retry shape in mind.
+- The synchronous "render on customer click" path makes document-service
+  a hard dependency of the download action itself (monthly statement,
+  payment confirmation): if document-service is unreachable, that
+  specific download fails, though nothing upstream (payment execution,
+  period-close) is affected. Acceptable because a failed download is
+  retryable by the customer with no data lost, unlike a blocked payment.
 
 **Neutral**
 - Does not change anything about how statement-service's existing
   camt.053/MT940/pocket-PDF rendering works, persists, or is triggered.
 - Does not address PSD2 Art. 60 (unauthorized-transaction liability)
   disclosures; that remains a separate, currently untracked gap.
-- Payment confirmation is intentionally the odd one out: it persists
-  where the two statement documents deliberately don't. It documents that
-  a specific payment executed rather than reproducing data the platform
-  already holds, so retaining a copy is proportionate there in a way it
-  is not for a statement.
 
 ## Compliance impact
 
 - PCI DSS: not applicable — no cardholder data involved.
 - DORA:    not applicable — no ICT third-party or resilience change; new
            Kafka consumers are internal, non-critical, off the money path.
-- GDPR:    Art. 5(1)(c) data minimisation motivates never persisting the
-           rendered monthly/annual statement PDF (render-and-discard via
-           the non-persisting preview endpoint); the underlying personal
-           data itself is already covered by existing statement/payment
+- GDPR:    Art. 5(1)(c) data minimisation motivates never persisting any
+           of the three rendered documents (render-and-discard via the
+           non-persisting preview endpoint, for the statement documents
+           and payment confirmation alike); the underlying personal data
+           itself is already covered by existing statement/payment
            processing lawful bases, no new lawful basis introduced.
 - PSD2:    Art. 58(2) (monthly statement, make-available, durable medium)
            and Art. 45/48 (post-execution payment information) are the
