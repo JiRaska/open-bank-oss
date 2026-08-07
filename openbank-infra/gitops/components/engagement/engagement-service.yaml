@@ -1,19 +1,19 @@
 # engagement-service: ADR-0220 in-app surfaces, first infrastructure slice.
 #
-# INERT: not in auto-deploy.yml's ALL_SERVICES, so no image is ever built or pushed for this
-# workload — Kyverno's SBOM-attestation/cosign-signature admission policies reject a tag that was
-# never pushed, so this Deployment never actually schedules a running pod. It exists to satisfy
-# this repo's gitops-presence gates (kafka-topic-existence, oidc-client-secret-wiring) for the
-# service code merged ahead of a real rollout.
+# LIVE: registered in auto-deploy.yml's ALL_SERVICES (deploy-coverage-guard requires this the
+# moment a released component has gitops manifests — "a component nobody builds has a gitops tag
+# that rots in place", #3344 class). A real single-instance CNPG Postgres backs it
+# (postgres.yaml).
 #
-# Deliberately absent, all follow-up scope for when the service is turned on for real:
-#   - a real CNPG Postgres cluster (no idle DB cost for a pod that never runs);
+# Deliberately still absent, named rather than silently missing:
 #   - Kafka mTLS (KafkaUser + keystore/truststore Secrets) — KAFKA_BOOTSTRAP_SERVERS below has no
-#     SSL config, which is fine only because openbank.outbox.dispatch-enabled defaults false;
+#     SSL config, which is fine only because openbank.outbox.dispatch-enabled defaults false. The
+#     outbox fills, publishes nothing, and no message is silently lost — flipping dispatch on
+#     without also wiring mTLS would just fail every publish attempt, loudly, in the outbox's own
+#     retry/DEAD accounting.
 #   - the OPA sidecar / policy bundle — SurfaceResource carries no @Authorize annotation yet, and
 #     the shared rest.rego has no rule for these two actions, so the platform-wide
-#     `default allow := false` denies them fail-closed under enforcement regardless;
-#   - NetworkPolicy.
+#     `default allow := false` denies them fail-closed under enforcement regardless.
 # Reachable only in-cluster via ClusterIP, no ingress.
 apiVersion: apps/v1
 kind: Deployment
@@ -25,6 +25,13 @@ metadata:
     app.kubernetes.io/part-of: engagement
 spec:
   replicas: 1
+  # Terminate-first (#3545): one replica, no HA to lose, and the default maxSurge 1 needs
+  # headroom the pod's own resource requests would otherwise contest during a rollout.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: engagement-service
@@ -43,11 +50,12 @@ spec:
           type: RuntimeDefault
       containers:
         - name: engagement-service
-          # Placeholder — never resolves to a real image while this workload stays out of
-          # ALL_SERVICES (see the file header). Not `sandbox-pending`: that string is not this
-          # repo's actual convention anywhere today: it names the FAILURE MODE this comment
-          # documents, not a tag any pipeline writes.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-engagement-service:unreleased
+          # Bootstrap placeholder — the deploy-drift gate requires a sandbox-<sha> tag. Now that
+          # this service IS in ALL_SERVICES, the next push touching openbank-engagement-service/
+          # src/main (this merge itself, first) triggers auto-deploy to build a real image and
+          # open a gitops PR replacing this with the actual sha. Until then, Kyverno's
+          # cosign-signature/SBOM-attestation admission policies reject a tag nothing ever pushed.
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-engagement-service:sandbox-7a66c233d
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

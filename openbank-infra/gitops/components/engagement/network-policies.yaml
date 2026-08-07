@@ -27,15 +27,15 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: consent-service-ingress-allow-list
-  namespace: consent
+  name: engagement-service-ingress-allow-list
+  namespace: engagement
   labels:
-    app.kubernetes.io/part-of: consent
+    app.kubernetes.io/part-of: engagement
     openbank.io/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: consent-service
+      app.kubernetes.io/name: engagement-service
   policyTypes:
     - Ingress
   ingress:
@@ -44,31 +44,10 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: campaign
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: customer-edge
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: engagement
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: notifications
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: platform
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: psd2
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: security-scanner
-        - namespaceSelector:
-            matchLabels:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP
-          port: 8106
+          port: 8153
     - from:
         - namespaceSelector:
             matchLabels:
@@ -83,21 +62,3 @@ spec:
       ports:
         - protocol: TCP
           port: 8085
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: redis-ingress-allow-list
-  namespace: consent
-  labels:
-    app.kubernetes.io/part-of: consent
-    openbank.io/derived: gen-network-policies
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: redis
-  policyTypes:
-    - Ingress
-  ingress:
-    - from:
-        - podSelector: {}
