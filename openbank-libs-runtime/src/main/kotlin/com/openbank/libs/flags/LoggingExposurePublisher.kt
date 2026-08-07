@@ -15,8 +15,9 @@ class LoggingExposurePublisher : ExposurePublisher {
 
     override suspend fun publish(exposure: FlagExposure) {
         log.infof(
-            "flag exposure exposureId=%s flag=%s variant=%s key=%s reason=%s traceId=%s",
+            "flag exposure exposureId=%s at=%s flag=%s variant=%s key=%s reason=%s traceId=%s",
             exposure.exposureId,
+            exposure.timestamp,
             exposure.flagKey,
             exposure.variant,
             exposure.targetingKey,

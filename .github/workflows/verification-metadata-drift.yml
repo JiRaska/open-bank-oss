@@ -48,14 +48,14 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # No `cache: gradle` on purpose. Two reasons, one FinOps and one correctness:
       # the repo's Actions cache sits at ~9 GB of its 10 GB ceiling across 61 entries, so
       # eight more entries per night would evict caches that PR builds depend on — slowing
       # everyone else down to speed up a nightly job that has no deadline. And the sweep
       # passes --refresh-dependencies anyway, so a warm cache buys it nothing.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "25"
@@ -81,7 +81,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Open or refresh the tracking issue
         env:
           GH_TOKEN: ${{ github.token }}

@@ -6,6 +6,7 @@ package com.openbank.libs.flags
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Instant
 
 class FlagExposureTest {
 
@@ -21,6 +22,23 @@ class FlagExposureTest {
         assertThat(exposure.reason).isEqualTo(EvaluationReason.SPLIT)
         assertThat(exposure.traceId).isEqualTo("trace-1")
         assertThat(exposure.exposureId).isNotNull()
+    }
+
+    /**
+     * Asserts RECENCY, not non-nullity: `timestamp` defaulted to `Instant.EPOCH`, and `of` — the
+     * documented typical call site — never passed one, so every exposure was stamped 1970-01-01.
+     * A non-null assertion passes against that, which is what let it survive.
+     */
+    @Test
+    fun `of stamps the exposure at construction time`() {
+        val before = Instant.now()
+
+        val stamped = FlagExposure.of(
+            FlagEvaluation("checkout-flow", "treatment", variant = "b", reason = EvaluationReason.SPLIT),
+            targetingKey = "party-9",
+        ).timestamp
+
+        assertThat(stamped).isBetween(before.minusSeconds(1), Instant.now().plusSeconds(1))
     }
 
     @Test

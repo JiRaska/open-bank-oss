@@ -47,6 +47,29 @@ layer (advisory by default, `copilot.opa.enforce=false`; flip via `COPILOT_OPA_E
 once `copilot-opa-bundle.yaml` is deployed). OPA rego tool names synced to actual Kotlin `name` values.
 `ScheduledPaymentsTool` capability corrected to `account.scheduled-payments.read`.
 
+## Conversation history is personal data — and is now erasable (#3870)
+
+Durable chat transcripts live in Postgres (`conversation_history`, `PostgresConversationStore`).
+Free-text chat is where the least predictable personal data lands, so the retention path matters:
+
+- **`expires_at` is a read-side filter, not deletion.** `load` filters on `expires_at > now()`, so an
+  expired conversation stops being *served* while the row stays on disk and in every base backup.
+  `ConversationRetentionScheduler` is what actually removes it (daily 03:30 UTC,
+  `copilot.retention.conversation.enabled`).
+- **`PartyErasureConsumer`** consumes `PARTY_ERASED` and hard-deletes the party's rows (GDPR Art. 17,
+  ADR-0117), matching the shape the other seven consumers of that topic use.
+- **The erasure ops on `ConversationStore` are `suspend`, deliberately.** Both callers already run on
+  a Vert.x context, where the blocking `VertxContextSupport.subscribeAndAwait` bridge that `load` and
+  `append` use would throw. For the same reason the sweep is a `suspend @Scheduled` method — a plain
+  one runs on a bare `executor-thread` and dies with `HR000068` on the first reactive call.
+- **The header comment in `V1__conversation_history.sql` is now stale** — it says there is no sweep
+  and no `PARTY_ERASED` consumer "yet". It is deliberately NOT corrected: Flyway checksums the whole
+  file including comments, so editing an applied migration fails the service at boot. Believe this
+  file, not that one.
+- **Known gap:** the event carries `partyId`, but history is keyed on the OIDC `sub`. The customers
+  realm also defines a separate `party_id` claim, so where those differ the erasure matches nothing.
+  Tracked separately — do not read the consumer as complete coverage.
+
 ## Build
 
 ```

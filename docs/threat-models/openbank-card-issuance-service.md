@@ -59,6 +59,37 @@ All mutations require `Idempotency-Key` or `X-Operator-Id` header; resource-leve
 | **E**oP | Viewer escalates to issue or block | Distinct roles enforced at JAX-RS layer (`@RolesAllowed`) + OPA; deny-by-default |
 | **T**ampering | Race between `suspend` and `block` on same card | Domain `require` guards throw `IllegalArgumentException` on illegal state; a concurrent block on a SUSPENDED card is valid by design; concurrent suspend+block both succeed on ACTIVE → last writer wins idempotently (both move toward frozen state) — acceptable; optimistic locking would make this exact (see §5) |
 
+## 4a. Card authorization decision point (D3) — STRIDE supplement
+
+Three new surfaces: `GET /api/v1/cards/category-taxonomy`, `GET|PUT /api/v1/cards/{id}/category-limits`,
+and `POST /api/v1/cards/{id}/authorizations` — the decision that answers whether one card
+authorisation is approved.
+
+**The pre-existing defect this closes.** The channel controls (`contactlessEnabled`,
+`onlineEnabled`, `atmEnabled`, `abroadEnabled`) have been stored on `cards` and returned by the API
+since V5, and **no code anywhere read them to decide anything**. A customer who switched off
+"payments abroad" changed a boolean, got a 200, and their card kept working abroad. That is worse
+than not offering the control: a security control that reports success without acting invites the
+customer to stop taking other precautions. Everything below exists to make those toggles real.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **E**oP | A caller obtains approvals for a card it does not own | `@RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN)` + `@Authorize(action = "card.authorization.decide", resource = "#id")`; the customer-facing path reaches this only through the edge, which already enforces card ownership against the JWT party |
+| **T**ampering | The caller supplies its own spend totals, so a compromised caller could under-report and slip past a limit | Accepted and explicit: the totals are inputs, because this service holds no authorisation history. The trust boundary is that only trusted rails may call it (no `ROLE_CUSTOMER`). When spend tracking lands, the totals become server-derived and this row narrows — flagged in the response today as `spendTracking: false` so no client presents them as measured |
+| **S**poofing | An unknown card id is used to fish for a permissive default | An unknown card **declines** (`CARD_NOT_ACTIVE`) rather than 404s. The acquirer needs an answer, and the safe answer to "may this unknown card spend" is no; it also avoids an existence oracle on card ids |
+| **D**oS | A customer locks themselves out of every rail | `CHIP_AND_PIN` deliberately has no toggle. A customer able to disable every channel could not pay at any terminal and could not recover from one either |
+| **T**ampering | A category block is bypassed by sending an MCC the taxonomy does not know | Unknown, malformed and absent MCCs all resolve to `OTHER`, which is **limitable but never blockable**. That asymmetry is deliberate: making OTHER blockable would let one unclassified code decline arbitrary legitimate spend as the acquirer estate changes, while leaving it unblockable means a customer's gambling block cannot be dodged by a merchant miscoding — because a miscoded gambling merchant is not in the gambling range for any control, including ours |
+| **R**epudiation | A decline cannot be explained to the customer | The decision returns a specific `declineReason`, and the evaluation order is card state, then customer switches, then amounts — so the reason shown is the one the customer can act on ("you turned gambling off"), not a downstream limit they never set |
+| **I**nfo disclosure | The taxonomy leaks something sensitive | It is public bank policy — category ids, labels and MCC ranges. Serving it is the point: a client that hardcoded MCC sets would keep enforcing a stale policy on every installed build |
+
+**DFD update:** adds `acquirer rail → POST /cards/{id}/authorizations → decision` and
+`customer (via edge) → PUT /cards/{id}/category-limits`. No new downstream dependency; the decision
+reads only this service's own tables.
+**Risk class:** integrity of a money-path control (an authorisation approve/decline).
+**Rollback:** revert. Card behaviour returns to what it is today — controls stored and unenforced —
+which is the defect, so a rollback should be paired with disabling the customer-facing toggles
+rather than leaving them visibly ineffective.
+
 ## 5. Residual risks / assumptions
 
 - **No optimistic locking today.** `Card` lacks a `version` column; two concurrent lifecycle
@@ -78,6 +109,8 @@ All mutations require `Idempotency-Key` or `X-Operator-Id` header; resource-leve
   is implemented, erasure is manual.
 
 ## 6. Change log
+
+- **2026-08-07** — Card authorization decision point (D3). New `CardAuthorizationPolicy` (pure, 15 unit tests) plus `POST /cards/{id}/authorizations`, `GET|PUT /cards/{id}/category-limits` and `GET /cards/category-taxonomy`; new `card_category_rules` table. STRIDE supplement in §4a. **This closes a live defect, not just a missing feature:** the channel controls stored since V5 were read by nothing, so a customer switching off "payments abroad" got a 200 and no protection. The policy is deliberately pure — no repository, no clock — so every branch of a money-path decision is reachable in a unit test rather than only against a live acquirer. Per-category spend is not yet tracked; the response says `spendTracking: false` so a client shows "no data" instead of a progress ring against a zero that looks measured. Rollback: revert, but pair it with hiding the customer-facing toggles rather than leaving controls that visibly do nothing.
 
 - **2026-06-30** — Initial threat model authored (ADR-0113 delivery gate).
   Sandbox: maskedPan synthetic, no real PAN stored, PCI DSS CHD scope not triggered.

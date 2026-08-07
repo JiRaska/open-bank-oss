@@ -153,11 +153,14 @@ class ConsentResource(
     @Authorize(action = "consent.revoke", resource = "#granteeId")
     suspend fun revoke(
         @PathParam("id") id: UUID,
-        @QueryParam("partyId") partyId: UUID,
+        @QueryParam("partyId") partyId: UUID?,
         @QueryParam("granteeId") granteeId: String?,
         request: RevokeConsentRequest?,
     ): ConsentResponse {
         requireNotNull(request) { "request body is required" }
+        // #3104 — same defect one argument position over: absent, partyId reached
+        // RevokeConsentCommand as null and answered 500 instead of 400.
+        requireNotNull(partyId) { "query parameter 'partyId' is required" }
         val consent = revokeConsent.revokeConsent(RevokeConsentCommand(id, partyId, request.reason, granteeId))
         return ConsentResponse.from(consent)
     }
@@ -166,15 +169,21 @@ class ConsentResource(
     @POST
     @Path("/{id}/activate")
     @Authorize(action = "consent.activate", resource = "#id")
-    suspend fun activate(@PathParam("id") id: UUID, @QueryParam("scaSessionId") scaSessionId: UUID): ConsentResponse =
-        ConsentResponse.from(activateConsent.activateConsent(id, scaSessionId))
+    suspend fun activate(@PathParam("id") id: UUID, @QueryParam("scaSessionId") scaSessionId: UUID?): ConsentResponse {
+        // #3104 — nullable + guard, because a guard in a non-nullable parameter's body is dead code.
+        requireNotNull(scaSessionId) { "query parameter 'scaSessionId' is required" }
+        return ConsentResponse.from(activateConsent.activateConsent(id, scaSessionId))
+    }
 
     @Operation(summary = "Reject a PENDING_SCA consent (e.g. customer cancelled SCA); transitions to REJECTED")
     @POST
     @Path("/{id}/reject")
     @Authorize(action = "consent.reject", resource = "#id")
-    suspend fun reject(@PathParam("id") id: UUID, @QueryParam("reason") reason: String): ConsentResponse =
-        ConsentResponse.from(activateConsent.rejectConsent(id, reason))
+    suspend fun reject(@PathParam("id") id: UUID, @QueryParam("reason") reason: String?): ConsentResponse {
+        // #3104 — a rejection with no reason is a bad request, not a broken server.
+        requireNotNull(reason) { "query parameter 'reason' is required" }
+        return ConsentResponse.from(activateConsent.rejectConsent(id, reason))
+    }
 
     @Operation(summary = "Validate whether a consent covers the requested scope and account (resource servers)")
     @POST
@@ -211,8 +220,13 @@ class ConsentResource(
     suspend fun hasActiveConsent(
         @PathParam("partyId") partyId: UUID,
         @PathParam("granteeId") granteeId: String,
-        @QueryParam("scope") scope: String,
+        @QueryParam("scope") scope: String?,
     ): ConsentCheckResponse {
+        // #3104 — this handler ALREADY answered 400 when the parameter was absent, because
+        // `runCatching` swallows the NPE from valueOf(null) and the requireNotNull below fires.
+        // Nullable + an explicit guard so the message names the missing parameter rather than
+        // reporting `unknown scope: null`, and so the declared type stops promising non-null.
+        requireNotNull(scope) { "query parameter 'scope' is required" }
         val required = runCatching { ConsentScope.valueOf(scope) }.getOrNull()
         requireNotNull(required) { "unknown scope: $scope" }
         val granted = validateConsent.hasActiveConsent(

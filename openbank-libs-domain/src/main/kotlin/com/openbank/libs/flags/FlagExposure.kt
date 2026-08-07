@@ -28,7 +28,8 @@ data class FlagExposure(
     val variant: String,
     val targetingKey: String?,
     val reason: EvaluationReason,
-    val timestamp: Instant = Instant.EPOCH,
+    /** When the subject saw the variant. Defaults to construction time; [of] never passes one. */
+    val timestamp: Instant = Instant.now(),
     /** Ties the exposure back to the request log line (DORA reconstruction). */
     val traceId: String? = null,
 ) {

@@ -13,7 +13,7 @@
 openbank-infra/scripts/build-push-service.sh customer-edge
 ```
 
-`Dockerfile` sestaví fast-jar ve stage `eclipse-temurin:25-jdk-alpine` a spustí ho na `eclipse-temurin:25-jre-alpine` s `-XX:+UseZGC`, exponuje port 8128.
+Image staví `.github/workflows/Dockerfile.deploy` z fast-jaru sestaveného na hostu — runtime base `eclipse-temurin:25-jre` (glibc, #3354), non-root uživatel `openbank`, `-XX:+UseZGC`, port 8128. `openbank-customer-edge/Dockerfile` nic nestaví (#3016); pipeline z něj čte jedinou věc, řádek `EXPOSE`.
 
 ## Endpointy
 

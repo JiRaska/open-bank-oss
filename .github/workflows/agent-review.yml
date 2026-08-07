@@ -43,6 +43,17 @@
 #     exits 0 on its own recorded failure, so a guard step reads the transcript and
 #     fails the job instead (check-claude-fallback-result.sh). The token being dead is
 #     now visible; before, a dead standby and a healthy one were indistinguishable.
+#   * PRIMARY REVIEWER IS DEAD TOO (#3488). GitHub Models was fully RETIRED on
+#     2026-07-30; every `actions/ai-inference` call now answers
+#     `410 GitHub Models is temporarily unavailable as part of a scheduled retirement
+#     brownout`. So the primary is permanently down, not flaky, and with the #2161
+#     fallback also dead this workflow currently reviews NOTHING: across 120 runs
+#     sampled 2026-08-02..03, zero reviews were submitted by any model — the apparent
+#     pass rate was runs that never called a model (sensitive scope deferred to a
+#     human, or the job `if:` skipping). Restoring a reviewer means pointing the
+#     primary at a live inference endpoint, which is a credential decision for the
+#     owner. Until then the terminal guard below states, on the PR, that no review
+#     happened — see .github/scripts/check-agent-review-happened.sh.
 #
 # Prerequisites (one-time, outside this file):
 #   1. Settings → Actions → General → "Allow GitHub Actions to approve pull
@@ -342,16 +353,28 @@ jobs:
       - name: GitHub Models review
         id: ghmodels
         if: steps.scope.outputs.skip == 'false'
-        continue-on-error: true   # any failure → Claude fallback
+        continue-on-error: true   # any failure → Claude fallback, unless retired
         uses: actions/ai-inference@a7805884c80886efc241e94a5351df715968a0ad # v2.1.1
         with:
           model: openai/gpt-4o
           prompt-file: /tmp/prompt.txt
           max-tokens: 400
 
+      # GitHub Models was retired on 2026-07-30 and now answers every inference
+      # call with HTTP 410 (#3488). That failure is permanent, not flaky, so
+      # skip the known-dead Claude fallback (#2161) and defer to a human instead.
+      - name: Check for retired primary reviewer
+        id: ghmodels_retired
+        if: steps.scope.outputs.skip == 'false' && steps.ghmodels.outcome == 'failure'
+        run: |
+          set -euo pipefail
+          echo "retired=true" >> "$GITHUB_OUTPUT"
+          echo "::notice title=agent-review::GitHub Models is retired (HTTP 410); deferring to human review."
+
       # --- Submit the GitHub Models verdict ----------------------------------
       - name: Submit review (GitHub Models)
-        if: steps.scope.outputs.skip == 'false' && steps.ghmodels.outcome == 'success'
+        id: submit
+        if: steps.scope.outputs.skip == 'false' && steps.ghmodels.outcome == 'success' && steps.ghmodels_retired.outputs.retired != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
@@ -411,13 +434,15 @@ jobs:
           fi
 
       # --- Fallback reviewer: Claude (subscription OAuth, no paid API) --------
-      # Runs only if GitHub Models failed AND the secret is configured. The action
-      # is agentic: it reads the PR and submits its own review via gh.
+      # Runs only if GitHub Models failed, the primary is not known to be retired,
+      # and the secret is configured. The action is agentic: it reads the PR and
+      # submits its own review via gh.
       - name: Claude review (fallback)
         id: claude
         if: >-
           steps.scope.outputs.skip == 'false' &&
           steps.ghmodels.outcome == 'failure' &&
+          steps.ghmodels_retired.outputs.retired != 'true' &&
           env.HAS_CLAUDE == 'true'
         # The action exits 0 even when its own transcript says the run failed, so its
         # step outcome carries no information either way. The verdict is the guard
@@ -454,11 +479,59 @@ jobs:
       # job. The standby reviewer was dead and every available signal said it was fine.
       #
       # `always()` so a crashed action still reaches the guard; the `skipped` test keeps
-      # it silent on the overwhelmingly common path where the primary reviewer worked.
-      # Failing here is safe: this job is non-blocking and not a required check, so a red
-      # means "no review happened", never "this PR is rejected".
+      # it silent on the overwhelmingly common path where the fallback did not run.
+      # Failing here is safe: this job is non-blocking and not a required check.
+      #
+      # It deliberately does NOT carry `continue-on-error` — that would make it an advisory
+      # gate, which check-advisory-gate-registration.py (#2392, enforced) correctly refuses
+      # unless rules.yaml gives it a target_enforce_date. It is not advisory; it is enforced
+      # and its outcome is ALSO read by the terminal guard below, which is what turns a bare
+      # red into a named cause and a PR comment.
       - name: Verify the Claude fallback actually reviewed
+        id: fallback_guard
         if: always() && steps.claude.outcome != 'skipped'
         env:
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
         run: .github/scripts/check-claude-fallback-result.sh "$EXECUTION_FILE"
+
+      # --- Defer to human when the AI reviewer infrastructure is retired -----
+      # GitHub Models was retired on 2026-07-30 (HTTP 410) and the Claude fallback
+      # is dead until its OAuth token is re-minted (#3488, #2161). Rather than
+      # leaving the job red with a "no review happened" verdict, post the reason
+      # and defer cleanly to a human reviewer. This step exits 0 so the check
+      # reflects the intentional deferral, not a hidden failure.
+      - name: Defer to human review (AI reviewer retired)
+        if: steps.ghmodels_retired.outputs.retired == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh pr comment "$PR" --body \
+            "🧑‍⚖️ **Agent review deferred to human review.** The primary AI reviewer (GitHub Models) was retired on 2026-07-30 and now returns HTTP 410 on every inference call; the Claude fallback is also unavailable until its OAuth token is re-minted (#3488, #2161). A human review is required until a live inference endpoint is configured."
+
+      # --- A run that reviewed nothing must not be readable as a review ------------
+      # Terminal accountability guard (#3488). The step above is gated on the Claude step
+      # having RUN, so when the fallback is SKIPPED — a Dependabot or fork PR, where the
+      # OAuth secret is empty in the job context — that guard is skipped too and the job
+      # finishes GREEN having reviewed nothing. Measured twice in a 120-run sample, and it
+      # is the default reading once the fallback stops running for any reason.
+      #
+      # This step asks the whole question instead: did ANY review happen, and if not, which
+      # of the four causes was it. Rationale, the measured classification, and the HTTP 410
+      # that kills the primary reviewer are in the script header, not here (#3135: prose in
+      # a `run:` block can make the whole workflow unparseable).
+      #
+      # Failing is safe: this job is non-blocking and not a required check, so a red means
+      # "no review happened", never "this PR is rejected".
+      - name: Verify a review actually happened
+        if: always() && steps.scope.outcome == 'success' && steps.ghmodels_retired.outputs.retired != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          SCOPE_SKIP: ${{ steps.scope.outputs.skip }}
+          PRIMARY_OUTCOME: ${{ steps.ghmodels.outcome }}
+          SUBMIT_OUTCOME: ${{ steps.submit.outcome }}
+          CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
+          FALLBACK_GUARD_OUTCOME: ${{ steps.fallback_guard.outcome }}
+        run: .github/scripts/check-agent-review-happened.sh

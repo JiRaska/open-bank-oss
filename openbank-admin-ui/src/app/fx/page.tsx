@@ -67,6 +67,7 @@ function nextRunTime(hour: number, minute: number, days: string[]): string {
 }
 
 function formatNextRun(iso: string, t: (cs: string, en: string) => string): string {
+  // eslint-disable-next-line react-hooks/purity -- time-relative display; timestamps are stable server data.
   const diffMs = new Date(iso).getTime() - Date.now()
   if (diffMs < 0) return t('brzy', 'soon')
   const h = Math.floor(diffMs / 3600000)
@@ -790,7 +791,7 @@ export default function FxPage() {
                     <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                       onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                      <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{new Date(c.createdAt || Date.now()).toLocaleString('cs-CZ')}</td>
+                      <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.createdAt ? new Date(c.createdAt).toLocaleString('cs-CZ') : '—'}</td>
                       <td style={{ padding: '10px 16px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <span style={{ fontSize: '14px' }}>{CURRENCY_META[c.fromCurrency]?.flag ?? '🏳️'}</span>
