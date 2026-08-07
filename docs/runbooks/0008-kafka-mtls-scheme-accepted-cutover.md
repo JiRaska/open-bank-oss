@@ -142,3 +142,72 @@ next image rebuild — currently blocked by the Pact `can-i-deploy` gate, **#266
 Do **not** try to force it via `MP_MESSAGING_INCOMING_*` env vars: SmallRye cannot
 take hyphenated mp.messaging channel config from env and the pod fails to start
 (tried and reverted, #2649 → #2659).
+
+## Stage 6 — remove the `plain:9092` listener (issue #3393)
+
+The last stage of this runbook, and the one that makes the rest of it enforceable
+rather than merely configured. **Everything above this heading was written while
+`allow.everyone.if.no.acl.found` was still `true` and the plaintext listener was
+in place; read it as history, not as instructions.** Specifically:
+
+- "Untouched: every other Kafka client (they keep using `plain:9092`)" and the
+  "Out of scope — cluster-wide gate flip" section were overtaken by **#2794**,
+  which flipped the gate to `false` for the whole cluster.
+- The verification commands that exec into the broker with
+  `--bootstrap-server localhost:9092` no longer have a listener to reach, and
+  the Stage-4 negative test ("an anonymous client on `plain:9092` is DENIED")
+  cannot be run at all any more — its outcome is now structural. A broker-local
+  check needs `:9093` plus a client `--command-config` carrying a KafkaUser
+  keystore.
+
+### What had to be true first
+
+The listener was kept because removing it was assumed to break clients. It did
+not grant anything — a client on it authenticates as `User:ANONYMOUS`, which
+holds no ACL and is denied on every resource once the gate is `false` — so
+"still on 9092" and "cannot use Kafka" were the same statement. Three workloads
+still named it on 2026-08-03, each resolved before the removal:
+
+| workload | state before | resolution |
+| --- | --- | --- |
+| `security-scanner-service` | no `KafkaUser` at all; both topic log segments 0 bytes since creation — it had never published | `KafkaUser security-scanner` + ACLs, moved to `:9093` |
+| `kafka-ui` | the only workload actually speaking on `:9092`; every request denied (`Principal = User:ANONYMOUS is Denied operation = DESCRIBE … based on rule DefaultDeny`, once per 30s poll), rendered as an empty cluster | `KafkaUser kafka-ui` + browse-scoped ACLs, moved to `:9093` |
+| `settlement-service` | `KAFKA_BOOTSTRAP_SERVERS` env with no `mp.messaging` config and no Kafka client in its source — dead value | env deleted |
+
+### Apply
+
+```
+argocd app sync kafka          # Strimzi rolls the broker to drop the listener
+kubectl -n messaging get kafka openbank-cluster -o yaml | yq '.status.listeners[].name'   # expect: tls  (only)
+```
+
+### Verify
+
+1. **Every client is still connected**, i.e. the roll changed nothing for them:
+   ```
+   kubectl get pods -A -l app.kubernetes.io/part-of=openbank --field-selector=status.phase=Running
+   kubectl logs -n <ns> deploy/<svc> --since=10m | grep -iE "SSL handshake|disconnected|TimeoutException"
+   ```
+2. **kafka-ui shows a populated cluster** — topic list, per-topic partitions and
+   consumer groups with lag. That is the observable this whole issue turned on:
+   before, the same screen showed an empty cluster and no error.
+3. **The denial log is gone.** The broker authorizer should no longer print
+   `User:ANONYMOUS is Denied` at all — previously once per 30s, forever:
+   ```
+   kubectl -n messaging logs openbank-cluster-dual-0 --since=10m | grep ANONYMOUS   # expect: nothing
+   ```
+4. **The derived NetworkPolicy names 9093, not 9092.** `gen-network-policies.py`
+   used to hardcode the port; it now derives it from the clients' bootstrap URLs,
+   so a stale port here is a real (if latent) hole rather than a cosmetic one:
+   ```
+   kubectl -n messaging get netpol kafka-broker-ingress-allow-list -o jsonpath='{.spec.ingress[*].ports[*].port}{"\n"}'
+   ```
+
+### Rollback
+
+Re-add the four listener lines to `components/kafka/kafka.yaml` and sync. Note
+what that does and does not buy: it restores *connectivity* on 9092, never
+*authorization* — an ANONYMOUS client is still denied on every resource by the
+gate. So it is only worth doing to quiet a connection-error loop while a real
+client-side problem is fixed, and it is not a path back to a working plaintext
+client. There is no such path; that is the point of the stage.

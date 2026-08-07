@@ -68,6 +68,32 @@ vault write auth/kubernetes/role/eso \
   ttl=1h
 ```
 
+## Convention: the OIDC client secret lives in ONE KV entry (issue #3485)
+
+A new service's ExternalSecret **must** read the OIDC client secret from
+`remoteRef.key: account-service`. Do not invent a per-service KV key.
+
+The whole fleet authenticates as a single Keycloak confidential client,
+`openbank-services` — check any service's `quarkus.oidc.client-id` — so there is
+exactly one secret value and a per-service key name promises a credential that
+does not exist. What it does cost is a `vault kv put` nobody prompts you for:
+`openbank-delegation-service` shipped `remoteRef.key: delegation-service`, ESO
+answered `Secret does not exist`, and the pod sat in `CreateContainerConfigError`
+for its entire life behind ~12 alerts that named everything except the cause
+(fixed in #3471).
+
+Enforced by `.github/scripts/check-oidc-secret-convention.py`
+(gate `oidc-secret-convention`, `mode: enforced`). Ten pre-existing per-service
+entries are baselined in that script and are shrink-only — they are frozen, not
+blessed; migrating one means deleting its baseline entry in the same commit.
+The rule itself is stated in `openbank-libs/governance/rules.yaml:
+oidc_secret_convention`, which is authoritative if this file disagrees.
+
+Note the seed commands below predate the convention: `openbank/balance-service`
+and `openbank/audit-service` are two of the ten baselined entries, and every
+other service takes the value from `openbank/account-service` with no seed step
+of its own.
+
 ## 3. Seed the real secret values (GATE 2 — out-of-band, never in git)
 
 Pull each current value from the live hand-made Secret and write it to Vault.

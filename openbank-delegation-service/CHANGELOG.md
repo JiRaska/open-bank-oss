@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.4.1...delegation-service-v0.5.0) (2026-08-06)
+
+
+### Features
+
+* **delegation:** snapshot counterparty display names onto a grant ([#3797](https://github.com/JiRaska/open-bank-oss/issues/3797)) ([5bc41f6](https://github.com/JiRaska/open-bank-oss/commit/5bc41f6f4735384fc65388d9a5854a3ce88f4b1d))
+
 ## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.4.0...delegation-service-v0.4.1) (2026-08-02)
 
 

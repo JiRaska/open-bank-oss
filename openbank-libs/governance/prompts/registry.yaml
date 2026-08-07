@@ -124,9 +124,10 @@ charters:
     placeholders: []
 
   - id: governance-auditor
-    status: pending
-    blocked_by: ADR-0164
-    reason: LlmDiagnosisAdapter is a stub; no /chat/completions call yet.
+    status: registered
+    prompts: [system.v1]
+    source: openbank-governance-auditor LlmDiagnosisAdapter.SYSTEM_PROMPT (loads system.v1)
+    placeholders: []
 
   - id: release-steward
     status: registered
@@ -135,9 +136,10 @@ charters:
     placeholders: []
 
   - id: docs-truth-agent
-    status: pending
-    blocked_by: ADR-0166
-    reason: LlmDiagnosisAdapter is a stub; no /chat/completions call yet.
+    status: registered
+    prompts: [system.v1]
+    source: openbank-docs-truth-agent LlmDiagnosisAdapter.SYSTEM_PROMPT
+    placeholders: []
 
   - id: authz-policy-auditor
     status: registered
@@ -146,6 +148,7 @@ charters:
     placeholders: []
 
   - id: flaky-test-hunter
-    status: pending
-    blocked_by: ADR-0168
-    reason: LlmDiagnosisAdapter is a stub; no /chat/completions call yet.
+    status: registered
+    prompts: [system.v1]
+    source: openbank-flaky-test-hunter LlmDiagnosisAdapter.SYSTEM_PROMPT
+    placeholders: []

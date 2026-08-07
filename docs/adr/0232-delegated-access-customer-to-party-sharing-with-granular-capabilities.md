@@ -198,6 +198,47 @@ transacting).
   external-disclosure port is shaped so VC issuance becomes a third
   delivery channel without reworking the aggregate.
 
+## Delivery status: is the enforcement path reachable, measured
+
+As of 2026-08-03, against `origin/main`, on **D3's enforcement half only** —
+whether a guard exists is a different question from whether anything asks it.
+Tracked as issue #3615.
+
+| Guard | Takes an amount | Production caller |
+| --- | --- | --- |
+| `AuthorizationService.isAuthorizedForAmount` (account) | yes | **None** — every call site is in `AuthorizationServiceDelegationTest` |
+| `GET /api/v1/accounts/{id}/authorizations/check` | no | None in-repo; calls the amount-free `isAuthorized` |
+| `GET /api/v1/accounts/{id}/savings-goal/delegation/check` | no | None in-repo |
+| `GET /api/v1/cards/{id}/delegation/check` | no | None in-repo |
+| `POST /api/v1/delegations/check` (delegation-service) | yes | The read-only admin-ui probe only |
+| `SavingsWithdrawalApproved` | — | **No consumer** in any service or in `openbank-contracts` |
+
+D3 calls the projection check "the last line before the money path". There is no
+money path behind it. No money-moving service — domestic-payment, sepa-payment,
+sepa-instant, swift, standing-order, settlement, clearing, transaction, ledger —
+reads a delegation grant or projection at all, and customer-edge payment
+initiation requires debtor-owner == the authenticated party, so a delegate is
+refused with 403 before any guard is consulted. `SavingsWithdrawalApproved` is
+documented in `SavingsProposalService` as "the executable instruction the
+payments path consumes"; nothing consumes it.
+
+The guards are correct code and are **kept**, unchanged. What is recorded here is
+that they are not invoked, because nothing in the repo could otherwise say so:
+each one compiles, is a CDI bean method or a registered route, has a port
+declaring it and a green test class — and coverage inverts the signal, since a
+well-tested unreachable guard scores higher than a lightly-tested reachable one.
+`isAuthorizedForAmount` is now declared in
+`rules.yaml: enforcement_reachability` and checked by the `enforcement-reachability`
+gate, which fails both when a `reachable` entry loses its last caller and when
+this `unreachable` entry gains one — so closing the gap requires updating this
+table rather than allowing it to go quietly stale.
+
+This is the same defect class as the `dailyLimit`/`monthlyLimit` refusal: there a
+declared number had no counter, here a declared check has no caller. The order of
+repair is the same and is stated in #3615 — a delegated payment path first, the
+guard consulted on it second, the cumulative counter last. A limit is only worth
+computing once there is a debit to refuse.
+
 ## Consequences
 
 **Positive**

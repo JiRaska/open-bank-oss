@@ -16,6 +16,8 @@ import com.openbank.campaign.application.port.out.StepOutcomeCount
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
+import com.openbank.campaign.domain.model.DeliveryStatus
+import com.openbank.campaign.domain.model.DeliveryTransition
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.Segment
@@ -23,6 +25,7 @@ import com.openbank.campaign.domain.model.SegmentCatalog
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
+import com.openbank.campaign.domain.model.StopCondition
 import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
@@ -61,6 +64,12 @@ class CampaignEntity : PanacheEntityBase() {
     // jsonb array column, which cannot be cast to String — every read threw ClassCastException.
     @Column(nullable = false, columnDefinition = "text")
     lateinit var stepsJson: String
+
+    // Nullable (V3): a campaign without a stop condition has no row content here — null, not an
+    // empty object, so "no condition" and "condition" can never be confused. Same text-not-jsonb
+    // reason as stepsJson.
+    @Column(columnDefinition = "text")
+    var stopConditionJson: String? = null
 
     @Column(nullable = false)
     lateinit var state: String
@@ -123,6 +132,16 @@ class SendLogEntity : PanacheEntityBase() {
 
     @Column(nullable = false)
     lateinit var occurredAt: Instant
+
+    /** ADR-0239 D3. Stored as the enum NAME, like [outcome] — never an ordinal. */
+    @Column(nullable = false)
+    var deliveryStatus: String = DeliveryStatus.PENDING.name
+
+    @Column
+    var deliveryReason: String? = null
+
+    @Column
+    var deliveryUpdatedAt: Instant? = null
 }
 
 @Entity
@@ -170,6 +189,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         segmentName = this@toEntity.segmentRef.name
         segmentVersion = this@toEntity.segmentRef.version
         stepsJson = mapper.writeValueAsString(this@toEntity.steps)
+        stopConditionJson = this@toEntity.stopCondition?.let { mapper.writeValueAsString(it) }
         state = this@toEntity.state.name
         createdBy = this@toEntity.createdBy
         approvedBy = this@toEntity.approvedBy
@@ -183,6 +203,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         goal = goal,
         segmentRef = SegmentRef(segmentName, segmentVersion),
         steps = mapper.readValue<List<CampaignStep>>(stepsJson),
+        stopCondition = stopConditionJson?.let { mapper.readValue<StopCondition>(it) },
         state = CampaignState.valueOf(state),
         createdBy = createdBy,
         approvedBy = approvedBy,
@@ -261,6 +282,9 @@ class PanacheSendLogRepository :
                     stepOrder = send.stepOrder
                     outcome = send.outcome.name
                     occurredAt = send.occurredAt
+                    deliveryStatus = send.deliveryStatus.name
+                    deliveryReason = send.deliveryReason
+                    deliveryUpdatedAt = send.deliveryUpdatedAt
                 },
             )
         }.awaitSuspending()
@@ -273,16 +297,45 @@ class PanacheSendLogRepository :
         size: Int,
     ): List<SendRecord> = Panache.withSession {
         query(campaignId, outcome).page<SendLogEntity>(Page.of(page, size)).list<SendLogEntity>()
-    }.awaitSuspending().map {
-        SendRecord(
-            id = it.id,
-            campaignId = it.campaignId,
-            partyId = it.partyId,
-            stepOrder = it.stepOrder,
-            outcome = SendOutcome.valueOf(it.outcome),
-            occurredAt = it.occurredAt,
-        )
-    }
+    }.awaitSuspending().map { it.toDomain() }
+
+    /**
+     * Apply one delivery outcome to the row the producer correlated it with (ADR-0239 D3/D4).
+     *
+     * Read-decide-write inside ONE transaction, and the decision is [DeliveryTransition.next] —
+     * not `update ... set delivery_status = ?`. Delivery is at-least-once and the outcomes topic
+     * is partitioned by notification id, so two events for one send arrive in no guaranteed order;
+     * a blind write would let a stale duplicate clobber a fresher terminal state.
+     *
+     * Returns false when nothing moved: an unknown correlation id (an outcome for somebody else's
+     * request — expected, since the topic is shared and carries every producer's traffic), or a
+     * transition the rule refuses. Neither is an error.
+     */
+    override suspend fun applyDeliveryOutcome(
+        sendId: UUID,
+        outcome: String,
+        reason: String?,
+        occurredAt: Instant,
+    ): Boolean = Panache.withTransaction {
+        // Explicit type argument: this is the Java Panache variant, whose query methods are generic
+        // in the entity type, so Kotlin cannot infer it from the receiver (the same reason
+        // `listByCampaign` above writes `.page<SendLogEntity>(…).list<SendLogEntity>()`).
+        find("id", sendId).firstResult<SendLogEntity>().map { entity ->
+            if (entity == null) {
+                false
+            } else {
+                val next = DeliveryTransition.next(DeliveryStatus.valueOf(entity.deliveryStatus), outcome)
+                if (next == null) {
+                    false
+                } else {
+                    entity.deliveryStatus = next.name
+                    entity.deliveryReason = reason
+                    entity.deliveryUpdatedAt = occurredAt
+                    true
+                }
+            }
+        }
+    }.awaitSuspending()
 
     /** `GROUP BY campaignId, outcome` — the whole estate in one round trip (issue #3296). */
     override suspend fun countAllByCampaignAndOutcome(): List<CampaignOutcomeCount> = Panache
@@ -345,6 +398,39 @@ class PanacheSendLogRepository :
             Instant.ofEpochSecond(sinceEpochSeconds),
         )
     }.awaitSuspending().toInt()
+
+    /**
+     * The predecessor send's delivery status (#3585 branch conditions).
+     *
+     * Ordered by step DESC then time DESC, and limited to one row: a retried step can leave more
+     * than one row at the same order, and the branch must read the newest attempt rather than
+     * whichever the database happened to return first. `SKIPPED_CONDITION` rows are excluded —
+     * a step that never ran is not a predecessor delivery, and counting it would make a chain of
+     * conditional steps read the skip's own PENDING as evidence about the real send before it.
+     */
+    override suspend fun latestDeliveryStatusBeforeStep(
+        campaignId: UUID,
+        partyId: UUID,
+        stepOrder: Int,
+    ): DeliveryStatus? = Panache.withSession {
+        find(
+            "campaignId = ?1 and partyId = ?2 and stepOrder < ?3 and outcome <> ?4 " +
+                "order by stepOrder desc, occurredAt desc",
+            campaignId,
+            partyId,
+            stepOrder,
+            SendOutcome.SKIPPED_CONDITION.name,
+        ).firstResult<SendLogEntity>()
+    }.awaitSuspending()?.let { DeliveryStatus.valueOf(it.deliveryStatus) }
+
+    override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID): Int = Panache.withSession {
+        count(
+            "campaignId = ?1 and partyId = ?2 and outcome = ?3",
+            campaignId,
+            partyId,
+            SendOutcome.SENT.name,
+        )
+    }.awaitSuspending().toInt()
 }
 
 @ApplicationScoped
@@ -387,3 +473,18 @@ class PanacheSegmentRegistry(private val mapper: ObjectMapper) :
         return SegmentCatalog.ALL + legacy.filterNot { (it.name to it.version) in catalogKeys }
     }
 }
+
+// A top-level private rather than a member of PanacheSendLogRepository: that class sits at
+// detekt's TooManyFunctions threshold of 11, which fires AT the limit, and the branch-condition
+// query (#3585) needed the slot.
+private fun SendLogEntity.toDomain(): SendRecord = SendRecord(
+    id = id,
+    campaignId = campaignId,
+    partyId = partyId,
+    stepOrder = stepOrder,
+    outcome = SendOutcome.valueOf(outcome),
+    occurredAt = occurredAt,
+    deliveryStatus = DeliveryStatus.valueOf(deliveryStatus),
+    deliveryReason = deliveryReason,
+    deliveryUpdatedAt = deliveryUpdatedAt,
+)

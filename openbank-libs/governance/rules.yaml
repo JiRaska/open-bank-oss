@@ -749,6 +749,31 @@ money_path_services:
                                             # genuine mismatches into reassuring amber warnings (threat model §3 Tampering).
                                             # It is gitops-only config today, so it is covered by PR review rather than
                                             # four_eyes.verbs; add a `vop.flip` verb here if it ever becomes operator-tunable.
+  - openbank-standing-order-service        # issue #2188: StandingOrderDueConsumer POSTs a real SCT to
+                                            # sepa-payment `/api/v1/sepa-payments` for every due order (#889, merged) —
+                                            # initiates money movement like sdd, not adjacent to it. Same class as sdd:
+                                            # it shapes the instruction, the irreversible debit lives downstream in a
+                                            # gated money-path service. Threat model:
+                                            # docs/threat-models/openbank-standing-order-service.md.
+                                            # four-eyes assessed: the only money-moving path is the scheduler-driven
+                                            # consumer (no human in the loop by design); the REST surface is
+                                            # customer/operator CRUD on orders (create/amend/pause/resume/cancel), whose
+                                            # effect is a FUTURE scheduled debit, not an immediate one — pausing or
+                                            # cancelling an order REDUCES money movement. There is no operator
+                                            # force-execute endpoint to maker-checker gate; add a verb here if one is
+                                            # ever added. Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
+  - openbank-psd2-service                  # issue #2188 sibling sweep: PaymentInitiationService (PIS) calls
+                                            # transactionClient.initiatePayment for SCT/SCT_INST/domestic/SIPO — it
+                                            # initiates real payments like sdd/standing-order do, consent- and
+                                            # SCA-gated upstream (ADR-0090, ADR-0126). Already treated as money-path
+                                            # by the OPA-bundle converge work (#3422); this makes the list agree.
+                                            # Threat model: docs/threat-models/openbank-psd2-service.md.
+                                            # four-eyes assessed: initiation is TPP-driven under an eIDAS consent with
+                                            # SCA on the debtor — a maker/checker pair does not exist for a
+                                            # customer-consented machine flow; the bank-side actions that WOULD deserve
+                                            # a gate (TPP revocation, consent termination by an operator) are not
+                                            # wired as operator verbs today. Runs AUTHZ_ENFORCE=false (advisory) —
+                                            # joins the #3679 cohort.
 
 # ---------------------------------------------------------------------------------------
 # SLOs (issue #669 — operational evidence, scope item 3). Governed data: a single
@@ -2116,6 +2141,37 @@ gitops_ref_integrity:
   # naming `Secret payments/vop-oidc`; restored, it passes.
   incident: 2026-07-16
 
+oidc_secret_convention:
+  script: .github/scripts/check-oidc-secret-convention.py
+  wired_into: .github/gates/gates.yaml    # gate id oidc-secret-convention, group gitops, enforced
+  # THE DECISION (issue #3485). The OIDC client secret lives in ONE KV entry, `account-service`,
+  # and every ExternalSecret reads it from there. Not because that name is apt -- it is a
+  # historical accident -- but because the fleet has exactly one Keycloak confidential client,
+  # `openbank-services`, and therefore exactly one secret VALUE. A per-service key name promises
+  # a per-service credential that does not exist, while costing a KV write nobody is prompted to
+  # make. Independent rotation is the only thing the per-service form buys, and nothing can use
+  # it while all 39 projections hold the same client's secret.
+  rule: >-
+    Under openbank-infra/gitops/components/, an ExternalSecret data entry projecting the OIDC
+    client secret (remoteRef.property or secretKey == OIDC_CLIENT_SECRET) must read
+    remoteRef.key: account-service.
+  basis: one_client_implies_one_kv_entry
+  baseline: in-script BASELINE dict -- 10 pre-existing per-service entries, SHRINK-ONLY
+  # WHY BASELINED AND NOT MIGRATED. Changing a live ExternalSecret's remoteRef re-projects the
+  # Secret and rolls the pod. Nothing in this repo can see what those 10 KV entries hold, so the
+  # switch is safe only if `account-service` is current -- likely (28 live consumers) but not
+  # verified from here, and being wrong breaks authentication on 10 services at once. The gate
+  # therefore FREEZES today's split rather than moving it: the losing side cannot grow, and a
+  # migration done later must delete its baseline entry or the gate fails on the stale
+  # exemption. Migration is tracked on #3485.
+  # PRIOR ART: openbank-delegation-service, 2026-08 -- shipped `remoteRef.key: delegation-service`,
+  # an entry nobody had written. ESO answered `Secret does not exist`, the Secret was never
+  # created, the pod sat in CreateContainerConfigError for its entire life, and ~12 alerts fired
+  # without one of them naming the cause. Fixed in #3471 by pointing at the shared entry.
+  # gitops_ref_integrity cannot catch this: the ExternalSecret DOES declare the Secret, it just
+  # never materialises -- the defect is one layer out, in the KV key the ref names.
+  incident: 2026-08-01
+
 deploy_coverage:
   script: .github/scripts/check-deploy-coverage.sh
   wired_into: .github/workflows/ci.yml   # governance job -> all-green (a REQUIRED check)
@@ -2242,6 +2298,33 @@ governance_manifest:
     # This gate's every historical defect lived on its failure path.
     - each_rule_has_a_test_that_fails_without_it
   incident: 2026-07-25
+
+# A function this repo describes as ENFORCING something must have a production caller. Nothing
+# else notices when it does not: it compiles, it is a bean method, its port declares it, and its
+# unit tests are green — about a function no request reaches. Coverage inverts the signal, since a
+# well-tested unreachable guard scores HIGHER than a lightly-tested reachable one.
+# Enforced by .github/scripts/check-enforcement-reachability.py (gate: enforcement-reachability).
+enforcement_reachability:
+  principle: >
+    Reachability is a property of the call graph, not of the code's docstring. An entry declares
+    what was MEASURED, and the gate fails in both directions — a `reachable` entry that loses its
+    last caller, and an `unreachable` entry that quietly gains one — so a known gap can neither rot
+    into permanent furniture nor be closed without the record being updated.
+  declared:
+    - symbol: isAuthorizedForAmount
+      module: openbank-account-service
+      status: unreachable
+      issue: 3615
+      declared_in:
+        - openbank-account-service/src/main/kotlin/com/openbank/account/application/usecase/AuthorizationService.kt
+        - openbank-account-service/src/main/kotlin/com/openbank/account/application/port/in/AccountPorts.kt
+      why: >
+        ADR-0232 D3's amount-aware guard and the only enforcer of perTransactionLimit in
+        account-service. Measured 2026-08-03: every call site is in AuthorizationServiceDelegationTest.
+        The endpoint that looks like its front door, GET /api/v1/accounts/{id}/authorizations/check,
+        calls the amount-free isAuthorized instead, and no money-moving service reads a delegation
+        grant at all — so there is no debit for a limit check to attach to yet. Flip to `reachable`
+        when the delegated payment path lands (#3615), not before.
 
 knowledge_capture:
   principle: >
