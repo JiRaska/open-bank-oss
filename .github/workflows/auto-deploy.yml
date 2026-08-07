@@ -175,7 +175,7 @@ jobs:
             # running. Added here so it stays built. With this, ALL_SERVICES and
             # release-please's package list finally agree — and check-deploy-coverage.sh
             # keeps them agreeing (#1205).
-            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-delegation-service'
+            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-delegation-service'
 
           # Manual dispatch: rebuild the requested module(s), or the full deployable
           # fleet when no input is given. Only services that actually carry a gitops
@@ -504,6 +504,12 @@ jobs:
             # (#3135).
             bash "${GITHUB_WORKSPACE}/.github/scripts/ensure-ecr-repository.sh" "${svc}" \
               2>&1 | sed "s/^/[${svc}] /" || return 1
+
+            # ldd every bundled linux .so inside the real runtime base before pushing (#3354).
+            # No-op for a service shipping none. Reasoning is in the script header, not here
+            # — prose in a run: block costs the whole workflow (#3135).
+            python3 "${GITHUB_WORKSPACE}/.github/scripts/verify-image-native-libs.py" \
+              "${ctx}/quarkus-app/lib" --arch arm64 2>&1 | sed "s/^/[${svc}] /" || return 1
 
             echo "==> [${svc}] docker push → ${image}"
             docker buildx build \
@@ -960,12 +966,14 @@ jobs:
                 echo "::warning::can-i-deploy: ${svc} has counterpart(s) not yet recorded in sandbox — treating as deployable (ADR-0092)"
                 deployable_list+=("$svc")
               else
-                # Why is it blocked? A queue delay and a real regression give the SAME
-                # verdict (#2549) — classify-can-i-deploy-block.sh's header has the full
-                # reasoning and the unit test drives every branch. Reuse the probe taken
-                # above: a second call could disagree and explain a block decided on other
-                # evidence. Keep this comment SHORT (check-workflow-run-step-size.py).
-                cls_line="$(PACT_VERSION_PRESENT="$vpresent" \
+                # Why blocked? #2549 (lag vs regression) + #3223 (counterpart carries no pacts,
+                # so waiting cannot help). Reasoning in both script headers. Reuse $vpresent.
+                # A probe that cannot run must not abort the step nor restore the promise.
+                IFS=$'\t' read -r cp_st cp_dt \
+                  < <(bash .github/scripts/probe-blocking-counterparts.sh <<< "$cid_out") \
+                  || { cp_st=unknown; cp_dt=""; }
+                cls_line="$(PACT_VERSION_PRESENT="$vpresent" COUNTERPART_STATE="$cp_st" \
+                  COUNTERPART_DETAIL="$cp_dt" \
                   bash .github/scripts/classify-can-i-deploy-block.sh "$svc" <<< "$cid_out")"
                 cls="$(cut -f1 <<< "$cls_line")"
                 cls_why="$(cut -f2- <<< "$cls_line")"

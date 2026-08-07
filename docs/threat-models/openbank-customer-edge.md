@@ -110,6 +110,7 @@ Trust boundaries:
 | E-3 | Container escape → access cluster APIs | `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, `capabilities: drop ALL`, `seccompProfile: RuntimeDefault`. No cluster API access in ServiceAccount. | Low |
 | E-4 | Party with PENDING_KYC opens account | `POST /onboarding/account` KYC gate checks party-service for `status == ACTIVE` before forwarding to account-service. | Low — enforced by edge |
 | E-5 | Customer initiates a payment debiting **another** customer's account (IDOR via `debtorAccountId`) | `POST /domestic-payments` resolves the `debtorAccountId` via account-service and rejects (403) unless its `partyId` equals the JWT party — the same ownership re-check as the transactions read (I-5). NB: this 3a step only creates + screens the instruction; it does not move money (settlement is a later SCA-gated step), so the residual exposure is a screened payment record, not a debit. | Low — IDOR closed at the edge |
+| E-6 | Customer is served ANOTHER party's data because the edge follows an ADR-0179 `merged_into` pointer | `PartyMergeResolver` rewrites the JWT `party_id` to the surviving party when party-service reports the claimed party as `MERGED`. This is the intended meaning of a merge (the two rows are one human), so the whole gate is on WRITING the pointer, not on reading it: `POST /api/v1/parties/{id}/merge` is `@Authorize(action = "party.merge")` and `party.merge` is listed in `rules.yaml: four_eyes.actions`, so a merge needs a maker plus a different checker. The resolver reads only party-service (in-cluster mTLS, M2M token) — never a client-supplied id — follows at most 5 hops with a visited-set so a corrupted or cyclic pointer cannot redirect indefinitely, and fails OPEN to the claimed id so a party-service outage degrades to today's behaviour rather than to a wrong identity. | **High until the merge gate is enforced** — a wrongly-approved merge is an account-takeover primitive, and today the four-eyes gate that is supposed to prevent one is WIRED BUT INERT: party-service ships `AUTHZ_FOUR_EYES_ENFORCE` at its `false` default and `gitops/components/party/party-service.yaml` sets `AUTHZ_ENFORCE="false"`, so a single `ROLE_OPERATOR` can merge unilaterally and this resolver will follow that merge. Flipping both flags is the mitigation; the resolver's own kill switch (`openbank.edge.party-merge-follow-enabled`) is the containment lever meanwhile |
 
 ---
 
@@ -157,3 +158,29 @@ Trust boundaries:
   `lending.intake.enabled` is turned on, and lending refuses any caller that is not this service's
   configured principal — see §9 of the `openbank-lending-service` threat model for why the role gate
   cannot be that control.
+
+- **2026-08-03** — **A delegate can pay from a shared account** (ADR-0232 D3/D5, issue #2990
+  AC9/AC10). `POST /customer/v1/domestic-payments` previously 403'd any account the JWT party did
+  not own; it now falls back to account-service's
+  `/api/v1/accounts/{id}/delegation/payment-authorization` and proceeds when that answers
+  `authorized`. Risk class = **elevation of privilege / spoofing**. Properties this rests on:
+  (a) the edge does not decide — the decision is account-service's, and the only input the edge
+  contributes is WHO is asking, resolved from the validated `party_id` claim and never from the
+  body; (b) the authorization question carries the AMOUNT, without which the grant's
+  per-transaction ceiling is not evaluated at all; (c) a non-200, unparseable, or
+  `authorized`-without-a-grantor answer is a refusal — this path fails CLOSED; (d) every refusal
+  reason collapses to one identical 403, so the route is not an oracle for other parties' accounts
+  or grants; (e) SCA is unchanged and belongs to the INITIATOR — a grant is not a substitute for a
+  device-signed, amount-and-payee-bound challenge.
+  Two consequences worth naming. The delegated path re-fetches the debtor account **as the
+  grantor**, because account-service's `X-Customer-Party-Id` guard is an ownership guard and 404s a
+  delegate by design; that is not the edge self-authorizing, since the grantor's identity came from
+  the authoritative decision one call earlier — but it does mean a bug in that decision widens into
+  an account read, so the edge re-checks that the fetched account's owner IS the named grantor
+  before proceeding. And the instruction now carries the ACCOUNT HOLDER's legal name as
+  `debtorName`, not the initiator's: sending the delegate's would misattribute the transfer on the
+  counterparty's statement and in every downstream AML party resolution.
+  `GET /customer/v1/delegations/activity` is the grantor-side transparency view over audit-service's
+  chain; the grantor is the token party, and the optional filters can only narrow a set already
+  scoped to the caller. Rollback: revert the `resolveDebitAuthority` call site — the route returns
+  to owner-only.

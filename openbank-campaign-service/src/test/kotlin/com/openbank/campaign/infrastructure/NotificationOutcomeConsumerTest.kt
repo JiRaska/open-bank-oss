@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.application.port.out.StepOutcomeCount
+import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
 import com.openbank.campaign.infrastructure.kafka.NotificationOutcomeConsumer
@@ -30,6 +31,10 @@ class NotificationOutcomeConsumerTest {
     private class Applied(val sendId: UUID, val outcome: String, val reason: String?, val occurredAt: Instant)
 
     private class RecordingSendLog : SendLogRepository {
+        // ADR-0245: this fake asserts nothing about conversion, so nothing ever converted.
+        override suspend fun conversionContextFor(campaignId: java.util.UUID, partyId: java.util.UUID) =
+            com.openbank.campaign.application.port.out.ConversionContext(null, false)
+
         val applied = mutableListOf<Applied>()
         var throwOnApply: RuntimeException? = null
 
@@ -52,6 +57,11 @@ class NotificationOutcomeConsumerTest {
         override suspend fun countByCampaign(campaignId: UUID, outcome: SendOutcome?) = 0L
         override suspend fun countByStepAndOutcome(campaignId: UUID) = emptyList<StepOutcomeCount>()
         override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID) = 0
+        override suspend fun latestDeliveryStatusBeforeStep(
+            campaignId: UUID,
+            partyId: UUID,
+            stepOrder: Int,
+        ): DeliveryStatus? = null
         override suspend fun countAllByCampaignAndOutcome() = emptyList<CampaignOutcomeCount>()
     }
 

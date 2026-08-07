@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.15.5...transaction-service-v1.16.0) (2026-08-07)
+
+
+### Features
+
+* **transaction:** resolve card merchants to a name and a shop location (D5) ([#4010](https://github.com/JiRaska/open-bank-oss/issues/4010)) ([78139e0](https://github.com/JiRaska/open-bank-oss/commit/78139e03d49298557ef3385436d7664ab23fd335))
+
 ## [1.15.5](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.15.4...transaction-service-v1.15.5) (2026-08-02)
 
 

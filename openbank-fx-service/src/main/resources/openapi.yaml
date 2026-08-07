@@ -5,7 +5,7 @@ info:
   title: FX Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.2 -> 1.3): additive
   # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
-  version: 1.5.0
+  version: 1.6.0
   description: >-
     Foreign exchange rates and currency conversion. On convert, the converting party's name is
     synchronously screened against the sanctions lists (ADR-0032): a clean party settles the
@@ -260,6 +260,20 @@ components:
     ExchangeRateResponse:
       type: object
       properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Identifier of the stored rate row. NULL when the quote was derived by inverting
+            the stored pair (#3374) — a derived quote has no row of its own.
+        derivedFrom:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Identifier of the stored rate this quote was derived from, present exactly when the
+            pair was answered by inverting the stored direction (#3374). NULL for a stored quote.
         baseCurrency:
           type: string
         quoteCurrency:

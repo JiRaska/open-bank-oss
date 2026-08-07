@@ -245,10 +245,16 @@ two authenticated principals to alter.
 | Repudiation — "who activated this rule set?" | Durable Postgres record per activation (`compliance_pack_activation`: maker, checker, reason, timestamps) + canonical SHA-256 `content_hash` pinned into the audit evidence (ADR-0214); unlike the Redis-backed ADR-0155 layer this trail is permanent |
 | DoS — boot bricked by a corrupt activation row | Deliberate fail-loud: boot refuses to start over a corrupt activation rather than originate unprotected; operator remediation is to fix the row (the in-memory registry cannot silently run with a partial rule set) |
 | Elevation of privilege — maker self-approves | Server-side identity from the JWT subject (never request body); segregation enforced twice: `Proposal.approve` and registry re-assertion |
+| Tampering — two decisions arriving together are BOTH applied, and a rejected pack is enforced anyway (#3467) | The decision is a conditional UPDATE (`... where id = :id and state = PROPOSED`), so exactly one of any number of concurrent deciders claims the row and the rest are refused. Previously `decide()` tested the state against a snapshot read in a separate transaction and then wrote unconditionally, so two decisions both passed; worse, the approve leg called `registry.activate` whether or not its write survived, leaving a REJECTED row beside a pod enforcing the pack that rejection refused — and `CompliancePackRegistry` has no de-activation path (ADR-0212 D3), so that pod enforced it until restart. `CompliancePackConcurrentDecideIT` measures the race over real HTTP; on the previous code it observed both decisions accepted in 10 of 12 rounds |
 
 **Residual risk:** pack enforcement ships behind the bootstrap flag (default `false`) until the
 CZ reference pack is seeded and activated — the guard cannot protect origination while off.
 Tracked as the named bootstrap follow-up (ADR-0212 D4).
+
+**Residual risk (concurrency):** the conditional UPDATE makes the *decision* atomic; it does not
+make the in-memory registry shared. A pack approved on one replica still reaches its siblings only
+by the convergence path, so the at-most-once guarantee here is about the durable decision, not about
+every pod agreeing at the same instant (#3467, and see the replica-convergence work tracked there).
 
 ## 9. Customer self-service origination intake (ADR-0211) — STRIDE supplement
 
@@ -293,6 +299,8 @@ against `lending.intake.caller-principal`, which refuses every call when unset.
 
 ## 10. Change log
 
+- **2026-08-05** — Trust-boundary change (#3734): `operator-lending-write` now excludes `service-account-*` principals, and a new `prohibited` veto closes the eight matrix-granted lending writes (`approve`, `collateralDecide`, `collateralRegister`, `create`, `disburse`, `repay`, `reschedule`, `writeoff`) to `service-account-openbank-edge` — the role_action_matrix grants them to ROLE_OPERATOR and matrix-allows bypasses rule-level exclusions. The edge's verified customer flow, `lending.intake` (loan application, `CustomerEdgeResource.applyForLoan`), is preserved via `edge-customer-intake`; the ~12 non-matrix writes (`acceleration.execute`, `advance`, `default.mark`, `approval.decide`, ...) are closed by the exclusion alone. Ext moved from generator heredoc to standalone `lending_rest_ext.rego` with a 16-test opa suite.
+- **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `partyId` on the two list endpoints (applications, loans). These are read-only queries scoped BY that party, so a null reaching the repository is a query with no subject; the handlers are non-suspend, so in practice it threw at the boundary and 500'd first. The `@Authorize(action = "lending.list")` gate is unchanged and still runs before the guard. No new caller or boundary. Rollback: revert.
 - **2026-07-31** — Termination and early-exit lifecycle (ADR-0215): termination
   sub-lifecycle states + guard, settlement quote (expired quote refused), statutory
   withdrawal with unwind journal + day interest, DPD/CRR-178 default gates, mandatory

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.10.1...copilot-service-v0.11.0) (2026-08-07)
+
+
+### Features
+
+* **copilot:** register workflow liveness on conversation retention scheduler (ADR-0237) ([#3932](https://github.com/JiRaska/open-bank-oss/issues/3932)) ([e9cf66b](https://github.com/JiRaska/open-bank-oss/commit/e9cf66bce8227696683e471a1d81dbc4a660209f)), closes [#3345](https://github.com/JiRaska/open-bank-oss/issues/3345)
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.10.0...copilot-service-v0.10.1) (2026-08-06)
+
+
+### Bug Fixes
+
+* **copilot:** governance manifest still declared no database after [#3711](https://github.com/JiRaska/open-bank-oss/issues/3711) added one ([#3887](https://github.com/JiRaska/open-bank-oss/issues/3887)) ([3f4ddbd](https://github.com/JiRaska/open-bank-oss/commit/3f4ddbdd63f20a828caa8b93a4184c49c138ceb5))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.9.0...copilot-service-v0.10.0) (2026-08-06)
+
+
+### Features
+
+* **copilot:** give conversation history a deletion path ([#3875](https://github.com/JiRaska/open-bank-oss/issues/3875)) ([227fd95](https://github.com/JiRaska/open-bank-oss/commit/227fd95a30fc5cdb8a4951f1814d7270dbd8880e)), closes [#3870](https://github.com/JiRaska/open-bank-oss/issues/3870)
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.8.1...copilot-service-v0.9.0) (2026-08-06)
 
 

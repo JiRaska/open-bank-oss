@@ -6,7 +6,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 # Runbook — openbank-copilot-service
 
 > Operational runbook for the `copilot` service. Data domain **platform**,
-> classification **confidential**, datastore **Redis**.
+> classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
 
@@ -15,7 +15,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 | Service | `openbank-copilot-service` |
 | HTTP port | `8131` |
 | Data domain | platform |
-| Datastore | Redis (database `—`) |
+| Datastore | PostgreSQL (database `openbank_copilots`) |
 | Classification | confidential |
 | Retention | 1 year |
 | Lineage role | internal |
@@ -44,22 +44,19 @@ triaging an incident that starts on `copilot`.
 ## Common failure modes
 
 - **Pod CrashLoopBackOff at boot:** usually a missing/invalid config or secret
-  (`ExternalSecret` not synced). Check `kubectl describe pod` events and the
-  first 50 log lines.
-- **Readiness flapping:** this service owns no database, but check its **Redis**
-  connectivity before ruling out the datastore — an upstream dependency below, or the
-  OPA sidecar if `AUTHZ_ENFORCE` is on (with no reachable PDP, `@Authorize` fails
-  closed), are the other likely causes.
+  (`ExternalSecret` not synced) or a Flyway checksum mismatch. Check
+  `kubectl describe pod` events and the first 50 log lines.
+- **Readiness flapping:** datastore (PostgreSQL) unreachable or saturated — check the
+  datastore pod/cluster health and connection-pool metrics.
 - **Downstream errors:** verify the upstream dependencies above are healthy before
   assuming the fault is local.
 
 ## Disaster recovery
 
-- **RPO/RTO: not this service's to promise** — it owns no database. Its **Redis** state has its own recovery posture; see the mechanism below before assuming zero impact.
-- **Mechanism:** this service owns no database — there is no managed backup to restore, and none is expected. It does hold state in **Redis**.
-- **Before assuming zero impact:** check this service's own `governance.yaml` and `Redis` keys for anything with a long or no TTL (a durable credential, not a session cache) — losing that requires its own recovery path, not a redeploy.
-- **Restore:** re-sync the ArgoCD Application (or `kubectl rollout restart` the Deployment). Verify against the `Redis` cluster's own health/backup posture, which this runbook does not track.
-- **Verify:** health endpoint green, then re-drive one request end to end.
+- **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up).
+- **Mechanism:** CloudNativePG continuous WAL archiving + base backups to S3 (`barmanObjectStore`). Point-in-time recovery (PITR).
+- **Restore:** create a `Cluster` with `bootstrap.recovery` pointing at the backup object store; CNPG replays WAL to the target time. See runbook 0003 (PG major upgrade) for the cluster-recreate mechanics.
+- **Verify:** `kubectl cnpg status <db>-rw -n <ns>` shows the recovered cluster Healthy and the `*-app` secret regenerated.
 
 > RPO/RTO above are documented targets. They become **Bank-grade** (prod-readiness
 > C6=3) only once a restore/failover drill has actually been rehearsed and attested

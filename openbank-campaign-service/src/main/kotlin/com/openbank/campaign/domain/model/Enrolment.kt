@@ -80,11 +80,28 @@ data class SendRecord(
  */
 enum class SendOutcome {
     SENT,
+
+    /**
+     * The party did the thing the campaign existed to cause (ADR-0245). Recorded by
+     * `ConversionConsumer` from a product event, never by the sending path — it is an OUTCOME, not
+     * a delivery, and the console must not add it to a send count.
+     */
+    CONVERTED,
     DRY_RUN,
     SUPPRESSED_CAP,
     SUPPRESSED_QUIET_HOURS,
     SUPPRESSED_CONSENT,
     SUPPRESSED_LIST,
+
+    /**
+     * The step's ADR-0200 D1 branch condition did not hold, so nothing was attempted (#3585).
+     *
+     * A recorded row rather than silence: a skipped step that leaves no trace makes the console's
+     * funnel understate the journey and gives an operator no way to tell "this branch was not
+     * taken" from "this step never ran". It is NOT a suppression — no policy denied anything, and
+     * it must not be read as one — and it does not consume the frequency cap, which counts `SENT`.
+     */
+    SKIPPED_CONDITION,
     FAILED,
 }
 

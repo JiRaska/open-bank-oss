@@ -37,7 +37,7 @@ What is actually running (`openbank-infra/gitops/components/mcp/mcp-service.yaml
 | Caller authentication on `/mcp` | **LIVE.** `quarkus.oidc.tenant-enabled: true`; a validated OAuth 2.1 bearer is required. No token ⇒ `resolveContext()` throws ⇒ the call is denied and metered `resolution_failed` (`McpEndpoint.kt`, ADR-0195 step 4, #2316) |
 | Caller identity | **LIVE.** `CallerContextResolver.resolveOrNull()` reads the token's `sub` (`agent:<id>`) and `consent_id` claim (#2253); the PDP principal id is `ctx.agentId`, no longer a constant. **Residual:** every real caller still authenticates through the one M2M OIDC client provisioned so far, so in practice one charter (`mcp-anonymous`) still covers every caller — see T-S1 |
 | Tool bodies — accounts, balance, transactions, consents | **LIVE.** `RealAccountReadPort` (#2262, wired as the CDI default in #2316) calls consent-service, account-service, balance-service and transaction-service over M2M OIDC client-credentials (#2278) |
-| Tool body — proposal (`propose_payment`) | **STUB.** `StubProposalPort` still returns the canned `{"phase":"1-stub","status":"PROPOSED"}` note — no maker-checker row is written. copilot-service's `ActionProposal` domain stayed internal (not exposed as a callable port) rather than being bound here |
+| Tool body — proposal (`propose_payment`) | **REFUSES.** `UnwiredProposalPort` throws `UnsupportedOperationException` and `McpEndpoint` relays the reason verbatim as a tool error: no proposal store is wired, so nothing is recorded and the caller is told so (#2414). It previously returned the canned `{"phase":"1-stub","status":"PROPOSED"}` — a fabricated acknowledgement of a proposal no human would ever see; worse, the PII masker replaced the explanatory `note` with `***`, so `status: PROPOSED` was all the caller got. copilot-service's `ActionProposal` domain is still internal (not a callable port), so which service owns an MCP proposal remains undecided |
 | Consent scoping | **LIVE.** `RealAccountReadPort.validate()` calls consent-service `POST /consents/{id}/validate` on every read, reads `grantedAccounts` from THAT response (never from the token), and fails closed on revoked/expired/out-of-scope — see T-I2 |
 | Audit trail of tool calls / policy decisions | **LIVE** (`application/McpCallAuditor.kt`) — one canonical `AuditEvent` per `tools/call`, `actorType = AI_AGENT`, carrying tool, capability, charter, `policy_decision` and outcome. Emitted on ALL four outcomes (allow, policy deny, unmapped tool, PDP outage). Delivery is the shared `LoggingAuditEventPublisher` (log pipeline), as everywhere else in the fleet — no Kafka producer in the module |
 | Rate limiting / budgets / idempotency | **NONE** in this service |
@@ -100,8 +100,8 @@ Assets, in priority order:
 │              ├─ consent.validate(consentId, scope, iban) ── LIVE, fails      │
 │              │    closed on revoked/expired/out-of-scope; grantedAccounts    │
 │              │    read from THIS response, never from the caller's token     │
-│              └─ propose_payment ──► StubProposalPort — still a canned note,   │
-│                   no maker-checker row written                               │
+│              └─ propose_payment ──► UnwiredProposalPort — REFUSES; no        │
+│                   proposal store, nothing recorded, caller told so           │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -115,7 +115,7 @@ and what bounds it is the live consent-intersection check inside the port, not t
 
 **External entities.** MCP clients (AI agents), the OPA sidecar, consent-service, account-service,
 balance-service, transaction-service. The maker-checker queue is not yet an entity here —
-`propose_payment` is still a stub.
+`propose_payment` refuses.
 
 ## 3. Authn / Authz — what the PDP can and cannot see
 
@@ -201,10 +201,9 @@ on an invariant nothing distinguishes" pattern, just one layer up from where it 
   For the read tools this is now bounded, not harmless: a malformed or out-of-scope `accountId`
   reaches `RealAccountReadPort.validate()`, which live-checks it against the presented consent's
   `grantedAccounts` and fails closed (T-I2) — so the residual is a wasted downstream round-trip and
-  an error, not a data leak. It is still fully open for `propose_payment`: nothing validates that
-  `amount` is a well-formed non-negative decimal, that `toIban` is a valid IBAN, or that `currency`
-  is ISO 4217, because that tool has no validating implementation behind it yet — the first thing to
-  fix when `propose_payment` writes a real row.
+  an error, not a data leak. For `propose_payment` it is **closed at the tool boundary**: `ProposePaymentArgs.validate()`
+  rejects a malformed amount, a non-mod-97 IBAN and a non-ISO-4217 currency before the port is
+  reached (#2649), and the port itself now refuses outright (#2414).
 - **T-T3 — runtime tampering.** `readOnlyRootFilesystem`, `runAsNonRoot: true`, `runAsUser: 100`,
   all capabilities dropped, `seccompProfile: RuntimeDefault`, image cosign-signed and
   Kyverno-verified at admission (ADR-0030 D4). **[LIVE]**
@@ -331,11 +330,15 @@ on an invariant nothing distinguishes" pattern, just one layer up from where it 
   declares `requires_human: [every: proposal, sca: dynamic_linking, scope: consent_granted]`.
   `agents.rego` states this outright: *"same as every charter's `requires_human` block, which no
   code path reads either"*. The propose-only regime — the claim that this service can never move
-  money — is therefore a property of the *stub* today and, in phase 2, a property of whatever the
-  `ProposalPort` implementation happens to do. Nothing structurally prevents a future
-  `ProposalPort` from calling `transaction-service` directly. The HITL + SCA guarantee needs to be
-  enforced at the write boundary (a `PROPOSED`-only state machine that has no transition this
-  service can trigger), not asserted in YAML.
+  money — is still not a state machine. Two things have changed since this row was written, and
+  neither closes it. `ProposedOnly.enforce` moved the PROPOSED-only check onto the CALL PATH, so a
+  future port cannot hand a caller a disposed proposal. And `propose_payment` now REFUSES
+  (`UnwiredProposalPort`, #2414) instead of returning a fabricated `PROPOSED` for a proposal nobody
+  recorded — a control that reports success is worse than one that is absent, because everything
+  upstream believes a human is reviewing something. What remains open is the whole of the real
+  design: nothing structurally prevents a future `ProposalPort` from calling `transaction-service`
+  directly, and the HITL + SCA guarantee must be enforced at the write boundary, not asserted in
+  YAML.
 
 ## 5. Documented-but-unenforced controls (summary)
 
@@ -357,7 +360,7 @@ reader skimming `agents.yaml` would reasonably assume all of them work:
 | ~~Consent-scoped reads / `grantedAccounts` intersection~~ | `RealAccountReadPort` KDoc, ADR-0181/ADR-0126 | **now enforced** — live `consent.validate()` call per read, fails closed (#2262, wired live in #2316); see T-I2 |
 | Per-agent charter (one charter per real caller) | ADR-0181 phase 2 intent, `agents.yaml: mcp-anonymous` comment | **nothing** — every real caller still authenticates through the one provisioned M2M client; see T-S1 |
 | `pii: masked` on the agent's data scope | `agents.yaml: mcp-anonymous.data_scope` | **nothing** in this service — see T-I3, now live-exploitable |
-| `requires_human: {every: proposal, sca: dynamic_linking, scope: consent_granted}` | `agents.yaml` | **nothing** — stated explicitly in `agents.rego`; moot in practice while `propose_payment` is a stub (T-E4) |
+| `requires_human: {every: proposal, sca: dynamic_linking, scope: consent_granted}` | `agents.yaml` | **nothing** — stated explicitly in `agents.rego`; moot in practice while `propose_payment` refuses outright and records nothing (T-E4, #2414) |
 | `limits: {tokens_per_run, runs_per_day}` | `agents.yaml` | **nothing** in this service (agent-service has a `CharterRateLimiter`; this one does not) — see T-D1, now live-exploitable |
 | ~~Policy decision recorded to the audit chain~~ | `agents.rego` `decision` comment, ADR-0031 D5 | **now enforced** — `McpCallAuditor` (#2207); see T-R1 |
 | Declared tool `inputSchema` | `McpToolRegistry.tools` | **nothing** server-side beyond presence + JSON type; narrowed by the live consent check for read tools (T-T2), fully open for `propose_payment` |
@@ -375,17 +378,20 @@ container hardening.
    The CI guard this section originally suggested shipped as `check-mcp-stub-ports-vs-caller-auth.sh`
    (#2230) and did exactly its job: it kept the real `AccountReadPort` from going live before T-I2
    and the caller-identity half of T-S1/T-E2 were closed, and now correctly reports "placeholder
-   identity removed; real ports permitted." The remaining load-bearing stub is `StubProposalPort` —
-   the same class of guard should gate its eventual replacement on T-E4 (below) actually being
-   closed, not merely on identity/consent being present.
+   identity removed; real ports permitted." The remaining load-bearing stub is gone: `propose_payment` refuses
+   (`UnwiredProposalPort`, #2414) rather than acknowledging a proposal it never wrote, so there is
+   no longer a fabricated success for the guard to protect. The same class of guard should gate the
+   eventual REAL binding on T-E4 actually being closed, not merely on identity/consent being
+   present.
 2. **No ingress today.** Still correct, and still should stay that way — authentication now exists,
    but nothing here has been evaluated against a hostile internet-facing client, only in-cluster
    ones.
 3. **Real customer data now passes through this service.** The sandbox posture (no production
    customers) is what currently bounds the blast radius of T-I3, not any code-level control.
-4. **`propose_payment` is money-adjacent by design and remains a stub.** The propose-only guarantee
-   still rests on an unimplemented port, not on a state machine (T-E4) — this is unchanged by the
-   phase-2 cutover, which deliberately left `ProposalPort` untouched.
+4. **`propose_payment` is money-adjacent by design and is unimplemented — and now says so.** The
+   propose-only guarantee still rests on there being no implementation, not on a state machine
+   (T-E4). What changed in #2414 is only honesty: the tool refuses and records nothing, instead of
+   answering `PROPOSED` to a caller that will relay it to a person as a submitted proposal.
 5. **The MCP protocol version is pinned** (`2025-06-18`) and the server advertises no capabilities
    beyond tools — no resources, prompts, or sampling, which keeps the surface small. Worth keeping.
 6. **The AGPL carve-out (ADR-0136)** applies to this service's own code; the shared Apache-2.0 libs
@@ -398,8 +404,8 @@ container hardening.
 - **Against, today — narrower than before, but still true.** The list is "services that move
   funds" plus a few adjacent ones. As of the phase-2 cutover this service does call real services
   and hold real customer data in transit (§0) — the "calls nothing" half of the original argument no
-  longer holds. But it still **moves nothing**: `propose_payment` returns a literal
-  `{"phase":"1-stub","status":"PROPOSED"}` object, unchanged by this cutover. The trigger this
+  longer holds. But it still **moves nothing**: `propose_payment` now refuses outright
+  (#2414), where it previously returned a literal `{"phase":"1-stub","status":"PROPOSED"}` object. The trigger this
   section named at first writing was deliberately the write side, not the read side, precisely
   because reads-only-adjacent-to-money is `openbank-psd2-service`'s own position and that service is
   not on the list either (see the next bullet). Adding this service now, on the strength of the read

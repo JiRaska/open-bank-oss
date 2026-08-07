@@ -8,6 +8,15 @@ metadata:
     app.kubernetes.io/part-of: authz-policy-auditor
 spec:
   replicas: 1
+  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
+  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
+  # resources - on a full cluster the rollout never completes while reporting 1/1 READY.
+  # No HA to lose: this workload is already unavailable for the moment its pod is replaced.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: authz-policy-auditor
@@ -28,7 +37,7 @@ spec:
         - name: authz-policy-auditor
           # Pending first CI build (ADR-0167 initial PR) — build-push-service.sh publishes the
           # real sandbox-<sha> tag on merge; ArgoCD will not sync a healthy pod until then.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-authz-policy-auditor:sandbox-b2697d6e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-authz-policy-auditor:sandbox-cbcb63c3
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

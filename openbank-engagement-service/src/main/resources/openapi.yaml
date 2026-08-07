@@ -1,0 +1,106 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+openapi: 3.0.3
+info:
+  title: OpenBank Engagement Service
+  description: >-
+    In-app engagement surfaces (ADR-0220), first infrastructure slice. Resolves a typed content
+    payload for a named app slot after the ADR-0219 contact-policy gate (consent + impression
+    budget) and a local repeated-dismissal exclusion, and records the app's impression/click/
+    dismiss/conversion feedback (D2).
+
+    Deliberately absent: gamification (D3) and pre-approved offers (D4, blocked on ADR-0142 not
+    existing yet). No NBA ranking — content returns in catalogue order until ADR-0201's model
+    graduates from shadow (D5). No `@Authorize` OPA rule for these actions yet; the shared policy's
+    `default allow := false` denies both endpoints fail-closed under enforcement until that rule
+    lands.
+  version: 1.0.0
+tags:
+  - name: Surfaces
+paths:
+  /api/v1/surfaces/{slot}:
+    get:
+      tags: [Surfaces]
+      summary: Resolve a typed content payload for a named surface slot
+      parameters:
+        - name: slot
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: >-
+            Always 200 — the state field distinguishes rendered content from every reason it might
+            be absent, none of which is an error: not consented, over the impression budget,
+            outside quiet hours, or locally suppressed by repeated dismissal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SurfaceResponse"
+        "400":
+          description: missing partyId or an unknown slot
+  /api/v1/surfaces/events:
+    post:
+      tags: [Surfaces]
+      summary: Record an impression, click, dismiss or conversion for a surfaced content item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EngagementEventRequest"
+      responses:
+        "202":
+          description: accepted — written to the transactional outbox, published asynchronously
+        "400":
+          description: unknown slot or event type
+components:
+  schemas:
+    SurfaceContent:
+      type: object
+      properties:
+        id: { type: string }
+        slot:
+          type: string
+          enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
+        type:
+          type: string
+          enum: [BANNER, CARD, STORY, CAROUSEL, OFFER]
+        variables:
+          type: array
+          items: { type: string }
+    SurfaceResponse:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [ok, not_eligible, suppressed]
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/SurfaceContent"
+        reason:
+          type: string
+          description: present only when state is not_eligible
+    EngagementEventRequest:
+      type: object
+      required: [partyId, contentId, slot, type]
+      properties:
+        partyId: { type: string, format: uuid }
+        contentId: { type: string }
+        slot:
+          type: string
+          enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
+        type:
+          type: string
+          enum: [IMPRESSION, CLICK, DISMISS, CONVERSION]

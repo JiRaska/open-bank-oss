@@ -16,6 +16,15 @@ metadata:
     app.kubernetes.io/part-of: billing
 spec:
   replicas: 1
+  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
+  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
+  # resources - on a full cluster the rollout never completes while reporting 1/1 READY.
+  # No HA to lose: this workload is already unavailable for the moment its pod is replaced.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: billing-service
@@ -27,7 +36,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-billing-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "0ed1121118c04aba"
+        openbank.tech/policy-checksum: "15d8a2154b87056f"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -38,7 +47,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: billing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-billing-service:sandbox-c5218b90
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-billing-service:sandbox-fcd28518
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

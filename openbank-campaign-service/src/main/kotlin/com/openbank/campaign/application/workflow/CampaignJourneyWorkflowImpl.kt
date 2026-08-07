@@ -68,6 +68,23 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
                     return
                 }
             }
+            // ADR-0200 D1 branch condition (#3585). Evaluated AFTER the delay, not before it: the
+            // fact it reads is the previous step's delivery status, and the delay is precisely the
+            // window in which that outcome comes back. A step whose condition does not hold is
+            // SKIPPED — the journey continues to the next step — which is what makes this a branch
+            // rather than a second kind of stop condition.
+            //
+            // Replay safety: this whole block is unreachable when `step.condition` is null, and a
+            // step serialized before the field existed deserializes to null (CampaignStep.condition
+            // defaults, pinned by JourneyDefinitionLegacyShapeTest). An in-flight journey replays
+            // its loadDefinition result out of history, so it can never enter here and can never
+            // emit a command its history does not contain.
+            if (step.condition != null &&
+                !step.condition.holdsFor(activities.previousDeliveryStatus(campaignId, partyId, step.order))
+            ) {
+                activities.skipStep(campaignId, partyId, step.order)
+                continue
+            }
             when (activities.deliverStep(campaignId, partyId, step.order)) {
                 StepOutcome.SENT -> activities.advanceStep(campaignId, partyId, step.order)
                 StepOutcome.SUPPRESSED -> {

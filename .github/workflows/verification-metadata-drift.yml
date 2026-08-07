@@ -48,7 +48,7 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # No `cache: gradle` on purpose. Two reasons, one FinOps and one correctness:
       # the repo's Actions cache sits at ~9 GB of its 10 GB ceiling across 61 entries, so
@@ -81,7 +81,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Open or refresh the tracking issue
         env:
           GH_TOKEN: ${{ github.token }}
