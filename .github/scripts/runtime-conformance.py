@@ -61,7 +61,13 @@ import sys
 # Each probe is (id, claim-side reader, fact-side key, comparator). Adding one means adding a
 # collector key and a comparator; the self-test then has to cover it, which is deliberate friction.
 
-PROBES = ("backup_recoverability", "outbox_liveness", "canary_realisability", "image_tag_exists")
+PROBES = (
+    "backup_recoverability",
+    "outbox_liveness",
+    "canary_realisability",
+    "image_tag_exists",
+    "audit_attribution",
+)
 
 
 # ── claim side: what the repo says (pure, reads the working tree) ─────────────────────────
@@ -142,6 +148,18 @@ def claim_canary_rollouts(root: pathlib.Path) -> dict[str, dict]:
                 "has_traffic_routing": "trafficRouting:" in doc,
             }
     return out
+
+
+def claim_audit_producers(root: pathlib.Path) -> dict:
+    """The topics audit-service subscribes to — its claim about which producers it can attribute.
+
+    The envelope in `openbank-libs-domain/.../audit/AuditEvent.kt` names `sourceService` and an actor,
+    so every row is CLAIMED to be attributable. The fact side counts how many actually are.
+    """
+    cfg = root / "openbank-audit-service" / "src" / "main" / "resources" / "application.yaml"
+    m = re.search(r"^\s*topics:\s*(\S.*)$", _read(cfg), re.M)
+    topics = [t.strip() for t in m.group(1).split(",") if t.strip()] if m else []
+    return {"subscribed_topics": len(topics)}
 
 
 def claim_image_pins(root: pathlib.Path) -> dict[str, str]:
@@ -244,11 +262,49 @@ def cmp_image_tag_exists(claims: dict, facts: dict) -> list[str]:
     return findings
 
 
+def cmp_audit_attribution(claims: dict, facts: dict) -> list[str]:
+    """Every audit row must say what it is and where it came from.
+
+    ZERO thresholds on purpose. A percentage here would be a guessed number, and a guessed threshold
+    can sit under the regression it exists to catch — a row that cannot name its own type or producer
+    is a defect at n=1, and the count is context rather than the trigger.
+
+    `distinct_real_sources` is reported alongside because the shape matters for the fix: one real
+    source out of 21 subscribed topics is "nobody populates the field", which is a fleet change;
+    a single missing producer is one service's change.
+    """
+    if not facts:
+        return []
+    findings = []
+    total = facts.get("total", 0)
+    if not total:
+        return []
+    unknown_type = facts.get("unknown_type", 0)
+    unknown_source = facts.get("unknown_source", 0)
+    real = facts.get("distinct_real_sources", 0)
+    topics = claims.get("subscribed_topics", 0)
+
+    if unknown_type:
+        findings.append(
+            f"{unknown_type} of {total} audit row(s) have event_type='UNKNOWN' — the consumer's "
+            f"fallback fired, which is a successful parse and therefore silent"
+        )
+    if unknown_source:
+        pct = 100.0 * unknown_source / total
+        findings.append(
+            f"{unknown_source} of {total} audit row(s) ({pct:.0f}%) have source_service='unknown'; "
+            f"{real} producer(s) populate it across {topics} subscribed topic(s) — the trail cannot "
+            f"say which service produced it"
+        )
+    return findings
+
+
 COMPARATORS = {
     "backup_recoverability": cmp_backup_recoverability,
     "outbox_liveness": cmp_outbox_liveness,
     "canary_realisability": cmp_canary_realisability,
     "image_tag_exists": cmp_image_tag_exists,
+    "audit_attribution": cmp_audit_attribution,
 }
 
 
@@ -284,12 +340,58 @@ def collect() -> dict:
         }
     snap["facts"]["canary_realisability"] = rollouts
 
-    # Outbox row counts are per-service and need a psql exec each; left to the caller to fill via
-    # --merge so this stays a single-responsibility collector. Absent facts are skipped, never
-    # guessed — an absent fact must never read as conformant.
-    snap["facts"].setdefault("outbox_liveness", {})
+    outbox: dict[str, dict] = {}
+    audit: dict = {}
+    for key in clusters:
+        ns, cl = key.split("/", 1)
+        db = _psql(ns, cl, "postgres",
+                   "SELECT datname FROM pg_database WHERE datistemplate=false "
+                   "AND datname<>'postgres' LIMIT 1;")
+        if not db:
+            continue
+
+        table = _psql(ns, cl, db,
+                      "SELECT table_name FROM information_schema.tables WHERE table_schema='public' "
+                      "AND table_name LIKE '%outbox%' LIMIT 1;")
+        if table:
+            row = _psql(ns, cl, db,
+                        f"SELECT count(*), count(*) FILTER (WHERE status='DEAD') FROM {table};")
+            if "|" in row:
+                total, dead = row.split("|")[:2]
+                # Key by the SERVICE the table belongs to, not the table: `card_outbox` is
+                # openbank-card-issuance-service's. The comparator resolves the rest via a unique
+                # prefix — keying by table name alone silently matched nothing on the first real run.
+                svc = "openbank-" + table.replace("_outbox", "").replace("_", "-")
+                outbox[svc] = {"total": int(total), "dead": int(dead)}
+
+        if _psql(ns, cl, db, "SELECT to_regclass('public.audit_entries');"):
+            row = _psql(ns, cl, db,
+                        "SELECT count(*), "
+                        "count(*) FILTER (WHERE event_type='UNKNOWN'), "
+                        "count(*) FILTER (WHERE source_service='unknown'), "
+                        "count(DISTINCT source_service) FILTER (WHERE source_service<>'unknown') "
+                        "FROM audit_entries;")
+            if row.count("|") == 3:
+                total, ut, us, real = row.split("|")
+                audit = {
+                    "total": int(total), "unknown_type": int(ut),
+                    "unknown_source": int(us), "distinct_real_sources": int(real),
+                }
+
+    snap["facts"]["outbox_liveness"] = outbox
+    snap["facts"]["audit_attribution"] = audit
+    # The registry is a separate credential domain (ECR), so image facts stay caller-supplied.
+    # An absent fact prints NOT CHECKED and never reads as conformant.
     snap["facts"].setdefault("image_tag_exists", {})
     return snap
+
+
+def _psql(ns: str, cluster: str, db: str, sql: str) -> str:
+    """One read-only query against a CNPG instance. Empty string on any failure — never a guess."""
+    return _sh([
+        "kubectl", "exec", "-n", ns, f"{cluster}-1", "-c", "postgres", "--",
+        "psql", "-U", "postgres", "-d", db, "-t", "-A", "-F", "|", "-c", sql,
+    ]).strip().split("\n")[0].strip()
 
 
 def _items(raw: str) -> list[dict]:
@@ -319,6 +421,7 @@ def check(root: pathlib.Path, snapshot: dict) -> int:
         "outbox_liveness": claim_outbox_services(root),
         "canary_realisability": claim_canary_rollouts(root),
         "image_tag_exists": claim_image_pins(root),
+        "audit_attribution": claim_audit_producers(root),
     }
     facts = snapshot.get("facts", {})
     total = 0
@@ -467,6 +570,41 @@ def self_test() -> int:
     expect(
         "image: a repo the registry was not queried for is skipped, not passed",
         cmp_image_tag_exists({"openbank-x": "sandbox-dead"}, {}),
+        [])
+
+    # audit: ZERO thresholds — one unattributable row is a defect. The cases below pin that a
+    # single bad row is flagged, so no percentage can creep in later and hide the tail.
+    expect(
+        "audit: a single UNKNOWN event_type is flagged (no threshold)",
+        len(cmp_audit_attribution(
+            {"subscribed_topics": 21},
+            {"total": 1000, "unknown_type": 1, "unknown_source": 0, "distinct_real_sources": 5})),
+        1)
+    expect(
+        "audit: a single unknown source_service is flagged (no threshold)",
+        len(cmp_audit_attribution(
+            {"subscribed_topics": 21},
+            {"total": 1000, "unknown_type": 0, "unknown_source": 1, "distinct_real_sources": 5})),
+        1)
+    expect(
+        "audit: both kinds are reported separately, not merged into one",
+        len(cmp_audit_attribution(
+            {"subscribed_topics": 21},
+            {"total": 1692, "unknown_type": 124, "unknown_source": 1298, "distinct_real_sources": 1})),
+        2)
+    expect(
+        "audit: a fully attributed trail is clean",
+        cmp_audit_attribution(
+            {"subscribed_topics": 21},
+            {"total": 1000, "unknown_type": 0, "unknown_source": 0, "distinct_real_sources": 21}),
+        [])
+    expect(
+        "audit: an EMPTY table is not a pass and not a finding — nothing to attribute yet",
+        cmp_audit_attribution({"subscribed_topics": 21}, {"total": 0}),
+        [])
+    expect(
+        "audit: no facts at all is skipped, not passed",
+        cmp_audit_attribution({"subscribed_topics": 21}, {}),
         [])
 
     if fails:
