@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.101.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.100.0...admin-ui-v0.101.0) (2026-08-07)
+
+
+### Features
+
+* **campaign:** record conversions from product events (ADR-0245) ([#3977](https://github.com/JiRaska/open-bank-oss/issues/3977)) ([0a14c46](https://github.com/JiRaska/open-bank-oss/commit/0a14c46c3793c6f8ada3a42717f44f0b1cb02885))
+
 ## [0.100.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.99.0...admin-ui-v0.100.0) (2026-08-07)
 
 

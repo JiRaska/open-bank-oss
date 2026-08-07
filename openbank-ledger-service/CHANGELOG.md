@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.19.0...ledger-service-v1.20.0) (2026-08-07)
+
+
+### Features
+
+* **ledger:** drive the accounting-day lifecycle automatically (ADR-0207 increment 2) ([#3984](https://github.com/JiRaska/open-bank-oss/issues/3984)) ([4a36eab](https://github.com/JiRaska/open-bank-oss/commit/4a36eaba9557202fc86fa1b0d37c7f746089f196))
+
 ## [1.19.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.18.2...ledger-service-v1.19.0) (2026-08-07)
 
 
