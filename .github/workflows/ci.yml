@@ -111,15 +111,6 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: bash .github/scripts/check-manifest-types-only.sh
 
-      # Per-service Dockerfiles are runtime recipes only; images come from
-      # .github/workflows/Dockerfile.deploy. Before #3016 every one of them carried a
-      # build stage that could not run, which read as authoritative while being fiction.
-      # This also guards the EXPOSE line — the only thing the deploy pipeline reads from
-      # those files, and whose loss silently defaults the container port to 8080.
-      - name: Dockerfiles are runtime-only and declare EXPOSE (#3016, enforced)
-        working-directory: ${{ github.workspace }}
-        run: python3 .github/scripts/check-dockerfile-no-build-stage.py --enforce
-
       # ADR-0071: the governance manifest is code-derived from per-service
       # governance.yaml. Regenerate and fail on any module missing/with an invalid
       # governance.yaml. Phase 4: flipped from advisory (::warning::) to enforce

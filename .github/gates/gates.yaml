@@ -1128,6 +1128,21 @@ gates:
     run: |
       python3 .github/scripts/check-gates-not-deregistered.py --enforce
 
+  - id: dockerfile-runtime-only
+    name: "Dockerfiles are runtime-only, declare EXPOSE, share the deploy base (#3016/#3354, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-dockerfile-no-build-stage.py --self-test
+    selftest_expect: pass
+    run: |
+      # This lived as an inline step in ci.yml's `ui-build` job, which runs only when
+      # openbank-admin-ui/, */governance.yaml or the governance schema changed. So the gate
+      # that owns Dockerfile shape could not fire on a Dockerfile-only PR — the exact change
+      # it exists to catch — and reported nothing rather than reporting a skip. Found on
+      # #3629, whose 53 Dockerfile edits skipped it entirely. A shard runs unconditionally.
+      python3 .github/scripts/check-dockerfile-no-build-stage.py --enforce
+
   - id: gate-script-registration
     name: "every check-* script is actually run (#3240, enforced)"
     group: registry
