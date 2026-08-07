@@ -30,7 +30,30 @@ object TemplateCatalog {
     /** Template id -> the variables it declares. Values are supplied per step; keys are not. */
     val ALL: Map<String, Set<String>> = mapOf(
         "MARKETING_PRODUCT_OFFER" to setOf("offerTitle", "offerText", "ctaText"),
+        // A push carries its template's SUBJECT as the title and a fixed generic body; the offer
+        // itself is read in the app after the tap. That is not a simplification of the email
+        // template — it is notification-service's rule (NotificationConsumer.GENERIC_PUSH_BODY,
+        // issue #1182): customer-specific content must never reach an APNs/FCM payload, which is
+        // delivered through a third party and shown on a locked screen. So this template declares
+        // exactly one variable, and a campaign cannot smuggle body copy into a push by filling in
+        // more.
+        "MARKETING_PRODUCT_OFFER_PUSH" to setOf("offerTitle"),
     )
+
+    /**
+     * Which channel a template is rendered for.
+     *
+     * Kept as data rather than a naming convention: `endsWith("_PUSH")` would silently accept a
+     * template someone names badly, and the failure would appear as a push that renders an email
+     * body — exactly the leak #1182 closed.
+     */
+    val CHANNEL_OF: Map<String, Channel> = mapOf(
+        "MARKETING_PRODUCT_OFFER" to Channel.EMAIL,
+        "MARKETING_PRODUCT_OFFER_PUSH" to Channel.PUSH,
+    )
+
+    /** Templates renderable on [channel] — what an authoring screen may offer for a step. */
+    fun forChannel(channel: Channel): Set<String> = CHANNEL_OF.filterValues { it == channel }.keys
 
     fun exists(template: String): Boolean = template in ALL
 

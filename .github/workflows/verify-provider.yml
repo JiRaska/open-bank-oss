@@ -16,6 +16,16 @@ on:
         description: "Provider service dir, e.g. openbank-swift-service"
         required: true
         type: string
+      ref:
+        # #3306: without this the verification is always published against the tip of main, while
+        # can-i-deploy asks about the version the counterpart has DEPLOYED. On a repo merging this
+        # often those are different shas nearly always, so a consumer can be blocked indefinitely
+        # with no move available. Pass the deployed sha to publish where the gate actually looks.
+        # Must be on main — _service-ci.yml refuses anything else.
+        description: "Commit to verify and publish against, e.g. a counterpart's deployed sha. Blank = tip of main."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -47,7 +57,7 @@ permissions:
 # assumption to avoid re-making: "superseding is free" is only true when the thing being
 # superseded was making progress.
 concurrency:
-  group: verify-provider-${{ inputs.service }}
+  group: verify-provider-${{ inputs.service }}-${{ inputs.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -55,5 +65,6 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: ${{ inputs.service }}
+      ref: ${{ inputs.ref }}
     secrets:
       PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}

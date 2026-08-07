@@ -15,7 +15,7 @@
 
 ### Kontejnerový image
 
-`Dockerfile` builduje z **plného kořenového kontextu repa** (kořenový `settings.gradle.kts` `include`uje každý modul), spustí `:openbank-product-catalog:quarkusBuild` (fast-jar) a runtime stage zkopíruje `build/quarkus-app/` do image `temurin:25-jre-alpine`. Běží pod non-root uživatelem `openbank`, `EXPOSE`uje 8104 a startuje se ZGC.
+`:openbank-product-catalog:quarkusBuild` (fast-jar) běží na hostu z **plného kořenového kontextu repa** (kořenový `settings.gradle.kts` `include`uje každý modul) a `.github/workflows/Dockerfile.deploy` zkopíruje výsledný `quarkus-app/` do image `eclipse-temurin:25-jre` (glibc, #3354). Běží pod non-root uživatelem `openbank`, `EXPOSE`uje 8104 a startuje se ZGC. `openbank-product-catalog/Dockerfile` nic nestaví (#3016) — pipeline z něj čte jedinou věc, řádek `EXPOSE`.
 
 > Platformní pravidlo: **vždy fast-jar, nikdy uber-jar** — runtime stage kopíruje `quarkus-app/`. Builduj na hostiteli, ne in-Docker Gradle. Generický helper: `openbank-infra/scripts/build-push-service.sh openbank-product-catalog`.
 

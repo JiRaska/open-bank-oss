@@ -13,7 +13,9 @@ import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushResult
 import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.persistence.entity.DeviceTokenEntity
+import com.openbank.notification.infrastructure.persistence.entity.NotificationOutboxEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
+import com.openbank.notification.infrastructure.persistence.repository.NotificationOutboxRepositoryImpl
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.mailer.MockMailbox
@@ -104,6 +106,10 @@ class NotificationConsumerIT {
     private fun notificationIdFor(partyId: UUID): UUID? = VertxContextSupport.subscribeAndAwait {
         Panache.withSession { repository.find("partyId", partyId).firstResult() }
     }?.notificationId
+
+    private fun correlationIdFor(partyId: UUID): UUID? = VertxContextSupport.subscribeAndAwait {
+        Panache.withSession { repository.find("partyId", partyId).firstResult() }
+    }?.correlationId
 
     /** Drive one request through the in-memory inbound channel and wait for the ack. */
     private fun consumeAndAwait(request: NotificationRequest) {
@@ -261,6 +267,114 @@ class NotificationConsumerIT {
 
         assertThat(bodyFor(partyId)).contains("Alice")
         assertThat(bodyFor(partyId)).isNotEqualTo(TemplateSensitivity.REDACTED_BODY)
+    }
+
+    // ── Delivery-outcome events (ADR-0239 D2, issue #3663) ──
+
+    @Inject
+    lateinit var outboxRepo: NotificationOutboxRepositoryImpl
+
+    /** Outbox rows for one notification, read through a real reactive session. */
+    private fun outcomeRowsFor(notificationId: UUID): List<NotificationOutboxEntity> =
+        VertxContextSupport.subscribeAndAwait {
+            Panache.withSession { outboxRepo.find("aggregateId", notificationId).list() }
+        } ?: emptyList()
+
+    /**
+     * The whole of issue #3663 in one assertion: a producer that handed a request over has, until
+     * now, had NOTHING to read back. The status write and this row commit in one transaction
+     * (ADR-0003), so a row that exists is a transition that happened.
+     *
+     * Asserts the correlation id is ECHOED, not merely that some event was emitted — an outcome the
+     * producer cannot join back to its own row is the same silence in a more expensive form.
+     */
+    @Test
+    fun `a completed send emits a correlated delivery-outcome event (ADR-0239 D2)`() {
+        val partyId = UUID.randomUUID()
+        val correlationId = UUID.randomUUID()
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.EMAIL,
+                template = NotificationTemplate.WELCOME,
+                recipient = "outcome-correlated@example.com",
+                variables = mapOf("name" to "Alice"),
+                correlationId = correlationId,
+            ),
+        )
+
+        assertThat(statusFor(partyId)).isEqualTo("SENT")
+        val notificationId = notificationIdFor(partyId)!!
+        val rows = outcomeRowsFor(notificationId)
+        assertThat(rows)
+            .withFailMessage("no delivery-outcome event was emitted for a completed send (issue #3663)")
+            .hasSize(1)
+        assertThat(rows.single().eventType).isEqualTo("NotificationOutcome")
+
+        val event = objectMapper.readTree(rows.single().payload)
+        assertThat(event.path("outcome").asText()).isEqualTo("SENT")
+        assertThat(event.path("correlationId").asText()).isEqualTo(correlationId.toString())
+        assertThat(event.path("notificationId").asText()).isEqualTo(notificationId.toString())
+        assertThat(event.path("partyId").asText()).isEqualTo(partyId.toString())
+        assertThat(event.path("reason").isNull).isTrue()
+        // The row itself carries the correlation id too, so an operator can join it back without
+        // replaying the topic.
+        assertThat(correlationIdFor(partyId)).isEqualTo(correlationId)
+    }
+
+    /**
+     * The uncorrelated case, which is the majority of this topic's traffic. An event is still
+     * emitted — ADR-0239 D2 makes it a shared contract, not a private channel back to one consumer
+     * — and its `correlationId` is null rather than a value nothing can match.
+     */
+    @Test
+    fun `an uncorrelated send still emits an outcome, with a null correlation id`() {
+        val partyId = UUID.randomUUID()
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.EMAIL,
+                template = NotificationTemplate.ACCOUNT_OPENED,
+                recipient = "outcome-uncorrelated@example.com",
+                variables = mapOf("accountNumber" to "CZ6508000000192000145399"),
+            ),
+        )
+
+        val rows = outcomeRowsFor(notificationIdFor(partyId)!!)
+        assertThat(rows).hasSize(1)
+        val event = objectMapper.readTree(rows.single().payload)
+        assertThat(event.path("outcome").asText()).isEqualTo("SENT")
+        assertThat(event.path("correlationId").isNull).isTrue()
+        assertThat(correlationIdFor(partyId)).isNull()
+    }
+
+    /**
+     * A request rejected before a row exists has had no transition, so it must emit nothing. The
+     * negative matters: an event for a request that was never dispatched would settle a producer's
+     * row on the strength of something that never happened.
+     */
+    @Test
+    fun `a rejected request emits no outcome at all`() {
+        val partyId = UUID.randomUUID()
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.EMAIL,
+                template = NotificationTemplate.ACCOUNT_FROZEN,
+                recipient = "outcome-rejected@example.com",
+                variables = mapOf(
+                    "accountNumber" to "CZ6508000000192000145399",
+                    "reason" to "AML review",
+                    "code" to "483920",
+                ),
+                correlationId = UUID.randomUUID(),
+            ),
+        )
+
+        assertThat(countFor(partyId)).isEqualTo(0L)
     }
 
     // ── PUSH channel end-to-end (issue #1548 hardening) ──

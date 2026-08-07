@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.13.1...sca-service-v0.13.2) (2026-08-07)
+
+
+### Bug Fixes
+
+* **account:** the propose-only savings withdrawal approval could never succeed ([#3632](https://github.com/JiRaska/open-bank-oss/issues/3632)) ([4209407](https://github.com/JiRaska/open-bank-oss/commit/4209407e79ffd7a11f048ff5d7daa9fdc6fdfa30))
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.13.0...sca-service-v0.13.1) (2026-08-02)
 
 

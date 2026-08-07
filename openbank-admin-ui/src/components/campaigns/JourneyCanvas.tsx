@@ -57,6 +57,7 @@ const LABEL_ALLOWANCE = 230
 
 /** Semantic variable per drop reason — the meaning, not a severity ranking. */
 const REASON_VAR: Record<string, string> = {
+  DRY_RUN: 'var(--text-secondary)',
   SUPPRESSED_CONSENT: 'var(--info)',
   SUPPRESSED_QUIET_HOURS: 'var(--text-secondary)',
   SUPPRESSED_CAP: 'var(--warning)',
@@ -78,6 +79,7 @@ export function JourneyCanvas({
 
   const reasonLabel = (r: string): string =>
     ({
+      DRY_RUN: t('Nazkoušeno', 'Rehearsed'),
       SUPPRESSED_CONSENT: t('Nemá souhlas', 'No consent'),
       SUPPRESSED_QUIET_HOURS: t('Tiché hodiny', 'Quiet hours'),
       SUPPRESSED_CAP: t('Příliš často', 'Too frequent'),

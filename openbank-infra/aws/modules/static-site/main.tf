@@ -140,7 +140,10 @@ resource "aws_cloudfront_response_headers_policy" "sec" {
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://*.hcaptcha.com",
         "font-src 'self' https://fonts.gstatic.com",
         "img-src 'self' data:",
-        "script-src 'self' https://web3forms.com https://js.hcaptcha.com https://*.hcaptcha.com",
+        # web3forms.com is deliberately absent: the landing page loads no script from it
+        # (unversioned, SRI-less third party). Only the form POST to api.web3forms.com remains,
+        # which is connect-src/form-action, not script-src.
+        "script-src 'self' https://js.hcaptcha.com https://*.hcaptcha.com",
         "connect-src 'self' https://api.web3forms.com https://*.hcaptcha.com",
         "frame-src https://hcaptcha.com https://*.hcaptcha.com",
         "object-src 'none'",

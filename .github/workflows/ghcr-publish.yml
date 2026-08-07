@@ -91,7 +91,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: |
@@ -113,7 +113,7 @@ jobs:
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Login to GHCR
-        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -141,6 +141,11 @@ jobs:
             echo "COPY sbom/bom.json /app/sbom/bom.json" >> "${ctx}/Dockerfile"
             echo "ENV OPENBANK_SBOM_PATH=/app/sbom/bom.json" >> "${ctx}/Dockerfile"
           fi
+          # ldd every bundled linux .so inside the real runtime base before publishing (#3354).
+          # This image is multi-arch, so both loaders are checked. Reasoning lives in the script
+          # header — prose in a run: block costs the whole workflow (#3135).
+          python3 .github/scripts/verify-image-native-libs.py "${ctx}/quarkus-app/lib" --arch amd64
+          python3 .github/scripts/verify-image-native-libs.py "${ctx}/quarkus-app/lib" --arch arm64
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
             --provenance=false \

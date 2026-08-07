@@ -163,11 +163,18 @@ class DelegationResource(
     @Authorize(action = "delegation.accept", resource = "#id")
     suspend fun accept(
         @PathParam("id") id: UUID,
-        @QueryParam("granteePartyId") granteePartyId: UUID,
-        @QueryParam("scaSessionId") scaSessionId: UUID,
+        @QueryParam("granteePartyId") granteePartyId: UUID?,
+        @QueryParam("scaSessionId") scaSessionId: UUID?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
-    ): DelegationResponse =
-        DelegationResponse.from(respondDelegation.accept(id, granteePartyId, scaSessionId, customerPartyId))
+    ): DelegationResponse {
+        // #3104 — both identify WHO is accepting and under which SCA session. Absent, they used to
+        // reach the use case as null and answer 500.
+        requireNotNull(granteePartyId) { "query parameter 'granteePartyId' is required" }
+        requireNotNull(scaSessionId) { "query parameter 'scaSessionId' is required" }
+        return DelegationResponse.from(
+            respondDelegation.accept(id, granteePartyId, scaSessionId, customerPartyId),
+        )
+    }
 
     @Operation(summary = "Decline an OFFERED grant (grantee)")
     @POST
@@ -175,9 +182,13 @@ class DelegationResource(
     @Authorize(action = "delegation.decline", resource = "#id")
     suspend fun decline(
         @PathParam("id") id: UUID,
-        @QueryParam("granteePartyId") granteePartyId: UUID,
+        @QueryParam("granteePartyId") granteePartyId: UUID?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
-    ): DelegationResponse = DelegationResponse.from(respondDelegation.decline(id, granteePartyId, customerPartyId))
+    ): DelegationResponse {
+        // #3104
+        requireNotNull(granteePartyId) { "query parameter 'granteePartyId' is required" }
+        return DelegationResponse.from(respondDelegation.decline(id, granteePartyId, customerPartyId))
+    }
 
     @Operation(summary = "Renounce an ACTIVE grant (grantee gives the access back)")
     @POST
@@ -185,9 +196,13 @@ class DelegationResource(
     @Authorize(action = "delegation.renounce", resource = "#id")
     suspend fun renounce(
         @PathParam("id") id: UUID,
-        @QueryParam("granteePartyId") granteePartyId: UUID,
+        @QueryParam("granteePartyId") granteePartyId: UUID?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
-    ): DelegationResponse = DelegationResponse.from(respondDelegation.renounce(id, granteePartyId, customerPartyId))
+    ): DelegationResponse {
+        // #3104
+        requireNotNull(granteePartyId) { "query parameter 'granteePartyId' is required" }
+        return DelegationResponse.from(respondDelegation.renounce(id, granteePartyId, customerPartyId))
+    }
 
     /**
      * `revokedBy` used to come from the query string and was both the authorisation ("you may

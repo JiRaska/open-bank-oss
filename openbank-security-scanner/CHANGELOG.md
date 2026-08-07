@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.6.0...security-scanner-v0.6.1) (2026-08-06)
+
+
+### Bug Fixes
+
+* **security-scanner:** a publish the broker rejects must not be marked SENT ([#3646](https://github.com/JiRaska/open-bank-oss/issues/3646)) ([a4cc68b](https://github.com/JiRaska/open-bank-oss/commit/a4cc68b1e95a22486f830b804023e719148c06df))
+
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.5.7...security-scanner-v0.6.0) (2026-08-05)
+
+
+### Features
+
+* **scheduler:** register workflow liveness for second non-money-path batch (ADR-0237) ([#3739](https://github.com/JiRaska/open-bank-oss/issues/3739)) ([735e8bd](https://github.com/JiRaska/open-bank-oss/commit/735e8bdc12fbf541464aeb4f15ce767cb7866e78))
+
 ## [0.5.7](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.5.6...security-scanner-v0.5.7) (2026-08-02)
 
 

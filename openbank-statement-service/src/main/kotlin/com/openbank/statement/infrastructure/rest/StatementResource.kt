@@ -8,6 +8,8 @@ import com.openbank.statement.application.port.`in`.AdHocExportUseCase
 import com.openbank.statement.application.port.`in`.ClosePeriodUseCase
 import com.openbank.statement.application.port.`in`.ListStatementsUseCase
 import com.openbank.statement.application.port.`in`.RenderStatementUseCase
+import com.openbank.statement.application.port.`in`.RestatePeriodUseCase
+import com.openbank.statement.application.usecase.NoClosedPeriodToRestateException
 import com.openbank.statement.application.usecase.ReconciliationException
 import com.openbank.statement.application.usecase.StatementNotFoundException
 import com.openbank.statement.domain.model.StatementFormat
@@ -38,6 +40,7 @@ class StatementResource(
     private val renderStatement: RenderStatementUseCase,
     private val listStatements: ListStatementsUseCase,
     private val adHocExport: AdHocExportUseCase,
+    private val restatePeriod: RestatePeriodUseCase,
 ) {
 
     @POST
@@ -55,6 +58,31 @@ class StatementResource(
         .recoverWithItem { e ->
             Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
         }
+
+    @POST
+    @Path("/{accountId}/{currency}/restate")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "statement.restate", resource = "#accountId")
+    @Operation(
+        summary = "Restate a closed period after a data correction (ADR-0035 §D) — issues a NEW " +
+            "sequenced close referencing the superseded one; never edits the existing record",
+    )
+    fun restate(
+        @PathParam("accountId") accountId: UUID,
+        @PathParam("currency") currency: String,
+        @QueryParam("from") from: String,
+        @QueryParam("to") to: String,
+    ): Uni<Response> =
+        restatePeriod.restatePocketPeriod(accountId, currency, LocalDate.parse(from), LocalDate.parse(to))
+            .map { Response.ok(it).build() }
+            .onFailure(NoClosedPeriodToRestateException::class.java)
+            .recoverWithItem { e ->
+                Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to e.message)).build()
+            }
+            .onFailure(ReconciliationException::class.java)
+            .recoverWithItem { e ->
+                Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
+            }
 
     @GET
     @Path("/{accountId}")

@@ -12,6 +12,15 @@ metadata:
     app.kubernetes.io/part-of: tpp-registry
 spec:
   replicas: 1
+  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
+  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
+  # resources - on a full cluster the rollout never completes while reporting 1/1 READY.
+  # No HA to lose: this workload is already unavailable for the moment its pod is replaced.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: tpp-registry-service
@@ -23,7 +32,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (subPath mounts do not hot-reload).
         # Kept in sync by gen-tpp-registry-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "dbd562a90bdcc9c7"
+        openbank.tech/policy-checksum: "127b0deddf8af576"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -34,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: tpp-registry-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-tpp-registry-service:sandbox-e5796ea7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-tpp-registry-service:sandbox-ee974ea3
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

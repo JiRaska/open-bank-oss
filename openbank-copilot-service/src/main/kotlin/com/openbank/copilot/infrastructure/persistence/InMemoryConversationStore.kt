@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
  * [InMemoryProposalTokenStore]). Same contract as [RedisConversationStore]; entries expire via [clock].
  */
 @ApplicationScoped
-@IfBuildProperty(name = "copilot.token-store", stringValue = "memory")
+@IfBuildProperty(name = "copilot.conversation-store", stringValue = "memory")
 class InMemoryConversationStore(private val clock: Clock) : ConversationStore {
     private val log = Logger.getLogger(InMemoryConversationStore::class.java)
 
@@ -46,6 +46,22 @@ class InMemoryConversationStore(private val clock: Clock) : ConversationStore {
             .takeLast(ConversationStore.MAX_MESSAGES)
         store[k] = Entry(merged, Instant.now(clock).plusSeconds(ConversationStore.TTL_SECONDS))
         log.debugf("InMemoryConversationStore: appended %d turn(s) key=%s", newTurns.size, k)
+    }
+
+    override suspend fun deleteForCustomer(customerId: String): Long {
+        val prefix = "$customerId|"
+        val victims = store.keys.filter { it.startsWith(prefix) }
+        victims.forEach { store.remove(it) }
+        return victims.size.toLong()
+    }
+
+    override suspend fun deleteConversation(customerId: String, conversationId: String): Long =
+        if (store.remove(key(customerId, conversationId)) != null) 1L else 0L
+
+    override suspend fun deleteExpired(now: Instant): Long {
+        val victims = store.entries.filter { !now.isBefore(it.value.expiresAt) }.map { it.key }
+        victims.forEach { store.remove(it) }
+        return victims.size.toLong()
     }
 
     private fun evictExpired() {

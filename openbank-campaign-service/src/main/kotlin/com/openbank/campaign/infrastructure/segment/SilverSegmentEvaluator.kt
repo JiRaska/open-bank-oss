@@ -44,6 +44,45 @@ class SilverSegmentEvaluator(
     private val log = Logger.getLogger(SilverSegmentEvaluator::class.java)
     private val http: HttpClient = HttpClient.newHttpClient()
 
+    /**
+     * One-party membership: the same generated WHERE clause plus an `aggregate_id` predicate.
+     *
+     * Built from [evaluate]'s own query rather than a second hand-written one — the whole risk here
+     * is the two drifting, so that a trigger enrols someone the segment would not have returned.
+     * `LIMIT 1` because the answer is a boolean; the party id travels as a bound parameter like
+     * every other rule value, so it cannot become SQL.
+     */
+    override suspend fun matches(segment: Segment, partyId: UUID): Boolean {
+        val (where, params) = segment.toWhereClause()
+        val sql = buildString {
+            append("SELECT 1 FROM ").append(database).append(".silver_current_state")
+            append(" WHERE ").append(where)
+            append(" AND aggregate_id = {p_party:String} LIMIT 1 FORMAT JSONEachRow")
+        }
+        val bound = params + mapOf("p_party" to partyId.toString())
+        val query = bound.entries.joinToString("&") { (k, v) ->
+            "param_$k=" + URLEncoder.encode(v.toString(), StandardCharsets.UTF_8)
+        }
+        val requestBuilder = HttpRequest.newBuilder(URI.create("$clickHouseUrl?$query"))
+            .POST(HttpRequest.BodyPublishers.ofString(sql))
+            .header("Content-Type", "text/plain")
+        clickHouseUser.filter { it.isNotBlank() }.ifPresent { requestBuilder.header("X-ClickHouse-User", it) }
+        clickHousePassword.filter { it.isNotBlank() }.ifPresent { requestBuilder.header("X-ClickHouse-Key", it) }
+
+        val response = http.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString())
+        if (response.statusCode() != HTTP_OK) {
+            // Throw rather than answer false: a ClickHouse outage answered as "not a member" would
+            // silently drop every triggered enrolment while looking like an empty segment. The
+            // consumer decides what to do with a failure; this layer must not decide it by
+            // returning the safe-looking value.
+            error(
+                "segment membership query failed (${response.statusCode()}): " +
+                    response.body().take(ERROR_PREVIEW_CHARS),
+            )
+        }
+        return response.body().isNotBlank()
+    }
+
     override suspend fun evaluate(segment: Segment): List<UUID> {
         val (where, params) = segment.toWhereClause()
         val sql = buildString {
@@ -94,6 +133,9 @@ class SilverSegmentEvaluator(
 
     companion object {
         private const val HTTP_OK = 200
+
+        /** Enough of a ClickHouse error to identify it, short enough not to dump a page into a log. */
+        private const val ERROR_PREVIEW_CHARS = 200
         private val AGGREGATE_ID = Regex("\"aggregate_id\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"")
     }
 }

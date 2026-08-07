@@ -97,7 +97,14 @@ class McpToolRegistry(
         ),
         ToolDefinition(
             name = "propose_payment",
-            description = "Create a REVIEWABLE payment proposal (never a debit; a human + SCA disposes).",
+            // Says UNAVAILABLE in the advertisement, not only in the error (#2414). A model picks
+            // its tool from this text; one that reads "create a proposal" will call it, narrate the
+            // intent to a person, and only then meet the refusal. Kept advertised rather than
+            // withdrawn so the charter/PDP/audit path is still exercised on every attempt.
+            description =
+            "UNAVAILABLE — no proposal store is wired, so this call is refused and records nothing. " +
+                "When implemented it creates a REVIEWABLE payment proposal (never a debit; a human " +
+                "+ SCA disposes).",
             inputSchema = obj(
                 mapOf(
                     "fromAccountId" to strProp("Debtor account (must be within the consent)"),

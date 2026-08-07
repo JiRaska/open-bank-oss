@@ -32,6 +32,9 @@ interface DocsTruthAgentConfig {
     @WithDefault("http://litellm.ai-platform:4000")
     fun llmGatewayUrl(): String
 
+    @WithDefault("deepseek-ai/DeepSeek-V3.2")
+    fun modelId(): String
+
     // Filesystem path to the monorepo checkout this agent reads docs/adr/*.md and
     // openbank-libs/governance/rules.yaml from (RepoScanAdapter, GovernanceRulesAdapter).
     // Defaults to the working directory, matching a sidecar/init-container checkout mount in the
