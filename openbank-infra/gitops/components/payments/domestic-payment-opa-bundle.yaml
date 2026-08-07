@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: domestic-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "5ee121539daad2e0"
+    openbank.tech/policy-checksum: "00fb8af48c38ee7f"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -193,10 +193,23 @@ data:
     # ADR-0224 D2: staff agent-session lifecycle (issue/read/revoke). Operator/admin only — sessions
     # are issued to the authenticated operator themselves (subject = principal), and revocation is
     # live-checked by the OBO resolver, so this grant only ever reaches the caller's own sessions.
+    #
+    # The `service-account-` exclusion is what makes "operator only" true (issue #3765). Without it the
+    # rule reads as staff-only and is not: Keycloak client_credentials tokens never produce
+    # principal.type == SERVICE (rules.yaml: authz_policy.principal_type_service_unreachable), and the
+    # shared backend client's service-account-openbank-services carries ROLE_OPERATOR in the realm — so
+    # HUMAN + operator-role alone admits the fleet's M2M identity to minting, binding and revoking MCP
+    # sessions. Same idiom and same reason as operator-compose-message directly below.
+    #
+    # Nothing legitimate is cut: the only consumer of these endpoints is admin-ui's OBO relay
+    # (src/app/api/agent/obo-mcp/route.ts), which exchanges a token for a signed-in operator, so
+    # "mcp-service sees a HUMAN principal whose realm roles were bounded at issuance" — a real person,
+    # never a service account.
     allowed_reasons contains "operator-mcp-session" if {
     	input.principal.type == "HUMAN"
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
+    	not startswith(input.principal.id, "service-account-")
     	startswith(input.action, "mcp.session.")
     }
 
