@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: lending-service
     app.kubernetes.io/part-of: lending
   annotations:
-    openbank.tech/policy-checksum: "c5bfd87224666db7"
+    openbank.tech/policy-checksum: "7ac339e73154137c"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -558,6 +558,7 @@ data:
     # (resolve a stuck application, service-desk correction — the pid/sca/consent pattern).
     allowed_reasons contains "operator-lending-write" if {
     	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	startswith(input.action, "lending.")
@@ -657,6 +658,30 @@ data:
     # OUTBOUND call from lending). A blanket SERVICE allow would open every endpoint to any
     # M2M client. If a future caller lands (e.g. anacredit moving from Kafka to REST), add
     # another named, action-scoped rule here.
+
+    # 2026-08-05 (#3734): operator-lending-write was role-only, and rules.yaml's role_action_matrix
+    # grants EIGHT lending writes to ROLE_OPERATOR — which service-account-openbank-edge carries —
+    # so both the role-only path and matrix-allows admitted the customer-facing proxy to loan
+    # approval, disbursement, collateral decisions, repayment, reschedule and writeoff. The
+    # exclusion above closes the role-only path; this veto closes the matrix path (base rest.rego
+    # gates its allow head on `not prohibited`). lending.intake is deliberately absent — it is the
+    # edge's verified customer loan-application flow (edge-customer-intake above,
+    # CustomerEdgeResource.applyForLoan). The remaining ~12 lending writes not in the matrix grant
+    # (acceleration.execute, advance, default.mark, ...) are closed by the exclusion alone.
+    prohibited if {
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {
+    		"lending.approve",
+    		"lending.collateralDecide",
+    		"lending.collateralRegister",
+    		"lending.create",
+    		"lending.disburse",
+    		"lending.repay",
+    		"lending.reschedule",
+    		"lending.writeoff",
+    	}
+    }
+
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
