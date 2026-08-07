@@ -9,7 +9,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * In-edge nearby-payment session store (ADR-0087). The receiver creates a short-lived session
+ * In-edge nearby-payment session store (ADR-0095). The receiver creates a short-lived session
  * bound to ONE of their own accounts and broadcasts the returned opaque token over BLE; the payer
  * resolves the token to a display name + requested amount + a MASKED account before signing. The
  * real creditor account never leaves the edge — only the edge can map the token back to it.
@@ -20,6 +20,12 @@ import java.util.concurrent.ConcurrentHashMap
  * token opaque (a random id, never an encoded payload) is also what lets the resolution rule evolve
  * later — e.g. a standardised cross-app "pay via your bank app" payload — without changing the
  * token the receiver broadcasts.
+ *
+ * ADR pointer, because this rail's citations were wrong for a long time: the informal nearby-pay
+ * work is referenced as *ADR-0087* in the `openbank-app` repo, which numbers its ADRs independently
+ * (ADR-0147). In THIS repo ADR-0087 is Observability Correlation & Profiling, and no monorepo ADR
+ * ever covered nearby-pay — ADR-0095 (QRlessPay) says so outright and formalises/supersedes the
+ * rail. Cite ADR-0095 here; ADR-0087 means observability.
  *
  * In-memory is acceptable because the loss mode is benign: an edge restart drops live sessions, the
  * payer's resolve returns 404, and the receiver simply re-shares. For multi-replica edge the token
@@ -115,7 +121,7 @@ class PaymentSessionStore {
 
         /**
          * Mask a Czech IBAN to country + last 4 ("CZ…6789"), the only account form a payer is shown
-         * (ADR-0087). Falls back to a generic mask for anything not IBAN-shaped. Package-visible for
+         * (ADR-0095). Falls back to a generic mask for anything not IBAN-shaped. Package-visible for
          * unit tests.
          */
         fun maskIban(iban: String?): String {
