@@ -362,6 +362,28 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `service-account-<clientId>` convention) instead — gating on `HUMAN` + `ROLE_OPERATOR` alone is
   NOT equivalent, since real staff also carry `ROLE_OPERATOR` and would over-grant. Enforced by
   `.github/scripts/check-no-service-principal-type.sh` (`rules.yaml: authz_policy`).
+- **A line added to `rules.yaml: authz.role_action_matrix` is a grant to a MACHINE, and no policy
+  can veto it.** `rest.rego`'s `matrix-allows` turns every entry into a permit for any HUMAN holding
+  that role, and the Keycloak service-accounts the platform authenticates as are classified HUMAN
+  and hold `ROLE_OPERATOR` in at least one realm. `shared_m2m_write_prohibition` cannot help: it is
+  keyed by REASON NAME, and listing `matrix-allows` there would veto every legitimate matrix call;
+  a per-service `*_rest_ext.rego` cannot help either, because `matrix-allows` lives in base
+  `rest.rego` and consults no per-service exclusion. So the only gate is at build time — a write
+  action must be declared in `rules.yaml: shared_m2m_matrix_write_grants.declared`
+  (`check-matrix-write-grants.py`, enforced). Two things this cost: the "graduated ⇒ denied" column
+  of the audits was never true, because `data.rules.shared_m2m_write_prohibition` **is not emitted
+  into any bundle** (it is nested under `change_requirements:`, so `gen-rules-opa-data.py` cannot
+  select it) and the veto has therefore never fired anywhere; and `ledger.approve`, documented as
+  "NEVER reachable by any SERVICE principal", resolved `allow=true` for both service-accounts on the
+  live bundle. **Measure a policy claim with `opa eval` against the bundle ConfigMap** — materialise
+  it to the sidecar's own directory layout (`rules-data.yaml` → `rules/data.yaml`) and probe
+  `data.openbank.rest.allow` per (principal, action), with a must-DENY and a must-ALLOW control in
+  every run. Reading the rego cannot tell you which of several reasons actually fires (#3765/#3734).
+- **The three realm JSONs in this tree disagree about which roles the M2M accounts hold** — the
+  deployed gitops template gives `service-account-openbank-services` only `ROLE_API`, while the
+  docker and CI realms also give it `ROLE_OPERATOR`. Any statement of the form "the shared client
+  carries ROLE_OPERATOR" is environment-specific; take the union when reasoning about exposure, and
+  say which realm you read.
 
 ### GitOps / Kubernetes / OPA policy bundles
 Full pitfalls — node livelock, `optional: true` secret refs, Argo Rollout dead-`stable` deadlock,

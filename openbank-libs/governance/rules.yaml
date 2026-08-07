@@ -2556,3 +2556,102 @@ shared_m2m_write_prohibition:
     operator-domestic-payment-write: "1 identity-pinned rule; action coverage unverified"
     operator-party-write: "1 identity-pinned rule, but onboarding-service PUTs party.kyc-status via the shared client (latent: AUTHZ_ENFORCE=false there today)"
   adr: ADR-0034
+
+# Every WRITE action that `authz.role_action_matrix` (above) grants to a role an M2M
+# service-account holds — and therefore, via rest.rego's `matrix-allows`, to every caller
+# presenting that service-account's token rather than to a named human (#3765, #3734).
+#
+# This register is NOT an exemption list and does not make any entry below safe. It exists
+# because the grant is otherwise invisible: a write action added to the ROLE_OPERATOR grant
+# list reads as staff authorization, and the policy layer cannot object — `matrix-allows` is
+# a base-layer reason, so `shared_m2m_write_prohibition.reasons` (which is keyed by reason
+# name) can never list it without vetoing every legitimate matrix-granted call, and no
+# per-service `*_rest_ext.rego` can veto a rule that lives in base rest.rego. Listing the
+# action here is the only place the decision becomes an explicit, reviewable act.
+#
+# The set below was MEASURED, not assembled: derived from the matrix by
+# .github/scripts/check-matrix-write-grants.py, and cross-checked action-by-action against
+# the live bundle ConfigMaps with `opa eval` (see the tables on #3765). Adding an entry is
+# a security decision on a money path; removing an action from the matrix requires removing
+# it here too, and the gate fails on a stale entry in either direction.
+#
+# The gate derives its role scope from every Keycloak realm JSON in the tree, so it does not
+# need to be told which roles matter. Worth knowing while reading this: the three realms do
+# NOT agree today — the deployed gitops template gives `service-account-openbank-services`
+# only ROLE_API, while the docker and CI realms also give it ROLE_OPERATOR, and
+# `service-account-openbank-edge` carries ROLE_OPERATOR in the deployed template. The union
+# is used, because a role assignment that exists in any environment is an exposure there.
+shared_m2m_matrix_write_grants:
+  gate: matrix-write-grants
+  enforced: enforced
+  ci_producer: ".github/scripts/check-matrix-write-grants.py"
+  adr: ADR-0223
+  declared:
+    - account.approval.decide
+    - account.authorize
+    - account.close
+    - account.create
+    - account.freeze
+    - account.search
+    - account.unfreeze
+    - account.update
+    - balance.credit
+    - balance.debit
+    - balance.hold
+    - balance.holdRelease
+    - balance.initialize
+    - balance.reconciliation.run
+    - billing.approval.decide
+    - billing.post
+    - billing.reverse
+    - clearingBatch.approval.decide
+    - clearingBatch.reconcile
+    - clearingBatch.settle
+    - clearingBatch.submit
+    - clearingBatch.triggerCycle
+    - fraud.score
+    - fx.convert
+    - identity.case.decide
+    - identity.case.reopen
+    - identity.eudi.issue
+    - identity.eudi.poll
+    - identity.eudi.request
+    - identity.eudi.revoke
+    - identity.eudi.verify
+    - identity.link
+    - identity.register
+    - identity.resolve
+    - interest.create
+    - interest.delete
+    - interest.trigger
+    - ledger.create
+    - ledger.replay
+    - ledger.reverse
+    - ledger.trigger
+    - lending.approve
+    - lending.collateralDecide
+    - lending.collateralRegister
+    - lending.create
+    - lending.disburse
+    - lending.repay
+    - lending.reschedule
+    - lending.writeoff
+    - opsmessage.approval.decide
+    - opsmessage.compose
+    - party.approval.decide
+    - party.consent.update
+    - party.merge
+    - party.update
+    - sanctions.approval.decide
+    - sanctions.clear
+    - sanctions.create
+    - sanctions.trigger
+    - sanctions.update
+    - sctInstPayment.create
+    - sepaPayment.approval.decide
+    - sepaPayment.create
+    - sepaPayment.handleReturn
+    - sepaPayment.transitionStatus
+    - settlement.create
+    - transaction.create
+    - transaction.reverse
