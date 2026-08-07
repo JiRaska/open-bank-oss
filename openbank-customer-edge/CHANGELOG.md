@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.56.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.55.0...customer-edge-v0.56.0) (2026-08-07)
+
+
+### Features
+
+* let a delegate pay from a shared account, and audit it as delegated ([#3633](https://github.com/JiRaska/open-bank-oss/issues/3633)) ([568686b](https://github.com/JiRaska/open-bank-oss/commit/568686bfc3ba15e824252f3502b0fddc856c7d37))
+
 ## [0.55.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.54.2...customer-edge-v0.55.0) (2026-08-07)
 
 
