@@ -141,7 +141,7 @@ spec:
             - name: OPENBANK_SECURITY_SCANNER_TARGET_PSD2_SERVICE
               value: http://psd2-service.psd2.svc:8107
             - name: OPENBANK_SECURITY_SCANNER_TARGET_TPP_REGISTRY_SERVICE
-              value: http://tpp-registry-service.tpp.svc:8108
+              value: http://tpp-registry-service.tpp-registry.svc:8108
             - name: OPENBANK_SECURITY_SCANNER_TARGET_AGENT_SERVICE
               value: http://agent-service.platform.svc:8109
             - name: OPENBANK_SECURITY_SCANNER_TARGET_SCA_SERVICE
