@@ -8,6 +8,7 @@ import com.openbank.statement.application.port.`in`.ClosePeriodUseCase
 import com.openbank.statement.application.port.`in`.ClosePocketUseCase
 import com.openbank.statement.application.port.`in`.ListStatementsUseCase
 import com.openbank.statement.application.port.`in`.RenderStatementUseCase
+import com.openbank.statement.application.port.`in`.StatementModelUseCase
 import com.openbank.statement.application.port.`in`.SummarizeStatementUseCase
 import com.openbank.statement.application.port.out.AccountInfoPort
 import com.openbank.statement.application.port.out.BalancePort
@@ -42,6 +43,11 @@ import java.util.UUID
  * The reconciliation/sequence/projection logic lives in the (framework-free) domain; this use case
  * only wires the ports together.
  */
+// TooManyFunctions: this is the single lifecycle orchestrator for close/render/export/list (see
+// KDoc above) — ADR-0248 added statementModel() as the shared lookup both render() and the new
+// customer-facing document use case (StatementDocumentService) replay, so it belongs here rather
+// than duplicating the reconciliation/lookup logic in a second class.
+@Suppress("TooManyFunctions")
 @ApplicationScoped
 class StatementService(
     private val accountInfo: AccountInfoPort,
@@ -51,6 +57,7 @@ class StatementService(
 ) : ClosePeriodUseCase,
     ClosePocketUseCase,
     RenderStatementUseCase,
+    StatementModelUseCase,
     ListStatementsUseCase,
     AdHocExportUseCase,
     SummarizeStatementUseCase {
@@ -155,13 +162,13 @@ class StatementService(
         legalSequence: Long,
         format: StatementFormat,
     ): Uni<StatementRenderer.Rendered> =
-        closedModel(accountId, currency, legalSequence).map { model -> StatementRenderer.render(model, format) }
+        statementModel(accountId, currency, legalSequence).map { model -> StatementRenderer.render(model, format) }
 
-    /** [SummarizeStatementUseCase]: the same closed period as [render], as the canonical model — no renderer. */
+    /** [SummarizeStatementUseCase]: the same closed period as [render] and [statementModel], as the canonical model — no renderer. */
     override fun summary(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementModel> =
-        closedModel(accountId, currency, legalSequence)
+        statementModel(accountId, currency, legalSequence)
 
-    private fun closedModel(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementModel> =
+    override fun statementModel(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementModel> =
         periods.findBySequence(accountId, currency, legalSequence).flatMap { period ->
             if (period == null) {
                 Uni.createFrom().failure(StatementNotFoundException(accountId, currency, legalSequence))
