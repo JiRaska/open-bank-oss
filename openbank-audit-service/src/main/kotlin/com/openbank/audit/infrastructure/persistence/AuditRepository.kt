@@ -343,14 +343,16 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
         limit: Int = 100,
     ): List<AuditEntry> {
         val clauses = mutableListOf("onBehalfOf = :grantor")
-        val params = io.quarkus.panache.common.Parameters.with("grantor", grantorPartyId)
+        // Panache's Parameters.with/.and are deprecated (flagged by CodeQL); the overload taking a
+        // plain Map is the supported one and reads the same here.
+        val params = mutableMapOf<String, Any>("grantor" to grantorPartyId)
         delegatePartyId?.let {
             clauses += "actorId = :delegate"
-            params.and("delegate", it)
+            params["delegate"] = it
         }
         delegationId?.let {
             clauses += "delegationId = :grant"
-            params.and("grant", it)
+            params["grant"] = it
         }
         val query = clauses.joinToString(" AND ") + " ORDER BY occurredAt DESC"
         return Panache.withSession {
