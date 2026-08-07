@@ -96,7 +96,7 @@ class AccountingDaySchedulerTest {
     }
 
     @Test
-    fun `first tick ever opens only the current accounting day`() = runBlocking {
+    fun `first tick ever opens only the current accounting day`(): Unit = runBlocking {
         coEvery { dayRepository.findLatest() } returns null
         noDaysInAnyStatus()
 
@@ -107,7 +107,7 @@ class AccountingDaySchedulerTest {
     }
 
     @Test
-    fun `gap since the latest known day is opened oldest first and bounded`() = runBlocking {
+    fun `gap since the latest known day is opened oldest first and bounded`(): Unit = runBlocking {
         // Latest row is 12 days back — only the OLDEST 7 of the missing days open this tick, so
         // a long outage heals forward instead of stranding the oldest gap (TieOutScheduler shape).
         coEvery { dayRepository.findLatest() } returns day(today.minusDays(12), AccountingDayStatus.TIED_OUT)
@@ -125,7 +125,7 @@ class AccountingDaySchedulerTest {
     }
 
     @Test
-    fun `open day the clock moved past goes to CUTOFF and today stays OPEN`() = runBlocking {
+    fun `open day the clock moved past goes to CUTOFF and today stays OPEN`(): Unit = runBlocking {
         coEvery { dayRepository.findLatest() } returns day(today, AccountingDayStatus.OPEN)
         coEvery { dayRepository.findInStatus(AccountingDayStatus.OPEN) } returns listOf(
             day(today.minusDays(1), AccountingDayStatus.OPEN),
@@ -150,7 +150,7 @@ class AccountingDaySchedulerTest {
     }
 
     @Test
-    fun `CUTOFF day with an OK tie-out after its cutoff is tied out`() = runBlocking {
+    fun `CUTOFF day with an OK tie-out after its cutoff is tied out`(): Unit = runBlocking {
         val yesterday = today.minusDays(1)
         val cutoffAt = Instant.parse("2026-08-06T22:05:00Z")
         coEvery { dayRepository.findLatest() } returns day(today, AccountingDayStatus.OPEN)
@@ -175,7 +175,7 @@ class AccountingDaySchedulerTest {
     }
 
     @Test
-    fun `CUTOFF day stays put on a BREAK verdict and on a pre-cutoff OK`() = runBlocking {
+    fun `CUTOFF day stays put on a BREAK verdict and on a pre-cutoff OK`(): Unit = runBlocking {
         val d1 = today.minusDays(2)
         val d2 = today.minusDays(1)
         val cutoffAt = Instant.parse("2026-08-06T22:05:00Z")
@@ -221,7 +221,7 @@ class AccountingDaySchedulerTest {
     }
 
     @Test
-    fun `one failing day does not stop the rest of the tick`() = runBlocking {
+    fun `one failing day does not stop the rest of the tick`(): Unit = runBlocking {
         val d1 = today.minusDays(2)
         val d2 = today.minusDays(1)
         coEvery { dayRepository.findLatest() } returns day(today, AccountingDayStatus.OPEN)
