@@ -10,6 +10,7 @@ import com.fasterxml.jackson.module.kotlin.kotlinModule
 import com.openbank.fx.application.port.`in`.ConvertCommand
 import com.openbank.fx.application.port.`in`.GetRateHistoryQuery
 import com.openbank.fx.application.port.`in`.GetRateQuery
+import com.openbank.fx.application.port.`in`.ResolvedRate
 import com.openbank.fx.application.port.out.AmlCasePort
 import com.openbank.fx.application.port.out.AmlCaseRiskLevel
 import com.openbank.fx.application.port.out.FraudScoreOutcome
@@ -124,25 +125,31 @@ class FxServiceTest {
 
     @Test
     fun `getRate answers from the reverse quote when only that direction is stored`() = runBlocking<Unit> {
+        val stored = fxRate()
         coEvery { rateRepo.findLatest("CZK", "EUR", RateType.SPOT) } returns null
-        coEvery { rateRepo.findLatest("EUR", "CZK", RateType.SPOT) } returns fxRate()
+        coEvery { rateRepo.findLatest("EUR", "CZK", RateType.SPOT) } returns stored
 
-        val rate = service.getRate(GetRateQuery("CZK", "EUR", RateType.SPOT))
+        val resolved = service.getRate(GetRateQuery("CZK", "EUR", RateType.SPOT))
 
-        assertThat(rate).isNotNull
-        assertThat(rate!!.baseCurrency).isEqualTo("CZK")
+        assertThat(resolved).isNotNull
+        val rate = resolved!!.rate
+        assertThat(rate.baseCurrency).isEqualTo("CZK")
         assertThat(rate.quoteCurrency).isEqualTo("EUR")
         // 1/25.10 (the ask side), not 1/24.90.
         assertThat(rate.bidRate).isEqualByComparingTo("0.03984064")
+        // #3374: the resolution names the stored row it was derived from.
+        assertThat(resolved.derivedFrom).isEqualTo(stored.id)
+        assertThat(rate.id).isEqualTo(stored.id)
     }
 
     @Test
     fun `a directly stored pair is never overridden by an inverse`() = runBlocking<Unit> {
         coEvery { rateRepo.findLatest("EUR", "CZK", RateType.SPOT) } returns fxRate()
 
-        val rate = service.getRate(GetRateQuery("EUR", "CZK", RateType.SPOT))
+        val resolved = service.getRate(GetRateQuery("EUR", "CZK", RateType.SPOT))
 
-        assertThat(rate!!.bidRate).isEqualByComparingTo("24.90")
+        assertThat(resolved!!.rate.bidRate).isEqualByComparingTo("24.90")
+        assertThat(resolved.derivedFrom).isNull()
         coVerify(exactly = 0) { rateRepo.findLatest("CZK", "EUR", RateType.SPOT) }
     }
 
@@ -364,7 +371,7 @@ class FxServiceTest {
 
         val result = service.getRate(query)
 
-        assertThat(result).isEqualTo(rate)
+        assertThat(result).isEqualTo(ResolvedRate(rate, derivedFrom = null))
         coVerify(exactly = 1) { rateRepo.findLatest(query.baseCurrency, query.quoteCurrency, query.rateType) }
     }
 
