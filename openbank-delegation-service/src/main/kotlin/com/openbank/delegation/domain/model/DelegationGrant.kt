@@ -135,9 +135,27 @@ data class DelegationGrant(
 
     fun hasCapability(capability: DelegationCapability): Boolean = capability in capabilities
 
+    /**
+     * May this grant cover [capability] for [amount]?
+     *
+     * A null [amount] means the caller did not say what the action is worth. That is fine for a
+     * capability with no ceiling — a read has no sum — and it is NOT fine when the grant carries a
+     * [perTransactionLimit]: answering `true` there tells the caller the ceiling is satisfied
+     * without ever comparing anything to it, and the ceiling is the whole reason the grantor set it.
+     *
+     * So an unpriced question against a priced grant is a DENIAL, not coverage (issue #3800). It
+     * reads as strict, and the alternative is worse: `customer-edge`'s `hasGrant` omits the amount
+     * on every call, so under the old rule the first caller to put a payment path behind a grant
+     * would have got `true` for any sum with the limit sitting unread (#3615). Failing closed here
+     * makes the ceiling real regardless of which caller forgets, rather than depending on every
+     * caller remembering.
+     *
+     * Unchanged for everything without a ceiling: a grant with `perTransactionLimit == null` still
+     * answers on capability alone, so read paths and unpriced grants behave exactly as before.
+     */
     fun covers(capability: DelegationCapability, amount: Money?): Boolean {
         if (!hasCapability(capability)) return false
-        if (amount == null) return true
+        if (amount == null) return perTransactionLimit == null
         return withinLimits(amount)
     }
 
