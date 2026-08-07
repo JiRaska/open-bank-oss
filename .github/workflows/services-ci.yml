@@ -423,6 +423,23 @@ jobs:
           python3 .github/scripts/check-verification-metadata-complete.py \
             --modules "${{ steps.mods.outputs.modules }}" --enforce
 
+  # SCOPE: this job is about SERVICE BUILDS ONLY — despite the name (#3955).
+  #
+  # `needs` is the whole story: `changes`, `build`, `verification-metadata`. It never observes
+  # ci.yml's `gates (*)` shards, and therefore says nothing about `Validate manifests`, which
+  # aggregates them. Both are required contexts in the `main-protection` ruleset, and it is the
+  # PAIR that covers builds + gates — neither half alone is merge-readiness.
+  #
+  # This is not theoretical. On #3932 this job reported SUCCESS at 23:08:08 while
+  # `Validate manifests` had already reported FAILURE at 23:04:58 on the same commit — three
+  # minutes earlier, so not a race. The ruleset held (the PR stayed BLOCKED and merged only once
+  # `Validate manifests` went green), but a reader scanning the checks list for `all-green ✓`
+  # would have called that PR ready, and so would anything keying off this context alone.
+  #
+  # So: do not treat a green here as "the PR is mergeable", and do not add a downstream consumer
+  # that does. The name overpromises and cannot cheaply be fixed — a required context cannot be
+  # renamed in place (see the same warning on issue-hygiene.yml); it takes a two-step ruleset
+  # change. #3955 tracks that decision.
   all-green:
     name: all-green
     needs: [changes, build, verification-metadata]
