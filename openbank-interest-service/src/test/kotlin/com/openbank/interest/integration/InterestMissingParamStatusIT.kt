@@ -66,7 +66,12 @@ class InterestMissingParamStatusIT {
             .statusCode
 
         assertThat(status)
-            .describedAs("with productId supplied the request must get past the #3104 guard")
+            .describedAs(
+                "with productId supplied the request must get past the #3104 guard AND not " +
+                    "crash: `isNotEqualTo(400)` alone is satisfied by a 500, which is the exact " +
+                    "defect this IT exists to catch, so the control could not fail on its own subject",
+            )
+            .isLessThan(500)
             .isNotEqualTo(400)
     }
 
