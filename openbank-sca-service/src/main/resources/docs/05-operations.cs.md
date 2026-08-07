@@ -11,7 +11,7 @@ Práh pokrytí (kover): LINE ≥ 40 (money-path baseline; ratchet-only, cíl 70)
 
 ## Build image a deploy
 
-- **fast-jar, build na hostu** (CLAUDE.md GitOps pravidla). Dockerfile staví s `-Dquarkus.package.jar.type=fast-jar` a kopíruje `quarkus-app/` do runtime stage `eclipse-temurin:25-jre-alpine`; běží jako non-root uživatel `openbank` s `-XX:+UseZGC`. `EXPOSE 8110`.
+- **fast-jar, build na hostu** (CLAUDE.md GitOps pravidla). Image skládá `.github/workflows/Dockerfile.deploy`: kopíruje `quarkus-app/` do runtime base `eclipse-temurin:25-jre` (glibc, #3354) a běží jako non-root uživatel `openbank` s `-XX:+UseZGC`. `openbank-sca-service/Dockerfile` nic nestaví (#3016) — pipeline z něj čte jedinou věc, `EXPOSE 8110`.
 - Generický build: `openbank-infra/scripts/build-push-service.sh sca-service`.
 - **Flyway**: `migrate-at-start: true` s 10 connect-retries. Pokud kdy dojde k checksum mismatch na živé DB, dočasně nastav `QUARKUS_FLYWAY_REPAIR_AT_START=true`, pak odeber po ustálení (nikdy nepřepisuj aplikovanou migraci).
 

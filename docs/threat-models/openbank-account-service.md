@@ -86,7 +86,37 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-05** — Trust-boundary change (#3734): `operator-account-write` now excludes `service-account-*` principals, and a new `prohibited` veto closes `account.{close, freeze, unfreeze, authorize, approval.decide}` to `service-account-openbank-edge`. The role_action_matrix grants ALL ten account.* actions to ROLE_OPERATOR (which the edge service-account carries) and matrix-allows bypasses rule-level exclusions, so both paths needed closing. The edge's verified customer self-service — `account.{create, update}` via `service-edge-account-m2m` (onboarding open-account, pocket add/close, savings goal, ADR-0104/ADR-0153) — is preserved; the shared client keeps `account.read`. Ext moved from generator heredoc to standalone `account_rest_ext.rego` with a 13-test opa suite.
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. Six parameters: `Idempotency-Key` on openAccount, `currency` on resolvePocket, and the `partyId`/`role` and `partyId`/`intent` pairs on the two authorization-check endpoints. The authorization pairs are the security-relevant ones: they are the INPUTS to an access decision, so a null reaching the use case is a decision taken on an absent subject rather than a rejected request. No new caller, no new boundary; the endpoints and their `@RolesAllowed`/`@Authorize` gates are unchanged, and every guard runs AFTER authorization. Rollback: revert the commit (restores the 500).
+- **2026-08-03** — Propose-only savings withdrawal: the owner's approval now SPENDS an SCA
+  challenge (ADR-0232 AC8). **New outbound trust boundary** `account-service → sca-service`
+  (`POST /api/v1/sca/challenges/{id}/consume`) — this service can now consume a customer's
+  single-use authentication factor, which it previously could not do at all.
+
+  Three defects made the flow impossible and each is a threat in its own right:
+
+  - **Replay (fixed).** The challenge was READ and never consumed, so one approved ceremony
+    authorised unlimited proposals. RTS Art. 5 single-use was not met. `consume` is atomic on
+    `consumedAt`, so two concurrent approvals cannot both win.
+  - **Availability (fixed).** `verifyOwnerSca` pre-checked `status == "COMPLETED"` before consuming
+    — the same defect as #3537 in delegation-service, in a second service. Nothing a customer can
+    reach promotes a decoupled challenge (customer-edge exposes create/read/decision only;
+    `decision` records the signed device decision without promoting), so every owner approval
+    failed. Party and purpose are checked here; promotion and approval enforcement belong to
+    `consume`, which owns them.
+  - **`SAVINGS_WITHDRAW_APPROVAL` was absent from `ScaPurpose`**, a closed enum, so the challenge
+    could not be created. Found only by trying to falsify the fix; the suite was green either way.
+
+  Expiry: a 7-day window with a `suspend fun` sweep (`rules.yaml: scheduled_methods` — a plain
+  `@Scheduled` method has no Vert.x context and would never run). The decision path reads the
+  window rather than the stored status, and expiry is checked BEFORE the SCA leg so a doomed
+  decision does not burn the owner's one-shot factor.
+
+  **Residual, stated plainly: no money moves.** Nothing consumes `SavingsWithdrawalApproved`, and
+  customer-edge exposes no route for these paths, so approval produces an event and a row. AC8 is
+  not done. `consume` is exercised only against a stub — no consumer pact, no provider replay — so
+  the outbound edge introduced here is the least verified part of the change.
+
 - **2026-07-09** — Account opening validates against product-catalog (ADR-0158, issue #668).
   New outbound trust boundary: `account-service → product-catalog` (`GET /api/v1/products/{id}`,
   unauthenticated, sync). `openAccount` now rejects a `productId` product-catalog confirms does
@@ -308,3 +338,25 @@ not change any existing request's outcome until explicitly flipped.
   never had, and that property is the mitigation this edge depends on. Rollback: drop the
   `namespaceSelector` entry for `delegation`. Recorded here because #3431's measurement showed this
   change landed with no threat-model update.
+
+- **2026-08-03** — **The delegation projection reaches the money path** (ADR-0232 D3/D5, issue
+  #2990 AC9). `AuthorizationService.authorizeDelegatedPayment` and
+  `GET /api/v1/accounts/{accountId}/delegation/payment-authorization` (Authorize action
+  `account.read`, edge-proxy role set — same gate as the savings-goal `/check`) answer whether a
+  NON-OWNER may debit an account, and customer-edge's domestic-payment route now calls it. Until
+  now `isAuthorizedForAmount` had **zero callers**: the grant, the events and the projection were
+  live while a delegate could not actually pay, so this is the change that turns a stored grant
+  into money movement. Risk class = **elevation of privilege**. Structural properties relied on:
+  (a) the decision stays HERE, because this is the only service holding both the projection and the
+  account's true owner — a caller-side copy would be a second rule free to drift, with the
+  money-path copy the stale one; (b) the `issuedBy(ownerPartyId)` gate is re-evaluated on every
+  request, so a revoked or non-owner-issued grant cannot authorise a debit even if it once did;
+  (c) the response carries `delegationId`/`grantorPartyId` **only** on an authorising DELEGATED
+  outcome, so a refusal does not disclose that a grant exists; (d) refusals are classified
+  (NO_GRANT / LIMIT_EXCEEDED / ACCOUNT_NOT_FOUND) for the audit trail, and the edge is required to
+  collapse all of them to one opaque 403 — if a future caller surfaces the outcome verbatim this
+  becomes an enumeration oracle for other parties' accounts and sharing arrangements, which is the
+  most likely way to regress this design. Deliberate narrowing vs `isAuthorizedForAmount`: the
+  legacy `account_authorizations.transaction_limit` **is** enforced on this path, because wiring
+  the old behaviour to a live debit route would have made an operator-set per-transaction ceiling
+  decoration. Rollback: revert the edge call site — the endpoint alone moves no money.

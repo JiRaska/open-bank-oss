@@ -16,10 +16,12 @@ import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.account.application.port.out.AccountRepository
+import com.openbank.account.application.port.out.DelegationProjectionRepository
 import com.openbank.account.domain.event.AccountCreatedEvent
 import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
+import com.openbank.account.domain.model.DelegatedAccessGrant
 import com.openbank.account.it.PostgresRedpandaRedisTestResource
 import com.openbank.libs.domain.account.Iban
 import com.openbank.libs.domain.money.CurrencyCode
@@ -39,6 +41,7 @@ import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
@@ -96,6 +99,12 @@ class AccountEventPactProviderVerificationTest {
         // Must match DelegationAccountOwnershipPactConsumerTest's ACCOUNT_ID / OWNER_PARTY_ID.
         private val ACCOUNT_ID = UUID.fromString("11111111-2222-4333-8444-555555555555")
         private val OWNER_PARTY_ID = UUID.fromString("66666666-7777-4888-8999-aaaaaaaaaaaa")
+
+        // Must match CustomerEdgeDelegatedPaymentPactConsumerTest's fixed UUIDs.
+        private val DELEGATED_ACCOUNT_ID = UUID.fromString("22222222-3333-4444-8555-666666666666")
+        private val DELEGATION_GRANTOR_PARTY_ID = UUID.fromString("33333333-4444-4555-8666-777777777777")
+        private val DELEGATE_PARTY_ID = UUID.fromString("44444444-5555-4666-8777-888888888888")
+        private val DELEGATION_GRANT_ID = UUID.fromString("55555555-6666-4777-8888-999999999999")
     }
 
     private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
@@ -105,6 +114,9 @@ class AccountEventPactProviderVerificationTest {
 
     @Inject
     lateinit var accountRepository: AccountRepository
+
+    @Inject
+    lateinit var delegationProjectionRepository: DelegationProjectionRepository
 
     @Inject
     lateinit var vertx: Vertx
@@ -199,6 +211,56 @@ class AccountEventPactProviderVerificationTest {
                 openedAt = Instant.parse("2026-01-01T00:00:00Z"),
                 closedAt = null,
                 version = 0,
+            ),
+        )
+        Unit
+    }
+
+    /**
+     * Seeds the account + grant behind customer-edge's debit-authorization contract (ADR-0232
+     * D3/D5). Two rows, because the endpoint answers from BOTH: the account establishes who the
+     * owner is, and the projection row is the grant `issuedBy(owner)` is checked against — a grant
+     * whose grantor is not the account's owner is refused, which is the hole that gate exists to
+     * close, so seeding only one of the two would silently produce NO_GRANT.
+     *
+     * The 5000.00 CZK ceiling is above the contract's 1500.00 amount ON PURPOSE: the consumer pact
+     * carries the amount precisely so a provider that ignores per-transaction limits cannot pass,
+     * and a ceiling equal to the amount would not distinguish "compared" from "not compared".
+     *
+     * `upsertActive` is idempotent on the grant id; the account `save` is not (`persist` on an
+     * application-assigned id), hence the same findById guard as the state above.
+     */
+    @State("an account with an ACTIVE payment delegation to a known party exists")
+    fun accountWithActivePaymentDelegation() = runOnVertxContext {
+        if (accountRepository.findById(DELEGATED_ACCOUNT_ID) == null) {
+            accountRepository.save(
+                Account(
+                    id = DELEGATED_ACCOUNT_ID,
+                    accountNumber = Iban("CZ3808000000192000145400"),
+                    accountType = AccountType.CURRENT,
+                    partyId = DELEGATION_GRANTOR_PARTY_ID,
+                    productId = UUID.fromString("99999999-8888-4777-8666-555555555555"),
+                    currency = CurrencyCode("CZK"),
+                    status = AccountStatus.ACTIVE,
+                    openedAt = Instant.parse("2026-01-01T00:00:00Z"),
+                    closedAt = null,
+                    version = 0,
+                ),
+            )
+        }
+        delegationProjectionRepository.upsertActive(
+            DelegatedAccessGrant(
+                id = DELEGATION_GRANT_ID,
+                accountId = DELEGATED_ACCOUNT_ID,
+                grantorPartyId = DELEGATION_GRANTOR_PARTY_ID,
+                granteePartyId = DELEGATE_PARTY_ID,
+                capabilities = setOf(DelegatedAccessGrant.CAP_INITIATE_PAYMENT),
+                resourceType = DelegatedAccessGrant.RESOURCE_TYPE_ACCOUNT,
+                perTransactionLimitAmount = java.math.BigDecimal("5000.00"),
+                perTransactionLimitCurrency = "CZK",
+                validFrom = OffsetDateTime.now().minusDays(1),
+                validTo = OffsetDateTime.now().plusYears(10),
+                active = true,
             ),
         )
         Unit

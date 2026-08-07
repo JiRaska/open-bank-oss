@@ -66,10 +66,15 @@ BASELINE = [
     # money-path
     "openbank-balance-service/src/main/kotlin/com/openbank/balance/infrastructure/schedule/BalanceReconciliationScheduler.kt",
     "openbank-balance-service/src/main/kotlin/com/openbank/balance/infrastructure/schedule/ReconciliationFreshnessWatchdog.kt",
+    "openbank-domestic-payment/src/main/kotlin/com/openbank/domestic/infrastructure/observability/DomesticPaymentStrandedGauge.kt",
+    "openbank-domestic-payment/src/main/kotlin/com/openbank/domestic/infrastructure/scheduler/ScreeningRedriveScheduler.kt",
     "openbank-interest-service/src/main/kotlin/com/openbank/interest/infrastructure/scheduler/InterestAccrualScheduler.kt",
     "openbank-interest-service/src/main/kotlin/com/openbank/interest/infrastructure/scheduler/InterestCapitalizationScheduler.kt",
+    "openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/partition/JournalPartitionMaintainer.kt",
+    "openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/schedule/TieOutFreshnessWatchdog.kt",
     "openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/servicing/InterestAccrualScheduler.kt",
     "openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/servicing/ProvisioningCycleScheduler.kt",
+    "openbank-sdd-service/src/main/kotlin/com/openbank/sdd/infrastructure/scheduler/MandateExpiryScheduler.kt",
     # non-money-path
     "openbank-agent-service/src/main/kotlin/com/openbank/agent/application/OversightService.kt",
     "openbank-agent-service/src/main/kotlin/com/openbank/agent/infrastructure/observability/AgentMetricsAdapter.kt",

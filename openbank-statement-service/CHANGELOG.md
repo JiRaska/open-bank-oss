@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.5.11...statement-service-v0.6.0) (2026-08-07)
+
+
+### Features
+
+* **statement:** build the SUPERSEDED write path for closed-period restatement ([#3920](https://github.com/JiRaska/open-bank-oss/issues/3920)) ([f0b5f58](https://github.com/JiRaska/open-bank-oss/commit/f0b5f58d541fc4c965f431e582d54b30e52e3291))
+
 ## [0.5.11](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.5.10...statement-service-v0.5.11) (2026-08-02)
 
 

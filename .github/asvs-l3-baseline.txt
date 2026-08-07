@@ -219,6 +219,7 @@ V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:79: plaintex
 V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:131: plaintext http:// env value http://apicurio-registry.messaging.svc:8080
 V13.1 openbank-analytics-sink: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-authz-policy-auditor: serves REST resources but publishes no openapi.yaml
+V13.1 openbank-case-coordinator-agent: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-control-liveness-sentinel: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-devops-agent: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-docs-truth-agent: serves REST resources but publishes no openapi.yaml
@@ -230,3 +231,4 @@ V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:106: pl
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:108: plaintext http:// env value http://pid-service.pid.svc:8105
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:114: plaintext http:// env value http://account-service.accounts.svc:8100
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:116: plaintext http:// env value http://card-issuance-service.payments.svc:8118
+V9.1 openbank-infra/gitops/components/engagement/engagement-service.yaml:81: plaintext http:// env value http://consent-service.consent.svc:8106
