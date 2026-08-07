@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sepa-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "cf35d7e824f10c48"
+    openbank.tech/policy-checksum: "e87e9f5b27b946cd"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -542,8 +542,18 @@ data:
     # status transition — so the human operator path stays first-class. Initiation and
     # transition on this money-path rail remain subject to the platform's four-eyes and
     # canary controls; approval logic itself lives in the handlers, never in this policy.
+    # 2026-08-05 (#3734): this rule was role-only, so BOTH M2M service accounts (HUMAN-classified,
+    # ROLE_OPERATOR) rode it to every sepaPayment.* write. Each M2M caller's legitimate access is
+    # already identity-scoped below (edge -> {create, read}; shared client -> handleReturn), so the
+    # exclusion loses nothing — and the prohibition beneath closes what the matrix would otherwise
+    # re-admit to the edge (ROLE_OPERATOR is granted sepaPayment.{approval.decide, handleReturn,
+    # transitionStatus} by rules.yaml's role_action_matrix, and matrix-allows does not consult this
+    # rule's exclusion). A customer-facing proxy must never execute a clearing return, an ops status
+    # transition, or a four-eyes approval decision.
+
     allowed_reasons contains "operator-sepa-payment-write" if {
     	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS"}
     	role in input.principal.roles
     	startswith(input.action, "sepaPayment.")
@@ -585,6 +595,21 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
     	input.action == "sepaPayment.handleReturn"
+    }
+
+    # Edge prohibition (2026-08-05, #3734): veto the customer-facing edge client on every sepaPayment.*
+    # write it has no identity-scoped grant for. Base rest.rego gates its allow head on
+    # `not prohibited`, so this beats the matrix grant for approval.decide / handleReturn /
+    # transitionStatus no matter which allow reason fires. `sepaPayment.create` is deliberately
+    # absent — it is the edge's identity-scoped grant above (verified caller: customer-edge
+    # UpstreamClient POST /sepa-payments, after the edge's own ownership guard + SCA gate, ADR-0021).
+    prohibited if {
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {
+    		"sepaPayment.transitionStatus",
+    		"sepaPayment.handleReturn",
+    		"sepaPayment.approval.decide",
+    	}
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
