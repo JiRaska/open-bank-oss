@@ -109,6 +109,24 @@ test_operator_lists_consents if {
 	"operator-consent-write" in allowed_reasons with input as {"principal": operator, "action": "consent.list"}
 }
 
+# --- ADR-0219 D3 suppression actions (#3656 slice 2) ---
+
+test_operator_manages_suppressions if {
+	"operator-suppression-write" in allowed_reasons with input as {"principal": operator, "action": "suppression.manage"}
+}
+
+test_operator_reads_suppressions if {
+	"operator-suppression-read" in allowed_reasons with input as {"principal": operator, "action": "suppression.read"}
+}
+
+test_services_m2m_reads_suppressions_for_the_gate if {
+	"service-suppression-m2m-read" in allowed_reasons with input as {"principal": services_m2m, "action": "suppression.read"}
+}
+
+test_services_m2m_cannot_write_suppressions if {
+	not allowed_reasons["operator-suppression-write"] with input as {"principal": services_m2m, "action": "suppression.manage"}
+}
+
 # --- 2026-08-05 (#3734): the edge client (customer-facing M2M, ROLE_OPERATOR) ---
 
 edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}

@@ -100,6 +100,32 @@ class CompliancePackActivationServiceTest {
         }.isInstanceOf(IllegalArgumentException::class.java)
     }
 
+    /**
+     * Losing the race must be inert, not merely unsuccessful. The service decides in memory before
+     * it writes, so by the time the write is refused it already holds a fully-approved proposal — and
+     * `registry.activate` on that value would enforce a pack whose decision never reached the
+     * database. `CompliancePackConcurrentDecideIT` shows the race happens; this pins what the loser
+     * is allowed to do when it does, which the IT can only observe indirectly.
+     */
+    @Test
+    fun `losing the decision race refuses AND leaves the registry untouched`() {
+        val losing = object : InMemoryActivationRepository() {
+            override fun compareAndSetDecision(entity: CompliancePackActivationEntity): Uni<Int> =
+                Uni.createFrom().item(0)
+        }
+        val racedService = CompliancePackActivationService(losing, registry, clock)
+        val pending = racedService.propose(czPackJson, "maker-1").await().indefinitely()
+
+        assertThatThrownBy {
+            racedService.decide(pending.id, approve = true, checker = "checker-2", reason = null)
+                .await().indefinitely()
+        }.isInstanceOf(IllegalArgumentException::class.java)
+
+        assertThat(registry.activePack("CZ", PackProductType.CONSUMER_CREDIT, LocalDate.parse("2026-08-15")))
+            .describedAs("a decision that did not claim the row must not activate the pack")
+            .isNull()
+    }
+
     @Test
     fun `pending list shows only undecided proposals`() {
         service.propose(czPackJson, "maker-1").await().indefinitely()
@@ -112,12 +138,29 @@ class CompliancePackActivationServiceTest {
         assertThat(pending.single().packVersion).isEqualTo(1)
     }
 
-    private class InMemoryActivationRepository : CompliancePackActivationRepository {
+    private open class InMemoryActivationRepository : CompliancePackActivationRepository {
         private val rows = mutableMapOf<UUID, CompliancePackActivationEntity>()
+
+        /**
+         * The COMMITTED state, tracked apart from the entity. [rows] aliases the caller's instance,
+         * so `rows[id].state` is whatever the caller last mutated in memory — a fake that tested
+         * that field would report a transition as committed before it had been written, which is
+         * precisely the confusion `compareAndSetDecision` exists to remove. Modelling the two
+         * separately is what lets this fake refuse a second decision the way the database does.
+         */
+        private val committed = mutableMapOf<UUID, ProposalState>()
 
         override fun save(entity: CompliancePackActivationEntity): Uni<CompliancePackActivationEntity> {
             rows[entity.id] = entity
+            committed[entity.id] = entity.state
             return Uni.createFrom().item(entity)
+        }
+
+        override fun compareAndSetDecision(entity: CompliancePackActivationEntity): Uni<Int> {
+            if (committed[entity.id] != ProposalState.PROPOSED) return Uni.createFrom().item(0)
+            rows[entity.id] = entity
+            committed[entity.id] = entity.state
+            return Uni.createFrom().item(1)
         }
 
         override fun findById(id: UUID): Uni<CompliancePackActivationEntity?> = Uni.createFrom().item(rows[id])

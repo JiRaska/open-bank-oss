@@ -1,6 +1,6 @@
 # 02 — Architecture
 
-Hexagonal per [ADR-0002](../../../../docs/adr/0002-hexagonal-architecture-per-service.md). The domain has zero framework imports and is enforced by `check-domain-purity.sh`.
+Hexagonal per [ADR-0002](../../../../docs/adr/0002-hexagonal-architecture-per-service.md). The domain has zero framework imports and is enforced by `check-domain-purity.py`.
 
 ## Layers
 

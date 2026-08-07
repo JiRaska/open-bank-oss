@@ -205,6 +205,31 @@ class AgentPolicyGateTest {
         assertThat(outcome.proceed).isTrue()
     }
 
+    @Test
+    fun `audit payload includes model_id from identity (ADR-0031 D5)`() {
+        coEvery { pdp.evaluate(any()) } answers {
+            val q = firstArg<PolicyQuery>()
+            PolicyDecision(allow = true, agent = q.agent, tool = q.tool, resource = null, reason = "ok")
+        }
+        val agentWithModel =
+            AgentIdentity(agentId = "compliance-officer", plane = "control", modelId = "llama-3.3-70b-versatile")
+
+        val event = slot<AuditEvent>()
+        gate.authorize(agentWithModel, tool = "get_account", capability = "query.ledger.readonly", resource = null)
+        coVerify { auditPublisher.publish(capture(event)) }
+
+        assertThat(event.captured.payload["model_id"]).isEqualTo("llama-3.3-70b-versatile")
+    }
+
+    @Test
+    fun `audit payload carries unknown model_id when identity has no charter model`() {
+        val event = slot<AuditEvent>()
+        gate.authorize(null, tool = "get_account", capability = "query.ledger.readonly", resource = null)
+        coVerify { auditPublisher.publish(capture(event)) }
+
+        assertThat(event.captured.payload["model_id"]).isEqualTo("unknown")
+    }
+
     private fun every3Deny() {
         coEvery { pdp.evaluate(any()) } answers {
             val q = firstArg<PolicyQuery>()

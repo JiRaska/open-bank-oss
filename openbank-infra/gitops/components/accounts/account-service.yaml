@@ -37,7 +37,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-account-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "10d1619e2808e334"
+        openbank.tech/policy-checksum: "0797417e430a4dc0"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -139,6 +139,13 @@ spec:
             # already attached to this Rollout) aborts on an error-rate/latency regression.
             - name: AUTHZ_ENFORCE
               value: "true"
+            # #686 / #2945: load the party-events-in / delegation-events-in group.id override
+            # (account-service-msg-override ConfigMap, mounted below) as an external Quarkus
+            # config source, so the dotted YAML keys' declared values actually reach the Kafka
+            # connector instead of silently falling back to quarkus.application.name.
+            # Optional location: if the file is absent Quarkus warns and continues.
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /mnt/msg-config/override.properties
           startupProbe:
             tcpSocket:
               port: management
@@ -176,6 +183,9 @@ spec:
               readOnly: true
             - name: kafka-truststore
               mountPath: /mnt/kafka/truststore
+              readOnly: true
+            - name: msg-override
+              mountPath: /mnt/msg-config
               readOnly: true
           resources:
             requests:
@@ -273,6 +283,9 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
+        - name: msg-override
+          configMap:
+            name: account-service-msg-override
   strategy:
     canary:
       stableService: account-service
