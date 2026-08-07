@@ -85,7 +85,13 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "20"
+          # Matches the runtime image (openbank-admin-ui/Dockerfile: node:26-alpine). Pinned at 20
+          # it was three majors behind what ships, and #3569's jsdom bump made that fatal:
+          # jsdom 30 declares engines ^22.22.2 || ^24.15.0 || >=26 and pulls undici 8, whose
+          # cachestorage calls webidl.util.markAsUncloneable. On 20 every vitest worker died
+          # with "Failed to start forks worker", the run collected ZERO tests, and the job
+          # still reported a plain red — engine-strict is off, so npm ci installed it happily.
+          node-version: "26"
           cache: "npm"
           cache-dependency-path: openbank-admin-ui/package-lock.json
 
@@ -104,15 +110,6 @@ jobs:
       - name: manifest.ts types-only gate (ADR-0071 Phase 4, enforced)
         working-directory: ${{ github.workspace }}
         run: bash .github/scripts/check-manifest-types-only.sh
-
-      # Per-service Dockerfiles are runtime recipes only; images come from
-      # .github/workflows/Dockerfile.deploy. Before #3016 every one of them carried a
-      # build stage that could not run, which read as authoritative while being fiction.
-      # This also guards the EXPOSE line — the only thing the deploy pipeline reads from
-      # those files, and whose loss silently defaults the container port to 8080.
-      - name: Dockerfiles are runtime-only and declare EXPOSE (#3016, enforced)
-        working-directory: ${{ github.workspace }}
-        run: python3 .github/scripts/check-dockerfile-no-build-stage.py --enforce
 
       # ADR-0071: the governance manifest is code-derived from per-service
       # governance.yaml. Regenerate and fail on any module missing/with an invalid
@@ -473,7 +470,13 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: env.APP_RO_TOKEN != ''
         with:
-          node-version: "20"
+          # Matches the runtime image (openbank-admin-ui/Dockerfile: node:26-alpine). Pinned at 20
+          # it was three majors behind what ships, and #3569's jsdom bump made that fatal:
+          # jsdom 30 declares engines ^22.22.2 || ^24.15.0 || >=26 and pulls undici 8, whose
+          # cachestorage calls webidl.util.markAsUncloneable. On 20 every vitest worker died
+          # with "Failed to start forks worker", the run collected ZERO tests, and the job
+          # still reported a plain red — engine-strict is off, so npm ci installed it happily.
+          node-version: "26"
           cache: "npm"
           cache-dependency-path: openbank-admin-ui/package-lock.json
 

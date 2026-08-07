@@ -48,9 +48,17 @@ import rego.v1
 # consent.grant/consent.revoke were M2M-unreachable — false the whole time this exclusion was
 # missing. M2M access to consent.grant/consent.revoke is scoped exclusively through
 # "service-consent-m2m-marketing" below now.
+#
+# 2026-08-05 (#3734): the exclusion widened from the shared client to the `service-account-`
+# prefix — ADR-0206 D5 closed the backend M2M identity but left `service-account-openbank-edge`
+# (customer-facing, HUMAN-classified, ROLE_OPERATOR) admitted to EVERY consent.* write via this
+# rule. The edge's legitimate consent access is exactly {consent.list, consent.revoke} via base
+# rest.rego's edge-service-consent (the customer's PSD2 consent screen) — deliberate, scoped,
+# and pinned by consent_rest_ext_test.rego. No prohibition clause: rules.yaml's matrix grants no
+# consent.* write to ROLE_OPERATOR, so matrix-allows admits nothing this exclusion doesn't close.
 allowed_reasons contains "operator-consent-write" if {
 	input.principal.type == "HUMAN"
-	not input.principal.id == "service-account-openbank-services"
+	not startswith(input.principal.id, "service-account-")
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	startswith(input.action, "consent.")
@@ -104,4 +112,33 @@ allowed_reasons contains "service-consent-m2m-marketing" if {
 	input.principal.id == "service-account-openbank-services"
 	input.action in {"consent.grant", "consent.revoke"}
 	input.resource.id == "party-service:marketing-comms"
+}
+
+# ADR-0219 D3 suppression administration (#3656 slice 2). Writes (suppression.manage) are
+# HUMAN-only — operators on the preference-centre / complaints / RM surfaces; no M2M writer
+# exists yet, and the shared-M2M exclusion mirrors operator-consent-write for the same reason
+# (a role-only check would grant every backend service the write). Reads (suppression.read) are
+# the contact-policy gate's shape: operators AND backend senders via the shared M2M client —
+# same identity caveat as service-consent-m2m: indistinguishable from any other
+# openbank-services caller at this layer, and acceptable for a low-sensitivity stop-list read.
+allowed_reasons contains "operator-suppression-write" if {
+	input.principal.type == "HUMAN"
+	not input.principal.id == "service-account-openbank-services"
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action == "suppression.manage"
+}
+
+allowed_reasons contains "operator-suppression-read" if {
+	input.principal.type == "HUMAN"
+	not input.principal.id == "service-account-openbank-services"
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action == "suppression.read"
+}
+
+allowed_reasons contains "service-suppression-m2m-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-services"
+	input.action == "suppression.read"
 }

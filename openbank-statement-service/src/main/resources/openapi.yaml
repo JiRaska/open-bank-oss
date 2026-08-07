@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Statement Service API
-  version: 1.0.0
+  version: 1.1.0
   description: >-
     Account statements for the multi-currency current account (ADR-0035). The unit is the per-pocket
     (IBAN + currency) statement: each pocket has its own camt.053.001.08 / MT940 with an independent
@@ -47,6 +47,38 @@ paths:
                   $ref: '#/components/schemas/StatementPeriod'
         '409':
           description: Fail-closed reconciliation mismatch — no statement issued
+
+  /api/v1/statements/{accountId}/{currency}/restate:
+    post:
+      tags: [Statements]
+      summary: Restate a closed period after a correction to the underlying booked data
+      description: >-
+        ADR-0035 §D: a correction is a NEW period close carrying the next legal sequence and an
+        explicit `supersedesSequence` back-reference — the existing record is never edited. Re-reads
+        the booked entries and balance-service's closing balance and reconciles fail-closed exactly
+        as a first close does; a restatement that cannot itself reconcile returns 409 and leaves the
+        standing close untouched. If the recomputed figures are unchanged, no sequence is burnt and
+        the standing record is returned as-is. The superseded record is retained and stays renderable
+        by its own legal sequence for its full retention period.
+      operationId: restateStatementPeriod
+      parameters:
+        - { name: accountId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: currency, in: path, required: true, schema: { type: string, minLength: 3, maxLength: 3 } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: >-
+            The standing period-close record after the restatement — the new superseding close, or
+            the unchanged existing one when the recomputed figures matched.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatementPeriod'
+        '404':
+          description: No closed period for that window — a restatement never mints a first close
+        '409':
+          description: Fail-closed reconciliation mismatch — the standing close is left untouched
 
   /api/v1/statements/{accountId}:
     get:

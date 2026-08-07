@@ -6,56 +6,83 @@
 package com.openbank.flakytest.infrastructure.adapter
 
 import com.openbank.flakytest.application.port.out.LlmDiagnosisPort
-import com.openbank.flakytest.domain.model.FlakyTestCheckType
 import com.openbank.flakytest.domain.model.FlakyTestFinding
-import com.openbank.flakytest.infrastructure.config.FlakyTestHunterConfig
+import com.openbank.libs.llm.LlmGatewayPort
 import jakarta.enterprise.context.ApplicationScoped
-import org.jboss.logging.Logger
+import jakarta.inject.Inject
 
 /**
- * LiteLLM gateway adapter for AI-assisted triage of a silent-test-failure finding.
+ * Live LLM diagnosis for flaky-test-hunter (ADR-0168), migrated onto the two ADR-0148 / ADR-0174 seams
+ * — the same pattern devops-agent, control-liveness-sentinel, finops-agent, governance-auditor,
+ * release-steward, and docs-truth-agent adopted:
+ *  - The model call goes through the shared [LlmGatewayPort] (ADR-0174) instead of a per-adapter
+ *    `java.net.http.HttpClient`. Returns `null` on any failure, so the agent still degrades to a
+ *    deterministic placeholder exactly as before; the adapter is now injectable, so an eval can
+ *    drive it with a stub gateway.
+ *  - The system prompt is loaded from the ADR-0148 prompt registry (the flaky-test-hunter
+ *    `system.v1.md` file), packaged at build time (see build.gradle.kts) and read verbatim, so the
+ *    runtime prompt equals the registered content byte-for-byte — the `prompt_hash` in an
+ *    AI-attributed AuditEvent now resolves.
  *
- * Full implementation tracked separately; this stub logs and returns a placeholder to keep the
- * workflow structurally complete, matching the finops-agent/devops-agent/control-liveness-sentinel/
- * governance-auditor/release-steward/docs-truth-agent/authz-policy-auditor bootstrap pattern.
- * `proposeFixDiff` only ever branches non-null for `TEST_COUNT_DRIFT` — the one check whose shape
- * could someday have a narrow mechanical case — and even that branch still returns null in v1
- * (ADR-0168 Decision): every other check type stays ticket-only by design, since a wrong auto-fix on
- * a test's coroutine builder, its Pact provider target, or its gating annotation risks silently
- * masking a real bug instead of fixing it.
+ * `proposeFixDiff` stays unimplemented for all check types in v1 (ADR-0168 Decision: every finding is
+ * ticket-only because a wrong auto-fix on a test's coroutine builder, Pact provider target, or gating
+ * annotation could silently mask a real bug). The wiring and registry entry are the scope of this change.
  */
 @ApplicationScoped
-class LlmDiagnosisAdapter(private val config: FlakyTestHunterConfig) : LlmDiagnosisPort {
+class LlmDiagnosisAdapter : LlmDiagnosisPort {
 
-    private val log = Logger.getLogger(LlmDiagnosisAdapter::class.java)
+    @Inject
+    lateinit var gateway: LlmGatewayPort
 
     override suspend fun diagnose(finding: FlakyTestFinding, contextMetrics: Map<String, Double>): String {
-        log.infof(
-            "LLM diagnosis requested for finding %s checkType=%s component=%s (gateway=%s) — stub",
-            finding.id,
-            finding.checkType,
-            finding.component,
-            config.llmGatewayUrl(),
-        )
-        // TODO(ADR-0168): wire to LiteLLM /chat/completions with structured prompt (the matched test
-        // source snippet plus the runBlocking-Unit/Pact-gating/test-count evidence) to draft a
-        // human-readable triage summary.
-        return "Automated diagnosis pending LiteLLM integration. Finding: ${finding.title}."
+        val metrics =
+            contextMetrics.entries.joinToString(", ") { "${it.key}=${it.value}" }
+                .ifBlank { "(no additional signals)" }
+        val user = """
+            A silent-test-failure or test-integrity finding was detected. Write a concise (2-5 sentence)
+            triage note for a human maintainer. Do not invent facts not present below; say so plainly
+            if the cause is not determinable from this data alone.
+
+            <finding>
+            check_type: ${finding.checkType}
+            severity: ${finding.severity}
+            title: ${finding.title}
+            component: ${finding.component}
+            file_path: ${finding.filePath}
+            root_cause: ${finding.rootCause ?: "none"}
+            status: ${finding.status}
+            detected_at: ${finding.detectedAt}
+            </finding>
+            <context_metrics>$metrics</context_metrics>
+        """.trimIndent()
+
+        return gateway.chat(SYSTEM_PROMPT, user)
+            ?: (
+                "Automated diagnosis unavailable (model backend not reachable or API key not seeded). " +
+                    "Finding: ${finding.title}."
+                )
     }
 
-    override suspend fun proposeFixDiff(finding: FlakyTestFinding, diagnosis: String): String? {
-        log.infof(
-            "Fix-diff proposal requested for finding %s checkType=%s component=%s — stub",
-            finding.id,
-            finding.checkType,
-            finding.component,
-        )
-        if (finding.checkType != FlakyTestCheckType.TEST_COUNT_DRIFT) {
-            return null
+    override suspend fun proposeFixDiff(finding: FlakyTestFinding, diagnosis: String): String? = null
+
+    private companion object {
+        val SYSTEM_PROMPT = loadRegisteredPrompt()
+
+        /**
+         * Load the system prompt from the ADR-0148 registry, packaged onto the classpath at build
+         * time from the flaky-test-hunter `system.v1.md` registry file. Read verbatim so the runtime
+         * prompt equals the registry file byte-for-byte (the `prompt_hash` resolvability contract). A
+         * missing resource is a build misconfiguration and fails fast rather than shipping a silent
+         * empty prompt.
+         */
+        private fun loadRegisteredPrompt(): String {
+            val path = "/governance-prompts/flaky-test-hunter/system.v1.md"
+            return LlmDiagnosisAdapter::class.java.getResourceAsStream(path)
+                ?.bufferedReader()?.use { it.readText() }
+                ?: error(
+                    "prompt registry resource missing: $path — packaged by build.gradle.kts from " +
+                        "openbank-libs/governance/prompts/flaky-test-hunter/system.v1.md (ADR-0148)",
+                )
         }
-        // TODO(ADR-0168): the one theoretically mechanical case (e.g. a stale JUnit5 tag-filter
-        // exclusion) — still returns null unconditionally in v1, pending a deliberate re-evaluation
-        // of whether ANY test-count-drift root cause is safe to auto-fix without human judgment.
-        return null
     }
 }

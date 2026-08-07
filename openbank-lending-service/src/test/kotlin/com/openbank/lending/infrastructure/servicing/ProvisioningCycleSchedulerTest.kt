@@ -32,7 +32,8 @@ class ProvisioningCycleSchedulerTest {
 
     private val cycle = mockk<RunProvisioningCycleUseCase>()
     private val clock = Clock.fixed(Instant.parse("2026-06-15T04:00:00Z"), ZoneOffset.UTC)
-    private val scheduler = ProvisioningCycleScheduler(cycle, batchSize = 500, clock = clock)
+    private val scheduler =
+        ProvisioningCycleScheduler(cycle, batchSize = 500, clock = clock, domainMetrics = mockk(relaxed = true))
 
     @BeforeEach
     fun stubPanacheSession() {

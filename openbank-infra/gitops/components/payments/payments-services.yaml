@@ -42,7 +42,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-transaction-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "c8c28bcd3ec74908" # transaction-opa-bundle
+        openbank.tech/policy-checksum: "c9e7f240d10da7de" # transaction-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -53,7 +53,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: transaction-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-a5e5d32a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-fcd28518
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -375,7 +375,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-payment-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "95808b195cdb58fd"
+        openbank.tech/policy-checksum: "99e733f9fb6b0ef6"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -729,7 +729,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-domestic-payment-opa-bundle.sh via the trailing marker
         # comment (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "b1a329472478538a" # domestic-payment-opa-bundle
+        openbank.tech/policy-checksum: "5ee121539daad2e0" # domestic-payment-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1053,7 +1053,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-instant-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "ff3101d1abe4abfd"
+        openbank.tech/policy-checksum: "4ab40b48d78368ca"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1066,7 +1066,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-7f651163
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-fcd28518
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1369,7 +1369,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-clearing-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "f0e58852856c4e93" # clearing-opa-bundle
+        openbank.tech/policy-checksum: "2565e21369c67751" # clearing-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1380,7 +1380,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-95b652dd
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-ee974ea3
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1647,6 +1647,15 @@ metadata:
     app.kubernetes.io/part-of: payments
 spec:
   replicas: 1
+  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
+  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
+  # resources - on a full cluster the rollout never completes while reporting 1/1 READY.
+  # No HA to lose: this workload is already unavailable for the moment its pod is replaced.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: standing-order-service
@@ -1658,7 +1667,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (ADR-0034). Value is stamped by
         # gen-standing-order-opa-bundle.sh — do not hand-edit.
-        openbank.tech/policy-checksum: "057a2489c43caed2" # standing-order-opa-bundle
+        openbank.tech/policy-checksum: "0f5c089c283d45a2" # standing-order-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1669,7 +1678,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: standing-order-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-95b652dd
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-ee974ea3
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1900,6 +1909,15 @@ metadata:
     app.kubernetes.io/part-of: payments
 spec:
   replicas: 1
+  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
+  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
+  # resources - on a full cluster the rollout never completes while reporting 1/1 READY.
+  # No HA to lose: this workload is already unavailable for the moment its pod is replaced.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: card-issuance-service
@@ -1911,7 +1929,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-issuance-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "6740ceff5d58e70c"
+        openbank.tech/policy-checksum: "1bc61ba3ea81c9e8"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1922,7 +1940,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-9ef6c0ab
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-f456d51d
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2181,7 +2199,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-settlement-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "bfbcf6f49d72baa5" # settlement-opa-bundle
+        openbank.tech/policy-checksum: "b73f174ae302a9c3" # settlement-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2192,7 +2210,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-b5dd381c
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-e532b32e
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2224,8 +2242,13 @@ spec:
             # enough; safe to leave briefly, repair is a no-op once checksums already match).
             - name: QUARKUS_FLYWAY_REPAIR_AT_START
               value: "true"
-            - name: KAFKA_BOOTSTRAP_SERVERS
-              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+            # `KAFKA_BOOTSTRAP_SERVERS: …:9092` stood here and was dead (issue #3393):
+            # openbank-settlement-service has no `mp.messaging` config and no Kafka client
+            # anywhere under src/main, so it opened no connection and the value was never read.
+            # It mattered only because it made settlement-service read as a plaintext-listener
+            # client in every audit of who is still on :9092 — including
+            # `gen-network-policies.py`, which derives the broker allow-list from exactly this
+            # kind of env URL and so admitted `payments` on 9092 partly on its account.
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET
@@ -2459,6 +2482,15 @@ metadata:
     app.kubernetes.io/part-of: payments
 spec:
   replicas: 1
+  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
+  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
+  # resources - on a full cluster the rollout never completes while reporting 1/1 READY.
+  # No HA to lose: this workload is already unavailable for the moment its pod is replaced.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: clearing-simulator
@@ -2582,7 +2614,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-swift-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "883b6a6b80ed2a7d"
+        openbank.tech/policy-checksum: "2613b870f0e13b99"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2595,7 +2627,7 @@ spec:
         - name: swift-service
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-fe48f5b6
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-ee974ea3
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -2896,7 +2928,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-vop-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "da939ca353e0ee8a"
+        openbank.tech/policy-checksum: "01953b743e8e93f7"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2908,7 +2940,7 @@ spec:
       containers:
         - name: vop-service
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-581ebd9c
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-e532b32e
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -2945,10 +2977,15 @@ spec:
             # ADR-0171 §4: the payee name is two hops away — account-service resolves
             # IBAN→partyId, party-service resolves partyId→legal/trading name.
             # account-service holds no holder name of its own.
+            # Ports were TRANSPOSED and the party namespace pluralised (issue #3966): this read
+            # `accounts.svc:8101` (8101 is ledger-service) and `parties.svc:8100` (8100 is
+            # account-service, and namespace `parties` has never existed — it is `party`). So
+            # neither hop of the lookup above could complete, in any environment: the same swap
+            # was in application.yaml's defaults, so there was no fallback to be right.
             - name: ACCOUNT_SERVICE_URL
-              value: http://account-service.accounts.svc:8101
+              value: http://account-service.accounts.svc:8100
             - name: PARTY_SERVICE_URL
-              value: http://party-service.parties.svc:8100
+              value: http://party-service.party.svc:8111
             # Backs the per-requester rate limit. Shared, not in-process: a local counter
             # would give an attacker limit × replicas and reset on every pod roll.
             - name: QUARKUS_REDIS_HOSTS

@@ -2,11 +2,14 @@
 package com.openbank.audit.application
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.audit.domain.model.OccurredAtSource
 import com.openbank.audit.infrastructure.persistence.AuditRepository
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -19,6 +22,8 @@ class AuditConsumerTest {
 
     private val repo = mockk<AuditRepository>()
 
+    private val registry = SimpleMeterRegistry()
+
     private lateinit var consumer: AuditConsumer
 
     @BeforeEach
@@ -27,7 +32,8 @@ class AuditConsumerTest {
             it.repo = repo
             it.objectMapper = jacksonObjectMapper().findAndRegisterModules()
             // ADR-0100: recordedAt is stamped via Instant.now(clock); fix it for determinism.
-            it.clock = Clock.fixed(Instant.parse("2026-05-27T12:00:00Z"), ZoneOffset.UTC)
+            it.clock = Clock.fixed(INGEST_TIME, ZoneOffset.UTC)
+            it.meterRegistry = registry
         }
     }
 
@@ -351,5 +357,88 @@ class AuditConsumerTest {
         }.doesNotThrowAnyException()
 
         coVerify(exactly = 0) { repo.save(any()) }
+    }
+
+    // ── #3883: event time vs ingest time ──────────────────────────────────────────────────────
+    //
+    // `occurredAt` is the fleet's canonical event-time key (declared on DomainEvent), so the
+    // consumer's read of it is right and stays. What was missing is any record of the OTHER
+    // branch: 7 of the 21 consumed topics send no event time, and their rows silently claimed
+    // ingest time as business time. These pin both halves.
+
+    @Test
+    fun `consume keeps the producer's event time and marks it as the producer's (EVENT)`(): Unit = runBlocking {
+        // Deliberately far from the fixed ingest clock: an assertion using a value equal to
+        // Instant.now(clock) would pass against the bug, which is how this survived.
+        val eventTime = Instant.parse("2026-05-27T09:15:30Z")
+        val payload = """{"eventType":"X","accountId":"${UUID.randomUUID()}","occurredAt":"$eventTime"}"""
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(
+                match {
+                    it.occurredAt == eventTime &&
+                        it.occurredAtSource == OccurredAtSource.EVENT &&
+                        it.recordedAt == INGEST_TIME
+                },
+            )
+        }
+        assertThat(registry.find("openbank.audit.event.time.missing").counters()).isEmpty()
+    }
+
+    @Test
+    fun `consume marks an entry INGEST-sourced when the producer sends no occurredAt`(): Unit = runBlocking {
+        // A real statement-service payload shape: it carries closedAt, never occurredAt.
+        val payload = """
+            {"eventType":"account.statement.period.closed.v1","accountId":"${UUID.randomUUID()}",
+             "sourceService":"statement-service","closedAt":"2026-05-27T09:15:30Z"}
+        """.trimIndent()
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(
+                match { it.occurredAt == INGEST_TIME && it.occurredAtSource == OccurredAtSource.INGEST },
+            )
+        }
+        assertThat(
+            registry.counter("openbank.audit.event.time.missing", "source_service", "statement-service").count(),
+        ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `consume does NOT accept a differently-named event-time key`(): Unit = runBlocking {
+        // document-service emits `at`, the canonical audit envelope names the field `timestamp`.
+        // Accepting either here would be a second silent path; the producer is the thing to fix,
+        // and an INGEST row plus a counter is what makes that visible.
+        val payload = """{"eventType":"DOCUMENT_GENERATED","documentId":"${UUID.randomUUID()}",
+            "sourceService":"document-service","at":"2026-05-27T09:15:30Z","timestamp":"2026-05-27T09:15:30Z"}"""
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify { repo.save(match { it.occurredAtSource == OccurredAtSource.INGEST }) }
+    }
+
+    @Test
+    fun `consume keeps the entry when occurredAt is unparseable, rather than dropping it`(): Unit = runBlocking {
+        // Before #3883 this threw out of the AuditEntry constructor into consume()'s catch, so one
+        // malformed field discarded the entire audit record. RED against that code: repo.save was
+        // never called.
+        val payload = """{"eventType":"X","accountId":"${UUID.randomUUID()}","occurredAt":"not-a-timestamp"}"""
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(match { it.occurredAt == INGEST_TIME && it.occurredAtSource == OccurredAtSource.INGEST })
+        }
+    }
+
+    private companion object {
+        val INGEST_TIME: Instant = Instant.parse("2026-05-27T12:00:00Z")
     }
 }
