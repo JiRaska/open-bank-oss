@@ -339,7 +339,8 @@ so either denial surfaces as a generic "error". Catalogued in #1326.
 
 **Reads are not audited, and this ADR does not pretend otherwise.** The default
 `AuditEventPublisher` binding is a log line, no Kafka implementation exists outside agent-service,
-`@Audited` has no interceptor, and audit-service consumes no notification topic. Recording operator
+the `@Audited` annotation had no interceptor and has since been removed (#4011), and
+audit-service consumes no notification topic. Recording operator
 reads needs real wiring, tracked separately — a fleet-wide accountability gap this feature surfaces
 rather than creates. We do not claim Art. 5(2) coverage for read access until it lands.
 

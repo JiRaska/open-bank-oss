@@ -50,7 +50,7 @@ mindmap
     persistence
       Generic outbox primitives
     security
-      PiiMask + @MaskSensitive
+      PiiMask deterministic masking
       Roles canonical enum
       BootstrapVerifier
       BearerTokenClientHeadersFactory
