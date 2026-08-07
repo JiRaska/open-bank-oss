@@ -1425,7 +1425,7 @@ class CustomerEdgeResource(
      * **Why a session token and not an IBAN.** Answering with the payee's account number would turn
      * this route into a harvester: phone numbers are guessable in a way account numbers are not, so
      * anyone could walk a range of numbers and collect IBANs. Instead the edge resolves the account
-     * privately and hands back the SAME opaque token the nearby-pay rail already uses (ADR-0095):
+     * privately and hands back the SAME opaque token the nearby-pay rail already uses (ADR-0087):
      * the payer sees a name and a masked account, signs SCA against that masked form, and
      * [createDomesticPayment] resolves the token back to the real account inside the edge. The
      * payee's account number never reaches another customer's device.
@@ -1905,7 +1905,7 @@ class CustomerEdgeResource(
         // downstream screening/AML party resolution that reads it.
         val debtorName = fetchPartyLegalName(debit.accountOwnerPartyId)
             ?: return badRequest("Cannot resolve debtor name")
-        // NearbyPay (ADR-0095): if a paymentSessionToken is present, resolve the real creditor from
+        // NearbyPay (ADR-0087): if a paymentSessionToken is present, resolve the real creditor from
         // the in-edge session store — the true account never reaches the payer's device; for SCA
         // dynamic-linking we compare against the masked form (which is what the app signed).
         val sessionTokenRaw = extractTextField(objectMapper, body, "paymentSessionToken")
@@ -3480,7 +3480,7 @@ class CustomerEdgeResource(
         .type(MediaType.APPLICATION_JSON)
         .build()
 
-    // --- Nearby payments (payment sessions, ADR-0095) ---
+    // --- Nearby payments (payment sessions, ADR-0087) ---
 
     /**
      * Create a nearby-pay session bound to one of the caller's OWN accounts (the receiver). Returns an
@@ -3532,8 +3532,7 @@ class CustomerEdgeResource(
     }
 
     /**
-     * Receiver-side session status poll (nearby-pay phase 2, ADR-0095; settlement-honest per
-     * ADR-0108). Returns:
+     * Receiver-side session status poll (ADR-0087 phase 2, settlement-honest per ADR-0108). Returns:
      *   - "ACTIVE"     — live token, no payer has initiated yet;
      *   - "PROCESSING" — a payer has initiated but the payment is not yet settled (accepted, in flight);
      *   - "PAID"       — the payer's payment actually SETTLED (money irrevocably credited);
