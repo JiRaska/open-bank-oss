@@ -4,6 +4,8 @@
 
 package com.openbank.domestic.infrastructure.rest
 
+import com.openbank.domestic.application.port.`in`.PaymentNotSettledException
+import com.openbank.domestic.application.port.out.PaymentConfirmationRenderException
 import com.openbank.domestic.application.usecase.DomesticPaymentNotFoundException
 import com.openbank.domestic.application.usecase.InvalidDomesticPaymentStateTransitionException
 import com.openbank.libs.api.error.ApiError
@@ -25,6 +27,42 @@ class InvalidDomesticPaymentStateTransitionMapper : ExceptionMapper<InvalidDomes
     override fun toResponse(exception: InvalidDomesticPaymentStateTransitionException): Response = Response.status(409)
         .entity(ApiError(UUID.randomUUID().toString(), 409, ErrorCode.CONFLICT.code, exception.message ?: "Conflict"))
         .build()
+}
+
+@Provider
+class PaymentNotSettledMapper : ExceptionMapper<PaymentNotSettledException> {
+    override fun toResponse(exception: PaymentNotSettledException): Response = Response.status(HTTP_CONFLICT)
+        .entity(
+            ApiError(
+                UUID.randomUUID().toString(),
+                HTTP_CONFLICT,
+                ErrorCode.CONFLICT.code,
+                exception.message ?: "Conflict",
+            ),
+        )
+        .build()
+
+    private companion object {
+        const val HTTP_CONFLICT = 409
+    }
+}
+
+@Provider
+class PaymentConfirmationRenderMapper : ExceptionMapper<PaymentConfirmationRenderException> {
+    override fun toResponse(exception: PaymentConfirmationRenderException): Response = Response.status(HTTP_BAD_GATEWAY)
+        .entity(
+            ApiError(
+                UUID.randomUUID().toString(),
+                HTTP_BAD_GATEWAY,
+                "DOCUMENT_SERVICE_UNAVAILABLE",
+                exception.message ?: "Confirmation rendering is temporarily unavailable",
+            ),
+        )
+        .build()
+
+    private companion object {
+        const val HTTP_BAD_GATEWAY = 502
+    }
 }
 
 // SelfApprovalNotAllowedMapper / InvalidApprovalStateMapper (403/409) moved to
