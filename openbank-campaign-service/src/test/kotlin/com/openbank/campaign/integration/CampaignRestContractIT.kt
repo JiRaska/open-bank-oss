@@ -221,6 +221,101 @@ class CampaignRestContractIT {
         }
     }
 
+    /**
+     * A cadence must survive the create-and-read round trip, and be readable back as itself.
+     *
+     * Asserted over a second request rather than the create response, for the same reason the PUSH
+     * channel test does: the 201 body could be echoing the request DTO, which would pass while the
+     * campaign was stored with no cadence at all and never enrolled anyone again.
+     */
+    @Test
+    fun `a campaign can be created with a cadence and reads it back`() {
+        val body = """
+            {"name":"cron-${UUID.randomUUID()}","goal":"prove the cadence round trip",
+             "segmentName":"actives","segmentVersion":1,
+             "schedule":{"cadence":"WEEKLY_MONDAY_MORNING","endAt":"2026-12-31T00:00:00Z"},
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                       "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("schedule.cadence", org.hamcrest.Matchers.equalTo("WEEKLY_MONDAY_MORNING"))
+            body("schedule.endAt", org.hamcrest.Matchers.notNullValue())
+        }
+    }
+
+    /**
+     * A cadence outside the catalogue is a 400, not a stored campaign.
+     *
+     * This is the whole argument for a catalogue over a cron string: the rejected value here is a
+     * perfectly well-formed cron, and accepting it would produce a campaign that looks scheduled in
+     * the console and never fires — a failure with no error anywhere to notice it by.
+     */
+    @Test
+    fun `an unknown cadence is rejected rather than stored`() {
+        val body = """
+            {"name":"badcron-${UUID.randomUUID()}","goal":"prove the catalogue rejects free text",
+             "segmentName":"actives","segmentVersion":1,
+             "schedule":{"cadence":"*/5 * * * *"},
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                       "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
+        """.trimIndent()
+
+        Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    /** A body written before cadences existed keeps its meaning: one-shot, no schedule. */
+    @Test
+    fun `a campaign with no schedule field reads back without one`() {
+        val id = createDraft()
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("schedule", org.hamcrest.Matchers.nullValue())
+        }
+    }
+
+    /**
+     * The console builds its cadence picker from this list, so it must be served and must agree
+     * with what create accepts — an option the authoring screen offers and the service rejects is
+     * a dead control.
+     */
+    @Test
+    fun `the cadence catalogue is served with its human form and zone`() {
+        When {
+            get("/api/v1/campaigns/cadences")
+        } Then {
+            statusCode(200)
+            body("cadence", org.hamcrest.Matchers.hasItem("DAILY_MORNING"))
+            body("find { it.cadence == 'DAILY_MORNING' }.humanForm", org.hamcrest.Matchers.containsString("09:00"))
+            // Never UTC: a cron without a zone fires an hour or two off the customer's morning.
+            body("find { it.cadence == 'DAILY_MORNING' }.zone", org.hamcrest.Matchers.equalTo("Europe/Prague"))
+        }
+    }
+
     @Test
     fun `the segment catalogue is served over HTTP with its rules in words`() {
         When {

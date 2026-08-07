@@ -46,7 +46,11 @@ open class CampaignEnrolmentSweepActivitiesImpl(
             return@runBlockingOnWorker SweepOutcome(0, 0, SweepSkip.NOT_ACTIVE)
         }
         if (campaign.schedule?.expiredAt(clock.instant()) == true) {
-            log.infof("Scheduled sweep for campaign %s skipped — schedule ended at %s", campaignId, campaign.schedule.endAt)
+            log.infof(
+                "Scheduled sweep for campaign %s skipped — schedule ended at %s",
+                campaignId,
+                campaign.schedule.endAt,
+            )
             return@runBlockingOnWorker SweepOutcome(0, 0, SweepSkip.SCHEDULE_EXPIRED)
         }
         val outcome = service.enrol(campaignId)

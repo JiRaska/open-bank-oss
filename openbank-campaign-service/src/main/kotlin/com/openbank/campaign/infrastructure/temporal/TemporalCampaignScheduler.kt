@@ -6,6 +6,7 @@ package com.openbank.campaign.infrastructure.temporal
 
 import com.openbank.campaign.application.port.out.CampaignScheduler
 import com.openbank.campaign.application.workflow.CampaignEnrolmentSweepWorkflow
+import io.temporal.api.enums.v1.ScheduleOverlapPolicy
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import io.temporal.client.schedules.Schedule
@@ -14,10 +15,8 @@ import io.temporal.client.schedules.ScheduleClient
 import io.temporal.client.schedules.ScheduleException
 import io.temporal.client.schedules.ScheduleHandle
 import io.temporal.client.schedules.ScheduleOptions
-import io.temporal.api.enums.v1.ScheduleOverlapPolicy
 import io.temporal.client.schedules.SchedulePolicy
 import io.temporal.client.schedules.ScheduleSpec
-import io.temporal.client.schedules.ScheduleState
 import io.temporal.client.schedules.ScheduleUpdate
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -135,11 +134,13 @@ class ScheduleClientProducer {
 
     @jakarta.enterprise.inject.Produces
     @ApplicationScoped
-    fun scheduleClient(workflowClient: WorkflowClient): ScheduleClient =
-        ScheduleClient.newInstance(workflowClient.workflowServiceStubs, workflowClient.options.let {
+    fun scheduleClient(workflowClient: WorkflowClient): ScheduleClient = ScheduleClient.newInstance(
+        workflowClient.workflowServiceStubs,
+        workflowClient.options.let {
             io.temporal.client.schedules.ScheduleClientOptions.newBuilder()
                 .setNamespace(it.namespace)
                 .setDataConverter(it.dataConverter)
                 .build()
-        })
+        },
+    )
 }

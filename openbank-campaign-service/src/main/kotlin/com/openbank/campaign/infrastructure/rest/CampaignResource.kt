@@ -8,7 +8,6 @@ import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
-import com.openbank.campaign.domain.model.ScheduleCatalog
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.StepCondition
 import com.openbank.campaign.domain.model.StopCondition
@@ -134,23 +133,6 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
         )
         return Response.status(Response.Status.CREATED).entity(campaign).build()
     }
-
-    /**
-     * The cadences a campaign may be scheduled on, with the sentence an operator approves.
-     *
-     * Served rather than documented so the console cannot offer a cadence the service would reject:
-     * the authoring screen reads this list, and adding an entry to `ScheduleCatalog` is all it takes
-     * for the option to appear. NOTE the literal path segment — it must keep matching ahead of
-     * `/api/v1/campaigns/{id}`, exactly as `/summary` does.
-     */
-    @GET
-    @Path("/cadences")
-    @Authorize(action = "campaign.read", resource = "#id")
-    suspend fun cadences(): Response = Response.ok(
-        ScheduleCatalog.ALL.map { (key, cadence) ->
-            mapOf("cadence" to key, "humanForm" to cadence.humanForm, "zone" to ScheduleCatalog.ZONE)
-        },
-    ).build()
 
     @POST
     @Path("/{id}/submit")

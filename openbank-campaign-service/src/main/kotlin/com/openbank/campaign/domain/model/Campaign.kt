@@ -210,10 +210,7 @@ enum class StepCondition {
  *   closed. A campaign is a finite thing in practice and an unbounded one is usually an oversight,
  *   but refusing null would force a fake far-future date, which is worse: it hides the intent.
  */
-data class CampaignSchedule(
-    val cadence: String,
-    val endAt: Instant? = null,
-) {
+data class CampaignSchedule(val cadence: String, val endAt: Instant? = null) {
     init {
         // A cadence outside the catalogue is a schedule that could never be translated into a
         // Temporal spec — reject it here rather than at the adapter, where the campaign would

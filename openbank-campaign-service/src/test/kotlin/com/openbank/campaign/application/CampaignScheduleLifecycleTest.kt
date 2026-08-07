@@ -54,9 +54,15 @@ class CampaignScheduleLifecycleTest {
             lastEndAt = endAt
         }
 
-        override fun pause(campaignId: UUID) { calls += "pause" }
-        override fun unpause(campaignId: UUID) { calls += "unpause" }
-        override fun delete(campaignId: UUID) { calls += "delete" }
+        override fun pause(campaignId: UUID) {
+            calls += "pause"
+        }
+        override fun unpause(campaignId: UUID) {
+            calls += "unpause"
+        }
+        override fun delete(campaignId: UUID) {
+            calls += "delete"
+        }
     }
 
     private fun campaign(state: CampaignState, schedule: CampaignSchedule?) = Campaign(
@@ -70,7 +76,13 @@ class CampaignScheduleLifecycleTest {
         schedule = schedule,
         state = state,
         createdBy = "maker@openbank.test",
-        approvedBy = if (state == CampaignState.ACTIVE || state == CampaignState.PAUSED) "checker@openbank.test" else null,
+        approvedBy = if (state == CampaignState.ACTIVE ||
+            state == CampaignState.PAUSED
+        ) {
+            "checker@openbank.test"
+        } else {
+            null
+        },
         createdAt = Instant.parse("2026-08-01T09:00:00Z"),
         updatedAt = Instant.parse("2026-08-01T09:00:00Z"),
     )
