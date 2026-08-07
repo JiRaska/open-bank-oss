@@ -162,6 +162,46 @@ class FxServiceTest {
         assertThat(conv.appliedRate).isEqualByComparingTo("0.04016064")
     }
 
+    // --- fx_conversions.rate_id must name a STORED row (#3374) --------------------------------
+    //
+    // `fx_conversions.rate_id` is `NOT NULL REFERENCES fx_rates(id)`. A CZK->foreign pair has no
+    // stored row of its own — the CNB fixing publishes FOREIGN->CZK only — so it is answered by
+    // inverting the stored direction, and whatever id that derived quote carries is what reaches
+    // the column. If it is ever an id with no row, EVERY CZK->foreign conversion fails the insert
+    // on a foreign-key violation, and the audit record cites an id nothing can resolve.
+    //
+    // Today the invariant holds by construction, because `inverted()` carries the source id over.
+    // That is precisely why it is worth pinning: #3374 is a live proposal to give a derived quote
+    // its own identity (#3594 minted a deterministic derived id, #3741 nulls it in the response),
+    // and the money-path property has to survive whichever shape lands. These assert the property
+    // itself — the id written is the STORED row's — not any particular derivation scheme, so they
+    // stay meaningful under both designs and fail the moment a derived id reaches the column.
+
+    @Test
+    fun `a conversion on a derived quote records the stored row id`() = runBlocking<Unit> {
+        val stored = fxRate()
+        coEvery { rateRepo.findLatest("CZK", "EUR", RateType.SPOT) } returns null
+        coEvery { rateRepo.findLatest("EUR", "CZK", RateType.SPOT) } returns stored
+        coEvery { convRepo.saveWithOutbox(any(), any()) } answers { firstArg() }
+        clear()
+
+        val conv = service.convert(convertCommand().copy(fromCurrency = "CZK", toCurrency = "EUR"))
+
+        assertThat(conv.rateId).isEqualTo(stored.id)
+    }
+
+    @Test
+    fun `a conversion on a stored quote records that row's id`() = runBlocking<Unit> {
+        val stored = fxRate()
+        coEvery { rateRepo.findLatest("EUR", "CZK", RateType.SPOT) } returns stored
+        coEvery { convRepo.saveWithOutbox(any(), any()) } answers { firstArg() }
+        clear()
+
+        val conv = service.convert(convertCommand().copy(fromCurrency = "EUR", toCurrency = "CZK"))
+
+        assertThat(conv.rateId).isEqualTo(stored.id)
+    }
+
     @Test
     fun `convert throws when rate is expired`() = runBlocking<Unit> {
         val command = convertCommand()
