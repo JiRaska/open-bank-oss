@@ -163,3 +163,29 @@ interface JourneySignaller {
     fun signalConsentRevoked(campaignId: UUID, partyId: UUID)
     fun startJourney(campaignId: UUID, partyId: UUID)
 }
+
+/**
+ * The recurring-enrolment schedule of a campaign, held outside this service by Temporal.
+ *
+ * Every method is idempotent on the campaign id, because the caller is a REST lifecycle transition
+ * that can be retried and because the schedule may already be in the requested state — activating
+ * an already-scheduled campaign must not be an error.
+ *
+ * Deliberately NOT a `suspend` interface: the Temporal `ScheduleClient` is blocking, and wrapping it
+ * in `runBlocking` inside a coroutine is the shape that produced `HR000068` across five schedulers
+ * in this repo. The call sites are `@Blocking` REST transitions, so a plain synchronous port is both
+ * honest and correct here.
+ */
+interface CampaignScheduler {
+    /** Creates or updates the schedule so it fires [cron] in [zone] until [endAt]. */
+    fun upsert(campaignId: UUID, cron: String, zone: String, endAt: Instant?)
+
+    /** Stops the schedule firing without forgetting it — the campaign can resume. */
+    fun pause(campaignId: UUID)
+
+    /** Resumes a paused schedule. A no-op when the campaign never had one. */
+    fun unpause(campaignId: UUID)
+
+    /** Removes the schedule entirely. Called when a campaign closes; safe when none exists. */
+    fun delete(campaignId: UUID)
+}

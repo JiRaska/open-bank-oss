@@ -263,6 +263,21 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   literal `quarkus.datasource.jdbc.url` in the file, since Flyway migrates the DEFAULT (Agroal/JDBC)
   datasource and a service that only boots because the env supplied one cannot start from this repo
   alone (#3080).
+- **Two branches can claim the SAME migration version and git will never say so.** The version is
+  the *filename prefix*, so `V10__delegated_action_index.sql` on a branch and `V10__hash_version.sql`
+  on main are different files: the merge is textually clean, nothing conflicts, and the service then
+  refuses to boot with `FlywayException: Found more than one migration with version 10`. Renumber to
+  the next free version — safe only while the migration has never been applied, since after that the
+  checksum rule above forbids touching it. The trap is what the failure HIDES: Quarkus cannot start,
+  so every `@QuarkusTest` integration test in the module reports as **SKIPPED**, and the module reads
+  `73 tests / 10 skipped / 0 failures` — which scans as a pass, because the number anyone looks at is
+  the failure count. After the fix it was `73 / 0 / 0`: ten integration tests had silently stopped
+  running. Generalize past Flyway: **after merging main into a branch, build and test the merged
+  result and read the SKIPPED count, not just failures.** The collisions to expect are shared
+  *namespaces* rather than shared lines — migration versions, enum and `@Id` values, JSON/YAML map
+  keys, and the constructor or field shape of any class a test instantiates by hand (a `lateinit`
+  added upstream fails every such test at once). Sibling of the multi-agent note that a clean merge
+  can silently DELETE a list entry: same cause, git merges text and not meaning, opposite direction.
 
 ### Contract tests (Pact)
 - **One BROKER-sourced `@Provider` test per provider.** Two verification classes with the same
@@ -347,6 +362,28 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `service-account-<clientId>` convention) instead — gating on `HUMAN` + `ROLE_OPERATOR` alone is
   NOT equivalent, since real staff also carry `ROLE_OPERATOR` and would over-grant. Enforced by
   `.github/scripts/check-no-service-principal-type.sh` (`rules.yaml: authz_policy`).
+- **A line added to `rules.yaml: authz.role_action_matrix` is a grant to a MACHINE, and no policy
+  can veto it.** `rest.rego`'s `matrix-allows` turns every entry into a permit for any HUMAN holding
+  that role, and the Keycloak service-accounts the platform authenticates as are classified HUMAN
+  and hold `ROLE_OPERATOR` in at least one realm. `shared_m2m_write_prohibition` cannot help: it is
+  keyed by REASON NAME, and listing `matrix-allows` there would veto every legitimate matrix call;
+  a per-service `*_rest_ext.rego` cannot help either, because `matrix-allows` lives in base
+  `rest.rego` and consults no per-service exclusion. So the only gate is at build time — a write
+  action must be declared in `rules.yaml: shared_m2m_matrix_write_grants.declared`
+  (`check-matrix-write-grants.py`, enforced). Two things this cost: the "graduated ⇒ denied" column
+  of the audits was never true, because `data.rules.shared_m2m_write_prohibition` **is not emitted
+  into any bundle** (it is nested under `change_requirements:`, so `gen-rules-opa-data.py` cannot
+  select it) and the veto has therefore never fired anywhere; and `ledger.approve`, documented as
+  "NEVER reachable by any SERVICE principal", resolved `allow=true` for both service-accounts on the
+  live bundle. **Measure a policy claim with `opa eval` against the bundle ConfigMap** — materialise
+  it to the sidecar's own directory layout (`rules-data.yaml` → `rules/data.yaml`) and probe
+  `data.openbank.rest.allow` per (principal, action), with a must-DENY and a must-ALLOW control in
+  every run. Reading the rego cannot tell you which of several reasons actually fires (#3765/#3734).
+- **The three realm JSONs in this tree disagree about which roles the M2M accounts hold** — the
+  deployed gitops template gives `service-account-openbank-services` only `ROLE_API`, while the
+  docker and CI realms also give it `ROLE_OPERATOR`. Any statement of the form "the shared client
+  carries ROLE_OPERATOR" is environment-specific; take the union when reasoning about exposure, and
+  say which realm you read.
 
 ### GitOps / Kubernetes / OPA policy bundles
 Full pitfalls — node livelock, `optional: true` secret refs, Argo Rollout dead-`stable` deadlock,

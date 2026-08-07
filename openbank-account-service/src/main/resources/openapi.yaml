@@ -335,6 +335,87 @@ paths:
                   authorized:
                     type: boolean
 
+  /api/v1/accounts/{accountId}/delegation/payment-authorization:
+    get:
+      tags: [Accounts]
+      summary: Whether a party may initiate a payment of a given amount from the account
+      description: >-
+        The debit-authorization decision the payment path consults before letting a
+        NON-OWNER move money out of a shared account (ADR-0232 D3/D5). True when the
+        party owns the account, holds an active legacy `account_authorizations` row
+        whose own per-transaction limit covers the amount, or holds an ACTIVE,
+        in-window, OWNER-ISSUED delegation grant carrying `ACCOUNT_INITIATE_PAYMENT`
+        whose per-transaction ceiling covers the amount.
+
+
+        Unlike the boolean `/authorizations/check`, this endpoint returns the EVIDENCE:
+        `delegationId` and `grantorPartyId` are what make the resulting payment auditable
+        as a delegated action, and the grant is revocable, so nothing after the fact can
+        reconstruct which one was live when the money moved.
+
+
+        `outcome` distinguishes NO_GRANT from LIMIT_EXCEEDED for the audit record.
+        Callers MUST render every non-authorized outcome as the same opaque refusal on
+        a customer-facing wire, so this never becomes an existence oracle for another
+        party's grants. Authorize action `account.read`.
+      operationId: checkDelegatedPaymentAuthorization
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: partyId
+          in: query
+          required: true
+          description: >-
+            The party initiating the debit. Resolved by the caller from its own
+            authenticated identity — never from a customer-supplied request body.
+          schema:
+            type: string
+            format: uuid
+        - name: amount
+          in: query
+          required: false
+          description: >-
+            Decimal amount. Omit to ask the capability question without the ceiling;
+            a payment about to be submitted MUST supply it, or no per-transaction
+            limit is evaluated.
+          schema:
+            type: string
+        - name: currency
+          in: query
+          required: false
+          description: ISO-4217 code. Required when `amount` is supplied.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The authorization decision
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authorized, outcome]
+                properties:
+                  authorized:
+                    type: boolean
+                  outcome:
+                    type: string
+                    enum:
+                      - OWNER
+                      - LEGACY_AUTHORIZATION
+                      - DELEGATED
+                      - NO_GRANT
+                      - LIMIT_EXCEEDED
+                      - ACCOUNT_NOT_FOUND
+                  delegationId:
+                    type: string
+                    format: uuid
+                    description: Present only when `outcome` is DELEGATED.
+                  grantorPartyId:
+                    type: string
+                    format: uuid
+                    description: Present only when `outcome` is DELEGATED.
+        '400':
+          description: amount supplied without a currency, or not a valid monetary value
+
   /api/v1/accounts/{accountId}/savings-goal/delegation/proposals:
     post:
       tags: [Accounts]

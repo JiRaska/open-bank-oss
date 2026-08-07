@@ -64,8 +64,6 @@ ALLOWLIST = {
 # fails if the list GROWS or if an entry healed without being removed here.
 BASELINE = [
     # money-path
-    "openbank-balance-service/src/main/kotlin/com/openbank/balance/infrastructure/schedule/BalanceReconciliationScheduler.kt",
-    "openbank-balance-service/src/main/kotlin/com/openbank/balance/infrastructure/schedule/ReconciliationFreshnessWatchdog.kt",
     "openbank-interest-service/src/main/kotlin/com/openbank/interest/infrastructure/scheduler/InterestAccrualScheduler.kt",
     "openbank-interest-service/src/main/kotlin/com/openbank/interest/infrastructure/scheduler/InterestCapitalizationScheduler.kt",
     "openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/servicing/InterestAccrualScheduler.kt",
