@@ -14,6 +14,16 @@ metadata:
     app.kubernetes.io/part-of: security-scanner
 spec:
   replicas: 1
+  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
+  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
+  # resources - on a full cluster the rollout never completes and reports 1/1 READY.
+  # This workload is single-replica BY CONSTRAINT: it holds per-pod in-memory state, so
+  # scaling it past 1 needs the #3467-class fix first, not a replica bump.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: security-scanner-service
@@ -32,7 +42,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: security-scanner-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-security-scanner:sandbox-9584ae90
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-security-scanner:sandbox-c5218b90
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -64,8 +74,36 @@ spec:
                 secretKeyRef:
                   name: security-scanner-db-app
                   key: password
+            # ADR-0137 / issue #3393: the mTLS listener :9093, NOT the anonymous
+            # plaintext :9092 this used to name. On :9092 the producers authenticated as
+            # `User:ANONYMOUS`, and the cluster runs allow.everyone.if.no.acl.found=false,
+            # so every publish would be denied on every topic. Nothing ever surfaced it
+            # because nothing has ever published: both topic log segments were 0 bytes on
+            # 2026-08-03, nothing writes to `security_outbox`, and the one live produce
+            # path (IctIncidentService, POST /api/v1/ict-incidents) is human-triggered.
+            # Identity + ACLs: kafka-security-scanner-mtls.yaml (KafkaUser `security-scanner`).
             - name: KAFKA_BOOTSTRAP_SERVERS
-              value: openbank-cluster-kafka-bootstrap.messaging.svc:9092
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka-keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: security-scanner-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka-truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
             # `QUARKUS_OIDC_ENABLED=false` used to sit here and did NOTHING: quarkus.oidc.enabled
             # is a BUILD-TIME property, so setting it through the environment cannot switch OIDC
             # off in an already-built image. It read as "auth is off for this service" while the
@@ -166,6 +204,16 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            # Deliberately NOT `optional: true`: if the ESO projection has not landed, the
+            # pod must stay at ContainerCreating rather than boot and fall back to a
+            # plaintext-shaped client that silently publishes nothing (openbank-infra
+            # CLAUDE.md, the #1284 trade). A stalled pod is the loud failure we want here.
+            - name: kafka-keystore
+              mountPath: /mnt/kafka-keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka-truststore
+              readOnly: true
           resources:
             requests:
               cpu: 250m
@@ -176,6 +224,12 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: kafka-keystore
+          secret:
+            secretName: security-scanner-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
 ---
 apiVersion: v1
 kind: Service

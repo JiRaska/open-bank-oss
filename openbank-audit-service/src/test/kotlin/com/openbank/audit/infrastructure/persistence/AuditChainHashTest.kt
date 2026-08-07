@@ -28,6 +28,7 @@ class AuditChainHashTest {
         correlationId = "corr-1",
         occurredAt = Instant.parse("2026-06-12T10:00:00Z"),
         recordedAt = Instant.parse("2026-06-12T10:00:01Z"),
+        occurredAtSource = com.openbank.audit.domain.model.OccurredAtSource.EVENT,
     )
 
     private val genesis = "0".repeat(64)

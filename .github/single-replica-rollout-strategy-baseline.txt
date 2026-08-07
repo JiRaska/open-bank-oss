@@ -1,64 +1,13 @@
-openbank-infra/gitops/components/accounts/product-catalog.yaml: Deployment/product-catalog has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/accounts/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/admin-ui/admin-ui.yaml: Deployment/admin-ui has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/agent/agent-service.yaml: Deployment/agent-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/ai-platform/litellm.yaml: Deployment/litellm has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/aml/aml-service.yaml: Deployment/aml-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/aml/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/anacredit/anacredit-service.yaml: Deployment/anacredit-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/analytics/analytics-sink.yaml: Deployment/analytics-sink has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/ap2/ap2-service.yaml: Deployment/ap2-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/apicurio/registry.yaml: Deployment/apicurio-registry has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/audit/audit-service.yaml: Deployment/audit-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/authz-policy-auditor/authz-policy-auditor.yaml: Deployment/authz-policy-auditor has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/balances/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/billing/billing-service.yaml: Deployment/billing-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/billing/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/campaign/campaign-service.yaml: Deployment/campaign-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/campaign/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/consent/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/control-liveness-sentinel/control-liveness-sentinel.yaml: Deployment/control-liveness-sentinel has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/copilot/copilot-service.yaml: Deployment/copilot-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/copilot/redis.yaml: Deployment/copilot-redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/delegation/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/devops-agent/devops-agent.yaml: Deployment/devops-agent has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/dispute-service/dispute-service.yaml: Deployment/dispute-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/dispute-service/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/docs-truth-agent/docs-truth-agent.yaml: Deployment/docs-truth-agent has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/document-renderer/document-renderer-service.yaml: Deployment/document-renderer has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/document-service/document-service-service.yaml: Deployment/document-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/document-service/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/finops-agent/finops-agent.yaml: Deployment/finops-agent has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/finrep/finrep-service.yaml: Deployment/finrep-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/flaky-test-hunter/flaky-test-hunter.yaml: Deployment/flaky-test-hunter has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/fraud-service/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/fx-service/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/governance-auditor/governance-auditor.yaml: Deployment/governance-auditor has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/interest-service/interest-service.yaml: Deployment/interest-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/interest-service/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/kafka/kafka-ui.yaml: Deployment/kafka-ui has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/ledger/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/lending/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/mcp/mcp-service.yaml: Deployment/mcp-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/notifications/notification-service.yaml: Deployment/notification-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/notifications/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/observability/holmes-rca.yaml: Deployment/holmes-rca has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/observability/ntfy.yaml: Deployment/ntfy has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/observability/pyrra.yaml: Deployment/pyrra-api has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/observability/pyrra.yaml: Deployment/pyrra-kubernetes has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/party/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/payments/payments-services.yaml: Deployment/card-issuance-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/payments/payments-services.yaml: Deployment/clearing-simulator has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/payments/payments-services.yaml: Deployment/standing-order-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/payments/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/pid/pid-service.yaml: Deployment/pid-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/psd2-service/psd2-service.yaml: Deployment/psd2-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/psd2-service/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/release-steward/release-steward.yaml: Deployment/release-steward has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/sanctions-service/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/sca/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/sdd/sdd-service.yaml: Deployment/sdd-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/security-scanner/security-scanner-service.yaml: Deployment/security-scanner-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/statements/statement-service.yaml: Deployment/statement-service has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/tpp-registry/redis.yaml: Deployment/redis has replicas 1 and no declared rollout strategy
-openbank-infra/gitops/components/tpp-registry/tpp-registry-service.yaml: Deployment/tpp-registry-service has replicas 1 and no declared rollout strategy
+# Declared debt for check-single-replica-rollout-strategy.py (issue #3545).
+#
+# THIS FILE IS EMPTY ON PURPOSE, and empty is the state to keep it in.
+#
+# Every one-replica workload under openbank-infra/gitops now declares its rollout strategy:
+# 66 Deployments terminate-first (maxSurge 0 / maxUnavailable 1), 7 Recreate, 2 declare surge
+# deliberately (keycloak, pact-broker), 21 are canary Argo Rollouts, 1 is a StatefulSet.
+#
+# An entry added here is a one-replica workload that inherits the default maxSurge 1 /
+# maxUnavailable 0 — i.e. one that cannot roll when the cluster has no room for a second pod,
+# while reporting 1/1 READY throughout. It needs a reason, not just a line: say which of the
+# strategies it declined and why. The checker fails on a stale entry too, so a line that stops
+# matching must be deleted rather than left to outlive the debt it described.

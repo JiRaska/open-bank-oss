@@ -390,6 +390,8 @@ class ScaService(
             "Potvrďte sdílení přístupu k vašemu produktu"
         ScaPurpose.DELEGATION_ACCEPT ->
             "Potvrďte přijetí sdíleného přístupu"
+        ScaPurpose.SAVINGS_WITHDRAW_APPROVAL ->
+            "Potvrďte výběr ze spořicího cíle"
     }
 
     private fun buildIdempotencyKey(command: InitiateScaCommand, method: ScaMethod): String {

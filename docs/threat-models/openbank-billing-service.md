@@ -170,6 +170,10 @@ Trust boundaries: every inbound/outbound hop is service↔service over mTLS with
 
 ## 6. Change log
 
+| Date | Change |
+|---|---|
+| 2026-08-05 | Trust-boundary change (#3734): `operator-billing-write` now excludes `service-account-*` principals, and a new `prohibited` veto closes all three billing writes (`post`, `reverse`, `approval.decide`) to `service-account-openbank-edge` — the role_action_matrix grants all three to ROLE_OPERATOR and matrix-allows bypasses rule-level exclusions. Billing has no in-repo M2M caller at all (verified 2026-08-05: no edge URL, no backend REST client; account-service's billing-discovery read is INBOUND from billing), so no identity-scoped grant needed preserving. Ext moved from generator heredoc to standalone `billing_rest_ext.rego` with an 8-test opa suite. |
+
 - 2026-06-29 — initial model for the phase-2b skeleton (ADR-0143).
 - 2026-07-07 — phase 2c/2c-ii/2d landed: persistence, transactional outbox, ledger `@RestClient`
   posting, the scheduled cycle trigger, four-eyes `billing.post` (ApprovalStore-backed), and the

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.6](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.9.5...fx-service-v0.9.6) (2026-08-07)
+
+
+### Bug Fixes
+
+* **fx:** a derived inverse rate no longer reuses the source rate's id ([#3741](https://github.com/JiRaska/open-bank-oss/issues/3741)) ([559256a](https://github.com/JiRaska/open-bank-oss/commit/559256aabbb7ddcb5e5b5d2331a731023817ad8b)), closes [#3374](https://github.com/JiRaska/open-bank-oss/issues/3374)
+
 ## [0.9.5](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.9.4...fx-service-v0.9.5) (2026-08-02)
 
 

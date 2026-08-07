@@ -196,14 +196,14 @@ const securityLayers = [
 ]
 
 const imageAnatomy = {
-  multiStage: img.ok ? img.multiStage : true,
-  buildBase: img.ok ? img.buildBase : 'eclipse-temurin:25-jdk-alpine',
-  runtimeBase: img.ok ? img.runtimeBase : 'eclipse-temurin:25-jre-alpine',
+  multiStage: img.ok ? img.multiStage : null,
+  buildBase: img.ok ? img.buildBase : null,
+  runtimeBase: img.ok ? img.runtimeBase : null,
   steps: [
-    { id: 'build', label: 'Build stage (JDK)', status: 'live', adr: [],
-      detail: `Plný JDK (${img.ok ? img.buildBase : 'temurin:25-jdk-alpine'}) zkompiluje a sestaví aplikaci. Tento stage se NEDISTRIBUUJE — zůstává v něm jen nářadí.` },
-    { id: 'runtime', label: 'Runtime stage (JRE-only)', status: 'live', adr: [],
-      detail: `Distribuuje se jen štíhlý JRE (${img.ok ? img.runtimeBase : 'temurin:25-jre-alpine'}) + aplikace. Menší image = menší útočná plocha, žádný kompilátor/shell nářadí navíc.` },
+    { id: 'build', label: 'Build stage (JDK)', status: img.ok ? 'live' : 'partial', adr: [],
+      detail: `Plný JDK (${img.ok ? img.buildBase : 'nezjištěno / neparsováno'}) zkompiluje a sestaví aplikaci. Tento stage se NEDISTRIBUUJE — zůstává v něm jen nářadí.` },
+    { id: 'runtime', label: 'Runtime stage (JRE-only)', status: img.ok ? 'live' : 'partial', adr: [],
+      detail: `Distribuuje se jen štíhlý JRE (${img.ok ? img.runtimeBase : 'nezjištěno / neparsováno'}) + aplikace. Menší image = menší útočná plocha, žádný kompilátor/shell nářadí navíc.` },
     { id: 'nonroot', label: 'Non-root uživatel', status: img.ok && img.nonRoot ? 'live' : 'partial', adr: ['0081'],
       detail: 'Proces běží jako `openbank` (ne root). I kdyby útočník unikl z aplikace, nemá v kontejneru práva roota.' },
     { id: 'fastjar', label: 'Quarkus fast-jar vrstvy', status: img.ok && img.fastJar ? 'live' : 'partial', adr: [],

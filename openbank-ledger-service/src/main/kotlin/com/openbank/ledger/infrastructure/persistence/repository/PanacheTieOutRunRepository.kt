@@ -12,6 +12,7 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepositoryBase
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.LocalDate
 import java.util.UUID
 
 @ApplicationScoped
@@ -28,6 +29,10 @@ class PanacheTieOutRunRepository :
 
     override suspend fun findLatest(): TieOutRunRecord? = Panache.withSession {
         find("order by runAt desc").firstResult()
+    }.awaitSuspending()?.toDomain()
+
+    override suspend fun findLatestFor(asOf: LocalDate): TieOutRunRecord? = Panache.withSession {
+        find("asOf = ?1 order by runAt desc", asOf).firstResult()
     }.awaitSuspending()?.toDomain()
 
     private fun TieOutRunRecord.toEntity() = TieOutRunEntity().also {

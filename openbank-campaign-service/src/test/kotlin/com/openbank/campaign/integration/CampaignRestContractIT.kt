@@ -139,6 +139,237 @@ class CampaignRestContractIT {
         }
     }
 
+    /**
+     * PUSH must be selectable by a caller, not just representable in the domain.
+     *
+     * #3584 added `Channel.PUSH` and the openapi enum lists it, but `StepRequest` had no `channel`
+     * field and the resource hardcoded `Channel.EMAIL` — so the capability was documented and
+     * unreachable, and nothing went red: the domain tests construct `CampaignStep` directly and the
+     * spec is not executed. Only a real create-then-read over HTTP can tell "the enum has PUSH in
+     * it" from "a client can ask for PUSH".
+     */
+    @Test
+    fun `a step can be created on PUSH and reads back as PUSH`() {
+        val body = """
+            {"name":"push-${UUID.randomUUID()}","goal":"prove PUSH is reachable over HTTP",
+             "segmentName":"actives","segmentVersion":1,
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER_PUSH","channel":"PUSH",
+                       "variables":{"offerTitle":"T"},"delaySeconds":0}]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("steps[0].channel", org.hamcrest.Matchers.equalTo("PUSH"))
+        } Extract {
+            path<String>("id")
+        }
+
+        // Read back through a second request: the create response could be echoing the request DTO
+        // rather than what was persisted, which would pass the assertion above and still mean the
+        // step runs on EMAIL.
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("steps[0].channel", org.hamcrest.Matchers.equalTo("PUSH"))
+        }
+    }
+
+    /**
+     * The other half: making the channel caller-supplied must not make it caller-*chosen*. The
+     * `CampaignStep` init invariant is the validation — an email template on a PUSH step would put
+     * offer body copy into an APNs payload, the leak #1182 closed — and it has to survive the trip
+     * through the REST layer, where a failed `require()` becomes a 400 via libs' common mappers.
+     */
+    @Test
+    fun `a template that renders on EMAIL is rejected on a PUSH step`() {
+        val body = """
+            {"name":"mismatch-${UUID.randomUUID()}","goal":"prove the invariant reaches HTTP",
+             "segmentName":"actives","segmentVersion":1,
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER","channel":"PUSH",
+                       "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
+        """.trimIndent()
+
+        Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    /**
+     * A body written before `channel` existed must keep its meaning — the field is optional with an
+     * EMAIL default, so every stored campaign and every existing client is unaffected.
+     */
+    @Test
+    fun `a step with no channel field still defaults to EMAIL`() {
+        val id = createDraft()
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("steps[0].channel", org.hamcrest.Matchers.equalTo("EMAIL"))
+        }
+    }
+
+    /**
+     * A cadence must survive the create-and-read round trip, and be readable back as itself.
+     *
+     * Asserted over a second request rather than the create response, for the same reason the PUSH
+     * channel test does: the 201 body could be echoing the request DTO, which would pass while the
+     * campaign was stored with no cadence at all and never enrolled anyone again.
+     */
+    @Test
+    fun `a campaign can be created with a cadence and reads it back`() {
+        val body = """
+            {"name":"cron-${UUID.randomUUID()}","goal":"prove the cadence round trip",
+             "segmentName":"actives","segmentVersion":1,
+             "schedule":{"cadence":"WEEKLY_MONDAY_MORNING","endAt":"2026-12-31T00:00:00Z"},
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                       "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("schedule.cadence", org.hamcrest.Matchers.equalTo("WEEKLY_MONDAY_MORNING"))
+            body("schedule.endAt", org.hamcrest.Matchers.notNullValue())
+        }
+    }
+
+    /**
+     * A cadence outside the catalogue is a 400, not a stored campaign.
+     *
+     * This is the whole argument for a catalogue over a cron string: the rejected value here is a
+     * perfectly well-formed cron, and accepting it would produce a campaign that looks scheduled in
+     * the console and never fires — a failure with no error anywhere to notice it by.
+     */
+    @Test
+    fun `an unknown cadence is rejected rather than stored`() {
+        val body = """
+            {"name":"badcron-${UUID.randomUUID()}","goal":"prove the catalogue rejects free text",
+             "segmentName":"actives","segmentVersion":1,
+             "schedule":{"cadence":"*/5 * * * *"},
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                       "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
+        """.trimIndent()
+
+        Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    /** A body written before cadences existed keeps its meaning: one-shot, no schedule. */
+    @Test
+    fun `a campaign with no schedule field reads back without one`() {
+        val id = createDraft()
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("schedule", org.hamcrest.Matchers.nullValue())
+        }
+    }
+
+    /**
+     * The console builds its cadence picker from this list, so it must be served and must agree
+     * with what create accepts — an option the authoring screen offers and the service rejects is
+     * a dead control.
+     */
+    @Test
+    fun `the cadence catalogue is served with its human form and zone`() {
+        When {
+            get("/api/v1/campaigns/cadences")
+        } Then {
+            statusCode(200)
+            body("cadence", org.hamcrest.Matchers.hasItem("DAILY_MORNING"))
+            body("find { it.cadence == 'DAILY_MORNING' }.humanForm", org.hamcrest.Matchers.containsString("09:00"))
+            // Never UTC: a cron without a zone fires an hour or two off the customer's morning.
+            body("find { it.cadence == 'DAILY_MORNING' }.zone", org.hamcrest.Matchers.equalTo("Europe/Prague"))
+        }
+    }
+
+    /** A trigger key survives the round trip, so a campaign can declare what wakes it. */
+    @Test
+    fun `a campaign can declare a trigger and reads it back`() {
+        val body = """
+            {"name":"trig-${UUID.randomUUID()}","goal":"prove the trigger round trip",
+             "segmentName":"actives","segmentVersion":1,"trigger":"ACCOUNT_OPENED",
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                       "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("trigger", org.hamcrest.Matchers.equalTo("ACCOUNT_OPENED"))
+        }
+    }
+
+    /**
+     * An uncatalogued trigger is a 400.
+     *
+     * Stored, it would be a campaign that looks event-driven and waits forever, because no consumer
+     * watches a topic nobody named — the same dead-capability shape as an unknown cadence.
+     */
+    @Test
+    fun `an unknown trigger is rejected rather than stored`() {
+        val body = """
+            {"name":"badtrig-${UUID.randomUUID()}","goal":"prove the catalogue rejects invented triggers",
+             "segmentName":"actives","segmentVersion":1,"trigger":"CUSTOMER_SNEEZED",
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                       "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
+        """.trimIndent()
+
+        Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(400)
+        }
+    }
+
     @Test
     fun `the segment catalogue is served over HTTP with its rules in words`() {
         When {
@@ -257,6 +488,47 @@ class CampaignRestContractIT {
         } Then {
             statusCode(400)
             body("message", org.hamcrest.Matchers.containsString("bodyHtml"))
+        }
+    }
+
+    @Test
+    fun `a stop condition survives the create-and-read round trip`() {
+        val id = Given {
+            contentType("application/json")
+            body(
+                """
+                {"name":"it-stop-condition","goal":"prove the HTTP contract","segmentName":"actives","segmentVersion":1,
+                 "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                           "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}],
+                 "stopCondition":{"maxSendsPerParty":2}}
+                """.trimIndent(),
+            )
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("stopCondition.maxSendsPerParty", org.hamcrest.Matchers.equalTo(2))
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("stopCondition.maxSendsPerParty", org.hamcrest.Matchers.equalTo(2))
+        }
+    }
+
+    @Test
+    fun `a draft without a stop condition reads back with none — absent never invents a cap`() {
+        val id = createDraft("it-no-stop-condition")
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("stopCondition", org.hamcrest.Matchers.nullValue())
         }
     }
 }

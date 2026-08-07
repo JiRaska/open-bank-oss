@@ -5,7 +5,7 @@ info:
   title: Consent Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.0 -> 1.1): additive
   # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
-  version: 1.4.0
+  version: 1.5.0
   description: >-
     Data sharing consent lifecycle — create, activate, reject, revoke, validate. PATCH
     /approvals/{id} decides a four-eyes approval paused by the platform's ADR-0155 maker-checker
@@ -274,6 +274,79 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/suppressions:
+    post:
+      tags: [Suppressions]
+      summary: Create a do-not-contact suppression (ADR-0219 D3)
+      operationId: createSuppression
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSuppressionRequest'
+      responses:
+        '201':
+          description: Suppression created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuppressionResponse'
+        '400':
+          description: Invalid entry (ALL takes no value; SCOPE/TOPIC require one)
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/suppressions/party/{partyId}:
+    get:
+      tags: [Suppressions]
+      summary: List a party's active suppressions — the contact-policy gate's read
+      operationId: listActiveSuppressions
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Active suppression entries (empty when none)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SuppressionResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/suppressions/{id}/revoke:
+    post:
+      tags: [Suppressions]
+      summary: Revoke a suppression entry
+      operationId: revokeSuppression
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The revoked entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuppressionResponse'
+        '404':
+          description: No suppression with that id
+        '409':
+          description: Already revoked
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -360,3 +433,49 @@ components:
           type: string
         message:
           type: string
+
+    CreateSuppressionRequest:
+      type: object
+      required: [partyId, scope, reason, source]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        scope:
+          type: string
+          enum: [ALL, SCOPE, TOPIC]
+        value:
+          type: string
+          description: Scope or topic name — required for SCOPE/TOPIC, must be absent for ALL.
+        reason:
+          type: string
+          enum: [CUSTOMER_OPTOUT, COMPLAINT, RM_MANAGED, LEGAL_HOLD, DECEASED]
+        source:
+          type: string
+          description: Origin surface (preference-centre, complaints flow, RM workbench).
+
+    SuppressionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        scope:
+          type: string
+          enum: [ALL, SCOPE, TOPIC]
+        value:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          enum: [CUSTOMER_OPTOUT, COMPLAINT, RM_MANAGED, LEGAL_HOLD, DECEASED]
+        source:
+          type: string
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time

@@ -13,7 +13,7 @@
 openbank-infra/scripts/build-push-service.sh kyc-service
 ```
 
-`Dockerfile` staví **fast-jar** (`-Dquarkus.package.jar.type=fast-jar`) a runtime stage kopíruje `quarkus-app/`. Runtime image: `eclipse-temurin:25-jre-alpine`, non-root uživatel `openbank`, ZGC. Nikdy nepoužívej uber-jar (prázdný `quarkus-app/` → crashloop).
+**fast-jar** (`-Dquarkus.package.jar.type=fast-jar`) se staví na hostu; image skládá `.github/workflows/Dockerfile.deploy`, které kopíruje `quarkus-app/`. Runtime image: `eclipse-temurin:25-jre` (glibc, #3354), non-root uživatel `openbank`, ZGC. Nikdy nepoužívej uber-jar (prázdný `quarkus-app/` → crashloop). `openbank-kyc-service/Dockerfile` nic nestaví (#3016) — pipeline z něj čte jen `EXPOSE`.
 
 ## Endpointy
 

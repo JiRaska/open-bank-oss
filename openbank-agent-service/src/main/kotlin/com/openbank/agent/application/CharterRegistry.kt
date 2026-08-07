@@ -38,6 +38,17 @@ class CharterRegistry {
         }.also { log.infof("charter registry: loaded %d entries", it.size) }
     }
 
+    private val modelIds: Map<String, String> by lazy {
+        config.charters().associate { c -> c.agentId() to c.model() }
+    }
+
+    /** Charter-declared model id for [agentId] (ADR-0031 D5, issue #3667). Returns [UNKNOWN_MODEL] when undeclared. */
+    fun modelId(agentId: String): String = modelIds[agentId] ?: UNKNOWN_MODEL
+
+    companion object {
+        const val UNKNOWN_MODEL = "unknown"
+    }
+
     /**
      * Per-agent allow-list of MCP capabilities (ADR-0080 P0). Runtime projection of the
      * `tools.allow` list in agents.yaml. AgentPolicyGate uses it as a fail-safe, in-process
@@ -99,5 +110,13 @@ interface CharterConfig {
         /** Config-baseline kill switch (ADR-0031 D7): false halts this agent declaratively. */
         @WithDefault("true")
         fun enabled(): Boolean
+
+        /**
+         * Charter-declared LiteLLM model id (ADR-0031 D5, issue #3667). The policy gate records
+         * this on every agent.mcp.tool_call audit event so the evidence chain is complete without
+         * a model-gateway round-trip at gate time. Defaults to [CharterRegistry.UNKNOWN_MODEL].
+         */
+        @WithDefault("unknown")
+        fun model(): String
     }
 }

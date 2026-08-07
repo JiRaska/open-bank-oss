@@ -4,6 +4,7 @@
 
 package com.openbank.account.infrastructure.rest
 
+import com.openbank.account.application.usecase.ProposalExpiredException
 import com.openbank.account.application.usecase.ProposalForbiddenException
 import com.openbank.account.application.usecase.ProposalNotFoundException
 import com.openbank.account.application.usecase.ProposalScaException
@@ -26,6 +27,13 @@ class ProposalNotFoundExceptionMapper : ExceptionMapper<ProposalNotFoundExceptio
 class ProposalForbiddenExceptionMapper : ExceptionMapper<ProposalForbiddenException> {
     override fun toResponse(exception: ProposalForbiddenException): Response =
         Response.status(Response.Status.FORBIDDEN).entity(errorBody(403, exception.message)).build()
+}
+
+/** 409, not 400: the request is well formed and the caller entitled — the resource's window closed. */
+@Provider
+class ProposalExpiredExceptionMapper : ExceptionMapper<ProposalExpiredException> {
+    override fun toResponse(exception: ProposalExpiredException): Response = Response.status(Response.Status.CONFLICT)
+        .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message)).build()
 }
 
 @Provider
