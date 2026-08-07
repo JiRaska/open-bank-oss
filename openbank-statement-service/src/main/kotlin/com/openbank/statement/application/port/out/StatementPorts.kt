@@ -49,8 +49,29 @@ interface StatementPeriodRepository {
      */
     fun saveWithOutbox(period: StatementPeriod, event: OutboxMessage): Uni<StatementPeriod>
 
+    /**
+     * The **standing** (non-SUPERSEDED) close for a window, or null. Superseded records stay in the
+     * table for retention and remain reachable by [findBySequence]; they must never be returned here,
+     * or a restated period would look closed-with-the-old-figures to the idempotency check and to
+     * [priorClosing].
+     */
     fun findByPeriod(accountId: UUID, currency: String, from: LocalDate, to: LocalDate): Uni<StatementPeriod?>
+
+    /** Finds by legal sequence **including** superseded records — an issued statement page must stay
+     *  reproducible for its full retention (ADR-0035 §D). */
     fun findBySequence(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementPeriod?>
+
+    /**
+     * Atomically supersede [supersededId] and persist [replacement] plus its [event] in ONE
+     * transaction (ADR-0035 §D). Either the whole restatement lands or none of it does — a
+     * SUPERSEDED record with no replacement would leave the pocket with no standing close, and a
+     * replacement without the status flip would violate the one-active-close-per-window index.
+     */
+    fun supersedeAndReplace(
+        supersededId: UUID,
+        replacement: StatementPeriod,
+        event: OutboxMessage,
+    ): Uni<StatementPeriod>
     fun priorClosing(accountId: UUID, currency: String, before: LocalDate): Uni<BigDecimal?>
     fun listForAccount(accountId: UUID): Uni<List<StatementPeriod>>
 

@@ -124,8 +124,12 @@ class AccountResource(
     @Operation(summary = "Open a new account")
     suspend fun openAccount(
         request: OpenAccountRequest,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
+        // Declared nullable on purpose (#3104): JAX-RS injects null for an absent header, and the
+        // non-nullable type only decided where the NPE landed — a 500 that tells the caller the
+        // server broke. libs-runtime maps IllegalArgumentException to 400.
+        requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
         idempotencyStore.get(idempotencyKey)?.let { cached ->
             return Response.status(cached.statusCode)
                 .entity(cached.responseBody)
@@ -375,10 +379,12 @@ class AccountResource(
     @Operation(summary = "Resolve which pocket settles a payment in a given currency")
     suspend fun resolvePocket(
         @PathParam("accountId") accountId: UUID,
-        @QueryParam("currency") currency: String,
+        @QueryParam("currency") currency: String?,
         @QueryParam("policy") @DefaultValue("CONVERT_TO_PRIMARY") policy: String,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
     ): Response {
+        // #3104 — absent `currency` used to reach CurrencyCode.of(null) and answer 500.
+        requireNotNull(currency) { "query parameter 'currency' is required" }
         customerPartyId?.let {
             val account = accountUseCase.getAccount(GetAccountQuery(accountId))
             denyIfNotOwner(account.partyId, it)?.let { deny -> return deny }

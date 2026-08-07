@@ -34,8 +34,9 @@
 | `payload` | TEXT, not null | Původní JSON události, doslovně |
 | `source_service` | VARCHAR(100) | Zdrojová služba |
 | `correlation_id` | VARCHAR(100), null | Trace correlation |
-| `occurred_at` | TIMESTAMPTZ | Business čas |
+| `occurred_at` | TIMESTAMPTZ | Business čas — skutečný jen když `occurred_at_source = 'EVENT'` |
 | `recorded_at` | TIMESTAMPTZ, default NOW() | Čas ingestu |
+| `occurred_at_source` | VARCHAR(8), null | (V11) `EVENT` = producent poslal `occurredAt`; `INGEST` = neposlal, takže `occurred_at` je čas příjmu (horní mez); NULL = řádek před V11, ber jako `INGEST` |
 | `session_id` | VARCHAR(100), null | (V2) |
 | `user_agent` | VARCHAR(500), null | (V2) |
 | `ip_address` | VARCHAR(45), null | (V2) — IPv4/IPv6 |

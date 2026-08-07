@@ -4,10 +4,13 @@
 
 package com.openbank.securityscanner.infrastructure.rest
 
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.securityscanner.application.SecurityScannerService
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.config.ConfigMapping
 import io.smallrye.config.WithName
+import jakarta.annotation.PostConstruct
 import jakarta.annotation.security.PermitAll
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
@@ -21,6 +24,7 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import java.time.Duration
 
 data class ServiceConfig(val name: String, val url: String, val port: Int)
 
@@ -41,7 +45,18 @@ interface SecurityScannerConfig {
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @Tag(name = "Security Scanner", description = "OWASP Top 10 security scanning for all microservices")
-class SecurityScannerResource(private val scanner: SecurityScannerService, private val config: SecurityScannerConfig) {
+class SecurityScannerResource(
+    private val scanner: SecurityScannerService,
+    private val config: SecurityScannerConfig,
+    private val domainMetrics: DomainMetrics,
+) {
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    @PostConstruct
+    fun registerLiveness() {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
+
     private fun serviceList() = config.services().map { it.name() to it.url() }
 
     @GET
@@ -91,5 +106,11 @@ class SecurityScannerResource(private val scanner: SecurityScannerService, priva
     @Scheduled(every = "30m", delayed = "2m")
     fun scheduledScan() {
         scanner.scanAll(serviceList())
+        liveness?.recordSuccess()
+    }
+
+    private companion object {
+        const val WORKFLOW_NAME = "security-scanner-scan"
+        val EXPECTED_INTERVAL: Duration = Duration.ofMinutes(30)
     }
 }

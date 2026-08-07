@@ -32,6 +32,9 @@ interface FlakyTestHunterConfig {
     @WithDefault("http://litellm.ai-platform:4000")
     fun llmGatewayUrl(): String
 
+    @WithDefault("deepseek-ai/DeepSeek-V3.2")
+    fun modelId(): String
+
     // Filesystem path to the monorepo checkout this agent reads every service's src/test/kotlin
     // tree, .github/scripts/*.sh CI guard scripts, and build/test-results/test/*.xml JUnit reports
     // from (TestScanAdapter). Defaults to the working directory, matching a sidecar/init-container
