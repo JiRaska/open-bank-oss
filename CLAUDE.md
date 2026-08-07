@@ -477,6 +477,41 @@ fire from *outside* it, so they stay here:
   plain red while having silently left half the fleet unlinted — 455 actionable findings against a
   true 920 (#2177). Feed every new gate an input it MUST flag, and read what it *prints*, not just
   its exit code.
+- **An advisory gate's "these findings are all benign" note is an unverified claim, and advisory
+  mode is what removes the pressure to check it.** The repo already knows a gate that has only ever
+  passed is unfalsified; the sharper form is that a gate can fire CORRECTLY and have its *triage* be
+  the unfalsified artifact. `incluster-hostname-resolution` landed advisory with 6 findings and a
+  note — repeated in `gates.yaml` and `rules.yaml` — saying all six were dead `openbank-<svc>`
+  rest-client defaults "on services whose pods override them by env". Three were. The other three
+  were live: settlement-service's Rollout and onboarding-service's Deployment carried no
+  `*_SERVICE_URL` at all, so `openbank-balance-service:8080` / `openbank-ledger-service:8080` /
+  `openbank-party-service:8090` were the values those pods actually dialled — names that resolve in
+  no namespace, on ports wrong even for the right name (8103 / 8101 / 8111). Every settlement
+  debit/credit and GL posting, and onboarding's abandoned-registration party lookup, went nowhere
+  (#3931). The note was written from the SHAPE of the config line — a bare `openbank-` default, of a
+  kind several peers DO override — instead of from the deployed manifest, and that heuristic gets
+  the benign cases right and the live ones wrong. **Grade a finding against the deployed state, one
+  workload at a time; "several of these are overridden" is not a fact about the rest.** The trap
+  that makes it cheap to misread: `payments-services.yaml` DOES declare `LEDGER_SERVICE_URL` +
+  `BALANCE_SERVICE_URL` — for transaction-service, ~2000 lines from settlement's Rollout, so a grep
+  of the file confirms the wrong thing. And settlement is a `kind: Rollout`, so a Deployment-only
+  parse reports it as having no workload rather than as having no override.
+- **A red advisory check and a verified-benign one are indistinguishable — so an advisory finding
+  needs a dated verification note or it decays into permanent background noise.** This is what makes
+  the bullet above a structural problem rather than one bad call: nothing downstream of a triage note
+  re-derives it, no gate covers it, and the longer it sits the more it reads as settled. If you write
+  "known, benign", write what you checked and when; if you can't, leave the finding untriaged, which
+  is at least honest.
+- **A gate over `application.yaml` says nothing about the gitops env that overrides it — and moving
+  a URL into gitops moves it OUT of scope.** `incluster-hostname-resolution` reads
+  `openbank-*/src/main/resources/application.yaml` only. So the fleet-standard fix for a bad host
+  (localhost dev default + real URL in the workload env) hands the checked claim to an unchecked
+  file. Not hypothetical: vop-service's ADR-0171 payee-name hop declares
+  `PARTY_SERVICE_URL: http://party-service.parties.svc:8100` in `payments-services.yaml` — namespace
+  `parties` does not exist (it is `party`) and 8100 is account-service's port — alongside
+  `ACCOUNT_SERVICE_URL: …accounts.svc:8101`, where 8101 is ledger's. Both ports transposed, live on
+  the pod, invisible to the gate. When a gate's subject can be overridden, either extend it to the
+  overriding layer or say in its own header which layer it does not cover.
 - **An advisory check over a *generated* artifact is a contradiction.** On a hand-written artifact a
   red advisory check means "someone should look"; on a generated one it means "the committed document
   does not match reality" — there is no judgement left to exercise, so advisory just makes the drift
