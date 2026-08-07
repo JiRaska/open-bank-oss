@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: anacredit-service
     app.kubernetes.io/part-of: anacredit
   annotations:
-    openbank.tech/policy-checksum: "f9856a010df6ef54"
+    openbank.tech/policy-checksum: "0bad21e7a390cdb2"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2019,15 +2019,16 @@ data:
         # never becomes the only one. standing-order POSTs sepaPayment.create via the shared
         # client. When ADR-0223 D2(b) retires those matrix grants, this entry starts denying it.
         - operator-sepa-payment-write   # service-sepa-payment-shared-client-m2m (see note above)
+        # Restored once #3748 landed: service-sca-shared-client-m2m now admits the shared client
+        # for scaChallenge.read AND scaChallenge.consume, so document-service's consume call
+        # (ScaChallengeClient, oidc-client.client-id openbank-services) keeps an identity-scoped
+        # reason and this entry no longer 403s the document-signing gate. device.list is covered
+        # by matrix-allows. Still uncovered for the shared client: decide/initiate/verify and
+        # device.enroll — no in-repo caller invokes them on that principal.
+        - operator-sca-write            # service-sca-edge-m2m + service-sca-shared-client-m2m
       # NOT listed, and why. Each needs an identity-scoped rule for its real callers FIRST;
       # adding it here before that is a money-path outage, not a test failure.
       deferred:
-        operator-sca-write: "service-sca-shared-client-m2m covers scaChallenge.read ONLY, while
-          sca-service exposes consume/decide/initiate/verify and device.enroll. document-service
-          calls POST /challenges/{id}/consume through the shared client (ScaChallengeClient carries
-          OidcClientRequestReactiveFilter with oidc-client.client-id openbank-services) and
-          sca-service runs AUTHZ_ENFORCE=true, so listing this reason 403s the document-signing
-          gate. Needs #3748 (scaChallenge.consume for the shared client) to land first."
         operator-transaction-write: "6 verified callers of transaction.create via the shared client; no identity-scoped rule exists"
         operator-settlement-write: "settlement.create is resourceless with no alternative rule"
         operator-swift-write: "no identity-scoped rule; callers unverified"
