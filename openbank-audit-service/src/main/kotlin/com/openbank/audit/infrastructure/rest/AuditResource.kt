@@ -33,6 +33,13 @@ class AuditResource {
 
     @Inject lateinit var anchors: AuditAnchorService
 
+    companion object {
+        /** Upper bound on a customer-facing page; mirrors the access-log cap. */
+        private const val MAX_CUSTOMER_PAGE = 500
+
+        private val operationJson = com.fasterxml.jackson.databind.ObjectMapper()
+    }
+
     @GET
     @Path("/customer/{partyId}")
     // Customer-facing privacy view (P2-27): the customer edge proxies a caller's OWN access
@@ -63,6 +70,67 @@ class AuditResource {
         }
         return Response.ok(entries).build()
     }
+
+    /**
+     * "What did they do with my account" — the grantor transparency query (ADR-0232 D5, #2990
+     * AC10). Every action a delegate took ON BEHALF OF [grantorPartyId], newest first.
+     *
+     * Same edge-proxy gate and the same `audit.customerRead` OPA action as the customer access
+     * log above, for the same reason and with the same contract: the edge injects the party from
+     * the JWT so a client-supplied id never reaches this path, and `rest.rego` grants the action
+     * to exactly `service-account-openbank-edge`. Reusing that action rather than minting one
+     * keeps a policy-bundle restamp off a change that does not need it — the cost is that any
+     * principal already able to read a party's own access log can read this too. Those are the
+     * same principal set today; if they ever diverge this needs its own action.
+     *
+     * Projected, not raw: the grantor is entitled to know *that* their delegate paid, when, and
+     * under which grant — not to the full event payload, which is regulated evidence for the
+     * auditor-gated routes below. `actorId` (the delegate) is included because withholding it
+     * would defeat the point of the view.
+     */
+    @GET
+    @Path("/on-behalf-of/{grantorPartyId}")
+    @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "audit.customerRead", resource = "#grantorPartyId")
+    @Operation(
+        summary = "Actions taken on behalf of a grantor by their delegates (ADR-0232 D5)",
+        description = "The data behind \"what did they do with my account\": every audited action " +
+            "whose on-behalf-of party is this grantor. Optionally narrowed to one delegate " +
+            "(?delegatePartyId=) or one grant (?delegationId=).",
+    )
+    suspend fun getDelegatedActionsForGrantor(
+        @PathParam("grantorPartyId") grantorPartyId: String,
+        @QueryParam("delegatePartyId") delegatePartyId: String?,
+        @QueryParam("delegationId") delegationId: String?,
+        @QueryParam("limit") @DefaultValue("100") limit: Int,
+    ): Response {
+        val entries = repo.findOnBehalfOf(
+            grantorPartyId = grantorPartyId,
+            delegatePartyId = delegatePartyId?.takeIf { it.isNotBlank() },
+            delegationId = delegationId?.takeIf { it.isNotBlank() },
+            limit = limit.coerceIn(1, MAX_CUSTOMER_PAGE),
+        ).map {
+            mapOf(
+                "entryId" to it.id.toString(),
+                "eventType" to it.eventType,
+                "operation" to extractOperation(it.payload),
+                "delegatePartyId" to it.actorId,
+                "delegationId" to it.delegationId,
+                "resourceType" to it.aggregateType,
+                "sourceService" to it.sourceService,
+                "occurredAt" to it.occurredAt.toString(),
+            )
+        }
+        return Response.ok(entries).build()
+    }
+
+    /**
+     * The customer-facing verb ("payments.domestic"), read out of the chain-hashed payload rather
+     * than stored beside it. A second copy of a field that already exists in the payload is a
+     * field that can disagree with it; this projection reads the evidence.
+     */
+    private fun extractOperation(payload: String): String? =
+        runCatching { operationJson.readTree(payload)["operation"]?.asText() }.getOrNull()
 
     @GET
     @Path("/entries/{aggregateId}")

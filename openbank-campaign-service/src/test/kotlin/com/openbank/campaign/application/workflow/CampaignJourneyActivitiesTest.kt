@@ -74,6 +74,7 @@ class CampaignJourneyActivitiesTest {
             override suspend fun findById(id: UUID) = if (id == campaignId) campaign else null
             override suspend fun list() = listOf(campaign)
             override suspend fun save(campaign: Campaign) = campaign
+            override suspend fun findActiveByTrigger(trigger: String) = emptyList<Campaign>()
         }
         val enrolments = object : EnrolmentRepository {
             override suspend fun findByCampaignAndParty(campaignId: UUID, partyId: UUID): Enrolment? = null
@@ -83,6 +84,10 @@ class CampaignJourneyActivitiesTest {
             override suspend fun save(enrolment: Enrolment) = enrolment
         }
         val sendLog = object : SendLogRepository {
+            // ADR-0245: this fake asserts nothing about conversion, so nothing ever converted.
+            override suspend fun conversionContextFor(campaignId: java.util.UUID, partyId: java.util.UUID) =
+                com.openbank.campaign.application.port.out.ConversionContext(null, false)
+
             override suspend fun record(send: SendRecord) {
                 recorded += send
             }

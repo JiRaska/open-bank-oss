@@ -64,6 +64,7 @@ OPTIONAL_TRUE_PENDING_LIVE_CHECK: dict[str, str] = {
     "mcp-service": "secret is declared; flip after confirming it synced in `mcp`.",
     "sdd-service": "secret is declared; flip after confirming it synced in `sdd`.",
     "tpp-registry-service": "secret is declared; flip after confirming it synced in `tpp-registry`.",
+    "engagement-service": "new service, no Vault entry seeded yet — flip after confirming it synced in `engagement`.",
 }
 
 

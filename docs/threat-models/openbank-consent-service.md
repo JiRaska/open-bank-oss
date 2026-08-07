@@ -21,9 +21,13 @@ escalating a consent is a direct path to unauthorized data access or payment ini
                                                               |
                                                               +--> [(consent_outbox)] --> [Kafka consent events]
    validate() <-- [psd2-service / resource servers checking a consent before serving data]
+   hasActiveConsent() <-- [engagement-service: ContactPolicyGate's live per-call consent check]
 ```
 
 - **External entities:** PSD2/TPP-facing layer, party-service, resource servers calling `validate`.
+- **engagement-service** (new caller, 2026-08-07): reads `hasActiveConsent` for the
+  `MARKETING_COMMS_INAPP` scope before resolving a surface (ADR-0220, ADR-0219 D1). Read-only,
+  same shape as campaign-service's own consent check — no new mutation path.
 - **Trust boundaries:** TPP edge (highest scrutiny); service↔Postgres; service↔Kafka.
 - **Assets:** consent grants, scopes, party↔grantee linkage, consent state.
 
@@ -52,6 +56,7 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 
 ## 6. Change log
 
+- **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. Four parameters on the consent lifecycle: `partyId` on revoke, `scaSessionId` on activate, `reason` on reject, `scope` on hasActiveConsent. `scaSessionId` is the evidence that SCA completed, so a null reaching activate is a state transition with no SCA reference attached — the request must be rejected, not half-processed. hasActiveConsent already answered 400 by accident (`runCatching` swallowed the NPE); it now says which parameter is missing. No new caller or boundary. Rollback: revert.
 - **2026-07-17** — Completed ADR-0126 §D2: `/validate` response now carries `scopes`, `grantedAccounts`
   (covered IBANs; null = all of the party's accounts) and `frequencyPerDay` (PSD2 RTS Art. 10 AISP cap
   = 4) so a resource server can cache within that window. Additive optional fields (openapi
@@ -75,3 +80,11 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 - **2026-05-30** — Added `consent_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/
   surface/boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
   Rollback: `DROP SEQUENCE`.
+- **2026-08-07** — New caller: `engagement-service` reads `hasActiveConsent` for
+  `MARKETING_COMMS_INAPP` (ADR-0220, ADR-0219 D1) before resolving an in-app surface. Read-only,
+  network-policy-allowed ingress edge only (`openbank-infra/gitops/components/consent/network-policies.yaml`,
+  via `gen-network-policies.py`) — no new mutation, no new scope, no schema change. Risk class =
+  **information disclosure**, unchanged: the endpoint already returns only a boolean, and the
+  caller authenticates as the shared `openbank-services` M2M client like every other consumer of
+  this endpoint. Rollback: revert the network-policy edge; the code-level call fails closed
+  (`ContactPolicyGate`'s D5 fail-closed-on-port-failure) if it cannot reach consent-service.

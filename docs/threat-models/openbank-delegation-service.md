@@ -78,11 +78,29 @@ gap closes only with a consumer pact or a run against a deployed stack.
   update required when that lands (leaked-link = leaked-document analysis).
 - EUDI verifiable-credential delivery channel (follow-up ADR on ADR-0094).
 - `AccountAuthorization` migration dual-run window (two grant sources for accounts).
-- **Cumulative daily/monthly ceilings are not enforced anywhere.** The grant carries them and
-  the event publishes them, but no projection counts spend against them, so a `dailyLimit` shown
-  to a customer ("max 5 000 Kč/den") is not a control today. Only `perTransactionLimit` binds.
+- **Cumulative daily/monthly ceilings are REFUSED at the API, not silently accepted.** The
+  aggregate still carries the fields and `DelegationOffered` still publishes them, but no
+  projection counts spend against them, so they were never a control. A request supplying
+  `dailyLimit` or `monthlyLimit` is now rejected `400 CUMULATIVE_LIMIT_UNSUPPORTED` at
+  delegation-service and at customer-edge, so a grantor cannot be shown "max 5 000 Kč/den" and
+  believe they capped their delegate. Only `perTransactionLimit` binds.
+
+  The refusal is placed AHEAD of the SCA gate: a doomed request must not spend the customer's
+  single-use challenge. Rows created before this change keep their unenforced ceilings and still
+  serialize — each is a grant a customer accepted under a false belief, and finding those grantors
+  is work that has not been done.
+
+  Enforcing them was rejected on evidence, not effort: a counter needs a point where spend is
+  observed, and there is none. `isAuthorizedForAmount` has no production caller, no money-moving
+  service reads a delegation grant, and `DelegationOffered` does not carry the figure to a
+  projection that could count against it. A counter shipped today would sit at zero and read as
+  implemented — the same false promise, harder to notice.
 - **No notification on any lifecycle transition** (ADR-0232 D4 requires both parties be told).
 - **No sanctions/PEP screening at grant time** (ADR-0232 D5); the eligibility gate checks party
   status and KYC level only.
 - **The ADR-0232 D5 SME bridge is unimplemented**: nothing requires a LEGAL_ENTITY grantor's
   acting person to hold `delegation.manage` on that entity.
+
+## Change log
+
+- **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. Four parameters on the grantee-response endpoints: `granteePartyId` on accept/decline/renounce and `scaSessionId` on accept. Both are authorization-relevant — `granteePartyId` names WHO is responding to the grant and `scaSessionId` is the SCA evidence for accepting it — so a null reaching the use case is a delegation transition with no identified actor. The `X-Customer-Party-Id` header stays nullable by design (its absence is what distinguishes a bank-initiated call). No new caller or boundary. Rollback: revert.
