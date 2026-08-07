@@ -687,6 +687,23 @@ gates:
     run: |
       bash .github/scripts/probe-pact-version.sh --self-test
 
+  # The counterpart-verifiability probe (#3223). The classifier above says WHY a block
+  # happened; two of its classes end in a promise ("clears within one reconcile tick",
+  # "the reconcile re-drives it automatically") that was a hardcoded constant, not an
+  # observation — and on run 31080511057 all six blocked money-path services carried it
+  # while every counterpart version named was unverifiable by construction. This probe is
+  # what turns that promise into evidence, so its failure directions are what must be
+  # exercised: a contentless counterpart dominating a healthy one, and every probe failure
+  # degrading to `unknown` rather than to the reassuring answer.
+  - id: blocking-counterpart-probe-unit-test
+    name: "can-i-deploy counterpart verifiability probe (issue #3223, enforced)"
+    group: supplychain
+    mode: enforced
+    selftest: |
+      bash .github/scripts/probe-blocking-counterparts.sh --self-test
+    run: |
+      bash .github/scripts/probe-blocking-counterparts.sh --self-test
+
   # Workflow `run:` step size (#3082). GitHub rejects an oversized run script by making the
   # WHOLE workflow unparseable — zero jobs, no error message, every contributor's runs of that
   # file dead until someone reverts. It happened to auto-deploy.yml (#3135 -> #3139) and NOTHING
@@ -1217,6 +1234,27 @@ gates:
       python3 .github/scripts/check-compliance-matrix.py --self-test
     run: |
       python3 .github/scripts/check-compliance-matrix.py --enforce
+
+  # docs/compliance/openssf-gold-gap.md feeds the OpenSSF BadgeApp form -- a public
+  # attestation to a third party. It shipped scoring crypto_used_network/crypto_tls12 as
+  # met on the justification "TLS + Istio mTLS", while the live cluster has zero Istio
+  # CRDs and zero Istio namespaces (#1914 is open for exactly that), and nine other rows
+  # were scored met on justifications naming nothing checkable at all ("Attest"). An
+  # assessor checks the evidence, not the tick. Nothing read this file before #3884.
+  #
+  # Structural, not a word deny-list: a met row must cite a resolvable anchor (existing
+  # repo path / issue ref / URL), and every path-shaped citation must resolve. Partial and
+  # not-met rows are exempt, so the prose explaining the mesh gap cannot trip it -- the
+  # gate-over-prose trap. Falsified both ways against the real pre-fix document: 10
+  # findings before, 0 after. Prints the row count, so a green cannot mean "never opened".
+  - id: openssf-gold-evidence
+    name: "OpenSSF Gold gap-doc evidence citations (#3884, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-openssf-gold-evidence.py --self-test
+    run: |
+      python3 .github/scripts/check-openssf-gold-evidence.py
 
   # rules.yaml' shared_m2m_write_prohibition names this script as its own `ci_producer`, and
   # nothing invoked it — so reading rules.yaml gave every impression the rule was enforced

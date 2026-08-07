@@ -8,6 +8,7 @@ import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
 import com.openbank.campaign.application.port.out.SendLogRepository
+import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
@@ -64,6 +65,21 @@ open class CampaignJourneyActivitiesImpl(
         sendLog.countSendsForPartyInCampaign(campaignId, partyId)
     }
 
+    override fun previousDeliveryStatus(campaignId: UUID, partyId: UUID, stepOrder: Int): DeliveryStatus? =
+        runBlockingOnWorker {
+            sendLog.latestDeliveryStatusBeforeStep(campaignId, partyId, stepOrder)
+        }
+
+    override fun skipStep(campaignId: UUID, partyId: UUID, stepOrder: Int) = runBlockingOnWorker {
+        sendLog.record(
+            SendRecord(Ids.newId(), campaignId, partyId, stepOrder, SendOutcome.SKIPPED_CONDITION, Instant.now()),
+        )
+        enrolments.findByCampaignAndParty(campaignId, partyId)?.let {
+            enrolments.save(it.copy(currentStep = stepOrder + 1))
+        }
+        Unit
+    }
+
     // The publish failure below is caught broadly on purpose: the point is that NO handoff failure
     // may leave the send log without a row, and narrowing the catch would re-open the gap for
     // whichever exception type the Kafka client happens to raise next (#3581). It is rethrown, so
@@ -105,7 +121,7 @@ open class CampaignJourneyActivitiesImpl(
                 // still reports SUPPRESSED and not DRY_RUN. Nothing is handed off, so this row's
                 // delivery status stays PENDING forever — correctly: no message ever left.
                 if (dryRun) {
-                    record(sendId, campaignId, partyId, stepOrder, SendOutcome.DRY_RUN)
+                    sendLog.record(sendId, campaignId, partyId, stepOrder, SendOutcome.DRY_RUN)
                 } else {
                     // ADR-0200 D3 — delivery goes through notification-service, never direct.
                     //
@@ -123,13 +139,13 @@ open class CampaignJourneyActivitiesImpl(
                             correlationId = sendId,
                         )
                     } catch (e: Exception) {
-                        record(sendId, campaignId, partyId, stepOrder, SendOutcome.FAILED)
+                        sendLog.record(sendId, campaignId, partyId, stepOrder, SendOutcome.FAILED)
                         // Rethrown on purpose: Temporal retries the activity, and the FAILED row
                         // above is the durable evidence that this attempt happened. FAILED rows do
                         // not consume the frequency cap (SENT only), so a retry is not penalised.
                         throw e
                     }
-                    record(sendId, campaignId, partyId, stepOrder, SendOutcome.SENT)
+                    sendLog.record(sendId, campaignId, partyId, stepOrder, SendOutcome.SENT)
                 }
                 StepOutcome.SENT
             }
@@ -137,7 +153,7 @@ open class CampaignJourneyActivitiesImpl(
                 if (decision.denyReason == ContactDenyReason.GATE_UNAVAILABLE) {
                     throw ContactGateUnavailableException("contact gate state unavailable — activity will retry")
                 }
-                record(Ids.newId(), campaignId, partyId, stepOrder, outcomeFor(decision.denyReason))
+                sendLog.record(Ids.newId(), campaignId, partyId, stepOrder, outcomeFor(decision.denyReason))
                 StepOutcome.SUPPRESSED
             }
         }
@@ -169,18 +185,6 @@ open class CampaignJourneyActivitiesImpl(
         Unit
     }
 
-    // `id` is a parameter rather than minted here: on the ALLOWED path it was already published as
-    // the correlation id, and a second id would be a row nothing can ever correlate back to.
-    // A gate-denied send never reached notification-service, so its id correlates with nothing and
-    // its delivery status stays PENDING forever — correctly: no message was ever handed off.
-    private suspend fun record(id: UUID, campaignId: UUID, partyId: UUID, stepOrder: Int, outcome: SendOutcome) {
-        sendLog.record(SendRecord(id, campaignId, partyId, stepOrder, outcome, Instant.now()))
-    }
-
-    // The recipient address is resolved by notification-service from party data; the campaign
-    // never carries an e-mail address itself (ADR-0200 D3 — no PII duplication).
-    private fun recipientFor(partyId: UUID): String = partyId.toString()
-
     /**
      * Every repository here is reactive Panache, and a Temporal activity runs on a plain worker
      * thread that carries NO Vert.x context — a bare `runBlocking` around a reactive Panache call
@@ -210,3 +214,27 @@ open class CampaignJourneyActivitiesImpl(
 
 /** Thrown when the contact gate cannot reach its state — a retry signal, never a policy outcome. */
 class ContactGateUnavailableException(message: String) : RuntimeException(message)
+
+// Two helpers as top-level privates rather than members: CampaignJourneyActivitiesImpl sits at
+// detekt's TooManyFunctions threshold of 11, which fires AT the limit, so the branch-condition
+// activities (#3585) had to buy their room somewhere.
+
+/**
+ * Write one send-log row.
+ *
+ * `id` is a parameter rather than minted here: on the ALLOWED path it was already published as the
+ * correlation id, and a second id would be a row nothing can ever correlate back to. A gate-denied
+ * send never reached notification-service, so its id correlates with nothing and its delivery
+ * status stays PENDING forever — correctly: no message was ever handed off.
+ */
+private suspend fun SendLogRepository.record(
+    id: UUID,
+    campaignId: UUID,
+    partyId: UUID,
+    stepOrder: Int,
+    outcome: SendOutcome,
+) = record(SendRecord(id, campaignId, partyId, stepOrder, outcome, Instant.now()))
+
+// The recipient address is resolved by notification-service from party data; the campaign never
+// carries an e-mail address itself (ADR-0200 D3 — no PII duplication).
+private fun recipientFor(partyId: UUID): String = partyId.toString()

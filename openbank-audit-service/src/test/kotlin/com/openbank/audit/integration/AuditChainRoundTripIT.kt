@@ -57,6 +57,7 @@ class AuditChainRoundTripIT {
         // 123456789 ns and 987654321 ns — both lose their last three digits to TIMESTAMPTZ.
         occurredAt = Instant.ofEpochSecond(OCCURRED_EPOCH_SECOND, OCCURRED_NANOS),
         recordedAt = Instant.ofEpochSecond(RECORDED_EPOCH_SECOND, RECORDED_NANOS),
+        occurredAtSource = com.openbank.audit.domain.model.OccurredAtSource.EVENT,
     )
 
     /**

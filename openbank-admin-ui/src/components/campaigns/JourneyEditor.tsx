@@ -29,11 +29,15 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 export type EditorChannel = 'EMAIL' | 'PUSH'
 
+export type EditorCondition = 'IF_PREVIOUS_CONFIRMED' | 'IF_PREVIOUS_NOT_CONFIRMED'
+
 export interface EditorStep {
   template: string
   channel: EditorChannel
   variables: Record<string, string>
   delaySeconds: number
+  /** Absent means the step always runs. Evaluated against the previous send's delivery status. */
+  condition?: EditorCondition
 }
 
 export const MAX_STEPS = 5
@@ -74,6 +78,7 @@ export function JourneyEditor({
   onAdd,
   onRemove,
   templateLabels,
+  stopAfter,
   attachedBelow = false,
 }: {
   steps: EditorStep[]
@@ -85,6 +90,8 @@ export function JourneyEditor({
   onAdd: () => void
   onRemove: (index: number) => void
   templateLabels: Record<string, string>
+  /** Campaign-level cap: the journey ends once a party has had this many sends. Null = no cap. */
+  stopAfter: number | null
   /** True when the step editor renders directly beneath, so the two read as one surface. */
   attachedBelow?: boolean
 }) {
@@ -105,7 +112,8 @@ export function JourneyEditor({
   // step is added.
   const cols = 1 + steps.length + (canAdd ? 1 : 0)
   const width = PAD * 2 + cols * NODE_W + (cols - 1) * GAP_X
-  const height = ROW_Y + NODE_H / 2 + 64
+  // Two rows live under the cards: the per-hop condition chips, then the journey-wide cap note.
+  const height = ROW_Y + NODE_H / 2 + 92
 
   const colX = (i: number) => PAD + i * (NODE_W + GAP_X)
 
@@ -116,11 +124,25 @@ export function JourneyEditor({
    * would be ornament suggesting a freedom of layout this canvas does not have. The label sits in a
    * chip that masks the line, which is what keeps it readable when the theme is dark.
    */
-  const edge = (fromIdx: number, toIdx: number, label: string) => {
+  const conditionLabel = (c?: EditorCondition): string => {
+    if (c === 'IF_PREVIOUS_CONFIRMED') return t('jen po doručení', 'if delivered')
+    if (c === 'IF_PREVIOUS_NOT_CONFIRMED') return t('jen bez doručení', 'if not delivered')
+    return ''
+  }
+
+  /**
+   * A connector carries BOTH gates on the transition it represents: how long the journey waits, and
+   * whether it proceeds at all. Putting the condition inside the node would read as a property of
+   * the message rather than of the hop, and a marketer scanning the row would have to open each step
+   * to find out why someone might not get it.
+   */
+  const edge = (fromIdx: number, toIdx: number, label: string, condition?: EditorCondition) => {
     const x0 = colX(fromIdx) + NODE_W
     const x1 = colX(toIdx)
     const mid = (x0 + x1) / 2
     const chipW = Math.max(46, label.length * 6.4 + 16)
+    const cLabel = conditionLabel(condition)
+    const cW = Math.max(60, cLabel.length * 6.2 + 22)
     return (
       <g key={`e${fromIdx}`}>
         <path
@@ -141,6 +163,26 @@ export function JourneyEditor({
               {label}
             </text>
           </>
+        )}
+        {cLabel && (
+          <g data-edge-condition={condition}>
+            <rect
+              x={mid - cW / 2} y={ROW_Y + NODE_H / 2 + 4} width={cW} height={21} rx="10.5"
+              fill="var(--surface)" stroke="var(--warning)" strokeWidth="1"
+            />
+            {/* A filter glyph, so the chip reads as a gate rather than another label. */}
+            <path
+              d="M-4,-3.2 H4 L1,0.4 V3.6 L-1,2.6 V0.4 Z"
+              transform={`translate(${mid - cW / 2 + 13}, ${ROW_Y + NODE_H / 2 + 14.5})`}
+              fill="var(--warning)" opacity="0.9"
+            />
+            <text
+              x={mid + 8} y={ROW_Y + NODE_H / 2 + 18.5} fontSize="10.5" textAnchor="middle"
+              fill="var(--text-secondary)"
+            >
+              {cLabel}
+            </text>
+          </g>
         )}
       </g>
     )
@@ -212,7 +254,7 @@ export function JourneyEditor({
           const ch = CHANNEL[step.channel] ?? CHANNEL.EMAIL
           return (
             <g key={i}>
-              {edge(i, i + 1, delayLabel(step.delaySeconds))}
+              {edge(i, i + 1, delayLabel(step.delaySeconds), step.condition)}
               <g
                 filter="url(#je-shadow)"
                 style={{ cursor: 'pointer' }}
@@ -304,11 +346,31 @@ export function JourneyEditor({
           </g>
         )}
 
+        {stopAfter !== null && (
+          // The cap belongs on the canvas, not only in a form field: it is the reason a journey a
+          // marketer drew five steps for may deliver two, and a number that changes the outcome
+          // should not live where you have to scroll back to see it.
+          <g data-stop-after={stopAfter}>
+            <rect
+              x={PAD} y={ROW_Y + NODE_H / 2 + 34} width={214} height={24} rx="12"
+              fill="var(--surface)" stroke="var(--border-strong)" strokeWidth="1"
+            />
+            <path
+              d="M-4,-4 H4 V4 H-4 Z"
+              transform={`translate(${PAD + 16}, ${ROW_Y + NODE_H / 2 + 46})`}
+              fill="var(--text-secondary)" opacity="0.75"
+            />
+            <text x={PAD + 28} y={ROW_Y + NODE_H / 2 + 50} fontSize="11" fill="var(--text-secondary)">
+              {t(`Konec po ${stopAfter} zprávách na člověka`, `Stops after ${stopAfter} messages per person`)}
+            </text>
+          </g>
+        )}
+
         {!canAdd && (
           // Stated, not enforced silently: the cap is a domain rule (Campaign.MAX_STEPS), and a
           // marketer who cannot find the add button deserves to know why rather than assume a bug.
           <text
-            x={width - PAD} y={ROW_Y + NODE_H / 2 + 34}
+            x={width - PAD} y={ROW_Y + NODE_H / 2 + 78}
             fontSize="11" textAnchor="end" fill="var(--text-secondary)"
           >
             {t(

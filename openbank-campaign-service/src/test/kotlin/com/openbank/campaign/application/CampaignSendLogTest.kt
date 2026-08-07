@@ -8,6 +8,7 @@ import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.application.port.out.StepOutcomeCount
 import com.openbank.campaign.application.usecase.CampaignSendLogQuery
+import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
 import kotlinx.coroutines.runBlocking
@@ -48,6 +49,11 @@ class CampaignSendLogTest {
             override suspend fun record(send: SendRecord) = Unit
             override suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long) = 0
             override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID) = 0
+            override suspend fun latestDeliveryStatusBeforeStep(
+                campaignId: UUID,
+                partyId: UUID,
+                stepOrder: Int,
+            ): DeliveryStatus? = null
 
             // Filters and pages the way SQL does, so the test exercises the real contract rather
             // than a fake that always answers with everything.

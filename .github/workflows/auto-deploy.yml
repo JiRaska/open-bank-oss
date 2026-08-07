@@ -960,12 +960,14 @@ jobs:
                 echo "::warning::can-i-deploy: ${svc} has counterpart(s) not yet recorded in sandbox — treating as deployable (ADR-0092)"
                 deployable_list+=("$svc")
               else
-                # Why is it blocked? A queue delay and a real regression give the SAME
-                # verdict (#2549) — classify-can-i-deploy-block.sh's header has the full
-                # reasoning and the unit test drives every branch. Reuse the probe taken
-                # above: a second call could disagree and explain a block decided on other
-                # evidence. Keep this comment SHORT (check-workflow-run-step-size.py).
-                cls_line="$(PACT_VERSION_PRESENT="$vpresent" \
+                # Why blocked? #2549 (lag vs regression) + #3223 (counterpart carries no pacts,
+                # so waiting cannot help). Reasoning in both script headers. Reuse $vpresent.
+                # A probe that cannot run must not abort the step nor restore the promise.
+                IFS=$'\t' read -r cp_st cp_dt \
+                  < <(bash .github/scripts/probe-blocking-counterparts.sh <<< "$cid_out") \
+                  || { cp_st=unknown; cp_dt=""; }
+                cls_line="$(PACT_VERSION_PRESENT="$vpresent" COUNTERPART_STATE="$cp_st" \
+                  COUNTERPART_DETAIL="$cp_dt" \
                   bash .github/scripts/classify-can-i-deploy-block.sh "$svc" <<< "$cid_out")"
                 cls="$(cut -f1 <<< "$cls_line")"
                 cls_why="$(cut -f2- <<< "$cls_line")"

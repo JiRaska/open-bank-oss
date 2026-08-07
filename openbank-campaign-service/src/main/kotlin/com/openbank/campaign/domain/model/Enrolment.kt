@@ -85,6 +85,16 @@ enum class SendOutcome {
     SUPPRESSED_QUIET_HOURS,
     SUPPRESSED_CONSENT,
     SUPPRESSED_LIST,
+
+    /**
+     * The step's ADR-0200 D1 branch condition did not hold, so nothing was attempted (#3585).
+     *
+     * A recorded row rather than silence: a skipped step that leaves no trace makes the console's
+     * funnel understate the journey and gives an operator no way to tell "this branch was not
+     * taken" from "this step never ran". It is NOT a suppression — no policy denied anything, and
+     * it must not be read as one — and it does not consume the frequency cap, which counts `SENT`.
+     */
+    SKIPPED_CONDITION,
     FAILED,
 }
 

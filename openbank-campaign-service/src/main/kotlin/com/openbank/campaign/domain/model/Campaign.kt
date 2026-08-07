@@ -83,6 +83,16 @@ data class CampaignStep(
     val channel: Channel,
     val variables: Map<String, String>,
     val delaySeconds: Long,
+    /**
+     * The ADR-0200 D1 branch condition (#3585): when set, this step runs only if the condition
+     * holds, and is otherwise skipped — the journey continues to the next step rather than ending.
+     *
+     * Defaulted to null, and that default is load-bearing beyond convenience: a step serialized
+     * before this field existed — in a campaign row, and in the Temporal history of an in-flight
+     * journey — deserializes with no condition, so a running workflow takes exactly the code path
+     * it took before. See [StepCondition].
+     */
+    val condition: StepCondition? = null,
 ) {
     init {
         require(order >= 0) { "step order must be >= 0" }
@@ -137,6 +147,42 @@ data class StopCondition(val maxSendsPerParty: Int) {
 
     /** True when [sendsSoFar] already reached the cap, so the journey must stop before the next step. */
     fun reachedBy(sendsSoFar: Int): Boolean = sendsSoFar >= maxSendsPerParty
+}
+
+/**
+ * A branch condition on one step (ADR-0200 D1, issue #3585), evaluated by the journey workflow
+ * immediately before the step.
+ *
+ * Like [StopCondition], only conditions backed by data this service already holds are
+ * representable. The one observable fact about an earlier step is its `DeliveryStatus` as reported
+ * back by notification-service (ADR-0239 D3) — so the vocabulary is named after exactly that and
+ * nothing more. There is deliberately no `IF_PREVIOUS_OPENED` or `IF_GOAL_REACHED`: no impression,
+ * click or conversion signal exists anywhere in the platform, and a condition nothing can ever
+ * make true is the "inauthentic placeholder" ADR-0220 D5 refuses.
+ *
+ * `CONFIRMED` means the message was reported delivered. It does NOT mean read, and the honest
+ * resting state `PENDING` counts as *not* confirmed — so a follow-up gated on
+ * [IF_PREVIOUS_NOT_CONFIRMED] will also fire for a send whose outcome has simply not landed yet.
+ * That is a real property of an at-least-once feedback channel, not a bug to be papered over: put
+ * a delay on the step that is long enough for an outcome to arrive.
+ *
+ * "Previous" is the most recent send-log row for this party in this campaign at a LOWER step
+ * order. A step with no such row has no observable predecessor, so [IF_PREVIOUS_CONFIRMED] does
+ * not hold and [IF_PREVIOUS_NOT_CONFIRMED] does.
+ */
+enum class StepCondition {
+    /** Run this step only if the previous step's delivery was confirmed. */
+    IF_PREVIOUS_CONFIRMED,
+
+    /** Run this step only if the previous step's delivery was NOT confirmed — the reminder case. */
+    IF_PREVIOUS_NOT_CONFIRMED,
+    ;
+
+    /** Whether this step runs, given the [previous] step's delivery status (null = no predecessor). */
+    fun holdsFor(previous: DeliveryStatus?): Boolean = when (this) {
+        IF_PREVIOUS_CONFIRMED -> previous == DeliveryStatus.CONFIRMED
+        IF_PREVIOUS_NOT_CONFIRMED -> previous != DeliveryStatus.CONFIRMED
+    }
 }
 
 /** A binding to a versioned segment artifact (ADR-0201 D1): never a query, always name@version. */
