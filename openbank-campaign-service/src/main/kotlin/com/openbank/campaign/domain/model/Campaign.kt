@@ -26,6 +26,11 @@ data class Campaign(
      * never be rendered as — a campaign that converted nobody.
      */
     val conversionRule: String? = null,
+    /**
+     * Cadence key from [ScheduleCatalog], or null for the one-shot campaign that was the only kind
+     * until now. Null means `POST /{id}/enrol` is the only way in, exactly as before.
+     */
+    val schedule: CampaignSchedule? = null,
     val state: CampaignState,
     val createdBy: String,
     val approvedBy: String?,
@@ -189,6 +194,34 @@ enum class StepCondition {
         IF_PREVIOUS_CONFIRMED -> previous == DeliveryStatus.CONFIRMED
         IF_PREVIOUS_NOT_CONFIRMED -> previous != DeliveryStatus.CONFIRMED
     }
+}
+
+/**
+ * A recurring campaign's cadence and the window it is allowed to run in.
+ *
+ * The schedule re-runs enrolment, nothing else. Each run evaluates the segment and starts a journey
+ * for whoever newly qualifies; parties already enrolled are skipped by the existing
+ * `findByCampaignAndParty` check, so a daily cadence does not re-contact yesterday's audience. That
+ * is what makes re-running safe, and it is the same idempotency the manual endpoint already relies
+ * on.
+ *
+ * @param cadence key into [ScheduleCatalog].
+ * @param endAt when the schedule stops firing, or null to run until the campaign is paused or
+ *   closed. A campaign is a finite thing in practice and an unbounded one is usually an oversight,
+ *   but refusing null would force a fake far-future date, which is worse: it hides the intent.
+ */
+data class CampaignSchedule(val cadence: String, val endAt: Instant? = null) {
+    init {
+        // A cadence outside the catalogue is a schedule that could never be translated into a
+        // Temporal spec — reject it here rather than at the adapter, where the campaign would
+        // already be stored and would read as scheduled while never firing.
+        require(ScheduleCatalog.exists(cadence)) {
+            "unknown cadence '$cadence' — known: ${ScheduleCatalog.ALL.keys.sorted()}"
+        }
+    }
+
+    /** True once [endAt] has passed, i.e. the schedule has nothing left to do. */
+    fun expiredAt(now: Instant): Boolean = endAt != null && !now.isBefore(endAt)
 }
 
 /** A binding to a versioned segment artifact (ADR-0201 D1): never a query, always name@version. */

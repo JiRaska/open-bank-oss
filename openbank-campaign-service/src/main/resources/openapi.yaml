@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.13.0
+  version: 1.14.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -71,6 +71,33 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/CampaignSummary' }
+  /api/v1/campaigns/cadences:
+    get:
+      tags: [Campaigns]
+      summary: Cadences a recurring campaign may be scheduled on
+      operationId: listCadences
+      description: >-
+        The closed set of cadences, served so an authoring screen cannot offer one the service would
+        reject. Adding an entry is a pull request against ScheduleCatalog.
+        NOTE the literal path segment: it must keep matching ahead of /api/v1/campaigns/{id}.
+      responses:
+        '200':
+          description: Every cadence, with its human form and the zone it is evaluated in
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    cadence: { type: string, example: DAILY_MORNING }
+                    humanForm: { type: string, example: every day at 09:00 }
+                    zone:
+                      type: string
+                      example: Europe/Prague
+                      description: >-
+                        Never UTC. A cron evaluated in UTC reaches Czech customers an hour or two
+                        off their morning, and the offset moves twice a year.
   /api/v1/campaigns/{id}:
     get:
       tags: [Campaigns]
@@ -404,6 +431,8 @@ components:
             $ref: '#/components/schemas/CampaignStep'
         stopCondition:
           $ref: '#/components/schemas/StopCondition'
+        schedule:
+          $ref: '#/components/schemas/CampaignSchedule'
         conversionRule:
           description: >-
             Optional conversion rule (ADR-0245, added 1.13.0). A key from the service's own
@@ -476,6 +505,8 @@ components:
             $ref: '#/components/schemas/CampaignStep'
         stopCondition:
           $ref: '#/components/schemas/StopCondition'
+        schedule:
+          $ref: '#/components/schemas/CampaignSchedule'
         conversionRule:
           description: >-
             Optional conversion rule (ADR-0245, added 1.13.0). A key from the service's own
@@ -487,6 +518,32 @@ components:
             (ADR-0245 D5).
           type: string
           enum: [ACCOUNT_OPENED, CARD_ISSUED]
+    CampaignSchedule:
+      type: object
+      required: [cadence]
+      description: >-
+        Recurring enrolment (1.14.0). Each run re-evaluates the segment and enrols whoever newly
+        qualifies; parties already enrolled are skipped, which is what makes re-running safe. The
+        schedule is stored on the draft and only becomes a live Temporal schedule at activation, so
+        a campaign cannot enrol anyone before four-eyes has passed. Pausing the campaign pauses it;
+        closing deletes it. Absent means one-shot — enrolment happens only on POST /{id}/enrol.
+      properties:
+        cadence:
+          type: string
+          description: >-
+            A key from the served catalogue, never a cron expression. GET /api/v1/campaigns/cadences
+            lists the accepted values with the sentence an operator approves and the zone they are
+            evaluated in. A cron string is rejected with 400 — a malformed one is a schedule that
+            silently never fires, and the expression plus its zone belong in reviewed code rather
+            than in a request body.
+          example: WEEKLY_MONDAY_MORNING
+        endAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            When the schedule stops firing, inclusive. Null runs until the campaign is paused or
+            closed.
     StopCondition:
       type: object
       required: [maxSendsPerParty]
