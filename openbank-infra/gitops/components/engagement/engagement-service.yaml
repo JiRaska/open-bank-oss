@@ -11,9 +11,13 @@
 #     outbox fills, publishes nothing, and no message is silently lost — flipping dispatch on
 #     without also wiring mTLS would just fail every publish attempt, loudly, in the outbox's own
 #     retry/DEAD accounting.
-#   - the OPA sidecar / policy bundle — SurfaceResource carries no @Authorize annotation yet, and
-#     the shared rest.rego has no rule for these two actions, so the platform-wide
-#     `default allow := false` denies them fail-closed under enforcement regardless.
+#   - the OPA sidecar / policy bundle — SurfaceResource now carries @Authorize annotations and
+#     rest.rego has a matching `edge-service-engagement` rule, but no sidecar container is wired
+#     into this Deployment yet (no `gen-engagement-opa-bundle.sh`, unlike lending/pid/sca/etc.).
+#     Same deferred-not-broken shape as the Kafka mTLS gap above: @Authorize's own interceptor
+#     still enforces `@RolesAllowed` at the JAX-RS layer with no sidecar involved, and the
+#     platform's `default allow := false` denies both actions fail-closed the moment enforcement
+#     IS wired in — this just means OPA-level policy isn't consulted yet, not that it's open.
 # Reachable only in-cluster via ClusterIP, no ingress.
 apiVersion: apps/v1
 kind: Deployment

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: balance-service
     app.kubernetes.io/part-of: balances
   annotations:
-    openbank.tech/policy-checksum: "32a43e1487b92cc1"
+    openbank.tech/policy-checksum: "5e1010e19f9165d7"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -306,6 +306,18 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
     	input.action in {"consent.list", "consent.revoke"}
+    }
+
+    # The customer-edge proxying the app's in-app engagement surfaces (ADR-0220 D1): the app
+    # resolves what to show in a slot and records the customer's reaction to it. Same edge
+    # principal and same guard as edge-service-consent — the edge injects the caller's
+    # authoritative partyId from the JWT, so a client-supplied partyId never reaches
+    # engagement-service on its own authority. Scoped to the two exact actions the app uses —
+    # NOT an `engagement.` family — least privilege, matching edge-service-consent's shape.
+    allowed_reasons contains "edge-service-engagement" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
     }
 
     # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sepa-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "6a7481be8fea262c"
+    openbank.tech/policy-checksum: "cf35d7e824f10c48"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -306,6 +306,18 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-edge"
     	input.action in {"consent.list", "consent.revoke"}
+    }
+
+    # The customer-edge proxying the app's in-app engagement surfaces (ADR-0220 D1): the app
+    # resolves what to show in a slot and records the customer's reaction to it. Same edge
+    # principal and same guard as edge-service-consent — the edge injects the caller's
+    # authoritative partyId from the JWT, so a client-supplied partyId never reaches
+    # engagement-service on its own authority. Scoped to the two exact actions the app uses —
+    # NOT an `engagement.` family — least privilege, matching edge-service-consent's shape.
+    allowed_reasons contains "edge-service-engagement" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
     }
 
     # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log
