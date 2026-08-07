@@ -166,6 +166,13 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.party-service-url")
     lateinit var partyServiceUrl: String
 
+    // Same property and default as CustomerDelegationResource — one service, one address.
+    @ConfigProperty(
+        name = "openbank.edge.delegation-service-url",
+        defaultValue = "http://delegation-service.delegation.svc:8126",
+    )
+    lateinit var delegationServiceUrl: String
+
     @ConfigProperty(name = "openbank.edge.pid-service-url")
     lateinit var pidServiceUrl: String
 
@@ -223,10 +230,24 @@ class CustomerEdgeResource(
     @Blocking
     fun listAccounts(): Response {
         val customer = customer()
-        return upstream.get(
+        val own = upstream.get(
             "$accountServiceUrl/api/v1/accounts?partyId=${customer.partyId}",
             customer.partyId.toString(),
         )
+        // Accounts shared WITH the caller belong in the list — without this a grantee accepts a
+        // share, passes SCA, and then has no way to reach what they were given (issue #3615).
+        // Appended, never merged silently: each carries "sharedWithMe": true so the app can say
+        // whose account it is. Own accounts are unaffected if delegation-service is unreachable —
+        // the customer's own money must not disappear because a secondary service is down.
+        if (own.statusInfo.family != Response.Status.Family.SUCCESSFUL) return own
+        val shared = sharedAccountsFor(customer.partyId)
+        if (shared.isEmpty()) return own
+        val merged = runCatching { objectMapper.readTree(own.entity?.toString() ?: "") }
+            .getOrNull()?.takeIf { it.isArray } ?: return own
+        val out = objectMapper.createArrayNode()
+        merged.forEach { out.add(it) }
+        shared.forEach { out.add(it) }
+        return Response.ok(objectMapper.writeValueAsString(out)).type(MediaType.APPLICATION_JSON).build()
     }
 
     /**
@@ -243,7 +264,9 @@ class CustomerEdgeResource(
         val customer = customer()
         val accountJson = fetchAccount(accountId, customer.partyId)
             ?: return forbidden("Account does not belong to caller")
-        if (extractOwnerPartyId(accountJson) != customer.partyId.toString()) {
+        if (extractOwnerPartyId(accountJson) != customer.partyId.toString() &&
+            !hasGrant(customer.partyId, "ACCOUNT", accountId, "ACCOUNT_READ_BALANCES")
+        ) {
             return forbidden("Account does not belong to caller")
         }
         return Response.ok(accountJson).type(MediaType.APPLICATION_JSON).build()
@@ -263,7 +286,7 @@ class CustomerEdgeResource(
     @Blocking
     fun getBalance(@PathParam("accountId") accountId: UUID): Response {
         val customer = customer()
-        if (!ownsAccount(accountId, customer.partyId)) {
+        if (!mayReadAccount(accountId, customer.partyId, "ACCOUNT_READ_BALANCES")) {
             return forbidden("Account does not belong to caller")
         }
         return upstream.get("$balanceServiceUrl/api/v1/balances/$accountId", customer.partyId.toString())
@@ -1407,7 +1430,7 @@ class CustomerEdgeResource(
         @QueryParam("cursor") cursor: String?,
     ): Response {
         val customer = customer()
-        if (!ownsAccount(accountId, customer.partyId)) {
+        if (!mayReadAccount(accountId, customer.partyId, "ACCOUNT_READ_TRANSACTIONS")) {
             return forbidden("Account does not belong to caller")
         }
         val query = buildTransactionsQuery(accountId, limit, cursor)
@@ -1477,6 +1500,82 @@ class CustomerEdgeResource(
     private fun ownsAccount(accountId: UUID, partyId: UUID): Boolean {
         val body = fetchAccount(accountId, partyId) ?: return false
         return extractOwnerPartyId(body) == partyId.toString()
+    }
+
+    /**
+     * May this caller read this account — as its owner, or as someone it was shared with?
+     *
+     * Until now the answer was ownership and nothing else, which made delegated access a ceremony
+     * with no consequence: a grantor could share an account, the grantee could accept and pass SCA,
+     * and then every read still answered 403 because no route outside CustomerDelegationResource
+     * consulted a grant (ADR-0232 "no production caller", issue #3615). This is the caller.
+     *
+     * Ownership is still checked FIRST and locally — the common case must not depend on another
+     * service being up. Only a non-owner pays for a delegation check.
+     *
+     * **Fail closed.** A delegation-service that is down, slow or unparseable denies. The failure
+     * mode of guessing "probably allowed" is disclosing someone's balance to a stranger; the
+     * failure mode of denying is a shared account that temporarily reads as unavailable.
+     */
+    private fun mayReadAccount(accountId: UUID, partyId: UUID, capability: String): Boolean =
+        ownsAccount(accountId, partyId) || hasGrant(partyId, "ACCOUNT", accountId, capability)
+
+    /**
+     * Ask delegation-service whether an ACTIVE grant covers [capability] on this resource.
+     *
+     * Deliberately no local projection and no cache: a revoked or suspended grant must stop working
+     * on the next read, not at the end of a TTL. Revocation that takes effect "soon" is not
+     * revocation, and this is the read path of someone else's money.
+     */
+    private fun hasGrant(granteePartyId: UUID, resourceType: String, resourceId: UUID, capability: String): Boolean {
+        val body = """
+            {"granteePartyId":"$granteePartyId","resourceType":"$resourceType",
+            "resourceId":"$resourceId","capability":"$capability"}
+        """.trimIndent().replace("\n", "")
+        val resp = runCatching {
+            upstream.post("$delegationServiceUrl/api/v1/delegations/check", granteePartyId.toString(), body)
+        }.getOrNull() ?: return false
+        if (resp.status != 200) return false
+        return runCatching {
+            objectMapper.readTree(resp.entity?.toString() ?: "").path("granted").asBoolean(false)
+        }.getOrDefault(false)
+    }
+
+    /**
+     * The accounts shared WITH this caller, as account JSON, for appending to their own list.
+     *
+     * Read capability decides visibility: an account someone may see the balance of belongs in the
+     * list. A grant that carries no read capability (nothing does today, but the vocabulary allows
+     * it) is not a reason to show the account.
+     */
+    private fun sharedAccountsFor(partyId: UUID): List<com.fasterxml.jackson.databind.JsonNode> {
+        val resp = runCatching {
+            upstream.get("$delegationServiceUrl/api/v1/delegations/grantee/$partyId", partyId.toString())
+        }.getOrNull() ?: return emptyList()
+        if (resp.status != 200) return emptyList()
+        val grants = runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") }.getOrNull()
+            ?.takeIf { it.isArray } ?: return emptyList()
+        return grants.asSequence()
+            .filter { it.path("status").asText() == "ACTIVE" }
+            .filter { it.path("resourceType").asText() == "ACCOUNT" }
+            .filter { g ->
+                g.path("capabilities").any { it.asText() in ACCOUNT_READ_CAPABILITIES }
+            }
+            .mapNotNull { it.path("resourceId").asText(null) }
+            .distinct()
+            .mapNotNull { id -> runCatching { UUID.fromString(id) }.getOrNull() }
+            // Fetch as the OWNER's party: account-service scopes by id and the header is advisory,
+            // but sending the grantee's party id on someone else's account would be a lie in the
+            // audit trail. The grant is the authority, and it was just checked above.
+            .mapNotNull { id -> fetchAccount(id, partyId) }
+            .mapNotNull { body -> runCatching { objectMapper.readTree(body) }.getOrNull() }
+            .map { node ->
+                // Mark it, so the app can say "shared with you" rather than presenting someone
+                // else's account as the customer's own. Silently blending the two would let a
+                // delegate believe they own what they were merely lent.
+                (node as com.fasterxml.jackson.databind.node.ObjectNode).put("sharedWithMe", true)
+            }
+            .toList()
     }
 
     // Resolve the caller's legal name from party-service (for the debtorName a domestic payment needs).
@@ -3486,6 +3585,13 @@ class CustomerEdgeResource(
 
         private const val BAD_REQUEST_STATUS = 400
         private const val FORBIDDEN_STATUS = 403
+
+        /**
+         * Capabilities that make a shared ACCOUNT worth listing. Read access is what "you can see
+         * this account" means; execution capabilities are deliberately not here, because this edge
+         * does not yet honour them on the money path (see [mayReadAccount]).
+         */
+        internal val ACCOUNT_READ_CAPABILITIES = setOf("ACCOUNT_READ_BALANCES", "ACCOUNT_READ_TRANSACTIONS")
 
         /** Upper bound on address-book hashes forwarded in one directory lookup. */
         internal const val MAX_DIRECTORY_HASHES = 500
