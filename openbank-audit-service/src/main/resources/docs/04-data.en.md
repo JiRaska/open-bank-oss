@@ -34,8 +34,9 @@
 | `payload` | TEXT, not null | Original event JSON, verbatim |
 | `source_service` | VARCHAR(100) | Originating service |
 | `correlation_id` | VARCHAR(100), null | Trace correlation |
-| `occurred_at` | TIMESTAMPTZ | Business time |
+| `occurred_at` | TIMESTAMPTZ | Business time — real only when `occurred_at_source = 'EVENT'` |
 | `recorded_at` | TIMESTAMPTZ, default NOW() | Ingest time |
+| `occurred_at_source` | VARCHAR(8), null | (V11) `EVENT` = producer sent `occurredAt`; `INGEST` = it did not, so `occurred_at` is ingest time (an upper bound); NULL = pre-V11 row, treat as `INGEST` |
 | `session_id` | VARCHAR(100), null | (V2) |
 | `user_agent` | VARCHAR(500), null | (V2) |
 | `ip_address` | VARCHAR(45), null | (V2) — IPv4/IPv6 |

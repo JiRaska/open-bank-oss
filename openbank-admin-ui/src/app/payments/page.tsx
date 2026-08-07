@@ -443,6 +443,7 @@ function PaymentsContent() {
   }
   const timeoutCountdown = (timeoutAt?: string, status?: string) => {
     if (status !== 'PROCESSING' || !timeoutAt) return null
+    // eslint-disable-next-line react-hooks/purity -- time-relative display; timestamps are stable server data.
     const ms = new Date(timeoutAt).getTime() - Date.now()
     if (ms <= 0) return <span style={{ fontSize: '11px', color: 'var(--danger)', fontWeight: 700 }}>TIMEOUT</span>
     return <span style={{ fontSize: '11px', color: ms < 3000 ? 'var(--danger)' : 'var(--warning)', fontWeight: 600 }}>{(ms / 1000).toFixed(1)}s</span>

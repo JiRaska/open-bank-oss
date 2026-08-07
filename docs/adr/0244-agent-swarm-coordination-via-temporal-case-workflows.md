@@ -1,0 +1,182 @@
+---
+date: 2026-08-05
+decision-status: proposed
+delivery-status: planned
+authors: [Jiri Raska]
+supersedes: []
+superseded-by: []
+delivery-repos: []
+tags: [ai-agents, architecture, resilience, governance]
+summary: "Real-time agent swarm = one Temporal case workflow per disposition target: chartered agents join mid-run via OPA-gated signals, a dedicated case-coordinator owns budget and convergence, and the swarm emits exactly one HITL proposal."
+---
+
+# ADR-0244 — Agent swarm coordination via Temporal case workflows
+
+## Context
+
+ADR-0202 defines agent-to-agent collaboration as a *pipeline*: findings published on
+`agent.proposal.v1`, read tools over MCP, and multi-agent sequences as Temporal
+workflows owned by a single agent. That covers hand-offs. It does not cover the
+requirement this ADR addresses: **several chartered agents working the same problem
+concurrently, in real time** — entering a running investigation, commenting on each
+other's contributions, correcting the direction mid-flight, and thereby improving
+both the speed and the content of the result ("swarm" semantics).
+
+Constraints inherited from the estate:
+
+- **ADR-0031**: agents propose, governance disposes. Charters live in
+  `agents.yaml`; every action is AI-attributed audit; kill switch per agent and
+  global.
+- **ADR-0034 / ADR-0202**: tool access is OPA-gated; a delegating call is identified
+  by principal id, never by the structurally unreachable `SERVICE` principal type.
+- **Temporal is the fleet orchestration standard** (ADR-0101/0120) and there is no
+  shared orchestration library (ADR-0202 constraint 3) — reuse means the per-service
+  `TemporalClientProducer` pattern.
+- **The agent plane moves no money** and is AGPL-3.0-only (ADR-0136/0197).
+- **Token cost is a governed quantity** (ADR-0112 finops dashboards); an unbounded
+  swarm is an unbounded cost center.
+
+## Decision
+
+**D1 — A case is one long-running Temporal workflow.** The unit of swarm work is a
+*case*, executed as a single durable workflow (the "case workflow") started via the
+established per-service Temporal client pattern. Participating agents run as
+activities or child workflows of that case. Durability, retry, per-step history and
+visibility come from Temporal; no new orchestration substrate is introduced. The
+pipeline of ADR-0202 is the degenerate case of a swarm with a single participant —
+this ADR extends it rather than replacing it, and the case workflow still has
+exactly one owning agent (the `case-coordinator`, D3), as ADR-0202 D4 requires.
+
+**D2 — Mid-run participation happens through Temporal signals, gated per charter.**
+A chartered agent joins a running case by signalling the case workflow with a typed
+contribution (`evidence`, `objection`, `correction`, `endorsement`). The signal
+handler performs the signalling agent's charter capability check (OPA, principal id)
+before accepting the contribution — the policy gate sits at the workflow boundary,
+exactly as it does at the MCP boundary. The wiring is a new call site of an existing
+mechanism, not a new mechanism: the signal-receiving path reuses the same
+`PolicyDecisionPoint` port that gates agent-service's MCP endpoint. Case discovery
+is capability-filtered the same way ADR-0225 filters `tools/list` — an agent
+enumerating open cases sees only those its charter lets it join, so it never learns
+about a case it cannot enter. Signal rate is bounded by the signalling agent's
+charter limits.
+
+**D3 — Coordination is a dedicated chartered agent: `case-coordinator`.** The agent
+that opened the case never coordinates it. Invitation of participants, budget
+enforcement, convergence judgement and synthesis are a separate capability with its
+own charter in `agents.yaml`, its own rate limits and its own kill-switch scope.
+Audit attribution stays clean: who detected is never who coordinated.
+
+**D4 — A case is bounded to one disposition target.** A case is opened for one
+alert, incident or proposal lineage — never a free-form topic — and must terminate
+in exactly one outcome: a single synthesized proposal, or an explicit no-action
+finding. Both go to the human disposition path. This preserves the ADR-0031
+invariant and makes cost bounded by construction.
+
+**D5 — Pre-emption is allowed and deterministic.** A contribution carrying decisive
+new evidence may short-circuit pending steps: affected steps are marked
+`superseded-by-evidence` and skipped by a deterministic workflow rule, so Temporal
+replay stays consistent. Queue-only commenting was rejected as the sole mechanism —
+it serializes away the speed benefit that justifies a swarm — and uncontrolled
+interruption was rejected because it breaks replay determinism. Every pre-emption is
+a history event naming the triggering signal id. Contribution payloads influence
+workflow control flow only through deterministic predicates over typed fields;
+wall-clock reads, randomness and I/O stay inside activities and never enter the
+workflow's decision logic.
+
+**D6 — Every case carries a budget and a stop-condition.** Token and wall-clock
+budgets are declared at case open, with per-case-class defaults in `agents.yaml`.
+The case ends on convergence (the coordinator's synthesis activity judges the
+contribution set sufficient), on budget exhaustion, or on deadline. A case that does
+not converge still produces one proposal, marked **contested**, with the dissenting
+contributions attached. Non-convergence is a disposition input, never a silent
+stall. Merge semantics are citation, not voting: contributions are never overwritten
+or silently dropped — the synthesis cites the contribution ids it relied on, and any
+conflicting contribution it does not adopt is attached verbatim as dissent, so the
+human disposer can reconstruct exactly why the swarm said what it said.
+
+**D7 — The swarm's only output channel is the existing HITL path.** The synthesized
+proposal enters the ADR-0031 proposal flow (and the unified approval inbox of
+ADR-0227 when it lands); the swarm never writes to a business service directly.
+Every contribution — signal accepted, signal rejected, pre-emption, synthesis — is
+recorded as an AI-attributed audit event carrying the case id, the contributing
+principal id, model id/version and prompt hash (the ADR-0031 D5 capture set), so the
+case joins the cross-channel trail of ADR-0226 and one query answers "who
+contributed what to this case" across every participant. The global and per-agent
+kill switches cancel in-flight case workflows (Temporal cancel) without redeploy;
+a halted case emits a no-action finding naming the kill switch as the cause, so a
+governance action never reads as a swarm verdict. (As-built note: today's kill
+switch halts agent runtimes but has no Temporal hook; wiring it to case-workflow
+cancellation is part of the follow-up, not the current state.)
+
+**D8 — The coordinator lives in the agent plane.** `case-coordinator` is an
+AGPL-3.0-only module registered in `rules.yaml: agpl_modules`, like every other
+agent-plane component.
+
+**D9 — Case-open authority, deduplication and rate are chartered.** Opening a case
+is itself a governed act, not a side effect of any agent feeling busy: only a
+chartered agent whose charter grants the `case-open` capability may open one, the
+open call names the disposition-target lineage (D4), passes the same OPA gate as
+any contribution (D2) and is AI-attributed (D7). Three bounds make proposal spam
+structurally impossible rather than merely audited: **(a) deduplication** — at most
+one open case per disposition target; a second open naming the same target is
+converted into a contribution signal to the existing case, so N detectors seeing
+one alert produce one case, not N; **(b) rate** — a per-agent open-rate limit in
+the charter, plus a fleet-wide ceiling of concurrent open cases per case-class in
+the `agents.yaml` defaults; at the ceiling a new finding queues as a contribution
+or is refused with an audit event — the refusal is visible, never silent;
+**(c) a convergence circuit-breaker** — a case-class whose contested-outcome rate
+(D6) crosses the threshold declared in `agents.yaml` has its `case-open` capability
+automatically suspended pending human charter review, so a swarm that repeatedly
+fails to converge cannot keep billing supervisors for its failure.
+
+## Alternatives considered
+
+- **Blackboard over a Kafka topic + materialized view**: an `agent.case.v1` topic
+  with a materializing service. Flexible, but duplicates the orchestration Temporal
+  already provides and makes the board eventually consistent where the workflow is
+  authoritative.
+- **Chat-room resource**: agents post to a case-thread entity like humans. Simplest
+  mental model, but orchestration and convergence are implicit — nothing enforces a
+  stop.
+- **An external A2A framework**: rejected already by ADR-0202 (external dependency,
+  contrary to the in-cluster OSS substrate principle).
+- **Stay with the ADR-0202 pipeline**: does not meet the real-time collaboration
+  requirement at all.
+
+## Consequences
+
+- The swarm requirement is met entirely on existing, production-proven mechanisms
+  (Temporal workflows + signals, OPA, charters, AI-attributed audit); the marginal
+  infrastructure cost is one new chartered agent and the `agents.yaml` schema
+  extension for case budgets and the swarm-participation capability.
+- Signal handlers must stay deterministic and replay-safe; signal storms are bounded
+  by charter rate limits (D2) and case budgets (D6).
+- An admin-ui "swarm thread" view becomes a pure projection of Temporal workflow
+  history — no new data model; the UI surface is a separate follow-up ADR.
+- Contested proposals add HITL cognitive load; the disposition UI must render
+  dissent. The load is bounded: case opens are capability-gated, deduplicated per
+  disposition target and rate-limited with a convergence circuit-breaker (D9), so
+  the HITL queue cannot be flooded by swarm activity — a case-class that keeps
+  failing to converge loses its opening privilege instead of the supervisor losing
+  their attention.
+- Follow-ups: `agents.yaml` extension (case budgets, swarm-participation and
+  `case-open` capabilities, per-case-class ceilings and contested-rate thresholds);
+  `case-coordinator` charter + eval scenarios under the ADR-0148 evals gate;
+  kill-switch → Temporal case-cancellation wiring (D7); admin-ui thread-view ADR;
+  registration in `rules.yaml: agpl_modules`.
+
+## Compliance impact
+
+No change of AI Act risk class: the swarm never decides — a human disposes every
+case outcome, money-path dispositions keep SCA (ADR-0227), and the agent plane moves
+no money (ADR-0197). Every contribution is AI-attributed and case-correlated
+(ADR-0031 D5, ADR-0226); charters keep PII masked by default (ADR-0031). Temporal
+durability supports DORA incident-reconstruction expectations.
+
+## References
+
+- ADR-0031 (agent governance), ADR-0034 (unified OPA), ADR-0101/0120 (Temporal),
+  ADR-0148 (AI assurance/evals), ADR-0197 (agent-plane AGPL boundary),
+  ADR-0202 (agent-to-agent pipeline), ADR-0225 (policy-filtered tool discovery),
+  ADR-0226 (audit correlation), ADR-0227 (unified approval inbox)
+- `openbank-libs/governance/agents.yaml`

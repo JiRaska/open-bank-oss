@@ -1,0 +1,140 @@
+# Pull-based refresh of the customer-app dossier (ADR-0074).
+#
+# Why this exists (#3552, recurrence #5 of the same single-field drift; #2047, #2097, #3212).
+# The dossier is DERIVED from `JiRaska/openbank-app` source, and the transport that was supposed
+# to keep it current is a PUSH: openbank-app's own `app-status` workflow regenerates and opens a
+# publish PR here. That job is gated on a `PLATFORM_RW_TOKEN` secret which is not configured, so
+# it runs only its skip notice and exits success — green, no PR, nothing signalled (#2101, open).
+# The drift then surfaces days later as a red `Customer-app dossier` check on someone else's PR,
+# and gets hand-republished. Four times so far; the interval is just the app's release cadence,
+# so each manual fix buys exactly one release of quiet.
+#
+# This reverses the direction. open-bank-oss already holds BOTH credentials it needs —
+# OPENBANK_APP_RO_TOKEN to read the app source (ci.yml's dossier check uses it) and the GITOPS
+# App for a signed self-PR — so the refresh does not depend on a secret in the other repo at all.
+# #2101 stays worth fixing, but it is no longer on the critical path for this drift.
+#
+# Not a replacement for the ci.yml check: that one still fails a PR whose committed dossier
+# disagrees with the app source. This removes the reason it keeps being true.
+name: App-status refresh
+
+on:
+  schedule:
+    # Daily. The drift is created by a customer-app RELEASE, so anything faster is polling for
+    # an event that happens every few weeks.
+    - cron: "37 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-status-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: regenerate the dossier and open a PR on drift
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      APP_RO_TOKEN: ${{ secrets.OPENBANK_APP_RO_TOKEN }}
+      GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A missing credential must be LOUD. The whole defect this workflow answers is a job that
+      # did nothing and reported success (#2101, ADR-0074 invariant 3), so the one thing this
+      # must not do is reproduce it one repo over. Fail, and say which secret.
+      - name: Require the credentials this refresh cannot work without
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -n "${APP_RO_TOKEN}" ] || missing="${missing} OPENBANK_APP_RO_TOKEN"
+          [ -n "${GITOPS_APP_ID}" ] || missing="${missing} GITOPS_APP_ID"
+          if [ -n "${missing}" ]; then
+            echo "::error title=app-status::cannot refresh the dossier — missing secret(s):${missing}."
+            echo "Without them this job would regenerate nothing and report success, which is the" >&2
+            echo "exact vacuous-green failure it exists to replace (#2101, #3552)." >&2
+            exit 1
+          fi
+
+      - name: Checkout customer-app source (read-only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # No ref pinned — the default branch is the published state the committed dossier is
+          # supposed to match, same as ci.yml's check.
+          repository: JiRaska/openbank-app
+          token: ${{ env.APP_RO_TOKEN }}
+          path: .app-src
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          # Kept equal to ci.yml's dossier job and the runtime image (node:26-alpine).
+          node-version: "26"
+          cache: "npm"
+          cache-dependency-path: openbank-admin-ui/package-lock.json
+
+      - name: Install (admin-ui, for the yaml parser)
+        working-directory: openbank-admin-ui
+        run: npm ci --no-audit --no-fund
+
+      - name: Regenerate the dossier
+        id: regen
+        working-directory: openbank-admin-ui
+        run: |
+          set -euo pipefail
+          # Write mode: --check is the opt-in diff, its absence is what writes the artefact.
+          node scripts/generate-app-status.mjs --app-repo ../.app-src
+          if git diff --quiet -- app-status.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "dossier already matches openbank-app source — nothing to publish."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git --no-pager diff -- app-status.json | head -40
+          fi
+
+      - name: Mint a GitHub App installation token
+        id: app_token
+        if: steps.regen.outputs.changed == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+
+      - name: Open the publish PR
+        if: steps.regen.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          # An App installation token, for two independent reasons: `main-protection` enforces
+          # required_signatures and only the App path gets the commit signed, and a PR opened
+          # with GITHUB_TOKEN does not trigger the required checks (anti-recursion).
+          token: ${{ steps.app_token.outputs.token }}
+          sign-commits: true
+          # Scope the commit. npm ci and the generator both write into the tree, and
+          # create-pull-request otherwise commits whatever is dirty.
+          add-paths: openbank-admin-ui/app-status.json
+          branch: chore/app-status-refresh
+          delete-branch: true
+          commit-message: |
+            chore(admin-ui): regenerate app-status.json from openbank-app source
+
+            Derived artefact (ADR-0074) — regenerated by .github/workflows/app-status-refresh.yml,
+            never hand-edited.
+
+            Refs #3552
+          title: "chore(admin-ui): regenerate app-status.json from openbank-app source"
+          body: |
+            `openbank-admin-ui/app-status.json` is DERIVED from `JiRaska/openbank-app` source
+            (ADR-0074). This PR is the regenerated artefact — the diff below is the app's own
+            published state, not an edit.
+
+            Opened by the scheduled pull-based refresh rather than by openbank-app's push job,
+            which cannot run without a `PLATFORM_RW_TOKEN` that is not configured (#2101). That
+            silent no-op is what made this drift recur four times before it was noticed each
+            time as a red check on an unrelated PR.
+
+            Refs #3552, #2101, ADR-0074.

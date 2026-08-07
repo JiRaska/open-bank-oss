@@ -13,9 +13,9 @@
 # Identity model (ADR-0137): mTLS gives each *service* exactly one client cert =
 # one KafkaUser = one principal for ALL of its Kafka traffic, so KafkaUsers are
 # named after the service, not after a per-topic role. A KafkaUser's ACLs list
-# everything that service may do on the ACL'd resources; resources without ACLs
-# stay open under allow.everyone.if.no.acl.found=true (see kafka.yaml), so each
-# service needs an ACL for EVERY topic it touches. This comment used to say the
+# everything that service may do, and a resource with NO matching ACL is DENIED to
+# every principal (see kafka.yaml), so each service needs an ACL for EVERY topic it
+# touches. This comment used to say the
 # opposite — that resources without ACLs "stay open under
 # allow.everyone.if.no.acl.found=true", so a service's own domain-event topics
 # needed none. That was true until #2794 flipped the cluster to
@@ -431,7 +431,10 @@ rules:
       - customer-edge                   # ADR-0086 audit trail + ADR-0072 resume, ns customer-edge (first ESO Kafka client there); missed by the #2665 sweep
       - analytics-sink                  # ADR-0022/0069: analytics bronze consumer (party/kyc/consent/sca/documents/onboarding-funnel), ns analytics (first ESO client there)
       - campaign-service                # ADR-0200: campaign journey delivery requests, ns campaign (first ESO client there); missing entry blocked the whole sandbox rollout at sync-wave -1 (#2749)
+      - copilot-service                 # issue #3881: PARTY_ERASED consumer (GDPR Art. 17, #3875), ns platform — second ESO Kafka client there after agent-service, sharing that namespace's kafka-cluster-ca-truststore rather than duplicating it
       - delegation-service              # ADR-0232: grant lifecycle producer, ns delegation (first ESO client there); same #2749 failure, observed again — the keystore ExternalSecret sat at SecretSyncedError and ArgoCD never advanced past sync-wave -1, so all 11 wave-0 resources stayed OutOfSync and no pod was ever created
+      - security-scanner                # issue #3393: last fleet workload without a KafkaUser — scan-event + ICT-incident producer, ns security-scanner (first ESO client there)
+      - kafka-ui                        # issue #3393: the cluster-browsing console, and the only workload that was actually SPEAKING on :9092 — every DESCRIBE denied as User:ANONYMOUS. Unusually, it runs IN `messaging`, so this projection does not cross a namespace; it goes through ESO anyway to stay in this inventory (see components/kafka/kafka-ui-mtls.yaml)
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1

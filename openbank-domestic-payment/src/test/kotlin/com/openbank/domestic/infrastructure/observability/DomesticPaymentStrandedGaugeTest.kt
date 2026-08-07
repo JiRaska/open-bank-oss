@@ -8,6 +8,7 @@ import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -62,7 +63,7 @@ class DomesticPaymentStrandedGaugeTest {
                 DomesticPaymentStatus.VALIDATED to now.minus(Duration.ofMinutes(5)),
             ),
         )
-        val gauge = DomesticPaymentStrandedGauge(repo, registry, clock)
+        val gauge = DomesticPaymentStrandedGauge(repo, registry, clock, domainMetrics = mockk(relaxed = true))
         gauge.register()
 
         gauge.refresh()
@@ -100,7 +101,7 @@ class DomesticPaymentStrandedGaugeTest {
                 if (oldest.containsKey(status)) 1L else 0L
             override suspend fun oldestCreatedAt(status: DomesticPaymentStatus) = oldest[status]
         }
-        val gauge = DomesticPaymentStrandedGauge(repo, registry, clock)
+        val gauge = DomesticPaymentStrandedGauge(repo, registry, clock, domainMetrics = mockk(relaxed = true))
         gauge.register()
 
         gauge.refresh()
@@ -119,7 +120,12 @@ class DomesticPaymentStrandedGaugeTest {
     @Test
     fun `terminal states are not published`() {
         val registry = SimpleMeterRegistry()
-        DomesticPaymentStrandedGauge(StubRepository(emptyMap(), emptyMap()), registry, clock).register()
+        DomesticPaymentStrandedGauge(
+            StubRepository(emptyMap(), emptyMap()),
+            registry,
+            clock,
+            domainMetrics = mockk(relaxed = true),
+        ).register()
 
         val published = registry.meters
             .filter { it.id.name == "openbank.domestic.payments.non_terminal" }
@@ -133,7 +139,12 @@ class DomesticPaymentStrandedGaugeTest {
     /** A missing Prometheus registry must not break startup — the gauge is optional telemetry. */
     @Test
     fun `registers nothing and does not throw when no registry is present`(): Unit = runBlocking {
-        val gauge = DomesticPaymentStrandedGauge(StubRepository(emptyMap(), emptyMap()), null, clock)
+        val gauge = DomesticPaymentStrandedGauge(
+            StubRepository(emptyMap(), emptyMap()),
+            null,
+            clock,
+            domainMetrics = mockk(relaxed = true),
+        )
         gauge.register()
         gauge.refresh()
     }
