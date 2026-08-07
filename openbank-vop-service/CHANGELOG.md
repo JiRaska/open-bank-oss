@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/JiRaska/open-bank-oss/compare/vop-service-v0.3.2...vop-service-v0.3.3) (2026-08-07)
+
+
+### Bug Fixes
+
+* **vop:** correct both payee-name hop URLs — ports were transposed, namespace never existed ([#3968](https://github.com/JiRaska/open-bank-oss/issues/3968)) ([fcabf55](https://github.com/JiRaska/open-bank-oss/commit/fcabf551e34a4385629c4698250bb162fcd62fa4))
+
 ## [0.3.2](https://github.com/JiRaska/open-bank-oss/compare/vop-service-v0.3.1...vop-service-v0.3.2) (2026-08-02)
 
 
