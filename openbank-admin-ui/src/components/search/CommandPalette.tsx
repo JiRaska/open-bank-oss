@@ -9,7 +9,7 @@
 
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { CreditCard, Search, User, X } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -84,17 +84,56 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     router.push(ref.route)
   }, [onClose, router])
 
+  // The keydown listener must never read a STALE `shown`/`active` (#3886).
+  //
+  // It used to close over both and be re-registered by a `useEffect` keyed on them. A passive
+  // effect flushes AFTER the browser has painted, so between React committing a render and that
+  // effect running there is a real window in which the DOM already shows N results while the
+  // installed listener is still the one captured when `shown` was empty. Under a starved event
+  // loop that window widens from microseconds to whole milliseconds — long enough for a keypress
+  // to land in it. In that window `Math.min(a + 1, shown.length - 1)` evaluated
+  // `Math.min(1, -1) === -1`, so ArrowDown DESELECTED every row, and the following Enter found
+  // `shown[-1] === undefined` and navigated nowhere.
+  //
+  // This is a user-facing defect, not only a test artifact: open ⌘K, type two characters, press ↓
+  // during the 300 ms debounce or while the fetch is in flight, then Enter — nothing happens, and
+  // nothing ever resets `active` back into range (ArrowUp clamps at 0, the `[open]` effect only
+  // runs on open, and the input's onChange needs another keystroke).
+  //
+  // Fix, both halves:
+  //  1. Mirror the live values into refs from a LAYOUT effect. Layout effects flush synchronously
+  //     before paint, so "the DOM shows these rows" now implies "the refs describe these rows" —
+  //     the window is closed by construction rather than waited out.
+  //  2. Clamp ArrowDown at 0. An empty list can no longer produce an out-of-range `active`, so
+  //     even a keypress that beats the state entirely leaves a valid selection.
+  const shownRef = useRef(shown)
+  const activeRef = useRef(active)
+  const chooseRef = useRef(choose)
+  const onCloseRef = useRef(onClose)
+  useLayoutEffect(() => {
+    shownRef.current = shown
+    activeRef.current = active
+    chooseRef.current = choose
+    onCloseRef.current = onClose
+  })
+
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); onClose() }
-      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(a => Math.min(a + 1, shown.length - 1)) }
+      if (e.key === 'Escape') { e.preventDefault(); onCloseRef.current() }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setActive(a => Math.max(0, Math.min(a + 1, shownRef.current.length - 1)))
+      }
       if (e.key === 'ArrowUp') { e.preventDefault(); setActive(a => Math.max(a - 1, 0)) }
-      if (e.key === 'Enter' && shown[active]) { e.preventDefault(); choose(shown[active]) }
+      if (e.key === 'Enter') {
+        const target = shownRef.current[activeRef.current]
+        if (target) { e.preventDefault(); chooseRef.current(target) }
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, shown, active, choose, onClose])
+  }, [open])
 
   useEffect(() => {
     const el = listRef.current?.children[active] as HTMLElement | undefined
