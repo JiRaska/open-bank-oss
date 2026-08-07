@@ -109,6 +109,53 @@ class CustomerDelegationResourceTest {
         assertThat(response.status).isEqualTo(201)
     }
 
+    /**
+     * A ceiling the platform cannot keep must not reach upstream, and above all must not reach the
+     * customer as a 201. Asserting `upstream.post` is never called: the defect being fixed is that
+     * this body used to sail through the edge, be stored, and come back echoed — the grantor walked
+     * away believing the delegate was capped at 5 000 Kč/den while only `perTransactionLimit` was
+     * ever checked on a payment.
+     */
+    @Test
+    fun `offer rejects a body carrying dailyLimit or monthlyLimit`() {
+        val upstream = mockk<UpstreamClient>()
+
+        val daily = resource(upstream).offer(
+            """{"granteePartyId":"$stranger","dailyLimit":{"amount":5000.00,"currency":"CZK"}}""",
+        )
+        assertThat(daily.status).isEqualTo(400)
+        assertThat(daily.entity.toString()).contains("CUMULATIVE_LIMIT_UNSUPPORTED").contains("dailyLimit")
+
+        val monthly = resource(upstream).offer(
+            """{"granteePartyId":"$stranger","monthlyLimit":{"amount":50000.00,"currency":"CZK"}}""",
+        )
+        assertThat(monthly.status).isEqualTo(400)
+        assertThat(monthly.entity.toString()).contains("monthlyLimit")
+
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+    }
+
+    /**
+     * The control without which the test above is vacuous: an explicit JSON `null` is the app
+     * sending "no ceiling", not a ceiling, and `perTransactionLimit` is the one limit this platform
+     * enforces — both must still pass through. A naive `node.has(field)` check fails the first of
+     * these, and a check that rejected all limits would fail the second while looking correct.
+     */
+    @Test
+    fun `offer passes through a null ceiling and a perTransactionLimit`() {
+        val upstream = mockk<UpstreamClient>()
+        val body = slot<String>()
+        every { upstream.post(any(), any(), capture(body), any()) } returns Response.status(201).build()
+
+        val response = resource(upstream).offer(
+            """{"granteePartyId":"$stranger","dailyLimit":null,"monthlyLimit":null,""" +
+                """"perTransactionLimit":{"amount":5000.00,"currency":"CZK"}}""",
+        )
+
+        assertThat(response.status).isEqualTo(201)
+        assertThat(body.captured).contains("\"perTransactionLimit\"")
+    }
+
     @Test
     fun `offer rejects a body that is not a JSON object`() {
         val upstream = mockk<UpstreamClient>()

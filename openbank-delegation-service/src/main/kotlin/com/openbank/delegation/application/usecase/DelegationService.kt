@@ -29,6 +29,7 @@ import com.openbank.delegation.domain.event.DelegationRenounced
 import com.openbank.delegation.domain.event.DelegationRevoked
 import com.openbank.delegation.domain.event.DelegationSuspended
 import com.openbank.delegation.domain.event.EventMoney
+import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
 import jakarta.enterprise.context.ApplicationScoped
@@ -52,6 +53,24 @@ class DelegationCallerMismatchException(callerPartyId: UUID, claimedPartyId: UUI
 
 /** The grantor does not own the resource, or ownership could not be established. */
 class DelegationResourceOwnershipException(message: String) : RuntimeException(message)
+
+/**
+ * The request carries a constraint this platform accepts in its schema but enforces nowhere.
+ *
+ * Today that is exactly `dailyLimit` and `monthlyLimit` (ADR-0232 D1/D6). A cumulative ceiling is
+ * only a real constraint at the point where accumulated spend is OBSERVED, and no such point
+ * exists: `DelegationOffered` does not even carry the two fields, so no product-service projection
+ * can learn them, and nothing in the fleet decrements or counts against them. Accepting them
+ * silently is the worst of the three options — the grantor comes away believing they capped the
+ * delegate at 5 000 Kč/den while every payment the delegate makes is checked only against
+ * `perTransactionLimit`. Refusing the field is the honest state until a counter exists.
+ */
+class DelegationUnsupportedConstraintException(val code: String, message: String) : RuntimeException(message) {
+    companion object {
+        const val CODE_CUMULATIVE_LIMIT_UNSUPPORTED = "CUMULATIVE_LIMIT_UNSUPPORTED"
+        const val CODE_APPROVAL_POLICY_UNSUPPORTED = "APPROVAL_POLICY_UNSUPPORTED"
+    }
+}
 
 @ApplicationScoped
 class DelegationService(
@@ -83,6 +102,8 @@ class DelegationService(
     override suspend fun offer(command: OfferDelegationCommand): DelegationGrant {
         val now = OffsetDateTime.now(clock)
         requireCallerIs(command.callerPartyId, command.grantorPartyId)
+        rejectUnenforcedCeilings(command)
+        rejectUnenforcedApprovalPolicy(command)
         verifyResourceOwnership(command)
         val parties = verifyEligibility(command)
         // SCA last of the three gates: it SPENDS the challenge, so a request that was going to be
@@ -331,6 +352,61 @@ class DelegationService(
     private fun requireCallerIs(callerPartyId: CallerPartyId, claimedPartyId: UUID) {
         if (callerPartyId != null && callerPartyId != claimedPartyId) {
             throw DelegationCallerMismatchException(callerPartyId, claimedPartyId)
+        }
+    }
+
+    /**
+     * Refuse a grant carrying a ceiling nothing enforces, BEFORE any gate that costs the customer
+     * something. It runs ahead of the ownership lookup, the eligibility call and above all ahead of
+     * the SCA consume, for the same reason those three are ordered as they are: a request that will
+     * be refused anyway must not spend a challenge.
+     *
+     * See [DelegationUnsupportedConstraintException] for why refusing beats accepting. The check is
+     * on the WRITE path only — an existing row that already carries a ceiling still rehydrates and
+     * still serializes, because hiding data the platform already stored would replace one wrong
+     * belief with another.
+     */
+    private fun rejectUnenforcedCeilings(command: OfferDelegationCommand) {
+        val unenforced = buildList {
+            if (command.dailyLimit != null) add("dailyLimit")
+            if (command.monthlyLimit != null) add("monthlyLimit")
+        }
+        if (unenforced.isNotEmpty()) {
+            throw DelegationUnsupportedConstraintException(
+                code = DelegationUnsupportedConstraintException.CODE_CUMULATIVE_LIMIT_UNSUPPORTED,
+                message = "${unenforced.joinToString(" and ")} cannot be accepted: this platform enforces only " +
+                    "perTransactionLimit. No service counts cumulative spend against a grant, so a ceiling set " +
+                    "here would never be applied to any payment. Omit the field (ADR-0232 D1/D6).",
+            )
+        }
+    }
+
+    /**
+     * ADR-0232 D8's co-signing promise, refused for the same reason as the cumulative ceilings:
+     * nothing counts approvals against a grant.
+     *
+     * `approvalPolicy` is accepted, checked for self-consistency (N_OF_M demands
+     * `requiredApprovals >= 2`), persisted, echoed and rendered — and never read by a decision.
+     * `DelegationGrant.covers` consults capability and `perTransactionLimit` only;
+     * `DelegationOffered` does not carry the policy; account-service's delegation projection has
+     * no column for it. So the one flow that could honour it — `SavingsProposalService.decide`,
+     * the D8 maker-checker — releases the withdrawal on a SINGLE owner decision no matter what
+     * the grantor chose. "Oba rodiče musí schválit výběr" is a number nobody counts.
+     *
+     * SOLO stays accepted: it is the default and it promises no second approver, so it is the one
+     * value that is honest today. Delivering the rest means replicating the policy onto the
+     * projection and counting decisions where the money moves — in that order, or the counter is
+     * a second unread field.
+     */
+    private fun rejectUnenforcedApprovalPolicy(command: OfferDelegationCommand) {
+        if (command.approvalPolicy != ApprovalPolicy.SOLO) {
+            throw DelegationUnsupportedConstraintException(
+                code = DelegationUnsupportedConstraintException.CODE_APPROVAL_POLICY_UNSUPPORTED,
+                message = "approvalPolicy ${command.approvalPolicy} cannot be accepted: no service counts " +
+                    "approvals against a grant, so a co-signing requirement set here would never be applied — " +
+                    "a single owner decision still releases the money. Only SOLO is enforced today. " +
+                    "Omit the field (ADR-0232 D8).",
+            )
         }
     }
 
