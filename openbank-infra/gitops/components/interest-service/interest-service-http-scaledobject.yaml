@@ -18,8 +18,8 @@
 # Modeled exactly on components/accounts/product-catalog-http-scaledobject.yaml (ADR-0083 pilot).
 #
 # Native-image status (T1 viability assumption per ADR-0057/rules.yaml finops_tiers.T1): NOT
-# native. interest-service's Dockerfile runs `quarkusBuild` (fast-jar) on a JVM (eclipse-temurin
-# jre-alpine) base — same as the product-catalog pilot itself, which is also fast-jar despite
+# native. interest-service ships `quarkusBuild` output (fast-jar) on a JVM (eclipse-temurin
+# 25-jre) base — same as the product-catalog pilot itself, which is also fast-jar despite
 # rules.yaml's `declared` comment claiming a passed native cold-start gate (no native Dockerfile
 # lane, no native CI step, and no `-Dquarkus.native.enabled` anywhere in this repo backs that
 # comment). Per the issue's explicit guidance, native is a T1 prerequisite/promotion gate, not a

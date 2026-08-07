@@ -98,11 +98,19 @@ class InterestResource(
     @Authorize(action = "interest.create", resource = "#accountId")
     fun capitalize(
         @PathParam("accountId") accountId: UUID,
-        @QueryParam("productId") productId: String,
+        @QueryParam("productId") productId: String?,
         @QueryParam("toDate") toDate: String?,
-    ): Uni<Response> =
-        capitalizeUseCase.capitalize(accountId, productId, toDate?.let { LocalDate.parse(it) } ?: LocalDate.now(clock))
+    ): Uni<Response> {
+        // #3104's own reproduction case. This handler is NOT suspend, so Kotlin emits
+        // Intrinsics.checkNotNullParameter at bytecode offset 0: omitting `?productId=` threw NPE
+        // before the first statement ran, and GenericExceptionMapper rendered 500. A guard could
+        // only become reachable by declaring the parameter nullable — with the old signature it
+        // compiled to nothing.
+        requireNotNull(productId) { "query parameter 'productId' is required" }
+        return capitalizeUseCase
+            .capitalize(accountId, productId, toDate?.let { LocalDate.parse(it) } ?: LocalDate.now(clock))
             .map { Response.ok(it).build() }
+    }
 
     @GET
     @Path("/accruals/{accountId}")
@@ -163,9 +171,12 @@ class InterestResource(
     @Authorize(action = "interest.read", resource = "#accountId")
     fun effectiveRate(
         @PathParam("accountId") accountId: UUID,
-        @QueryParam("productId") productId: String,
+        @QueryParam("productId") productId: String?,
         @QueryParam("date") @DefaultValue("") date: String,
     ): Uni<Response> {
+        // #3104 — `date` is safe (it carries @DefaultValue, so JAX-RS never injects null);
+        // `productId` was not, and answered 500 when omitted.
+        requireNotNull(productId) { "query parameter 'productId' is required" }
         val on = if (date.isNotEmpty()) LocalDate.parse(date) else LocalDate.now(clock)
         return rateConfigUseCase.effectiveRate(accountId, productId, on)
             .map { it?.let { c -> Response.ok(c).build() } ?: Response.noContent().build() }

@@ -1,0 +1,155 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006: every Kafka topic is documented in AsyncAPI 3.0 under openbank-contracts/<service>/.
+#
+# WHAT IS AND IS NOT ENFORCED HERE. `check-event-contract-coverage.py` asserts this FILE EXISTS;
+# nothing validates its content against what the code actually sends, and no schema is registered
+# in Apicurio. Everything below is DERIVED from `EngagementEventRepositoryImpl.save`, the only
+# producer, and each claim names its source — see the delegation-service contract for the same
+# convention.
+#
+# NO CONSUMER EXISTS (allowlisted: `openbank-libs/governance/rules.yaml:
+# event_consumer_liveness.allowlist`, topic `openbank.engagement.events`) and NO GITOPS DEPLOYMENT
+# is live (`openbank-infra/gitops/components/engagement/*` is inert — the workload is not in
+# auto-deploy.yml's ALL_SERVICES). This contract documents the wire shape the producer WILL send
+# once turned on, ahead of both — same ordering ADR-0006 itself prescribes: "producers before
+# consumers" (#1916).
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Engagement Service — events
+  version: 1.0.0
+  description: |
+    Impression/click/dismiss/conversion feedback for an in-app engagement surface (ADR-0220 D2).
+
+    Unlike delegation-service's or account-service's events, this is NOT a `DomainEvent` subtype
+    — there is no aggregate whose lifecycle this describes. Each event is one customer action on
+    one piece of catalogued content (`SurfaceCatalog`), recorded by `RecordEngagementEventUseCase`
+    and published via the transactional outbox.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: |
+      Strimzi cluster `openbank-cluster` in the `messaging` namespace. mTLS in the shipped design;
+      the gitops slice merged so far has NO KafkaUser for this service (deferred, see the file
+      header), so nothing can actually authenticate to produce yet.
+
+channels:
+  engagementEvents:
+    address: openbank.engagement.events
+    title: Surface impression/click/dismiss/conversion feedback
+    description: |
+      One partition, one replica, `cleanup.policy: delete`, `retention.ms: 604800000` (7 days) —
+      declared in `openbank-infra/gitops/components/kafka/kafka.yaml` (the fleet's single shared
+      topic-declaration file, not a per-service one — see that file's own convention note).
+
+      **Retention is 7 days and the topic is not compacted, so it is a change feed.** A future
+      consumer building an aggregate (e.g. "dismissal streak per party/slot") must seed from
+      `GET /api/v1/surfaces/{slot}`'s own read path or `engagement_event` directly, then follow
+      the topic — the same caveat delegation-service's contract states for the same reason.
+
+      **Partitioning key: `aggregateId`**, which `EngagementEventRepositoryImpl.save` sets to the
+      event's `partyId` (`OutboxKafkaHeaders.partitionKey` reads `entry.aggregateId`). All events
+      for one party therefore land on one partition and are ordered with respect to each other.
+      With `partitions: 1` today the distinction is invisible; it becomes real the moment the topic
+      is scaled out.
+    messages:
+      EngagementEvent:
+        $ref: '#/components/messages/EngagementEvent'
+
+operations:
+  publishEngagementEvents:
+    action: send
+    title: Publish engagement feedback
+    channel:
+      $ref: '#/channels/engagementEvents'
+    description: |
+      **Producer: `openbank-engagement-service`** — the sole producer, and the owner of this
+      contract. Configured as `mp.messaging.outgoing.engagement-outbox-out` in its
+      `application.yaml`.
+
+      **Consumers: none.** See the file header — allowlisted in `rules.yaml`, not silently absent.
+      The intended consumers are the analytics layer (ADR-0022) and ADR-0221's campaign dashboards.
+    messages:
+      - $ref: '#/channels/engagementEvents/messages/EngagementEvent'
+
+components:
+  messageTraits:
+    outboxHeaders:
+      headers:
+        type: object
+        required: [ce-id, ce-type, idempotency-key]
+        properties:
+          ce-id:
+            type: string
+            format: uuid
+            description: Event id (the outbox row's own `event_id`, UUIDv7). Stable across redeliveries.
+          ce-type:
+            type: string
+            description: >-
+              `EngagementEvent.<TYPE>` — `EngagementEventRepositoryImpl.save`'s literal
+              `"EngagementEvent.${event.type.name}"`, e.g. `EngagementEvent.DISMISS`.
+          idempotency-key:
+            type: string
+            format: uuid
+            description: |
+              Equal to `ce-id`. The outbox dispatcher offers at-least-once delivery, so a consumer
+              MUST deduplicate on this value rather than assume each event arrives once.
+
+  schemas:
+    surfaceSlot:
+      type: string
+      description: The named app slot the content rendered into (ADR-0220 D1).
+      enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
+    engagementEventType:
+      type: string
+      enum: [IMPRESSION, CLICK, DISMISS, CONVERSION]
+
+  messages:
+    EngagementEvent:
+      name: EngagementEvent
+      title: A customer action on one piece of catalogued surface content
+      summary: |
+        Not a `DomainEvent` envelope — this payload is the exact `mapOf(...)` literal
+        `EngagementEventRepositoryImpl.save` builds, no wrapper, no `aggregateType`/`version`
+        fields (there is no aggregate here to version).
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        type: object
+        required: [eventId, partyId, contentId, slot, type, occurredAt]
+        properties:
+          eventId:
+            type: string
+            format: uuid
+            description: Same value as the `ce-id` header — the outbox row's own id.
+          partyId:
+            type: string
+            format: uuid
+            description: The party who performed the action. Also the partition key.
+          contentId:
+            type: string
+            description: >-
+              A `SurfaceCatalog` entry id (e.g. `SAVINGS_RATE_BANNER`). Not validated against the
+              catalogue at publish time — the catalogue can change; this records what was actually
+              shown.
+          slot:
+            $ref: '#/components/schemas/surfaceSlot'
+          type:
+            $ref: '#/components/schemas/engagementEventType'
+          occurredAt:
+            type: string
+            format: date-time
+            description: >-
+              `Instant.toString()` — ISO-8601. Set by `SurfaceResource.postEvent` to `Instant.now()`
+              at the moment the app's POST was received, not client-reported.
