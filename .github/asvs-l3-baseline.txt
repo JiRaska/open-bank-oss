@@ -40,8 +40,12 @@ V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2651: plai
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2657: plaintext http:// env value http://clearing-simulator.payments.svc:8139
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2662: plaintext http:// env value http://transaction-service.payments.svc:8102
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2942: plaintext http:// env value http://tempo.observability.svc:4317
-V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2949: plaintext http:// env value http://account-service.accounts.svc:8101
-V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2951: plaintext http:// env value http://party-service.parties.svc:8100
+# vop -> party-service (issue #3966). Replaces two entries retired in the same change:
+# `account-service.accounts.svc:8101` and `party-service.parties.svc:8100`, the transposed-port
+# pair. The account hop needs no line of its own — V9.1's identity is (file, value) and
+# `account-service.accounts.svc:8100` is already baselined for this file. Plaintext for the same
+# reason as the other 200+ lines here; retiring it is the mesh-mTLS work (baseline Layer 1).
+V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2988: plaintext http:// env value http://party-service.party.svc:8111
 V9.1 openbank-infra/gitops/components/ledger/ledger-service.yaml:114: plaintext http:// env value http://fx-service.fx.svc:8119
 V9.1 openbank-infra/gitops/components/ledger/ledger-service.yaml:122: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/ap2/ap2-service.yaml:66: plaintext http:// env value http://tempo.observability.svc:4317
@@ -215,6 +219,7 @@ V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:79: plaintex
 V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:131: plaintext http:// env value http://apicurio-registry.messaging.svc:8080
 V13.1 openbank-analytics-sink: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-authz-policy-auditor: serves REST resources but publishes no openapi.yaml
+V13.1 openbank-case-coordinator-agent: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-control-liveness-sentinel: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-devops-agent: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-docs-truth-agent: serves REST resources but publishes no openapi.yaml
@@ -226,3 +231,4 @@ V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:106: pl
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:108: plaintext http:// env value http://pid-service.pid.svc:8105
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:114: plaintext http:// env value http://account-service.accounts.svc:8100
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:116: plaintext http:// env value http://card-issuance-service.payments.svc:8118
+V9.1 openbank-infra/gitops/components/engagement/engagement-service.yaml:81: plaintext http:// env value http://consent-service.consent.svc:8106

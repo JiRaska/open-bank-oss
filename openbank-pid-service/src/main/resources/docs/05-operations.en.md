@@ -9,11 +9,11 @@
 # Run dev mode (live reload)
 ./gradlew :openbank-pid-service:quarkusDev
 
-# Container (multi-stage Dockerfile, fast-jar, runs as non-root user `openbank`)
-docker build -t openbank-pid-service -f openbank-pid-service/Dockerfile .
+# Container (fast-jar, runs as non-root user `openbank`)
+openbank-infra/scripts/build-push-service.sh pid-service
 ```
 
-The Dockerfile builds with `eclipse-temurin:25-jdk-alpine`, runs on `25-jre-alpine`, copies the `quarkus-app/` layout, and starts with `-XX:+UseZGC`.
+The image is assembled by `.github/workflows/Dockerfile.deploy` from a host-side fast-jar: it copies the `quarkus-app/` layout into the `eclipse-temurin:25-jre` runtime base (glibc, #3354) and starts with `-XX:+UseZGC`. `openbank-pid-service/Dockerfile` builds nothing (#3016) — the pipeline reads exactly one thing from it, the `EXPOSE` line.
 
 ## Endpoints / ports
 

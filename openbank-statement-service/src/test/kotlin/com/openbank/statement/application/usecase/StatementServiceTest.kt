@@ -38,11 +38,14 @@ class StatementServiceTest {
     private val to = LocalDate.parse("2026-01-31")
 
     private lateinit var service: StatementService
+    private lateinit var restatement: StatementRestatementService
 
     @BeforeEach
     fun setUp() {
         service = StatementService(accountInfo, bookedEntries, balance, periods)
         service.clock = { Fixtures.CLOSED_AT }
+        restatement = StatementRestatementService(accountInfo, bookedEntries, balance, periods)
+        restatement.clock = { Fixtures.CLOSED_AT }
         every { accountInfo.pocketAccount(Fixtures.ACCOUNT_ID) } returns
             Uni.createFrom().item(PocketAccountInfo(Fixtures.ACCOUNT_ID, "CZ65", "Jan Novak", listOf("CZK")))
         every { bookedEntries.bookedEntries(any(), any(), any(), any()) } returns Uni.createFrom().item(
@@ -147,5 +150,107 @@ class StatementServiceTest {
         // Non-sequenced informational export -> legal sequence 0 on the PDF.
         assertThat(rendered.body).contains("Statement no. (legal): 0")
         verify(exactly = 0) { periods.saveWithOutbox(any(), any()) }
+    }
+
+    // ---- Restatement of a closed period (ADR-0035 §D, issue #1302 item 5) -------------------
+    //
+    // Before this, `PeriodCloseStatus.SUPERSEDED` had ZERO write sites fleet-wide: a period closed
+    // on wrong data was immutable, and `closePocketMonth` silently returned the stale record.
+
+    private fun standingClose(
+        seq: Long = 3,
+        opening: String = "1000.00",
+        closing: String = "1075.00",
+        entryCount: Int = 2,
+    ) = StatementPeriod(
+        id = UUID.randomUUID(), accountId = Fixtures.ACCOUNT_ID, pocketCurrency = "CZK",
+        periodFrom = from, periodTo = to, legalSequenceNumber = seq, electronicSequenceNumber = seq,
+        openingBalance = BigDecimal(opening), closingBalance = BigDecimal(closing),
+        entryCount = entryCount, closedAt = Fixtures.CLOSED_AT,
+    )
+
+    @Test
+    fun `restating a corrected period issues a new sequenced close referencing the superseded one`() {
+        // The standing close was built before TX-2 (the 25.00 fee) was booked: it says 1100.00 with
+        // one entry. The corrected truth is 1000 + 100 - 25 = 1075.00 over two entries.
+        val standing = standingClose(seq = 3, closing = "1100.00", entryCount = 1)
+        every { periods.findByPeriod(any(), any(), any(), any()) } returns Uni.createFrom().item(standing)
+        every { balance.closingBalance(Fixtures.ACCOUNT_ID, "CZK", to) } returns
+            Uni.createFrom().item(BalanceAnchor(BigDecimal("1075.00"), "CZK", to))
+        every { periods.nextLegalSequence(Fixtures.ACCOUNT_ID, "CZK") } returns Uni.createFrom().item(4L)
+        every { periods.supersedeAndReplace(any(), any(), any()) } answers {
+            Uni.createFrom().item(secondArg<StatementPeriod>())
+        }
+
+        val restated = restatement.restatePocketPeriod(Fixtures.ACCOUNT_ID, "CZK", from, to).await().indefinitely()
+
+        // The FIGURES are the assertion, not merely that a status changed.
+        assertThat(restated.closingBalance).isEqualByComparingTo("1075.00")
+        assertThat(restated.openingBalance).isEqualByComparingTo("1000.00")
+        assertThat(restated.entryCount).isEqualTo(2)
+        assertThat(restated.legalSequenceNumber).isEqualTo(4L)
+        assertThat(restated.electronicSequenceNumber).isEqualTo(4L)
+        assertThat(restated.supersedesSequence).isEqualTo(3L)
+        assertThat(restated.status).isEqualTo(PeriodCloseStatus.CLOSED)
+        assertThat(restated.id).isNotEqualTo(standing.id)
+
+        // The prior record is superseded in the SAME call (one transaction), and the correction is
+        // announced on its own event type, not silently as another `period.closed`.
+        verify(exactly = 1) {
+            periods.supersedeAndReplace(
+                standing.id,
+                any(),
+                match<StatementOutboxMessage> {
+                    it.eventType == "account.statement.period.restated.v1" &&
+                        it.payload.contains("\"supersedesSequence\":3") &&
+                        it.payload.contains("\"closingBalance\":1075.00") &&
+                        it.payload.contains("\"supersededClosingBalance\":1100.00")
+                },
+            )
+        }
+        // Never an in-place edit, and never a plain close.
+        verify(exactly = 0) { periods.save(any()) }
+        verify(exactly = 0) { periods.saveWithOutbox(any(), any()) }
+    }
+
+    @Test
+    fun `restating a period whose figures are unchanged burns no legal sequence`() {
+        val standing = standingClose(seq = 3, closing = "1075.00", entryCount = 2)
+        every { periods.findByPeriod(any(), any(), any(), any()) } returns Uni.createFrom().item(standing)
+        every { balance.closingBalance(Fixtures.ACCOUNT_ID, "CZK", to) } returns
+            Uni.createFrom().item(BalanceAnchor(BigDecimal("1075.00"), "CZK", to))
+
+        val result = restatement.restatePocketPeriod(Fixtures.ACCOUNT_ID, "CZK", from, to).await().indefinitely()
+
+        assertThat(result).isEqualTo(standing)
+        verify(exactly = 0) { periods.nextLegalSequence(any(), any()) }
+        verify(exactly = 0) { periods.supersedeAndReplace(any(), any(), any()) }
+    }
+
+    @Test
+    fun `a restatement that cannot itself reconcile leaves the standing close untouched - fail closed`() {
+        val standing = standingClose(seq = 3, closing = "1100.00", entryCount = 1)
+        every { periods.findByPeriod(any(), any(), any(), any()) } returns Uni.createFrom().item(standing)
+        // computed = 1000 + (100 - 25) = 1075, balance-service says 9999 -> mismatch
+        every { balance.closingBalance(Fixtures.ACCOUNT_ID, "CZK", to) } returns
+            Uni.createFrom().item(BalanceAnchor(BigDecimal("9999.00"), "CZK", to))
+
+        assertThatThrownBy {
+            restatement.restatePocketPeriod(Fixtures.ACCOUNT_ID, "CZK", from, to).await().indefinitely()
+        }.isInstanceOf(ReconciliationException::class.java)
+
+        verify(exactly = 0) { periods.supersedeAndReplace(any(), any(), any()) }
+    }
+
+    @Test
+    fun `restating a window that was never closed is rejected, not turned into a first close`() {
+        every { periods.findByPeriod(any(), any(), any(), any()) } returns Uni.createFrom().nullItem()
+
+        assertThatThrownBy {
+            restatement.restatePocketPeriod(Fixtures.ACCOUNT_ID, "CZK", from, to).await().indefinitely()
+        }.isInstanceOf(NoClosedPeriodToRestateException::class.java)
+
+        verify(exactly = 0) { periods.nextLegalSequence(any(), any()) }
+        verify(exactly = 0) { periods.supersedeAndReplace(any(), any(), any()) }
     }
 }

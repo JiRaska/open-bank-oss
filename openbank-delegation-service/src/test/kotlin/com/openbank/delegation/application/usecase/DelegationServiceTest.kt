@@ -16,6 +16,7 @@ import com.openbank.delegation.application.port.out.ScaChallengeClient
 import com.openbank.delegation.application.port.out.ScaChallengeSnapshot
 import com.openbank.delegation.domain.event.DelegationOffered
 import com.openbank.delegation.domain.event.EventMoney
+import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
@@ -86,9 +87,57 @@ class DelegationServiceTest {
         )
     }
 
-    private fun eligibilityOk(grantorKyc: String = "FULL", granteeKyc: String = "FULL") {
-        coEvery { eligibilityClient.eligibilityOf(grantor) } returns PartyEligibility(grantor, true, grantorKyc)
-        coEvery { eligibilityClient.eligibilityOf(grantee) } returns PartyEligibility(grantee, true, granteeKyc)
+    private fun eligibilityOk(
+        grantorKyc: String = "FULL",
+        granteeKyc: String = "FULL",
+        grantorName: String? = null,
+        granteeName: String? = null,
+    ) {
+        coEvery { eligibilityClient.eligibilityOf(grantor) } returns
+            PartyEligibility(grantor, true, grantorKyc, grantorName)
+        coEvery { eligibilityClient.eligibilityOf(grantee) } returns
+            PartyEligibility(grantee, true, granteeKyc, granteeName)
+    }
+
+    /**
+     * Issue #3604 — the accept screen showed the counterparty as a truncated UUID, so the person
+     * asked to hand over authority over their money could not tell who was asking.
+     *
+     * Asserted on the SAVED AGGREGATE, not on the returned response: the point of the fix is that
+     * the label is persisted at the moment of consent, so it survives a later rename of the party
+     * and needs no runtime lookup (and therefore no new authority for customer-edge). A test that
+     * only read the response would still pass against an implementation that resolved the name
+     * on the way out.
+     */
+    @Test
+    fun `the offered grant snapshots both counterparty display names`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk(grantorName = "Alice Testerova", granteeName = "Bob Zkousky")
+        val saved = slot<DelegationGrant>()
+        coEvery { repository.save(capture(saved), any()) } answers { firstArg() }
+
+        service.offer(offerCommand())
+
+        assertThat(saved.captured.grantorName).isEqualTo("Alice Testerova")
+        assertThat(saved.captured.granteeName).isEqualTo("Bob Zkousky")
+    }
+
+    /**
+     * A party pid-service returns no usable name for must leave the field NULL, never an empty
+     * string: consumers render the party id when the label is absent, and a blank chip on a
+     * consent screen looks like a name that failed to load rather than one never captured.
+     */
+    @Test
+    fun `a party with no name leaves the snapshot null rather than blank`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+        val saved = slot<DelegationGrant>()
+        coEvery { repository.save(capture(saved), any()) } answers { firstArg() }
+
+        service.offer(offerCommand())
+
+        assertThat(saved.captured.grantorName).isNull()
+        assertThat(saved.captured.granteeName).isNull()
     }
 
     private fun offerCommand(
@@ -141,6 +190,163 @@ class DelegationServiceTest {
         assertThat(wire!!.currency).isEqualTo("CZK")
         assertThat(wire.amount).isEqualByComparingTo(BigDecimal("5000.00"))
         assertThat(EventMoney.from(null)).isNull()
+    }
+
+    /**
+     * The ceilings the API used to accept and nothing ever enforced. Asserting on the REFUSAL and
+     * on `save` never being called, because the defect was that both succeeded: a grantor could
+     * cap a delegate at 5 000 Kč/den, get a 201 back with the field echoed, and have every payment
+     * checked against `perTransactionLimit` alone. `DelegationOffered` does not even carry the two
+     * fields, so no projection could have applied them.
+     */
+    @Test
+    fun `offer refuses a dailyLimit because nothing enforces it`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+
+        assertThatThrownBy {
+            runBlocking { service.offer(offerCommand().copy(dailyLimit = Money.of(BigDecimal("5000.00"), "CZK"))) }
+        }
+            .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
+            .hasMessageContaining("dailyLimit")
+
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `offer refuses a monthlyLimit and names both fields when both are set`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+
+        assertThatThrownBy {
+            runBlocking { service.offer(offerCommand().copy(monthlyLimit = Money.of(BigDecimal("50000.00"), "CZK"))) }
+        }
+            .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
+            .hasMessageContaining("monthlyLimit")
+
+        val both = offerCommand().copy(
+            dailyLimit = Money.of(BigDecimal("5000.00"), "CZK"),
+            monthlyLimit = Money.of(BigDecimal("50000.00"), "CZK"),
+        )
+        assertThatThrownBy { runBlocking { service.offer(both) } }
+            .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
+            .hasMessageContaining("dailyLimit and monthlyLimit")
+
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    /**
+     * The refusal must not cost the customer their ceremony. SCA is the last of the four gates
+     * precisely because `consumeChallenge` SPENDS the challenge — a request that was always going
+     * to be refused must leave the grantor able to retry without re-authenticating.
+     */
+    @Test
+    fun `offer refuses an unenforced ceiling before spending the SCA challenge`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+
+        assertThatThrownBy {
+            runBlocking { service.offer(offerCommand().copy(dailyLimit = Money.of(BigDecimal("1.00"), "CZK"))) }
+        }
+            .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
+
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+    }
+
+    /**
+     * The control the refusal needs: `perTransactionLimit` is the one ceiling this platform
+     * actually checks, and it must still be accepted. Without this the two tests above would pass
+     * against a service that had simply stopped accepting limits altogether.
+     */
+    @Test
+    fun `offer still accepts a perTransactionLimit`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+        coEvery { repository.save(any<DelegationGrant>(), any()) } answers { firstArg() }
+
+        val limit = Money.of(BigDecimal("5000.00"), "CZK")
+        val grant = service.offer(offerCommand().copy(perTransactionLimit = limit))
+
+        assertThat(grant.perTransactionLimit).isEqualTo(limit)
+        assertThat(grant.dailyLimit).isNull()
+        coVerify(exactly = 1) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    /**
+     * ADR-0232 D8 promises `approvalPolicy` binds per-resource co-signing — "oba rodiče musí
+     * schválit výběr". It binds nothing. The field is accepted, validated for self-consistency
+     * (N_OF_M demands requiredApprovals >= 2), persisted, echoed and rendered in admin-ui, and
+     * read by no decision anywhere: `DelegationGrant.covers` consults capability and
+     * perTransactionLimit only, `DelegationOffered` does not carry it, and the account-service
+     * projection has no column for it — so account-service's `SavingsProposalService.decide`
+     * releases the money on a SINGLE owner decision whatever the policy said. Same shape as the
+     * cumulative ceilings: present at every layer except the enforcing one.
+     */
+    @Test
+    fun `offer refuses an N_OF_M approvalPolicy because no service counts approvals`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+
+        assertThatThrownBy {
+            runBlocking {
+                service.offer(
+                    offerCommand().copy(approvalPolicy = ApprovalPolicy.N_OF_M, requiredApprovals = 2),
+                )
+            }
+        }
+            .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
+            .hasMessageContaining("approvalPolicy")
+            .hasMessageContaining("N_OF_M")
+
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `offer refuses every multi-party approvalPolicy, not just N_OF_M`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+
+        listOf(ApprovalPolicy.ANY_ONE, ApprovalPolicy.ALL).forEach { policy ->
+            assertThatThrownBy {
+                runBlocking { service.offer(offerCommand().copy(approvalPolicy = policy)) }
+            }
+                .describedAs("approvalPolicy %s must be refused", policy)
+                .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
+                .hasMessageContaining(policy.name)
+        }
+
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    /** The refusal must not spend the challenge — same reasoning as the ceiling gate. */
+    @Test
+    fun `offer refuses an unenforced approvalPolicy before spending the SCA challenge`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+
+        assertThatThrownBy {
+            runBlocking { service.offer(offerCommand().copy(approvalPolicy = ApprovalPolicy.ALL)) }
+        }
+            .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
+
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+    }
+
+    /**
+     * The control. SOLO is the default and is honest — it promises no extra approver and there is
+     * none. Without this the three tests above would pass against a service that had stopped
+     * accepting `approvalPolicy` altogether, which would break every ordinary grant.
+     */
+    @Test
+    fun `offer still accepts the default SOLO approvalPolicy`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+        coEvery { repository.save(any<DelegationGrant>(), any()) } answers { firstArg() }
+
+        val grant = service.offer(offerCommand().copy(approvalPolicy = ApprovalPolicy.SOLO))
+
+        assertThat(grant.approvalPolicy).isEqualTo(ApprovalPolicy.SOLO)
+        coVerify(exactly = 1) { repository.save(any<DelegationGrant>(), any()) }
     }
 
     @Test

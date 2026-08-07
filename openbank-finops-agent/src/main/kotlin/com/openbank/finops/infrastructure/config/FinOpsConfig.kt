@@ -32,6 +32,9 @@ interface FinOpsConfig {
     @WithDefault("http://litellm.ai-platform:4000")
     fun llmGatewayUrl(): String
 
+    @WithDefault("deepseek-ai/DeepSeek-V3.2")
+    fun modelId(): String
+
     @WithDefault("50")
     fun natEgressThresholdGb(): Int
 

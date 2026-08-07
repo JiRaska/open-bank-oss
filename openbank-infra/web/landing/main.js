@@ -57,6 +57,30 @@ if (modal) {
   });
 }
 
+// hCaptcha widget loader.
+// Replaces the third-party https://web3forms.com/client/script.js, which was an
+// unversioned remote script with no SRI (see the SRI finding): a compromise there
+// would have run attacker code with full access to this form. Of everything that
+// script did (uploadcare/filepond uploaders we never use) only this remains — inject
+// hCaptcha's api.js with Web3Forms' public sitekey, exactly as it did.
+const HCAPTCHA_SITEKEY = '50b2fe65-b00b-4b9e-ad62-3ba471098be2';
+function loadHcaptcha() {
+  const widgets = document.querySelectorAll('.h-captcha');
+  if (!widgets.length || document.querySelector('script[src*="js.hcaptcha.com"]')) return;
+  widgets.forEach((w) => { if (!w.dataset.sitekey) w.dataset.sitekey = HCAPTCHA_SITEKEY; });
+  const s = document.createElement('script');
+  s.src = 'https://js.hcaptcha.com/1/api.js?recaptchacompat=off';
+  s.async = true;
+  s.defer = true;
+  document.body.appendChild(s);
+}
+loadHcaptcha();
+// bfcache restore: the widget is gone but our guard script tag may still be in the DOM.
+window.addEventListener('pageshow', (e) => {
+  if (!e.persisted) return;
+  if (window.hcaptcha) { try { window.hcaptcha.reset(); } catch (_) {} } else { loadHcaptcha(); }
+});
+
 // testflight signup form (Web3Forms, AJAX submit)
 const tfForm = document.getElementById('tf-form');
 if (tfForm) {

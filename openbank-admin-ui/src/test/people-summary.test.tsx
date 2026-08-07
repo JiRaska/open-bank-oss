@@ -13,6 +13,7 @@ const ENROLMENTS = [
   { id: 'b', partyId: '026289e3-0b80-452a-be01-e69034838549', state: 'TERMINATED_SUPPRESSED', currentStep: 0 },
   { id: 'c', partyId: '5e3d6411-cb5b-4e94-83f8-de95495ef5dd', state: 'TERMINATED_CONSENT_REVOKED', currentStep: 1 },
   { id: 'd', partyId: '7a1b2c3d-0000-0000-0000-000000000000', state: 'ACTIVE', currentStep: 1 },
+  { id: 'e', partyId: '9c0ffee0-0000-0000-0000-000000000000', state: 'STOPPED_MAX_SENDS', currentStep: 1 },
 ]
 
 const show = (rows = ENROLMENTS) =>
@@ -34,12 +35,14 @@ describe('people summary', () => {
     expect(screen.getAllByText(/Stopped by a rule/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/Withdrew consent/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/Still in the journey/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Send cap reached/).length).toBeGreaterThan(0)
   })
 
   it('never shows a state enum as visible text', () => {
     const { container } = show()
 
     expect(container.textContent).not.toMatch(/TERMINATED_/)
+    expect(container.textContent).not.toMatch(/STOPPED_MAX_SENDS/)
     expect(container.textContent).not.toMatch(/\bACTIVE\b/)
   })
 

@@ -126,3 +126,45 @@ test_services_m2m_reads_suppressions_for_the_gate if {
 test_services_m2m_cannot_write_suppressions if {
 	not allowed_reasons["operator-suppression-write"] with input as {"principal": services_m2m, "action": "suppression.manage"}
 }
+
+# --- 2026-08-05 (#3734): the edge client (customer-facing M2M, ROLE_OPERATOR) ---
+
+edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+
+# After the prefix widening, the edge identity no longer rides operator-consent-write on any
+# consent.* write.
+test_edge_cannot_grant_via_operator_rule if {
+	not "operator-consent-write" in allowed_reasons with input as {"principal": edge, "action": "consent.grant"}
+}
+
+test_edge_cannot_activate_via_operator_rule if {
+	not "operator-consent-write" in allowed_reasons with input as {"principal": edge, "action": "consent.activate"}
+}
+
+test_edge_denied_entirely_on_grant if {
+	count(allowed_reasons) == 0 with input as {
+		"principal": edge,
+		"action": "consent.grant",
+		"resource": marketing_resource,
+	}
+}
+
+# The edge's legitimate consent access — {consent.list, consent.revoke} — is BASE
+# edge-service-consent's grant, not this ext's. Pinned here so a future base regression is
+# caught on the consent bundle's own test suite.
+test_edge_revokes_via_base_edge_service_consent if {
+	"edge-service-consent" in allowed_reasons with input as {"principal": edge, "action": "consent.revoke"}
+}
+
+test_edge_lists_via_base_edge_service_consent if {
+	"edge-service-consent" in allowed_reasons with input as {"principal": edge, "action": "consent.list"}
+}
+
+# ...but the edge must not gain the other consent actions through any rule in this bundle.
+test_edge_denied_entirely_on_consent_validate if {
+	count(allowed_reasons) == 0 with input as {
+		"principal": edge,
+		"action": "consent.validate",
+		"resource": marketing_resource,
+	}
+}

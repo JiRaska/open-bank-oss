@@ -5,6 +5,7 @@
 package com.openbank.ledger.application.port.out
 
 import com.openbank.ledger.domain.model.AccountingDayRecord
+import com.openbank.ledger.domain.model.AccountingDayStatus
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import java.time.LocalDate
 
@@ -15,6 +16,20 @@ interface AccountingDayRepository {
 
     /** The most recently opened day that still accepts postings — the forward-correction target. */
     suspend fun findLatestOpen(): AccountingDayRecord?
+
+    /**
+     * The day with the highest business date regardless of status — the catch-up anchor for
+     * [com.openbank.ledger.infrastructure.schedule.AccountingDayScheduler]: days after this one
+     * have never been opened. Null only before the very first day is ever opened.
+     */
+    suspend fun findLatest(): AccountingDayRecord?
+
+    /**
+     * Every day currently in [status], ascending by business date. Bounded in practice by the
+     * lifecycle itself: one row exists per calendar day and non-terminal statuses drain daily,
+     * so a large result is itself the stuck-day signal, never a paging problem.
+     */
+    suspend fun findInStatus(status: AccountingDayStatus): List<AccountingDayRecord>
 
     /** Days in `[from, to]`, ascending by business date. */
     suspend fun findRange(from: LocalDate, to: LocalDate): List<AccountingDayRecord>

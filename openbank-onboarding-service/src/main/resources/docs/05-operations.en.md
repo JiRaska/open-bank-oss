@@ -10,10 +10,10 @@
 ./gradlew :openbank-onboarding-service:quarkusDev
 
 # Docker image (multi-stage; fast-jar, JDK 25 Temurin, ZGC)
-docker build -f openbank-onboarding-service/Dockerfile -t openbank-onboarding-service .
+openbank-infra/scripts/build-push-service.sh onboarding-service
 ```
 
-The Dockerfile builds the fast-jar in a `eclipse-temurin:25-jdk-alpine` stage and runs it on `eclipse-temurin:25-jre-alpine` as a non-root `openbank` user, entrypoint `java -XX:+UseZGC … -jar /app/quarkus-run.jar`, exposing port 8130.
+The image is built by `.github/workflows/Dockerfile.deploy` from a host-side fast-jar and runs on `eclipse-temurin:25-jre` (glibc, #3354) as a non-root `openbank` user, entrypoint `java -XX:+UseZGC … -jar /app/quarkus-run.jar`, port 8130. `openbank-onboarding-service/Dockerfile` builds nothing (#3016) — `docker build` against it fails, the context has no `quarkus-app/`; the pipeline reads only its `EXPOSE`.
 
 ## Endpoints
 

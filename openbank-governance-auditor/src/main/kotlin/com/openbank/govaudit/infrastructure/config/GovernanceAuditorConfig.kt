@@ -29,8 +29,18 @@ interface GovernanceAuditorConfig {
     @WithDefault("JiRaska/open-bank-oss")
     fun githubRepo(): String
 
+    /**
+     * Base URL of the OpenAI-compatible model backend (LiteLLM gateway, ADR-0174). The API key is
+     * read separately via an OPTIONAL lookup (governance-auditor.model.api-key) so an un-seeded key
+     * degrades the diagnosis call instead of CrashLooping the pod at boot
+     * (SmallRye SRCFG00040 on empty bind).
+     */
     @WithDefault("http://litellm.ai-platform:4000")
     fun llmGatewayUrl(): String
+
+    /** Upstream model name, sent verbatim — the same DeepSeek model sibling ops agents run. */
+    @WithDefault("deepseek-ai/DeepSeek-V3.2")
+    fun modelId(): String
 
     // Mirrors rules.yaml `review.default_approvals` / `review.money_path_approvals` until the
     // live-parsing follow-up lands (GovernanceRulesReadAdapter).

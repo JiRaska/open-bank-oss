@@ -79,6 +79,15 @@ data class DelegationGrant(
     val id: UUID = Ids.newId(),
     val grantorPartyId: UUID,
     val granteePartyId: UUID,
+    /**
+     * Counterparty labels SNAPSHOTTED at offer time from the eligibility lookup this service
+     * already performs (issue #3604). Deliberately part of the authorisation record rather than a
+     * live lookup: a grant says who agreed to what at the moment they agreed, and a later rename
+     * must not silently rewrite that. Null for grants created before this field existed, and for
+     * a party pid-service returns no usable name for — consumers fall back to the party id.
+     */
+    val grantorName: String? = null,
+    val granteeName: String? = null,
     val resourceType: DelegationResourceType,
     val resourceId: UUID,
     val capabilities: Set<DelegationCapability>,
@@ -133,9 +142,21 @@ data class DelegationGrant(
     }
 
     /**
-     * Limit checks are per-amount ceilings only. Cumulative daily/monthly spend tracking
-     * is the enforcing product service's job against its own projection (ADR-0232 D3) —
-     * the grant carries the ceilings, the resource owner counts the spend.
+     * Limit checks are per-amount ceilings only — [dailyLimit] and [monthlyLimit] are NOT consulted
+     * here and are not consulted anywhere else either.
+     *
+     * This KDoc used to say cumulative tracking was "the enforcing product service's job against
+     * its own projection (ADR-0232 D3) — the grant carries the ceilings, the resource owner counts
+     * the spend". No product service counts it. `DelegationOffered` does not carry the two fields,
+     * so no projection can even learn them, and account-service's `DelegatedAccessGrant` has no
+     * equivalent of them. The sentence described an intent as though it were a division of labour,
+     * which is how two ceilings survived from the request DTO all the way into the database with
+     * nothing between them and the customer's belief that they had capped their delegate.
+     *
+     * The two fields therefore survive only on rows written before
+     * `DelegationService.rejectUnenforcedCeilings` refused them; the offer API no longer accepts
+     * either. Anything that starts counting spend must make this function consult it — a caller
+     * reading a non-null [dailyLimit] off a grant today is reading a stored number, not a control.
      */
     fun withinLimits(amount: Money): Boolean {
         if (perTransactionLimit == null) return true
