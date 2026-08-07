@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.7.0...statement-service-v0.8.0) (2026-08-07)
+
+
+### Features
+
+* **mcp-service:** add statement and payment confirmation query tools ([#4127](https://github.com/JiRaska/open-bank-oss/issues/4127)) ([98841b4](https://github.com/JiRaska/open-bank-oss/commit/98841b41dafd900429141744f3f3f57b1f0fa1b6))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.6.0...statement-service-v0.7.0) (2026-08-07)
 
 
