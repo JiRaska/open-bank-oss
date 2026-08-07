@@ -13,11 +13,13 @@
 # quarkus-app/, this builds the real image.
 #
 # Adding a build stage back here is enforced against by
-# .github/scripts/check-dockerfile-no-build-stage.py.
+# .github/scripts/check-dockerfile-no-build-stage.py, which also fails if the FROM above
+# drifts from Dockerfile.deploy — the runtime base is stated in exactly one place (#3354).
 
-FROM eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0
+FROM eclipse-temurin:25-jre@sha256:681c543d6f36c50f45e9b5226930a46203dcfa351d3670e9d0bdf0dabae53539
 WORKDIR /app
-RUN addgroup -S openbank && adduser -S openbank -G openbank
+RUN groupadd --system --gid 101 openbank \
+ && useradd --system --uid 100 --gid 101 --no-create-home --shell /usr/sbin/nologin openbank
 USER openbank
 COPY quarkus-app/lib/ /app/lib/
 COPY quarkus-app/*.jar /app/

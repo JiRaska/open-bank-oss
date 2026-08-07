@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.26.0
+  version: 1.28.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1420,12 +1420,21 @@ paths:
         rather than rewritten, because silently issuing a grant the user did not ask for is worse
         than failing a client bug loudly. Everything else is passed through — delegation-service
         owns capability validation and verifies that the grantor actually owns the resource.
+
+
+        NOT SUPPORTED: dailyLimit and monthlyLimit. Cumulative ceilings are described by ADR-0232
+        D1/D6 but no service counts spend against a grant, so a body carrying either is rejected
+        with 400 CUMULATIVE_LIMIT_UNSUPPORTED rather than stored as a cap that never applies.
+        perTransactionLimit is the only limit this platform enforces.
       operationId: offerDelegation
       security:
         - customerOidc: [delegations:write]
       responses:
         '201': {description: Grant offered}
-        '400': {description: Body is not a JSON object, or upstream validation failed}
+        '400':
+          description: >-
+            Body is not a JSON object, upstream validation failed, or the body carries
+            dailyLimit/monthlyLimit (response `code: CUMULATIVE_LIMIT_UNSUPPORTED`).
         '403': {description: grantorPartyId is not the authenticated party, or resource not owned}
 
   /delegations/shared-by-me:

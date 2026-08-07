@@ -153,6 +153,7 @@ charters:
     placeholders: []
 
   - id: case-coordinator
-    status: pending
-    blocked_by: ADR-0244
-    reason: New agent-plane charter; no module or LlmDiagnosisAdapter wiring yet.
+    status: registered
+    prompts: [system.v1]
+    source: openbank-case-coordinator-agent CaseCoordinatorLlmAdapter.SYSTEM_PROMPT
+    placeholders: []

@@ -125,6 +125,12 @@
     "openbank-campaign-service": {
       "release-type": "simple"
     },
+    "openbank-case-coordinator-agent": {
+      "component": "case-coordinator-agent",
+      "exclude-paths": [
+        "openbank-case-coordinator-agent/src/test"
+      ]
+    },
     "openbank-card-issuance-service": {
       "component": "card-issuance-service",
       "exclude-paths": [

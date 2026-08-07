@@ -142,8 +142,8 @@
   "facts": {
     "agentCharters": {
       "source": "openbank-libs/governance/agents.yaml",
-      "sha256": "7feff1674a83d5ea",
-      "count": 15,
+      "sha256": "bfc4b4639efd5846",
+      "count": 16,
       "ids": [
         "compliance-officer",
         "ledger-domain-engineer",
@@ -159,10 +159,11 @@
         "release-steward",
         "docs-truth-agent",
         "authz-policy-auditor",
-        "flaky-test-hunter"
+        "flaky-test-hunter",
+        "case-coordinator"
       ],
       "byPlane": {
-        "control": 10,
+        "control": 11,
         "development": 2,
         "customer": 3
       },
@@ -173,12 +174,12 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "7b03a0fa5c08758f",
+      "sha256": "7b2ffecbcf6afe7d",
       "counts": {
         "external": 2,
         "not-applicable": 2,
         "pending": 1,
-        "registered": 10
+        "registered": 11
       },
       "idsByStatus": {
         "external": [
@@ -202,7 +203,8 @@
           "governance-auditor",
           "release-steward",
           "docs-truth-agent",
-          "flaky-test-hunter"
+          "flaky-test-hunter",
+          "case-coordinator"
         ]
       }
     },
@@ -223,6 +225,13 @@
             "ui-assistant"
           ],
           "buildFile": "openbank-agent-service/build.gradle.kts"
+        },
+        {
+          "module": "openbank-case-coordinator-agent",
+          "charters": [
+            "case-coordinator"
+          ],
+          "buildFile": "openbank-case-coordinator-agent/build.gradle.kts"
         },
         {
           "module": "openbank-control-liveness-sentinel",
@@ -274,8 +283,9 @@
           "buildFile": "openbank-release-steward/build.gradle.kts"
         }
       ],
-      "serviceCount": 8,
+      "serviceCount": 9,
       "registeredChartersLoadedFromRegistry": [
+        "case-coordinator",
         "compliance-officer",
         "control-liveness-sentinel",
         "devops-agent",
