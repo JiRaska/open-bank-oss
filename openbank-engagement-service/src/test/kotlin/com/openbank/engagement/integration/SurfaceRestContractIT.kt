@@ -7,6 +7,7 @@ package com.openbank.engagement.integration
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -28,6 +29,7 @@ import java.util.UUID
  * prove without also needing a reachable OIDC token server.
  */
 @QuarkusTest
+@TestSecurity(user = "edge@openbank.test", roles = ["ROLE_OPERATOR"])
 @QuarkusTestResource(SurfaceRestContractIT.NoKafkaResource::class)
 @QuarkusTestResource(EngagementPostgresTestResource::class)
 class SurfaceRestContractIT {
