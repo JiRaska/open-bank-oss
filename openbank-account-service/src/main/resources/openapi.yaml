@@ -5,7 +5,7 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  version: 1.8.0
+  version: 1.9.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -474,10 +474,13 @@ paths:
       tags: [Accounts]
       summary: Owner decides a withdrawal proposal (SCA-bound)
       description: >-
-        The owner approves or rejects with a COMPLETED SCA challenge
-        (purpose SAVINGS_WITHDRAW_APPROVAL bound to the owner). An approval flips the
-        proposal to APPROVED and emits SavingsWithdrawalApproved — the executable
-        instruction for the payments path. Authorize action `account.authorize`.
+        The owner approves or rejects with their own SCA challenge (purpose
+        SAVINGS_WITHDRAW_APPROVAL, bound to the owner). The challenge is CONSUMED here, so it is
+        single-use: one challenge authorises exactly one decision. It need not already be
+        COMPLETED — a decoupled challenge (PUSH_NOTIFICATION / BIOMETRIC) is PENDING while holding
+        a signature-verified device decision, and consume is what promotes and spends it. An
+        approval flips the proposal to APPROVED and emits SavingsWithdrawalApproved — the
+        executable instruction for the payments path. Authorize action `account.authorize`.
       operationId: decideSavingsWithdrawalProposal
       parameters:
         - $ref: '#/components/parameters/accountId'
@@ -511,6 +514,10 @@ paths:
                 $ref: '#/components/schemas/ProposalResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: >-
+            The proposal's approval window has closed. The SCA challenge is NOT consumed in this
+            case, so the owner's second factor is not burnt on a decision that cannot succeed.
 
   /api/v1/accounts/{accountId}/savings-goal/delegation/proposals/{proposalId}:
     delete:
@@ -771,9 +778,16 @@ components:
         note: { type: string }
         status:
           type: string
-          enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+          enum: [PENDING, APPROVED, REJECTED, CANCELLED, EXPIRED]
         approvalId: { type: string }
         createdAt: { type: string, format: date-time }
+        expiresAt:
+          type: string
+          format: date-time
+          description: >-
+            When the proposal's approval window closes. A proposal past this instant cannot be
+            approved even while its stored status still reads PENDING — the decision path checks
+            the window directly, so it does not depend on the expiry sweep having already run.
     SavingsGoalRequest:
       type: object
       required: [name, targetMinorUnits]
