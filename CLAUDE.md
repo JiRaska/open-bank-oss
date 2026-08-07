@@ -883,6 +883,16 @@ Rationale + what does *not* cover it: `rules.yaml: dependencies.pr_time_cve_gate
   squash delta; 2-dot includes main's post-divergence commits and makes stale branches look like
   regressions.
 
+### ADR registry
+- **Order is `gen-index.sh` → COMMIT → `check-adr-registry.sh`, never regen → check → commit.** A
+  failing check restores the three derived files (`README.md`, `DIGEST.md`, `index.json`) to HEAD
+  on exit, so committing after a failed check commits the *restored* content — and the next regen
+  then disagrees with what you committed, failing the gate on content you never wrote (#3983).
+- **`git mv` + a follow-up edit = a PURE RENAME commit — the edit stays unstaged.** When
+  renumbering an ADR after a number collision with main, `git mv` the file, edit the H1, `git add`
+  the file AGAIN, then commit — or the registry gate fails with "H1 says number N but filename is
+  M" on a file that looks correct in your working tree (#3983).
+
 ### gh CLI
 - **Always write a PR/issue body to a file and pass `--body-file`. Never `--body` with an
   inline string.** Not "when it contains backticks" — *always*, because you decide the flag
