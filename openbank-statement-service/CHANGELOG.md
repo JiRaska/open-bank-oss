@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.6.0...statement-service-v0.7.0) (2026-08-07)
+
+
+### Features
+
+* **statement-service:** add customer-facing statement download endpoint ([#4125](https://github.com/JiRaska/open-bank-oss/issues/4125)) ([e78ea34](https://github.com/JiRaska/open-bank-oss/commit/e78ea34468c726bf16f813deeb0bc4e79c2e5f35))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.5.11...statement-service-v0.6.0) (2026-08-07)
 
 

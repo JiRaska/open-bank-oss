@@ -48,7 +48,7 @@
   "openbank-sepa-payment": "0.8.9",
   "openbank-settlement-service": "0.4.10",
   "openbank-standing-order-service": "0.14.5",
-  "openbank-statement-service": "0.6.0",
+  "openbank-statement-service": "0.7.0",
   "openbank-swift-service": "0.7.4",
   "openbank-tpp-registry-service": "0.6.12",
   "openbank-transaction-service": "1.16.0",
