@@ -1427,8 +1427,15 @@ class CustomerEdgeResource(
      * anyone could walk a range of numbers and collect IBANs. Instead the edge resolves the account
      * privately and hands back the SAME opaque token the nearby-pay rail already uses (ADR-0087):
      * the payer sees a name and a masked account, signs SCA against that masked form, and
-     * [createDomesticPayment] resolves the token back to the real account inside the edge. The
-     * payee's account number never reaches another customer's device.
+     * [createDomesticPayment] resolves the token back to the real account inside the edge. So a
+     * LOOKUP never yields an IBAN — the harvesting threat is what this defeats, and it is defeated
+     * because learning the account now costs a real, SCA-signed payment to that person rather than
+     * a free directory probe.
+     *
+     * It is deliberately NOT a promise that the account never reaches the payer at all. Once they
+     * have actually paid, the confirmation names the account their money went to (see
+     * [createDomesticPayment]), exactly as a statement does; do not build on the stronger reading
+     * (issue #3890).
      *
      * **Why the hash and not the partyId.** The caller must prove they already know the number, not
      * merely an id they saw once. Taking a partyId from the body would let anyone with a party id —
@@ -1906,8 +1913,20 @@ class CustomerEdgeResource(
         val debtorName = fetchPartyLegalName(debit.accountOwnerPartyId)
             ?: return badRequest("Cannot resolve debtor name")
         // NearbyPay (ADR-0087): if a paymentSessionToken is present, resolve the real creditor from
-        // the in-edge session store — the true account never reaches the payer's device; for SCA
-        // dynamic-linking we compare against the masked form (which is what the app signed).
+        // the in-edge session store — the payer never SUPPLIES the true account, they only hold a
+        // token and a mask; for SCA dynamic-linking we compare against that masked form (which is
+        // what the app signed).
+        //
+        // Request-side only, and say so: the confirmation below is the upstream
+        // DomesticPaymentResponse returned verbatim, and that DTO declares creditorAccountNumber /
+        // creditorBankCode / creditorName as required fields — so the payer's device DOES receive
+        // the account once the payment is made, here and again on every `getDomesticPaymentStatus`
+        // poll. That is intended (it is their own payment; `enrichWithCounterpartyIban` re-adds the
+        // counterparty IBAN on the next /transactions page anyway, and ADR-0095 — which formalises
+        // and supersedes this rail — hands the payer the full SPAYD descriptor by design). What is
+        // not intended is reading the masking as a response-side control: it is not one, and
+        // anything built on that reading is built on nothing (issue #3890, #3176).
+        // Pinned by NearbyPayCreditorDisclosureTest.
         val sessionTokenRaw = extractTextField(objectMapper, body, "paymentSessionToken")
         val nearbySession = sessionTokenRaw?.let { sessions.resolve(it) }
         if (sessionTokenRaw != null && nearbySession == null) {

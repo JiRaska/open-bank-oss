@@ -11,8 +11,15 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * In-edge nearby-payment session store (ADR-0087). The receiver creates a short-lived session
  * bound to ONE of their own accounts and broadcasts the returned opaque token over BLE; the payer
- * resolves the token to a display name + requested amount + a MASKED account before signing. The
- * real creditor account never leaves the edge — only the edge can map the token back to it.
+ * resolves the token to a display name + requested amount + a MASKED account before signing. Only
+ * the edge can map the token back to the real account, so nothing the payer holds BEFORE paying
+ * discloses it.
+ *
+ * That is the whole of the guarantee, and it is a request-side one. It is not "the real creditor
+ * account never leaves the edge": the edge sends it upstream to address the instruction, and the
+ * payment confirmation returns it to the payer verbatim (issue #3890, pinned by
+ * NearbyPayCreditorDisclosureTest). The mask defeats free harvesting through the directory, not
+ * disclosure to someone who has actually paid.
  *
  * Why a store inside the edge rather than a microservice: the session is an ephemeral, ~minutes-TTL
  * token→creditor mapping with no reporting/ledger value once it expires. A dedicated service +
