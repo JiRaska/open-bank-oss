@@ -10,7 +10,7 @@ tags: [ai-agents, admin-ui, observability, governance]
 summary: "The admin-ui swarm thread view is a read-only projection of Temporal case-workflow history — a chronological, per-agent-attributed thread under /iaops, with no new data model, no graph dependency, and no case mutation from the UI."
 ---
 
-# ADR-0245 — Admin-ui swarm thread view over Temporal case history
+# ADR-0246 — Admin-ui swarm thread view over Temporal case history
 
 ## Context
 
