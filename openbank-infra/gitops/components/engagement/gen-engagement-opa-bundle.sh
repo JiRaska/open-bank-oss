@@ -67,8 +67,13 @@ CHECKSUM=$(cat "$REST" "$AGENTS" "$RULES" "$AGENTS_DATA" "$MANIFEST" | \
   awk 1 "$AGENTS_DATA" | sed 's/^/    /' | sed 's/[[:space:]]*$//'
   echo "  manifest.json: |"
   awk 1 "$MANIFEST" | sed 's/^/    /' | sed 's/[[:space:]]*$//'
-  printf '\n'
 } > "$OUT"
+# No trailing `printf '\n'` here, unlike the sibling generators. Theirs supplies the single
+# terminator their last source (bundle.manifest, which has no trailing newline) is missing;
+# `awk 1` above already supplies it, so keeping the printf too would emit a BLANK last line
+# and yamllint fails it: `2035:1 [empty-lines] too many blank lines (1 > 0)`. Measured on the
+# first push of this branch. Drop the printf, not the awk — awk 1 is what makes every block
+# terminate, and that is the #3748 defence.
 
 echo "wrote $OUT (checksum $CHECKSUM, $(wc -c < "$OUT") bytes)"
 

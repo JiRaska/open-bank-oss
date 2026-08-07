@@ -2032,4 +2032,3 @@ data:
           dora: "ICT change management (Art. 8–10); operational resilience via durable, bounded case coordination"
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}
-
