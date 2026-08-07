@@ -31,6 +31,15 @@ spec:
   # is gone. Leaving the field absent would work only by Kubernetes' default-to-1, which
   # is an accident rather than a declaration.
   replicas: 1
+  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
+  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
+  # resources - on a full cluster the rollout never completes while reporting 1/1 READY.
+  # No HA to lose: this workload is already unavailable for the moment its pod is replaced.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: notification-service
@@ -39,7 +48,7 @@ spec:
       annotations:
         # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
         # hot-reload). Kept in sync by gen-notification-opa-bundle.sh.
-        openbank.tech/policy-checksum: "6c500a6f3b582bd1"
+        openbank.tech/policy-checksum: "99a64206f9e9605b"
       labels:
         app.kubernetes.io/name: notification-service
         app.kubernetes.io/part-of: notifications
@@ -183,6 +192,19 @@ spec:
                 secretKeyRef:
                   name: notification-service-apns
                   key: APNS_PRIVATE_KEY
+                  optional: true
+            # PUSH delivery via FCM (FcmPushSender) — wired but deliberately OFF: enabling
+            # before the Vault key is seeded would record every Android push as a CONFIG
+            # failure instead of a skip. Activation is operational, not a code change:
+            # seed openbank/notification-service FCM_SERVICE_ACCOUNT_JSON (see
+            # fcm-externalsecret.yaml), flip FCM_ENABLED to "true", restart the service.
+            - name: FCM_ENABLED
+              value: "false"
+            - name: FCM_SERVICE_ACCOUNT_JSON
+              valueFrom:
+                secretKeyRef:
+                  name: notification-service-fcm
+                  key: FCM_SERVICE_ACCOUNT_JSON
                   optional: true
             # Dotted-key YAML config bug workaround (issue #686): load the
             # notification-events-in / party-events-in group.id and auto.offset.reset

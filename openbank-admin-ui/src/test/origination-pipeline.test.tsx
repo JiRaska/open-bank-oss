@@ -38,6 +38,7 @@ afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 describe('summarise', () => {
@@ -64,6 +65,10 @@ describe('wrap', () => {
 })
 
 describe('OriginationPipeline', () => {
+  // Pin Date.now() to the same epoch the test items were built relative to; without this the
+  // component's summarise(items) call uses real clock time, making items created "1 hour ago"
+  // look hours-old relative to the test's fixed NOW, flipping 'ok' → 'warn'.
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW) })
   it('tints a waiting stage by how long the oldest item has waited', () => {
     render(React.createElement(Providers, null, React.createElement(OriginationPipeline, {
       items: [item('ASSESSMENT', 1), item('FOUR_EYES', 100, 1, 2), item('KYC_PENDING', 30, 1, 3)],

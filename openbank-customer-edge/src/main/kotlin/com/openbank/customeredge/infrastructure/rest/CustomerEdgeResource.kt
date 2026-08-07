@@ -101,6 +101,11 @@ class CustomerEdgeResource(
     @Inject
     lateinit var pendingStore: PendingOnboardingStore
 
+    // Field injection, not a constructor parameter: the constructor is already the widest thing
+    // detekt tolerates here and every test constructs this resource positionally.
+    @Inject
+    lateinit var partyMergeResolver: PartyMergeResolver
+
     @ConfigProperty(name = "openbank.edge.account-service-url")
     lateinit var accountServiceUrl: String
 
@@ -3444,11 +3449,17 @@ class CustomerEdgeResource(
             partyIdClaim = jwt.getClaim<String>("party_id"),
             sub = jwt.subject,
         ) ?: throw ForbiddenException("Missing party_id/sub claim in customer token")
-        return try {
-            CustomerIdentity(UUID.fromString(partyIdStr))
+        val claimed = try {
+            UUID.fromString(partyIdStr)
         } catch (e: IllegalArgumentException) {
             throw ForbiddenException("party_id claim is not a valid party UUID: $partyIdStr")
         }
+        // ADR-0179: the token still carries the id of a party that may since have been merged
+        // away. Follow `merged_into` HERE, once, so every downstream proxy call below is made
+        // with the surviving id — otherwise a merged customer sees an empty bank (no accounts,
+        // no loans, no KYC case) while their data sits under the survivor. Fail-open: on any
+        // upstream trouble the resolver hands back `claimed` unchanged. See PartyMergeResolver.
+        return CustomerIdentity(partyMergeResolver.resolve(claimed))
     }
 
     /** Accepts "number/bankcode" BBAN or Czech IBAN — contacts store the IBAN form. */

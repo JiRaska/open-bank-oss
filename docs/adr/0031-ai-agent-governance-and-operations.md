@@ -12,22 +12,29 @@ summary: "AI agents run as least-privilege workloads declared in agents.yaml, pa
 
 # 31. AI agent governance and operations: agents-as-code, policy-gated MCP, human-in-the-loop, AI-attributed audit
 
-**Delivery note (updated 2026-06-30):**
+**Delivery note (updated 2026-08-03, issues #3669 #3676):**
 - **D1 (agents-as-code)** — ✅ Shipped: `agents.yaml` charter registry; `CharterRegistry` + `CharterRateLimiter` in `agent-service`.
-- **D2 (policy-gated MCP)** — Partial: `OpaPolicyDecisionPoint` + `agents.rego` deny-by-default logic shipped; sidecar enforcement pending (PR #638, D9 phase 1 advisory).
-- **D4 (human-in-the-loop)** — ✅ Shipped: proposal queue + admin-UI approvals (#657); read-only MCP oversight tools across 7 domains (#639).
-- **D5 (AI-attributed audit)** — ⬜ Skeleton present; model-id + prompt-hash enforcement pending.
+- **D2 (policy-gated MCP)** — ✅ Shipped: `OpaPolicyDecisionPoint` + `agents.rego` deny-by-default; `AGENT_POLICY_ENFORCEMENT=block` in gitops (PR #638). See ADR-0034 for sidecar details.
+- **D4 (human-in-the-loop)** — ✅ Shipped end-to-end: `ProposalResource` (`GET /api/v1/proposals`, `POST /{id}/decision`) with segregation-of-duties; admin-UI `/approvals` page + BFF routes; federated money-path inbox per ADR-0227 D2 (PRs #600/#2297/#2792/#3022). Issue #3668 closed as already-implemented.
+- **D5 (AI-attributed audit)** — 🟡 Partial. Per-operation capture matrix (verified 2026-08-03):
+  - `agent.model.complete` (`ModelGateway`): captures `model_id`, `model_version`, `prompt_hash` — ✅
+  - `agent.run` (`AgentRunAuditor`): captures `model_id`, `prompt_hash`, `tool_calls[]` — ✅
+  - `agent.mcp.tool_call` (`AgentPolicyGate`): captures `policy_decision` (ALLOW/DENY) — ✅; `model_id` NOT YET captured — fix in flight on branch `feat/agent-charter-model-id` (issue #3667; `prompt_hash` and `tool_calls` are architecturally N/A at the gate — the gate runs before any LLM call)
+  - Production KMS/cosign-keyed anchor signer (asymmetric, third-party-verifiable) — ⬜ Planned
+- **D6 (technology stack)** — See D6 section; amended 2026-08-03 (issue #3676).
 - **D8 (AGPL agent-runtime public repo)** — ⬜ Planned (issue JiRaska/open-bank#224).
 
 > **Ratification (2026-06-10).** The load-bearing controls are in place and deployed, so the
 > decision is ratified and the phasing (D9) becomes the execution plan:
 > - **D1** — agents-as-code: canonical `openbank-libs/governance/agents.yaml` charters consumed by
 >   both the OPA bundle and the runtime; `CharterRegistry` + `CharterRateLimiter` in service.
-> - **D2** — policy-gated MCP: `OpaPolicyDecisionPoint` + `agents.rego` (deny-by-default PEP) on
->   every `tools/call`. Sidecar **enforcement** wiring is the open tail (PR #638) — until it lands
->   the gate runs `advisory` per D9 phase 1.
-> - **D4** — human-in-the-loop: proposal queue + admin-UI approvals shipped (#657).
-> - Read-only MCP oversight tools across 7 domains (#639); `agent-service` deployed at v1.6.0.
+ > - **D2** — policy-gated MCP: `OpaPolicyDecisionPoint` + `agents.rego` (deny-by-default PEP) on
+ >   every `tools/call`. `AGENT_POLICY_ENFORCEMENT=block` in gitops — enforcement is live, not advisory.
+ >   (PR #638; see ADR-0034 D2.)
+ > - **D4** — human-in-the-loop: proposal queue + admin-UI approvals shipped end-to-end (PRs
+ >   #600/#2297/#2792/#3022; `ProposalResource`, segregation-of-duties, federated money-path inbox per
+ >   ADR-0227 D2). Issue #3668 closed as already-implemented 2026-08-03.
+ > - Read-only MCP oversight tools across 7 domains (#639); `agent-service` deployed at v1.6.0.
 >
 > Ratification does **not** widen blast radius: agents stay `advisory` + proposal-only until the D9
 > gates flip. Acceptance unblocks the remaining tail — enforcement (D2 sidecar), the oversight
@@ -133,7 +140,9 @@ We will run AI agents as **governed, least-privilege workloads** whose every act
 - **Control plane** adds a lightweight **approval queue** surfaced in the admin UI governance view (the
   same place vuln SLAs and coverage already surface, ADR-0029 D3 / ADR-0030 D1): the agent writes a
   proposal, a human approves/rejects **with a recorded reason**, and only then may any downstream action
-  run. A human can also **assign work** to an agent from this view. ⬜ PLANNED.
+  run. A human can also **assign work** to an agent from this view. ✅ **Shipped end-to-end** (PRs
+  #600/#2297/#2792/#3022; federated money-path inbox per ADR-0227 D2; `ProposalResource` with
+  segregation-of-duties). Issue #3668 closed as already-implemented 2026-08-03.
 
 ### D5 — AI-attributed, tamper-evident audit
 
@@ -147,32 +156,63 @@ We will run AI agents as **governed, least-privilege workloads** whose every act
   exists; 🟢 per-event hash chain live (`audit_entries.record_hash`/`prev_hash`, V5) **and** periodic
   externally-signed anchors over the chain head (`audit_anchor`, V6) — `GET /api/v1/audit/anchors/verify`
   detects a wholesale rewrite that an internal-consistency walk alone would miss; the default in-cluster
-  signer is HMAC-SHA256 with the key held outside the audit DB. ⬜ AI-attribution payload fields and the
-  production KMS/cosign-keyed anchor signer (asymmetric, third-party verifiable) remain.
+  signer is HMAC-SHA256 with the key held outside the audit DB.
+
+**Per-operation capture status (verified 2026-08-03):**
+
+| Audit event | `model_id` | `model_version` | `prompt_hash` | `tool_calls[]` | `policy_decision` |
+|---|---|---|---|---|---|
+| `agent.model.complete` (`ModelGateway`) | ✅ | ✅ | ✅ | N/A | N/A |
+| `agent.run` (`AgentRunAuditor`) | ✅ | N/A | ✅ | ✅ | N/A |
+| `agent.mcp.tool_call` (`AgentPolicyGate`) | ⬜ (issue #3667, in flight on `feat/agent-charter-model-id`) | N/A (gate precedes LLM call) | N/A (gate precedes LLM call) | N/A (gate precedes LLM call) | ✅ |
+
+`prompt_hash` and `tool_calls` are architecturally N/A at the policy gate — the gate runs before any
+LLM call, so there is no prompt or tool invocation to hash. `model_id` threading to the gate is being
+fixed (issue #3667).
+
+⬜ Remaining: AI-attribution payload fields on `agent.mcp.tool_call` (issue #3667) and the production
+KMS/cosign-keyed anchor signer (asymmetric, third-party verifiable).
 
 ### D6 — Open, model-agnostic technology stack
 
-The runtime is assembled from open components, all in-cluster (ADR-0027), with **no dependency on any
-single vendor's agent SDK** — tools via MCP, policy via Rego, models via a gateway:
+**Amendment 2026-08-03 (issue #3676):** The original D6 listed an aspirational stack. The items below
+are corrected to reflect what is deployed, what is deferred, and what remains an open gap.
 
-- **Durable orchestration: Temporal.** An agent is a **durable, replayable workflow**, not a fire-and-
-  forget script: every step (LLM call, tool call, approval wait) is a persisted event with full history.
-  LLM calls are Temporal activities (retry, timeout, compensation). This makes the *envelope* around the
-  non-deterministic LLM deterministic and reconstructable — the single biggest banking-grade lift, and the
-  audit substrate DORA Art. 17 wants.
-- **Reasoning loop: LangGraph** (or equivalent) as the agent state graph, executed as Temporal activities.
-- **Model serving: hybrid via gateway.** **vLLM** serves self-hosted open-weight models for sensitive /
-  air-gapped / data-residency work; a capable hosted model (Anthropic API) handles general reasoning;
-  both sit behind an open **LLM gateway (LiteLLM)**. The gateway is a **trust boundary and must be HA** —
-  it sees every (masked) prompt and is in the path of every action; it is not a single point of failure.
-  Sensitive-data routing pins to the self-hosted tier.
-- **Guardrails (input + output): Llama Guard / NeMo Guardrails + a prompt-injection filter** in front of
-  the reasoning loop — see the prompt-injection risk in Consequences. All data an agent *reads* is treated
-  as untrusted, with instruction/data separation.
-- **Memory / RAG: pgvector** (reuses Postgres) to ground agents in `rules.yaml`, ADRs and code.
-- **LLM observability: Langfuse** (self-hostable) on top of OpenTelemetry (ADR-0008) — prompt/response
-  tracing, eval, cost, and the approval-without-edit metric that detects rubber-stamping (Consequences).
-- **Identity: SPIFFE/SPIRE** (D3); **policy: OPA/Rego** (D2); **tools: MCP** (existing). ⬜ PLANNED.
+**Load-bearing and shipped (deny-by-default OPA + charters + MCP gating + kill switch + HITL):**
+- OPA/Rego deny-by-default + `agents.yaml` charters: ✅ Shipped (D1/D2, ADR-0034)
+- MCP gating in block mode (`AGENT_POLICY_ENFORCEMENT=block`): ✅ Shipped (D2)
+- Kill switch (per-agent + global, `AGENT_KILL_SWITCH` in gitops): ✅ Shipped (D7)
+- Human-in-the-loop approval queue + admin-UI `/approvals`: ✅ Shipped (D4)
+
+**Deferred (not deployed; no regulatory requirement satisfied by these in the current sandbox):**
+- **Reasoning loop: LangGraph** — DEFERRED. The current implementation uses hand-written Kotlin
+  activities; no graph framework is deployed. May be revisited when multi-step long-running agent
+  workflows justify the dependency.
+- **Memory / RAG: pgvector** — DEFERRED. Not deployed. ADR-0183 tracks this; tracked issue #3599
+  (LiteLLM choke-point work). Optional until agents need persistent grounding in rules/ADRs.
+- **Guardrails: Llama Guard / NeMo Guardrails** — DEFERRED. The current mitigation is a targeted
+  `PromptInjectionGuard` in `copilot-service`. Full Llama Guard / NeMo stack not deployed.
+- **Durable orchestration: Temporal for agents** — DEFERRED for agent workflows. Temporal is deployed
+  for payments (ADR-0101) but agents currently run as stateless activities, not durable workflows. This
+  becomes a required maturity step once agents are long-running multi-step actors that wait on
+  approval-queue decisions between steps.
+- **Self-hosted vLLM tier** — DEFERRED. Not deployed. Required before any deployment processing real
+  personal or regulated data (see ADR-0175 D3, issue #3599). Optional for the sandbox where all data
+  is synthetic. All inference currently routes to hosted providers (Groq / DeepInfra).
+
+**Open observability gaps:**
+- **Langfuse / LLM observability** — Not deployed. The approval-without-edit (rubber-stamp) metric
+  remains an OPEN observability gap and a known risk to the human-oversight control (see Consequences).
+  Tracked as a roadmap item; not marked delivered.
+
+**Deferred identity hardening:**
+- **SPIFFE/SPIRE** — DEFERRED. OpenBao PKI-agent CA (300 s TTL SVIDs, `no_store`) is the accepted
+  interim workload identity. SPIRE is a future hardening step once the sandbox grows multiple trust
+  domains.
+
+**Current deployed stack (load-bearing):** deny-by-default OPA, `agents.yaml` charters, MCP gating in
+block mode, kill switch, HITL approval queue, OpenBao short-TTL SVIDs (D3b), OpenTelemetry traces (D7),
+Groq/DeepInfra hosted LLMs via model-gateway (synthetic data only, see ADR-0175).
 
 ### D7 — Observability, budgets, kill switch
 

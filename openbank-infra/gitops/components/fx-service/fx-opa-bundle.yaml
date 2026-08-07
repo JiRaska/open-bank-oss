@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fx-service
     app.kubernetes.io/part-of: fx
   annotations:
-    openbank.tech/policy-checksum: "445a656924cffb31"
+    openbank.tech/policy-checksum: "e4a0e534e277dd89"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1640,6 +1640,29 @@ data:
                                                 # sanctions.clear (deciding a screening hit) — the highest-risk action in this
                                                 # service, since a wrongly-cleared true positive is a real sanctions violation.
       - openbank-vop-service                   # ADR-0171: Verification of Payee (IPR Art. 5c) — sits on the pre-execution path of
+                                                # every euro credit transfer. Money-path for the same reason sca/consent/fraud are:
+                                                # it gates money movement without moving money itself.
+                                                # four-eyes assessed: the only REST surface is POST /vop/verify (vop.verify), a
+                                                # read-shaped check that mints nothing and decides nothing a human could collude on
+                                                # — there is nothing to maker-checker gate. The action that WOULD deserve a gate is
+                                                # a runtime change to `openbank.vop.max-edit-distance`: widening it silently turns
+                                                # genuine mismatches into reassuring amber warnings (threat model §3 Tampering).
+                                                # It is gitops-only config today, so it is covered by PR review rather than
+                                                # four_eyes.verbs; add a `vop.flip` verb here if it ever becomes operator-tunable.
+      - openbank-standing-order-service        # issue #2188: StandingOrderDueConsumer POSTs a real SCT to
+                                                # sepa-payment `/api/v1/sepa-payments` for every due order (#889, merged) —
+                                                # initiates money movement like sdd, not adjacent to it. Same class as sdd:
+                                                # it shapes the instruction, the irreversible debit lives downstream in a
+                                                # gated money-path service. Threat model:
+                                                # docs/threat-models/openbank-standing-order-service.md.
+                                                # four-eyes assessed: the only money-moving path is the scheduler-driven
+                                                # consumer (no human in the loop by design); the REST surface is
+                                                # customer/operator CRUD on orders (create/amend/pause/resume/cancel), whose
+                                                # effect is a FUTURE scheduled debit, not an immediate one — pausing or
+                                                # cancelling an order REDUCES money movement. There is no operator
+                                                # force-execute endpoint to maker-checker gate; add a verb here if one is
+                                                # ever added. Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
+      - openbank-psd2-service                  # issue #2188 sibling sweep: PaymentInitiationService (PIS) calls
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
