@@ -79,10 +79,14 @@ class DelegatedPaymentAuthorizationResource(private val authorizationUseCase: Au
     @Operation(summary = "Whether a party may initiate a payment of a given amount from the account")
     suspend fun check(
         @PathParam("accountId") accountId: UUID,
-        @QueryParam("partyId") partyId: UUID,
+        @QueryParam("partyId") partyId: UUID?,
         @QueryParam("amount") amount: String?,
         @QueryParam("currency") currency: String?,
     ): Response {
+        // #3104 — required, and absent it used to reach the use case as null and answer 500. This
+        // handler is `suspend`, so no Kotlin intrinsic fires at the boundary and the null would
+        // flow into the body; libs-runtime maps this guard to 400.
+        requireNotNull(partyId) { "query parameter 'partyId' is required" }
         val money = when {
             amount.isNullOrBlank() -> null
             currency.isNullOrBlank() -> return badRequest("currency is required when amount is supplied")
