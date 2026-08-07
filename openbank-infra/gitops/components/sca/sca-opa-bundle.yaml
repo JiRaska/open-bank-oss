@@ -595,7 +595,8 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
     	input.action in {"scaChallenge.read", "scaChallenge.consume"}
-    }  agents.rego: |
+    }
+  agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
     #

@@ -41,7 +41,12 @@ OUT=$REPO/openbank-infra/gitops/components/sca/sca-opa-bundle.yaml
   echo "  rest.rego: |"
   sed 's/^/    /' "$REST_REGO" | sed 's/[[:space:]]*$//'
   echo "  sca_rest_ext.rego: |"
-  sed 's/^/    /' "$SCA_REST_EXT" | sed 's/[[:space:]]*$//'
+  # `awk 1` normalises a missing trailing newline. Without it, a source file that does not
+  # end in \n leaves the next `echo` on the same line, producing `}  agents.rego: |` — which
+  # silently drops the agents.rego key AND makes the embedded ext policy unparseable. Shipped
+  # that way once (#3748); OPA then fails to load the bundle, and with AUTHZ_ENFORCE=true the
+  # PDP fails closed, i.e. sca denies everything.
+  awk 1 "$SCA_REST_EXT" | sed 's/^/    /' | sed 's/[[:space:]]*$//'
   echo "  agents.rego: |"
   sed 's/^/    /' "$AGENTS_REGO" | sed 's/[[:space:]]*$//'
   echo "  agents-data.yaml: |"
