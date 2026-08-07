@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/v0.17.0...v0.18.0) (2026-08-07)
+
+
+### Features
+
+* **campaign:** enrol a party the moment a product event says they qualify ([#4058](https://github.com/JiRaska/open-bank-oss/issues/4058)) ([e7f8a63](https://github.com/JiRaska/open-bank-oss/commit/e7f8a6355e8747b633fbd0b7b4ea060f7f65f7d0)), closes [#3585](https://github.com/JiRaska/open-bank-oss/issues/3585)
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/v0.16.0...v0.17.0) (2026-08-07)
 
 
