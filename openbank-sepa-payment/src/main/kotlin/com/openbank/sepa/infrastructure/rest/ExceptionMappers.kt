@@ -6,12 +6,17 @@ package com.openbank.sepa.infrastructure.rest
 
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
+import com.openbank.sepa.application.port.out.DocumentTemplateUnavailableException
 import com.openbank.sepa.application.usecase.InvalidSepaPaymentStateTransitionException
+import com.openbank.sepa.application.usecase.PaymentNotCompletedException
 import com.openbank.sepa.application.usecase.SepaPaymentNotFoundException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
 import java.util.UUID
+
+private const val HTTP_CONFLICT = 409
+private const val HTTP_BAD_GATEWAY = 502
 
 @Provider
 class SepaPaymentNotFoundMapper : ExceptionMapper<SepaPaymentNotFoundException> {
@@ -30,3 +35,32 @@ class InvalidSepaPaymentStateTransitionMapper : ExceptionMapper<InvalidSepaPayme
 // SelfApprovalNotAllowedMapper / InvalidApprovalStateMapper (403/409) moved to
 // openbank-libs-runtime's CommonExceptionMappers (issue #1394) — a service-local copy of the
 // same exact type would collide non-deterministically with the shared one (issue #526).
+
+@Provider
+class PaymentNotCompletedMapper : ExceptionMapper<PaymentNotCompletedException> {
+    override fun toResponse(exception: PaymentNotCompletedException): Response = Response.status(HTTP_CONFLICT)
+        .entity(
+            ApiError(
+                UUID.randomUUID().toString(),
+                HTTP_CONFLICT,
+                ErrorCode.CONFLICT.code,
+                exception.message ?: "Conflict",
+            ),
+        )
+        .build()
+}
+
+@Provider
+class DocumentTemplateUnavailableMapper : ExceptionMapper<DocumentTemplateUnavailableException> {
+    override fun toResponse(exception: DocumentTemplateUnavailableException): Response =
+        Response.status(HTTP_BAD_GATEWAY)
+            .entity(
+                ApiError(
+                    UUID.randomUUID().toString(),
+                    HTTP_BAD_GATEWAY,
+                    ErrorCode.INTERNAL_ERROR.code,
+                    exception.message ?: "Confirmation document unavailable",
+                ),
+            )
+            .build()
+}
