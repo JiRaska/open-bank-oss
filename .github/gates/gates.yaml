@@ -964,6 +964,19 @@ gates:
     run: |
       bash .github/scripts/check-agent-charter-registry.sh
 
+  - id: agent-case-schema
+    name: "agent case-coordination schema invariants (ADR-0244 D3/D6/D9, enforced)"
+    group: registry
+    mode: enforced
+    run: |
+      # #3771 added case_classes + case_capabilities to agents.yaml with no validator;
+      # a threshold of 1.30 or a second charter holding case.coordinate would parse as
+      # valid YAML and merge as a governance lie (budgets are the D6 stop-condition,
+      # single-coordinator the D3/D9 audit invariant). Falsified both directions by the
+      # 15-case self-test; the real file passes.
+      python3 .github/scripts/check-agent-case-schema.py --self-test
+      python3 .github/scripts/check-agent-case-schema.py --enforce
+
   # EU AI Act inventory drift (ADR-0148 rule #7, issue #1918).
   #
   # docs/compliance/eu-ai-act.md is DERIVED from openbank-libs/governance/agents.yaml +

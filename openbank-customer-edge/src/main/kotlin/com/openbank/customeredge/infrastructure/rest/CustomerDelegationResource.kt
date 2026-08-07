@@ -157,8 +157,18 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
      * and quietly issuing a grant the user did not ask for is the worse of the two outcomes. An
      * absent field is filled in, since the app has no reason to send it at all.
      *
-     * Everything else — grantee, resource, capabilities, limits, SCA session — is passed through
-     * untouched; delegation-service owns that validation and verifies resource ownership itself.
+     * `dailyLimit`/`monthlyLimit` are the ONE exception to pass-through, and they are rejected here
+     * rather than only upstream. Nothing in this platform counts cumulative spend against a grant
+     * (`DelegationOffered` does not even carry the two fields), so a ceiling set through this route
+     * would be stored, echoed back, and never applied to a single payment — the grantor would be
+     * told they capped their delegate at "5 000 Kč/den" by an API that cannot do it. delegation-
+     * service refuses them too and is the binding gate; this copy exists so the customer channel
+     * fails on its own terms and the refusal is visible in the edge contract the app reads, not
+     * only in an upstream 400 the app would surface as a generic error.
+     *
+     * Everything else — grantee, resource, capabilities, perTransactionLimit, SCA session — is
+     * passed through untouched; delegation-service owns that validation and verifies resource
+     * ownership itself.
      */
     @POST
     @Blocking
@@ -166,6 +176,16 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         val partyId = partyId()
         val node = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
             ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
+        val unenforced = UNENFORCED_CEILING_FIELDS.filter { !node.get(it).let { v -> v == null || v.isNull } }
+        if (unenforced.isNotEmpty()) {
+            return refuse(
+                Response.Status.BAD_REQUEST,
+                "${unenforced.joinToString(" and ")} cannot be accepted: this platform enforces only " +
+                    "perTransactionLimit. No service counts cumulative spend against a grant, so a ceiling " +
+                    "set here would never be applied to any payment. Omit the field (ADR-0232 D1/D6).",
+                CODE_CUMULATIVE_LIMIT_UNSUPPORTED,
+            )
+        }
         val declared = node.get(FIELD_GRANTOR)?.asText()?.takeIf { it.isNotBlank() }
         if (declared != null && declared != partyId) {
             return refuse(Response.Status.FORBIDDEN, "grantorPartyId must be the authenticated party")
@@ -233,13 +253,19 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
 
     // One helper rather than a forbidden()/badRequest() pair: detekt's TooManyFunctions fires AT
     // the threshold (11), not above it, and a second one-line wrapper is the cheapest thing to give up.
-    private fun refuse(status: Response.Status, message: String): Response =
-        Response.status(status).entity(mapOf("error" to message)).build()
+    private fun refuse(status: Response.Status, message: String, code: String? = null): Response =
+        Response.status(status)
+            .entity(mapOf("error" to message) + (code?.let { mapOf("code" to it) } ?: emptyMap()))
+            .build()
 
     private companion object {
         const val UPSTREAM = "/api/v1/delegations"
         const val FIELD_GRANTOR = "grantorPartyId"
         const val DEFAULT_REASON = "Revoked by grantor"
+        const val CODE_CUMULATIVE_LIMIT_UNSUPPORTED = "CUMULATIVE_LIMIT_UNSUPPORTED"
+
+        /** Constraints the schema still names but no service enforces. See [offer]. */
+        val UNENFORCED_CEILING_FIELDS = listOf("dailyLimit", "monthlyLimit")
 
         /** Matches audit-service's own customer-facing page cap; a larger value is clamped there too. */
         const val MAX_ACTIVITY_PAGE = 500

@@ -9,6 +9,7 @@ import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.Test
 
 /**
@@ -30,5 +31,27 @@ class FinrepBootSmokeTest {
     fun `the service-info endpoint answers with this service's identity`() {
         val body = (Given { this } When { get("/api/v1/info") } Then { statusCode(200) }).extract().body().asString()
         assertThat(body).contains("openbank-finrep-service")
+    }
+
+    @Test
+    fun `dependency application yaml contributes defaults and service yaml still wins conflicts`() {
+        val config = ConfigProvider.getConfig()
+
+        assertThat(config.getValue("quarkus.http.header.Strict-Transport-Security.value", String::class.java))
+            .isEqualTo("max-age=31536000; includeSubDomains")
+        assertThat(
+            config.getValue(
+                "quarkus.http.header.X-Frame-Options.value",
+                String::class.java,
+            ),
+        ).isEqualTo("SAMEORIGIN")
+        assertThat(config.getValue("quarkus.management.port", Int::class.javaObjectType))
+            .isEqualTo(8085)
+        assertThat(config.getValue("quarkus.management.root-path", String::class.java))
+            .isEqualTo("/q")
+        assertThat(config.getValue("quarkus.management.enabled", Boolean::class.javaObjectType))
+            .isFalse()
+        assertThat(config.getValue("openbank.service.port", Int::class.javaObjectType))
+            .isEqualTo(8140)
     }
 }
