@@ -1,5 +1,5 @@
-# copilot-service: the customer-facing AI assistant backend (ADR-0089). Stateless — no DB,
-# no Kafka. The governed reasoning loop runs server-side behind a provider-agnostic model
+# copilot-service: the customer-facing AI assistant backend (ADR-0089). The governed
+# reasoning loop runs server-side behind a provider-agnostic model
 # gateway. READ tools call the customer edge AS the customer (propagated bearer → ownership
 # enforced at the edge, ADR-0065). The HTTP @Authorize gate queries the OPA sidecar
 # (data.openbank.rest.allow) and the copilot tool-dispatch gate queries
@@ -18,6 +18,16 @@ metadata:
     app.kubernetes.io/part-of: platform
 spec:
   replicas: 1
+  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
+  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
+  # resources - on a full cluster the rollout never completes and reports 1/1 READY.
+  # This workload is single-replica BY CONSTRAINT: it holds per-pod in-memory state, so
+  # scaling it past 1 needs the #3467-class fix first, not a replica bump.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: copilot-service
@@ -29,7 +39,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-copilot-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "916dd2f78b56858b"
+        openbank.tech/policy-checksum: "0eb73cb130731327"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -40,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: copilot-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-copilot-service:sandbox-9b40c5db
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-copilot-service:sandbox-7d6790a7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -84,6 +94,31 @@ spec:
                   name: copilot-service-secrets
                   key: COPILOT_MODEL_API_KEY
                   optional: true
+            # Postgres conversation history (#3710). The CNPG operator injects
+            # copilot-db-app with PG_USER/PG_PASSWORD; REACTIVE_URL and JDBC_URL resolve them.
+            #
+            # The database name is `openbank_copilots`, PLURAL — that is what postgres.yaml's
+            # `bootstrap.initdb.database` creates and it is the only database on the cluster.
+            # These two URLs said `openbank_copilot` (singular) from the day #3710 added them,
+            # so no pod carrying the conversation store has ever reached its schema. Flyway's
+            # `migrate-at-start: true` retries the connection and then fails the boot, which is
+            # why the sandbox has been serving from a pre-#3710 ReplicaSet while the newer one
+            # CrashLoops: an erasure consumer cannot delete rows from a database its own pod
+            # cannot open (issue #3881).
+            - name: REACTIVE_URL
+              value: postgresql://copilot-db-rw.platform.svc:5432/openbank_copilots
+            - name: JDBC_URL
+              value: jdbc:postgresql://copilot-db-rw.platform.svc:5432/openbank_copilots
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: copilot-db-app
+                  key: user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: copilot-db-app
+                  key: password
             - name: COPILOT_GUARDRAIL_MODE
               value: block
             # Bearer-only resource server validating the CUSTOMER JWT — the openbank-customers realm
@@ -118,6 +153,39 @@ spec:
             # @Authorize HTTP interceptor to enforce decisions from data.openbank.rest.allow.
             - name: AUTHZ_ENFORCE
               value: "true"
+            # ── PARTY_ERASED consumer (GDPR Art. 17 / ADR-0117, #3875, issue #3881) ──
+            # Kafka consumer → Strimzi bootstrap (ADR-0137: mTLS on :9093). The plaintext
+            # :9092 listener is denied for every principal cluster-wide, so there is no
+            # non-mTLS path to fall back to. The keystore Secret is projected from
+            # `messaging` by kafka-copilot-mtls.yaml; the truststore Secret is the one
+            # agent-service already created in this namespace and is shared, not duplicated.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka-keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: copilot-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka-truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
+            # group.id / auto.offset.reset arrive as an external properties source, NOT as env
+            # vars and NOT from application.yaml — see copilot-service-msg-override.yaml for
+            # why both of those routes are broken for a hyphenated channel (#686).
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /mnt/msg-config/override.properties
           startupProbe:
             httpGet:
               path: /q/health/started
@@ -146,6 +214,15 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka-keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka-truststore
+              readOnly: true
+            - name: msg-override
+              mountPath: /mnt/msg-config
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -240,6 +317,25 @@ spec:
         - name: opa-bundle
           configMap:
             name: copilot-opa-bundle
+        # Projected by kafka-copilot-mtls.yaml's ExternalSecret from the Strimzi-minted
+        # `copilot-service` Secret in `messaging`.
+        - name: kafka-keystore
+          secret:
+            secretName: copilot-service-kafka-keystore
+            items:
+              - key: user.p12
+                path: user.p12
+        # Shared cluster-CA truststore — this Secret is created in `platform` by
+        # components/agent/kafka-agent-mtls.yaml and is deliberately not redeclared here.
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
+            items:
+              - key: ca.p12
+                path: ca.p12
+        - name: msg-override
+          configMap:
+            name: copilot-service-msg-override
 ---
 apiVersion: v1
 kind: Service

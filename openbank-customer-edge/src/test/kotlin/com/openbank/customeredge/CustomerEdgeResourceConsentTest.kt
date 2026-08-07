@@ -32,6 +32,7 @@ class CustomerEdgeResourceConsentTest {
         mockk(relaxed = true),
         Clock.systemUTC(),
     ).apply {
+        partyMergeResolver = mockk { every { resolve(any()) } answers { firstArg() } }
         jwt = mockk {
             every { getClaim<String>("party_id") } returns null
             every { subject } returns sub.toString()

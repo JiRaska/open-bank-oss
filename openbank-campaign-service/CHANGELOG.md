@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/v0.14.0...v0.15.0) (2026-08-06)
+
+
+### Features
+
+* **campaign:** branch a journey on what the platform can actually observe (ADR-0200 D1) ([#3895](https://github.com/JiRaska/open-bank-oss/issues/3895)) ([4b6eb7e](https://github.com/JiRaska/open-bank-oss/commit/4b6eb7e4d96e15d6020e31cab36a25647227a7e4))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/v0.13.0...v0.14.0) (2026-08-06)
+
+
+### Features
+
+* **campaign:** let a caller select the PUSH channel on a campaign step ([#3897](https://github.com/JiRaska/open-bank-oss/issues/3897)) ([ee9708f](https://github.com/JiRaska/open-bank-oss/commit/ee9708f2c5008cfa436a6010cf33eff4d842605b))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/v0.12.0...v0.13.0) (2026-08-06)
+
+
+### Features
+
+* **campaign,notification:** tell a delivered message from an accepted handoff (ADR-0239) ([#3838](https://github.com/JiRaska/open-bank-oss/issues/3838)) ([789d662](https://github.com/JiRaska/open-bank-oss/commit/789d6626fde13ab48cd72806a07b7c4e6c19ed0e))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/v0.11.0...v0.12.0) (2026-08-06)
+
+
+### Features
+
+* **campaign:** deliver campaign steps on push as well as email ([#3584](https://github.com/JiRaska/open-bank-oss/issues/3584)) ([d5fdaf3](https://github.com/JiRaska/open-bank-oss/commit/d5fdaf3f321e433c6a602892bd99398cf517f12a))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/v0.10.0...v0.11.0) (2026-08-06)
+
+
+### Features
+
+* **campaign:** stop journeys at the campaign's own send cap (ADR-0200 D1, [#3585](https://github.com/JiRaska/open-bank-oss/issues/3585) slice 1) ([#3635](https://github.com/JiRaska/open-bank-oss/issues/3635)) ([9c513e8](https://github.com/JiRaska/open-bank-oss/commit/9c513e83dfc19300a9afe543026ec891063783d3))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/v0.9.2...v0.10.0) (2026-08-06)
+
+
+### Features
+
+* **campaign:** route journey delivery through the ADR-0219 ContactPolicyGate ([#3665](https://github.com/JiRaska/open-bank-oss/issues/3665)) ([34a8093](https://github.com/JiRaska/open-bank-oss/commit/34a80938df33dfb5d72309ce7a2eb41ed9c9f1b5))
+
 ## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/v0.9.1...v0.9.2) (2026-08-03)
 
 

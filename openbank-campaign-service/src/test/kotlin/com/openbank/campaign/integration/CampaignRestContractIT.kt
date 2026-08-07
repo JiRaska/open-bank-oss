@@ -139,6 +139,88 @@ class CampaignRestContractIT {
         }
     }
 
+    /**
+     * PUSH must be selectable by a caller, not just representable in the domain.
+     *
+     * #3584 added `Channel.PUSH` and the openapi enum lists it, but `StepRequest` had no `channel`
+     * field and the resource hardcoded `Channel.EMAIL` — so the capability was documented and
+     * unreachable, and nothing went red: the domain tests construct `CampaignStep` directly and the
+     * spec is not executed. Only a real create-then-read over HTTP can tell "the enum has PUSH in
+     * it" from "a client can ask for PUSH".
+     */
+    @Test
+    fun `a step can be created on PUSH and reads back as PUSH`() {
+        val body = """
+            {"name":"push-${UUID.randomUUID()}","goal":"prove PUSH is reachable over HTTP",
+             "segmentName":"actives","segmentVersion":1,
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER_PUSH","channel":"PUSH",
+                       "variables":{"offerTitle":"T"},"delaySeconds":0}]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("steps[0].channel", org.hamcrest.Matchers.equalTo("PUSH"))
+        } Extract {
+            path<String>("id")
+        }
+
+        // Read back through a second request: the create response could be echoing the request DTO
+        // rather than what was persisted, which would pass the assertion above and still mean the
+        // step runs on EMAIL.
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("steps[0].channel", org.hamcrest.Matchers.equalTo("PUSH"))
+        }
+    }
+
+    /**
+     * The other half: making the channel caller-supplied must not make it caller-*chosen*. The
+     * `CampaignStep` init invariant is the validation — an email template on a PUSH step would put
+     * offer body copy into an APNs payload, the leak #1182 closed — and it has to survive the trip
+     * through the REST layer, where a failed `require()` becomes a 400 via libs' common mappers.
+     */
+    @Test
+    fun `a template that renders on EMAIL is rejected on a PUSH step`() {
+        val body = """
+            {"name":"mismatch-${UUID.randomUUID()}","goal":"prove the invariant reaches HTTP",
+             "segmentName":"actives","segmentVersion":1,
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER","channel":"PUSH",
+                       "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
+        """.trimIndent()
+
+        Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    /**
+     * A body written before `channel` existed must keep its meaning — the field is optional with an
+     * EMAIL default, so every stored campaign and every existing client is unaffected.
+     */
+    @Test
+    fun `a step with no channel field still defaults to EMAIL`() {
+        val id = createDraft()
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("steps[0].channel", org.hamcrest.Matchers.equalTo("EMAIL"))
+        }
+    }
+
     @Test
     fun `the segment catalogue is served over HTTP with its rules in words`() {
         When {
@@ -257,6 +339,47 @@ class CampaignRestContractIT {
         } Then {
             statusCode(400)
             body("message", org.hamcrest.Matchers.containsString("bodyHtml"))
+        }
+    }
+
+    @Test
+    fun `a stop condition survives the create-and-read round trip`() {
+        val id = Given {
+            contentType("application/json")
+            body(
+                """
+                {"name":"it-stop-condition","goal":"prove the HTTP contract","segmentName":"actives","segmentVersion":1,
+                 "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                           "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}],
+                 "stopCondition":{"maxSendsPerParty":2}}
+                """.trimIndent(),
+            )
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("stopCondition.maxSendsPerParty", org.hamcrest.Matchers.equalTo(2))
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("stopCondition.maxSendsPerParty", org.hamcrest.Matchers.equalTo(2))
+        }
+    }
+
+    @Test
+    fun `a draft without a stop condition reads back with none — absent never invents a cap`() {
+        val id = createDraft("it-no-stop-condition")
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("stopCondition", org.hamcrest.Matchers.nullValue())
         }
     }
 }

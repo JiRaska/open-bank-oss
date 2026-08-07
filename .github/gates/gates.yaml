@@ -208,6 +208,47 @@ gates:
       python3 .github/scripts/check-agent-virtual-keys.py --self-test
       python3 .github/scripts/check-agent-virtual-keys.py --enforce
 
+  - id: model-residency-claims
+    name: "a `sensitivity: self-hosted` model entry points in-cluster (ADR-0175 D3, issue #3599)"
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-model-residency-claims.py --self-test
+    selftest_expect: pass
+    run: |
+      # Falsified BOTH ways before wiring in — the distinction this gate exists for is
+      # routed-to-EU vs routed-ANYWHERE, and a check that cannot tell those apart is
+      # worthless as a residency control.
+      #   Detection: 24 self-test cases, the first being the exact defect — a `self-hosted`
+      #   LABEL on `https://api.groq.com/openai/v1`. Also the underscore/mixed-case spellings
+      #   ModelGateway.parseSensitivity accepts, an env placeholder with an off-cluster
+      #   default, one with NO default, a userinfo smuggling attempt, and the near-misses it
+      #   must NOT flag (a `hosted` entry on the same US endpoint; a typo'd sensitivity,
+      #   which the Kotlin also reads as hosted).
+      #   Scope: both real service shapes were fed the violation and both went red with the
+      #   real path — agent-service's top-level `model-gateway` and copilot-service's nested
+      #   `copilot.model-gateway`. In that state the Kotlin fail-closed test stays GREEN
+      #   (a self-hosted model IS registered), which is precisely why the gate is needed.
+      # LIMIT, stated so nobody reads this as more than it is: CONFIG-LEVEL only. It proves
+      # the committed config cannot express an off-cluster self-hosted tier. It observes no
+      # request and cannot prove the host behind an in-cluster address is EU-resident — the
+      # egress NetworkPolicy is what constrains that, not this.
+      python3 .github/scripts/check-model-residency-claims.py --enforce
+
+  - id: oidc-secret-convention
+    name: "the OIDC client secret is read from ONE KV entry (issue #3485, enforced, baseline-ratcheted)"
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-oidc-secret-convention.py --self-test
+    selftest_expect: pass
+    run: |
+      # Falsified BOTH ways before wiring in. Detection: 13 cases including the exact #3471
+      # defect (a per-service key nobody wrote), a baselined path that migrated (reported
+      # stale), and a baselined path pointing at a THIRD key (still a violation). Scope: the
+      # gate prints how many manifests it walked and how many projections it found — 531 and
+      # 39 today — because a gate is green two independent ways and "it never opened the
+      # file" is the one a passing exit code hides.
+      python3 .github/scripts/check-oidc-secret-convention.py --enforce
+
   - id: single-replica-rollout-strategy
     name: "one-replica workloads declare their rollout strategy (issue #3545, enforced, baseline-ratcheted)"
     group: gitops
@@ -240,6 +281,25 @@ gates:
         echo "::error::NetworkPolicy drift detected — run openbank-infra/scripts/gen-network-policies.py and commit the result (a new file listed above means a namespace has no committed policy)."
         exit 1
       fi
+
+  # The drift gate above proves the committed policies match what the generator
+  # DERIVES. It cannot say anything about what the generator cannot SEE: a
+  # cross-namespace URL that lives only in a Kotlin @ConfigProperty default or a
+  # service's own application.yaml yields no edge, so the caller's namespace is
+  # silently absent from the callee's allow-list. That hole is why #2691 is a staged
+  # rollout rather than one default-deny PR — a blanket baseline would drop flows
+  # nobody has enumerated. This gate IS the enumeration, and it ratchets: today's
+  # four entries are baselined in the checker with the reason each is there, a new
+  # one fails at PR time, and a fixed one must leave the baseline.
+  # Procedure and the cluster-side half: docs/runbooks/0010-networkpolicy-default-deny-measurement.md
+  - id: network-policy-code-edges
+    name: "code-only cross-namespace edges (issue #2691 stage 1, enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-network-policy-code-edges.py --self-test
+    run: |
+      python3 .github/scripts/check-network-policy-code-edges.py
 
   - id: podmonitor-namespace-coverage
     name: "PodMonitor namespace coverage (issue #2255, enforced)"
@@ -626,6 +686,23 @@ gates:
       bash .github/scripts/probe-pact-version.sh --self-test
     run: |
       bash .github/scripts/probe-pact-version.sh --self-test
+
+  # The counterpart-verifiability probe (#3223). The classifier above says WHY a block
+  # happened; two of its classes end in a promise ("clears within one reconcile tick",
+  # "the reconcile re-drives it automatically") that was a hardcoded constant, not an
+  # observation — and on run 31080511057 all six blocked money-path services carried it
+  # while every counterpart version named was unverifiable by construction. This probe is
+  # what turns that promise into evidence, so its failure directions are what must be
+  # exercised: a contentless counterpart dominating a healthy one, and every probe failure
+  # degrading to `unknown` rather than to the reassuring answer.
+  - id: blocking-counterpart-probe-unit-test
+    name: "can-i-deploy counterpart verifiability probe (issue #3223, enforced)"
+    group: supplychain
+    mode: enforced
+    selftest: |
+      bash .github/scripts/probe-blocking-counterparts.sh --self-test
+    run: |
+      bash .github/scripts/probe-blocking-counterparts.sh --self-test
 
   # Workflow `run:` step size (#3082). GitHub rejects an oversized run script by making the
   # WHOLE workflow unparseable — zero jobs, no error message, every contributor's runs of that
@@ -1157,6 +1234,27 @@ gates:
       python3 .github/scripts/check-compliance-matrix.py --self-test
     run: |
       python3 .github/scripts/check-compliance-matrix.py --enforce
+
+  # docs/compliance/openssf-gold-gap.md feeds the OpenSSF BadgeApp form -- a public
+  # attestation to a third party. It shipped scoring crypto_used_network/crypto_tls12 as
+  # met on the justification "TLS + Istio mTLS", while the live cluster has zero Istio
+  # CRDs and zero Istio namespaces (#1914 is open for exactly that), and nine other rows
+  # were scored met on justifications naming nothing checkable at all ("Attest"). An
+  # assessor checks the evidence, not the tick. Nothing read this file before #3884.
+  #
+  # Structural, not a word deny-list: a met row must cite a resolvable anchor (existing
+  # repo path / issue ref / URL), and every path-shaped citation must resolve. Partial and
+  # not-met rows are exempt, so the prose explaining the mesh gap cannot trip it -- the
+  # gate-over-prose trap. Falsified both ways against the real pre-fix document: 10
+  # findings before, 0 after. Prints the row count, so a green cannot mean "never opened".
+  - id: openssf-gold-evidence
+    name: "OpenSSF Gold gap-doc evidence citations (#3884, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-openssf-gold-evidence.py --self-test
+    run: |
+      python3 .github/scripts/check-openssf-gold-evidence.py
 
   # rules.yaml' shared_m2m_write_prohibition names this script as its own `ci_producer`, and
   # nothing invoked it — so reading rules.yaml gave every impression the rule was enforced
@@ -1865,6 +1963,47 @@ gates:
     mode: enforced
     run: |
       python3 .github/scripts/check-roles-allowed-realm.py
+  # Keycloak realm templates must be IMPORTABLE (issue #3246). The three existing realm checks
+  # all compare NAME SETS — @RolesAllowed vs template, template vs live, template vs the import
+  # artifact — and every one of them is perfectly happy with a document Keycloak refuses to
+  # parse. Measured against quay.io/keycloak/keycloak:26.6.3 (the tag keycloak.yaml runs), the
+  # customers template had FOUR independent import-blocking defects and could never have
+  # rebuilt its realm: five `"comment"` keys (Jackson fails the whole import on an unrecognized
+  # field), a 490-char client description over the 255 column cap, a 37-char authenticator in a
+  # VARCHAR(36) column, and a composite referencing built-in roles an explicit-roles import does
+  # not create. Plus two confidential clients with no `secret`, so a rebuilt realm would issue
+  # random credentials neither service presents.
+  # Nothing could have caught any of it: `--import-realm` runs on COLD START ONLY and skips a
+  # realm that already exists, so the template is inert on every deploy, restart and DR restore,
+  # and ArgoCD is Synced/Healthy about a Secret it does not manage. The first observation of the
+  # defect would have been the rebuild it existed to survive.
+  # ENFORCED, because every rule is a fact about the file (a column width, a duplicate key, a
+  # missing field), never a judgement. A static gate cannot enumerate Keycloak's schema, so it
+  # narrows the window rather than closing it — components/keycloak/README.md keeps the real
+  # `docker run ... --import-realm` recipe, which is still required before changing a template.
+  - id: realm-template-importable
+    name: "Keycloak realm templates must be importable (issue #3246, enforced)"
+    group: security
+    mode: enforced
+    selftest: python3 .github/scripts/check-realm-template-importable.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-realm-template-importable.py
+  - id: opa-bundle-parses
+    name: "OPA bundle must be loadable by OPA (generated artifact, not its sources)"
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-opa-bundle-parses.py --self-test
+    selftest_expect: pass
+    run: |
+      # sca shipped an unloadable bundle on 2026-08-07 (#3748, repaired by #3971): a source
+      # rego without a trailing newline made the generator emit `}  agents.rego: |`, which
+      # dropped a ConfigMap key and left the embedded policy unparseable. Every existing gate
+      # was green — `opa test` reads the SOURCE rego, and the drift check regenerates with the
+      # same broken generator, so committed and regenerated agreed. This one reads the
+      # ARTIFACT with the consumer's own parser, which is the only layer that can see it.
+      python3 .github/scripts/check-opa-bundle-parses.py --self-test
+      python3 .github/scripts/check-opa-bundle-parses.py --root .
   - id: opa-bundle-apply-size
     name: OPA bundle must be installable (client-side apply annotation ceiling)
     group: gitops
@@ -1911,3 +2050,20 @@ gates:
       # not only a fixture — it exits 1 on origin/main's network module + substrate env and
       # 0 with the pin in place.
       python3 .github/scripts/check-nat-ami-pinned.py --enforce
+  - id: enforcement-reachability
+    name: "a declared enforcement function has a production caller (ADR-0232, issue #3615)"
+    group: kotlin
+    mode: enforced
+    selftest: python3 .github/scripts/check-enforcement-reachability.py --self-test
+    selftest_expect: pass
+    run: |
+      # AuthorizationService.isAuthorizedForAmount is the only amount-aware account guard in
+      # the fleet and the only enforcer of ADR-0232's perTransactionLimit — and every one of
+      # its call sites is a test. Nothing else in the repo can see that: the function compiles,
+      # is a CDI bean method, has a port declaring it and a green test class, and coverage
+      # INVERTS the signal (a well-tested unreachable guard scores higher than a lightly-tested
+      # reachable one). The registry in rules.yaml records what was measured; this gate fails in
+      # both directions, so an entry can neither rot into permanent furniture nor be silently
+      # closed. Falsified against the real tree before wiring in: injecting one production
+      # caller and, separately, flipping the declared status each produce exactly one finding.
+      python3 .github/scripts/check-enforcement-reachability.py --enforce

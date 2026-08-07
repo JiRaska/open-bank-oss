@@ -9,6 +9,7 @@ import com.openbank.delegation.application.port.out.OwnershipVerdict
 import com.openbank.delegation.application.port.out.ResourceOwnershipClient
 import com.openbank.delegation.domain.model.DelegationResourceType
 import io.quarkus.logging.Log
+import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
@@ -18,6 +19,7 @@ import jakarta.ws.rs.PathParam
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.util.UUID
@@ -29,6 +31,17 @@ data class AccountOwnerResponse(val id: UUID, val partyId: UUID)
 data class CardOwnerResponse(val id: UUID, val partyId: UUID)
 
 @Path("/api/v1/accounts")
+/**
+ * Carries the shared `openbank-services` client-credentials token. Every endpoint this client
+ * reaches is `@RolesAllowed`, so without the filter the call goes out with no Authorization header
+ * and 401s — which the caller then reports as its fail-closed verdict, not as a misconfiguration.
+ *
+ * Invisible to this repo's tests: they all mock the client interface, so nothing exercises the
+ * wire. It surfaced only against the deployed sandbox, where the offer refused every grant with
+ * "ownership could not be established" while the underlying cause was `Unauthorized, status
+ * code 401` in the pod log.
+ */
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterRestClient(configKey = "account-service")
 interface AccountServiceRestClient {
     @GET
@@ -37,6 +50,17 @@ interface AccountServiceRestClient {
 }
 
 @Path("/api/v1/cards")
+/**
+ * Carries the shared `openbank-services` client-credentials token. Every endpoint this client
+ * reaches is `@RolesAllowed`, so without the filter the call goes out with no Authorization header
+ * and 401s — which the caller then reports as its fail-closed verdict, not as a misconfiguration.
+ *
+ * Invisible to this repo's tests: they all mock the client interface, so nothing exercises the
+ * wire. It surfaced only against the deployed sandbox, where the offer refused every grant with
+ * "ownership could not be established" while the underlying cause was `Unauthorized, status
+ * code 401` in the pod log.
+ */
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterRestClient(configKey = "card-issuance-service")
 interface CardIssuanceRestClient {
     @GET

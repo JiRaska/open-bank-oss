@@ -78,3 +78,74 @@ class TemplateCatalogTest {
         )
     }
 }
+
+/**
+ * The channel/template agreement (ADR-0200 D7 as it now stands: EMAIL + PUSH).
+ *
+ * Both directions matter and both fail silently in production. An EMAIL step naming a push template
+ * renders a one-line title as an entire email; a PUSH step naming an email template puts offer body
+ * copy into an APNs payload, which is the leak #1182 closed by making push bodies generic.
+ */
+class CampaignStepChannelTest {
+
+    @Test
+    fun `a push step may use a push template`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER_PUSH",
+            channel = Channel.PUSH,
+            variables = mapOf("offerTitle" to "Savings at 4%"),
+            delaySeconds = 0,
+        )
+        assertEquals(Channel.PUSH, step.channel)
+    }
+
+    @Test
+    fun `an email template on a push step is refused`() {
+        val e = assertThrows<IllegalArgumentException> {
+            CampaignStep(
+                order = 1,
+                template = "MARKETING_PRODUCT_OFFER",
+                channel = Channel.PUSH,
+                variables = emptyMap(),
+                delaySeconds = 0,
+            )
+        }
+        assertTrue(e.message!!.contains("renders on EMAIL"), e.message)
+    }
+
+    @Test
+    fun `a push template on an email step is refused`() {
+        assertThrows<IllegalArgumentException> {
+            CampaignStep(
+                order = 1,
+                template = "MARKETING_PRODUCT_OFFER_PUSH",
+                channel = Channel.EMAIL,
+                variables = emptyMap(),
+                delaySeconds = 0,
+            )
+        }
+    }
+
+    @Test
+    fun `a push template declares only its title — body copy cannot be smuggled in`() {
+        // notification-service renders a fixed generic body for every push (GENERIC_PUSH_BODY), so a
+        // template that declared body text would promise something the channel refuses to deliver.
+        assertEquals(setOf("offerTitle"), TemplateCatalog.ALL["MARKETING_PRODUCT_OFFER_PUSH"])
+        assertThrows<IllegalArgumentException> {
+            CampaignStep(
+                order = 1,
+                template = "MARKETING_PRODUCT_OFFER_PUSH",
+                channel = Channel.PUSH,
+                variables = mapOf("offerTitle" to "t", "offerText" to "body copy"),
+                delaySeconds = 0,
+            )
+        }
+    }
+
+    @Test
+    fun `the catalogue offers exactly the templates a channel can render`() {
+        assertEquals(setOf("MARKETING_PRODUCT_OFFER"), TemplateCatalog.forChannel(Channel.EMAIL))
+        assertEquals(setOf("MARKETING_PRODUCT_OFFER_PUSH"), TemplateCatalog.forChannel(Channel.PUSH))
+    }
+}

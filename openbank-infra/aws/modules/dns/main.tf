@@ -120,8 +120,10 @@ resource "aws_eks_pod_identity_association" "cert_manager" {
 
 # ---------------------------------------------------------------------------
 # Email anti-spoofing (SPF + DMARC)
-# OpenBank sends no email from this domain. SPF -all rejects any sender;
-# DMARC p=reject instructs receiving MTAs to drop forged messages outright.
+# hello@open-bank.tech is a real Zoho Mail inbox (see the landing page's
+# mailto: links) — SPF must authorize Zoho's sending servers, not reject
+# everyone. DMARC p=reject still instructs receiving MTAs to drop anything
+# that doesn't align with this SPF (or a future DKIM signature).
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # CAA (Certification Authority Authorization)
@@ -158,6 +160,23 @@ resource "aws_route53_record" "caa" {
 resource "aws_route53_record" "spf" {
   zone_id = aws_route53_zone.this.zone_id
   name    = var.domain
+  type    = "TXT"
+  ttl     = 300
+  records = [
+    "v=spf1 include:zohomail.eu ~all",
+    # Zoho Mail domain-ownership proof (Zoho re-checks this TXT periodically;
+    # removing it can silently suspend the hello@ mailbox).
+    "zoho-verification=zb32116331.zmverify.zoho.eu",
+  ]
+}
+
+# SPF is NOT inherited from the apex the way DMARC/CAA are (RFC 7208 has no
+# organizational-domain fallback) — admin.<domain> needs its own record. No
+# mail is ever sent from this subdomain (it's the operator console), so -all
+# rejects every sender outright.
+resource "aws_route53_record" "spf_admin" {
+  zone_id = aws_route53_zone.this.zone_id
+  name    = "admin.${var.domain}"
   type    = "TXT"
   ttl     = 300
   records = ["v=spf1 -all"]
