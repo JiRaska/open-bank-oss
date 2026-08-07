@@ -4,14 +4,19 @@
 
 package com.openbank.ledger.infrastructure.partition
 
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.libs.persistence.lock.ClusterLock
 import com.openbank.libs.persistence.partition.PartitionMaintenance
 import com.openbank.libs.persistence.partition.PartitionPolicy
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.Duration
 import java.time.LocalDate
 
 /**
@@ -48,7 +53,14 @@ class JournalPartitionMaintainer(
     private val dryRun: Boolean,
 
     private val clusterLock: ClusterLock,
+    private val domainMetrics: DomainMetrics,
 ) {
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofDays(1))
+    }
+
     @Scheduled(every = "24h", delayed = "30s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     suspend fun maintain() {
         val ran = clusterLock.tryRunExclusively(JOB_NAME) {
@@ -79,6 +91,7 @@ class JournalPartitionMaintainer(
                         report.defaultPartitionRows,
                     )
                 }
+                liveness?.recordSuccess()
             } catch (ex: Exception) {
                 // The scheduler must never crash; a failed pass is retried on the next tick.
                 log.error("journal_entries partition maintenance failed", ex)
@@ -89,9 +102,10 @@ class JournalPartitionMaintainer(
         }
     }
 
-    companion object {
+    private companion object {
         private const val PARENT_TABLE = "journal_entries"
         private const val JOB_NAME = "ledger.partition-maintenance"
+        private const val WORKFLOW_NAME = "ledger-journal-partition-maintenance"
         private val log: Logger = Logger.getLogger(JournalPartitionMaintainer::class.java)
     }
 }

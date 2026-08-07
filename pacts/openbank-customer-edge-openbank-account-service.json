@@ -1,0 +1,53 @@
+{
+  "consumer": {
+    "name": "openbank-customer-edge"
+  },
+  "interactions": [
+    {
+      "description": "GET the delegated-payment authorization decision for an amount within the ceiling",
+      "providerStates": [
+        {
+          "name": "an account with an ACTIVE payment delegation to a known party exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/22222222-3333-4444-8555-666666666666/delegation/payment-authorization",
+        "query": {
+          "amount": [
+            "1500.00"
+          ],
+          "currency": [
+            "CZK"
+          ],
+          "partyId": [
+            "44444444-5555-4666-8777-888888888888"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "authorized": true,
+          "delegationId": "55555555-6666-4777-8888-999999999999",
+          "grantorPartyId": "33333333-4444-4555-8666-777777777777",
+          "outcome": "DELEGATED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-account-service"
+  }
+}

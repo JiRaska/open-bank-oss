@@ -48,9 +48,11 @@ class SepaPaymentResource(
     @Operation(summary = "Create a SEPA payment")
     suspend fun createPayment(
         request: CreateSepaPaymentRequest,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
-        require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
+        // #3104 — an ABSENT header injected null, so `null.isNotBlank()` threw NPE and this guard
+        // answered 500 in exactly the case it was written for. A blank header was always a 400.
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
 
         idempotencyStore.get(idempotencyKey)?.let { cached ->
             return Response.status(cached.statusCode)

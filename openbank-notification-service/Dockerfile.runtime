@@ -10,11 +10,15 @@
 # (which `include(...)`s every service) and breaks under Gradle 9.5.1, which no
 # longer tolerates configuring an absent project dir. Fixing that for in-Docker
 # builds is a separate follow-up; this runtime image unblocks the pilot now.
-FROM eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0
+# The FROM below is the fleet runtime base and is checked against
+# .github/workflows/Dockerfile.deploy by
+# .github/scripts/check-dockerfile-no-build-stage.py (#3354).
+FROM eclipse-temurin:25-jre@sha256:681c543d6f36c50f45e9b5226930a46203dcfa351d3670e9d0bdf0dabae53539
 WORKDIR /app
 # Explicit numeric UID/GID so a pod with runAsNonRoot can verify non-root without
 # a runAsUser override (kubelet cannot resolve a named user from the image).
-RUN addgroup -S -g 1001 openbank && adduser -S -u 1001 -G openbank openbank
+RUN groupadd --system --gid 1001 openbank \
+ && useradd --system --uid 1001 --gid 1001 --no-create-home --shell /usr/sbin/nologin openbank
 USER 1001
 COPY lib/ /app/lib/
 COPY *.jar /app/

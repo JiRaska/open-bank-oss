@@ -51,6 +51,7 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
 
 ## 6. Change log
 
+- **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `Idempotency-Key` on convert, the sibling of the null-body guard added by #3050 one argument position over. Same defect as domestic-payment: `require(key.isNotBlank())` in a `suspend` handler threw NPE on an absent header, so the replay control answered 500 for a missing key and 400 only for a blank one. Now `require(!key.isNullOrBlank())`. No new caller or boundary. Rollback: revert.
 - **2026-05-30** — Added `fx_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/surface/
   boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
   Rollback: `DROP SEQUENCE`.
@@ -78,3 +79,12 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
     unaffected (keyed on `(source, pair, validFrom)`). Risk: a slightly stale CNB mid rate used in
     `spreadPct` display for at most 3 days. Rate table integrity and conversion accuracy are not affected
     (INTERNAL bid/ask are the settlement rates; CNB mid is display-only). Residual risk = **negligible**.
+- **2026-08-05** — Derived inverse-quote identity (#3374). `GET /api/v1/fx/rates/{base}/{quote}`
+  answered a pair derived by inverting the stored direction with the **source row's `id`**, so both
+  directions shared one identifier — a quote id could not be replayed to a direction (the §4
+  repudiation concern, and §5's "pin the rate id" assumption). The endpoint now answers `id: null` +
+  `derivedFrom: <source row id>` on a derived quote; a stored quote keeps its own id and no
+  `derivedFrom`. No new flow/surface/boundary — same endpoint, same data, honest identity.
+  `FxConversion.rateId` still references the real `fx_rates` row on both paths (FK unchanged), so
+  dispute defense via §5 is preserved. Risk class = **repudiation/auditability (reduced)**.
+  API contract: additive, `info.version` 1.5.0 → 1.6.0.

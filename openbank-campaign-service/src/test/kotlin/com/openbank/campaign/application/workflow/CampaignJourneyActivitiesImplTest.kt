@@ -16,6 +16,11 @@ import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
+import com.openbank.libs.contact.ContactConsentPort
+import com.openbank.libs.contact.ContactCounterPort
+import com.openbank.libs.contact.ContactPolicy
+import com.openbank.libs.contact.ContactPolicyGate
+import com.openbank.libs.contact.ContactSuppressionPort
 import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -53,20 +58,32 @@ class CampaignJourneyActivitiesImplTest {
     private val campaignId = UUID.randomUUID()
     private val partyId = UUID.randomUUID()
 
-    private val activities = object : CampaignJourneyActivitiesImpl(
-        campaigns,
-        enrolments,
-        sendLog,
-        consentCheck,
-        notificationSend,
-        maxSendsPerWeek = 2,
-        // Quiet hours are evaluated against the wall clock; a start == end window is never active,
-        // so the suppression branch cannot make these tests time-of-day dependent.
-        quietHoursStart = 0,
-        quietHoursEnd = 0,
-        marketingScope = "MARKETING_COMMS_EMAIL",
-    ) {
-        override fun <T> runBlockingOnWorker(block: suspend () -> T): T = runBlocking { block() }
+    private val activities = run {
+        // The ADR-0219 gate with scripted state: consent from the mock, counters from the send-log
+        // mock, quiet hours disabled by a start == end window (never active, so these tests are not
+        // time-of-day dependent), no suppression entries.
+        val gate = ContactPolicyGate(
+            consent = ContactConsentPort { p, s -> consentCheck.hasActiveConsent(p, s) },
+            counters = object : ContactCounterPort {
+                override suspend fun sendsInWindow(partyId: UUID, windowStart: Instant): Int =
+                    sendLog.countRecentForParty(partyId, windowStart.epochSecond)
+
+                override suspend fun impressionsInWindow(partyId: UUID, windowStart: Instant) = 0
+            },
+            suppression = ContactSuppressionPort { emptyList() },
+            policy = ContactPolicy(sendCapPerWindow = 2, quietHoursStart = 0, quietHoursEnd = 0),
+        )
+        object : CampaignJourneyActivitiesImpl(
+            campaigns,
+            enrolments,
+            sendLog,
+            gate,
+            notificationSend,
+            dryRun = false,
+            marketingScope = "MARKETING_COMMS_EMAIL",
+        ) {
+            override fun <T> runBlockingOnWorker(block: suspend () -> T): T = runBlocking { block() }
+        }
     }
 
     private fun givenDeliverableStep() {
@@ -98,7 +115,7 @@ class CampaignJourneyActivitiesImplTest {
     @Test
     fun `a refused notification handoff records FAILED and never SENT`() {
         givenDeliverableStep()
-        coEvery { notificationSend.requestSend(partyId, any(), any(), any()) } throws
+        coEvery { notificationSend.requestSend(partyId, any(), any(), any(), any(), any()) } throws
             IllegalStateException("broker refused the publish")
 
         assertThatThrownBy { activities.deliverStep(campaignId, partyId, 1) }
@@ -114,7 +131,9 @@ class CampaignJourneyActivitiesImplTest {
         givenDeliverableStep()
         val recordedBeforeSend = mutableListOf<SendOutcome>()
         var handedOff = false
-        coEvery { notificationSend.requestSend(partyId, any(), any(), any()) } answers { handedOff = true }
+        coEvery {
+            notificationSend.requestSend(partyId, any(), any(), any(), any(), any())
+        } answers { handedOff = true }
         coEvery { sendLog.record(any()) } answers {
             if (!handedOff) recordedBeforeSend += firstArg<SendRecord>().outcome
             Unit

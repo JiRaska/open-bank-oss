@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.5](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.14.4...mcp-service-v0.14.5) (2026-08-06)
+
+
+### Bug Fixes
+
+* **mcp:** refuse propose_payment instead of answering PROPOSED for a proposal nobody recorded ([#3900](https://github.com/JiRaska/open-bank-oss/issues/3900)) ([dcefe12](https://github.com/JiRaska/open-bank-oss/commit/dcefe12e284c29d2f230d0b8c11d92cd475c3ee2)), closes [#2414](https://github.com/JiRaska/open-bank-oss/issues/2414)
+
 ## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.14.3...mcp-service-v0.14.4) (2026-08-02)
 
 

@@ -5,6 +5,8 @@
 package com.openbank.account.application.usecase
 
 import com.openbank.account.application.port.`in`.AuthorizationUseCase
+import com.openbank.account.application.port.`in`.DelegatedPaymentDecision
+import com.openbank.account.application.port.`in`.DelegatedPaymentOutcome
 import com.openbank.account.application.port.`in`.GrantAuthorizationCommand
 import com.openbank.account.application.port.`in`.ListAuthorizationsQuery
 import com.openbank.account.application.port.`in`.RevokeAuthorizationCommand
@@ -87,6 +89,80 @@ class AuthorizationService(
         return delegationProjectionRepository.findActiveByAccountAndParty(accountId, partyId)
             .filter { it.issuedBy(account.partyId) && it.isActiveOn(now) && it.satisfies(role) }
             .any { it.withinPerTransactionLimit(amount.amount, amount.currency.code) }
+    }
+
+    /**
+     * The payment path's guard, answered with evidence (ADR-0232 D3/D5, #2990 AC9/AC10).
+     *
+     * Same three disjuncts and the same order as [isAuthorizedForAmount] — owner, legacy
+     * `account_authorizations` row, delegation grant — with two DELIBERATE divergences, both
+     * narrowing and both safe because [isAuthorizedForAmount] has no callers on any money path:
+     *
+     *  1. **The legacy row's own `transactionLimit` is enforced here.** [isAuthorizedForAmount]
+     *     ignores it: it returns true on a role match and only ever compares an amount against a
+     *     *delegation* grant's ceiling. That was harmless while nothing called it. Wiring this
+     *     method to the payment path would otherwise have shipped a live debit route on which an
+     *     operator-set per-transaction limit is decoration — a PAYMENT_ONLY row capped at 1 000 CZK
+     *     would authorise 1 000 000. Honouring it is not a behaviour change to anything that runs
+     *     today; it is a refusal to create the hole.
+     *  2. **A refusal is classified.** NO_GRANT and LIMIT_EXCEEDED are different facts about the
+     *     grantor's account and belong differently in their transparency view. The caller must
+     *     still render both as the same opaque 403 — the classification is for the audit record,
+     *     not for the wire.
+     *
+     * The role asked is always PAYMENT_ONLY: this method exists for debits. FULL_ACCESS satisfies
+     * it through [DelegatedAccessGrant.satisfies] / the legacy role check, exactly as before.
+     */
+    override suspend fun authorizeDelegatedPayment(
+        accountId: UUID,
+        partyId: UUID,
+        amount: com.openbank.libs.domain.money.Money?,
+    ): DelegatedPaymentDecision {
+        val account = accountRepository.findById(accountId)
+            ?: return DelegatedPaymentDecision(DelegatedPaymentOutcome.ACCOUNT_NOT_FOUND)
+        if (account.partyId == partyId) return DelegatedPaymentDecision(DelegatedPaymentOutcome.OWNER)
+
+        val role = AuthorizationRole.PAYMENT_ONLY
+        val legacy = authorizationRepository.findActiveByAccountAndParty(accountId, partyId)
+            .filter { it.role == role || it.role == AuthorizationRole.FULL_ACCESS }
+        if (legacy.any { withinLegacyTransactionLimit(it, amount) }) {
+            return DelegatedPaymentDecision(DelegatedPaymentOutcome.LEGACY_AUTHORIZATION)
+        }
+
+        val now = OffsetDateTime.now(clock)
+        val candidates = delegationProjectionRepository.findActiveByAccountAndParty(accountId, partyId)
+            .filter { it.issuedBy(account.partyId) && it.isActiveOn(now) && it.satisfies(role) }
+        val permitting = candidates.firstOrNull { grant ->
+            amount == null || grant.withinPerTransactionLimit(amount.amount, amount.currency.code)
+        }
+        return when {
+            permitting != null -> DelegatedPaymentDecision(
+                outcome = DelegatedPaymentOutcome.DELEGATED,
+                delegationId = permitting.id,
+                grantorPartyId = permitting.grantorPartyId,
+            )
+            // A candidate existed and every one refused the amount — the grantor's ceiling bit,
+            // which is a materially different event from "this party has nothing here".
+            candidates.isNotEmpty() || legacy.isNotEmpty() ->
+                DelegatedPaymentDecision(DelegatedPaymentOutcome.LIMIT_EXCEEDED)
+            else -> DelegatedPaymentDecision(DelegatedPaymentOutcome.NO_GRANT)
+        }
+    }
+
+    /**
+     * A legacy authorization's per-transaction ceiling. A null limit means "no ceiling" (the
+     * column is nullable and most rows carry none); a currency mismatch is a refusal rather than
+     * a pass, mirroring [DelegatedAccessGrant.withinPerTransactionLimit] — the two ceilings must
+     * not disagree about what an unset currency means.
+     */
+    private fun withinLegacyTransactionLimit(
+        auth: AccountAuthorization,
+        amount: com.openbank.libs.domain.money.Money?,
+    ): Boolean {
+        val limit = auth.transactionLimit ?: return true
+        if (amount == null) return true
+        if (limit.currency != amount.currency) return false
+        return amount.amount <= limit.amount
     }
 
     /**

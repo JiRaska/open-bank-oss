@@ -9,6 +9,7 @@ import com.openbank.psd2.application.port.`in`.AccountInformationUseCase
 import com.openbank.psd2.application.port.`in`.GetAccountsQuery
 import com.openbank.psd2.application.port.`in`.GetBalancesQuery
 import com.openbank.psd2.application.port.`in`.GetTransactionsQuery
+import com.openbank.psd2.application.usecase.Psd2RequestFormatException
 import com.openbank.psd2.domain.model.BookingStatus
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
@@ -31,9 +32,10 @@ class AisResource(private val ais: AccountInformationUseCase) {
     @Path("/accounts")
     @Authorize(action = "psd2.list", resource = "")
     suspend fun getAccounts(
-        @HeaderParam("Consent-ID") consentId: String,
+        @HeaderParam("Consent-ID") consentId: String?,
         @Context ctx: ContainerRequestContext,
     ): Response {
+        if (consentId.isNullOrBlank()) throw Psd2RequestFormatException(CONSENT_ID_REQUIRED)
         val tppId = ctx.getProperty("tppId") as? String ?: return missingTpp()
         val accounts = ais.getAccounts(GetAccountsQuery(consentId, tppId))
         return Response.ok(mapOf("accounts" to accounts)).build()
@@ -44,9 +46,10 @@ class AisResource(private val ais: AccountInformationUseCase) {
     @Authorize(action = "psd2.read", resource = "#accountId")
     suspend fun getBalances(
         @PathParam("accountId") accountId: String,
-        @HeaderParam("Consent-ID") consentId: String,
+        @HeaderParam("Consent-ID") consentId: String?,
         @Context ctx: ContainerRequestContext,
     ): Response {
+        if (consentId.isNullOrBlank()) throw Psd2RequestFormatException(CONSENT_ID_REQUIRED)
         val tppId = ctx.getProperty("tppId") as? String ?: return missingTpp()
         val balances = ais.getBalances(GetBalancesQuery(consentId, tppId, accountId))
         return Response.ok(mapOf("account" to mapOf("iban" to accountId), "balances" to balances)).build()
@@ -58,7 +61,7 @@ class AisResource(private val ais: AccountInformationUseCase) {
     @Suppress("LongParameterList")
     suspend fun getTransactions(
         @PathParam("accountId") accountId: String,
-        @HeaderParam("Consent-ID") consentId: String,
+        @HeaderParam("Consent-ID") consentId: String?,
         @QueryParam("dateFrom") dateFrom: String?,
         @QueryParam("dateTo") dateTo: String?,
         @QueryParam("bookingStatus") bookingStatus: String?,
@@ -66,6 +69,7 @@ class AisResource(private val ais: AccountInformationUseCase) {
         @QueryParam("afterCursor") afterCursor: String?,
         @Context ctx: ContainerRequestContext,
     ): Response {
+        if (consentId.isNullOrBlank()) throw Psd2RequestFormatException(CONSENT_ID_REQUIRED)
         val tppId = ctx.getProperty("tppId") as? String ?: return missingTpp()
         val page = ais.getTransactions(
             GetTransactionsQuery(
@@ -92,4 +96,16 @@ class AisResource(private val ais: AccountInformationUseCase) {
 
     private fun missingTpp() = Response.status(401)
         .entity(mapOf("tppMessages" to listOf(mapOf("category" to "ERROR", "code" to "CERTIFICATE_MISSING")))).build()
+
+    private companion object {
+        // #3624 — Consent-ID is mandated on every AIS call by the Berlin Group NextGenPSD2 spec.
+        // Declared non-nullable it could only ever be a 500: these handlers are `suspend`, so no
+        // Intrinsics.checkNotNullParameter is emitted and JAX-RS's null for an ABSENT header
+        // reached GetAccountsQuery / GetBalancesQuery / GetTransactionsQuery — telling the TPP the
+        // ASPSP had broken. Thrown as Psd2RequestFormatException, not require(), so the 400 carries
+        // this service's Berlin Group tppMessages envelope rather than libs-runtime's generic
+        // ApiError (the #526 shape lottery ExceptionMappers.kt documents); same shape as
+        // ObConsentResource's X-Request-ID guard.
+        const val CONSENT_ID_REQUIRED = "Consent-ID header is required"
+    }
 }
