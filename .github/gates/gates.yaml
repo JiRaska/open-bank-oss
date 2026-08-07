@@ -1518,17 +1518,29 @@ gates:
   # hexagonal invariant was documented in every PR template but never enforced,
   # and the fleet quietly accumulated violations (Quarkus @RegisterForReflection
   # on a domain type, Jackson JsonNode in domain models). Baseline-ratcheted
-  # (detekt pattern): the 11 pre-existing violations are grandfathered in
+  # (detekt pattern): pre-existing violations are grandfathered in
   # domain-purity-baseline.txt and burn down as touched; any NEW framework
-  # import in a domain layer fails outright. openbank-libs-runtime is module-
+  # reference in a domain layer fails outright. openbank-libs-runtime is module-
   # exempt (it IS the framework side of the ADR-0122 split; only its package
   # string says "domain"). ENFORCED from introduction (0 new on main).
+  #
+  # #3670 rewrote the bash version, which had two blind spots that intersected on
+  # @Authorize/@FeatureFlag — the fleet's most-used annotations, declared in
+  # openbank-libs-domain as jakarta.interceptor.InterceptorBinding, green every run:
+  #   (a) SCOPE was the `*/domain/*` package path, so 80 of libs-domain's 107 main
+  #       sources (com/openbank/libs/authz, .../flags, ...) were never opened. The
+  #       whole module is now in scope — it IS the domain side of ADR-0122.
+  #   (b) DETECTION was `^import <prefix>`; a fully-qualified reference has no import
+  #       line. Both forms are matched now, on comment- and string-stripped source.
+  # It also gained a --self-test the bash version never had.
   - id: domain-purity-gate
     name: "domain-purity gate — hexagonal invariant (ADR-0002, enforced)"
     group: kotlin
     mode: enforced
+    selftest: |
+      python3 .github/scripts/check-domain-purity.py --self-test
     run: |
-      bash .github/scripts/check-domain-purity.sh .
+      python3 .github/scripts/check-domain-purity.py .
 
   # ==== api ===================================================================
 

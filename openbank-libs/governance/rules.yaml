@@ -1276,12 +1276,15 @@ dependencies:
 architecture:
   hexagonal: true
   domain_zero_framework_imports: true   # domain layer must not import Quarkus/Jakarta/Spring
-  # ENFORCED by .github/scripts/check-domain-purity.sh (Validate manifests job):
-  # baseline-ratcheted — 11 grandfathered violations burn down as touched, any NEW
-  # framework import in */domain/* fails CI. openbank-libs-runtime is module-exempt
+  # ENFORCED by .github/scripts/check-domain-purity.py (Validate manifests job):
+  # baseline-ratcheted — grandfathered violations burn down as touched, any NEW
+  # framework reference fails CI. Scope is every per-service */domain/* package PLUS
+  # the whole openbank-libs-domain module; openbank-libs-runtime is module-exempt
   # (shares the domain package string for its JPA converters but IS the framework
-  # side of the ADR-0122 split).
-  ci_producer: ".github/scripts/check-domain-purity.sh"
+  # side of the ADR-0122 split). Both an `import` and a fully-qualified reference
+  # count — #3670 hid `jakarta.interceptor.InterceptorBinding` in the second form,
+  # in a libs-domain package the old `*/domain/*` scope never opened.
+  ci_producer: ".github/scripts/check-domain-purity.py"
 
 # ---------------------------------------------------------------------------------------
 # OPA bundle sync (issue #1184). Keep terse: this file is embedded verbatim into every
