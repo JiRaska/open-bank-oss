@@ -39,6 +39,7 @@ class OnboardingResolutionGateTest {
             mockk(relaxed = true),
             Clock.systemUTC(),
         ).apply {
+            partyMergeResolver = mockk { every { resolve(any()) } answers { firstArg() } }
             jwt = mockk {
                 every { getClaim<String>("party_id") } returns caller.toString()
                 every { getClaim<String>("name") } returns "Jan Novák"

@@ -28,7 +28,8 @@ data class FlagExposure(
     val variant: String,
     val targetingKey: String?,
     val reason: EvaluationReason,
-    val timestamp: Instant = Instant.EPOCH,
+    /** When the subject saw the variant. Defaults to construction time; [of] never passes one. */
+    val timestamp: Instant = Instant.now(),
     /** Ties the exposure back to the request log line (DORA reconstruction). */
     val traceId: String? = null,
 ) {
@@ -66,8 +67,9 @@ class LoggingExposurePublisher : ExposurePublisher {
 
     override suspend fun publish(exposure: FlagExposure) {
         log.infof(
-            "flag exposure exposureId=%s flag=%s variant=%s key=%s reason=%s traceId=%s",
+            "flag exposure exposureId=%s at=%s flag=%s variant=%s key=%s reason=%s traceId=%s",
             exposure.exposureId,
+            exposure.timestamp,
             exposure.flagKey,
             exposure.variant,
             exposure.targetingKey,

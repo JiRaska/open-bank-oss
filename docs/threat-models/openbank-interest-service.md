@@ -58,6 +58,7 @@ money-path service, not adjacent.
 
 ## 6. Change log
 
+- **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `productId` on capitalize and effectiveRate — #3104's own reproduction case. Both handlers are non-suspend, so `POST /api/v1/interest/capitalize/{accountId}` without `?productId=` threw at the method boundary and rendered 500 before any authorization-independent work ran. No fund movement is reachable without the parameter in either the old or the new behaviour — the change is purely which status the rejected request carries, and 5xx here also burnt this service's SLO error budget. No new caller or boundary. Rollback: revert.
 - **2026-08-03** — Prohibit service-account principals from interest writes (#3679 follow-up). The
   `#3695` `AUTHZ_ENFORCE=true` flip exposed a trust-boundary widening the ext file itself did not
   document: `operator-interest-write` was role-only, and the `rules.yaml` `role_action_matrix`

@@ -244,6 +244,12 @@ locals {
     # DBs a barmanObjectStore each. Two different kinds of false statement, one effect.
     mcp     = { namespace = "platform", sa = "mcp-db" }
     litellm = { namespace = "ai-platform", sa = "litellm-db" }
+    # copilot-db arrives with the durable conversation-history store (#3710). Its gitops
+    # manifest declares a barmanObjectStore into this bucket, so without the association here
+    # every WAL archive would fail with "Unable to locate credentials" and the cluster would
+    # have no recovery point at all — the #1444 failure mode, caught this time by
+    # check-db-backup-associations.py before the cluster ever existed rather than days after.
+    copilot = { namespace = "platform", sa = "copilot-db" }
   }
 }
 

@@ -140,4 +140,72 @@ interface AuthorizationUseCase {
         role: com.openbank.account.domain.model.AuthorizationRole,
         amount: com.openbank.libs.domain.money.Money?,
     ): Boolean
+
+    /**
+     * The payment path's question, answered with the EVIDENCE and not just a boolean
+     * (ADR-0232 D3/D5, #2990 AC9/AC10).
+     *
+     * [isAuthorizedForAmount] returns Boolean, which is enough to permit a debit and NOT
+     * enough to record one: a delegated payment has to be auditable *as delegated*, which
+     * needs the grant that permitted it and the grantor it was taken on behalf of. Both are
+     * known at the moment of the decision and unrecoverable afterwards — the grant can be
+     * revoked a second later and the projection row closed, at which point no later query
+     * can reconstruct which grant was live when the money moved.
+     *
+     * Refusals are classified rather than collapsed to `false` so the audit trail can tell
+     * "this party has no grant" from "this party has a grant and blew the ceiling" — the
+     * second is a limit event a grantor should see, the first is closer to an access probe.
+     */
+    suspend fun authorizeDelegatedPayment(
+        accountId: UUID,
+        partyId: UUID,
+        amount: com.openbank.libs.domain.money.Money?,
+    ): DelegatedPaymentDecision
+}
+
+/**
+ * Why the payment path was (or was not) allowed to debit the account (ADR-0232 D3/D5).
+ *
+ * OWNER and DELEGATED both authorise; they are distinct because only the second one has to
+ * be written into the audit chain as an on-behalf-of action.
+ */
+enum class DelegatedPaymentOutcome {
+    /** The initiating party owns the account — not a delegated action, nothing to record. */
+    OWNER,
+
+    /** A legacy `account_authorizations` row authorises the party. Amount limits on that table are
+     *  NOT evaluated here (see [DelegatedPaymentDecision]); it is not a delegation grant. */
+    LEGACY_AUTHORIZATION,
+
+    /** An ACTIVE, in-window, owner-issued delegation grant authorises the party for this amount. */
+    DELEGATED,
+
+    /** No grant and no authorization row names this party on this account. */
+    NO_GRANT,
+
+    /** A grant names the party, but every candidate grant refuses this amount/currency. */
+    LIMIT_EXCEEDED,
+
+    /** The account does not exist. Reported separately so the caller does not turn a typo into a
+     *  permission story; callers MUST still collapse it to the same opaque refusal on the wire. */
+    ACCOUNT_NOT_FOUND,
+}
+
+/**
+ * The decision plus the evidence needed to audit it (ADR-0232 D5).
+ *
+ * [delegationId] and [grantorPartyId] are populated ONLY for [DelegatedPaymentOutcome.DELEGATED];
+ * for an owner they are meaningless and for a refusal they would leak the existence of a grant.
+ */
+data class DelegatedPaymentDecision(
+    val outcome: DelegatedPaymentOutcome,
+    /** The grant that permitted the debit; null unless [outcome] is DELEGATED. */
+    val delegationId: UUID? = null,
+    /** The account owner the debit is taken on behalf of; null unless [outcome] is DELEGATED. */
+    val grantorPartyId: UUID? = null,
+) {
+    val authorized: Boolean
+        get() = outcome == DelegatedPaymentOutcome.OWNER ||
+            outcome == DelegatedPaymentOutcome.LEGACY_AUTHORIZATION ||
+            outcome == DelegatedPaymentOutcome.DELEGATED
 }

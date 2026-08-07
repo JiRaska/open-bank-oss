@@ -9,6 +9,8 @@ import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.notification.application.port.out.NotificationOutboxRepository
 import com.openbank.notification.application.port.out.OversightWebhookPublisher
 import com.openbank.notification.application.port.out.PushMessage
 import com.openbank.notification.application.port.out.PushSender
@@ -16,6 +18,8 @@ import com.openbank.notification.domain.HtmlEscape
 import com.openbank.notification.domain.RecipientAddress
 import com.openbank.notification.domain.model.NotificationCategory
 import com.openbank.notification.domain.model.NotificationChannel
+import com.openbank.notification.domain.model.NotificationOutcome
+import com.openbank.notification.domain.model.NotificationOutcomeEvent
 import com.openbank.notification.domain.model.NotificationRequest
 import com.openbank.notification.domain.model.NotificationStatus
 import com.openbank.notification.domain.model.NotificationTemplate
@@ -78,6 +82,13 @@ class NotificationConsumer {
     @Inject lateinit var objectMapper: ObjectMapper
 
     @Inject lateinit var notificationRepo: NotificationRepository
+
+    /**
+     * ADR-0239 D2. Field injection, not a constructor parameter: detekt's `LongParameterList`
+     * fires AT `constructorThreshold: 9`, and this bean is already at the ceiling — the fleet
+     * convention for one more collaborator is a field.
+     */
+    @Inject lateinit var outboxRepo: NotificationOutboxRepository
 
     @Inject lateinit var deviceTokenRepo: DeviceTokenRepository
 
@@ -184,6 +195,7 @@ class NotificationConsumer {
             // Secret-bearing templates persist a placeholder; `body` below still carries the
             // rendered secret to the delivery adapters, so the customer receives it as usual.
             it.body = TemplateSensitivity.bodyForStorage(req.template, body)
+            it.correlationId = req.correlationId
             it.status = "PENDING"
             it.createdAt = Instant.now(clock)
         }
@@ -319,8 +331,14 @@ class NotificationConsumer {
                             req.template,
                             req.partyId,
                         )
-                        markStatus(entity, "SUPPRESSED")
-                            .invoke { _ -> auditMarketingSuppressed(req, "consent_check_unavailable") }
+                        markStatus(
+                            req,
+                            entity,
+                            NotificationOutcome.SUPPRESSED,
+                            NotificationOutcomeEvent.REASON_CONSENT_UNAVAILABLE,
+                        ).invoke { _ ->
+                            auditMarketingSuppressed(req, NotificationOutcomeEvent.REASON_CONSENT_UNAVAILABLE)
+                        }
                     }
                     check.granted ->
                         when (req.channel) {
@@ -334,8 +352,14 @@ class NotificationConsumer {
                             req.template,
                             req.partyId,
                         )
-                        markStatus(entity, "SUPPRESSED")
-                            .invoke { _ -> auditMarketingSuppressed(req, "no_active_consent") }
+                        markStatus(
+                            req,
+                            entity,
+                            NotificationOutcome.SUPPRESSED,
+                            NotificationOutcomeEvent.REASON_NO_CONSENT,
+                        ).invoke { _ ->
+                            auditMarketingSuppressed(req, NotificationOutcomeEvent.REASON_NO_CONSENT)
+                        }
                     }
                 }
             }
@@ -400,7 +424,7 @@ class NotificationConsumer {
                 req.partyId,
                 req.template,
             )
-            markStatus(entity, "FAILED")
+            markStatus(req, entity, NotificationOutcome.FAILED, NotificationOutcomeEvent.REASON_NO_RECIPIENT)
         } else {
             deliverEmail(req, address, subject, body, entity)
         }
@@ -434,42 +458,37 @@ class NotificationConsumer {
         body: String,
         entity: NotificationEntity,
     ): Uni<Void> = mailer.send(Mail.withHtml(recipient, subject, body))
-        .onFailure().invoke { e ->
-            log.warnf(e, "Email send failed: party=%s template=%s", req.partyId, req.template)
-        }
-        .onFailure().recoverWithUni { _ ->
-            Panache.withTransaction {
-                notificationRepo.find("notificationId", entity.notificationId).firstResult()
-                    .map { ent -> ent?.also { it.status = "FAILED" } }
-            }.replaceWithVoid()
-        }
-        .chain { _ ->
-            Panache.withTransaction {
-                notificationRepo.find("notificationId", entity.notificationId).firstResult()
-                    .map { e ->
-                        e?.also {
-                            it.status = "SENT"
-                            it.sentAt = Instant.now(clock)
-                        }
+        // One branch point, deliberately, rather than two `.onFailure()` handlers at different
+        // depths (the older shape, issue #1392). The distinction that shape existed to preserve —
+        // "the mail never went out" vs "the mail went out but recording it failed" — is kept, and
+        // is now visible as two branches instead of two positions in a chain.
+        .onItemOrFailure().transformToUni { _, failure ->
+            if (failure != null) {
+                log.warnf(failure, "Email send failed: party=%s template=%s", req.partyId, req.template)
+                markStatus(req, entity, NotificationOutcome.FAILED, NotificationOutcomeEvent.REASON_MAILER_REFUSED)
+            } else {
+                markStatus(req, entity, NotificationOutcome.SENT, reason = null, sent = true)
+                    .onItem().invoke { _ ->
+                        log.infof("Email sent: party=%s template=%s", req.partyId, req.template)
                     }
-            }.replaceWithVoid()
+                    // Reachable only when the mail genuinely went out. Never marks the row FAILED —
+                    // that would be a lie about a message the customer already has — logs loudly
+                    // instead and swallows, so dispatch still completes. The cost is now explicit:
+                    // the outcome event is lost with the status write (they share one transaction,
+                    // ADR-0239 D2), so the producer's row stays PENDING rather than going wrong.
+                    .onFailure().invoke { e ->
+                        log.warnf(
+                            e,
+                            "Email sent but recording SENT status failed: party=%s template=%s — row " +
+                                "left as-is, NOT marked FAILED (the email was actually delivered); no " +
+                                "outcome event was emitted either",
+                            req.partyId,
+                            req.template,
+                        )
+                    }
+                    .onFailure().recoverWithUni { _ -> Uni.createFrom().voidItem() }
+            }
         }
-        .onItem().invoke { _ -> log.infof("Email sent: party=%s template=%s", req.partyId, req.template) }
-        // Only reachable if the mail genuinely went out (the FAILED path above already recovered
-        // any send failure into a completed Uni). Never marks the row FAILED — that would be a
-        // lie about a message that was actually delivered — logs loudly instead, and swallows so
-        // dispatch still completes normally: the customer already has the message, this is a
-        // bookkeeping problem for an operator to notice via the log, not a reason to fail dispatch.
-        .onFailure().invoke { e ->
-            log.warnf(
-                e,
-                "Email sent but recording SENT status failed: party=%s template=%s — row left as-is, " +
-                    "NOT marked FAILED (the email was actually delivered)",
-                req.partyId,
-                req.template,
-            )
-        }
-        .onFailure().recoverWithUni { _ -> Uni.createFrom().voidItem() }
 
     /**
      * Gate a PUSH by the party's preferences (#2). SECURITY-category notifications (OTP, SCA, KYC,
@@ -499,7 +518,12 @@ class NotificationConsumer {
                 sendPush(req, subject, entity)
             } else {
                 log.infof("PUSH suppressed by preference: party=%s category=%s", req.partyId, category)
-                markStatus(entity, "SUPPRESSED")
+                markStatus(
+                    req,
+                    entity,
+                    NotificationOutcome.SUPPRESSED,
+                    NotificationOutcomeEvent.REASON_PREFERENCE_MUTED,
+                )
             }
         }
     }
@@ -533,7 +557,12 @@ class NotificationConsumer {
             .chain { tokens ->
                 if (tokens.isEmpty()) {
                     log.infof("PUSH: no active devices for party=%s template=%s", req.partyId, req.template)
-                    return@chain markStatus(entity, "FAILED")
+                    return@chain markStatus(
+                        req,
+                        entity,
+                        NotificationOutcome.FAILED,
+                        NotificationOutcomeEvent.REASON_NO_DEVICE,
+                    )
                 }
                 // Snapshot detached values before crossing the async send boundary — the
                 // managed entities belong to the (now closed) read transaction.
@@ -558,18 +587,23 @@ class NotificationConsumer {
                             delivered,
                             invalidIds.size,
                         )
+                        val outcome =
+                            if (delivered > 0) NotificationOutcome.SENT else NotificationOutcome.FAILED
+                        val reason =
+                            if (delivered > 0) null else NotificationOutcomeEvent.REASON_PUSH_REJECTED
                         Panache.withTransaction {
                             deviceTokenRepo.invalidate(invalidIds).chain { _ ->
                                 notificationRepo.find("notificationId", entity.notificationId).firstResult()
                                     .map { e ->
                                         e?.also {
-                                            if (delivered > 0) {
-                                                it.status = "SENT"
-                                                it.sentAt = Instant.now(clock)
-                                            } else {
-                                                it.status = "FAILED"
-                                            }
+                                            it.status = outcome.name
+                                            if (delivered > 0) it.sentAt = Instant.now(clock)
                                         }
+                                    }
+                                    .chain { _ ->
+                                        outboxRepo.persistInTransaction(
+                                            outcomeMessage(req, entity, outcome, reason),
+                                        )
                                     }
                             }
                         }
@@ -578,10 +612,62 @@ class NotificationConsumer {
             }
     }
 
-    private fun markStatus(entity: NotificationEntity, status: String): Uni<Void> = Panache.withTransaction {
+    /**
+     * Write the terminal status AND its outcome event in ONE transaction (ADR-0003, ADR-0239 D2).
+     *
+     * The two must commit together or not at all. A status written without its event leaves the
+     * producer's funnel permanently wrong about a message — which is issue #3663 in miniature — and
+     * an event without the status would announce a transition that never happened.
+     */
+    private fun markStatus(
+        req: NotificationRequest,
+        entity: NotificationEntity,
+        status: NotificationOutcome,
+        reason: String?,
+        sent: Boolean = false,
+    ): Uni<Void> = Panache.withTransaction {
         notificationRepo.find("notificationId", entity.notificationId).firstResult()
-            .map { e -> e?.also { it.status = status } }
+            .map { e ->
+                e?.also {
+                    it.status = status.name
+                    if (sent) it.sentAt = Instant.now(clock)
+                }
+            }
+            .chain { _ -> outboxRepo.persistInTransaction(outcomeMessage(req, entity, status, reason)) }
     }.replaceWithVoid()
+
+    /**
+     * The outbox row for one terminal transition.
+     *
+     * `aggregateId` is the **notificationId**, not the correlation id: it is what partitions the
+     * topic (`OutboxKafkaHeaders.partitionKey`), and a correlation id is optional, so keying on it
+     * would put every uncorrelated event on one partition.
+     */
+    private fun outcomeMessage(
+        req: NotificationRequest,
+        entity: NotificationEntity,
+        outcome: NotificationOutcome,
+        reason: String?,
+    ): OutboxMessage {
+        val now = Instant.now(clock)
+        val event = NotificationOutcomeEvent(
+            notificationId = entity.notificationId,
+            correlationId = req.correlationId,
+            partyId = req.partyId,
+            channel = req.channel,
+            template = req.template,
+            outcome = outcome,
+            reason = reason,
+            occurredAt = now,
+        )
+        return OutboxMessage(
+            eventId = Ids.newId(),
+            aggregateId = entity.notificationId,
+            eventType = NotificationOutcomeEvent.EVENT_TYPE,
+            payload = objectMapper.writeValueAsString(event),
+            createdAt = now,
+        )
+    }
 
     /**
      * Renders [template] into a (subject, body) pair.

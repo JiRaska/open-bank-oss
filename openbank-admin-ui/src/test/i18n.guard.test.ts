@@ -37,11 +37,12 @@ import path from 'path'
 const APP_DIR = path.resolve(__dirname, '../app')
 const COMPONENTS_DIR = path.resolve(__dirname, '../components')
 
-// Auth screens are static, pre-login, single-language by design.
+// Auth screens (and the GDPR privacy notice) are static, pre-login, single-language by design.
 const EXEMPT = new Set<string>([
   'auth/login/page.tsx',
   'auth/error/page.tsx',
   'auth/forbidden/page.tsx',
+  'privacy/page.tsx',
 ])
 
 // Brand / proper nouns / technical tokens that read identically in cs and en and

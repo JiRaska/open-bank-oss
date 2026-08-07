@@ -7,11 +7,15 @@ package com.openbank.devops.infrastructure.schedule
 
 import com.openbank.devops.application.port.incoming.RunDevOpsAnalysisUseCase
 import com.openbank.devops.domain.model.RunTrigger
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.libs.temporal.TemporalConfig
 import io.quarkus.scheduler.Scheduled
+import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.jboss.logging.Logger
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -41,8 +45,17 @@ class DevOpsAnalysisScheduler {
     @Inject
     lateinit var temporalConfig: TemporalConfig
 
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+
     private val log = Logger.getLogger(DevOpsAnalysisScheduler::class.java)
     private val fires = AtomicLong(0)
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    @PostConstruct
+    fun registerLiveness() {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
 
     /**
      * How many times the cron has actually fired in this pod.
@@ -64,6 +77,12 @@ class DevOpsAnalysisScheduler {
             return
         }
         val workflowId = runAnalysis.startDetached(RunTrigger.SCHEDULED)
+        liveness?.recordSuccess()
         log.infof("Scheduled DevOps analysis dispatched as workflow %s", workflowId)
+    }
+
+    private companion object {
+        const val WORKFLOW_NAME = "devops-analysis"
+        val EXPECTED_INTERVAL: Duration = Duration.ofDays(1)
     }
 }

@@ -196,12 +196,34 @@ rejects a posting that is legal today. Enforcement is a config flip, and its pre
 evidence, not a calendar: `openbank_ledger_day_lock_decisions_total{outcome="would_refuse"}` at zero
 or every hit explained.
 
+**Increment 2 (the two enforcement preconditions above).**
+
+Motivated by measurement, not schedule: on 2026-08-07 the live cluster had **zero** rows in
+`ledger_accounting_day` while postings flowed — every day-lock decision was `no_day_record`
+(confirmed in the shadow counter) and `would_refuse` could structurally never fire, so the
+enforcement evidence gate was green about nothing. A lock whose calendar nobody maintains
+measures nothing.
+
+Shipped:
+- `AccountingDayScheduler` — reconciles the persisted calendar toward the `AccountingClock`
+  every tick (default */15 min, cluster-locked, suspend per #2187): opens the current day,
+  backfills gaps since the latest known row (oldest-first, bounded — history before the
+  scheduler existed is deliberately NOT fabricated), cuts over past `OPEN` days, and advances
+  `CUTOFF → TIED_OUT` only on a tie-out run that is OK **and** recorded after the cutoff — a
+  verdict from while the day could still change proves nothing about its final figures.
+  `TIED_OUT → LOCKED` stays operator-driven: locking is the statement/period-close act, which a
+  timer cannot know.
+- The stuck-`CUTOFF` alert: gauge `openbank_ledger_accounting_day_stuck_cutoff_days`
+  (re-published every tick; threshold `openbank.ledger.accounting-day.stuck-cutoff-hours`,
+  default 8h against a normal ~6h residence) + `AccountingDayStuckInCutoff` in
+  `prometheus-rules-accounting-day.yaml`.
+- Dispatch proven by `LedgerSchedulerVertxContextIT` driving the real cron against a real
+  Postgres, alongside the two #2187 regressions.
+
 Not yet built, and deliberately out of this increment:
-- The stuck-`CUTOFF` alert. The ADR's own Consequences section makes it a precondition of
-  enforcement, not of the state machine — a day stuck in `CUTOFF` blocks nothing while the lock is
-  in shadow. It must exist before the flip.
-- A scheduler that opens each day automatically. Days are opened by an operator for now; the day
-  lock treats an unopened day as *not refused* precisely so that this ordering is safe.
+- The enforce flip itself (`openbank.ledger.day-lock.mode: enforce`). Its evidence gate is now
+  real: with the calendar maintained, `would_refuse` measures actual backdated postings. Read
+  the counter after the scheduler has run in the cluster over at least one full day cycle.
 - #1302 items 3–5 (reconciliation false drift, FX rate staleness, statement correction path), which
   this ADR's Context predicted would "collapse into wiring once this is settled".
 - The three pre-existing accounting-clock sites the new guard surfaced outside ledger-service

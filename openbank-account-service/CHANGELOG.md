@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.18.1...account-service-v0.19.0) (2026-08-07)
+
+
+### Features
+
+* let a delegate pay from a shared account, and audit it as delegated ([#3633](https://github.com/JiRaska/open-bank-oss/issues/3633)) ([568686b](https://github.com/JiRaska/open-bank-oss/commit/568686bfc3ba15e824252f3502b0fddc856c7d37))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.18.0...account-service-v0.18.1) (2026-08-02)
 
 
