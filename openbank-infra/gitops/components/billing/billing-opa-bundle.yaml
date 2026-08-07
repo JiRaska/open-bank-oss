@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: billing-service
     app.kubernetes.io/part-of: billing
   annotations:
-    openbank.tech/policy-checksum: "fcb7f5c4c84e1fa1"
+    openbank.tech/policy-checksum: "15d8a2154b87056f"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -308,6 +308,18 @@ data:
     	input.action in {"consent.list", "consent.revoke"}
     }
 
+    # The customer-edge proxying the app's in-app engagement surfaces (ADR-0220 D1): the app
+    # resolves what to show in a slot and records the customer's reaction to it. Same edge
+    # principal and same guard as edge-service-consent — the edge injects the caller's
+    # authoritative partyId from the JWT, so a client-supplied partyId never reaches
+    # engagement-service on its own authority. Scoped to the two exact actions the app uses —
+    # NOT an `engagement.` family — least privilege, matching edge-service-consent's shape.
+    allowed_reasons contains "edge-service-engagement" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
+    }
+
     # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log
     # (P2-27). Same edge principal and same guard as edge-service-consent — the edge injects the
     # caller's authoritative partyId from the JWT, so a client-supplied id never reaches
@@ -537,10 +549,31 @@ data:
     # they land behind the four-eyes gate).
     allowed_reasons contains "operator-billing-write" if {
     	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	startswith(input.action, "billing.")
     }
+
+    # 2026-08-05 (#3734): operator-billing-write was role-only, and rules.yaml's role_action_matrix
+    # grants ALL THREE billing writes (post, reverse, approval.decide) to ROLE_OPERATOR — which
+    # service-account-openbank-edge carries — so both the role-only path and matrix-allows admitted
+    # the customer-facing proxy to fee posting, reversal, and four-eyes approval decisions. Billing
+    # has NO in-repo M2M caller at all (verified 2026-08-05: no edge URL, no backend REST client —
+    # account-service's billing-discovery read is INBOUND from billing, and product-catalog fees are
+    # read via catalog, not billing), so there is no identity-scoped grant to preserve: the
+    # exclusion closes the role-only path and this veto closes the matrix path for the edge (base
+    # rest.rego gates its allow head on `not prohibited`). billing.read stays reachable to M2M via
+    # base operator-read-any — the fleet-wide M2M read over-grant is tracked separately in #3734.
+    prohibited if {
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {
+    		"billing.post",
+    		"billing.reverse",
+    		"billing.approval.decide",
+    	}
+    }
+
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
@@ -954,6 +987,10 @@ data:
 
       - id: compliance-officer
         plane: control
+        # model: the LLM this agent invokes when run. Charter-declared so the policy gate can record
+        # it on every agent.mcp.tool_call audit event (ADR-0031 D5, issue #3667) without consulting
+        # the model gateway at gate time. Value is the LiteLLM model id the gateway serves.
+        model: llama-3.3-70b-versatile
         charter: "AML/sanctions/GDPR/PSD2 oversight of the running bank; produces proposals only."
         data_scope:
           read: [transaction, sanction-screening, consent, audit, aml, sanctions, dispute, clearing, sepa-instant]
@@ -973,6 +1010,7 @@ data:
 
       - id: ledger-domain-engineer
         plane: development
+        model: llama-3.3-70b-versatile
         charter: "Maintains its owned services via skills + rules.yaml + ADRs; opens PRs, never merges."
         owns: [openbank-ledger-service]            # a money_path service (rules.yaml) -> stricter HITL
         skills: [ship-check, bump, open-pr, release]   # run.skill is constrained to THIS list
@@ -990,6 +1028,7 @@ data:
 
       - id: ui-assistant
         plane: control
+        model: llama-3.3-70b-versatile
         charter: "The admin-UI bot. Answers operator questions from read-only tools; proposal-only, never acts on money."
         data_scope:
           read: [account, transaction, balance, catalog, ledger,
@@ -1018,6 +1057,7 @@ data:
 
       - id: rca-investigator
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "On a firing alert, investigates metrics, logs, traces and k8s state and proposes a likely root cause (HolmesGPT, ADR-0088). Read-only oversight — emits a finding, never acts."
         data_scope:
           read: [observability, audit]             # Prometheus / Loki / Tempo / Alertmanager + cluster state
@@ -1032,6 +1072,7 @@ data:
 
       - id: customer-copilot
         plane: customer
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "Customer-facing mobile assistant (ADR-0089). Reads the signed-in customer's OWN data; action tools emit PROPOSALS only — money never moves on the model's word. The app routes each proposal into the existing edge payment/card/dispute + SCA flow."
         data_scope:
           # The signed-in customer's own data, audience-scoped via an on-behalf-of token; ownership is
@@ -1054,6 +1095,7 @@ data:
 
       - id: mcp-anonymous
         plane: customer
+        model: unknown
         charter: "The first-party MCP server's acting identity (ADR-0181). Exposes a curated, PSD2-consent-scoped tool set — read the granted accounts/balances/transactions/consents, and PROPOSE a payment — to governed AI agents over the Model Context Protocol. Reads only; propose.payment is a reviewable artifact a human + SCA disposes, never a debit."
         # `mcp-anonymous` is the phase-1 FIXED principal id McpEndpoint.resolveContext() sets
         # (ctx.agentId = "agent:mcp-anonymous"); the shared ADR-0034 PDP classifies it AI_AGENT and
@@ -1081,6 +1123,7 @@ data:
 
       - id: ap2-anonymous
         plane: customer
+        model: unknown
         charter: "The bank-side AP2 mandate verifier's acting identity (ADR-0193). Verifies a presented AP2 (Agent Payments Protocol) signed mandate — its signature chain + constraints (payee, amount cap, currency, expiry) — as an authorization-evidence type. Verification only: it moves NO funds; a valid verdict is an input to the SCA/payment decision, never a payment."
         # `ap2-anonymous` is the phase-1 FIXED principal id Ap2VerifyEndpoint sets when the X-Agent-Id
         # header is absent (ANONYMOUS_AGENT = "agent:ap2-anonymous"); the shared ADR-0034 PDP classifies
@@ -1105,6 +1148,7 @@ data:
 
       - id: finops-agent
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0112"
         description: >
           Proactive AWS cost monitoring and optimization agent. Detects NAT egress spikes,
@@ -1157,6 +1201,7 @@ data:
 
       - id: devops-agent
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0119"
         description: >
           Proactive SSDLC, CI/CD and DORA reliability agent — the delivery-pipeline twin of the
@@ -1210,6 +1255,7 @@ data:
 
       - id: control-liveness-sentinel
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0163"
         description: >
           Fleet-wide correlator for the ADR-0160 liveness/drift-detection mechanisms — watches
@@ -1261,6 +1307,7 @@ data:
 
       - id: governance-auditor
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0164"
         description: >
           Post-hoc auditor of merged-PR governance compliance. For every PR merged to main, re-verifies
@@ -1320,6 +1367,7 @@ data:
 
       - id: release-steward
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0165"
         description: >
           Periodic guardian of the release-please / version-axis invariants. Checks
@@ -1378,6 +1426,7 @@ data:
 
       - id: docs-truth-agent
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0166"
         description: >
           Periodic ADR-status-vs-code drift detector. On a weekly sweep plus reactively when any
@@ -1433,6 +1482,7 @@ data:
 
       - id: authz-policy-auditor
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0167"
         description: >
           Static analyzer for the fleet's OPA/Rego authorization policies (rest.rego, agents.rego,
@@ -1496,6 +1546,7 @@ data:
 
       - id: flaky-test-hunter
         plane: development
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0168"
         description: >
           Static analyzer for fleet-wide silent-test-failure patterns in Kotlin test sources.

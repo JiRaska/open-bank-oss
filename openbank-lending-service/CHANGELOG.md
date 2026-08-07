@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.23.0...lending-service-v0.23.1) (2026-08-07)
+
+
+### Bug Fixes
+
+* **lending:** make the compliance-pack four-eyes decision atomic ([#3837](https://github.com/JiRaska/open-bank-oss/issues/3837)) ([51b07b0](https://github.com/JiRaska/open-bank-oss/commit/51b07b08230194ee4524659c4c423a7351bd2648))
+
 ## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.22.2...lending-service-v0.23.0) (2026-08-07)
 
 

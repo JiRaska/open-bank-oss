@@ -11,9 +11,13 @@
 #     outbox fills, publishes nothing, and no message is silently lost — flipping dispatch on
 #     without also wiring mTLS would just fail every publish attempt, loudly, in the outbox's own
 #     retry/DEAD accounting.
-#   - the OPA sidecar / policy bundle — SurfaceResource carries no @Authorize annotation yet, and
-#     the shared rest.rego has no rule for these two actions, so the platform-wide
-#     `default allow := false` denies them fail-closed under enforcement regardless.
+# The OPA sidecar used to be on that deferred list, on the reasoning that a missing PDP left
+# OPA-level policy merely "not consulted yet, not open". That was wrong, and the
+# `authz-enforce ⇒ PDP sidecar parity` gate (#1797) caught it: `authz.enforce` carries
+# `defaultValue = "true"` in AuthorizeInterceptor and this service overrides it nowhere, so the
+# interceptor enforces with no PDP to ask — `AuthorizeInterceptorTest` names the outcome
+# outright, `enforce=true, no PDP bean throws 503`. Not open, but not deferred either: both
+# @Authorize endpoints on SurfaceResource answer 503 rather than serving. Wired below.
 # Reachable only in-cluster via ClusterIP, no ingress.
 apiVersion: apps/v1
 kind: Deployment
@@ -37,6 +41,10 @@ spec:
       app.kubernetes.io/name: engagement-service
   template:
     metadata:
+      annotations:
+        # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
+        # hot-reload). Kept in sync by gen-engagement-opa-bundle.sh.
+        openbank.tech/policy-checksum: "2f77f3a887a2737a"
       labels:
         app.kubernetes.io/name: engagement-service
         app.kubernetes.io/part-of: engagement
@@ -55,7 +63,7 @@ spec:
           # src/main (this merge itself, first) triggers auto-deploy to build a real image and
           # open a gitops PR replacing this with the actual sha. Until then, Kyverno's
           # cosign-signature/SBOM-attestation admission policies reject a tag nothing ever pushed.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-engagement-service:sandbox-7a66c233d
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-engagement-service:sandbox-fac75d19
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -116,8 +124,79 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+        # The PDP every @Authorize endpoint on SurfaceResource queries. Without it the
+        # interceptor has nothing to ask and fails closed (503/422) — issue #1797, and
+        # exactly the state #4054 left this workload in.
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: engagement-service-opa-bundle
+        - name: opa-tmp
           emptyDir: {}
 ---
 apiVersion: v1

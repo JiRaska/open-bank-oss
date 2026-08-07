@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "5f0203cb87c910e3"
+    openbank.tech/policy-checksum: "f6749ed5f1dd6724"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -308,6 +308,18 @@ data:
     	input.action in {"consent.list", "consent.revoke"}
     }
 
+    # The customer-edge proxying the app's in-app engagement surfaces (ADR-0220 D1): the app
+    # resolves what to show in a slot and records the customer's reaction to it. Same edge
+    # principal and same guard as edge-service-consent — the edge injects the caller's
+    # authoritative partyId from the JWT, so a client-supplied partyId never reaches
+    # engagement-service on its own authority. Scoped to the two exact actions the app uses —
+    # NOT an `engagement.` family — least privilege, matching edge-service-consent's shape.
+    allowed_reasons contains "edge-service-engagement" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
+    }
+
     # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log
     # (P2-27). Same edge principal and same guard as edge-service-consent — the edge injects the
     # caller's authoritative partyId from the JWT, so a client-supplied id never reaches
@@ -505,6 +517,10 @@ data:
     }
   ledger_rest_ext.rego: |
     # SPDX-License-Identifier: Apache-2.0
+    # Ledger REST extension — general-ledger allow reasons (ADR-0034 Phase 5, issue #266).
+    # ledger-service is the bank's double-entry book of record — the single most sensitive
+    # write target in the fleet. Every write action below is deny-by-default until an
+    # explicit reason below (or in base rest.rego) fires; no blanket SERVICE allow.
     # Ledger-service REST extension (ADR-0034 Phase 5, issue #266).
     # Extends openbank.rest with ledger-domain allow reasons.
     # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
@@ -535,6 +551,26 @@ data:
     # permitted viewer/auditor read — the domestic-payment OPA-enforce work (ADR-0034 Phase 5,
     # issue #266) hit the identical gap for ROLE_VIEWER and named it explicitly; ledger adds
     # ROLE_AUDITOR to the same fix since its read roles include auditor too.
+
+
+    # ── #3734 (2026-08-05): service-account exclusion + edge write prohibition ──────────────
+    # The two operator rules above were role-only, and rules.yaml's role_action_matrix grants
+    # ledger.create/reverse/trigger/replay to ROLE_OPERATOR. Both realm M2M clients carry that
+    # role and are HUMAN-classified, so the customer-facing edge identity
+    # (service-account-openbank-edge) was admitted to the book-of-record's writes — post/reverse
+    # a journal, re-run an FX revaluation — via base matrix-allows, and to year-close attestation
+    # via operator-year-close-attest (whose own comment says no SERVICE principal must EVER
+    # reach it). Fleet caller audit: no ledgerServiceUrl exists anywhere in customer-edge — the
+    # edge has NO ledger caller at all; the legitimate M2M writers (transaction/lending/
+    # settlement via the shared client) keep their identity-scoped service-ledger-post /
+    # service-ledger-reverse rules below. The exclusion on the operator rules closes the
+    # role-only path for ALL service accounts; the prohibition below vetoes the edge on every
+    # ledger write at the allow head, beating the matrix grant the exclusion cannot reach.
+    # Edge-scoped rather than all-service-accounts because the shared client IS a legitimate
+    # writer here (interest #3698 could prohibit all service-accounts; ledger cannot).
+    #
+    # ledger.approve is in the prohibition even though the matrix does not grant it: the veto is
+    # cheap, and no future matrix edit must ever hand the edge a statutory close event.
 
     package openbank.rest
 
@@ -588,6 +624,7 @@ data:
     	input.principal.type == "HUMAN"
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
+    	not startswith(input.principal.id, "service-account-")
     	input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay"}
     }
 
@@ -597,22 +634,6 @@ data:
     # no in-repo caller invokes it (it's an operator/admin console-only action) and none ever
     # should, since attesting is a human sign-off by design (four-eyes on the maker/attestor
     # pair is enforced in-service, see YearCloseResource's draftedBy/attestedBy check).
-    #
-    # The `service-account-` exclusion is what makes the sentence above TRUE. Without it the
-    # rule was role-only, and `service-account-openbank-services` — the identity nearly every
-    # backend service authenticates as — carries ROLE_OPERATOR in the realm while
-    # AuthorizeInterceptor classifies its client_credentials JWT as HUMAN. Measured against
-    # this very bundle with `opa eval` (issue #3765): ledger.approve resolved
-    # allow=true, reason="operator-year-close-attest" for that principal, so the "NEVER
-    # reachable by any SERVICE principal" claim above, and the closing note at the bottom of
-    # this file that an un-mapped SERVICE call "403s, by design", were both wrong — three
-    # @Authorize sites use this action (YearCloseResource.attest, AccountingDayResource,
-    # ClosedPeriodResource), all statutory sign-offs. Excluding, not identity-pinning: there is
-    # no legitimate M2M attestor to name — no module outside openbank-ledger-service declares a
-    # client for these routes (every fleet Ledger*Client was read; none exposes attest /
-    # accounting-day / closed-period). rest.rego's `shared_m2m_write_prohibition` cannot cover
-    # this: that register is keyed by reason name, and its data key is not even emitted into
-    # the bundles (see gen-rules-opa-data.py's own note), so the veto has never fired anywhere.
     allowed_reasons contains "operator-year-close-attest" if {
     	input.principal.type == "HUMAN"
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
@@ -665,17 +686,13 @@ data:
     # ledger.trigger (FX revaluation) and ledger.approve (year-close attest) have NO in-repo
     # M2M caller — the FX revaluation is scheduled in-process (FxRevaluationScheduler) and the
     # ops/backfill re-run endpoint is operator-only; year-close attestation is a human sign-off
-    # by design (see operator-year-close-attest above). Neither gets a service-* rule.
-    #
-    # CORRECTION (#3765): "no rule added" was never sufficient for either. Deny-by-default only
-    # holds for an action NO rule reaches, and both of these are reached by a role-only rule the
-    # shared M2M identity satisfies — ledger.approve via operator-year-close-attest (now closed
-    # by the exclusion above) and ledger.trigger / ledger.replay via operator-ledger-write AND
-    # base rest.rego's `matrix-allows`, since rules.yaml grants both to ROLE_OPERATOR. Those two
-    # are deliberately NOT closed here: `matrix-allows` is a base-layer reason no per-service ext
-    # can veto, so excluding service-accounts from operator-ledger-write alone would remove one
-    # of two paths and change nothing. That is issue #3765's decision (a) vs (b), not a
-    # per-service edit.
+    # by design (see operator-year-close-attest above). Neither gets a service-* rule: an
+    # un-mapped SERVICE call to either 403s, by design (deny-by-default, no rule added).
+
+    prohibited if {
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve"}
+    }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
@@ -1089,6 +1106,10 @@ data:
 
       - id: compliance-officer
         plane: control
+        # model: the LLM this agent invokes when run. Charter-declared so the policy gate can record
+        # it on every agent.mcp.tool_call audit event (ADR-0031 D5, issue #3667) without consulting
+        # the model gateway at gate time. Value is the LiteLLM model id the gateway serves.
+        model: llama-3.3-70b-versatile
         charter: "AML/sanctions/GDPR/PSD2 oversight of the running bank; produces proposals only."
         data_scope:
           read: [transaction, sanction-screening, consent, audit, aml, sanctions, dispute, clearing, sepa-instant]
@@ -1108,6 +1129,7 @@ data:
 
       - id: ledger-domain-engineer
         plane: development
+        model: llama-3.3-70b-versatile
         charter: "Maintains its owned services via skills + rules.yaml + ADRs; opens PRs, never merges."
         owns: [openbank-ledger-service]            # a money_path service (rules.yaml) -> stricter HITL
         skills: [ship-check, bump, open-pr, release]   # run.skill is constrained to THIS list
@@ -1125,6 +1147,7 @@ data:
 
       - id: ui-assistant
         plane: control
+        model: llama-3.3-70b-versatile
         charter: "The admin-UI bot. Answers operator questions from read-only tools; proposal-only, never acts on money."
         data_scope:
           read: [account, transaction, balance, catalog, ledger,
@@ -1153,6 +1176,7 @@ data:
 
       - id: rca-investigator
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "On a firing alert, investigates metrics, logs, traces and k8s state and proposes a likely root cause (HolmesGPT, ADR-0088). Read-only oversight — emits a finding, never acts."
         data_scope:
           read: [observability, audit]             # Prometheus / Loki / Tempo / Alertmanager + cluster state
@@ -1167,6 +1191,7 @@ data:
 
       - id: customer-copilot
         plane: customer
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "Customer-facing mobile assistant (ADR-0089). Reads the signed-in customer's OWN data; action tools emit PROPOSALS only — money never moves on the model's word. The app routes each proposal into the existing edge payment/card/dispute + SCA flow."
         data_scope:
           # The signed-in customer's own data, audience-scoped via an on-behalf-of token; ownership is
@@ -1189,6 +1214,7 @@ data:
 
       - id: mcp-anonymous
         plane: customer
+        model: unknown
         charter: "The first-party MCP server's acting identity (ADR-0181). Exposes a curated, PSD2-consent-scoped tool set — read the granted accounts/balances/transactions/consents, and PROPOSE a payment — to governed AI agents over the Model Context Protocol. Reads only; propose.payment is a reviewable artifact a human + SCA disposes, never a debit."
         # `mcp-anonymous` is the phase-1 FIXED principal id McpEndpoint.resolveContext() sets
         # (ctx.agentId = "agent:mcp-anonymous"); the shared ADR-0034 PDP classifies it AI_AGENT and
@@ -1216,6 +1242,7 @@ data:
 
       - id: ap2-anonymous
         plane: customer
+        model: unknown
         charter: "The bank-side AP2 mandate verifier's acting identity (ADR-0193). Verifies a presented AP2 (Agent Payments Protocol) signed mandate — its signature chain + constraints (payee, amount cap, currency, expiry) — as an authorization-evidence type. Verification only: it moves NO funds; a valid verdict is an input to the SCA/payment decision, never a payment."
         # `ap2-anonymous` is the phase-1 FIXED principal id Ap2VerifyEndpoint sets when the X-Agent-Id
         # header is absent (ANONYMOUS_AGENT = "agent:ap2-anonymous"); the shared ADR-0034 PDP classifies
@@ -1240,6 +1267,7 @@ data:
 
       - id: finops-agent
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0112"
         description: >
           Proactive AWS cost monitoring and optimization agent. Detects NAT egress spikes,
@@ -1292,6 +1320,7 @@ data:
 
       - id: devops-agent
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0119"
         description: >
           Proactive SSDLC, CI/CD and DORA reliability agent — the delivery-pipeline twin of the
@@ -1345,6 +1374,7 @@ data:
 
       - id: control-liveness-sentinel
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0163"
         description: >
           Fleet-wide correlator for the ADR-0160 liveness/drift-detection mechanisms — watches
@@ -1396,6 +1426,7 @@ data:
 
       - id: governance-auditor
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0164"
         description: >
           Post-hoc auditor of merged-PR governance compliance. For every PR merged to main, re-verifies
@@ -1455,6 +1486,7 @@ data:
 
       - id: release-steward
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0165"
         description: >
           Periodic guardian of the release-please / version-axis invariants. Checks
@@ -1513,6 +1545,7 @@ data:
 
       - id: docs-truth-agent
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0166"
         description: >
           Periodic ADR-status-vs-code drift detector. On a weekly sweep plus reactively when any
@@ -1568,6 +1601,7 @@ data:
 
       - id: authz-policy-auditor
         plane: control
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0167"
         description: >
           Static analyzer for the fleet's OPA/Rego authorization policies (rest.rego, agents.rego,
@@ -1631,6 +1665,7 @@ data:
 
       - id: flaky-test-hunter
         plane: development
+        model: deepseek-ai/DeepSeek-V3.2
         charter: "ADR-0168"
         description: >
           Static analyzer for fleet-wide silent-test-failure patterns in Kotlin test sources.

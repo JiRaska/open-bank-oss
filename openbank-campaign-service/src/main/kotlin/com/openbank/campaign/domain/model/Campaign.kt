@@ -31,6 +31,12 @@ data class Campaign(
      * until now. Null means `POST /{id}/enrol` is the only way in, exactly as before.
      */
     val schedule: CampaignSchedule? = null,
+    /**
+     * Key from [TriggerCatalog], or null. When set, a matching product event enrols the party at
+     * once — but only if the segment still contains them: the trigger decides when, the segment
+     * decides who.
+     */
+    val trigger: String? = null,
     val state: CampaignState,
     val createdBy: String,
     val approvedBy: String?,

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/JiRaska/open-bank-oss/compare/vop-service-v0.3.3...vop-service-v0.3.4) (2026-08-07)
+
+
+### Bug Fixes
+
+* **libs:** move CDI interceptor bindings out of libs-domain and close the gate hole that hid them ([#3808](https://github.com/JiRaska/open-bank-oss/issues/3808)) ([7316bb1](https://github.com/JiRaska/open-bank-oss/commit/7316bb1257dbf04bf43f2d8498bc7ea8e78cc490))
+
 ## [0.3.3](https://github.com/JiRaska/open-bank-oss/compare/vop-service-v0.3.2...vop-service-v0.3.3) (2026-08-07)
 
 

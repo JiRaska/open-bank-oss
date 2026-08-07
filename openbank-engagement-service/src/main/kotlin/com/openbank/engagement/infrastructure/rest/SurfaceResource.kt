@@ -10,6 +10,8 @@ import com.openbank.engagement.domain.model.EngagementEvent
 import com.openbank.engagement.domain.model.EngagementEventType
 import com.openbank.engagement.domain.model.SurfaceContent
 import com.openbank.engagement.domain.model.SurfaceSlot
+import com.openbank.libs.authz.Authorize
+import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
@@ -21,13 +23,10 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * The app-facing surface API (ADR-0220 D1/D2). No `@Authorize` policy exists yet for these two
- * actions in the shared `rest.rego` (`openbank-libs/governance/rules.yaml`-derived OPA bundle):
- * editing that file restamps every service's OPA bundle fleet-wide (per this repo's own
- * documented gitops footguns), which is exactly the kind of cross-cutting infra change kept out
- * of this PR alongside the Dockerfile and gitops manifests. Until that rule lands, an OPA sidecar
- * with `AUTHZ_ENFORCE=true` denies both endpoints by the policy's own `default allow := false` —
- * fail-closed, not fail-open, so this gap cannot leak data in the meantime.
+ * The app-facing surface API (ADR-0220 D1/D2), reached through the customer edge
+ * (`edge-service-engagement` in `openbank-libs/governance/policies/rest.rego`) — the edge
+ * injects the caller's authoritative partyId, so a client-supplied partyId never reaches this
+ * service on its own authority.
  */
 @Path("/api/v1/surfaces")
 @ApplicationScoped
@@ -35,6 +34,8 @@ class SurfaceResource(private val resolve: ResolveSurfaceUseCase, private val re
 
     @GET
     @Path("/{slot}")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_API", "ROLE_ADMIN")
+    @Authorize(action = "engagement.surface.read", resource = "#partyId")
     suspend fun get(@PathParam("slot") slotName: String, @QueryParam("partyId") partyId: UUID?): Response {
         partyId ?: return badRequest("partyId query parameter is required")
         val slot = parseSlot(slotName) ?: return badRequest("unknown slot '$slotName'")
@@ -57,6 +58,8 @@ class SurfaceResource(private val resolve: ResolveSurfaceUseCase, private val re
 
     @POST
     @Path("/events")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_API", "ROLE_ADMIN")
+    @Authorize(action = "engagement.surface.recordEvent", resource = "#request.partyId")
     suspend fun postEvent(request: EngagementEventRequest): Response {
         val slot = parseSlot(request.slot) ?: return badRequest("unknown slot '${request.slot}'")
         val type = EngagementEventType.entries.find { it.name == request.type }

@@ -16,6 +16,7 @@ import com.openbank.agent.domain.McpResponse
 import com.openbank.agent.domain.ToolCallResult
 import com.openbank.agent.domain.ToolDefinition
 import com.openbank.agent.domain.ToolsListResult
+import com.openbank.agent.domain.policy.AgentIdentity
 import com.openbank.agent.domain.policy.EnforcementMode
 import com.openbank.agent.domain.policy.GateOutcome
 import com.openbank.agent.domain.policy.PolicyDecision
@@ -230,5 +231,58 @@ class McpEndpointIdentityTest {
         val evt = slot<AuditEvent>()
         coVerify(exactly = 1) { auditPublisher.publish(capture(evt)) }
         assertThat(evt.captured.operation).isEqualTo("agent.identity.rejected")
+    }
+
+    @Test
+    fun `charter model id is threaded into the identity passed to the policy gate`() {
+        var capturedIdentity: AgentIdentity? = null
+        val gate = mockk<AgentPolicyGate> {
+            every { authorize(any(), any(), any(), any()) } answers {
+                capturedIdentity = firstArg()
+                GateOutcome(
+                    decision = PolicyDecision(
+                        allow = false,
+                        agent = "compliance-officer",
+                        tool = "query.compliance.readonly",
+                        resource = null,
+                        reason = "denied-for-test",
+                    ),
+                    mode = EnforcementMode.BLOCK,
+                    proceed = false,
+                )
+            }
+        }
+        val chartersWithModel = mockk<CharterRegistry> {
+            every { allowedCapabilities("compliance-officer") } returns setOf("query.compliance.readonly")
+            every { modelId("compliance-officer") } returns "llama-3.3-70b-versatile"
+        }
+        val body = mapper.readTree(
+            """{"method":"tools/call","id":2,"params":{"name":"aml_list_cases","arguments":{}}}""",
+        )
+        val ep = McpEndpoint().apply {
+            this.registry = this@McpEndpointIdentityTest.registry
+            this.objectMapper = mapper
+            this.policyGate = gate
+            this.charterRegistry = chartersWithModel
+            this.binding = AgentIdentityBinding(false, "")
+            this.identity =
+                mockk {
+                    every { isAnonymous } returns true
+                    every { getRoles() } returns emptySet()
+                    every { principal } returns
+                        Principal { "op" }
+                }
+            this.auditPublisher = this@McpEndpointIdentityTest.auditPublisher
+            this.svid = AgentSvidVerifier(caCertPem = Optional.empty(), maxSkewSeconds = 60)
+            this.svidEnforced = false
+            this.headers =
+                mockk {
+                    every { getHeaderString(any()) } returns null
+                    every { getHeaderString("X-Agent-Id") } returns
+                        "compliance-officer"
+                }
+        }
+        ep.handle(body)
+        assertThat(capturedIdentity?.modelId).isEqualTo("llama-3.3-70b-versatile")
     }
 }
