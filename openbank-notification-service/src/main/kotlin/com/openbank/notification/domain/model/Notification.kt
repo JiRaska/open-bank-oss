@@ -101,4 +101,15 @@ data class NotificationRequest(
     val template: NotificationTemplate,
     val recipient: String,
     val variables: Map<String, String>,
+    /**
+     * Producer-owned correlation id (ADR-0239 D1). Optional and additive: a producer that wants to
+     * hear back what became of this request sets an identifier IT owns — campaign-service uses the
+     * send-log row id — and notification-service echoes it, unchanged, on the persisted row and on
+     * every [NotificationOutcomeEvent] for it. Producers that do not care omit it and nothing
+     * changes for them.
+     *
+     * Nullable rather than generated here on purpose: an id minted by notification-service would be
+     * meaningless to the producer, which is the only party that can join it back to its own row.
+     */
+    val correlationId: UUID? = null,
 )

@@ -446,6 +446,12 @@
       "realmRoles": [
         "ROLE_API"
       ]
+    },
+    {
+      "username": "service-account-openbank-mcp-service",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-mcp-service",
+      "realmRoles": []
     }
   ]
 }

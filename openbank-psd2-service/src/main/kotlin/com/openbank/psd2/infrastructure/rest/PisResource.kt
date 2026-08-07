@@ -40,8 +40,8 @@ class PisResource(
     @Authorize(action = "psd2.initiate", resource = "")
     suspend fun initiateSepa(
         payment: PaymentInitiation,
-        @HeaderParam("Consent-ID") consentId: String,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String,
+        @HeaderParam("Consent-ID") consentId: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @Context ctx: ContainerRequestContext,
     ): Response = initiatePayment(payment, consentId, idempotencyKey, PaymentProduct.SEPA_CREDIT_TRANSFERS, ctx)
 
@@ -50,8 +50,8 @@ class PisResource(
     @Authorize(action = "psd2.initiate", resource = "")
     suspend fun initiateInstantSepa(
         payment: PaymentInitiation,
-        @HeaderParam("Consent-ID") consentId: String,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String,
+        @HeaderParam("Consent-ID") consentId: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @Context ctx: ContainerRequestContext,
     ): Response = initiatePayment(payment, consentId, idempotencyKey, PaymentProduct.INSTANT_SEPA_CREDIT_TRANSFERS, ctx)
 
@@ -60,8 +60,8 @@ class PisResource(
     @Authorize(action = "psd2.initiate", resource = "")
     suspend fun initiateDomesticCz(
         payment: DomesticCzPayment,
-        @HeaderParam("Consent-ID") consentId: String,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String,
+        @HeaderParam("Consent-ID") consentId: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @Context ctx: ContainerRequestContext,
     ): Response = initiatePayment(payment, consentId, idempotencyKey, PaymentProduct.DOMESTIC_CZ, ctx)
 
@@ -70,8 +70,8 @@ class PisResource(
     @Authorize(action = "psd2.initiate", resource = "")
     suspend fun initiateSipo(
         payment: SipoPayment,
-        @HeaderParam("Consent-ID") consentId: String,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String,
+        @HeaderParam("Consent-ID") consentId: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @Context ctx: ContainerRequestContext,
     ): Response = initiatePayment(payment, consentId, idempotencyKey, PaymentProduct.SIPO, ctx)
 
@@ -90,15 +90,26 @@ class PisResource(
         return Response.ok(mapOf("transactionStatus" to status.name)).build()
     }
 
+    /**
+     * The four initiation handlers differ only in payment product, so both Berlin Group headers are
+     * validated once, here — the single place every one of them passes through.
+     *
+     * #3624: both used to be declared non-nullable, which bought nothing at runtime. These are
+     * `suspend` handlers, so Kotlin emits no `Intrinsics.checkNotNullParameter` and JAX-RS's null
+     * for an ABSENT header flowed straight in. `Consent-ID` then reached `InitiatePaymentCommand`
+     * as null, and `idempotencyKey.isBlank()` threw NPE — so the guard below answered 500 in
+     * exactly the case it was written for, while a BLANK header correctly gave 400.
+     */
     private suspend fun initiatePayment(
         payment: Any,
-        consentId: String,
-        idempotencyKey: String,
+        consentId: String?,
+        idempotencyKey: String?,
         product: PaymentProduct,
         ctx: ContainerRequestContext,
     ): Response {
         val tppId = ctx.getProperty("tppId") as? String ?: return tppMissing()
-        if (idempotencyKey.isBlank()) throw Psd2RequestFormatException("Idempotency-Key header is required")
+        if (consentId.isNullOrBlank()) throw Psd2RequestFormatException("Consent-ID header is required")
+        if (idempotencyKey.isNullOrBlank()) throw Psd2RequestFormatException("Idempotency-Key header is required")
 
         val cacheKey = paymentCreateKey(tppId, product, idempotencyKey)
         idempotencyStore.get(cacheKey)?.let { cached ->

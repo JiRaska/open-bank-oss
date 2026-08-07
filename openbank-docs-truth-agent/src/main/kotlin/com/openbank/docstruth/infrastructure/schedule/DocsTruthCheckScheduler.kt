@@ -7,11 +7,15 @@ package com.openbank.docstruth.infrastructure.schedule
 
 import com.openbank.docstruth.application.port.incoming.RunDocsTruthCheckUseCase
 import com.openbank.docstruth.domain.model.RunTrigger
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.libs.temporal.TemporalConfig
 import io.quarkus.scheduler.Scheduled
+import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.jboss.logging.Logger
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -44,8 +48,17 @@ class DocsTruthCheckScheduler {
     @Inject
     lateinit var temporalConfig: TemporalConfig
 
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+
     private val log = Logger.getLogger(DocsTruthCheckScheduler::class.java)
     private val fires = AtomicLong(0)
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    @PostConstruct
+    fun registerLiveness() {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
 
     /**
      * How many times the cron has actually fired in this pod.
@@ -67,6 +80,12 @@ class DocsTruthCheckScheduler {
             return
         }
         val workflowId = runCheck.startDetached(RunTrigger.SCHEDULED)
+        liveness?.recordSuccess()
         log.infof("Scheduled docs-truth-agent sweep dispatched as workflow %s", workflowId)
+    }
+
+    private companion object {
+        const val WORKFLOW_NAME = "docs-truth-check"
+        val EXPECTED_INTERVAL: Duration = Duration.ofDays(7)
     }
 }

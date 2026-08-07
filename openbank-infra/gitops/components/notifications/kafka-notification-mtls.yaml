@@ -3,8 +3,9 @@
 # secret is projected into `notifications` via ExternalSecret (kafka-messaging-certs
 # ClusterSecretStore). The cluster-CA truststore is shared and also projected.
 #
-# ACLs: notification-service is a pure consumer — it reads from two topics using
-# two separate consumer groups. No Write grants needed.
+# ACLs: notification-service reads from two topics using two separate consumer
+# groups, and — since ADR-0239 D2 — WRITES delivery outcomes onto one topic. That
+# Write grant is the whole of its producer surface; it is not a general producer.
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
@@ -35,6 +36,14 @@ spec:
           name: openbank.party.events
           patternType: literal
         operations: [Read, Describe]
+        host: "*"
+      # ADR-0239 D2: emit delivery outcomes so a producer can tell an accepted handoff
+      # from a delivered, suppressed or failed message (issue #3663).
+      - resource:
+          type: topic
+          name: openbank.notification.outcomes.v1
+          patternType: literal
+        operations: [Write, Describe]
         host: "*"
       - resource:
           type: group

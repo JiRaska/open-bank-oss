@@ -5,9 +5,12 @@
 package com.openbank.campaign.infrastructure.rest
 
 import com.openbank.campaign.application.usecase.CampaignService
+import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.SegmentRef
+import com.openbank.campaign.domain.model.StepCondition
+import com.openbank.campaign.domain.model.StopCondition
 import com.openbank.libs.authz.Authorize
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
@@ -16,6 +19,7 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.jwt.JsonWebToken
+import java.time.Instant
 import java.util.UUID
 
 data class CreateCampaignRequest(
@@ -24,13 +28,50 @@ data class CreateCampaignRequest(
     val segmentName: String,
     val segmentVersion: Int,
     val steps: List<StepRequest>,
+    val stopCondition: StopConditionRequest? = null,
+    /** ADR-0245 D1: a ConversionCatalog key, or absent to measure no conversion. */
+    val conversionRule: String? = null,
+    /** Absent means one-shot: enrolment happens only on POST /{id}/enrol, as it always has. */
+    val schedule: ScheduleRequest? = null,
+    /**
+     * A TriggerCatalog key, or absent. When set, a matching product event enrols a party at once —
+     * but only one the segment still contains: the trigger decides when, the segment decides who.
+     */
+    val trigger: String? = null,
 )
 
+/** Optional on create (ADR-0200 D1, #3585): absent means the journey runs every step, as before. */
+data class StopConditionRequest(val maxSendsPerParty: Int)
+
+/**
+ * A recurring campaign's cadence.
+ *
+ * [cadence] is a `ScheduleCatalog` key, never a cron expression — the expression and its time zone
+ * live in domain code, so a malformed one cannot be posted and a campaign cannot quietly acquire a
+ * schedule that never fires. `GET /api/v1/campaigns/cadences` lists what may be sent here.
+ *
+ * The schedule is stored on the draft and only becomes a live Temporal schedule at activation, so a
+ * campaign cannot enrol anyone before it has passed four-eyes.
+ */
+data class ScheduleRequest(val cadence: String, val endAt: Instant? = null)
+
+/**
+ * A step on the create body.
+ *
+ * [channel] defaults to EMAIL so every body written before PUSH existed keeps its meaning. It was
+ * absent entirely until #3584's PUSH support was reachable only from the domain: the resource
+ * hardcoded `Channel.EMAIL`, so the openapi enum documented a value no caller could ever select.
+ * Validation is the [CampaignStep] init invariant — the template's catalogue channel must agree
+ * with the step channel — not a second edge-level check that could drift from it.
+ */
 data class StepRequest(
     val order: Int,
     val template: String,
+    val channel: Channel = Channel.EMAIL,
     val variables: Map<String, String> = emptyMap(),
     val delaySeconds: Long = 0,
+    /** Optional branch condition (ADR-0200 D1, #3585). Absent means the step always runs. */
+    val condition: StepCondition? = null,
 )
 
 /**
@@ -83,7 +124,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
     suspend fun create(request: CreateCampaignRequest): Response {
         val createdBy = jwt.principalName()
         val steps = request.steps.map {
-            CampaignStep(it.order, it.template, Channel.EMAIL, it.variables, it.delaySeconds)
+            CampaignStep(it.order, it.template, it.channel, it.variables, it.delaySeconds, it.condition)
         }
         val campaign = service.createDraft(
             request.name,
@@ -91,6 +132,10 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
             SegmentRef(request.segmentName, request.segmentVersion),
             steps,
             createdBy,
+            request.stopCondition?.let { StopCondition(it.maxSendsPerParty) },
+            request.conversionRule,
+            request.schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
+            request.trigger,
         )
         return Response.status(Response.Status.CREATED).entity(campaign).build()
     }

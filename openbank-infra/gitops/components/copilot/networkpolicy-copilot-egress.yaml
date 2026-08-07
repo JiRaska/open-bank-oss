@@ -49,6 +49,31 @@ spec:
       ports:
         - protocol: TCP
           port: 6379
+    # Same-namespace dependency: the single-owner CNPG conversation-history store
+    # (copilot-db-rw:5432, postgres.yaml). This rule was MISSING from the day this
+    # allow-list was written, and this policy is Egress default-deny, so every pod carrying
+    # the #3710 conversation store has been unable to open its own database: Flyway logs
+    # `Connection error: The connection attempt failed. (Caused by Connect timed out)` on a
+    # loop and the pod never goes Ready. Selecting by the CNPG-owned `cnpg.io/cluster` label
+    # rather than `podSelector: {}` keeps the rule to this one dependency instead of opening
+    # the whole namespace (issue #3881).
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: copilot-db
+      ports:
+        - protocol: TCP
+          port: 5432
+    # PARTY_ERASED consumer → Strimzi broker on the mTLS listener (ADR-0137). Without this
+    # rule the KafkaUser and the mounted certificate are equally inert: the consumer would
+    # authenticate against a broker it cannot reach.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: messaging
+      ports:
+        - protocol: TCP
+          port: 9093
     # Customer JWT verification (Keycloak JWKS / metadata).
     - to:
         - namespaceSelector:

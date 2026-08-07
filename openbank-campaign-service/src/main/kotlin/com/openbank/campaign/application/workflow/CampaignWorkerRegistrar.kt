@@ -20,6 +20,7 @@ class CampaignWorkerRegistrar(
     private val taskQueue: String,
     private val workflowClient: WorkflowClient,
     private val activities: CampaignJourneyActivitiesImpl,
+    private val sweepActivities: CampaignEnrolmentSweepActivitiesImpl,
 ) {
 
     private val log = Logger.getLogger(CampaignWorkerRegistrar::class.java)
@@ -33,8 +34,15 @@ class CampaignWorkerRegistrar(
         log.infof("Registering Temporal worker on task queue '%s'", taskQueue)
         val factory = WorkerFactory.newInstance(workflowClient)
         val worker = factory.newWorker(taskQueue)
-        worker.registerWorkflowImplementationTypes(CampaignJourneyWorkflowImpl::class.java)
-        worker.registerActivitiesImplementations(activities)
+        // Both workflow types share this queue. A schedule can only start a workflow, so an
+        // unregistered sweep type would leave the schedule firing into a queue nobody serves —
+        // Temporal would record the start and the run would time out, which reads as a scheduling
+        // problem rather than a missing registration.
+        worker.registerWorkflowImplementationTypes(
+            CampaignJourneyWorkflowImpl::class.java,
+            CampaignEnrolmentSweepWorkflowImpl::class.java,
+        )
+        worker.registerActivitiesImplementations(activities, sweepActivities)
         factory.start()
         log.infof("Temporal worker started on task queue '%s'", taskQueue)
     }
