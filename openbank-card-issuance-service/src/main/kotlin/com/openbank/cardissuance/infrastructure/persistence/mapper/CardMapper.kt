@@ -15,6 +15,8 @@ fun CardEntity.toDomain() = Card(
     dailyLimitMinorUnits = dailyLimitMinorUnits, monthlyLimitMinorUnits = monthlyLimitMinorUnits,
     currency = currency, deliveryAddress = deliveryAddress,
     activatedAt = activatedAt, blockedAt = blockedAt, blockedReason = blockedReason,
+    expiresAt = expiresAt,
+    closedReason = closedReason?.let { r -> runCatching { CardClosedReason.valueOf(r) }.getOrNull() },
     createdAt = createdAt, updatedAt = updatedAt,
     contactlessEnabled = contactlessEnabled, onlineEnabled = onlineEnabled,
     atmEnabled = atmEnabled, abroadEnabled = abroadEnabled,
@@ -45,6 +47,8 @@ fun Card.toEntity() = CardEntity().also { e ->
     e.activatedAt = activatedAt
     e.blockedAt = blockedAt
     e.blockedReason = blockedReason
+    e.expiresAt = expiresAt
+    e.closedReason = closedReason?.name
     e.createdAt = createdAt
     e.updatedAt = updatedAt
     e.panEncrypted = panEncrypted

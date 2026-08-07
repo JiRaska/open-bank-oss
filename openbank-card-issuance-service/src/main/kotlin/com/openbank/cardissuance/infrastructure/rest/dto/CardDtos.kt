@@ -56,6 +56,10 @@ data class CardResponse(
     val onlineEnabled: Boolean = true,
     val atmEnabled: Boolean = true,
     val abroadEnabled: Boolean = true,
+    /** SINGLE_USE only: when the card stops being usable even if never presented. */
+    val expiresAt: Instant? = null,
+    /** Why the card reached a terminal status; null while it is alive. */
+    val closedReason: CardClosedReason? = null,
 )
 
 fun Card.toResponse() = CardResponse(
@@ -64,6 +68,7 @@ fun Card.toResponse() = CardResponse(
     dailyLimitMinorUnits, monthlyLimitMinorUnits, currency, deliveryAddress,
     activatedAt, blockedAt, blockedReason, createdAt, updatedAt,
     contactlessEnabled, onlineEnabled, atmEnabled, abroadEnabled,
+    expiresAt, closedReason,
 )
 
 /**
