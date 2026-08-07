@@ -1564,6 +1564,27 @@ gates:
     run: |
       bash .github/scripts/resolve-record-deployment-version.sh --self-test
 
+  # The other half of every other gate in this file. All 117 gates here read committed text,
+  # because that is what CI can see; this one compares that text to what the cluster actually
+  # does. Only the COMPARISON runs in CI — it is a pure function of (snapshot, repo) and is what
+  # the self-test drives. Collection needs cluster credentials no workflow has yet, so it is
+  # dispatch-only for now (runtime-conformance.yml), the same split check-external-feeds.py uses.
+  #
+  # Falsified before wiring in: the 22-case self-test fails when any comparator is broken, and the
+  # first run against the LIVE estate exposed two defects in the tool itself — libs-runtime's
+  # abstract dispatcher counted as a service, and outbox facts keyed by table name never matched
+  # claims keyed by directory name, so nine real findings were silently skipped. Both are now
+  # self-test cases.
+  - id: runtime-conformance-comparators
+    name: "runtime conformance: claim-vs-cluster comparators (enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/runtime-conformance.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/runtime-conformance.py --self-test
+
   - id: pact-provider-replay-coverage
     name: "Pact provider-replay coverage (issue #2338, enforced)"
     group: api
