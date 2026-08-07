@@ -9,6 +9,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.CampaignRepository
+import com.openbank.campaign.application.port.out.ConversionContext
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.port.out.SendLogRepository
@@ -70,6 +71,10 @@ class CampaignEntity : PanacheEntityBase() {
     // reason as stepsJson.
     @Column(columnDefinition = "text")
     var stopConditionJson: String? = null
+
+    /** ADR-0245 D1: a catalogue key, not a serialised rule — the rule itself lives in code. */
+    @Column(length = 64)
+    var conversionRule: String? = null
 
     @Column(nullable = false)
     lateinit var state: String
@@ -190,6 +195,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         segmentVersion = this@toEntity.segmentRef.version
         stepsJson = mapper.writeValueAsString(this@toEntity.steps)
         stopConditionJson = this@toEntity.stopCondition?.let { mapper.writeValueAsString(it) }
+        conversionRule = this@toEntity.conversionRule
         state = this@toEntity.state.name
         createdBy = this@toEntity.createdBy
         approvedBy = this@toEntity.approvedBy
@@ -204,6 +210,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         segmentRef = SegmentRef(segmentName, segmentVersion),
         steps = mapper.readValue<List<CampaignStep>>(stepsJson),
         stopCondition = stopConditionJson?.let { mapper.readValue<StopCondition>(it) },
+        conversionRule = conversionRule,
         state = CampaignState.valueOf(state),
         createdBy = createdBy,
         approvedBy = approvedBy,
@@ -268,6 +275,15 @@ class PanacheEnrolmentRepository :
 }
 
 @ApplicationScoped
+/**
+ * Detekt caps a class at 11 functions and fires AT the threshold, which this repository now sits on.
+ * Suppressed rather than split: the count is ten interface methods plus one private query helper,
+ * and the helper cannot move out of the class because it calls Panache's `find`. Splitting the
+ * INTERFACE to satisfy a lint rule would fragment one aggregate's persistence across two ports for
+ * no reader's benefit. If a twelfth method is ever needed, that is the moment to ask whether the
+ * send log is really one thing.
+ */
+@Suppress("TooManyFunctions")
 class PanacheSendLogRepository :
     SendLogRepository,
     PanacheRepository<SendLogEntity> {
@@ -422,6 +438,21 @@ class PanacheSendLogRepository :
             SendOutcome.SKIPPED_CONDITION.name,
         ).firstResult<SendLogEntity>()
     }.awaitSuspending()?.let { DeliveryStatus.valueOf(it.deliveryStatus) }
+
+    override suspend fun conversionContextFor(campaignId: UUID, partyId: UUID): ConversionContext =
+        Panache.withSession {
+            find(
+                "campaignId = ?1 and partyId = ?2 and outcome in ?3 order by occurredAt asc",
+                campaignId,
+                partyId,
+                listOf(SendOutcome.SENT.name, SendOutcome.CONVERTED.name),
+            ).list<SendLogEntity>().map { rows ->
+                ConversionContext(
+                    firstSentAt = rows.firstOrNull { it.outcome == SendOutcome.SENT.name }?.occurredAt,
+                    alreadyConverted = rows.any { it.outcome == SendOutcome.CONVERTED.name },
+                )
+            }
+        }.awaitSuspending()
 
     override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID): Int = Panache.withSession {
         count(

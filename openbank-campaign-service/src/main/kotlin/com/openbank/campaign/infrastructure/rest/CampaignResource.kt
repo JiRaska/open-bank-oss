@@ -27,6 +27,8 @@ data class CreateCampaignRequest(
     val segmentVersion: Int,
     val steps: List<StepRequest>,
     val stopCondition: StopConditionRequest? = null,
+    /** ADR-0245 D1: a ConversionCatalog key, or absent to measure no conversion. */
+    val conversionRule: String? = null,
 )
 
 /** Optional on create (ADR-0200 D1, #3585): absent means the journey runs every step, as before. */
@@ -110,6 +112,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
             steps,
             createdBy,
             request.stopCondition?.let { StopCondition(it.maxSendsPerParty) },
+            request.conversionRule,
         )
         return Response.status(Response.Status.CREATED).entity(campaign).build()
     }
