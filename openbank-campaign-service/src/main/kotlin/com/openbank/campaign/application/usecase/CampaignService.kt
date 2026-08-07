@@ -12,6 +12,7 @@ import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
+import com.openbank.campaign.domain.model.ConversionCatalog
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.SegmentRef
@@ -54,9 +55,16 @@ class CampaignService(
         steps: List<CampaignStep>,
         createdBy: String,
         stopCondition: StopCondition? = null,
+        conversionRule: String? = null,
     ): Campaign {
         val segment = segments.load(segmentRef.name, segmentRef.version)
             ?: throw NoSuchElementException("segment ${segmentRef.name}@${segmentRef.version} not found")
+        // Rejected here rather than at the consumer: a campaign carrying a key nobody watches would
+        // be approved, run, and report nothing, and the first person to notice would be whoever
+        // asked why it converted zero people (ADR-0245 D1).
+        require(conversionRule == null || ConversionCatalog.exists(conversionRule)) {
+            "unknown conversion rule '$conversionRule' — must be one of ${ConversionCatalog.ALL.keys.sorted()}"
+        }
         val campaign = Campaign(
             id = Ids.newId(),
             name = name,
@@ -64,6 +72,7 @@ class CampaignService(
             segmentRef = SegmentRef(segment.name, segment.version),
             steps = steps.sortedBy { it.order },
             stopCondition = stopCondition,
+            conversionRule = conversionRule,
             state = CampaignState.DRAFT,
             createdBy = createdBy,
             approvedBy = null,

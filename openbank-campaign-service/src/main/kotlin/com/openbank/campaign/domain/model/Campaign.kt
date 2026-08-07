@@ -20,6 +20,12 @@ data class Campaign(
     val segmentRef: SegmentRef,
     val steps: List<CampaignStep>,
     val stopCondition: StopCondition? = null,
+    /**
+     * Catalogue key from [ConversionCatalog], or null (ADR-0245 D1). Null is the honest resting
+     * state: a campaign with no rule reports no conversions, which is different from — and must
+     * never be rendered as — a campaign that converted nobody.
+     */
+    val conversionRule: String? = null,
     val state: CampaignState,
     val createdBy: String,
     val approvedBy: String?,

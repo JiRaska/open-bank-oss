@@ -31,6 +31,10 @@ class NotificationOutcomeConsumerTest {
     private class Applied(val sendId: UUID, val outcome: String, val reason: String?, val occurredAt: Instant)
 
     private class RecordingSendLog : SendLogRepository {
+        // ADR-0245: this fake asserts nothing about conversion, so nothing ever converted.
+        override suspend fun conversionContextFor(campaignId: java.util.UUID, partyId: java.util.UUID) =
+            com.openbank.campaign.application.port.out.ConversionContext(null, false)
+
         val applied = mutableListOf<Applied>()
         var throwOnApply: RuntimeException? = null
 

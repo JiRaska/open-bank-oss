@@ -39,6 +39,16 @@ data class CampaignOutcomeCount(val campaignId: UUID, val outcome: SendOutcome, 
 /** How many parties are enrolled in one campaign (issue #3296). */
 data class CampaignEnrolmentCount(val campaignId: UUID, val count: Long)
 
+/**
+ * @param firstSentAt when this campaign first actually sent to the party, or null if it never has.
+ *   The attribution window is measured from here rather than from enrolment: a party can sit
+ *   enrolled for days behind a delay or a quiet-hours suppression, and counting that time would
+ *   credit a campaign for a decision it had not yet contributed to.
+ * @param alreadyConverted whether a CONVERTED row exists. Kafka is at-least-once, and a party who
+ *   opens two accounts converted the campaign once.
+ */
+data class ConversionContext(val firstSentAt: Instant?, val alreadyConverted: Boolean)
+
 interface SendLogRepository {
     suspend fun record(send: SendRecord)
     suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long): Int
@@ -49,6 +59,15 @@ interface SendLogRepository {
      * party's cap covers every send the campaign ever made to them.
      */
     suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID): Int
+
+    /**
+     * Everything attribution needs about one party in one campaign, in one query (ADR-0245 D2).
+     *
+     * Deliberately one call rather than two: the consumer asks both questions about the same row
+     * set, and splitting them invites a caller to check one and forget the other — the forgotten
+     * one being idempotency, whose absence is invisible until Kafka redelivers.
+     */
+    suspend fun conversionContextFor(campaignId: UUID, partyId: UUID): ConversionContext
 
     /**
      * The delivery status of the most recent send to [partyId] in [campaignId] at a step BELOW

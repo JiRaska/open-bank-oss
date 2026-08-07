@@ -83,6 +83,10 @@ class CampaignJourneyActivitiesTest {
             override suspend fun save(enrolment: Enrolment) = enrolment
         }
         val sendLog = object : SendLogRepository {
+            // ADR-0245: this fake asserts nothing about conversion, so nothing ever converted.
+            override suspend fun conversionContextFor(campaignId: java.util.UUID, partyId: java.util.UUID) =
+                com.openbank.campaign.application.port.out.ConversionContext(null, false)
+
             override suspend fun record(send: SendRecord) {
                 recorded += send
             }
