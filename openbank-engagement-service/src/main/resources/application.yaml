@@ -62,6 +62,13 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
 
 "%test":
+  # SurfaceResource's two endpoints are @Authorize-annotated, and `authz.enforce` carries
+  # defaultValue = "true" in AuthorizeInterceptor — so under @QuarkusTest, with no OPA PDP
+  # bean in the graph, every one of them answers 503 and SurfaceRestContractIT's
+  # `statusCode(200)` fails. Advisory in tests only; the deployed posture is unchanged and
+  # is decided by the sidecar wired in #4068.
+  authz:
+    enforce: false
   quarkus:
     management:
       enabled: false

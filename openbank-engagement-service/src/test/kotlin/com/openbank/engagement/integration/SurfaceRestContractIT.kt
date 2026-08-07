@@ -11,6 +11,7 @@ import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import io.quarkus.test.security.TestSecurity
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -50,6 +51,7 @@ class SurfaceRestContractIT {
     }
 
     @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
     fun `an eligible party sees the catalogued banner`() {
         StubConsentCheckPort.granted.set(true)
         val body = getBanner(UUID.randomUUID())
@@ -59,6 +61,7 @@ class SurfaceRestContractIT {
     }
 
     @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
     fun `a party without marketing consent is not_eligible, not an empty list`() {
         StubConsentCheckPort.granted.set(false)
         val body = getBanner(UUID.randomUUID())
@@ -67,6 +70,7 @@ class SurfaceRestContractIT {
     }
 
     @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
     fun `three posted dismissals suppress the next resolve for that party and slot`() {
         StubConsentCheckPort.granted.set(true)
         val party = UUID.randomUUID()
@@ -88,6 +92,7 @@ class SurfaceRestContractIT {
     }
 
     @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
     fun `an unknown slot is a 400, not a 500 or a silent empty result`() {
         Given {
             queryParam("partyId", UUID.randomUUID().toString())
@@ -96,5 +101,10 @@ class SurfaceRestContractIT {
         } Then {
             statusCode(400)
         }
+    }
+
+    private companion object {
+        /** Any stable principal id: the endpoints gate on the ROLE, not on this value. */
+        const val TEST_OPERATOR = "00000000-0000-0000-0000-000000000099"
     }
 }
