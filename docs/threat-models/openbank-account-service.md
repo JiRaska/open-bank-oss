@@ -86,6 +86,21 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-07** — No trust boundary moved: the `sanctions-service` and `product-catalog`
+  rest-client **defaults** in `application.yaml` were changed from `http://openbank-sanctions-service:8123`
+  and `http://openbank-product-catalog:8080` to `http://localhost:8123` / `http://localhost:8104`
+  (issue #3931). Neither `openbank-` name is a Service in any namespace, and the product-catalog
+  port was wrong as well (the Service is `product-catalog:8104` in `accounts`). **These defaults
+  were dead in every deployed environment** — the account-service Deployment sets
+  `SANCTIONS_SERVICE_URL` and `PRODUCT_CATALOG_SERVICE_URL` (the latter at the KEDA HTTP
+  interceptor, with `PRODUCT_CATALOG_API_HOST_OVERRIDE`) — so no deployed request path changes,
+  and both edges keep their existing postures (sanctions fails **closed**, product-catalog fails
+  **open**, §6 2026-07-09 and 2026-06-06 entries). The change matters for local dev, where the
+  screening gate previously failed closed against a name that could never resolve, and it clears
+  the last findings blocking `incluster-hostname-resolution` from `mode: advisory` to `enforced`.
+  Sibling services on the same edges (`fx`, `kyc`, `sepa-payment`, `billing`, `document-service`)
+  already used these localhost defaults; account-service was the outlier.
+
 - **2026-07-09** — Account opening validates against product-catalog (ADR-0158, issue #668).
   New outbound trust boundary: `account-service → product-catalog` (`GET /api/v1/products/{id}`,
   unauthenticated, sync). `openAccount` now rejects a `productId` product-catalog confirms does
