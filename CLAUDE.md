@@ -263,6 +263,21 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   literal `quarkus.datasource.jdbc.url` in the file, since Flyway migrates the DEFAULT (Agroal/JDBC)
   datasource and a service that only boots because the env supplied one cannot start from this repo
   alone (#3080).
+- **Two branches can claim the SAME migration version and git will never say so.** The version is
+  the *filename prefix*, so `V10__delegated_action_index.sql` on a branch and `V10__hash_version.sql`
+  on main are different files: the merge is textually clean, nothing conflicts, and the service then
+  refuses to boot with `FlywayException: Found more than one migration with version 10`. Renumber to
+  the next free version — safe only while the migration has never been applied, since after that the
+  checksum rule above forbids touching it. The trap is what the failure HIDES: Quarkus cannot start,
+  so every `@QuarkusTest` integration test in the module reports as **SKIPPED**, and the module reads
+  `73 tests / 10 skipped / 0 failures` — which scans as a pass, because the number anyone looks at is
+  the failure count. After the fix it was `73 / 0 / 0`: ten integration tests had silently stopped
+  running. Generalize past Flyway: **after merging main into a branch, build and test the merged
+  result and read the SKIPPED count, not just failures.** The collisions to expect are shared
+  *namespaces* rather than shared lines — migration versions, enum and `@Id` values, JSON/YAML map
+  keys, and the constructor or field shape of any class a test instantiates by hand (a `lateinit`
+  added upstream fails every such test at once). Sibling of the multi-agent note that a clean merge
+  can silently DELETE a list entry: same cause, git merges text and not meaning, opposite direction.
 
 ### Contract tests (Pact)
 - **One BROKER-sourced `@Provider` test per provider.** Two verification classes with the same
