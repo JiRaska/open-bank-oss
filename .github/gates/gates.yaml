@@ -1290,16 +1290,27 @@ gates:
   # says in place that registering an operator write without it "is a money-path outage, not
   # a test failure".
   #
-  # ADVISORY, deliberately and temporarily. The script has no --enforce flag and exits 1 on
-  # the current tree with one real finding (`operator-mcp-session` in the shared rest.rego
-  # grants on ROLE_OPERATOR/ROLE_ADMIN without pinning input.principal.id). Registering it
-  # enforced would break main on a defect this PR is not fixing; registering it advisory is
-  # what makes that defect visible at all. Graduate to enforced once the finding is closed —
-  # tracked on #3240.
+  # GRADUATED TO ENFORCED by this PR, which is what the advisory note below asked for. It read:
+  # "Graduate to enforced once the finding is closed — tracked on #3240." The finding was
+  # `operator-mcp-session` granting on ROLE_OPERATOR/ROLE_ADMIN without pinning
+  # input.principal.id; this PR closes it with the `service-account-` exclusion, and clears the
+  # two stale BASELINE entries (operator-fx-approval-decide, operator-fx-trigger) that had
+  # accumulated meanwhile. Measured: origin/main exits 1 (1 new + 2 stale), this branch exits 0.
+  #
+  # `mode:` is the whole enforcement, and the run line deliberately does NOT pass --enforce.
+  # That is the ratchet: a NEW escaping rule and a STALE baseline entry each `return 1`
+  # unconditionally, so enforced blocks them, while today's 5 baselined rules print a warning
+  # and exit 0 so the debt can be worked down per rule. Passing --enforce would instead fail on
+  # the debt itself and make the gate unmergeable — a different lever, kept but not wired here.
+  #
+  # Advisory was doing less than it looked: those two `return 1` paths already existed, and
+  # `mode: advisory` converts a script's exit 1 into a warning at the runner. So a brand-new
+  # operator write escaping the prohibition was DETECTED and not blocked, on a rule whose own
+  # text says registering one without it "is a money-path outage, not a test failure".
   - id: operator-write-naming
-    name: "operator-write naming vs. shared-M2M prohibition (GHSA-58jq-9hq3-66jr, advisory)"
+    name: "operator-write naming vs. shared-M2M prohibition (GHSA-58jq-9hq3-66jr, enforced)"
     group: registry
-    mode: advisory
+    mode: enforced
     run: |
       python3 .github/scripts/check-operator-write-naming.py
 
