@@ -64,7 +64,11 @@ on:
   workflow_dispatch:
     inputs:
       services:
-        description: "Space-separated module(s) to rebuild, e.g. 'openbank-party-service'. Blank = full deployable fleet."
+        description: >-
+          Space-separated module(s) to rebuild, e.g. 'openbank-party-service'. Must be services
+          that changed in the current HEAD (or are dependents of a changed shared library).
+          Leave blank only when reconcile=true; a blank manual dispatch of the full fleet is
+          not allowed because it creates NOT_ASKED / missing-pact failures (#3318).
         required: false
         default: ""
       codeploy:
@@ -75,6 +79,16 @@ on:
           currently-deployed counterpart. Use ONLY with the exact set the gate named as a
           CO-DEPLOY SET; on any other input it is a strictly weaker check, because it stops
           asking about the services deployed alongside them.
+        type: boolean
+        required: false
+        default: false
+      reconcile:
+        description: >-
+          Run the scheduled reconcile logic immediately (issue #2020). Instead of building the
+          listed services at the current HEAD, re-drive every stranded service to the correct
+          per-service commit, using the same logic as the every-3h schedule tick. This is the
+          safe way to recover stale gitops tags when the current HEAD did not change those
+          services. When reconcile is true, `services` is ignored and `codeploy` is not used.
         type: boolean
         required: false
         default: false
@@ -177,13 +191,72 @@ jobs:
             # keeps them agreeing (#1205).
             ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-delegation-service'
 
-          # Manual dispatch: rebuild the requested module(s), or the full deployable
-          # fleet when no input is given. Only services that actually carry a gitops
-          # manifest (an image:sandbox- pin) are eligible — the same filter the
-          # per-push path applies below. Lets ops recover stale image tags on demand.
+          # Which files changed in this push (compare to the parent commit). We compute this
+          # early because the workflow_dispatch guard below also needs to know which services
+          # changed in the current HEAD, so an operator cannot accidentally request services
+          # from an unrelated commit that has no pact versions in the broker (#3318, #3454).
+          CHANGED_FILES="$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD 2>/dev/null)"
+
+          # Shared paths that affect every service. Governance catalogs
+          # (openbank-libs/governance/) are excluded — they are data for CI
+          # checks + admin-ui, not a compile input, so a mixed push touching a
+          # control catalog and one service must rebuild ONE service, not 33.
+          # NB: here-string, not `echo | grep -q` — under pipefail a -q early
+          # exit SIGPIPEs the echo and the match is racily mis-read as false
+          # (same footgun documented in services-ci.yml).
+          CODE_FILES="$(grep -vE '^openbank-libs/governance/' <<< "$CHANGED_FILES" || true)"
+
+          # Services to rebuild because a SHARED library changed, derived from the
+          # `project(":openbank-libs-*")` declarations in each consumer's build.gradle.kts
+          # (issue #2983). The old shape was a hardcoded path regex naming only openbank-libs,
+          # -domain and -runtime, so the ADR-0122 siblings matched NOTHING: #2949 fixed the
+          # Temporal payload converter and rebuilt zero consumers, leaving fx-service and
+          # statement-service running pre-fix images while their pods read green.
+          #
+          # Deriving it also narrows the blast radius rather than widening it: a libs-temporal
+          # change rebuilds its 16 consumers, not the whole fleet, and libs-testing
+          # (testImplementation everywhere) rebuilds nobody.
+          LIBS_DEPENDENTS="$(printf '%s\n' "$CODE_FILES" \
+            | bash .github/scripts/libs-change-dependents.sh "$ALL_SERVICES")"
+
+          # Services changed directly in this push.
+          DIRECT_SERVICES=()
+          for svc in $ALL_SERVICES; do
+            if grep -qE "^${svc}/(src/main|build\.gradle\.kts)" <<< "$CHANGED_FILES"; then
+              DIRECT_SERVICES+=("$svc")
+            fi
+          done
+
+          # Manual dispatch: rebuild the requested module(s), or run the scheduled reconcile
+          # logic immediately. Without reconcile=true, a manual dispatch must target services
+          # that changed in the current HEAD; dispatching arbitrary services from an unrelated
+          # commit leaves the contract gate with no pact version for this SHA and produces the
+          # wasted runs / NOT_ASKED failures behind #3318 / #3454.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            CANDIDATES="${{ github.event.inputs.services }}"
-            CANDIDATES="${CANDIDATES:-$ALL_SERVICES}"
+            # Reconcile on demand: use the same logic as the schedule tick, which picks the
+            # correct per-service commit instead of forcing everything onto the current HEAD.
+            if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
+              SERVICES_JSON="$(RECONCILE_SERVICES="$ALL_SERVICES" \
+                bash .github/scripts/auto-deploy-reconcile-lag.sh)"
+              if [ "$SERVICES_JSON" = "[]" ] || [ -z "$SERVICES_JSON" ]; then
+                echo "Reconcile: every deployable service is up to date."
+                echo "services=[]" >> "$GITHUB_OUTPUT"
+                echo "any=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "workflow_dispatch (reconcile) → re-driving stranded services: $SERVICES_JSON"
+              echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
+              echo "any=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            REQUESTED="${{ github.event.inputs.services }}"
+            if [ -z "$REQUESTED" ]; then
+              echo "::error::workflow_dispatch with empty services is only allowed when reconcile=true. A blank manual dispatch of the full fleet at an unrelated commit creates the NOT_ASKED / missing-pact failures seen in runs 31149468822 and 31150052893. Use reconcile=true to re-drive stranded services, or list explicit services that changed in the current HEAD."
+              exit 1
+            fi
+
+            CANDIDATES="$REQUESTED"
             DEPLOYABLE=()
             for svc in $CANDIDATES; do
               if grep -rlq "${svc}:sandbox-" openbank-infra/gitops/components 2>/dev/null; then
@@ -198,6 +271,23 @@ jobs:
               echo "any=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
+
+            # Guard: every manually requested service must have changed in the current HEAD,
+            # or be a consumer of a changed shared library. Dispatching a service that did not
+            # change in this commit means the broker has no pact version for this SHA, which the
+            # contract gate rightfully refuses (#3318), and the build is wasted work.
+            CHANGED_SET="$( { printf '%s\n' "${DIRECT_SERVICES[@]+"${DIRECT_SERVICES[@]}"}"; printf '%s\n' "$LIBS_DEPENDENTS"; } | grep -v '^$' | sort -u )"
+            GUARD_FAILED=0
+            for svc in "${DEPLOYABLE[@]}"; do
+              if ! grep -qxF "$svc" <<< "$CHANGED_SET"; then
+                echo "::error::workflow_dispatch requested service ${svc} which did not change in HEAD ($(git rev-parse --short HEAD)) and is not a dependent of a changed shared library. The broker has no pact version for this SHA, so the contract gate will REFUSE. Dispatch from the commit that changed ${svc}, or use reconcile=true to recover the correct per-service commit."
+                GUARD_FAILED=1
+              fi
+            done
+            if [ "$GUARD_FAILED" -ne 0 ]; then
+              exit 1
+            fi
+
             SERVICES_JSON="$(printf '%s\n' "${DEPLOYABLE[@]}" | jq -R . | jq -sc .)"
             echo "workflow_dispatch → building: $SERVICES_JSON"
             echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
@@ -227,41 +317,11 @@ jobs:
             exit 0
           fi
 
-          # Which files changed in this push (compare to the parent commit)?
-          CHANGED_FILES="$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD 2>/dev/null)"
-
-          # Shared paths that affect every service. Governance catalogs
-          # (openbank-libs/governance/) are excluded — they are data for CI
-          # checks + admin-ui, not a compile input, so a mixed push touching a
-          # control catalog and one service must rebuild ONE service, not 33.
-          # NB: here-string, not `echo | grep -q` — under pipefail a -q early
-          # exit SIGPIPEs the echo and the match is racily mis-read as false
-          # (same footgun documented in services-ci.yml).
-          CODE_FILES="$(grep -vE '^openbank-libs/governance/' <<< "$CHANGED_FILES" || true)"
-          # Services to rebuild because a SHARED library changed, derived from the
-          # `project(":openbank-libs-*")` declarations in each consumer's build.gradle.kts
-          # (issue #2983). The old shape was a hardcoded path regex naming only openbank-libs,
-          # -domain and -runtime, so the ADR-0122 siblings matched NOTHING: #2949 fixed the
-          # Temporal payload converter and rebuilt zero consumers, leaving fx-service and
-          # statement-service running pre-fix images while their pods read green.
-          #
-          # Deriving it also narrows the blast radius rather than widening it: a libs-temporal
-          # change rebuilds its 16 consumers, not the whole fleet, and libs-testing
-          # (testImplementation everywhere) rebuilds nobody.
-          LIBS_DEPENDENTS="$(printf '%s\n' "$CODE_FILES" \
-            | bash .github/scripts/libs-change-dependents.sh "$ALL_SERVICES")"
-
-          # Services changed directly in this push.
-          SERVICES=()
-          for svc in $ALL_SERVICES; do
-            if grep -qE "^${svc}/(src/main|build\.gradle\.kts)" <<< "$CHANGED_FILES"; then
-              SERVICES+=("$svc")
-            fi
-          done
-          # ...unioned with the libs consumers, then filtered ONCE on the gitops manifest, so a
+          # Push path: union the services that changed directly in this push with the services
+          # that consume a changed shared library, then filter ONCE on the gitops manifest so a
           # library fan-out cannot try to deploy a service this pipeline has no manifest for.
           DEPLOYABLE=()
-          for svc in $(printf '%s\n' "${SERVICES[@]+"${SERVICES[@]}"}" $LIBS_DEPENDENTS | grep -v '^$' | sort -u); do
+          for svc in $( { printf '%s\n' "${DIRECT_SERVICES[@]+"${DIRECT_SERVICES[@]}"}"; printf '%s\n' "$LIBS_DEPENDENTS"; } | grep -v '^$' | sort -u ); do
             if grep -rlq "${svc}:sandbox-" openbank-infra/gitops/components 2>/dev/null; then
               DEPLOYABLE+=("$svc")
             else
@@ -858,9 +918,12 @@ jobs:
           # the broker whether THOSE versions are mutually compatible. Full reasoning in
           # derive-codeploy-set.py's header. It is a gate, not a bypass — a red verdict
           # deploys nothing — but a DIFFERENT question, so it is opt-in on workflow_dispatch
-          # and never reachable from a push or a scheduled tick.
+          # and never reachable from a push or a scheduled tick. reconcile=true bypasses
+          # co-deploy because the services were already selected by the reconcile script
+          # and may span multiple SHAs.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
-             && [ "${{ github.event.inputs.codeploy }}" = "true" ]; then
+             && [ "${{ github.event.inputs.codeploy }}" = "true" ] \
+             && [ "${{ github.event.inputs.reconcile }}" != "true" ]; then
             CODEPLOY_ARGS=()
             for svc in $(echo "$SERVICES" | jq -r '.[]'); do
               CODEPLOY_ARGS+=(--pacticipant "$svc" --latest main)
