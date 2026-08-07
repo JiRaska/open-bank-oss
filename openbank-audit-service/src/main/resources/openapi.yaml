@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Audit Service API
-  version: 1.5.0
+  version: 1.6.0
   description: Immutable audit trail — retrieve event history per aggregate; verify hash-chain integrity (ADR-0086) and externally-signed anchors (ADR-0031 D5).
   license:
     name: Apache-2.0
@@ -40,6 +40,54 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/AccessLogEntryResponse'
+
+  /api/v1/audit/on-behalf-of/{grantorPartyId}:
+    get:
+      tags: [Audit]
+      summary: Actions taken on behalf of a grantor by their delegates (ADR-0232 D5)
+      description: >-
+        The data behind "what did they do with my account". Returns every audited action
+        whose on-behalf-of party is this grantor — i.e. what a DELEGATE did under a
+        delegation grant the grantor issued. Distinct from
+        `/api/v1/audit/customer/{partyId}`: on a delegated action the grantor is neither
+        the actor nor the aggregate, so that view shows nothing about it.
+
+
+        Same edge-proxy gate and `audit.customerRead` Authorize action as the customer
+        access log; the edge injects the party from the JWT, so a client-supplied id never
+        reaches this path. Projected to metadata only — the grantor is entitled to know
+        that, when and under which grant, not to the raw event payload.
+      operationId: getDelegatedActionsForGrantor
+      parameters:
+        - name: grantorPartyId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: delegatePartyId
+          in: query
+          description: Narrow to one delegate (the actor).
+          schema:
+            type: string
+        - name: delegationId
+          in: query
+          description: Narrow to one delegation grant.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Delegated actions taken on behalf of the grantor, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DelegatedActionEntryResponse'
 
   /api/v1/audit/entries/{aggregateId}:
     get:
@@ -317,6 +365,38 @@ components:
         actorType:
           type: string
           nullable: true
+        sourceService:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+
+    DelegatedActionEntryResponse:
+      type: object
+      description: >-
+        Grantor-facing projection of one delegated action (ADR-0232 D5). Metadata only —
+        the payload is chain-hashed evidence for the auditor-gated routes, not for this view.
+      properties:
+        entryId:
+          type: string
+          format: uuid
+          description: The audit chain entry; usable as `fromEventId` on /api/v1/audit/integrity.
+        eventType:
+          type: string
+        operation:
+          type: string
+          nullable: true
+          description: The customer-facing verb, e.g. `payments.domestic`.
+        delegatePartyId:
+          type: string
+          nullable: true
+          description: Who acted. The actor is the delegate, never the grantor.
+        delegationId:
+          type: string
+          nullable: true
+          description: The grant that permitted the action.
+        resourceType:
+          type: string
         sourceService:
           type: string
         occurredAt:

@@ -18,6 +18,13 @@ export type Grant = {
   id: string
   grantorPartyId: string
   granteePartyId: string
+  /**
+   * Counterparty display names snapshotted onto the grant at offer time (issue #3604). Null on
+   * grants offered before delegation-service carried the field, which is why every render goes
+   * through counterpartyLabel() rather than reading these directly.
+   */
+  grantorName?: string | null
+  granteeName?: string | null
   resourceType: string
   resourceId: string
   capabilities: string[]
@@ -55,6 +62,21 @@ export function DelegationStatusBadge({ status }: { status: string }) {
 export function capabilityLabels(capabilities: string[] | undefined): string {
   if (!capabilities?.length) return '—'
   return capabilities.join(', ')
+}
+
+/**
+ * The label for a counterparty chip (issue #3604).
+ *
+ * Returns `undefined`, never a blank or a placeholder, when the grant carries no snapshotted
+ * name — that is the signal EntityChip needs in order to fall back to its own resolution and
+ * then to a shortened id. An empty string would render as a chip with no text at all, which
+ * looks like a name that failed to load rather than one that was never captured.
+ *
+ * A whitespace-only name is treated as absent for the same reason.
+ */
+export function counterpartyLabel(name: string | null | undefined): string | undefined {
+  const trimmed = name?.trim()
+  return trimmed ? trimmed : undefined
 }
 
 /** A ceiling of `null` means UNCAPPED for that window — never render it as zero. */

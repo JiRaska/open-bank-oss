@@ -106,10 +106,27 @@ allowed_reasons contains "operator-ledger-write" if {
 # no in-repo caller invokes it (it's an operator/admin console-only action) and none ever
 # should, since attesting is a human sign-off by design (four-eyes on the maker/attestor
 # pair is enforced in-service, see YearCloseResource's draftedBy/attestedBy check).
+#
+# The `service-account-` exclusion is what makes the sentence above TRUE. Without it the
+# rule was role-only, and `service-account-openbank-services` — the identity nearly every
+# backend service authenticates as — carries ROLE_OPERATOR in the realm while
+# AuthorizeInterceptor classifies its client_credentials JWT as HUMAN. Measured against
+# this very bundle with `opa eval` (issue #3765): ledger.approve resolved
+# allow=true, reason="operator-year-close-attest" for that principal, so the "NEVER
+# reachable by any SERVICE principal" claim above, and the closing note at the bottom of
+# this file that an un-mapped SERVICE call "403s, by design", were both wrong — three
+# @Authorize sites use this action (YearCloseResource.attest, AccountingDayResource,
+# ClosedPeriodResource), all statutory sign-offs. Excluding, not identity-pinning: there is
+# no legitimate M2M attestor to name — no module outside openbank-ledger-service declares a
+# client for these routes (every fleet Ledger*Client was read; none exposes attest /
+# accounting-day / closed-period). rest.rego's `shared_m2m_write_prohibition` cannot cover
+# this: that register is keyed by reason name, and its data key is not even emitted into
+# the bundles (see gen-rules-opa-data.py's own note), so the veto has never fired anywhere.
 allowed_reasons contains "operator-year-close-attest" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
+	not startswith(input.principal.id, "service-account-")
 	input.action == "ledger.approve"
 }
 
@@ -157,8 +174,17 @@ allowed_reasons contains "service-ledger-reverse" if {
 # ledger.trigger (FX revaluation) and ledger.approve (year-close attest) have NO in-repo
 # M2M caller — the FX revaluation is scheduled in-process (FxRevaluationScheduler) and the
 # ops/backfill re-run endpoint is operator-only; year-close attestation is a human sign-off
-# by design (see operator-year-close-attest above). Neither gets a service-* rule: an
-# un-mapped SERVICE call to either 403s, by design (deny-by-default, no rule added).
+# by design (see operator-year-close-attest above). Neither gets a service-* rule.
+#
+# CORRECTION (#3765): "no rule added" was never sufficient for either. Deny-by-default only
+# holds for an action NO rule reaches, and both of these are reached by a role-only rule the
+# shared M2M identity satisfies — ledger.approve via operator-year-close-attest (now closed
+# by the exclusion above) and ledger.trigger / ledger.replay via operator-ledger-write AND
+# base rest.rego's `matrix-allows`, since rules.yaml grants both to ROLE_OPERATOR. Those two
+# are deliberately NOT closed here: `matrix-allows` is a base-layer reason no per-service ext
+# can veto, so excluding service-accounts from operator-ledger-write alone would remove one
+# of two paths and change nothing. That is issue #3765's decision (a) vs (b), not a
+# per-service edit.
 REGO
 )
 

@@ -60,6 +60,19 @@ quarkus:
     tls:
       verification: none
 
+  # OUTBOUND M2M. `quarkus.oidc` above validates bearers this service RECEIVES; it mints nothing.
+  # Every REST client here (sca, pid, account, card-issuance) targets an @RolesAllowed endpoint,
+  # so without this block the calls carry no Authorization header and 401 — surfacing as the
+  # ownership gate's fail-closed "could not be established", never as an auth problem.
+  # Same shape as party-service / document-service / sdd-service.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+
   smallrye-reactive-messaging:
     kafka:
       bootstrap-servers: localhost:29092
@@ -152,6 +165,10 @@ mp:
     management:
       enabled: false
     oidc:
+      enabled: false
+    # Tests mock every REST client, so nothing needs an outbound token — and leaving this on makes
+    # the test JVM try to reach a Keycloak that is not there. Same as party-service's test profile.
+    oidc-client:
       enabled: false
 
 openbank:

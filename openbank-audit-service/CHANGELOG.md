@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.13.4...audit-service-v0.14.0) (2026-08-07)
+
+
+### Features
+
+* let a delegate pay from a shared account, and audit it as delegated ([#3633](https://github.com/JiRaska/open-bank-oss/issues/3633)) ([568686b](https://github.com/JiRaska/open-bank-oss/commit/568686bfc3ba15e824252f3502b0fddc856c7d37))
+
+## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.13.3...audit-service-v0.13.4) (2026-08-06)
+
+
+### Bug Fixes
+
+* **audit:** record whether occurred_at is event time or ingest time ([#3907](https://github.com/JiRaska/open-bank-oss/issues/3907)) ([b72f57e](https://github.com/JiRaska/open-bank-oss/commit/b72f57eaa7c067bd9c906433ca8fcdfe1fa348fe)), closes [#3883](https://github.com/JiRaska/open-bank-oss/issues/3883)
+
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.13.2...audit-service-v0.13.3) (2026-08-05)
+
+
+### Bug Fixes
+
+* **audit:** let the chain walk cross the rows [#3586](https://github.com/JiRaska/open-bank-oss/issues/3586) could not fix ([#3649](https://github.com/JiRaska/open-bank-oss/issues/3649)) ([ba72389](https://github.com/JiRaska/open-bank-oss/commit/ba723892e11fba1c4eb46366178aa2bb9d644e69)), closes [#3505](https://github.com/JiRaska/open-bank-oss/issues/3505)
+
 ## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.13.1...audit-service-v0.13.2) (2026-08-03)
 
 

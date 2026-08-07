@@ -1,0 +1,92 @@
+# Kafka mTLS identity + ACLs for openbank-copilot-service (ADR-0137, issue #3881).
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# #3875 merged copilot's GDPR Art. 17 erasure path — `PartyErasureConsumer` consumes
+# `PARTY_ERASED` from `openbank.party.events` and hard-deletes that party's conversation
+# history. The consumer, its unit test and the retention sweep all landed and are on main.
+# In the cluster it could not receive a single event: copilot-service had **no KafkaUser,
+# no certificate, no KAFKA_* env and no Kafka manifest of any kind**. The broker runs
+# `authorization: simple` with `allow.everyone.if.no.acl.found=false`, so a workload with no
+# principal is denied outright and the consumer is never invoked. Nothing errors — which is
+# exactly why it survived a merge with every check green. The control existed and was not in
+# force.
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for all of
+# this service's Kafka traffic. The KafkaUser lives in `messaging` (where the Strimzi User
+# Operator watches); the Operator mints a per-user Secret of the same name there, and the
+# ExternalSecret below projects it into `platform`, where copilot-service runs.
+#
+# NOTE — the cluster-CA truststore ExternalSecret is deliberately NOT repeated here.
+# `kafka-cluster-ca-truststore` already exists in `platform`, created by agent-service
+# (components/agent/kafka-agent-mtls.yaml), whose header says in as many words that a second
+# Kafka client in this namespace should SHARE it rather than duplicate it. Two ExternalSecrets
+# with the same `target.name` in one namespace fight over the same Secret. copilot mounts that
+# existing Secret; it declares only its own keystore below.
+#
+# The `eso-kafka-cert-reader` Role in `messaging` grants ESO read access by a hand-kept
+# `resourceNames` list; `copilot-service` is added to it in the same commit as this file
+# (components/payments/kafka-scheme-accepted-acl.yaml). That pairing is enforced —
+# `check-kafka-cert-reader-grant.py` derives its required set from the ExternalSecrets that
+# read this store and fails BOTH ways, so neither half can land alone and there is no
+# exception list to opt into.
+---
+# ── KafkaUser: copilot-service ──────────────────────────────────────────────
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs must land before the platform Deployment rolls pods onto mTLS;
+    # lower waves sync first and ArgoCD blocks on ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: copilot-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      # Consumer-only. copilot produces nothing to Kafka: the erasure path is a pure
+      # consumer, and no Write grant belongs here until something actually writes.
+      - resource:
+          type: topic
+          name: openbank.party.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # Group name must match `group.id` in copilot-service-msg-override.yaml exactly. A
+      # mismatch is a silent GroupAuthorizationException on every poll, not a boot failure.
+      - resource:
+          type: group
+          name: copilot-service-party
+          patternType: literal
+        operations: [Read]
+        host: "*"
+---
+# ── ExternalSecret: copilot-service keystore ────────────────────────────────
+# Projects the Strimzi-minted `copilot-service` Secret from `messaging` into `platform`.
+# `dataFrom.extract` copies every key verbatim, preserving the binary PKCS#12 payload
+# byte-for-byte. deletionPolicy: Retain so a transient store/RBAC blip never deletes a live
+# keystore out from under a running pod.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: copilot-service-kafka-keystore
+  namespace: platform
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: copilot-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: copilot-service

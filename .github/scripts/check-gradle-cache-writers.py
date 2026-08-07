@@ -131,22 +131,33 @@ DECLARED: dict[str, tuple[str, str]] = {
         "Boot probe; builds one service and needs no cross-run Gradle state.",
     ),
     "pitest.yml::pitest": (
-        "setup-java",
-        "Weekly mutation-testing sweep on a schedule. `actions/setup-java` keys its Gradle "
-        "cache on the build files, so it re-uses one entry across runs rather than storing a "
-        "new one per run; it is not part of the per-run churn this budget limits.",
+        "read-only",
+        "Demoted from setup-java. Consumer; restores fleet-lint's home. The setup-java "
+        "keying argument holds better here than for verification-metadata — this is a "
+        "weekly scheduled sweep — but it is still a pure consumer, so reading the entry "
+        "fleet-lint already maintains costs the pool nothing and cannot churn it.",
     ),
     "pact-drift-check.yml::drift-check": (
-        "setup-java",
-        "Same setup-java keying as pitest; regenerates consumer pacts and diffs them.",
+        "read-only",
+        "Demoted from setup-java. Consumer; regenerates consumer pacts and diffs them, and "
+        "restores fleet-lint's home to do it. Runs on PRs, so unlike pitest it is exposed "
+        "to the per-run churn this budget limits.",
     ),
     "services-ci.yml::verification-metadata": (
-        "setup-java",
-        "Same setup-java keying as pitest.",
+        "read-only",
+        "Demoted from setup-java. The shared justification — setup-java keys on the build "
+        "files, so it re-uses one entry rather than storing a new one per run — is FALSE "
+        "here, and measurably so: this job runs only when a module `build.gradle.kts` "
+        "changed, i.e. exactly when the key's own input changed, so an exact-key hit is "
+        "impossible by construction and it stored ~1.1 GB per PR. Measured 2026-08-06: all "
+        "three live `setup-java-Linux-x64-gradle` entries (3.29 GB, 29% of the ceiling) sat "
+        "on PR refs, not one shared entry. Its check also passes `--refresh-dependencies` "
+        "deliberately, so a warm Gradle home is what it is designed not to lean on.",
     ),
-    "dependabot-verification-metadata.yml::refresh-metadata": (
-        "setup-java",
-        "Same setup-java keying as pitest.",
+    "perf-gate.yml::perf": (
+        "read-only",
+        "Consumer; restores fleet-lint's home. Weekly advisory k6 gate (ADR-0243) — "
+        "never a writer, so it costs the pool nothing.",
     ),
 }
 
