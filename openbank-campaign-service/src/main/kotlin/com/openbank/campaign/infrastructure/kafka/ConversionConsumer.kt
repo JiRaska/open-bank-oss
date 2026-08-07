@@ -11,6 +11,7 @@ import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.domain.model.ConversionCatalog
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
+import com.openbank.libs.domain.identifiers.Ids
 import io.smallrye.reactive.messaging.kafka.api.IncomingKafkaRecordMetadata
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Incoming
@@ -111,7 +112,9 @@ class ConversionConsumer(
 
         sendLog.record(
             SendRecord(
-                id = UUID.randomUUID(),
+                // Ids.newId() is UUIDv7 (ADR-0106): a send-log row is durable and indexed, so a
+                // time-ordered id keeps the primary key from scattering writes across the B-tree.
+                id = Ids.newId(),
                 campaignId = campaignId,
                 partyId = partyId,
                 stepOrder = stepOrder,
