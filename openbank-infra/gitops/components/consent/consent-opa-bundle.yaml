@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: consent-service
     app.kubernetes.io/part-of: consent
   annotations:
-    openbank.tech/policy-checksum: "1adb550684f19972"
+    openbank.tech/policy-checksum: "f4e61d6c3acdd887"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -566,9 +566,17 @@ data:
     # consent.grant/consent.revoke were M2M-unreachable — false the whole time this exclusion was
     # missing. M2M access to consent.grant/consent.revoke is scoped exclusively through
     # "service-consent-m2m-marketing" below now.
+    #
+    # 2026-08-05 (#3734): the exclusion widened from the shared client to the `service-account-`
+    # prefix — ADR-0206 D5 closed the backend M2M identity but left `service-account-openbank-edge`
+    # (customer-facing, HUMAN-classified, ROLE_OPERATOR) admitted to EVERY consent.* write via this
+    # rule. The edge's legitimate consent access is exactly {consent.list, consent.revoke} via base
+    # rest.rego's edge-service-consent (the customer's PSD2 consent screen) — deliberate, scoped,
+    # and pinned by consent_rest_ext_test.rego. No prohibition clause: rules.yaml's matrix grants no
+    # consent.* write to ROLE_OPERATOR, so matrix-allows admits nothing this exclusion doesn't close.
     allowed_reasons contains "operator-consent-write" if {
     	input.principal.type == "HUMAN"
-    	not input.principal.id == "service-account-openbank-services"
+    	not startswith(input.principal.id, "service-account-")
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	startswith(input.action, "consent.")
