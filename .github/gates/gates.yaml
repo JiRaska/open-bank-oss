@@ -1989,6 +1989,21 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-realm-template-importable.py
+  - id: opa-bundle-parses
+    name: "OPA bundle must be loadable by OPA (generated artifact, not its sources)"
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-opa-bundle-parses.py --self-test
+    selftest_expect: pass
+    run: |
+      # sca shipped an unloadable bundle on 2026-08-07 (#3748, repaired by #3971): a source
+      # rego without a trailing newline made the generator emit `}  agents.rego: |`, which
+      # dropped a ConfigMap key and left the embedded policy unparseable. Every existing gate
+      # was green — `opa test` reads the SOURCE rego, and the drift check regenerates with the
+      # same broken generator, so committed and regenerated agreed. This one reads the
+      # ARTIFACT with the consumer's own parser, which is the only layer that can see it.
+      python3 .github/scripts/check-opa-bundle-parses.py --self-test
+      python3 .github/scripts/check-opa-bundle-parses.py --root .
   - id: opa-bundle-apply-size
     name: OPA bundle must be installable (client-side apply annotation ceiling)
     group: gitops
