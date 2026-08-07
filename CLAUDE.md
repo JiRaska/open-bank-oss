@@ -888,10 +888,22 @@ Rationale + what does *not* cover it: `rules.yaml: dependencies.pr_time_cve_gate
   failing check restores the three derived files (`README.md`, `DIGEST.md`, `index.json`) to HEAD
   on exit, so committing after a failed check commits the *restored* content — and the next regen
   then disagrees with what you committed, failing the gate on content you never wrote (#3983).
+  **Same trap in the sibling derived-file checks:** `check-eu-ai-act.sh` restores
+  `docs/compliance/eu-ai-act.md` to HEAD on a failing run (its line 25 `git checkout -- "$DOC"`),
+  so a regen you ran *before* the check is silently reverted and your later `git add` stages the
+  old version (#4002). Universal order for every derived file: regenerate → stage+commit → run
+  the check.
 - **`git mv` + a follow-up edit = a PURE RENAME commit — the edit stays unstaged.** When
   renumbering an ADR after a number collision with main, `git mv` the file, edit the H1, `git add`
   the file AGAIN, then commit — or the registry gate fails with "H1 says number N but filename is
   M" on a file that looks correct in your working tree (#3983).
+- **An `agents.yaml` change has THREE derived tails, not one.** Regenerate all of them or the
+  enforced gates fail on main: `docs/compliance/eu-ai-act.md` (`gen-eu-ai-act.py`), the 40 OPA
+  bundle ConfigMaps + pod-roll `policy-checksum` annotations (every
+  `gen-*opa-bundle*.sh` under `openbank-infra/gitops/components`), and
+  `openbank-admin-ui/ai-governance-snapshot.json` (`gen-ai-governance-snapshot.py`; also stale
+  after a `prompts/registry.yaml` change). #3771 regenerated none and red-gated main; #4002 is the
+  regeneration template.
 
 ### gh CLI
 - **Always write a PR/issue body to a file and pass `--body-file`. Never `--body` with an
