@@ -5,7 +5,7 @@ primaryDatastore: PostgreSQL
 databaseName: openbank_engagement
 dataLineageRole: both
 dataClassification: confidential
-retentionPolicy: 2 years
+retentionPolicy: 7 years
 evidenceExported: false
 databaseLineage:
   ownedDatabases:
