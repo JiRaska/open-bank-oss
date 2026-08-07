@@ -231,3 +231,4 @@ V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:106: pl
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:108: plaintext http:// env value http://pid-service.pid.svc:8105
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:114: plaintext http:// env value http://account-service.accounts.svc:8100
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:116: plaintext http:// env value http://card-issuance-service.payments.svc:8118
+V9.1 openbank-infra/gitops/components/engagement/engagement-service.yaml:81: plaintext http:// env value http://consent-service.consent.svc:8106

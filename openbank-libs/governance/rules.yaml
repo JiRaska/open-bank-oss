@@ -334,6 +334,8 @@ change_requirements:
         reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
       - topic: "openbank.delegation.events"
         reason: "Tracked future work (ADR-0232 D3): product-service enforcement projections (account/card/savings) are the next implementation slice and are the intended consumers — the publisher ships first so the event contract is stable before consumers land. Re-triage: remove this entry with the first projection consumer PR."
+      - topic: "openbank.engagement.events"
+        reason: "ADR-0220 D2 feedback loop, first infrastructure slice (#3585). The intended consumers are the analytics layer (ADR-0022) and ADR-0221's campaign dashboards, neither built yet — the producer ships first so the event contract is stable before consumers land, same shape as the delegation.events entry above. Re-triage: remove this entry with the first real consumer PR."
       - topic: "openbank.pid.events"
         reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
   lineage_code_audit:
