@@ -7,7 +7,9 @@ package com.openbank.audit.application
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.audit.domain.model.AuditEntry
+import com.openbank.audit.domain.model.OccurredAtSource
 import com.openbank.audit.infrastructure.persistence.AuditRepository
+import io.micrometer.core.instrument.MeterRegistry
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.reactive.messaging.Incoming
@@ -25,12 +27,15 @@ class AuditConsumer {
 
     @Inject lateinit var clock: Clock
 
+    @Inject lateinit var meterRegistry: MeterRegistry
+
     private val log = Logger.getLogger(AuditConsumer::class.java)
 
     @Incoming("audit-events-in")
     suspend fun consume(payload: String) {
         try {
             val node: JsonNode = objectMapper.readTree(payload)
+            val eventTime = eventTime(node)
             val entry = AuditEntry(
                 id = UUID.randomUUID(),
                 // sepa.instant.events (KafkaSctInstEventPublisher) names its discriminator "type",
@@ -46,8 +51,9 @@ class AuditConsumer {
                 payload = payload,
                 sourceService = node["sourceService"]?.asText() ?: "unknown",
                 correlationId = node["correlationId"]?.asText(),
-                occurredAt = node["occurredAt"]?.asText()?.let { Instant.parse(it) } ?: Instant.now(clock),
+                occurredAt = eventTime ?: Instant.now(clock),
                 recordedAt = Instant.now(clock),
+                occurredAtSource = if (eventTime != null) OccurredAtSource.EVENT else OccurredAtSource.INGEST,
                 // ADR-0226: cross-channel dimensions, additive — producers adopt them channel by
                 // channel, so absence stays null (unknown), never a guessed default.
                 channel = node["channel"]?.asText(),
@@ -61,9 +67,55 @@ class AuditConsumer {
                 onBehalfOf = node["onBehalfOf"]?.takeIf { !it.isNull }?.asText(),
                 delegationId = node["delegationId"]?.takeIf { !it.isNull }?.asText(),
             )
+            if (eventTime == null) countMissingEventTime(entry.sourceService)
             repo.save(entry)
         } catch (e: Exception) {
             log.errorf(e, "Failed to record audit entry: %s", payload.take(200))
+        }
+    }
+
+    /**
+     * `openbank.audit.event.time.missing{source_service}` — events stored with ingest time because
+     * their producer sent no usable `occurredAt` (#3883).
+     *
+     * The per-row [OccurredAtSource] flag makes the gap answerable in SQL after the fact; this
+     * makes it answerable as a series, which is what turns "a producer regressed" into something
+     * that can degrade a dashboard instead of waiting for an auditor. Tagged by producing service
+     * only — the tag set is the fixed topic list, so cardinality is bounded.
+     *
+     * Guarded by `isInitialized` because unit tests construct this bean by hand; a missing
+     * registry must never cost an audit row.
+     */
+    private fun countMissingEventTime(sourceService: String) {
+        if (!::meterRegistry.isInitialized) return
+        meterRegistry.counter("openbank.audit.event.time.missing", "source_service", sourceService)
+            .increment()
+    }
+
+    /**
+     * The producer's own event time, or null when the payload does not carry one (#3883).
+     *
+     * `occurredAt` is the fleet's canonical key — it is declared on
+     * `com.openbank.libs.domain.event.DomainEvent`, so every Jackson-of-domain-event producer
+     * lands on it. This reads that key and ONLY that key: a second accepted spelling would be a
+     * second silent path, and a silent path is exactly how the gap below survived unnoticed.
+     *
+     * Two ways to have no event time, both previously invisible:
+     *  - the key is absent. 7 of the 21 consumed topics are in this state today (clearing,
+     *    dispute, statement, sanctions, six of lending's payloads, sepa-payment's Temporal path,
+     *    and document-service which names it `at`). The old code substituted `Instant.now(clock)`
+     *    and the row then asserted, indistinguishably from a real one, that the operation happened
+     *    when the consumer got round to it. Under consumer lag or a replay that is arbitrarily
+     *    wrong, and it is the GDPR Art. 30 "when" dimension and DORA Art. 17 evidence.
+     *  - the key is present but unparseable. That threw out of the constructor into consume()'s
+     *    catch, so the WHOLE audit entry was dropped — one malformed field lost the record of the
+     *    operation entirely. It is now an INGEST-sourced row: a degraded entry beats no entry.
+     */
+    private fun eventTime(node: JsonNode): Instant? {
+        val raw = node["occurredAt"]?.asText() ?: return null
+        return runCatching { Instant.parse(raw) }.getOrElse {
+            log.warnf("Unparseable occurredAt %s; recording ingest time instead", raw.take(MAX_LOGGED_RAW_TIME_CHARS))
+            null
         }
     }
 
@@ -108,5 +160,10 @@ class AuditConsumer {
             if (node.has(field)) return type
         }
         return "UNKNOWN"
+    }
+
+    private companion object {
+        /** Cap on the producer-supplied value echoed into the warning — it is untrusted input. */
+        const val MAX_LOGGED_RAW_TIME_CHARS = 64
     }
 }

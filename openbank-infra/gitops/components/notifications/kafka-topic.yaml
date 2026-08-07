@@ -22,3 +22,28 @@ spec:
   config:
     retention.ms: 604800000
     cleanup.policy: delete
+---
+# ADR-0239 D2: the delivery-outcome topic. notification-service writes one event per TERMINAL
+# status transition (SENT / SUPPRESSED / FAILED / BOUNCED) through its transactional outbox, so a
+# published outcome always corresponds to a committed row.
+#
+# `.v1` is in the NAME rather than a header: the contract evolves additively within v1
+# (openbank-contracts/openbank-notification-service/asyncapi.yaml), and a breaking change would
+# be a new topic that consumers migrate onto deliberately rather than discover at runtime.
+#
+# Retention 7 days, `cleanup.policy: delete` — a change feed, not a source of truth. A consumer
+# that needs the full delivery history reads it from the producing service's own store; this topic
+# cannot be replayed beyond a week.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.notification.outcomes.v1
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

@@ -379,14 +379,27 @@ resource "kubectl_manifest" "nodepool_default" {
       # Deployment read 1/1 Available; the Pending pods were blocked scale-ups,
       # so HA was degraded, not lost).
       #
-      # The deadlock is self-inflicted by the xlarge/2xlarge floor set on
-      # 2026-08-02: the 22 EXISTING nodes are the old `large` shape and already
-      # fill the cap, while the smallest node Karpenter is now allowed to
-      # provision is 4 vCPU. 48 + 4 > 48, so it can neither schedule a new pod
-      # nor surge a replacement — which also means it cannot roll the drift
-      # created by that change, or by the single-AZ pin above. A zone
-      # requirement drifts every node in the pool; without surge headroom that
-      # roll cannot start.
+      # The deadlock is simply that the pool is FULL: 22 nodes hold exactly
+      # 48/48 vCPU (and 124.4Gi against the live 128Gi), so Karpenter cannot add
+      # a node of ANY size — it can neither schedule a new pod nor surge a
+      # replacement, which also means it cannot roll its own drift.
+      #
+      # DO NOT read this as a consequence of the xlarge/2xlarge floor set on
+      # 2026-08-02: THAT CHANGE HAS NEVER BEEN APPLIED. Live `kubectl get
+      # nodepool default` on 2026-08-03 still reads instance-category [c,m,r],
+      # instance-size [large,xlarge,2xlarge,4xlarge] and limits
+      # {cpu:48, memory:128Gi}, where this file says m/r, xlarge–2xlarge and
+      # 192Gi. `platform-tofu.yml` applies only on manual workflow_dispatch, so
+      # this file and the cluster drift silently whenever nobody dispatches it,
+      # and the 22 small nodes are the STEADY STATE, not a half-finished roll.
+      # An earlier version of this comment blamed the floor and computed
+      # "48 + 4 > 48"; on the live pool the smallest allowed node is still a
+      # 2 vCPU `large`, so the true statement is 48 + anything > 48. Reverting
+      # the floor would therefore not have unwedged anything.
+      #
+      # Consequence worth planning for: the next apply lands the raised cap AND
+      # the 2026-08-02 shape change together, so it will drift and roll all 22
+      # nodes. The surge headroom below is what makes that roll possible at all.
       #
       # 72 leaves 24 vCPU (6 xlarge nodes) of surge against a 50% disruption
       # budget. It raises the CEILING, not the spend: actual `default`-pool

@@ -51,10 +51,12 @@ export default auth((req) => {
     return withCsp(NextResponse.next({ request: { headers: requestHeaders } }))
   }
 
-  // The /auth/* pages (login, error, forbidden) are public — apply the nonce CSP but DON'T run
-  // the auth gate (it would loop /auth/login → /auth/login). They are matched by middleware only
-  // so the CSP reaches them (ADR-0080 P1: CSP must cover the pre-auth login page too).
-  if (pathname.startsWith("/auth")) {
+  // The /auth/* pages (login, error, forbidden), the GDPR privacy notice, and
+  // RFC 9116 security.txt are public — apply the nonce CSP but DON'T run the
+  // auth gate (it would loop /auth/login → /auth/login, or make the incident
+  // contact unreachable without an account). Matched by middleware only so the
+  // CSP still reaches them (ADR-0080 P1: CSP must cover pre-auth pages too).
+  if (pathname.startsWith("/auth") || pathname === "/privacy" || pathname.startsWith("/.well-known/")) {
     return nextWithNonce()
   }
 

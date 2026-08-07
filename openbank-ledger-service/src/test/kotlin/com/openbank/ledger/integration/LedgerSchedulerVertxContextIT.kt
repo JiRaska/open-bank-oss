@@ -6,8 +6,10 @@ package com.openbank.ledger.integration
 import com.openbank.ledger.application.port.`in`.FxRevaluationResult
 import com.openbank.ledger.application.port.`in`.FxRevaluationUseCase
 import com.openbank.ledger.application.port.`in`.RevalueFxCommand
+import com.openbank.ledger.application.port.out.AccountingDayRepository
 import com.openbank.ledger.application.port.out.TieOutRunRepository
 import com.openbank.ledger.it.PostgresTestResource
+import com.openbank.libs.domain.calendar.AccountingClock
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -67,6 +69,7 @@ class LedgerSchedulerVertxContextIT {
             "quarkus.scheduler.enabled" to "true",
             "openbank.ledger.tieout.cron" to "*/2 * * * * ?",
             "openbank.ledger.fx-revaluation.cron" to "*/2 * * * * ?",
+            "openbank.ledger.accounting-day.cron" to "*/2 * * * * ?",
             "openbank.outbox.dispatch-enabled" to "false",
         )
 
@@ -91,6 +94,12 @@ class LedgerSchedulerVertxContextIT {
     @Inject
     lateinit var tieOutRuns: TieOutRunRepository
 
+    @Inject
+    lateinit var accountingDays: AccountingDayRepository
+
+    @Inject
+    lateinit var accountingClock: AccountingClock
+
     private fun <T> onEventLoop(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
 
@@ -112,6 +121,23 @@ class LedgerSchedulerVertxContextIT {
             .describedAs(
                 "a scheduler-dispatched tie-out must record a run — never recording one means the " +
                     "sweep threw HR000068 off the Vert.x context before the first query (#2187)",
+            )
+            .isTrue()
+    }
+
+    @Test
+    fun `the scheduled accounting-day reconcile opens the current day`() {
+        val opened = await {
+            onEventLoop { accountingDays.findByDate(accountingClock.today()) } != null
+        }
+
+        assertThat(opened)
+            .describedAs(
+                "a scheduler-dispatched reconcile must open the current accounting day — the " +
+                    "cluster lock it acquires first is a reactive Panache transaction, and off " +
+                    "the Vert.x context it would throw HR000068 before the first query (#2187); " +
+                    "measured live 2026-08-07: with nothing opening days, ledger_accounting_day " +
+                    "had zero rows and the ADR-0207 day lock measured nothing",
             )
             .isTrue()
     }

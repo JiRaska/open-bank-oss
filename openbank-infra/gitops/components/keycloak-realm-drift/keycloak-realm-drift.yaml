@@ -15,8 +15,13 @@
 #   repo. The drift is one layer below what ArgoCD can see. And the template in git is not even
 #   the artifact Keycloak reads — keycloak.yaml's `realm-import` volume projects the out-of-band
 #   secrets `keycloak-realm-import` / `keycloak-customers-realm-import`, so the file the CI gate
-#   reads and the file Keycloak imports are two unrelated objects. Reading the LIVE realm is the
-#   only observation that covers both layers at once.
+#   reads and the file Keycloak imports are two unrelated objects. Reading the LIVE realm covers
+#   both layers at once, but it cannot SEPARATE them — the live realm agreeing with the template
+#   says nothing about what a rebuild would produce, because `--import-realm` has not fed the
+#   running realm since the day it first came up. Since #3246 this job also reads the import
+#   artifact directly (the same projected Secrets, mounted here too) and compares it to the
+#   template, which is the only observation that can see a realm that is correct today and
+#   unreproducible from git.
 #
 #   Measured 2026-07-26: ROLE_KYC, ROLE_KYC_OPENER, ROLE_KYC_REVIEWER and ROLE_SUPERVISOR were
 #   declared and absent; ROLE_DEMO was live and undeclared. 20 `@RolesAllowed` sites named the
@@ -38,12 +43,15 @@
 #   with the detail already readable.
 #
 # WHAT IT DELIBERATELY DOES NOT DO
-#   It does not reconcile. Issue #2540 leaves open whether the realm should be made to follow the
-#   template (a `kcadm` Job, or keycloak-config-cli); detection first, on purpose — a reconciler
-#   that writes to the identity provider is a much larger blast radius and wants its own decision.
-#   It also checks role EXISTENCE only, not role ASSIGNMENT. `service-account-openbank-services`
-#   held ROLE_OPERATOR live while the template declared no such user at all (#2442) — the same
-#   class one level deeper, and the natural next increment.
+#   It does not reconcile — neither the live realm nor the Vault copy. Detection first, on
+#   purpose: a job that writes to the identity provider, or to the KV holding every client
+#   secret, is a much larger blast radius and wants its own decision. #3246 settles the
+#   DIRECTION (the repo template is authoritative, the Vault copy converges to it) and
+#   docs/runbooks/0009-keycloak-realm-import-reconcile.md holds the procedure; the write itself
+#   is a human's.
+#   The import comparison reads NAMES only. It must never diff the documents: the template
+#   carries `__PLACEHOLDER__` tokens exactly where the import artifact carries real client
+#   secrets, and this job's report is published into a ConfigMap.
 #
 # NAMESPACE: `iam`, deliberately. Keycloak's ingress allow-list admits `podSelector: {}` — the
 # whole of `iam` — so a same-namespace caller needs no NetworkPolicy change, and the generated
@@ -297,11 +305,36 @@ spec:
                     > /work/final-users.json 2> /work/findings-users.txt \
                     || echo "findings" > /work/findings
                   cat /work/findings-users.txt
+
+                  # THIRD comparison (#3246): template vs the artifact Keycloak would IMPORT.
+                  # The two above both read the LIVE realm, which `--import-realm` stopped
+                  # feeding the day the realm first came up — so neither can see the import
+                  # artifact at all. Measured 2026-08-03 it is a strict ANCESTOR of the
+                  # template: openbank 4 roles / 2 clients / 1 user against 14 / 10 / 6.
+                  # The artifacts are read from the SAME projected Secrets keycloak.yaml
+                  # mounts, so this cannot compare a copy that has drifted from the one that
+                  # deploys. The checker reads NAMES ONLY — the files hold real client
+                  # secrets, and nothing derived from them may reach the report ConfigMap.
+                  python3 .github/scripts/check-realm-import-parity.py \
+                    --root /tmp/repo \
+                    --import "openbank=/realm-import/openbank-realm.json" \
+                    --import "openbank-customers=/realm-import/openbank-customers-realm.json" \
+                    > /work/final-import.json 2> /work/findings-import.txt \
+                    || echo "findings" > /work/findings
+                  cat /work/findings-import.txt
               volumeMounts:
                 - name: work
                   mountPath: /work
                 - name: tmp
                   mountPath: /tmp
+                # The same projected pair keycloak.yaml mounts at /opt/keycloak/data/import.
+                # No RBAC is added for it: the kubelet resolves a volume from the pod spec,
+                # so the ServiceAccount still cannot read any Secret through the API. The
+                # blast radius of this mount is bounded by the fact that this pod already
+                # holds the bootstrap admin credential.
+                - name: realm-import
+                  mountPath: /realm-import
+                  readOnly: true
 
           containers:
             # Phase 2 — publish the report, THEN fail. Order is load-bearing: the alert must fire
@@ -326,8 +359,12 @@ spec:
                   report = json.loads(raw) if raw else {"realms": {}, "captureFailed": True}
                   report["scannedAt"] = datetime.datetime.now(datetime.timezone.utc).strftime(
                       "%Y-%m-%dT%H:%M:%SZ")
-                  report["checkScope"] = "keycloak realm ROLE EXISTENCE + ROLE ASSIGNMENTS, template vs live"
-                  report["doesNotVerify"] = "client-role assignments; group membership"
+                  report["checkScope"] = (
+                      "keycloak realm ROLE EXISTENCE + ROLE ASSIGNMENTS, template vs live; "
+                      "plus ROLE/CLIENT/USER NAMES, template vs the import artifact (#3246)")
+                  report["doesNotVerify"] = (
+                      "client-role assignments; group membership; secret VALUES in the import "
+                      "artifact (names only, deliberately — the artifact holds real credentials)")
                   findings = pathlib.Path("/work/findings.txt")
                   report["findings"] = findings.read_text().splitlines() if findings.is_file() else []
                   users_raw = pathlib.Path("/work/final-users.json")
@@ -335,6 +372,11 @@ spec:
                   report["userRoleParity"] = json.loads(raw_u) if raw_u else {"captureFailed": True}
                   uf = pathlib.Path("/work/findings-users.txt")
                   report["userRoleFindings"] = uf.read_text().splitlines() if uf.is_file() else []
+                  imp = pathlib.Path("/work/final-import.json")
+                  raw_i = imp.read_text().strip() if imp.is_file() else ""
+                  report["importParity"] = json.loads(raw_i) if raw_i else {"captureFailed": True}
+                  imf = pathlib.Path("/work/findings-import.txt")
+                  report["importFindings"] = imf.read_text().splitlines() if imf.is_file() else []
                   print(json.dumps(report, indent=2, sort_keys=True))
                   PY
 
@@ -362,3 +404,14 @@ spec:
               emptyDir: {}
             - name: tmp
               emptyDir: {}
+            # Byte-for-byte the volume keycloak.yaml projects into the Keycloak pod. Declared
+            # the same way on purpose: a second copy of the realm JSON — fetched from Vault
+            # here, or re-templated — would be free to disagree with the one that deploys,
+            # which is the exact defect class #3246 is about.
+            - name: realm-import
+              projected:
+                sources:
+                  - secret:
+                      name: keycloak-realm-import
+                  - secret:
+                      name: keycloak-customers-realm-import

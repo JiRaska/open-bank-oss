@@ -1,0 +1,15 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://open-bank.tech/vex/delegation-service",
+  "author": "OpenBank Security",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2025-14969"
+      },
+      "status": "affected",
+      "action_statement": "Resolved org.hibernate.reactive:hibernate-reactive-core is 3.4.1.Final (bundled by the Quarkus platform BOM io.quarkus.platform:quarkus-bom:3.37.2). The connection-leak DoS is fixed in 4.2.1.Final, a major-version jump that cannot be forced independently of the Quarkus platform (a bare force desyncs from the Quarkus-tested Vert.x/Hibernate-Reactive combination), so remediation is tracked as the Quarkus platform bump in issue #1446. Compensating controls in place: the reactive PostgreSQL pool is bounded with idle-connection eviction (shared openbank-libs default, PRs #1682/#1894), so a leaked-connection condition self-heals rather than permanently exhausting the pool, and every service is reachable only in-mesh (Istio STRICT mTLS) and via the authenticated BFF, not directly by an external client. Residual risk: medium-severity DoS only, no data exposure."
+    }
+  ]
+}

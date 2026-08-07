@@ -88,6 +88,7 @@ export default function TraceExplorerPage() {
     setLoading(true)
     setUnavailable(null)
     try {
+      // eslint-disable-next-line react-hooks/purity -- time-relative display; timestamps are stable server data.
       const now = Math.floor(Date.now() / 1000)
       const res = await fetch(`/api/tempo/api/search?limit=20&start=${now - 3600}&end=${now}`, {
         signal: AbortSignal.timeout(8000),

@@ -9,7 +9,9 @@ import com.openbank.fx.application.port.`in`.ConvertCommand
 import com.openbank.fx.application.port.`in`.FxUseCase
 import com.openbank.fx.application.port.`in`.GetRateHistoryQuery
 import com.openbank.fx.application.port.`in`.GetRateQuery
+import com.openbank.fx.domain.model.FxRate
 import com.openbank.fx.domain.model.RateSource
+import com.openbank.fx.domain.model.RateType
 import com.openbank.libs.authz.Authorize
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
@@ -24,6 +26,7 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import java.math.BigDecimal
 import java.net.URI
 import java.time.Instant
 import java.util.UUID
@@ -36,6 +39,53 @@ data class ConvertRequest(
     val toCurrency: String,
     val fromAmountMinorUnits: Long,
 )
+
+/**
+ * Response for `GET /rates/{base}/{quote}`, mirroring the serialized [FxRate] shape.
+ *
+ * #3374: a quote derived by inverting the stored pair ([FxRate.inverted]) carried the source row's
+ * [FxRate.id], so both directions answered under one identifier — a client caching by `id` would
+ * serve one direction for the other, and an audit record referencing the quote id could not be
+ * replayed to a direction. A derived quote therefore answers with [id] null and the source row id
+ * in [derivedFrom]; a stored quote answers with its own [id] and [derivedFrom] null. The domain
+ * object keeps the source id internally — `FxConversion.rateId` must keep pointing at the row the
+ * price came from.
+ */
+data class FxRateResponse(
+    val id: UUID?,
+    val baseCurrency: String,
+    val quoteCurrency: String,
+    val bidRate: BigDecimal,
+    val askRate: BigDecimal,
+    val rateType: RateType,
+    val source: RateSource,
+    val validFrom: Instant,
+    val validTo: Instant,
+    val createdAt: Instant,
+    val pair: String,
+    val midRate: BigDecimal,
+    val spread: BigDecimal,
+    val derivedFrom: UUID?,
+) {
+    companion object {
+        fun of(rate: FxRate, derivedFrom: UUID?) = FxRateResponse(
+            id = if (derivedFrom != null) null else rate.id,
+            baseCurrency = rate.baseCurrency,
+            quoteCurrency = rate.quoteCurrency,
+            bidRate = rate.bidRate,
+            askRate = rate.askRate,
+            rateType = rate.rateType,
+            source = rate.source,
+            validFrom = rate.validFrom,
+            validTo = rate.validTo,
+            createdAt = rate.createdAt,
+            pair = rate.pair,
+            midRate = rate.midRate,
+            spread = rate.spread,
+            derivedFrom = derivedFrom,
+        )
+    }
+}
 
 @Path("/api/v1/fx")
 @Produces(MediaType.APPLICATION_JSON)
@@ -60,12 +110,16 @@ class FxResource(private val fxUseCase: FxUseCase, private val cnbIngestion: Cnb
         @PathParam("quote") quote: String,
         @QueryParam("source") source: String?,
     ): Response {
-        val rate = if (source?.uppercase() == RateSource.CNB.name) {
-            cnbIngestion.getCnbRate(base.uppercase(), quote.uppercase())
+        val requestedBase = base.uppercase()
+        val requestedQuote = quote.uppercase()
+        val body = if (source?.uppercase() == RateSource.CNB.name) {
+            // The ČNB path only ever looks up the exact stored direction — never derived.
+            cnbIngestion.getCnbRate(requestedBase, requestedQuote)?.let { FxRateResponse.of(it, derivedFrom = null) }
         } else {
-            fxUseCase.getRate(GetRateQuery(base.uppercase(), quote.uppercase()))
+            fxUseCase.getRate(GetRateQuery(requestedBase, requestedQuote))
+                ?.let { FxRateResponse.of(it.rate, it.derivedFrom) }
         }
-        return rate?.let { Response.ok(it).build() }
+        return body?.let { Response.ok(it).build() }
             ?: Response.status(404).entity(mapOf("error" to "Rate not found for $base/$quote")).build()
     }
 
@@ -74,12 +128,15 @@ class FxResource(private val fxUseCase: FxUseCase, private val cnbIngestion: Cnb
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
     @Authorize(action = "fx.convert", resource = "")
     @Operation(summary = "Execute FX conversion")
-    suspend fun convert(req: ConvertRequest?, @HeaderParam("Idempotency-Key") key: String): Response {
+    suspend fun convert(req: ConvertRequest?, @HeaderParam("Idempotency-Key") key: String?): Response {
         // A JSON `null` body deserialises to null despite the non-nullable Kotlin type, so the
         // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
         // IllegalArgumentException to 400.
         requireNotNull(req) { "request body is required" }
-        require(key.isNotBlank()) { "Idempotency-Key required" }
+        // #3104 — the sibling of the line above, one argument position over. An ABSENT header
+        // injected null, so `key.isNotBlank()` threw NPE and this guard answered 500 rather than
+        // the 400 it was written to give.
+        require(!key.isNullOrBlank()) { "Idempotency-Key required" }
         val conv = fxUseCase.convert(
             ConvertCommand(
                 idempotencyKey = key,

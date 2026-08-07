@@ -1,0 +1,152 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ---------------------------------------------------------------------------
+# The Temporal namespace SET, and the script that registers it (issue #3507).
+#
+# WHY THE LIST LIVES HERE AND NOT ON THE JOB
+#   It used to be an inline env value on `temporal-namespace-registration.yaml`, an
+#   ArgoCD PostSync **hook**. A hook is not part of the Application's desired-state
+#   tree — ArgoCD never diffs it, so editing ONLY the hook produces no diff, no sync
+#   operation, and the hook therefore never fires. That is not a subtlety of the
+#   diff output: `kubectl -n argocd get application temporal -o json` reports every
+#   other resource `Synced` and the hook Job `status: None`, i.e. not compared at all.
+#
+#   The single edit anyone ever makes to that Job is "add a namespace to the list" —
+#   precisely the edit that could not trigger it. Measured after #3475 merged: the
+#   Application sat `Synced/Healthy` at the new revision, no Job existed, and
+#   `openbank-lending` was still absent until someone ran a manual sync by hand. The
+#   mechanism was inert for its sole use case, and had only ever worked when a
+#   namespace addition happened to ride along with an unrelated change to a non-hook
+#   resource in the same Application.
+#
+#   A ConfigMap IS compared. So adding a namespace now changes a tracked resource,
+#   the Application goes OutOfSync, auto-sync runs a sync operation, and the sync
+#   operation runs its PostSync hook. The trigger is a structural property of where
+#   the list lives, not a convention anyone has to remember — which is the point:
+#   the previous mechanism relied on a comment asserting a behaviour it did not have.
+#
+# WHY THE SCRIPT LIVES HERE TOO
+#   Two workloads run it — the PostSync hook (registers on every sync) and the
+#   `temporal-namespace-reconcile` CronJob (registers whatever the sync path missed,
+#   and fails loudly when it had to). A second copy of a namespace list is the exact
+#   drift this file exists to prevent, so there is one copy of both the list and the
+#   logic, and both consumers mount it.
+#
+# WHEN A SERVICE ADOPTS TEMPORAL: add its namespace to NAMESPACES below AND to the
+# `temporal-platform-ingress` NetworkPolicy (temporal-network-policies.yaml) — both
+# are required; the NetworkPolicy gates frontend gRPC reachability and this list
+# gates namespace existence. `check-temporal-namespace-registration.py` fails the
+# PR if the list is short, and also fails if this declaration is ever moved back
+# onto a hook resource.
+# ---------------------------------------------------------------------------
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: temporal-namespace-registration
+  namespace: temporal
+  labels:
+    app.kubernetes.io/part-of: temporal
+    app.kubernetes.io/component: namespace-registration
+    openbank.io/derived: gitops-manual
+data:
+  # Space-separated list of Temporal NAMESPACES (not task queues) — the set of distinct
+  # `openbank.temporal.namespace` values across services that run workflows. Today:
+  # payments (sepa+domestic) → openbank-payments; fx → openbank-fx; statements →
+  # openbank-statements; settlement → openbank-settlement (its own TemporalConfig
+  # @WithDefault, like fx/statements — NOT openbank-default; an earlier comment here was
+  # wrong. The live worker polls namespace="openbank-settlement", confirmed by NOT_FOUND
+  # on go-live — runbook 0006). campaign → openbank-campaign (ADR-0200 journeys), added
+  # on its first rollout: its Deployment had no OPENBANK_TEMPORAL_NAMESPACE, so the worker
+  # defaulted to the bare `openbank` and hit exactly the NOT_FOUND this file exists to
+  # prevent. lending → openbank-lending, the THIRD time this list has been the thing that
+  # drifted. Measured in the sandbox 2026-08-02: the namespace was absent, so
+  # lending-service's workflow AND activity pollers both retried forever against a
+  # namespace Temporal has never held — ~2,000 ERROR lines/hour into Loki, and no
+  # origination workflow could start. Nothing went red: the pod is 2/2 and its readiness
+  # probe does not touch Temporal, so the only evidence was the log volume.
+  NAMESPACES: "openbank-default openbank-payments openbank-fx openbank-statements openbank-settlement openbank-finops openbank-devops openbank-liveness openbank-governance openbank-release openbank-docstruth openbank-authzaudit openbank-flakytest openbank-campaign openbank-lending"
+  RETENTION: "168h"
+  # Idempotent: each namespace is `describe`d first and only created if absent; a lost
+  # race on create is tolerated when the error says "already exists".
+  #
+  # REGISTRATION_MODE decides what a CREATE means, and that is the whole difference
+  # between the two callers:
+  #   sync-hook  — creating is the normal path (first install, or a namespace just added
+  #                to the list). Exit 0.
+  #   reconcile  — the sync path is supposed to have done this already. Both callers read
+  #                THIS ConfigMap, and ArgoCD syncs the ConfigMap and fires the hook in the
+  #                same operation, so the CronJob can never see a namespace the hook has
+  #                not already been asked to register. A create here therefore means the
+  #                sync path did not run or did not succeed — repair it, then exit 1 so a
+  #                failed Job raises KubeJobFailed with the detail already in the log.
+  register.sh: |
+    #!/bin/sh
+    set -eu
+
+    : "${TEMPORAL_ADDRESS:?}"
+    : "${NAMESPACES:?}"
+    : "${RETENTION:?}"
+    : "${REGISTRATION_MODE:?}"
+
+    echo "Temporal frontend: ${TEMPORAL_ADDRESS}"
+    echo "Mode:              ${REGISTRATION_MODE}"
+    echo "Namespaces:        ${NAMESPACES}"
+    echo "Retention:         ${RETENTION}"
+
+    # Wait for the frontend to answer (covers first-install and frontend restarts).
+    ready=0
+    i=1
+    while [ "$i" -le 60 ]; do
+      if temporal operator namespace list --address "${TEMPORAL_ADDRESS}" >/dev/null 2>&1; then
+        ready=1
+        break
+      fi
+      echo "waiting for temporal frontend... (${i}/60)"
+      i=$((i + 1))
+      sleep 5
+    done
+    if [ "$ready" -ne 1 ]; then
+      echo "ERROR: temporal frontend ${TEMPORAL_ADDRESS} not reachable" >&2
+      exit 1
+    fi
+
+    rc=0
+    created=""
+    for ns in ${NAMESPACES}; do
+      if temporal operator namespace describe --namespace "$ns" \
+           --address "${TEMPORAL_ADDRESS}" >/dev/null 2>&1; then
+        echo "[ok] ${ns} already exists"
+        continue
+      fi
+      echo "[create] ${ns} retention=${RETENTION}"
+      if temporal operator namespace create --namespace "$ns" \
+           --retention "${RETENTION}" \
+           --address "${TEMPORAL_ADDRESS}" 2>/tmp/create.err; then
+        echo "[created] ${ns}"
+        created="${created} ${ns}"
+      elif grep -qi "already exists" /tmp/create.err; then
+        # Lost the race with another replica / a concurrent sync — fine.
+        echo "[ok] ${ns} already exists (raced)"
+      else
+        echo "ERROR creating ${ns}:" >&2
+        cat /tmp/create.err >&2
+        rc=1
+      fi
+    done
+
+    if [ "$rc" -ne 0 ]; then
+      exit "$rc"
+    fi
+
+    if [ -n "${created}" ] && [ "${REGISTRATION_MODE}" = "reconcile" ]; then
+      echo "ERROR: reconcile had to create:${created}" >&2
+      echo "A declared namespace was missing from the running Temporal cluster. It has been" >&2
+      echo "created, so workers are unblocked — but the ArgoCD sync path that should have" >&2
+      echo "registered it did not. Check the temporal Application's last sync operation and" >&2
+      echo "the temporal-namespace-registration PostSync hook (issue #3507)." >&2
+      exit 1
+    fi
+
+    echo "Done: every declared namespace exists."

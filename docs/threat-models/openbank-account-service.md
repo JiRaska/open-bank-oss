@@ -86,6 +86,7 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. Six parameters: `Idempotency-Key` on openAccount, `currency` on resolvePocket, and the `partyId`/`role` and `partyId`/`intent` pairs on the two authorization-check endpoints. The authorization pairs are the security-relevant ones: they are the INPUTS to an access decision, so a null reaching the use case is a decision taken on an absent subject rather than a rejected request. No new caller, no new boundary; the endpoints and their `@RolesAllowed`/`@Authorize` gates are unchanged, and every guard runs AFTER authorization. Rollback: revert the commit (restores the 500).
 - **2026-07-09** — Account opening validates against product-catalog (ADR-0158, issue #668).
   New outbound trust boundary: `account-service → product-catalog` (`GET /api/v1/products/{id}`,
   unauthenticated, sync). `openAccount` now rejects a `productId` product-catalog confirms does
