@@ -8,6 +8,8 @@ import com.openbank.statement.application.port.`in`.ClosePeriodUseCase
 import com.openbank.statement.application.port.`in`.ClosePocketUseCase
 import com.openbank.statement.application.port.`in`.ListStatementsUseCase
 import com.openbank.statement.application.port.`in`.RenderStatementUseCase
+import com.openbank.statement.application.port.`in`.StatementModelUseCase
+import com.openbank.statement.application.port.`in`.SummarizeStatementUseCase
 import com.openbank.statement.application.port.out.AccountInfoPort
 import com.openbank.statement.application.port.out.BalancePort
 import com.openbank.statement.application.port.out.BookedEntryPort
@@ -15,7 +17,6 @@ import com.openbank.statement.application.port.out.PocketAccountInfo
 import com.openbank.statement.application.port.out.StatementOutboxMessage
 import com.openbank.statement.application.port.out.StatementPeriodRepository
 import com.openbank.statement.domain.model.BalanceAnchor
-import com.openbank.statement.domain.model.CreditDebit
 import com.openbank.statement.domain.model.PeriodCloseStatus
 import com.openbank.statement.domain.model.StatementEntry
 import com.openbank.statement.domain.model.StatementFormat
@@ -42,6 +43,11 @@ import java.util.UUID
  * The reconciliation/sequence/projection logic lives in the (framework-free) domain; this use case
  * only wires the ports together.
  */
+// TooManyFunctions: this is the single lifecycle orchestrator for close/render/export/list (see
+// KDoc above) — ADR-0248 added statementModel() as the shared lookup both render() and the new
+// customer-facing document use case (StatementDocumentService) replay, so it belongs here rather
+// than duplicating the reconciliation/lookup logic in a second class.
+@Suppress("TooManyFunctions")
 @ApplicationScoped
 class StatementService(
     private val accountInfo: AccountInfoPort,
@@ -51,8 +57,10 @@ class StatementService(
 ) : ClosePeriodUseCase,
     ClosePocketUseCase,
     RenderStatementUseCase,
+    StatementModelUseCase,
     ListStatementsUseCase,
-    AdHocExportUseCase {
+    AdHocExportUseCase,
+    SummarizeStatementUseCase {
 
     /** Clock seam: `closedAt` is stamped at close time and then *stored*, so renders stay deterministic
      *  (ADR-0035 §F). Overridable in tests; CDI uses the default. */
@@ -96,7 +104,7 @@ class StatementService(
     ): Uni<StatementPeriod> = bookedEntries.bookedEntries(account.accountId, currency, from, to).flatMap { entries ->
         openingBalance(account.accountId, currency, from).flatMap { opening ->
             balance.closingBalance(account.accountId, currency, to).flatMap { reported ->
-                val net = netMovement(entries)
+                val net = netMovementOf(entries)
                 when (val r = ReconciliationPolicy.reconcile(opening, net, reported.amount)) {
                     is ReconciliationPolicy.Result.Mismatch ->
                         Uni.createFrom().failure(
@@ -153,18 +161,24 @@ class StatementService(
         currency: String,
         legalSequence: Long,
         format: StatementFormat,
-    ): Uni<StatementRenderer.Rendered> = periods.findBySequence(accountId, currency, legalSequence).flatMap { period ->
-        if (period == null) {
-            Uni.createFrom().failure(StatementNotFoundException(accountId, currency, legalSequence))
-        } else {
-            accountInfo.pocketAccount(accountId).flatMap { account ->
-                bookedEntries.bookedEntries(accountId, currency, period.periodFrom, period.periodTo)
-                    .map { entries ->
-                        StatementRenderer.render(modelFromPeriod(account, period, entries), format)
-                    }
+    ): Uni<StatementRenderer.Rendered> =
+        statementModel(accountId, currency, legalSequence).map { model -> StatementRenderer.render(model, format) }
+
+    /** [SummarizeStatementUseCase]: the same closed period as [render] and [statementModel], as the canonical model — no renderer. */
+    override fun summary(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementModel> =
+        statementModel(accountId, currency, legalSequence)
+
+    override fun statementModel(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementModel> =
+        periods.findBySequence(accountId, currency, legalSequence).flatMap { period ->
+            if (period == null) {
+                Uni.createFrom().failure(StatementNotFoundException(accountId, currency, legalSequence))
+            } else {
+                accountInfo.pocketAccount(accountId).flatMap { account ->
+                    bookedEntries.bookedEntries(accountId, currency, period.periodFrom, period.periodTo)
+                        .map { entries -> modelFromPeriod(account, period, entries) }
+                }
             }
         }
-    }
 
     override fun export(
         accountId: UUID,
@@ -175,7 +189,7 @@ class StatementService(
     ): Uni<StatementRenderer.Rendered> = accountInfo.pocketAccount(accountId).flatMap { account ->
         bookedEntries.bookedEntries(accountId, currency, from, to).flatMap { entries ->
             openingBalance(accountId, currency, from).map { opening ->
-                val closing = opening.add(netMovement(entries))
+                val closing = opening.add(netMovementOf(entries))
                 // Non-sequenced informational export (legal/electronic sequence = 0).
                 val model = StatementModel(
                     accountId = accountId,
@@ -217,13 +231,6 @@ class StatementService(
         closedAt = period.closedAt,
         supersedesSequence = period.supersedesSequence,
     )
-
-    private fun netMovement(entries: List<StatementEntry>): BigDecimal = entries.fold(BigDecimal.ZERO) { acc, e ->
-        when (e.creditDebit) {
-            CreditDebit.CRDT -> acc.add(e.amount)
-            CreditDebit.DBIT -> acc.subtract(e.amount)
-        }
-    }
 
     /**
      * `occurredAt` is [StatementPeriod.closedAt] — the period-close instant this event announces —

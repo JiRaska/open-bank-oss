@@ -17,11 +17,16 @@
 #   `*-msg-override.yaml` ConfigMap carrying `override.properties` with `config_ordinal=500`.
 #
 # WHAT THIS CHECKS, AND WHY THE TWO KEYS DIFFER
-#   `group.id`         — the fallback is `quarkus.application.name`. Six services get away with the
-#                        broken key purely because the value they wanted happens to equal their
-#                        application name. That is correct by coincidence: it breaks the day a
-#                        service is renamed, or a channel wants its own group (exactly what
-#                        transaction-service did). Accepted, but only when the values match.
+#   `group.id`         — the fallback is `quarkus.application.name`. Six services USED TO get away
+#                        with the broken key purely because the value they wanted happened to equal
+#                        their application name — correct by coincidence, not by design: it breaks
+#                        the day a service is renamed, or a channel wants its own group (exactly
+#                        what transaction-service did). All six now carry a `*-msg-override`
+#                        ConfigMap setting the same value (#2945), so an override is the ONLY thing
+#                        that makes a dotted `group.id` acceptable and the coincidence exemption is
+#                        gone. Removing it is what stops the next service re-introducing the
+#                        latent version of this bug: matching the app name would otherwise pass CI
+#                        while resolving through a fallback nobody chose.
 #   `auto.offset.reset`— there is no such coincidence available. The fallback is the connector's own
 #                        default, so a channel declaring a NON-default value and having no override
 #                        is running on the default while its config file says otherwise. This is the
@@ -37,8 +42,9 @@
 #
 # EXIT CODES
 #   0  no new occurrences, no stale baseline entries
-#   1  a new dotted key that neither matches its fallback nor has an override — or a baseline entry
-#      that is now covered and should be removed
+#   1  a dotted `group.id` with no override ConfigMap, a dotted `auto.offset.reset` asking for a
+#      non-default value with no override — or a baseline entry that is now covered and should be
+#      removed
 #   2  the check could not run (PyYAML missing, tree not found). Never conflated with 0.
 #
 # Run:  python3 .github/scripts/check-kafka-dotted-keys.py [--root .] [--self-test]
@@ -151,9 +157,10 @@ def scan(root):
                 if (service, channel, key) in overrides:
                     continue
 
-                # group.id survives when the fallback (quarkus.application.name) is the same string.
-                if key == "group.id" and name is not None and value == name:
-                    continue
+                # NOTE: `group.id == quarkus.application.name` used to be accepted here. It is not
+                # any more (#2945) — see the header. A value that merely happens to equal the
+                # fallback still does not RESOLVE, so accepting it means the config file and the
+                # running consumer agree by accident, which is not a property a gate can keep.
                 # auto.offset.reset survives only when it asks for the connector default anyway.
                 if key == "auto.offset.reset" and value == CONNECTOR_DEFAULT_OFFSET_RESET:
                     continue
@@ -164,75 +171,133 @@ def scan(root):
                     continue
 
                 fallback = name if key == "group.id" else CONNECTOR_DEFAULT_OFFSET_RESET
+                effect = (
+                    f"the effective value is the fallback ({fallback!r}) — which happens to equal "
+                    f"the declared one, so nothing is broken TODAY and everything breaks on the "
+                    f"first rename or channel-specific group (#2945)"
+                    if str(fallback) == value
+                    else f"the effective value is the fallback ({fallback!r}), not {value!r}"
+                )
                 findings.append(
                     f"{path}: channel '{channel}' sets `{key}: {value}` as a dotted YAML key with no "
                     f"*-msg-override ConfigMap.\n"
-                    f"       That key does not reach the connector (#686), so the effective value is "
-                    f"the fallback ({fallback!r}), not {value!r}.\n"
+                    f"       That key does not reach the connector (#686), so {effect}.\n"
                     f"       Fix: add `mp.messaging.incoming.{channel}.{key}={value}` to a "
                     f"`*-msg-override.yaml` ConfigMap (config_ordinal=500), as transaction-service does.",
                 )
     return findings, matched
 
 
-SELF_TEST_DOC = """
+SELF_TEST_SERVICES = {
+    # (service, application.yaml body, override.properties body or None)
+    "openbank-demo-covered-service": (
+        """
 quarkus:
   application:
-    name: openbank-demo-service
+    name: openbank-demo-covered-service
 mp:
   messaging:
     incoming:
-      matches-app-name:
-        group.id: openbank-demo-service
-      differs-from-app-name:
+      covered-in:
+        group.id: openbank-demo-covered-service
+""",
+        "config_ordinal=500\nmp.messaging.incoming.covered-in.group.id=openbank-demo-covered-service\n",
+    ),
+    # The regression this gate exists for since #2945: a group.id equal to the application name.
+    # It resolves to the right string today by ACCIDENT and must still be reported.
+    "openbank-demo-coincidence-service": (
+        """
+quarkus:
+  application:
+    name: openbank-demo-coincidence-service
+mp:
+  messaging:
+    incoming:
+      coincidence-in:
+        group.id: openbank-demo-coincidence-service
+""",
+        None,
+    ),
+    "openbank-demo-differs-service": (
+        """
+quarkus:
+  application:
+    name: openbank-demo-differs-service
+mp:
+  messaging:
+    incoming:
+      differs-in:
         group.id: some-other-group
-      asks-for-default:
+      asks-for-default-in:
         auto.offset.reset: latest
-      asks-for-non-default:
+      asks-for-non-default-in:
         auto.offset.reset: earliest
-"""
+""",
+        None,
+    ),
+}
+
+# channel -> must this channel appear in the findings?
+SELF_TEST_EXPECT = {
+    "covered-in": False,           # override ConfigMap sets it — the only acceptable shape
+    "coincidence-in": True,        # equal to quarkus.application.name, still does not resolve
+    "differs-in": True,            # differs from the fallback — the loud case
+    "asks-for-default-in": False,  # asks for the connector default anyway, so a no-op
+    "asks-for-non-default-in": True,
+}
 
 
 def self_test():
-    """Exercise the classifier against channels it MUST flag and channels it MUST NOT.
+    """Drive the REAL scan() over a synthetic tree, not a retyped copy of its classifier.
 
-    The must-NOT half is the one that matters: a guard that flags every dotted key would be noise,
-    and the whole point is that `group.id` matching the application name is genuinely harmless while
-    `auto.offset.reset: earliest` never is.
+    An earlier version of this self-test re-implemented the harmless/flagged decision inline. That
+    could not see load_overrides() at all, so the one rule that now decides every group.id verdict
+    — "is there an override ConfigMap" — was the one rule it never exercised. It also could not have
+    caught the change it was written alongside.
+
+    The must-NOT half is the half that matters: a guard that flags every dotted key is noise.
     """
-    doc = yaml.safe_load(SELF_TEST_DOC)
-    name = app_name(doc)
-    results = {}
-    for channel, cfg in incoming_channels(doc):
-        for key in WATCHED_KEYS:
-            if key not in cfg:
-                continue
-            value = str(cfg[key])
-            harmless = (key == "group.id" and value == name) or (
-                key == "auto.offset.reset" and value == CONNECTOR_DEFAULT_OFFSET_RESET
-            )
-            results[channel] = not harmless  # True == should be flagged
+    import tempfile
 
-    expected = {
-        "matches-app-name": False,
-        "differs-from-app-name": True,
-        "asks-for-default": False,
-        "asks-for-non-default": True,
-    }
     failures = 0
-    for channel, want in expected.items():
-        got = results.get(channel)
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        for service, (app_yaml, override) in SELF_TEST_SERVICES.items():
+            res = root / service / "src" / "main" / "resources"
+            res.mkdir(parents=True)
+            (res / "application.yaml").write_text(app_yaml, encoding="utf-8")
+            if override is None:
+                continue
+            short = service[len("openbank-"):]
+            comp = root / "openbank-infra" / "gitops" / "components" / short
+            comp.mkdir(parents=True)
+            (comp / f"{short}-msg-override.yaml").write_text(
+                # The leading comment repeats the property name on purpose: a text guard that does
+                # not strip comments would read this prose as coverage (the silent direction of the
+                # "guard matches the text about the thing" failure).
+                f"# explains mp.messaging.incoming.covered-in.group.id=... and why it is here\n"
+                f"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {short}-msg-override\n"
+                f"data:\n  override.properties: |\n    " + override.replace("\n", "\n    "),
+                encoding="utf-8",
+            )
+
+        findings, _ = scan(str(root))
+
+    flagged = {ch for ch in SELF_TEST_EXPECT if any(f"channel '{ch}'" in f for f in findings)}
+    for channel, want in sorted(SELF_TEST_EXPECT.items()):
+        got = channel in flagged
         ok = got == want
         verdict = "flag" if want else "allow"
         print(f"{'pass' if ok else 'FAIL'}  {channel} -> {verdict}" + ("" if ok else f" (got flag={got})"))
         failures += 0 if ok else 1
 
-    # app_name must be read from the real path, or every group.id comparison silently "differs".
-    ok = name == "openbank-demo-service"
-    print(f"{'pass' if ok else 'FAIL'}  quarkus.application.name resolves" + ("" if ok else f" (got {name!r})"))
+    # A finding count larger than the expected set means scan() invented a channel we never declared.
+    ok = len(findings) == sum(SELF_TEST_EXPECT.values())
+    print(f"{'pass' if ok else 'FAIL'}  finding count == expected" + ("" if ok else f" (got {len(findings)})"))
     failures += 0 if ok else 1
 
-    print(f"\nself-test: {len(expected) + 1 - failures} passed, {failures} failed")
+    total = len(SELF_TEST_EXPECT) + 1
+    print(f"\nself-test: {total - failures} passed, {failures} failed")
     return 0 if failures == 0 else 2
 
 

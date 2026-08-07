@@ -3,7 +3,8 @@
 # (controller+broker) for FinOps; prod should split roles and raise replicas to
 # 3 with matching replication factors. Kafka version is intentionally omitted so
 # the operator pins its own supported default. Bootstrap Service for clients:
-# `openbank-cluster-kafka-bootstrap.messaging.svc:9092` (internal plaintext).
+# `openbank-cluster-kafka-bootstrap.messaging.svc:9093` (internal mTLS — the only
+# listener; the plaintext :9092 one was removed in #3393).
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
@@ -59,15 +60,23 @@ spec:
     # ADR-0137 mTLS migration). KRaft inter-broker comms use the managed
     # controller listener and are unaffected by SimpleAuthorizer.
     #
-    # Enforcement model (ADR-0137): SimpleAuthorizer is *deny-by-default per
-    # resource that carries any ACL*, and *allow-everyone* only for resources
-    # with NO ACL (because allow.everyone.if.no.acl.found=true below). So a
-    # single topic can be locked down — `payment.scheme-accepted` (the money
-    # path) — by attaching ACLs to it, WITHOUT touching the other ~30 topics
-    # that have none. ACLs bind to the authenticated principal, not the
-    # listener, so the plaintext listener below does not weaken a locked topic:
-    # an unauthenticated client is `User:ANONYMOUS`, which is absent from the
-    # scheme-accepted ACLs and therefore denied.
+    # Enforcement model: SimpleAuthorizer is deny-by-default for EVERY resource,
+    # because `allow.everyone.if.no.acl.found: "false"` below (#2794). A topic
+    # with no ACL at all is therefore denied to everyone, not open — so every
+    # client needs a KafkaUser whose ACLs name every topic it touches.
+    #
+    # This comment previously described the opposite model ("allow-everyone only
+    # for resources with NO ACL, because allow.everyone.if.no.acl.found=true
+    # below"), which had been false since #2794 flipped the flag. That stale
+    # prose is what made a set of missing producer grants read as deliberate:
+    # domestic-payment's own event topic had no Write grant and 13 outbox rows
+    # went DEAD before anyone looked (#3271).
+    #
+    # ACLs bind to the authenticated principal, not the listener. That is why the
+    # plaintext listener that used to sit below granted nothing while it existed —
+    # an unauthenticated client is `User:ANONYMOUS`, which holds no ACL anywhere and
+    # is denied on every resource (`… is Denied … based on rule DefaultDeny` in the
+    # broker log) — and why removing it (#3393) changed no principal's authority.
     authorization:
       type: simple
     # Broker-layer observability (Dynatrace-parity #0). Strimzi's bundled JMX
@@ -82,13 +91,34 @@ spec:
           name: kafka-metrics
           key: kafka-metrics-config.yml
     listeners:
-      # Anonymous plaintext listener — retained for backward compatibility.
-      # All 33 deployed Kafka clients migrated to mTLS:9093 (ADR-0137 fleet
-      # sweep complete). Removing the listener is a follow-up step (runbook 0008).
-      - name: plain
-        port: 9092
-        type: internal
-        tls: false
+      # There is no `plain` (9092) listener any more — runbook 0008's last step, done
+      # here (#3393). What used to sit here was an anonymous plaintext listener kept
+      # "for backward compatibility" with a comment claiming all 33 clients had already
+      # migrated. That claim was false, and the listener granted nothing anyway: a
+      # client on it is `User:ANONYMOUS`, which holds no ACL and is denied on every
+      # resource by the deny-by-default config below. "Still on 9092" and "cannot use
+      # Kafka" were the same statement — which is exactly why it had to go: it was an
+      # entry point that could only ever produce silent failures.
+      #
+      # Measured on the live sandbox 2026-08-03 (#3393), three workloads still declared
+      # :9092, and each is resolved before this removal rather than by it:
+      #   * security-scanner-service — no KafkaUser at all; both topic log segments were
+      #     0 bytes and dated their creation day, so it had never published anything.
+      #     Given an identity and moved to :9093 in the parent change.
+      #   * kafka-ui — the ONLY thing actually sending on :9092, refused on every
+      #     request (`Principal = User:ANONYMOUS is Denied operation = DESCRIBE … based
+      #     on rule DefaultDeny`, once per 30s poll) and rendering that as an empty
+      #     cluster. Now `User:kafka-ui` on :9093 (components/kafka/kafka-ui-mtls.yaml).
+      #   * settlement-service — carried KAFKA_BOOTSTRAP_SERVERS with no `mp.messaging`
+      #     config and no Kafka client in its source at all; the env var was dead and is
+      #     deleted (components/payments/payments-services.yaml).
+      #
+      # Strimzi rolls the broker to drop the listener. Anything that appears on :9092
+      # after this fails to CONNECT instead of authenticating as ANONYMOUS and being
+      # denied per request — a louder failure than the one being removed, which is the
+      # point. Rollback is re-adding the four lines; it restores connectivity but not
+      # authorization, so it is only ever worth doing to quiet a connection-error loop.
+      #
       # mTLS listener (ADR-0137). Clients presenting a cluster-CA-signed client
       # cert authenticate as the matching KafkaUser principal; this is what the
       # payment.scheme-accepted producers/consumer use so their ACLs apply.
@@ -109,12 +139,12 @@ spec:
       transaction.state.log.min.isr: 1
       default.replication.factor: 1
       min.insync.replicas: 1
-      # Cluster-wide authorization posture: deny-by-default for ALL topics.
-      # All 33 deployed Kafka clients migrated to mTLS:9093 (ADR-0137 fleet
-      # sweep complete). User:ANONYMOUS (plaintext) is now denied on every topic
-      # including those without explicit ACLs. Non-deployed services
-      # (card-issuance, sdd, standing-order, tpp-registry) are RBAC pre-registered
-      # and will receive gitops mTLS manifests before their first deploy.
+      # Cluster-wide authorization posture: deny-by-default for ALL topics. A
+      # topic with no ACL is denied to every principal, so this stays load-bearing
+      # now that mTLS is the only way in: it is what makes an unlisted topic a
+      # denial rather than a default-open. Non-deployed services (card-issuance,
+      # sdd, standing-order, tpp-registry) are RBAC pre-registered and will
+      # receive gitops mTLS manifests before their first deploy.
       allow.everyone.if.no.acl.found: "false"
   # Consumer-lag visibility (Dynatrace-parity #0). The Kafka Exporter is a
   # separate pod (also on `tcp-prometheus`:9404) that turns consumer group
@@ -183,4 +213,22 @@ spec:
   replicas: 1
   config:
     retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# ADR-0220 D2 feedback loop. No consumer exists yet (allowlisted in rules.yaml:
+# event_consumer_liveness) — this is the first slice's producer, ahead of the analytics
+# consumer ADR-0221's dashboards are meant to read from. Contract:
+# openbank-contracts/openbank-engagement-service/asyncapi.yaml.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.engagement.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
     cleanup.policy: delete

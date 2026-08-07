@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: platform
+primaryDatastore: PostgreSQL
+databaseName: openbank_casecoordinator
+dataLineageRole: internal
+dataClassification: internal
+retentionPolicy: "7 years"
+evidenceExported: false
+lineage:
+  upstream:
+    - serviceName: temporal
+      relationType: api
+      description: durable case workflow execution (ADR-0244)
+    - serviceName: agent-service
+      relationType: api
+      description: policy decision point for tool-call authorization
+databaseLineage:
+  ownedDatabases:
+    - openbank_casecoordinator
+  dependentDatabases: []

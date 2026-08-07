@@ -25,7 +25,7 @@
 # see requireValid()/checkConflict() in LedgerExceptions.kt for a drop-in replacement).
 #
 # stdlib-only (grep); no Kotlin-parser dependency, matching
-# check-no-service-principal-type.sh / check-domain-purity.sh. ENFORCED.
+# check-no-service-principal-type.sh / check-domain-purity.py. ENFORCED.
 # Usage: check-exception-mapper-collision.sh [root]   (default root: .)
 set -euo pipefail
 root="${1:-.}"

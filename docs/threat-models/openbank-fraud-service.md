@@ -132,6 +132,24 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 
 ## 6. Change log
 
+- **2026-08-07** — Malformed `POST /api/v1/fraud/score` bodies answered 500, not 400 (#3923). Nothing validated `currency` at the HTTP boundary, and Jackson **coerces** a wrongly-typed JSON scalar into `String` rather than rejecting it — `{"currency": false}` deserialises to the five-character `"false"`. That reached `fraud_scores.currency`, a `varchar(3)`, and Postgres raised `22001 value too long`, surfacing as a Hibernate `DataException` and, with no mapper for it, a **500** from `GenericExceptionMapper`. Found by the 2026-08-03 `api-fuzz-authenticated` run as this service's only `Server error`. **No trust boundary moves:** the endpoint, its `@RolesAllowed`/`@Authorize` gates and every caller are unchanged, and the new guard runs AFTER authorization — the change is purely which status a rejected request carries. It is still security-relevant twice over: a 5xx on a money-path service charges its error budget for someone else's bad request, and it hid a real input reaching storage untyped. Validation is `require` (-> `IllegalArgumentException` -> 400 via libs-runtime's `CommonExceptionMappers`), never a service-local `ExceptionMapper` — a second mapper for one JDK type is picked non-deterministically per request (#526). The bound is the storage contract (exactly three upper-case ISO 4217 letters), so it cannot drift back from the column. Rollback: revert the commit, which restores the 500.
+- **2026-08-05** — Prohibit the customer-edge M2M principal from `fraud.score` (#3734).
+  `operator-fraud-write` was role-only over the whole `fraud.*` namespace, and `rules.yaml`'s
+  `role_action_matrix` grants `fraud.score` to `ROLE_OPERATOR`. The customer-facing edge identity
+  (`service-account-openbank-edge`, HUMAN-classified, ROLE_OPERATOR) was therefore admitted to
+  the real-time scoring gate via base `matrix-allows` — the same escalation class fixed for
+  interest in #3698. Fleet caller audit: **no fraud caller exists in customer-edge at all** (no
+  `fraudServiceUrl` anywhere in the edge); the only M2M scorer is the shared backend client
+  (fx-service shadow scoring, graduated via `service-fraud-scoring`). Tightening is two-layered:
+  `operator-fraud-write` now excludes every `service-account-*` principal (which also closes any
+  FUTURE `fraud.*` rule shape to M2M), and an edge-scoped `prohibited` clause vetoes
+  `fraud.score` at the allow head, beating the matrix grant. Edge-scoped rather than
+  all-service-accounts because the shared client IS the legitimate scoring caller. The analyst
+  review-queue read (`fraud.review.read`) rides base `operator-read-any` — the pre-existing
+  fleet-wide M2M read over-grant, tracked separately in #3734, out of scope here. Falsified by
+  `fraud_rest_ext_test.rego` (stripping either layer turns 3 of 6 tests red); the ext moved from
+  a generator heredoc to a standalone `fraud_rest_ext.rego` so `opa test` can load it. Rollback:
+  revert the ext — no live caller is lost, as no edge fraud path exists.
 - **2026-06-23** — ADR-0084 §2 Phase 2: Kafka signal plane implemented.
   New asynchronous trust boundary: Kafka topic `openbank.transactions.transaction.initiated` →
   `TransactionSignalConsumer` (`@Incoming @Blocking`) → `VelocityAggregateRepositoryImpl` →

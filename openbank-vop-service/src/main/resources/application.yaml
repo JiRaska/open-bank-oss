@@ -60,11 +60,15 @@ quarkus:
     grant:
       type: client
   rest-client:
+    # The two ports were TRANSPOSED here for the life of the service (issue #3966): account-service
+    # had 8101 (ledger-service's port) and party-service had 8100 (account-service's). Both hops of
+    # the ADR-0171 §4 lookup therefore dialled the wrong port. The gitops env inherited the same
+    # swap, so no environment ever ran a working pair — see payments-services.yaml.
     account-service:
-      url: ${ACCOUNT_SERVICE_URL:http://localhost:8101}
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
       scope: jakarta.inject.Singleton
     party-service:
-      url: ${PARTY_SERVICE_URL:http://localhost:8100}
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
       scope: jakarta.inject.Singleton
   shutdown:
     timeout: 30S

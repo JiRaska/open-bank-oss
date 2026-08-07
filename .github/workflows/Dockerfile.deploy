@@ -1,6 +1,32 @@
-FROM eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0
+# The ONE runtime recipe for every openbank-* Quarkus service image. Three producers copy this
+# file verbatim into their build context and append only EXPOSE / SBOM lines: auto-deploy.yml,
+# ghcr-publish.yml and openbank-infra/scripts/build-push-service.sh. Per-service
+# openbank-*/Dockerfile files are declarations only (#3016) — nothing builds them.
+#
+# WHY GLIBC AND NOT ALPINE (#3354). This was eclipse-temurin:25-jre-alpine, i.e. musl.
+# openbank-fraud-service bundles com.microsoft.onnxruntime (ADR-0139 phase-1b), whose
+# libonnxruntime.so is linked against glibc + libstdc++, so OrtEnvironment.getEnvironment() threw
+# UnsatisfiedLinkError in every deployed environment from the day the adapter shipped, and the
+# model scored exactly nothing. Measured on linux/arm64, onnxruntime 1.22.0:
+#
+#   eclipse-temurin:25-jre-alpine                 -> Error loading shared library libstdc++.so.6
+#   eclipse-temurin:25-jre-alpine + apk libstdc++ -> Error loading shared library ld-linux-aarch64.so.1
+#   eclipse-temurin:25-jre (glibc)                -> every NEEDED entry resolves
+#
+# The middle row is the point: installing libstdc++ does NOT work, it moves the failure to the
+# glibc dynamic loader. A glibc base is required, not preferred. Cost is +132MB per base layer
+# (224MB -> 356MB); at ~51 ECR repositories that is ~$0.67/month of storage, which is not a reason
+# to keep a runtime that cannot load a library the fleet ships.
+#
+# Do not revert to a musl base to reclaim the layer: .github/scripts/verify-image-native-libs.py
+# runs `ldd` on every bundled linux .so INSIDE this exact base before any image is pushed, and
+# fails the push. It reads the base image from THIS file — never give it a second copy.
+FROM eclipse-temurin:25-jre@sha256:681c543d6f36c50f45e9b5226930a46203dcfa351d3670e9d0bdf0dabae53539
 WORKDIR /app
-RUN addgroup -S openbank && adduser -S openbank -G openbank
+# uid 100 / gid 101 reproduce exactly what busybox `adduser -S` yielded on the alpine base, so
+# nothing that assumed those numbers changes. Deployments pin runAsUser/runAsGroup anyway.
+RUN groupadd --system --gid 101 openbank \
+ && useradd --system --uid 100 --gid 101 --no-create-home --shell /usr/sbin/nologin openbank
 USER openbank
 COPY quarkus-app/lib/ /app/lib/
 COPY quarkus-app/*.jar /app/
