@@ -1,0 +1,110 @@
+# Kafka mTLS identity for security-scanner (ADR-0137; issue #3393)
+#
+# WHY THIS FILE EXISTS
+# security-scanner was the last openbank service with NO KafkaUser. Both of its producers
+# pointed at the anonymous plaintext listener `…:9092`, so they authenticated as
+# `User:ANONYMOUS` — and the cluster runs `allow.everyone.if.no.acl.found: "false"`
+# (components/kafka/kafka.yaml), which denies that principal on every resource. Measured on the
+# live sandbox 2026-08-03: both topic log segments under
+# `/var/lib/kafka/data-0/kafka-log0/openbank.security.{scan.event,ict.incident}-0/` are
+# **0 bytes** and dated the day the topics were created, and the broker's authorizer logs
+# `Principal = User:ANONYMOUS is Denied … based on rule DefaultDeny` for every ANONYMOUS request
+# on :9092. Nothing has ever been published on either topic.
+#
+# The denial was never observed because the scanner has also never *tried*: nothing writes to
+# `security_outbox` (`SecurityOutboxRepositoryImpl.persistInTransaction` has no caller), so the
+# 5s dispatcher drains an empty table, and the one live produce path — `IctIncidentService`, on
+# `POST /api/v1/ict-incidents` — is only exercised by a human. That is the whole reason this is
+# being fixed BEFORE a producer starts working rather than after: the first real publish would
+# be denied, and the dispatcher swallows the failure (see below).
+#
+# IDENTITY MODEL (ADR-0137)
+# One client cert = one KafkaUser = one principal for all of a service's Kafka traffic. The
+# scanner has two `outgoing` channels and no `incoming` ones, so it needs Write+Describe on the
+# two topics its `application.yaml` names, and no consumer-group ACL.
+#
+# The name `security-scanner` is not cosmetic: `.github/scripts/check-kafka-acl-coverage.py`
+# matches a KafkaUser to a service by that name (module `openbank-security-scanner` minus the
+# prefix), and only a matching name makes the ACLs checkable at all — without it the service is
+# reported as an unverifiable `::notice::`, which is what it was until now.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # Certs (KafkaUser -> Strimzi secret -> ESO projection) must land before the Deployment
+    # rolls the pod onto mTLS; lower waves sync first and ArgoCD blocks on the ExternalSecrets
+    # below reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: security-scanner
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      # mp.messaging.outgoing.security-events-out.topic — periodic scan verdicts.
+      - resource:
+          type: topic
+          name: openbank.security.scan.event
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # mp.messaging.outgoing.ict-incident-events-out.topic — DORA ICT incidents.
+      - resource:
+          type: topic
+          name: openbank.security.ict.incident
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+# Projects the Strimzi-minted keystore secret (messaging/security-scanner) into the
+# security-scanner namespace so the pod volume can reference it directly. This is the FIRST ESO
+# client in this namespace, so the `security-scanner` entry added to the `eso-kafka-cert-reader`
+# Role's `resourceNames` (components/payments/kafka-scheme-accepted-acl.yaml) is what makes it
+# readable — omitting it is the #2749/#2872 failure: the ExternalSecret sits at
+# SecretSyncedError, ArgoCD never advances past sync-wave -1, and no pod is ever created.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: security-scanner-kafka-keystore
+  namespace: security-scanner
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: security-scanner-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: security-scanner
+---
+# Projects the cluster CA truststore (messaging/openbank-cluster-cluster-ca-cert) into the
+# security-scanner namespace. Shared pattern with every other mTLS client.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: security-scanner
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert

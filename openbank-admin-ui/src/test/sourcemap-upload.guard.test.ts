@@ -29,6 +29,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 
 const UI_ROOT = process.cwd()
+const REPO_ROOT = join(UI_ROOT, '..')
 
 /** Strip `#` comment lines from a Dockerfile so a rule is never satisfied by prose about it. */
 function stripDockerComments(src: string): string {
@@ -71,6 +72,48 @@ describe('client source maps reach GlitchTip and never the browser (#3235)', () 
     const config = stripJsLineComments(readFileSync(join(UI_ROOT, 'next.config.mjs'), 'utf8'))
     expect(config).toMatch(/sentryUrl:\s*'https:\/\/glitchtip\.open-bank\.tech'/)
     expect(config).toMatch(/telemetry\s*:\s*false/)
+  })
+
+  it('hands the build an auth token, or nothing is ever uploaded', () => {
+    // The maps existing on disk is half the fix. `withSentryConfig` reads SENTRY_AUTH_TOKEN and,
+    // when it is empty, SKIPS the upload and completes the build normally — deliberately, so a
+    // local or PR build never fails for want of a credential. That same property is what makes
+    // this link silent: delete the mount below and every test here still passes, the image still
+    // builds, the deploy still goes green, and the console goes back to empty culprits.
+    const dockerfile = stripDockerComments(readFileSync(join(UI_ROOT, 'Dockerfile'), 'utf8'))
+    const buildRun = dockerfile.slice(
+      dockerfile.indexOf('--mount=type=secret,id=glitchtip_token'),
+      dockerfile.indexOf('npm run build') + 'npm run build'.length,
+    )
+    // A BuildKit secret, never an ARG: an ARG is recorded in `docker history` and would ship the
+    // credential inside an image anyone can pull.
+    expect(dockerfile).toContain('--mount=type=secret,id=glitchtip_token')
+    expect(dockerfile).not.toMatch(/^\s*ARG\s+(GLITCHTIP_AUTH_TOKEN|SENTRY_AUTH_TOKEN)/m)
+    // The mounted secret must actually reach the variable the plugin reads, in the same RUN.
+    expect(buildRun).toMatch(/SENTRY_AUTH_TOKEN=.*\/run\/secrets\/glitchtip_token/)
+  })
+
+  it('keeps the token chain whole from repo secret to the build', () => {
+    // Two hops live outside openbank-admin-ui/, so a PR touching only them does not run this
+    // suite (CI's admin-ui job is path-filtered). Asserting them here still catches the drift on
+    // the next admin-ui change, which is strictly better than the nothing that guards them today.
+    const script = readFileSync(
+      join(REPO_ROOT, 'openbank-infra/scripts/build-push-admin-ui.sh'),
+      'utf8',
+    )
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n')
+    expect(script).toContain('id=glitchtip_token,env=GLITCHTIP_AUTH_TOKEN')
+
+    const workflow = readFileSync(
+      join(REPO_ROOT, '.github/workflows/admin-ui-deploy.yml'),
+      'utf8',
+    )
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n')
+    expect(workflow).toMatch(/GLITCHTIP_AUTH_TOKEN:\s*\$\{\{\s*secrets\.GLITCHTIP_AUTH_TOKEN\s*\}\}/)
   })
 
   it('prunes every client .map out of the image after the build', () => {

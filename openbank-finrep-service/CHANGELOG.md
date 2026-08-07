@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.5](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.6.4...finrep-service-v0.6.5) (2026-08-07)
+
+
+### Bug Fixes
+
+* **finrep:** open the management port the probes have always asked for ([#4030](https://github.com/JiRaska/open-bank-oss/issues/4030)) ([475e6ea](https://github.com/JiRaska/open-bank-oss/commit/475e6ea04f2adeb8ac50444f5fd38c55affe6fa7))
+
 ## [0.6.4](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.6.3...finrep-service-v0.6.4) (2026-08-02)
 
 

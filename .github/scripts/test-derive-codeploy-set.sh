@@ -154,6 +154,18 @@ There is no verified pact between version abc123 of openbank-fraud-service and t
 ===SERVICE openbank-transaction-service${TAB}PENDING_BUILD
 There is no verified pact between version def456 of openbank-transaction-service and the version of openbank-fraud-service currently deployed to sandbox"
 
+# 11b (#3223). UNVERIFIABLE is durable BY MEASUREMENT — the counterpart version carries no
+#     pacts — and a co-deploy is the remedy for exactly that, so it must be set-eligible.
+#     Before the class existed these blocks arrived as UNVERIFIED or PENDING_BUILD, so this
+#     asserts the allow-list did not lose the pair when the label changed.
+check "UNVERIFIABLE pair is a co-deploy set" \
+  "CODEPLOY${TAB}openbank-fraud-service openbank-transaction-service" \
+  "openbank-fraud-service openbank-transaction-service" \
+"===SERVICE openbank-fraud-service${TAB}UNVERIFIABLE
+There is no verified pact between version abc123 of openbank-fraud-service and the version of openbank-transaction-service currently deployed to sandbox
+===SERVICE openbank-transaction-service${TAB}UNVERIFIABLE
+There is no verified pact between version def456 of openbank-transaction-service and the version of openbank-fraud-service currently deployed to sandbox"
+
 # ── issue #3454: NOT_ASKED, the class where no verdict exists at all ─────────────────────
 # 12. A NOT_ASKED pair references each other exactly like a deadlocked one, and on a fleet
 #     dispatch this is EVERY blocked service (54 of 54 on run 30765380309). Recommending a

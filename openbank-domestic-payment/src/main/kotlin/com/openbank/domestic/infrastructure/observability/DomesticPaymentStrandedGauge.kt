@@ -5,12 +5,16 @@ package com.openbank.domestic.infrastructure.observability
 
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.Startup
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
 import java.time.Clock
@@ -59,6 +63,7 @@ class DomesticPaymentStrandedGauge(
     private val paymentRepository: DomesticPaymentRepository,
     private val registry: MeterRegistry?,
     private val clock: Clock,
+    private val domainMetrics: DomainMetrics,
 ) {
     // CDI constructor: MeterRegistry is optional (absent when no Prometheus registry is on the
     // classpath, e.g. in slim test slices). Without an explicit @Inject constructor, ArC sees two
@@ -68,16 +73,19 @@ class DomesticPaymentStrandedGauge(
         paymentRepository: DomesticPaymentRepository,
         registryInstance: Instance<MeterRegistry>,
         clock: Clock,
+        domainMetrics: DomainMetrics,
     ) : this(
         paymentRepository,
         if (registryInstance.isResolvable) registryInstance.get() else null,
         clock,
+        domainMetrics,
     )
 
     private val counts: Map<DomesticPaymentStatus, AtomicLong> =
         NON_TERMINAL.associateWith { AtomicLong(0) }
     private val oldestAgeSeconds: Map<DomesticPaymentStatus, AtomicLong> =
         NON_TERMINAL.associateWith { AtomicLong(0) }
+    private var liveness: WorkflowLivenessRecorder? = null
 
     @PostConstruct
     fun register() {
@@ -91,6 +99,10 @@ class DomesticPaymentStrandedGauge(
                 oldestAgeSeconds.getValue(status),
             )
         }
+    }
+
+    fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofSeconds(REFRESH_INTERVAL_SECONDS))
     }
 
     private fun gauge(r: MeterRegistry, name: String, status: DomesticPaymentStatus, holder: AtomicLong) {
@@ -116,10 +128,13 @@ class DomesticPaymentStrandedGauge(
                 oldest?.let { maxOf(0L, Duration.between(it, now).seconds) } ?: 0L,
             )
         }
+        liveness?.recordSuccess()
     }
 
     companion object {
         private const val SERVICE = "domestic"
+        private const val WORKFLOW_NAME = "domestic-payment-stranded-gauge"
+        private const val REFRESH_INTERVAL_SECONDS = 30L
 
         /**
          * States a payment must move out of. A payment in any of these has been accepted and is

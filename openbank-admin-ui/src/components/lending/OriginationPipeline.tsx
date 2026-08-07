@@ -99,19 +99,20 @@ export function summarise(items: PipelineItem[], now = Date.now()) {
   return byState
 }
 
+function summariseRows(rows: NonNullable<Props['summary']>, now = Date.now()) {
+  return new Map(rows.map(r => [r.status, {
+    count: r.count,
+    oldestHours: r.oldestCreatedAt ? (now - new Date(r.oldestCreatedAt).getTime()) / 3_600_000 : null,
+    amount: 0,
+  }]))
+}
+
 export function OriginationPipeline({ items, cap, lang = 'cs', onSelectStage, selected, summary }: Props) {
   const [flow, setFlow] = useFlowAnimation()
   const spine = happyPath(ORIGINATION_GRAPH)
   const exits = exitStates(ORIGINATION_GRAPH)
   const byState = useMemo(() => {
-    if (summary) {
-      const now = Date.now()
-      return new Map(summary.map(r => [r.status, {
-        count: r.count,
-        oldestHours: r.oldestCreatedAt ? (now - new Date(r.oldestCreatedAt).getTime()) / 3_600_000 : null,
-        amount: 0,
-      }]))
-    }
+    if (summary) return summariseRows(summary)
     return summarise(items)
   }, [items, summary])
   const max = Math.max(1, ...[...byState.values()].map(v => v.count))

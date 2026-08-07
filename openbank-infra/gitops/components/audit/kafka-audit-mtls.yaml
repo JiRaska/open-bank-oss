@@ -3,8 +3,10 @@
 # Identity model (ADR-0137): mTLS gives each service exactly one client cert =
 # one KafkaUser = one principal for ALL of its Kafka traffic. The audit-service
 # is a pure consumer of domain events across 10 topics; it only needs Read+Describe
-# ACLs on those topics and Read on its consumer group. Topics not listed here
-# stay open under allow.everyone.if.no.acl.found=true (see kafka.yaml).
+# ACLs on those topics and Read on its consumer group. NOTE: "topics not listed here
+# stay open under allow.everyone.if.no.acl.found=true" stood here and has been false
+# since #2794 — a topic with no ACL is denied, not open, which is exactly how the six
+# subscriptions at the bottom of this list came to be receiving nothing (#3271).
 #
 # clearing.batch.event / security.ict.incident / security.scan.event added (ADR-0160
 # #996 triage): each was published with zero consumers since introduction — audit-service
@@ -12,12 +14,12 @@
 #
 # dispute.events / statement.event / sanctions.screening.event added (#996 round 2) —
 # each publisher has its own mTLS KafkaUser with a Write ACL on its topic, which makes
-# that topic ACL-guarded (no longer covered by allow.everyone.if.no.acl.found=true), so
-# audit-service needs an explicit Read+Describe grant to actually consume it. Verified
-# each has a real producer (a genuine outbox-row write) before adding — cards.events /
-# domestic.payment.events / sepa.payment.events have no dedicated mTLS KafkaUser and stay
-# open under allow-everyone, same as clearing/security-scanner above; no ACL change needed
-# for those three.
+# that topic ACL-guarded, so audit-service needs an explicit Read+Describe grant to
+# actually consume it. Verified each has a real producer (a genuine outbox-row write)
+# before adding. (The original note here went on to say cards.events /
+# domestic.payment.events / sepa.payment.events "stay open under allow-everyone, same as
+# clearing/security-scanner above; no ACL change needed for those three" — wrong on the
+# same stale premise, and all three were granted in #3271 once measured.)
 #
 # Strimzi User Operator mints a per-user Secret in `messaging` (user.crt/key/p12
 # + user.password + ca.crt). Those secrets are projected into the `audit` namespace

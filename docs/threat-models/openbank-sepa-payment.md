@@ -106,6 +106,7 @@ from clearing-simulator (cluster-internal, `ROLE_SERVICE`). New trust boundary:
 
 ## 6. Change log
 
+- **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `Idempotency-Key` on createPayment. As in domestic-payment, the existing `require(idempotencyKey.isNotBlank())` could not run for an ABSENT header — this handler is `suspend`, so `null.isNotBlank()` threw NPE and the replay control answered 500 in exactly the case it existed for. A duplicate submission was never at risk (the store is only consulted with a real key), but the caller was told the server had broken when it had not. Now `require(!idempotencyKey.isNullOrBlank())`. No new caller or boundary. Rollback: revert.
 - **2026-07-24** — Retire the legacy in-service orchestration; Temporal is the sole orchestrator
   (ADR-0120 Phase 6, issue #1917). `createPayment` no longer branches on `openbank.temporal.enabled`
   (removed) — it always dispatches `SepaPaymentWorkflow` (screening → shadow fraud scoring → scheme
