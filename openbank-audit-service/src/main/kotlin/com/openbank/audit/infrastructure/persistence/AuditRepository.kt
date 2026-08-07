@@ -385,11 +385,6 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
         delegationId = delegationId,
     )
 
-    private fun chainLinkBroken(prevHash: String?, expectedPrev: String, recordHash: String, recomputed: String) =
-        prevHash != expectedPrev || recordHash != recomputed
-
-    private fun anchorMissed(found: Boolean, fromEntryId: UUID?) = !found && fromEntryId != null
-
     companion object {
         private const val GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000"
         private const val CHAIN_PAGE_SIZE = 500
@@ -447,6 +442,11 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
  * File-scope rather than a method: it is a predicate about a ROW, and keeping it off the repository
  * also keeps that class under detekt's function-count threshold.
  */
+private fun chainLinkBroken(prevHash: String?, expectedPrev: String, recordHash: String, recomputed: String) =
+    prevHash != expectedPrev || recordHash != recomputed
+
+private fun anchorMissed(found: Boolean, fromEntryId: UUID?) = !found && fromEntryId != null
+
 private fun isLegacyHashVersion(e: AuditEntryEntity) = e.recordHash != null && e.hashVersion == null
 
 /** Chain head snapshot used to capture a signed anchor (see [AuditRepository.chainHead]). */

@@ -57,6 +57,10 @@ class DelegatedDomesticPaymentTest {
                 every { subject } returns delegate.toString()
             }
             objectMapper = ObjectMapper()
+            // ADR-0179: the resolver runs at the identity chokepoint on every request. Identity
+            // here — these tests are about delegation, not about merged parties — matching the
+            // other CustomerEdgeResource tests in this module.
+            partyMergeResolver = mockk { every { resolve(any()) } answers { firstArg() } }
             accountServiceUrl = accountSvc
             domesticPaymentServiceUrl = domesticSvc
             partyServiceUrl = "http://party"

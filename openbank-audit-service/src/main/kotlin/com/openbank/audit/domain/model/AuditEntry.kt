@@ -43,7 +43,7 @@ data class AuditEntry(
      * ("what did they do with my account") answerable at all.
      *
      * Like [channel]/[actChain], a query index derived from the chain-hashed [payload], not an
-     * independent claim — see V10__delegated_action_index.sql.
+     * independent claim — see V12__delegated_action_index.sql.
      */
     val onBehalfOf: String? = null,
     /** The delegation grant that permitted the action; null for a direct action (ADR-0232 D5). */
