@@ -212,7 +212,7 @@ paths:
       summary: Turn a directory hit into a payable target, without disclosing the payee's account at lookup
       description: >
         Takes the SHA-256 hash of a phone number the caller already holds and returns an opaque
-        payment-session token (the same rail nearby-pay uses, ADR-0087) plus a display name and a
+        payment-session token (the same rail nearby-pay uses, ADR-0095) plus a display name and a
         MASKED account. This LOOKUP never yields an account number: the token is resolved back to
         it inside POST /domestic-payments, and SCA is signed against the masked form. Answering
         with an account number would make this a harvester, since phone numbers are enumerable in
