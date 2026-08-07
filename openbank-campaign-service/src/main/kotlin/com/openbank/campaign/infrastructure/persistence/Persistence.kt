@@ -15,6 +15,7 @@ import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.application.port.out.StepOutcomeCount
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.DeliveryStatus
@@ -75,6 +76,17 @@ class CampaignEntity : PanacheEntityBase() {
     /** ADR-0245 D1: a catalogue key, not a serialised rule — the rule itself lives in code. */
     @Column(length = 64)
     var conversionRule: String? = null
+
+    /**
+     * Cadence key from `ScheduleCatalog` (V6), or null for a one-shot campaign. Two plain columns
+     * rather than a JSON blob like `stepsJson`: a schedule is two scalars, and keeping the cadence
+     * queryable is what lets an operator ask which campaigns run on a Monday.
+     */
+    @Column(length = 64)
+    var scheduleCadence: String? = null
+
+    @Column
+    var scheduleEndAt: Instant? = null
 
     @Column(nullable = false)
     lateinit var state: String
@@ -196,6 +208,8 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         stepsJson = mapper.writeValueAsString(this@toEntity.steps)
         stopConditionJson = this@toEntity.stopCondition?.let { mapper.writeValueAsString(it) }
         conversionRule = this@toEntity.conversionRule
+        scheduleCadence = this@toEntity.schedule?.cadence
+        scheduleEndAt = this@toEntity.schedule?.endAt
         state = this@toEntity.state.name
         createdBy = this@toEntity.createdBy
         approvedBy = this@toEntity.approvedBy
@@ -211,6 +225,9 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         steps = mapper.readValue<List<CampaignStep>>(stepsJson),
         stopCondition = stopConditionJson?.let { mapper.readValue<StopCondition>(it) },
         conversionRule = conversionRule,
+        // Reconstructed only when a cadence is present: an end instant on its own would be a
+        // schedule with nothing to fire, so the cadence is what decides whether one exists.
+        schedule = scheduleCadence?.let { CampaignSchedule(it, scheduleEndAt) },
         state = CampaignState.valueOf(state),
         createdBy = createdBy,
         approvedBy = approvedBy,
