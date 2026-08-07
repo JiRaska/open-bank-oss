@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.14.0
+  version: 1.15.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -433,6 +433,17 @@ components:
           $ref: '#/components/schemas/StopCondition'
         schedule:
           $ref: '#/components/schemas/CampaignSchedule'
+        trigger:
+          type: string
+          enum: [ACCOUNT_OPENED, CARD_ISSUED]
+          nullable: true
+          description: >-
+            Optional product event that enrols a party the moment it happens (1.15.0), instead of
+            waiting for the next manual enrol or scheduled sweep. A TriggerCatalog key, never a
+            topic name or a filter expression — an uncatalogued value is rejected with 400, since a
+            campaign waiting on a stream nobody publishes would look event-driven and wait forever.
+            The trigger decides WHEN; the campaign's segment still decides WHO, so an event only
+            enrols a party the segment currently contains. Absent means no event enrolment.
         conversionRule:
           description: >-
             Optional conversion rule (ADR-0245, added 1.13.0). A key from the service's own
@@ -507,6 +518,17 @@ components:
           $ref: '#/components/schemas/StopCondition'
         schedule:
           $ref: '#/components/schemas/CampaignSchedule'
+        trigger:
+          type: string
+          enum: [ACCOUNT_OPENED, CARD_ISSUED]
+          nullable: true
+          description: >-
+            Optional product event that enrols a party the moment it happens (1.15.0), instead of
+            waiting for the next manual enrol or scheduled sweep. A TriggerCatalog key, never a
+            topic name or a filter expression — an uncatalogued value is rejected with 400, since a
+            campaign waiting on a stream nobody publishes would look event-driven and wait forever.
+            The trigger decides WHEN; the campaign's segment still decides WHO, so an event only
+            enrols a party the segment currently contains. Absent means no event enrolment.
         conversionRule:
           description: >-
             Optional conversion rule (ADR-0245, added 1.13.0). A key from the service's own

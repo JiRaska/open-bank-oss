@@ -94,6 +94,7 @@ class CampaignSummaryQueryTest {
         override suspend fun findById(id: UUID) = items.firstOrNull { it.id == id }
         override suspend fun list() = items
         override suspend fun save(campaign: Campaign) = campaign
+        override suspend fun findActiveByTrigger(trigger: String) = emptyList<Campaign>()
     }
 
     @Test

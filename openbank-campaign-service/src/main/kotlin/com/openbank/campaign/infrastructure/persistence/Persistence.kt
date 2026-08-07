@@ -88,6 +88,10 @@ class CampaignEntity : PanacheEntityBase() {
     @Column
     var scheduleEndAt: Instant? = null
 
+    /** TriggerCatalog key (V7). Column is `trigger_event`: `trigger` is a reserved SQL word. */
+    @Column(name = "trigger_event", length = 64)
+    var triggerEvent: String? = null
+
     @Column(nullable = false)
     lateinit var state: String
 
@@ -193,6 +197,12 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
     override suspend fun list(): List<Campaign> =
         Panache.withSession { listAll() }.awaitSuspending().map { it.toDomain() }
 
+    // Filtered in SQL, not in Kotlin: this runs once per matching product event, so loading every
+    // campaign to discard almost all of them would put the whole table on a consumer's hot path.
+    override suspend fun findActiveByTrigger(trigger: String): List<Campaign> = Panache.withSession {
+        list("triggerEvent = ?1 and state = ?2", trigger, CampaignState.ACTIVE.name)
+    }.awaitSuspending().map { it.toDomain() }
+
     // merge, not persist: application-assigned @Id, so persist() would INSERT on every lifecycle
     // transition and fail on the PK (the fleet's standard upsert, cf. consent-service).
     override suspend fun save(campaign: Campaign): Campaign = Panache.withTransaction {
@@ -210,6 +220,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         conversionRule = this@toEntity.conversionRule
         scheduleCadence = this@toEntity.schedule?.cadence
         scheduleEndAt = this@toEntity.schedule?.endAt
+        triggerEvent = this@toEntity.trigger
         state = this@toEntity.state.name
         createdBy = this@toEntity.createdBy
         approvedBy = this@toEntity.approvedBy
@@ -228,6 +239,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         // Reconstructed only when a cadence is present: an end instant on its own would be a
         // schedule with nothing to fire, so the cadence is what decides whether one exists.
         schedule = scheduleCadence?.let { CampaignSchedule(it, scheduleEndAt) },
+        trigger = triggerEvent,
         state = CampaignState.valueOf(state),
         createdBy = createdBy,
         approvedBy = approvedBy,

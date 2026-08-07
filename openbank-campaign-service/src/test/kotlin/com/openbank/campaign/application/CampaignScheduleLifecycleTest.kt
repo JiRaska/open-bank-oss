@@ -94,6 +94,7 @@ class CampaignScheduleLifecycleTest {
                 override suspend fun findById(id: UUID): Campaign? = stored.takeIf { it.id == id }
                 override suspend fun list(): List<Campaign> = listOf(stored)
                 override suspend fun save(campaign: Campaign): Campaign = campaign
+                override suspend fun findActiveByTrigger(trigger: String): List<Campaign> = emptyList()
             },
             enrolments = object : EnrolmentRepository {
                 override suspend fun findByCampaignAndParty(campaignId: UUID, partyId: UUID): Enrolment? = null
@@ -109,6 +110,7 @@ class CampaignScheduleLifecycleTest {
             },
             segmentEvaluation = object : SegmentEvaluationPort {
                 override suspend fun evaluate(segment: Segment): List<UUID> = emptyList()
+                override suspend fun matches(segment: Segment, partyId: UUID): Boolean = true
             },
             journeys = object : JourneySignaller {
                 override fun signalConsentRevoked(campaignId: UUID, partyId: UUID) = Unit

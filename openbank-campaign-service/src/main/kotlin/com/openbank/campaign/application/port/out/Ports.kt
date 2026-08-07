@@ -18,6 +18,16 @@ interface CampaignRepository {
     suspend fun findById(id: UUID): Campaign?
     suspend fun list(): List<Campaign>
     suspend fun save(campaign: Campaign): Campaign
+
+    /**
+     * ACTIVE campaigns waiting on [trigger] — the only ones a product event may enrol into.
+     *
+     * A query rather than a filter over `list()`: this runs once per matching product event, and
+     * loading every campaign in the estate to discard almost all of them would put the whole table
+     * on the hot path of a Kafka consumer. The ACTIVE filter is in SQL for the same reason it is a
+     * guard in the service — a DRAFT campaign has not passed four-eyes and must not enrol anyone.
+     */
+    suspend fun findActiveByTrigger(trigger: String): List<Campaign>
 }
 
 interface EnrolmentRepository {
@@ -132,6 +142,16 @@ interface SegmentRegistry {
 /** ADR-0210: evaluates a segment against the silver layer and returns matching party ids. */
 interface SegmentEvaluationPort {
     suspend fun evaluate(segment: Segment): List<UUID>
+
+    /**
+     * Whether [partyId] is in [segment] right now — the membership check on the trigger path.
+     *
+     * Its own method rather than `evaluate(segment).contains(partyId)`: that would pull an entire
+     * audience out of ClickHouse to answer a yes/no question, once per product event. The
+     * implementation adds one predicate to the same generated WHERE clause, so the two can never
+     * disagree about what the segment means.
+     */
+    suspend fun matches(segment: Segment, partyId: UUID): Boolean
 }
 
 /** ADR-0198/0195: live per-call consent check — a cached consent survives its own revocation. */
