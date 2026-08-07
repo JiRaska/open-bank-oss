@@ -53,6 +53,9 @@ spec:
               kubernetes.io/metadata.name: onboarding
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: payments
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: security-scanner
         - namespaceSelector:
             matchLabels:

@@ -2992,10 +2992,15 @@ spec:
             # ADR-0171 §4: the payee name is two hops away — account-service resolves
             # IBAN→partyId, party-service resolves partyId→legal/trading name.
             # account-service holds no holder name of its own.
+            # Ports were TRANSPOSED and the party namespace pluralised (issue #3966): this read
+            # `accounts.svc:8101` (8101 is ledger-service) and `parties.svc:8100` (8100 is
+            # account-service, and namespace `parties` has never existed — it is `party`). So
+            # neither hop of the lookup above could complete, in any environment: the same swap
+            # was in application.yaml's defaults, so there was no fallback to be right.
             - name: ACCOUNT_SERVICE_URL
-              value: http://account-service.accounts.svc:8101
+              value: http://account-service.accounts.svc:8100
             - name: PARTY_SERVICE_URL
-              value: http://party-service.parties.svc:8100
+              value: http://party-service.party.svc:8111
             # Backs the per-requester rate limit. Shared, not in-process: a local counter
             # would give an attacker limit × replicas and reset on every pod roll.
             - name: QUARKUS_REDIS_HOSTS
