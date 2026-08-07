@@ -74,12 +74,15 @@ class FxResource(private val fxUseCase: FxUseCase, private val cnbIngestion: Cnb
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
     @Authorize(action = "fx.convert", resource = "")
     @Operation(summary = "Execute FX conversion")
-    suspend fun convert(req: ConvertRequest?, @HeaderParam("Idempotency-Key") key: String): Response {
+    suspend fun convert(req: ConvertRequest?, @HeaderParam("Idempotency-Key") key: String?): Response {
         // A JSON `null` body deserialises to null despite the non-nullable Kotlin type, so the
         // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
         // IllegalArgumentException to 400.
         requireNotNull(req) { "request body is required" }
-        require(key.isNotBlank()) { "Idempotency-Key required" }
+        // #3104 — the sibling of the line above, one argument position over. An ABSENT header
+        // injected null, so `key.isNotBlank()` threw NPE and this guard answered 500 rather than
+        // the 400 it was written to give.
+        require(!key.isNullOrBlank()) { "Idempotency-Key required" }
         val conv = fxUseCase.convert(
             ConvertCommand(
                 idempotencyKey = key,
