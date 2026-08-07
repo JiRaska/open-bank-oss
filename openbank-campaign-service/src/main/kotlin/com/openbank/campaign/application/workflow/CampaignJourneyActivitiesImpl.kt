@@ -16,6 +16,7 @@ import com.openbank.libs.contact.ContactClass
 import com.openbank.libs.contact.ContactDenyReason
 import com.openbank.libs.contact.ContactGateDecision
 import com.openbank.libs.contact.ContactPolicyGate
+import com.openbank.libs.contact.MarketingCallSite
 import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -94,6 +95,7 @@ open class CampaignJourneyActivitiesImpl(
      * point above stays a one-line delegate.
      */
     @Suppress("TooGenericExceptionCaught")
+    @MarketingCallSite
     internal suspend fun deliverStepGated(campaignId: UUID, partyId: UUID, stepOrder: Int): StepOutcome {
         val campaign = campaigns.findById(campaignId) ?: return StepOutcome.SUPPRESSED
         val step = campaign.steps.firstOrNull { it.order == stepOrder } ?: return StepOutcome.SUPPRESSED
