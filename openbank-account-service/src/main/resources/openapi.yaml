@@ -5,7 +5,7 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  version: 1.7.0
+  version: 1.9.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -335,6 +335,87 @@ paths:
                   authorized:
                     type: boolean
 
+  /api/v1/accounts/{accountId}/delegation/payment-authorization:
+    get:
+      tags: [Accounts]
+      summary: Whether a party may initiate a payment of a given amount from the account
+      description: >-
+        The debit-authorization decision the payment path consults before letting a
+        NON-OWNER move money out of a shared account (ADR-0232 D3/D5). True when the
+        party owns the account, holds an active legacy `account_authorizations` row
+        whose own per-transaction limit covers the amount, or holds an ACTIVE,
+        in-window, OWNER-ISSUED delegation grant carrying `ACCOUNT_INITIATE_PAYMENT`
+        whose per-transaction ceiling covers the amount.
+
+
+        Unlike the boolean `/authorizations/check`, this endpoint returns the EVIDENCE:
+        `delegationId` and `grantorPartyId` are what make the resulting payment auditable
+        as a delegated action, and the grant is revocable, so nothing after the fact can
+        reconstruct which one was live when the money moved.
+
+
+        `outcome` distinguishes NO_GRANT from LIMIT_EXCEEDED for the audit record.
+        Callers MUST render every non-authorized outcome as the same opaque refusal on
+        a customer-facing wire, so this never becomes an existence oracle for another
+        party's grants. Authorize action `account.read`.
+      operationId: checkDelegatedPaymentAuthorization
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: partyId
+          in: query
+          required: true
+          description: >-
+            The party initiating the debit. Resolved by the caller from its own
+            authenticated identity — never from a customer-supplied request body.
+          schema:
+            type: string
+            format: uuid
+        - name: amount
+          in: query
+          required: false
+          description: >-
+            Decimal amount. Omit to ask the capability question without the ceiling;
+            a payment about to be submitted MUST supply it, or no per-transaction
+            limit is evaluated.
+          schema:
+            type: string
+        - name: currency
+          in: query
+          required: false
+          description: ISO-4217 code. Required when `amount` is supplied.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The authorization decision
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authorized, outcome]
+                properties:
+                  authorized:
+                    type: boolean
+                  outcome:
+                    type: string
+                    enum:
+                      - OWNER
+                      - LEGACY_AUTHORIZATION
+                      - DELEGATED
+                      - NO_GRANT
+                      - LIMIT_EXCEEDED
+                      - ACCOUNT_NOT_FOUND
+                  delegationId:
+                    type: string
+                    format: uuid
+                    description: Present only when `outcome` is DELEGATED.
+                  grantorPartyId:
+                    type: string
+                    format: uuid
+                    description: Present only when `outcome` is DELEGATED.
+        '400':
+          description: amount supplied without a currency, or not a valid monetary value
+
   /api/v1/accounts/{accountId}/savings-goal/delegation/proposals:
     post:
       tags: [Accounts]
@@ -393,10 +474,13 @@ paths:
       tags: [Accounts]
       summary: Owner decides a withdrawal proposal (SCA-bound)
       description: >-
-        The owner approves or rejects with a COMPLETED SCA challenge
-        (purpose SAVINGS_WITHDRAW_APPROVAL bound to the owner). An approval flips the
-        proposal to APPROVED and emits SavingsWithdrawalApproved — the executable
-        instruction for the payments path. Authorize action `account.authorize`.
+        The owner approves or rejects with their own SCA challenge (purpose
+        SAVINGS_WITHDRAW_APPROVAL, bound to the owner). The challenge is CONSUMED here, so it is
+        single-use: one challenge authorises exactly one decision. It need not already be
+        COMPLETED — a decoupled challenge (PUSH_NOTIFICATION / BIOMETRIC) is PENDING while holding
+        a signature-verified device decision, and consume is what promotes and spends it. An
+        approval flips the proposal to APPROVED and emits SavingsWithdrawalApproved — the
+        executable instruction for the payments path. Authorize action `account.authorize`.
       operationId: decideSavingsWithdrawalProposal
       parameters:
         - $ref: '#/components/parameters/accountId'
@@ -430,6 +514,10 @@ paths:
                 $ref: '#/components/schemas/ProposalResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: >-
+            The proposal's approval window has closed. The SCA challenge is NOT consumed in this
+            case, so the owner's second factor is not burnt on a decision that cannot succeed.
 
   /api/v1/accounts/{accountId}/savings-goal/delegation/proposals/{proposalId}:
     delete:
@@ -690,9 +778,16 @@ components:
         note: { type: string }
         status:
           type: string
-          enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+          enum: [PENDING, APPROVED, REJECTED, CANCELLED, EXPIRED]
         approvalId: { type: string }
         createdAt: { type: string, format: date-time }
+        expiresAt:
+          type: string
+          format: date-time
+          description: >-
+            When the proposal's approval window closes. A proposal past this instant cannot be
+            approved even while its stored status still reads PENDING — the decision path checks
+            the window directly, so it does not depend on the expiry sweep having already run.
     SavingsGoalRequest:
       type: object
       required: [name, targetMinorUnits]

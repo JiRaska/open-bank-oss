@@ -7,6 +7,7 @@ import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.statement.application.port.out.StatementOutbox
 import com.openbank.statement.application.port.out.StatementPeriodRepository
+import com.openbank.statement.domain.model.PeriodCloseStatus
 import com.openbank.statement.domain.model.StatementPeriod
 import com.openbank.statement.infrastructure.persistence.entity.StatementOutboxEntity
 import com.openbank.statement.infrastructure.persistence.entity.StatementPeriodEntity
@@ -65,6 +66,43 @@ class StatementPeriodRepositoryImpl @Inject constructor(
         }
     }
 
+    @WithTransaction
+    override fun supersedeAndReplace(
+        supersededId: UUID,
+        replacement: StatementPeriod,
+        event: OutboxMessage,
+    ): Uni<StatementPeriod> {
+        val pe = mapper.toEntity(replacement)
+        val now = clock.instant()
+        val oe = StatementOutboxEntity().apply {
+            eventId = event.eventId
+            aggregateId = event.aggregateId
+            eventType = event.eventType
+            payload = event.payload
+            status = OutboxStatus.PENDING.name
+            attemptCount = 0
+            createdAt = now
+            updatedAt = now
+        }
+        return sf.withTransaction { s ->
+            // The superseded row is loaded MANAGED and mutated, so Hibernate issues an UPDATE on
+            // flush. Do NOT round-trip it through persist(): `id` is application-assigned, so a
+            // non-null id cannot distinguish transient from detached and Panache would schedule an
+            // INSERT — the duplicate-key defect that 500'd every consent-service transition.
+            s.find(StatementPeriodEntity::class.java, supersededId)
+                .chain { prior ->
+                    requireNotNull(prior) { "No statement period $supersededId to supersede" }
+                    prior.status = PeriodCloseStatus.SUPERSEDED
+                    // Flip BEFORE inserting the replacement: both rows share the window, and
+                    // ux_statement_period_window_active admits only one non-SUPERSEDED row.
+                    s.flush()
+                }
+                .chain { _ -> s.persist(pe) }
+                .chain { _ -> s.persist(oe) }
+                .replaceWith(mapper.toDomain(pe))
+        }
+    }
+
     @WithSession
     override fun findByPeriod(
         accountId: UUID,
@@ -74,10 +112,11 @@ class StatementPeriodRepositoryImpl @Inject constructor(
     ): Uni<StatementPeriod?> = sf.withSession { s ->
         s.createQuery(
             "FROM StatementPeriodEntity WHERE accountId = :a AND pocketCurrency = :c " +
-                "AND periodFrom = :f AND periodTo = :t",
+                "AND periodFrom = :f AND periodTo = :t AND status <> :sup",
             StatementPeriodEntity::class.java,
         ).setParameter("a", accountId).setParameter("c", currency)
             .setParameter("f", from).setParameter("t", to)
+            .setParameter("sup", PeriodCloseStatus.SUPERSEDED)
             .setMaxResults(1).singleResultOrNull
     }.map { it?.let(mapper::toDomain) }
 
@@ -97,9 +136,10 @@ class StatementPeriodRepositoryImpl @Inject constructor(
         sf.withSession { s ->
             s.createQuery(
                 "FROM StatementPeriodEntity WHERE accountId = :a AND pocketCurrency = :c " +
-                    "AND periodTo < :b ORDER BY periodTo DESC",
+                    "AND periodTo < :b AND status <> :sup ORDER BY periodTo DESC",
                 StatementPeriodEntity::class.java,
             ).setParameter("a", accountId).setParameter("c", currency).setParameter("b", before)
+                .setParameter("sup", PeriodCloseStatus.SUPERSEDED)
                 .setMaxResults(1).singleResultOrNull
         }.map { it?.closingBalance }
 
@@ -118,7 +158,7 @@ class StatementPeriodRepositoryImpl @Inject constructor(
                 "WHERE p.accountId = :a AND p.pocketCurrency = :c AND p.status = :st",
             LocalDate::class.java,
         ).setParameter("a", accountId).setParameter("c", currency)
-            .setParameter("st", com.openbank.statement.domain.model.PeriodCloseStatus.CLOSED)
+            .setParameter("st", PeriodCloseStatus.CLOSED)
             .singleResultOrNull
     }
 }

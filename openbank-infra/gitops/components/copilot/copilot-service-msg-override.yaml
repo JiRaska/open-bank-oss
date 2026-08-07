@@ -1,0 +1,50 @@
+# Dotted-key YAML config bug workaround for copilot-service (issue #686, issue #3881).
+#
+# Quarkus's YAML config source unconditionally quotes any `mp.messaging.incoming.<channel>`
+# YAML leaf key containing a literal dot when registering it as a MicroProfile Config
+# property. A YAML key written as `group.id: foo` under `mp.messaging.incoming.<channel>:`
+# registers ONLY as `mp.messaging.incoming.<channel>."group.id"` — literal quotes in the
+# property name — never as the plain `...group.id` that
+# `KafkaConnectorIncomingConfiguration.getGroupId()` (and `auto.offset.reset`) actually read.
+# Nothing errors; the connector silently uses its own default.
+#
+# copilot's `application.yaml` therefore deliberately declares NEITHER key — it carries a
+# comment saying they belong here. That is not a stylistic preference. Were `group.id` left to
+# its default it would fall back to `quarkus.application.name` = `openbank-copilot-service`,
+# which the KafkaUser ACL (kafka-copilot-mtls.yaml) does NOT grant Read on, and every poll
+# would take a silent GroupAuthorizationException. The group below and the ACL there are one
+# fact written twice; they must agree.
+#
+# Why a properties FILE and not env vars: `party-events-in` is a HYPHENATED channel name, and
+# quarkusio/quarkus#30106 + smallrye/smallrye-reactive-messaging#2028 document a live,
+# unresolved upstream bug where an env-var override of a single leaf property on a hyphenated
+# channel crashes Quarkus at startup (`SRMSG00071`). notification-service and
+# transaction-service both use this properties-file mechanism for the same reason.
+#
+# auto.offset.reset=earliest — SAFE HERE, and deliberate. The warning in the root CLAUDE.md is
+# about forcing `earliest` onto a consumer group *already running* on the default, which
+# re-reads the topic from the beginning and mass-replays. `copilot-service-party` is a BRAND
+# NEW group with no committed offsets, so `earliest` versus `latest` is the difference between
+# starting at the topic's oldest retained record and starting at its head — there is no
+# existing position to rewind. Starting at the oldest record is what we want: `openbank.party.
+# events` has `retention.ms=604800000` (7 days), so a fresh consumer picks up any PARTY_ERASED
+# emitted in the last week that copilot could not act on because it had no Kafka identity at
+# all. Those erasures are real and were missed; replaying them deletes conversation rows that
+# GDPR Art. 17 says should already be gone. The bound is the retention window, not all history.
+#
+# config_ordinal=500 forces this source to outrank the baked application.yaml (~254).
+# Loaded via QUARKUS_CONFIG_LOCATIONS on the Deployment (copilot-service.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: copilot-service-msg-override
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: copilot-service
+    app.kubernetes.io/part-of: platform
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.party-events-in.client.id=copilot-service-party-${quarkus.uuid}
+    mp.messaging.incoming.party-events-in.group.id=copilot-service-party
+    mp.messaging.incoming.party-events-in.auto.offset.reset=earliest

@@ -687,6 +687,23 @@ gates:
     run: |
       bash .github/scripts/probe-pact-version.sh --self-test
 
+  # The counterpart-verifiability probe (#3223). The classifier above says WHY a block
+  # happened; two of its classes end in a promise ("clears within one reconcile tick",
+  # "the reconcile re-drives it automatically") that was a hardcoded constant, not an
+  # observation — and on run 31080511057 all six blocked money-path services carried it
+  # while every counterpart version named was unverifiable by construction. This probe is
+  # what turns that promise into evidence, so its failure directions are what must be
+  # exercised: a contentless counterpart dominating a healthy one, and every probe failure
+  # degrading to `unknown` rather than to the reassuring answer.
+  - id: blocking-counterpart-probe-unit-test
+    name: "can-i-deploy counterpart verifiability probe (issue #3223, enforced)"
+    group: supplychain
+    mode: enforced
+    selftest: |
+      bash .github/scripts/probe-blocking-counterparts.sh --self-test
+    run: |
+      bash .github/scripts/probe-blocking-counterparts.sh --self-test
+
   # Workflow `run:` step size (#3082). GitHub rejects an oversized run script by making the
   # WHOLE workflow unparseable — zero jobs, no error message, every contributor's runs of that
   # file dead until someone reverts. It happened to auto-deploy.yml (#3135 -> #3139) and NOTHING
@@ -947,6 +964,19 @@ gates:
     run: |
       bash .github/scripts/check-agent-charter-registry.sh
 
+  - id: agent-case-schema
+    name: "agent case-coordination schema invariants (ADR-0244 D3/D6/D9, enforced)"
+    group: registry
+    mode: enforced
+    run: |
+      # #3771 added case_classes + case_capabilities to agents.yaml with no validator;
+      # a threshold of 1.30 or a second charter holding case.coordinate would parse as
+      # valid YAML and merge as a governance lie (budgets are the D6 stop-condition,
+      # single-coordinator the D3/D9 audit invariant). Falsified both directions by the
+      # 15-case self-test; the real file passes.
+      python3 .github/scripts/check-agent-case-schema.py --self-test
+      python3 .github/scripts/check-agent-case-schema.py --enforce
+
   # EU AI Act inventory drift (ADR-0148 rule #7, issue #1918).
   #
   # docs/compliance/eu-ai-act.md is DERIVED from openbank-libs/governance/agents.yaml +
@@ -1097,6 +1127,21 @@ gates:
       python3 .github/scripts/check-gates-not-deregistered.py --self-test
     run: |
       python3 .github/scripts/check-gates-not-deregistered.py --enforce
+
+  - id: dockerfile-runtime-only
+    name: "Dockerfiles are runtime-only, declare EXPOSE, share the deploy base (#3016/#3354, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-dockerfile-no-build-stage.py --self-test
+    selftest_expect: pass
+    run: |
+      # This lived as an inline step in ci.yml's `ui-build` job, which runs only when
+      # openbank-admin-ui/, */governance.yaml or the governance schema changed. So the gate
+      # that owns Dockerfile shape could not fire on a Dockerfile-only PR — the exact change
+      # it exists to catch — and reported nothing rather than reporting a skip. Found on
+      # #3629, whose 53 Dockerfile edits skipped it entirely. A shard runs unconditionally.
+      python3 .github/scripts/check-dockerfile-no-build-stage.py --enforce
 
   - id: gate-script-registration
     name: "every check-* script is actually run (#3240, enforced)"
@@ -1258,6 +1303,30 @@ gates:
     run: |
       python3 .github/scripts/check-operator-write-naming.py
 
+  # The OTHER half of the same exposure, and the half no policy can veto (#3765, #3734).
+  # check-operator-write-naming above governs role-only write RULES, so that a rule can at
+  # least become a candidate for `shared_m2m_write_prohibition.reasons`. It cannot see the
+  # matrix: `matrix-allows` grants straight out of `rules.yaml: authz.role_action_matrix`,
+  # is a base-layer reason no per-service ext can exclude, and can never join a register
+  # keyed by reason name without vetoing every legitimate matrix-granted call. So a write
+  # action added to the ROLE_OPERATOR grant list is a grant to whichever M2M service-account
+  # holds that role, with nothing anywhere to object.
+  #
+  # ENFORCED, not advisory, and the difference from its sibling is that the tree is CLEAN:
+  # the register was seeded with the measured 68 grants in the same change, so this blocks
+  # only what is NEW. Falsified against the real diff of PR #3697 (five sdd grants, one of
+  # them sdd.authorise — the call that books a debtor debit): 5 ::error:: lines, rc=1.
+  # `mode:` alone would be vacuous here as it was on threat-model-diff (#2392) — the script
+  # exits 0 without --enforce, so the flag below is the load-bearing half.
+  - id: matrix-write-grants
+    name: "matrix write grants reachable by an M2M service-account are declared (#3765, enforced)"
+    group: registry
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-matrix-write-grants.py --enforce
+    selftest: python3 .github/scripts/check-matrix-write-grants.py --self-test
+    selftest_expect: pass
+
   # Admin-ui IAOps governance snapshot drift (ADR-0029 D3 / ADR-0031).
   # openbank-admin-ui/ai-governance-snapshot.json is DERIVED from curated rollout prose
   # plus machine-checkable repo facts (agents.yaml, prompt-registry coverage, evals
@@ -1329,6 +1398,35 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/check-exception-mapper-collision.sh .
+
+  # A required @QueryParam/@HeaderParam/@MatrixParam declared with a NON-NULLABLE
+  # Kotlin reference type answers 500 when the caller omits it, never 400 — the
+  # caller cannot tell "I sent a bad request" from "the server is broken", and on
+  # a money path that decides whether they retry (issue #3104). Same root shape as
+  # the null-body 500s of #3032/#3050, one argument position over.
+  #
+  # The trap this gate exists to stop being re-learned: writing requireNotNull in
+  # the BODY of a non-suspend handler is dead code. Kotlin emits
+  # Intrinsics.checkNotNullParameter at bytecode offset 0, so the NPE has already
+  # thrown (verified with javap; a suspend function gets no intrinsic at all, and
+  # the null then flows into the body instead). The parameter must be declared
+  # NULLABLE for any guard to be reachable; libs-runtime maps the resulting
+  # IllegalArgumentException to 400 — never add a service-local mapper (#526).
+  #
+  # Ratchet, not a flat fail: remediation is per-handler (required / @DefaultValue
+  # / genuinely optional) and only the handler knows which. The 24 money-path
+  # sites are fixed; the 39 remaining are baselined in the script with their
+  # service, so a NEW occurrence fails and a baseline entry that becomes fixed is
+  # reported too. Self-test first — the must-NOT-flag half is what matters here,
+  # since an outbound REST-client interface carries the identical annotation and
+  # is not a defect (52 of the 115 raw matches on main). ENFORCED.
+  - id: nonnull-jaxrs-param-ratchet
+    name: "non-nullable required JAX-RS param ratchet (issue #3104, enforced)"
+    group: kotlin
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-nonnull-jaxrs-params.py --self-test
+      python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
 
   # openbank.outbox.dispatch-enabled guard (the CLAUDE.md "outbox footgun":
   # a service whose OutboxDispatcher actually gates on this flag silently
@@ -1420,17 +1518,29 @@ gates:
   # hexagonal invariant was documented in every PR template but never enforced,
   # and the fleet quietly accumulated violations (Quarkus @RegisterForReflection
   # on a domain type, Jackson JsonNode in domain models). Baseline-ratcheted
-  # (detekt pattern): the 11 pre-existing violations are grandfathered in
+  # (detekt pattern): pre-existing violations are grandfathered in
   # domain-purity-baseline.txt and burn down as touched; any NEW framework
-  # import in a domain layer fails outright. openbank-libs-runtime is module-
+  # reference in a domain layer fails outright. openbank-libs-runtime is module-
   # exempt (it IS the framework side of the ADR-0122 split; only its package
   # string says "domain"). ENFORCED from introduction (0 new on main).
+  #
+  # #3670 rewrote the bash version, which had two blind spots that intersected on
+  # @Authorize/@FeatureFlag — the fleet's most-used annotations, declared in
+  # openbank-libs-domain as jakarta.interceptor.InterceptorBinding, green every run:
+  #   (a) SCOPE was the `*/domain/*` package path, so 80 of libs-domain's 107 main
+  #       sources (com/openbank/libs/authz, .../flags, ...) were never opened. The
+  #       whole module is now in scope — it IS the domain side of ADR-0122.
+  #   (b) DETECTION was `^import <prefix>`; a fully-qualified reference has no import
+  #       line. Both forms are matched now, on comment- and string-stripped source.
+  # It also gained a --self-test the bash version never had.
   - id: domain-purity-gate
     name: "domain-purity gate — hexagonal invariant (ADR-0002, enforced)"
     group: kotlin
     mode: enforced
+    selftest: |
+      python3 .github/scripts/check-domain-purity.py --self-test
     run: |
-      bash .github/scripts/check-domain-purity.sh .
+      python3 .github/scripts/check-domain-purity.py .
 
   # ==== api ===================================================================
 
@@ -1450,6 +1560,21 @@ gates:
       python3 .github/scripts/check-pacticipant-matches-module.py --self-test
     run: |
       python3 .github/scripts/check-pacticipant-matches-module.py
+
+  # The resolver decides what record-deployment writes into the broker's environment record
+  # (#3223). Its core is a pure path classifier, so the self-test drives every branch — including
+  # the prefix-sibling near-miss (openbank-ledger vs openbank-ledger-service) and the
+  # "no exclude-paths declared" case, where src/test must COUNT rather than be assumed excluded.
+  # Falsified both ways before wiring in: breaking the exclusion makes it exit 1 with 4 failures.
+  - id: record-deployment-version-resolver
+    name: "record-deployment version resolver (issue #3223, enforced)"
+    group: api
+    mode: enforced
+    selftest: |
+      bash .github/scripts/resolve-record-deployment-version.sh --self-test
+    selftest_expect: pass
+    run: |
+      bash .github/scripts/resolve-record-deployment-version.sh --self-test
 
   - id: pact-provider-replay-coverage
     name: "Pact provider-replay coverage (issue #2338, enforced)"
@@ -1972,6 +2097,21 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-realm-template-importable.py
+  - id: opa-bundle-parses
+    name: "OPA bundle must be loadable by OPA (generated artifact, not its sources)"
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-opa-bundle-parses.py --self-test
+    selftest_expect: pass
+    run: |
+      # sca shipped an unloadable bundle on 2026-08-07 (#3748, repaired by #3971): a source
+      # rego without a trailing newline made the generator emit `}  agents.rego: |`, which
+      # dropped a ConfigMap key and left the embedded policy unparseable. Every existing gate
+      # was green — `opa test` reads the SOURCE rego, and the drift check regenerates with the
+      # same broken generator, so committed and regenerated agreed. This one reads the
+      # ARTIFACT with the consumer's own parser, which is the only layer that can see it.
+      python3 .github/scripts/check-opa-bundle-parses.py --self-test
+      python3 .github/scripts/check-opa-bundle-parses.py --root .
   - id: opa-bundle-apply-size
     name: OPA bundle must be installable (client-side apply annotation ceiling)
     group: gitops

@@ -138,6 +138,30 @@ jobs:
       - name: Build + validate the policy bundle (opa check + decision assertions)
         run: ./openbank-infra/opa/build-bundle.sh
 
+      - name: Run per-service rest_ext unit tests
+        run: |
+          # Every *_rest_ext_test.rego runs as its own trio (shared rest.rego + its ext + the
+          # test): all exts extend package openbank.rest, so one invocation would
+          # cross-contaminate allowed_reasons (issue #1797 follow-up 2). These tests previously
+          # ran only by hand — a suite that never runs in CI is vacuous. Discovered, never
+          # hard-coded, and zero discoveries fails closed.
+          TESTS=()
+          while IFS= read -r t; do
+            TESTS+=("$t")
+          done < <(find openbank-infra/gitops/components -name '*_rest_ext_test.rego' | sort)
+          if [ "${#TESTS[@]}" -eq 0 ]; then
+            echo "::error::No rest_ext test files discovered — the find pattern is wrong, not the repo. Refusing to pass a check that verifies nothing."
+            exit 1
+          fi
+          FAILED=0
+          for t in "${TESTS[@]}"; do
+            ext="${t%_test.rego}.rego"
+            echo "--- $t"
+            opa test openbank-libs/governance/policies/rest.rego "$ext" "$t" || FAILED=1
+          done
+          [ "$FAILED" -eq 0 ] || { echo "::error::One or more rest_ext suites failed."; exit 1; }
+          echo "All ${#TESTS[@]} rest_ext suites green."
+
       - name: Verify agent-opa-bundle ConfigMap is in sync with the policy source
         run: |
           cd openbank-infra/gitops/components/agent

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.19.0...account-service-v0.19.1) (2026-08-07)
+
+
+### Bug Fixes
+
+* **account:** the propose-only savings withdrawal approval could never succeed ([#3632](https://github.com/JiRaska/open-bank-oss/issues/3632)) ([4209407](https://github.com/JiRaska/open-bank-oss/commit/4209407e79ffd7a11f048ff5d7daa9fdc6fdfa30))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.18.1...account-service-v0.19.0) (2026-08-07)
+
+
+### Features
+
+* let a delegate pay from a shared account, and audit it as delegated ([#3633](https://github.com/JiRaska/open-bank-oss/issues/3633)) ([568686b](https://github.com/JiRaska/open-bank-oss/commit/568686bfc3ba15e824252f3502b0fddc856c7d37))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.18.0...account-service-v0.18.1) (2026-08-02)
 
 

@@ -30,6 +30,7 @@ class CustomerDelegationResourceTest {
     private val caller: UUID = UUID.randomUUID()
     private val stranger: UUID = UUID.randomUUID()
     private val svc = "http://delegation-service.delegation.svc:8126"
+    private val auditSvc = "http://audit-service.audit.svc:8113"
 
     private fun resource(upstream: UpstreamClient): CustomerDelegationResource =
         CustomerDelegationResource(upstream).apply {
@@ -38,6 +39,7 @@ class CustomerDelegationResourceTest {
                 every { subject } returns caller.toString()
             }
             delegationServiceUrl = svc
+            auditServiceUrl = auditSvc
         }
 
     @Test
@@ -107,6 +109,53 @@ class CustomerDelegationResourceTest {
         val response = resource(upstream).offer("""{"grantorPartyId":"$caller","granteePartyId":"$stranger"}""")
 
         assertThat(response.status).isEqualTo(201)
+    }
+
+    /**
+     * A ceiling the platform cannot keep must not reach upstream, and above all must not reach the
+     * customer as a 201. Asserting `upstream.post` is never called: the defect being fixed is that
+     * this body used to sail through the edge, be stored, and come back echoed — the grantor walked
+     * away believing the delegate was capped at 5 000 Kč/den while only `perTransactionLimit` was
+     * ever checked on a payment.
+     */
+    @Test
+    fun `offer rejects a body carrying dailyLimit or monthlyLimit`() {
+        val upstream = mockk<UpstreamClient>()
+
+        val daily = resource(upstream).offer(
+            """{"granteePartyId":"$stranger","dailyLimit":{"amount":5000.00,"currency":"CZK"}}""",
+        )
+        assertThat(daily.status).isEqualTo(400)
+        assertThat(daily.entity.toString()).contains("CUMULATIVE_LIMIT_UNSUPPORTED").contains("dailyLimit")
+
+        val monthly = resource(upstream).offer(
+            """{"granteePartyId":"$stranger","monthlyLimit":{"amount":50000.00,"currency":"CZK"}}""",
+        )
+        assertThat(monthly.status).isEqualTo(400)
+        assertThat(monthly.entity.toString()).contains("monthlyLimit")
+
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+    }
+
+    /**
+     * The control without which the test above is vacuous: an explicit JSON `null` is the app
+     * sending "no ceiling", not a ceiling, and `perTransactionLimit` is the one limit this platform
+     * enforces — both must still pass through. A naive `node.has(field)` check fails the first of
+     * these, and a check that rejected all limits would fail the second while looking correct.
+     */
+    @Test
+    fun `offer passes through a null ceiling and a perTransactionLimit`() {
+        val upstream = mockk<UpstreamClient>()
+        val body = slot<String>()
+        every { upstream.post(any(), any(), capture(body), any()) } returns Response.status(201).build()
+
+        val response = resource(upstream).offer(
+            """{"granteePartyId":"$stranger","dailyLimit":null,"monthlyLimit":null,""" +
+                """"perTransactionLimit":{"amount":5000.00,"currency":"CZK"}}""",
+        )
+
+        assertThat(response.status).isEqualTo(201)
+        assertThat(body.captured).contains("\"perTransactionLimit\"")
     }
 
     @Test
@@ -182,6 +231,76 @@ class CustomerDelegationResourceTest {
 
         assertThat(body.captured).contains("reason")
         assertThat(body.captured).doesNotContain("null")
+    }
+
+    // ── the grantor transparency view (ADR-0232 D5, #2990 AC10) ────────────────────────────────
+
+    @Test
+    fun `activity asks audit-service about the TOKEN party, never a client-named grantor`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        val party = slot<String>()
+        every { upstream.get(capture(url), capture(party)) } returns Response.ok("[]").build()
+
+        resource(upstream).activity(null, null, null)
+
+        assertThat(url.captured).isEqualTo("$auditSvc/api/v1/audit/on-behalf-of/$caller")
+        assertThat(url.captured).doesNotContain(stranger.toString())
+        assertThat(party.captured).isEqualTo(caller.toString())
+    }
+
+    @Test
+    fun `activity passes the narrowing filters through`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        every { upstream.get(capture(url), any()) } returns Response.ok("[]").build()
+
+        resource(upstream).activity(stranger.toString(), GRANT_ID.toString(), 25)
+
+        // The filters can only ever REMOVE rows from a set already scoped to the caller, so
+        // passing a party the caller is not is safe here — and must still not become the subject.
+        assertThat(url.captured).startsWith("$auditSvc/api/v1/audit/on-behalf-of/$caller?")
+        assertThat(url.captured).contains("delegatePartyId=$stranger")
+        assertThat(url.captured).contains("delegationId=$GRANT_ID")
+        assertThat(url.captured).contains("limit=25")
+    }
+
+    /**
+     * The value is interpolated into a URL the edge calls with its own M2M identity. An unencoded
+     * `&` would let a customer append query parameters of their choosing to that upstream call.
+     */
+    @Test
+    fun `activity URL-encodes the filters instead of interpolating them raw`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        every { upstream.get(capture(url), any()) } returns Response.ok("[]").build()
+
+        resource(upstream).activity("x&limit=999&delegatePartyId=$stranger", null, null)
+
+        assertThat(url.captured).doesNotContain("&limit=999")
+        assertThat(url.captured).contains("%26")
+    }
+
+    @Test
+    fun `activity clamps an absurd page size`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        every { upstream.get(capture(url), any()) } returns Response.ok("[]").build()
+
+        resource(upstream).activity(null, null, 100_000)
+
+        assertThat(url.captured).endsWith("limit=500")
+    }
+
+    @Test
+    fun `activity ignores blank filters rather than sending empty parameters`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        every { upstream.get(capture(url), any()) } returns Response.ok("[]").build()
+
+        resource(upstream).activity("", "  ", null)
+
+        assertThat(url.captured).isEqualTo("$auditSvc/api/v1/audit/on-behalf-of/$caller")
     }
 
     private companion object {

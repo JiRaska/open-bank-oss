@@ -8,62 +8,14 @@ AGENTS_YAML=$REPO/openbank-libs/governance/agents.yaml
 RULES_YAML=$REPO/openbank-libs/governance/rules-opa-data.yaml
 MANIFEST=$REPO/openbank-infra/opa/bundle.manifest
 
-# Fraud REST extension — fraud-scoring allow reasons (ADR-0034 Phase 5, issue #266)
-FRAUD_REST_EXT=$(cat << 'REGO'
-# SPDX-License-Identifier: Apache-2.0
-# Fraud-service REST extension (ADR-0034 Phase 5, ADR-0084, issue #266).
-# Extends openbank.rest with fraud-domain allow reasons.
-# Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
-#
-# Actions gated (FraudResource):
-#   fraud.score — POST /api/v1/fraud/score: score a payment intent, return a
-#                 verdict (ALLOW/CHALLENGE/REVIEW/DECLINE). The only endpoint
-#                 the service exposes today (ADR-0084 §1).
-#
-# Base rest.rego contributes nothing here (fraud.score is a non-read action with
-# no resource path parameter), so BOTH allow paths live in this extension.
-
-package openbank.rest
-
-import rego.v1
-
-# Operators and admins may perform ANY fraud operation — the ops console path
-# (manual re-score of a payment intent while investigating an alert; future
-# rule-management endpoints inherit the same gate before getting their own
-# narrower reasons).
-allowed_reasons contains "operator-fraud-write" if {
-	input.principal.type == "HUMAN"
-	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-	role in input.principal.roles
-	startswith(input.action, "fraud.")
-}
-
-# M2M payment surfaces calling the real-time scoring gate: fx-service invokes
-# POST /score in shadow mode (FraudScoreClient → fraud.score) alongside the
-# ADR-0032 sanctions/AML gate; sepa-instant & co. will use the same action once
-# wired (payments-services.yaml #1827 note). Deliberately narrow: ONLY
-# fraud.score — a future fraud.rules.* management surface must NOT be openable
-# by any M2M client, mirroring edge-service-notification's stance that a
-# blanket SERVICE allow would open every @Authorize endpoint to any M2M client.
-#
-# NOTE (found post-merge, issue tracked separately): AuthorizeInterceptor never
-# emits principal.type == "SERVICE" — M2M callers authenticate via Keycloak
-# client_credentials JWTs, which the interceptor classifies as HUMAN. fx-service
-# shares the `openbank-services` client (like nearly every other backend
-# service), identity `service-account-openbank-services` — gate on that
-# instead. This identity is not unique to fx-service; any other backend
-# service sharing the client would also match this rule for fraud.score.
-allowed_reasons contains "service-fraud-scoring" if {
-	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
-	input.action == "fraud.score"
-}
-REGO
-)
+# Standalone fraud_rest_ext.rego (matches delegation/consent/kyc/psd2/aml/interest/balance),
+# so `opa test` can load it directly rather than a heredoc trapped inside this script —
+# fraud_rest_ext_test.rego needs a real file.
+FRAUD_REST_EXT=$REPO/openbank-infra/gitops/components/fraud-service/fraud_rest_ext.rego
 
 CHECKSUM=$(printf '%s\n' \
     "$(cat "$REST_REGO")" \
-    "$(echo "$FRAUD_REST_EXT")" \
+    "$(cat "$FRAUD_REST_EXT")" \
     "$(cat "$AGENTS_REGO")" \
     "$(cat "$AGENTS_YAML")" \
     "$(cat "$RULES_YAML")" \
@@ -89,7 +41,7 @@ OUT=$REPO/openbank-infra/gitops/components/fraud-service/fraud-opa-bundle.yaml
   echo "  rest.rego: |"
   sed 's/^/    /' "$REST_REGO" | sed 's/[[:space:]]*$//'
   echo "  fraud_rest_ext.rego: |"
-  echo "$FRAUD_REST_EXT" | sed 's/^/    /' | sed 's/[[:space:]]*$//'
+  sed 's/^/    /' "$FRAUD_REST_EXT" | sed 's/[[:space:]]*$//'
   echo "  agents.rego: |"
   sed 's/^/    /' "$AGENTS_REGO" | sed 's/[[:space:]]*$//'
   echo "  agents-data.yaml: |"

@@ -29,7 +29,8 @@ class TieOutFreshnessWatchdogTest {
     private val now = Instant.parse("2026-07-16T10:00:00Z")
     private val clock = Clock.fixed(now, ZoneOffset.UTC)
     private val runs = mockk<TieOutRunRepository>()
-    private val watchdog = TieOutFreshnessWatchdog(runs, clock, NoOpClusterLock())
+    private val watchdog =
+        TieOutFreshnessWatchdog(runs, clock, NoOpClusterLock(), domainMetrics = mockk(relaxed = true))
 
     private fun run(age: Duration, status: TieOutRunStatus) = TieOutRunRecord(
         id = UUID.randomUUID(),

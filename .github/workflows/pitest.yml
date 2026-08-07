@@ -13,7 +13,7 @@ on:
       services:
         description: "Space-separated list of service modules to run pitest on (the matrix below is the source of truth)"
         required: false
-        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service"
+        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service openbank-sdd-service openbank-interest-service"
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); the pitest job below already declares contents: read too, belt-and-suspenders.
@@ -54,6 +54,13 @@ jobs:
           # the 1-2-file "thin domain" shape that excludes sca/consent/billing/clearing/swift/
           # lending/settlement. Local baseline: 67% mutation kill rate.
           - openbank-sanctions-service
+          # Issue #3675 sweep (2026-08-03): sdd (4 domain files — mandate lifecycle, collection
+          # authorisation and refund policy) and interest (6 domain files — withholding-tax and
+          # interest-accrual policy, ~470 LOC of money math) clear the same
+          # substantive-domain-math bar as sanctions. Remaining money-path services stay excluded
+          # by the thin-domain criterion (clearing/swift/lending/settlement/billing 1-2 files).
+          - openbank-sdd-service
+          - openbank-interest-service
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -62,7 +69,17 @@ jobs:
         with:
           java-version: "25"
           distribution: temurin
-          cache: gradle
+
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          # READ-ONLY. setup-java's own `cache: gradle` SAVES a whole Gradle-home entry
+          # (~1.1 GB) on this job's key, into a pool already over the 10 GB ceiling — so
+          # every write here evicts some other job's cache, continuously and silently
+          # (#3299). This job only consumes dependencies; it has no reason to be one of
+          # the lanes that maintains the cache. Reading the shared entry the writing
+          # lanes keep warm (_service-ci.yml's self-hosted lane, auto-deploy.yml) gives
+          # it the same artifacts and costs the pool nothing.
+          cache-read-only: true
 
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
