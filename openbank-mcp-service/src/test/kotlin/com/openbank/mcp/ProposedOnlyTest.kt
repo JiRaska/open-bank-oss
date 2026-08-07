@@ -154,11 +154,18 @@ class ProposedOnlyTest {
     }
 
     @Test
-    fun `the shipped stub port satisfies the invariant`() {
-        // Guards the other direction: the enforcement must not make the current binding unusable.
-        val stub = com.openbank.mcp.infrastructure.read.StubProposalPort(mapper)
-        assertThatCode { ProposedOnly.enforce(stub.proposePayment(CTX, mapper.createObjectNode())) }
-            .doesNotThrowAnyException()
+    fun `the shipped port never reaches the invariant at all — it refuses first`() {
+        // The other direction, restated for the binding that actually ships: since #2414 the bound
+        // port is UnwiredProposalPort, which refuses rather than returning a fabricated PROPOSED
+        // (see ProposalRefusalTest). So there is no proposal document for ProposedOnly to inspect —
+        // and that is the point: the guarantee must not rest on a string constant in a stub. This
+        // asserts the refusal reaches the enforcement point as a throw, not as an accepted result.
+        assertThatCode {
+            ProposedOnly.enforce(
+                com.openbank.mcp.infrastructure.read.UnwiredProposalPort()
+                    .proposePayment(CTX, mapper.createObjectNode()),
+            )
+        }.isInstanceOf(UnsupportedOperationException::class.java)
     }
 
     private fun registryReturning(json: String) = McpToolRegistry(

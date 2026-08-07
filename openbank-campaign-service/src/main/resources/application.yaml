@@ -106,6 +106,44 @@ mp:
         value:
           serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
+      # ADR-0239 D3: delivery outcomes for this service's own send requests, correlated by the
+      # send-log row id. Its own consumer group, not the service-wide default one shared with
+      # consent-events-in: two channels in one group makes both subscriptions one member set, so a
+      # rebalance on either topic churns the other, and the two offsets can never be reset apart.
+      notification-outcomes-in:
+        connector: smallrye-kafka
+        topic: openbank.notification.outcomes.v1
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        group:
+          id: openbank-campaign-service-notification-outcomes
+        auto:
+          offset:
+            reset: earliest
+      # ADR-0245 conversion sources. `latest`, not `earliest`, and deliberately: replaying months of
+      # historical account and card events on first boot would attribute conversions to campaigns
+      # that had not sent anything at the time. The attribution window in ConversionCatalog would
+      # reject most of them, which is exactly the kind of correctness nobody should have to rely on.
+      account-conversions-in:
+        connector: smallrye-kafka
+        topic: openbank.accounts.account.created
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        group:
+          id: openbank-campaign-service-account-conversions
+        auto:
+          offset:
+            reset: latest
+      card-conversions-in:
+        connector: smallrye-kafka
+        topic: openbank.cards.events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        group:
+          id: openbank-campaign-service-card-conversions
+        auto:
+          offset:
+            reset: latest
       consent-events-in:
         connector: smallrye-kafka
         topic: openbank.consent.events

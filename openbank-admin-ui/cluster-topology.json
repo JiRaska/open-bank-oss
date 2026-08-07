@@ -1,12 +1,12 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-07-26T12:43:23.000Z",
+  "generatedAt": "2026-08-04T08:06:31.000Z",
   "counts": {
-    "namespaces": 66,
-    "networkPolicies": 97,
-    "externalSecrets": 132,
-    "clusterPolicies": 4
+    "namespaces": 68,
+    "networkPolicies": 108,
+    "externalSecrets": 144,
+    "clusterPolicies": 5
   },
   "groups": [
     {
@@ -122,6 +122,12 @@
       "declared": true
     },
     {
+      "name": "campaign",
+      "group": "domain",
+      "role": "campaign",
+      "declared": true
+    },
+    {
       "name": "cert-manager",
       "group": "identity",
       "role": "cert-manager — TLS certifikáty",
@@ -149,6 +155,12 @@
       "name": "customer-edge",
       "group": "domain",
       "role": "Edge pro mobilní app",
+      "declared": true
+    },
+    {
+      "name": "delegation",
+      "group": "domain",
+      "role": "delegation",
       "declared": true
     },
     {
@@ -464,9 +476,9 @@
       "icon": "network",
       "status": "planned",
       "analogy": "Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.",
-      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 97 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
+      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 108 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
       "controls": [
-        "NetworkPolicy (97 / 66)",
+        "NetworkPolicy (108 / 68)",
         "per-namespace deny-by-default (cíl)"
       ],
       "adr": [
@@ -534,10 +546,10 @@
       "icon": "key",
       "status": "live",
       "analogy": "Trezor s časovým zámkem — hesla nikdy neleží v kódu.",
-      "summary": "OpenBao drží tajemství; 132 ExternalSecret je sype do k8s. Žádný secret v gitu.",
+      "summary": "OpenBao drží tajemství; 144 ExternalSecret je sype do k8s. Žádný secret v gitu.",
       "controls": [
         "OpenBao",
-        "External Secrets (132)",
+        "External Secrets (144)",
         "KMS unseal"
       ],
       "adr": [
@@ -547,8 +559,8 @@
     }
   ],
   "imageAnatomy": {
-    "multiStage": true,
-    "buildBase": "eclipse-temurin:25-jdk-alpine@sha256:5ecfde8e5ecde5954ea3721155b345ef56c1d579b940c761318ad4c05959a151",
+    "multiStage": false,
+    "buildBase": "eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0",
     "runtimeBase": "eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0",
     "steps": [
       {
@@ -556,7 +568,7 @@
         "label": "Build stage (JDK)",
         "status": "live",
         "adr": [],
-        "detail": "Plný JDK (eclipse-temurin:25-jdk-alpine@sha256:5ecfde8e5ecde5954ea3721155b345ef56c1d579b940c761318ad4c05959a151) zkompiluje a sestaví aplikaci. Tento stage se NEDISTRIBUUJE — zůstává v něm jen nářadí."
+        "detail": "Plný JDK (eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0) zkompiluje a sestaví aplikaci. Tento stage se NEDISTRIBUUJE — zůstává v něm jen nářadí."
       },
       {
         "id": "runtime",
@@ -624,13 +636,13 @@
     {
       "item": "Namespace segmentace",
       "plan": "Doménová izolace, 1 ns / doména",
-      "reality": "66 namespaců",
+      "reality": "68 namespaců",
       "status": "live"
     },
     {
       "item": "NetworkPolicy (east-west)",
       "plan": "deny-by-default v každém ns",
-      "reality": "97 / 66 ns má NetworkPolicy → většina provozu otevřená",
+      "reality": "108 / 68 ns má NetworkPolicy → většina provozu otevřená",
       "status": "planned"
     },
     {
@@ -642,7 +654,7 @@
     {
       "item": "Tajemství",
       "plan": "OpenBao + ESO, nic v gitu",
-      "reality": "132 ExternalSecret",
+      "reality": "144 ExternalSecret",
       "status": "live"
     },
     {
@@ -654,7 +666,7 @@
     {
       "item": "Admission policy",
       "plan": "sada kyverno policies",
-      "reality": "4 ClusterPolicy (image-verify)",
+      "reality": "5 ClusterPolicy (image-verify)",
       "status": "partial"
     }
   ]

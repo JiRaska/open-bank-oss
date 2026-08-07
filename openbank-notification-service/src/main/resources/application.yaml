@@ -63,6 +63,13 @@ quarkus:
       url: ${CONSENT_SERVICE_URL:http://localhost:8106}
       connect-timeout: 2000
       read-timeout: 2000
+    # EMAIL envelope-address resolution (issue #3581). Timeouts match consent-service: a party
+    # lookup that hangs must not hold a Kafka record open, and a timeout resolves to "not
+    # deliverable", which records FAILED rather than mailing a party id.
+    party-service:
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      connect-timeout: 2000
+      read-timeout: 2000
   smallrye-reactive-messaging:
     kafka:
       bootstrap-servers: localhost:29092
@@ -111,6 +118,23 @@ mp:
         ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    outgoing:
+      # ADR-0239 D2: the delivery-outcome topic. The channel bean
+      # (KafkaNotificationOutboxEventPublisher) and the outbox that feeds it predate this binding by
+      # a long way — until now the outbox had no writer and this channel had no topic, so the
+      # service produced nothing. `.v1` is in the topic NAME on purpose: this is the first versioned
+      # topic in the fleet and the contract evolves additively within v1 (ADR-0006).
+      notification-events-out:
+        connector: smallrye-kafka
+        # client.id: same dotted-key YAML trap as the incoming channels below — set via the gitops
+        # ConfigMap, never here (issue #686).
+        topic: openbank.notification.outcomes.v1
+        # NESTED, not the dotted `value.serializer` the incoming channels below use: Quarkus's YAML
+        # source quotes a dotted leaf key so the connector never reads it (issue #686). The existing
+        # dotted keys survive only because SmallRye happens to infer String serdes anyway; a new one
+        # must not rely on that, and the dotted-key ratchet gate would fail it.
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
       notification-events-in:
         connector: smallrye-kafka

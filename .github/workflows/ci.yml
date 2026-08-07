@@ -85,7 +85,13 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "20"
+          # Matches the runtime image (openbank-admin-ui/Dockerfile: node:26-alpine). Pinned at 20
+          # it was three majors behind what ships, and #3569's jsdom bump made that fatal:
+          # jsdom 30 declares engines ^22.22.2 || ^24.15.0 || >=26 and pulls undici 8, whose
+          # cachestorage calls webidl.util.markAsUncloneable. On 20 every vitest worker died
+          # with "Failed to start forks worker", the run collected ZERO tests, and the job
+          # still reported a plain red — engine-strict is off, so npm ci installed it happily.
+          node-version: "26"
           cache: "npm"
           cache-dependency-path: openbank-admin-ui/package-lock.json
 
@@ -473,7 +479,13 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: env.APP_RO_TOKEN != ''
         with:
-          node-version: "20"
+          # Matches the runtime image (openbank-admin-ui/Dockerfile: node:26-alpine). Pinned at 20
+          # it was three majors behind what ships, and #3569's jsdom bump made that fatal:
+          # jsdom 30 declares engines ^22.22.2 || ^24.15.0 || >=26 and pulls undici 8, whose
+          # cachestorage calls webidl.util.markAsUncloneable. On 20 every vitest worker died
+          # with "Failed to start forks worker", the run collected ZERO tests, and the job
+          # still reported a plain red — engine-strict is off, so npm ci installed it happily.
+          node-version: "26"
           cache: "npm"
           cache-dependency-path: openbank-admin-ui/package-lock.json
 

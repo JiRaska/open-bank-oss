@@ -69,16 +69,24 @@ evaluate() {
     return 1
   fi
 
-  local is_error num_turns cost subtype
+  local is_error num_turns cost subtype error_detail
   is_error="$(printf '%s' "$result" | jq -r '.is_error // false')"
   num_turns="$(printf '%s' "$result" | jq -r '.num_turns // 0')"
   cost="$(printf '%s' "$result" | jq -r '.total_cost_usd // 0')"
   subtype="$(printf '%s' "$result" | jq -r '.subtype // "unknown"')"
+  error_detail="$(printf '%s' "$result" | jq -r '(.error // .message // .output // empty) | tostring | gsub("\\n"; " ") | .[0:500]')"
 
   echo "Claude fallback transcript: is_error=$is_error num_turns=$num_turns total_cost_usd=$cost subtype=$subtype"
 
   if [ "$is_error" = "true" ]; then
-    echo "::error title=Claude fallback failed::The transcript reports \`is_error: true\` (subtype=$subtype, num_turns=$num_turns, cost=\$$cost). The action exits 0 in this case, so without this check the step would read as a SUCCESSFUL review of a PR nobody reviewed. See #2161."
+    # #3488: the OAuth token was rejected at the gateway, but the only symptom was the
+    # num_turns/cost summary. Surface whatever error detail the transcript carries so the
+    # next failure can be diagnosed without enabling full output on a public repo.
+    if [ -n "$error_detail" ]; then
+      echo "::error title=Claude fallback failed::The transcript reports \`is_error: true\` (subtype=$subtype, num_turns=$num_turns, cost=\$$cost). Error detail: $error_detail. The action exits 0 in this case, so without this check the step would read as a SUCCESSFUL review of a PR nobody reviewed. See #2161."
+    else
+      echo "::error title=Claude fallback failed::The transcript reports \`is_error: true\` (subtype=$subtype, num_turns=$num_turns, cost=\$$cost). The action exits 0 in this case, so without this check the step would read as a SUCCESSFUL review of a PR nobody reviewed. See #2161."
+    fi
     problems=1
   fi
 
@@ -107,6 +115,12 @@ self_test() {
   cat > "$tmp/dead.json" <<'JSON'
 [{"type":"system","subtype":"init"},
  {"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":1,"total_cost_usd":0}]
+JSON
+
+  # (1a) Same shape but carrying an error message (#3488: we need to see *why* it died).
+  cat > "$tmp/dead-with-message.json" <<'JSON'
+[{"type":"system","subtype":"init"},
+ {"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":1,"total_cost_usd":0,"error":"OAuth token rejected at gateway"}]
 JSON
 
   # (2) A healthy review. This MUST pass, or the guard is just a red light.
@@ -141,20 +155,21 @@ JSON
   }
 
   echo "self-test — every failure path is fed an input it MUST flag:"
-  check "#2161 shape (is_error + 1 turn)" "$tmp/dead.json"     1
-  check "healthy review"                  "$tmp/healthy.json"  0
-  check "completed, no verdict (warn)"    "$tmp/noverdict.json" 0
-  check "truncated transcript"            "$tmp/noresult.json" 1
-  check "unparseable transcript"          "$tmp/garbage.json"  1
-  check "missing file"                    "$tmp/absent.json"   1
-  check "empty execution_file output"     ""                   1
+  check "#2161 shape (is_error + 1 turn)" "$tmp/dead.json"       1
+  check "#2161 shape + error message"     "$tmp/dead-with-message.json" 1
+  check "healthy review"                  "$tmp/healthy.json"    0
+  check "completed, no verdict (warn)"    "$tmp/noverdict.json"  0
+  check "truncated transcript"            "$tmp/noresult.json"   1
+  check "unparseable transcript"          "$tmp/garbage.json"    1
+  check "missing file"                    "$tmp/absent.json"     1
+  check "empty execution_file output"     ""                     1
 
   rm -rf "$tmp"
   if [ "$fails" -gt 0 ]; then
     echo "self-test FAILED ($fails case(s))"
     return 1
   fi
-  echo "self-test OK — 7 cases."
+  echo "self-test OK — 8 cases."
   return 0
 }
 

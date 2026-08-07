@@ -29,11 +29,13 @@ Two things this deliberately does NOT do:
 Usage:
     check-verification-metadata-complete.py --modules openbank-a,openbank-b
     check-verification-metadata-complete.py --modules "" --enforce   # no-op, exits 0
+    check-verification-metadata-complete.py --selftest               # prove it can fail
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import re
 import shutil
@@ -133,9 +135,102 @@ class RegenerationFailed(RuntimeError):
         self.code = code
 
 
+def selftest() -> int:
+    """Prove the gate can fail, without Gradle — fixtures for every unit the verdict rests on.
+
+    A gate that has only ever passed is unfalsified, and this one's verdict is
+    `missing = after - before` over `artifact_set` — so the fixtures feed that
+    algebra both ways, plus the two parser traps that were each paid for once
+    (the comment-only plugin mention, and the alias() plugin application).
+    """
+    failures = 0
+
+    def check(name: str, cond: bool) -> None:
+        nonlocal failures
+        print(f"  {'ok' if cond else 'FAIL'}: {name}")
+        if not cond:
+            failures += 1
+
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d)
+
+        # (1) artifact_set parses (component, artifact) pairs — and only pairs: an
+        # artifact before any component, and a component with no artifacts, drop out.
+        meta = tmp / "metadata.xml"
+        meta.write_text(
+            '<artifact name="orphan-1.0.jar"/>\n'
+            '<component group="com.acme" name="core" version="1.2.3">\n'
+            '  <artifact name="core-1.2.3.jar"/>\n'
+            '  <artifact name="core-1.2.3.pom"/>\n'
+            '</component>\n'
+            '<component group="com.acme" name="empty" version="9">\n'
+            '</component>\n'
+        )
+        parsed = artifact_set(meta)
+        check("artifact_set parses pairs and drops unpaired lines",
+              parsed == {"com.acme:core:1.2.3|core-1.2.3.jar",
+                         "com.acme:core:1.2.3|core-1.2.3.pom"})
+
+        # (2) The verdict algebra: a regenerated file carrying one NEW pair must
+        # surface exactly that pair as missing — and nothing when the sets agree.
+        regen = tmp / "regen.xml"
+        regen.write_text(meta.read_text().replace(
+            '</component>\n<component group="com.acme" name="empty" version="9">',
+            '  <artifact name="core-1.2.3-sources.jar"/>\n'
+            '</component>\n<component group="com.acme" name="empty" version="9">'))
+        after = artifact_set(regen)
+        check("after - before names exactly the added pair",
+              sorted(after - parsed) == ["com.acme:core:1.2.3|core-1.2.3-sources.jar"])
+        check("identical sets report no gap", not (parsed - parsed))
+        # A pair present in before but absent in after is NOT a finding (removals are
+        # deliberately not reported — a narrower task list would "remove" half the file).
+        check("removals are not reported as gaps", not (parsed - after))
+
+        # tasks_for resolves `module/build.gradle.kts` relative to the cwd, so the
+        # fixture modules are exercised from inside the fixture root.
+        previous_cwd = os.getcwd()
+        os.chdir(tmp)
+        try:
+            # (3) tasks_for: both plugin-application shapes get the full task pair.
+            conv = tmp / "openbank-conv"; conv.mkdir()
+            (conv / "build.gradle.kts").write_text('plugins {\n    id("openbank.quarkus-service")\n}\n')
+            check("convention plugin -> both graphs",
+                  tasks_for("openbank-conv") == TASKS)
+            aliased = tmp / "openbank-alias"; aliased.mkdir()
+            (aliased / "build.gradle.kts").write_text('plugins {\n    alias(libs.plugins.quarkus)\n}\n')
+            check("alias(libs.plugins.quarkus) -> both graphs",
+                  tasks_for("openbank-alias") == TASKS)
+
+            # (4) The comment trap: a build file that only TALKS about the plugin must
+            # not get quarkusDependenciesBuild — this exact prose once classified a
+            # non-Quarkus module AS Quarkus (see QUARKUS_PLUGIN_RE above).
+            talker = tmp / "openbank-talker"; talker.mkdir()
+            (talker / "build.gradle.kts").write_text(
+                '// This module isn\'t a Quarkus service (no openbank.quarkus-service here)\n'
+                'plugins {\n    kotlin("jvm") version "2.3.20"\n}\n')
+            check("comment-only mention -> testClasses only",
+                  tasks_for("openbank-talker") == ("testClasses",))
+
+            # (5) Neither plugin -> testClasses only; missing build file -> same, no crash.
+            plain = tmp / "openbank-plain"; plain.mkdir()
+            (plain / "build.gradle.kts").write_text('plugins {\n    kotlin("jvm") version "2.3.20"\n}\n')
+            check("no Quarkus plugin -> testClasses only",
+                  tasks_for("openbank-plain") == ("testClasses",))
+            check("missing build file -> testClasses only",
+                  tasks_for("openbank-does-not-exist") == ("testClasses",))
+        finally:
+            os.chdir(previous_cwd)
+
+    if failures:
+        print(f"selftest FAILED ({failures} case(s))")
+        return 1
+    print("selftest OK — parser, verdict algebra, and both plugin shapes proven both ways.")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--modules", required=True,
+    parser.add_argument("--modules", required=False, default=None,
                         help="comma-separated Gradle module dirs; empty means nothing to do")
     parser.add_argument("--enforce", action="store_true",
                         help="exit non-zero on a gap (default: warn only)")
@@ -143,7 +238,16 @@ def main() -> int:
                         help="with --modules all: take shard I of N (1-based), for the "
                              "periodic guard — a single fleet run needs ~12g of heap, "
                              "more than a 16 GB runner can safely give it")
+    parser.add_argument("--selftest", action="store_true",
+                        help="prove the gate can fail, against fixtures it must and must "
+                             "not flag (no Gradle required)")
     args = parser.parse_args()
+
+    if args.selftest:
+        return selftest()
+
+    if args.modules is None:
+        parser.error("--modules is required unless --selftest is given")
 
     if args.modules.strip() == "all":
         every = sorted(d.name for d in pathlib.Path(".").iterdir()

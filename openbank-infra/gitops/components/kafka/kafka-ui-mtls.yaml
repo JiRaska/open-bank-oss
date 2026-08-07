@@ -1,0 +1,162 @@
+# Kafka mTLS identity for kafka-ui (ADR-0137; issue #3393)
+#
+# WHY THIS FILE EXISTS
+# kafka-ui pointed at the anonymous plaintext listener `…:9092`, so it authenticated as
+# `User:ANONYMOUS` — and the cluster runs `allow.everyone.if.no.acl.found: "false"`
+# (components/kafka/kafka.yaml), which denies that principal on every resource. Measured on the
+# live sandbox 2026-08-03: the broker authorizer logs
+# `Principal = User:ANONYMOUS is Denied operation = DESCRIBE from host = 10.80.86.183 … based on
+# rule DefaultDeny` once per 30s metadata poll (that host is the kafka-ui pod). Unlike
+# security-scanner — which had never *tried* to publish — kafka-ui is the one workload that was
+# genuinely talking to :9092 and being refused on every single request.
+#
+# The reason nobody noticed for months is the UI's own failure mode: a refused DESCRIBE comes back
+# as an empty topic/group list, and kafka-ui renders that as a cluster with no topics rather than
+# as an error. "Broken" and "quiet weekend" look identical on the screen.
+#
+# ACL SCOPE — why a browsing console needs far more than a producer
+# A service's KafkaUser names the handful of topics its `application.yaml` declares. A cluster
+# browser has no such list: its job is to enumerate whatever exists. So the grants are shaped by
+# what each screen calls, not by a topic inventory:
+#
+#   cluster  Describe        → broker list, cluster id, controller (AdminClient.describeCluster)
+#   cluster  DescribeConfigs → the Brokers ▸ Configs tab (AdminClient.describeConfigs on BROKER)
+#   topic *  Describe        → the topic list itself, partitions, leaders, offsets. This is the
+#                              operation that was being denied every 30s.
+#   topic *  DescribeConfigs → the Topics ▸ Settings tab (retention, cleanup.policy, …)
+#   topic openbank.* Read    → the Messages tab. Read is a FULL DATA GRANT, so it is the one thing
+#                              here that is scoped rather than wildcarded (see below).
+#   group *  Describe        → the Consumers screen and every lag figure. Lag needs both the group
+#                              offsets (group Describe) and the log-end offsets (topic Describe).
+#   group kafka-ui-* Read    → kafka-ui's own throwaway consumers when previewing messages. It
+#                              browses with `assign()`, which needs no group coordination, but it
+#                              still sets a `group.id`; granting Read on its own prefix covers the
+#                              path without betting on an implementation detail of v0.7.2.
+#
+# Read is granted on `openbank.` (prefix) and NOT on `*`. Two reasons, both deliberate:
+#   * Read on `*` would include `__consumer_offsets` and `__transaction_state`. Nobody browses
+#     those, and `__consumer_offsets` is the raw commit log of every consumer in the fleet.
+#   * The pod runs `AUTH_TYPE: DISABLED` (no app-layer auth; the NetworkPolicy admitting only the
+#     admin-ui namespace is the whole access control). Read on the business topics therefore means
+#     "anything that reaches this pod can read every domain event, including money-path payloads".
+#     That is a real widening of what this console can see versus today, where it can see nothing —
+#     it is the price of a working Messages tab, and it should be a conscious price. Cutting Read
+#     entirely still leaves a fully working topic/group/lag browser; that is the fallback if the
+#     exposure is judged too wide.
+#
+# NOT granted, on purpose: Write, Create, Delete, Alter, AlterConfigs and IdempotentWrite on any
+# resource, ClusterAction on the cluster, and Delete on any group (that is kafka-ui's "reset
+# offsets" / "delete group" action — a live mutation of another service's consumption). The
+# Deployment also gains `KAFKA_CLUSTERS_0_READONLY: "true"` so the UI hides those buttons instead
+# of offering them and failing with an authorization error, which is a worse way to learn the same
+# thing.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # Certs (KafkaUser -> Strimzi secret -> ESO projection) must land before the Deployment rolls
+    # the pod onto mTLS; lower waves sync first and ArgoCD blocks on the ExternalSecrets below
+    # reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: kafka-ui
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      # Broker/cluster metadata: the Brokers screen, the cluster id, the controller.
+      - resource:
+          type: cluster
+        operations: [Describe, DescribeConfigs]
+        host: "*"
+      # Enumerate every topic — a browser cannot be given a topic list up front. This is the
+      # operation the broker was denying once per poll.
+      - resource:
+          type: topic
+          name: "*"
+          patternType: literal
+        operations: [Describe, DescribeConfigs]
+        host: "*"
+      # Message preview, business topics only. Deliberately not `*` — see the header.
+      - resource:
+          type: topic
+          name: openbank.
+          patternType: prefix
+        operations: [Read]
+        host: "*"
+      # The Consumers screen: group membership, committed offsets, lag.
+      - resource:
+          type: group
+          name: "*"
+          patternType: literal
+        operations: [Describe]
+        host: "*"
+      # kafka-ui's own ephemeral browsing consumers.
+      - resource:
+          type: group
+          name: kafka-ui-
+          patternType: prefix
+        operations: [Read, Describe]
+        host: "*"
+---
+# Projects the Strimzi-minted keystore secret (messaging/kafka-ui) into a secret the Deployment
+# mounts. kafka-ui is the FIRST mTLS client that already lives in `messaging`, so this projection
+# does not cross a namespace boundary the way every other one does, and mounting the Strimzi
+# secret directly would work. It goes through ESO anyway on purpose: `eso-kafka-cert-reader`'s
+# resourceNames list is the repo's inventory of who holds a Kafka client cert, and
+# `check-kafka-cert-reader-grant.py` (gate kafka-cert-reader-grant, enforced) derives that
+# inventory from the ExternalSecrets. A direct mount would make kafka-ui the one cert consumer
+# invisible to it — the same "the list is short, so the gate reads as passing" shape that check
+# exists to retire.
+#
+# The `kafka-ui` entry in that Role's resourceNames
+# (components/payments/kafka-scheme-accepted-acl.yaml) is what makes this readable; omitting it is
+# the #2749/#2872 failure — the ExternalSecret sits at SecretSyncedError, ArgoCD never advances
+# past sync-wave -1, and no pod is ever created.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-ui-kafka-keystore
+  namespace: messaging
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-ui-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: kafka-ui
+---
+# Projects the cluster CA truststore (messaging/openbank-cluster-cluster-ca-cert) under the
+# `kafka-cluster-ca-truststore` name every other client's Deployment already uses. Shared pattern
+# with every other mTLS client.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: messaging
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert

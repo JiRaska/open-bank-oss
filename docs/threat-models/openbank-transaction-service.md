@@ -167,6 +167,7 @@ and no existing request's outcome changes.
 
 ## 6. Change log
 
+- **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `accountId` on listTransactions. Listing "transactions for an account" with no account is a malformed request; the null reached `ListTransactionsQuery` and answered 500. The sibling searchTransactions endpoint already declares `accountId` nullable by design (search is deliberately multi-criteria) and is untouched. No new caller or boundary; `@RolesAllowed` and `@Authorize(action = "transaction.list")` are unchanged and still run first. Rollback: revert.
 - **2026-07-12** — Wired the four-eyes (maker-checker) enforcement *mechanism* (ADR-0155) onto
   `transaction.reverse`, mirroring the account-service rollout (issue #413). New `ApprovalConfig`
   (`RedisApprovalStore` producer, wired onto this service's first-ever Redis client — reuses the

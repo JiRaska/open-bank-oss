@@ -5,7 +5,7 @@
 'use client'
 
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import type { EditorStep } from '@/components/campaigns/JourneyEditor'
+import type { EditorChannel, EditorCondition, EditorStep } from '@/components/campaigns/JourneyEditor'
 
 /**
  * Edits the step selected on the canvas.
@@ -23,6 +23,7 @@ export function StepEditor({
   index,
   step,
   templates,
+  templateChannel,
   templateLabels,
   variableLabels,
   onChange,
@@ -33,6 +34,8 @@ export function StepEditor({
   step: EditorStep
   /** template id → the variables it declares. Mirrors the service's catalogue. */
   templates: Record<string, string[]>
+  /** template id → the channel it renders on. The service refuses a mismatch. */
+  templateChannel: Record<string, EditorChannel>
   templateLabels: Record<string, string>
   /**
    * variable id → what to call it, and what a filled-in one looks like.
@@ -84,6 +87,49 @@ export function StepEditor({
         </button>
       </div>
 
+      {/* Channel first, because it changes what the rest of the panel can offer. A push carries a
+          title and nothing else — notification-service renders a fixed generic body so customer
+          content never reaches an APNs payload (#1182) — so offering an email's body fields on a
+          push step would promise something the platform refuses to deliver. */}
+      <div className="space-y-1.5">
+        <span className="text-sm font-medium">{t('Kanál', 'Channel')}</span>
+        <div className="flex gap-2">
+          {(['EMAIL', 'PUSH'] as EditorChannel[]).map(c => {
+            const first = Object.keys(templates).find(tpl => templateChannel[tpl] === c)
+            const active = step.channel === c
+            return (
+              <button
+                key={c}
+                type="button"
+                data-channel-pick={c}
+                data-selected={active ? 'true' : 'false'}
+                disabled={!first}
+                onClick={() => first && onChange({ ...step, channel: c, template: first, variables: {} })}
+                // `.btn` again rather than a hand-rolled box — the third time tonight that a
+                // house primitive existed and a worse copy was written next to it. `py-1.5` is not
+                // even generated in this build, so the copy rendered cramped.
+                className="btn disabled:opacity-40"
+                style={
+                  active
+                    ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' }
+                    : undefined
+                }
+              >
+                {c === 'EMAIL' ? t('E-mail', 'Email') : t('Push do aplikace', 'App push')}
+              </button>
+            )
+          })}
+        </div>
+        {step.channel === 'PUSH' && (
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'Push nese jen titulek. Nabídku si člověk přečte v aplikaci po klepnutí — do notifikace se osobní obsah nedává.',
+              'A push carries the headline only. The offer is read in the app after the tap — personal content never goes into a notification.',
+            )}
+          </p>
+        )}
+      </div>
+
       <div className="space-y-1.5">
         <label htmlFor={`tpl-${index}`} className="text-sm font-medium">
           {t('Co se pošle', 'What gets sent')}
@@ -94,7 +140,7 @@ export function StepEditor({
           value={step.template}
           onChange={e => onChange({ ...step, template: e.target.value, variables: {} })}
         >
-          {Object.keys(templates).map(tpl => (
+          {Object.keys(templates).filter(tpl => templateChannel[tpl] === step.channel).map(tpl => (
             <option key={tpl} value={tpl}>
               {templateLabels[tpl] ?? tpl}
             </option>
@@ -102,10 +148,15 @@ export function StepEditor({
         </select>
         {/* Said out loud so the absence of a rich-text box reads as a rule, not a missing feature. */}
         <p className="text-xs text-muted-foreground">
-          {t(
-            'Text e-mailu je v šabloně. Tady se vyplňují jen její pojmenované hodnoty.',
-            'The email copy lives in the template. Only its named values are filled in here.',
-          )}
+          {step.channel === 'PUSH'
+            ? t(
+                'Šablona notifikace je pevná. Tady se vyplňuje jen její titulek.',
+                'The notification template is fixed. Only its headline is filled in here.',
+              )
+            : t(
+                'Text e-mailu je v šabloně. Tady se vyplňují jen její pojmenované hodnoty.',
+                'The email copy lives in the template. Only its named values are filled in here.',
+              )}
         </p>
       </div>
 
@@ -123,6 +174,54 @@ export function StepEditor({
           />
         </div>
       ))}
+
+      {/* The gate, next to the delay, because the two together answer "when does this go out, and to
+          whom". `CONFIRMED` is delivery as notification-service reports it (ADR-0239 D3) — never
+          opened and never converted, because no such signal exists in the platform. Saying so here
+          is cheaper than letting someone build a follow-up they believe fires on a click. */}
+      <div className="space-y-1.5">
+        <span className="text-sm font-medium">{t('Kdy krok proběhne', 'When this step runs')}</span>
+        <div className="flex flex-wrap gap-2">
+          {([undefined, 'IF_PREVIOUS_CONFIRMED', 'IF_PREVIOUS_NOT_CONFIRMED'] as (EditorCondition | undefined)[])
+            .map(c => (
+              <button
+                key={c ?? 'ALWAYS'}
+                type="button"
+                data-condition-pick={c ?? 'ALWAYS'}
+                data-selected={(step.condition ?? undefined) === c ? 'true' : 'false'}
+                onClick={() => onChange({ ...step, condition: c })}
+                className="btn"
+                style={
+                  (step.condition ?? undefined) === c
+                    ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' }
+                    : undefined
+                }
+              >
+                {c === undefined
+                  ? t('Vždy', 'Always')
+                  : c === 'IF_PREVIOUS_CONFIRMED'
+                    ? t('Jen když předchozí dorazil', 'Only if the previous arrived')
+                    : t('Jen když předchozí nedorazil', 'Only if the previous did not arrive')}
+              </button>
+            ))}
+        </div>
+        {index === 0 && step.condition && (
+          <p className="text-xs text-amber-600">
+            {t(
+              'První krok nemá co předcházet — „dorazil" tu nikdy neplatí, „nedorazil" vždy.',
+              'The first step has no predecessor — "arrived" never holds here, "did not" always does.',
+            )}
+          </p>
+        )}
+        {step.condition === 'IF_PREVIOUS_NOT_CONFIRMED' && (
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'Nedoručeno zahrnuje i „zatím nevíme". Dejte kroku dost dlouhou prodlevu, ať výsledek stihne dorazit.',
+              'Not delivered includes "we do not know yet". Give the step a delay long enough for the outcome to arrive.',
+            )}
+          </p>
+        )}
+      </div>
 
       <div className="space-y-1.5">
         <label htmlFor={`delay-${index}`} className="text-sm font-medium">

@@ -208,10 +208,28 @@ independent review gate.
 ```
 npm run type-check      # tsc --noEmit
 npm run test            # vitest run (includes the graceful-state guard)
-npx next build          # full production build
+npm run build           # full production build — `next build --webpack`, NOT bare `next build`
 npx eslint .            # lint
 ```
 
+- **`next build` under TURBOPACK emits no client source maps, so a crash reporter can never name a
+  line — build with `--webpack`.** Next 16 defaults to Turbopack, and `productionBrowserSourceMaps`
+  is read only by `next/dist/build/webpack*`, so setting it changes nothing: measured on 16.2.12,
+  `.next/static` held **0** `.map` files with the option on or off, against 1056 under
+  `.next/server`. GlitchTip therefore stored every admin-ui error with a minified title and an
+  **empty culprit** — the same information the person reporting it already had (#3235). Nothing goes
+  red about this: the config option is accepted, the upload plugin runs, and it uploads nothing.
+  Two follow-on traps, both measured rather than assumed:
+  - **Webpack rejects extra value exports from a `route.ts` that Turbopack tolerates** (`"X" is not a
+    valid Route export field`) — so the bundler switch surfaces latent route-file violations one
+    build at a time. Exported `type`/`interface` are fine (they are not in the value namespace); a
+    `const`/`function` is not.
+  - **Do NOT reach for `productionBrowserSourceMaps: true` once on webpack.** It forces
+    `devtool: 'source-map'`, appending `//# sourceMappingURL=` to every client chunk (198 of them
+    here) — which, with maps deleted after upload, is a 404 per chunk and a published index of where
+    the sources would be. Leave it unset: @sentry/nextjs then selects `hidden-source-map`, which
+    wrote the same maps for upload and left **0** pointers in the bundle while injecting debug IDs
+    into 354 chunks. Symbolication joins events to bundles on that debug ID, not on the release.
 - **A generator that VALIDATES something must read the schema, never re-type it — and the schema
   itself should have exactly one author.** `scripts/` holds the fleet's derived-data generators
   (`generate-governance.mjs`, `generate-catalog.mjs`, `generate-security-graph.mjs`, …) and several

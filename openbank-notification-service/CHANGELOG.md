@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.17.4...notification-service-v0.18.0) (2026-08-06)
+
+
+### Features
+
+* **campaign,notification:** tell a delivered message from an accepted handoff (ADR-0239) ([#3838](https://github.com/JiRaska/open-bank-oss/issues/3838)) ([789d662](https://github.com/JiRaska/open-bank-oss/commit/789d6626fde13ab48cd72806a07b7c4e6c19ed0e))
+
+## [0.17.4](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.17.3...notification-service-v0.17.4) (2026-08-03)
+
+
+### Bug Fixes
+
+* **campaign,notification:** resolve the EMAIL recipient from partyId, and stop the send log losing a failed handoff ([#3662](https://github.com/JiRaska/open-bank-oss/issues/3662)) ([f050b19](https://github.com/JiRaska/open-bank-oss/commit/f050b198fbdae19a1909a180f00e9bbddce57297))
+
 ## [0.17.3](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.17.2...notification-service-v0.17.3) (2026-08-02)
 
 

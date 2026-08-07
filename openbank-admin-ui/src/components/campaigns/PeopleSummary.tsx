@@ -35,6 +35,7 @@ const STATE_TONE: Record<string, Tone> = {
   TERMINATED_CONSENT_REVOKED: 'warning',
   TERMINATED_SUPPRESSED: 'neutral',
   TERMINATED_CAMPAIGN_CLOSED: 'neutral',
+  STOPPED_MAX_SENDS: 'neutral',
 }
 
 export function PeopleSummary({
@@ -56,6 +57,7 @@ export function PeopleSummary({
       TERMINATED_CONSENT_REVOKED: t('Odvolali souhlas', 'Withdrew consent'),
       TERMINATED_SUPPRESSED: t('Zastaveni pravidlem', 'Stopped by a rule'),
       TERMINATED_CAMPAIGN_CLOSED: t('Kampaň byla uzavřena', 'Campaign was closed'),
+      STOPPED_MAX_SENDS: t('Dosažen limit odeslání', 'Send cap reached'),
     })[s] ?? s
 
   const rows = Array.isArray(enrolments) ? enrolments : []
