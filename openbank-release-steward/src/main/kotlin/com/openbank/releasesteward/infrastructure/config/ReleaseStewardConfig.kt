@@ -29,8 +29,18 @@ interface ReleaseStewardConfig {
     @WithDefault("JiRaska/open-bank-oss")
     fun githubRepo(): String
 
+    /**
+     * Base URL of the OpenAI-compatible model backend (LiteLLM gateway, ADR-0174). The API key is
+     * read separately via an OPTIONAL lookup (release-steward.model.api-key) so an un-seeded key
+     * degrades the diagnosis call instead of CrashLooping the pod at boot
+     * (SmallRye SRCFG00040 on empty bind).
+     */
     @WithDefault("http://litellm.ai-platform:4000")
     fun llmGatewayUrl(): String
+
+    /** Upstream model name, sent verbatim — the same DeepSeek model sibling ops agents run. */
+    @WithDefault("deepseek-ai/DeepSeek-V3.2")
+    fun modelId(): String
 
     // Filesystem path to the monorepo checkout this agent reads release-please-config.json,
     // .release-please-manifest.json, openbank-admin-ui/package.json and every service

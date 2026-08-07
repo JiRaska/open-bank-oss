@@ -334,6 +334,8 @@ change_requirements:
         reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
       - topic: "openbank.delegation.events"
         reason: "Tracked future work (ADR-0232 D3): product-service enforcement projections (account/card/savings) are the next implementation slice and are the intended consumers — the publisher ships first so the event contract is stable before consumers land. Re-triage: remove this entry with the first projection consumer PR."
+      - topic: "openbank.engagement.events"
+        reason: "ADR-0220 D2 feedback loop, first infrastructure slice (#3585). The intended consumers are the analytics layer (ADR-0022) and ADR-0221's campaign dashboards, neither built yet — the producer ships first so the event contract is stable before consumers land, same shape as the delegation.events entry above. Re-triage: remove this entry with the first real consumer PR."
       - topic: "openbank.pid.events"
         reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
   lineage_code_audit:
@@ -485,52 +487,6 @@ change_requirements:
     # all, so check-gate-graduation.sh could not see it and it had no deadline. That class is now
     # itself gated by .github/scripts/check-advisory-gate-registration.py.
     ci_producer: ".github/scripts/check-dotted-mp-messaging-keys.sh"
-  shared_m2m_write_prohibition:
-    # GHSA-58jq-9hq3-66jr. rest.rego denies the shared M2M identity
-    # (`service-account-openbank-services`, which carries ROLE_OPERATOR in the realm) when the
-    # ONLY reasons admitting it are the role-only write reasons listed here.
-    #
-    # OPT-IN, and the reason a name pattern was rejected: matching every `operator-*-write`
-    # would have 403'd transaction.create from six live callers (account-service's
-    # welcome-bonus credit, sepa-instant, domestic-payment, swift, interest, sdd) and
-    # settlement.create — both AUTHZ_ENFORCE=true money paths whose services have no
-    # identity-scoped rule to fall back on. transaction-service's rego states the exposure
-    # itself ("RESIDUAL RISK — shared identity, no per-caller narrowing"), which is precisely
-    # why removing its only path is not the fix.
-    #
-    # A reason joins this list once its service carries a rule that NAMES the caller and
-    # enumerates its actions, so denying the role-only path removes an over-grant rather than
-    # the only path. Each entry below was verified to have such a rule.
-    reasons:
-      - operator-consent-write        # service-consent-m2m + service-consent-m2m-marketing
-      - operator-ledger-write         # service-ledger-post / service-ledger-reverse
-      - operator-balance-write        # service-balance-m2m
-      - operator-fraud-write          # service-fraud-scoring
-      - operator-sca-write            # service-sca-edge-m2m + service-sca-shared-client-m2m
-      - operator-sepa-payment-write   # service-sepa-payment-shared-client-m2m
-    # NOT listed, and why. Each needs an identity-scoped rule for its real callers FIRST;
-    # adding it here before that is a money-path outage, not a test failure.
-    deferred:
-      operator-transaction-write: "6 verified callers of transaction.create via the shared client; no identity-scoped rule exists"
-      operator-settlement-write: "settlement.create is resourceless with no alternative rule"
-      operator-swift-write: "no identity-scoped rule; callers unverified"
-      operator-sepa-instant-write: "no identity-scoped rule; callers unverified"
-      operator-billing-write: "no identity-scoped rule; callers unverified"
-      operator-interest-write: "no identity-scoped rule; callers unverified"
-      operator-lending-write: "no identity-scoped rule; callers unverified"
-      operator-sanctions-write: "no identity-scoped rule; m2m-sanctions-screening covers create only"
-      operator-identity-write: "no identity-scoped rule; callers unverified"
-      operator-card-write: "no identity-scoped rule; callers unverified"
-      # These DO carry an identity-pinned rule, but "a rule exists" is not "the rule covers the
-      # actions the role-only path was serving". Listing them on that basis would repeat, one
-      # level down, the guess that made the first revision break transaction.create. Each needs
-      # its identity-scoped rule read against its real callers before it moves up.
-      operator-fx-write: "2 identity-pinned rules; action coverage vs real callers unverified"
-      operator-account-write: "2 identity-pinned rules; action coverage unverified"
-      operator-clearing-write: "1 identity-pinned rule; action coverage unverified"
-      operator-domestic-payment-write: "1 identity-pinned rule; action coverage unverified"
-      operator-party-write: "1 identity-pinned rule, but onboarding-service PUTs party.kyc-status via the shared client (latent: AUTHZ_ENFORCE=false there today)"
-    adr: ADR-0034
   role_only_write_rule_naming:
     # GHSA-58jq-9hq3-66jr. `service-account-openbank-services` — the identity nearly every
     # backend service authenticates as — carries ROLE_OPERATOR in the realm, and
@@ -749,6 +705,31 @@ money_path_services:
                                             # genuine mismatches into reassuring amber warnings (threat model §3 Tampering).
                                             # It is gitops-only config today, so it is covered by PR review rather than
                                             # four_eyes.verbs; add a `vop.flip` verb here if it ever becomes operator-tunable.
+  - openbank-standing-order-service        # issue #2188: StandingOrderDueConsumer POSTs a real SCT to
+                                            # sepa-payment `/api/v1/sepa-payments` for every due order (#889, merged) —
+                                            # initiates money movement like sdd, not adjacent to it. Same class as sdd:
+                                            # it shapes the instruction, the irreversible debit lives downstream in a
+                                            # gated money-path service. Threat model:
+                                            # docs/threat-models/openbank-standing-order-service.md.
+                                            # four-eyes assessed: the only money-moving path is the scheduler-driven
+                                            # consumer (no human in the loop by design); the REST surface is
+                                            # customer/operator CRUD on orders (create/amend/pause/resume/cancel), whose
+                                            # effect is a FUTURE scheduled debit, not an immediate one — pausing or
+                                            # cancelling an order REDUCES money movement. There is no operator
+                                            # force-execute endpoint to maker-checker gate; add a verb here if one is
+                                            # ever added. Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
+  - openbank-psd2-service                  # issue #2188 sibling sweep: PaymentInitiationService (PIS) calls
+                                            # transactionClient.initiatePayment for SCT/SCT_INST/domestic/SIPO — it
+                                            # initiates real payments like sdd/standing-order do, consent- and
+                                            # SCA-gated upstream (ADR-0090, ADR-0126). Already treated as money-path
+                                            # by the OPA-bundle converge work (#3422); this makes the list agree.
+                                            # Threat model: docs/threat-models/openbank-psd2-service.md.
+                                            # four-eyes assessed: initiation is TPP-driven under an eIDAS consent with
+                                            # SCA on the debtor — a maker/checker pair does not exist for a
+                                            # customer-consented machine flow; the bank-side actions that WOULD deserve
+                                            # a gate (TPP revocation, consent termination by an operator) are not
+                                            # wired as operator verbs today. Runs AUTHZ_ENFORCE=false (advisory) —
+                                            # joins the #3679 cohort.
 
 # ---------------------------------------------------------------------------------------
 # SLOs (issue #669 — operational evidence, scope item 3). Governed data: a single
@@ -1178,6 +1159,7 @@ dependencies:
       # apart from the tree once already (#2280).
       paths:
         - openbank-agent-service/
+        - openbank-case-coordinator-agent/
         - openbank-copilot-service/
         - openbank-devops-agent/
         - openbank-finops-agent/
@@ -1202,6 +1184,7 @@ dependencies:
       # in sync. Enforced by .github/scripts/check-license-headers.py.
       agpl_modules:
         - openbank-agent-service            # ADR-0136
+        - openbank-case-coordinator-agent   # ADR-0244
         - openbank-copilot-service          # ADR-0136
         - openbank-devops-agent             # ADR-0136
         - openbank-finops-agent             # ADR-0136
@@ -1213,7 +1196,7 @@ dependencies:
         - openbank-flaky-test-hunter
         - openbank-ap2-service              # ADR-0193 -- same agent plane as mcp-service
         - openbank-mcp-service              # ADR-0181 -- explicitly inside the ADR-0136 boundary
-      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-ap2-service'|':openbank-mcp-service') as a dependency"
+      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-case-coordinator-agent'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-ap2-service'|':openbank-mcp-service') as a dependency"
       license: "AGPL-3.0-only"
       adr: ADR-0136
   block_on_cve_severity: [CRITICAL, HIGH]
@@ -1496,6 +1479,24 @@ scheduled_methods:
     enforced: advisory
     target_enforce_date: "2026-09-30"
     ci_producer: ".github/scripts/check-scheduler-liveness.py"
+
+
+# ---------------------------------------------------------------------------------------
+# k6 performance smoke gate (issue #3348 / ADR-0243).
+# A failed weekly run opens a new issue. Once failure rate DCG stabilises, this
+# graduates to an enforced PR gate.
+# ---------------------------------------------------------------------------------------
+perf_gate:
+  pilot_services:
+    - openbank-product-catalog
+  detect: ["openbank-*/src/test/k6/*-smoke.js", ".github/workflows/perf-gate.yml"]
+  require:
+    - "k6 smoke script exists in src/test/k6/ matching perf-gate expectations"
+    - "weekly scheduled run reports into perf-reports-* artifact"
+  gate: perf-gate
+  enforced: advisory
+  target_enforce_date: "2026-11-01"
+  ci_producer: ".github/workflows/perf-gate.yml"
 
 
 # ---------------------------------------------------------------------------------------
@@ -2098,6 +2099,37 @@ gitops_ref_integrity:
   # naming `Secret payments/vop-oidc`; restored, it passes.
   incident: 2026-07-16
 
+oidc_secret_convention:
+  script: .github/scripts/check-oidc-secret-convention.py
+  wired_into: .github/gates/gates.yaml    # gate id oidc-secret-convention, group gitops, enforced
+  # THE DECISION (issue #3485). The OIDC client secret lives in ONE KV entry, `account-service`,
+  # and every ExternalSecret reads it from there. Not because that name is apt -- it is a
+  # historical accident -- but because the fleet has exactly one Keycloak confidential client,
+  # `openbank-services`, and therefore exactly one secret VALUE. A per-service key name promises
+  # a per-service credential that does not exist, while costing a KV write nobody is prompted to
+  # make. Independent rotation is the only thing the per-service form buys, and nothing can use
+  # it while all 39 projections hold the same client's secret.
+  rule: >-
+    Under openbank-infra/gitops/components/, an ExternalSecret data entry projecting the OIDC
+    client secret (remoteRef.property or secretKey == OIDC_CLIENT_SECRET) must read
+    remoteRef.key: account-service.
+  basis: one_client_implies_one_kv_entry
+  baseline: in-script BASELINE dict -- 10 pre-existing per-service entries, SHRINK-ONLY
+  # WHY BASELINED AND NOT MIGRATED. Changing a live ExternalSecret's remoteRef re-projects the
+  # Secret and rolls the pod. Nothing in this repo can see what those 10 KV entries hold, so the
+  # switch is safe only if `account-service` is current -- likely (28 live consumers) but not
+  # verified from here, and being wrong breaks authentication on 10 services at once. The gate
+  # therefore FREEZES today's split rather than moving it: the losing side cannot grow, and a
+  # migration done later must delete its baseline entry or the gate fails on the stale
+  # exemption. Migration is tracked on #3485.
+  # PRIOR ART: openbank-delegation-service, 2026-08 -- shipped `remoteRef.key: delegation-service`,
+  # an entry nobody had written. ESO answered `Secret does not exist`, the Secret was never
+  # created, the pod sat in CreateContainerConfigError for its entire life, and ~12 alerts fired
+  # without one of them naming the cause. Fixed in #3471 by pointing at the shared entry.
+  # gitops_ref_integrity cannot catch this: the ExternalSecret DOES declare the Secret, it just
+  # never materialises -- the defect is one layer out, in the KV key the ref names.
+  incident: 2026-08-01
+
 deploy_coverage:
   script: .github/scripts/check-deploy-coverage.sh
   wired_into: .github/workflows/ci.yml   # governance job -> all-green (a REQUIRED check)
@@ -2224,6 +2256,33 @@ governance_manifest:
     # This gate's every historical defect lived on its failure path.
     - each_rule_has_a_test_that_fails_without_it
   incident: 2026-07-25
+
+# A function this repo describes as ENFORCING something must have a production caller. Nothing
+# else notices when it does not: it compiles, it is a bean method, its port declares it, and its
+# unit tests are green — about a function no request reaches. Coverage inverts the signal, since a
+# well-tested unreachable guard scores HIGHER than a lightly-tested reachable one.
+# Enforced by .github/scripts/check-enforcement-reachability.py (gate: enforcement-reachability).
+enforcement_reachability:
+  principle: >
+    Reachability is a property of the call graph, not of the code's docstring. An entry declares
+    what was MEASURED, and the gate fails in both directions — a `reachable` entry that loses its
+    last caller, and an `unreachable` entry that quietly gains one — so a known gap can neither rot
+    into permanent furniture nor be closed without the record being updated.
+  declared:
+    - symbol: isAuthorizedForAmount
+      module: openbank-account-service
+      status: unreachable
+      issue: 3615
+      declared_in:
+        - openbank-account-service/src/main/kotlin/com/openbank/account/application/usecase/AuthorizationService.kt
+        - openbank-account-service/src/main/kotlin/com/openbank/account/application/port/in/AccountPorts.kt
+      why: >
+        ADR-0232 D3's amount-aware guard and the only enforcer of perTransactionLimit in
+        account-service. Measured 2026-08-03: every call site is in AuthorizationServiceDelegationTest.
+        The endpoint that looks like its front door, GET /api/v1/accounts/{id}/authorizations/check,
+        calls the amount-free isAuthorized instead, and no money-moving service reads a delegation
+        grant at all — so there is no debit for a limit check to attach to yet. Flip to `reachable`
+        when the delegated payment path lands (#3615), not before.
 
 knowledge_capture:
   principle: >
@@ -2435,3 +2494,166 @@ authz:
         - lending.collateralDecide
         - lending.approval.read
         - lending.approval.decide
+
+# PROMOTED TO A TOP-LEVEL KEY (2026-08-07). rest.rego reads this as
+# `data.rules.shared_m2m_write_prohibition.reasons`, and gen-rules-opa-data.py selects only
+# TOP-LEVEL keys of this file into the derived rules-opa-data.yaml that OPA actually mounts.
+# Nested under `change_requirements:` it was never emitted, so `role_only_write_reason` was
+# never true, `prohibited`'s `every` clause was false, and the guard had never once fired in
+# the cluster. gen-rules-opa-data.py had been warning about exactly this on every run.
+shared_m2m_write_prohibition:
+  # GHSA-58jq-9hq3-66jr. rest.rego denies the shared M2M identity
+  # (`service-account-openbank-services`, which carries ROLE_OPERATOR in the realm) when the
+  # ONLY reasons admitting it are the role-only write reasons listed here.
+  #
+  # OPT-IN, and the reason a name pattern was rejected: matching every `operator-*-write`
+  # would have 403'd transaction.create from six live callers (account-service's
+  # welcome-bonus credit, sepa-instant, domestic-payment, swift, interest, sdd) and
+  # settlement.create — both AUTHZ_ENFORCE=true money paths whose services have no
+  # identity-scoped rule to fall back on. transaction-service's rego states the exposure
+  # itself ("RESIDUAL RISK — shared identity, no per-caller narrowing"), which is precisely
+  # why removing its only path is not the fix.
+  #
+  # A reason joins this list once its service carries a rule that NAMES the caller and
+  # enumerates its actions, so denying the role-only path removes an over-grant rather than
+  # the only path. Each entry below was verified to have such a rule.
+  reasons:
+    - operator-consent-write        # service-consent-m2m + service-consent-m2m-marketing
+    - operator-ledger-write         # service-ledger-post / service-ledger-reverse
+    - operator-balance-write        # service-balance-m2m
+    - operator-fraud-write          # service-fraud-scoring
+    # SAFE TODAY ONLY BY CO-ADMISSION, not by the rule named here: that rule covers
+    # sepaPayment.handleReturn alone, but ROLE_OPERATOR also grants sepaPayment.create /
+    # .transitionStatus / .approval.decide, so `matrix-allows` co-admits and this reason
+    # never becomes the only one. standing-order POSTs sepaPayment.create via the shared
+    # client. When ADR-0223 D2(b) retires those matrix grants, this entry starts denying it.
+    - operator-sepa-payment-write   # service-sepa-payment-shared-client-m2m (see note above)
+    # Restored once #3748 landed: service-sca-shared-client-m2m now admits the shared client
+    # for scaChallenge.read AND scaChallenge.consume, so document-service's consume call
+    # (ScaChallengeClient, oidc-client.client-id openbank-services) keeps an identity-scoped
+    # reason and this entry no longer 403s the document-signing gate. device.list is covered
+    # by matrix-allows. Still uncovered for the shared client: decide/initiate/verify and
+    # device.enroll — no in-repo caller invokes them on that principal.
+    - operator-sca-write            # service-sca-edge-m2m + service-sca-shared-client-m2m
+  # NOT listed, and why. Each needs an identity-scoped rule for its real callers FIRST;
+  # adding it here before that is a money-path outage, not a test failure.
+  deferred:
+    operator-transaction-write: "6 verified callers of transaction.create via the shared client; no identity-scoped rule exists"
+    operator-settlement-write: "settlement.create is resourceless with no alternative rule"
+    operator-swift-write: "no identity-scoped rule; callers unverified"
+    operator-sepa-instant-write: "no identity-scoped rule; callers unverified"
+    operator-billing-write: "no identity-scoped rule; callers unverified"
+    operator-interest-write: "no identity-scoped rule; callers unverified"
+    operator-lending-write: "no identity-scoped rule; callers unverified"
+    operator-sanctions-write: "no identity-scoped rule; m2m-sanctions-screening covers create only"
+    operator-identity-write: "no identity-scoped rule; callers unverified"
+    operator-card-write: "no identity-scoped rule; callers unverified"
+    # These DO carry an identity-pinned rule, but "a rule exists" is not "the rule covers the
+    # actions the role-only path was serving". Listing them on that basis would repeat, one
+    # level down, the guess that made the first revision break transaction.create. Each needs
+    # its identity-scoped rule read against its real callers before it moves up.
+    operator-fx-write: "2 identity-pinned rules; action coverage vs real callers unverified"
+    operator-account-write: "2 identity-pinned rules; action coverage unverified"
+    operator-clearing-write: "1 identity-pinned rule; action coverage unverified"
+    operator-domestic-payment-write: "1 identity-pinned rule; action coverage unverified"
+    operator-party-write: "1 identity-pinned rule, but onboarding-service PUTs party.kyc-status via the shared client (latent: AUTHZ_ENFORCE=false there today)"
+  adr: ADR-0034
+
+# Every WRITE action that `authz.role_action_matrix` (above) grants to a role an M2M
+# service-account holds — and therefore, via rest.rego's `matrix-allows`, to every caller
+# presenting that service-account's token rather than to a named human (#3765, #3734).
+#
+# This register is NOT an exemption list and does not make any entry below safe. It exists
+# because the grant is otherwise invisible: a write action added to the ROLE_OPERATOR grant
+# list reads as staff authorization, and the policy layer cannot object — `matrix-allows` is
+# a base-layer reason, so `shared_m2m_write_prohibition.reasons` (which is keyed by reason
+# name) can never list it without vetoing every legitimate matrix-granted call, and no
+# per-service `*_rest_ext.rego` can veto a rule that lives in base rest.rego. Listing the
+# action here is the only place the decision becomes an explicit, reviewable act.
+#
+# The set below was MEASURED, not assembled: derived from the matrix by
+# .github/scripts/check-matrix-write-grants.py, and cross-checked action-by-action against
+# the live bundle ConfigMaps with `opa eval` (see the tables on #3765). Adding an entry is
+# a security decision on a money path; removing an action from the matrix requires removing
+# it here too, and the gate fails on a stale entry in either direction.
+#
+# The gate derives its role scope from every Keycloak realm JSON in the tree, so it does not
+# need to be told which roles matter. Worth knowing while reading this: the three realms do
+# NOT agree today — the deployed gitops template gives `service-account-openbank-services`
+# only ROLE_API, while the docker and CI realms also give it ROLE_OPERATOR, and
+# `service-account-openbank-edge` carries ROLE_OPERATOR in the deployed template. The union
+# is used, because a role assignment that exists in any environment is an exposure there.
+shared_m2m_matrix_write_grants:
+  gate: matrix-write-grants
+  enforced: enforced
+  ci_producer: ".github/scripts/check-matrix-write-grants.py"
+  adr: ADR-0223
+  declared:
+    - account.approval.decide
+    - account.authorize
+    - account.close
+    - account.create
+    - account.freeze
+    - account.search
+    - account.unfreeze
+    - account.update
+    - balance.credit
+    - balance.debit
+    - balance.hold
+    - balance.holdRelease
+    - balance.initialize
+    - balance.reconciliation.run
+    - billing.approval.decide
+    - billing.post
+    - billing.reverse
+    - clearingBatch.approval.decide
+    - clearingBatch.reconcile
+    - clearingBatch.settle
+    - clearingBatch.submit
+    - clearingBatch.triggerCycle
+    - fraud.score
+    - fx.convert
+    - identity.case.decide
+    - identity.case.reopen
+    - identity.eudi.issue
+    - identity.eudi.poll
+    - identity.eudi.request
+    - identity.eudi.revoke
+    - identity.eudi.verify
+    - identity.link
+    - identity.register
+    - identity.resolve
+    - interest.create
+    - interest.delete
+    - interest.trigger
+    - ledger.create
+    - ledger.replay
+    - ledger.reverse
+    - ledger.trigger
+    - lending.approve
+    - lending.collateralDecide
+    - lending.collateralRegister
+    - lending.create
+    - lending.disburse
+    - lending.repay
+    - lending.reschedule
+    - lending.writeoff
+    - opsmessage.approval.decide
+    - opsmessage.compose
+    - party.approval.decide
+    - party.consent.update
+    - party.merge
+    - party.update
+    - sanctions.approval.decide
+    - sanctions.clear
+    - sanctions.create
+    - sanctions.trigger
+    - sanctions.update
+    - sctInstPayment.create
+    - sepaPayment.approval.decide
+    - sepaPayment.create
+    - sepaPayment.handleReturn
+    - sepaPayment.transitionStatus
+    - settlement.create
+    - transaction.create
+    - transaction.reverse

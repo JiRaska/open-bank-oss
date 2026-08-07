@@ -10,6 +10,7 @@ import { JourneyEditor, MAX_STEPS, type EditorStep } from '@/components/campaign
 import { StepEditor } from '@/components/campaigns/StepEditor'
 
 const TEMPLATES = { MARKETING_PRODUCT_OFFER: ['offerTitle', 'offerText', 'ctaText'] }
+const TPL_CHANNEL = { MARKETING_PRODUCT_OFFER: 'EMAIL' as const }
 
 // The editor labels a variable in the marketer's words. The mapping is data, so the test carries its
 // own copy — asserting the rendered label against the same map the component reads would be vacuous.
@@ -20,7 +21,7 @@ const VAR_LABELS = {
 }
 const LABELS = { MARKETING_PRODUCT_OFFER: 'Product offer' }
 const step = (delay = 0, vars: Record<string, string> = {}): EditorStep => ({
-  template: 'MARKETING_PRODUCT_OFFER',
+  channel: 'EMAIL' as const, template: 'MARKETING_PRODUCT_OFFER',
   variables: vars,
   delaySeconds: delay,
 })
@@ -89,7 +90,7 @@ describe('step editor', () => {
     const { container } = render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(), templates: TEMPLATES, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange: vi.fn(), onClose: vi.fn(),
         })))
 
@@ -107,7 +108,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(), templates: TEMPLATES, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
@@ -119,7 +120,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(0, { offerTitle: 'T' }), templates: TEMPLATES, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(0, { offerTitle: 'T' }), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange: vi.fn(), onClose: vi.fn(),
         })))
 

@@ -10,6 +10,7 @@ import com.fasterxml.jackson.module.kotlin.kotlinModule
 import com.openbank.fx.application.port.`in`.ConvertCommand
 import com.openbank.fx.application.port.`in`.GetRateHistoryQuery
 import com.openbank.fx.application.port.`in`.GetRateQuery
+import com.openbank.fx.application.port.`in`.ResolvedRate
 import com.openbank.fx.application.port.out.AmlCasePort
 import com.openbank.fx.application.port.out.AmlCaseRiskLevel
 import com.openbank.fx.application.port.out.FraudScoreOutcome
@@ -124,25 +125,31 @@ class FxServiceTest {
 
     @Test
     fun `getRate answers from the reverse quote when only that direction is stored`() = runBlocking<Unit> {
+        val stored = fxRate()
         coEvery { rateRepo.findLatest("CZK", "EUR", RateType.SPOT) } returns null
-        coEvery { rateRepo.findLatest("EUR", "CZK", RateType.SPOT) } returns fxRate()
+        coEvery { rateRepo.findLatest("EUR", "CZK", RateType.SPOT) } returns stored
 
-        val rate = service.getRate(GetRateQuery("CZK", "EUR", RateType.SPOT))
+        val resolved = service.getRate(GetRateQuery("CZK", "EUR", RateType.SPOT))
 
-        assertThat(rate).isNotNull
-        assertThat(rate!!.baseCurrency).isEqualTo("CZK")
+        assertThat(resolved).isNotNull
+        val rate = resolved!!.rate
+        assertThat(rate.baseCurrency).isEqualTo("CZK")
         assertThat(rate.quoteCurrency).isEqualTo("EUR")
         // 1/25.10 (the ask side), not 1/24.90.
         assertThat(rate.bidRate).isEqualByComparingTo("0.03984064")
+        // #3374: the resolution names the stored row it was derived from.
+        assertThat(resolved.derivedFrom).isEqualTo(stored.id)
+        assertThat(rate.id).isEqualTo(stored.id)
     }
 
     @Test
     fun `a directly stored pair is never overridden by an inverse`() = runBlocking<Unit> {
         coEvery { rateRepo.findLatest("EUR", "CZK", RateType.SPOT) } returns fxRate()
 
-        val rate = service.getRate(GetRateQuery("EUR", "CZK", RateType.SPOT))
+        val resolved = service.getRate(GetRateQuery("EUR", "CZK", RateType.SPOT))
 
-        assertThat(rate!!.bidRate).isEqualByComparingTo("24.90")
+        assertThat(resolved!!.rate.bidRate).isEqualByComparingTo("24.90")
+        assertThat(resolved.derivedFrom).isNull()
         coVerify(exactly = 0) { rateRepo.findLatest("CZK", "EUR", RateType.SPOT) }
     }
 
@@ -160,6 +167,46 @@ class FxServiceTest {
         // buying EUR pays the bank's selling price, exactly as they would on a directly quoted
         // pair. (The inverted BID, 1/25.10, is what a customer SELLING EUR would receive.)
         assertThat(conv.appliedRate).isEqualByComparingTo("0.04016064")
+    }
+
+    // --- fx_conversions.rate_id must name a STORED row (#3374) --------------------------------
+    //
+    // `fx_conversions.rate_id` is `NOT NULL REFERENCES fx_rates(id)`. A CZK->foreign pair has no
+    // stored row of its own — the CNB fixing publishes FOREIGN->CZK only — so it is answered by
+    // inverting the stored direction, and whatever id that derived quote carries is what reaches
+    // the column. If it is ever an id with no row, EVERY CZK->foreign conversion fails the insert
+    // on a foreign-key violation, and the audit record cites an id nothing can resolve.
+    //
+    // Today the invariant holds by construction, because `inverted()` carries the source id over.
+    // That is precisely why it is worth pinning: #3374 is a live proposal to give a derived quote
+    // its own identity (#3594 minted a deterministic derived id, #3741 nulls it in the response),
+    // and the money-path property has to survive whichever shape lands. These assert the property
+    // itself — the id written is the STORED row's — not any particular derivation scheme, so they
+    // stay meaningful under both designs and fail the moment a derived id reaches the column.
+
+    @Test
+    fun `a conversion on a derived quote records the stored row id`() = runBlocking<Unit> {
+        val stored = fxRate()
+        coEvery { rateRepo.findLatest("CZK", "EUR", RateType.SPOT) } returns null
+        coEvery { rateRepo.findLatest("EUR", "CZK", RateType.SPOT) } returns stored
+        coEvery { convRepo.saveWithOutbox(any(), any()) } answers { firstArg() }
+        clear()
+
+        val conv = service.convert(convertCommand().copy(fromCurrency = "CZK", toCurrency = "EUR"))
+
+        assertThat(conv.rateId).isEqualTo(stored.id)
+    }
+
+    @Test
+    fun `a conversion on a stored quote records that row's id`() = runBlocking<Unit> {
+        val stored = fxRate()
+        coEvery { rateRepo.findLatest("EUR", "CZK", RateType.SPOT) } returns stored
+        coEvery { convRepo.saveWithOutbox(any(), any()) } answers { firstArg() }
+        clear()
+
+        val conv = service.convert(convertCommand().copy(fromCurrency = "EUR", toCurrency = "CZK"))
+
+        assertThat(conv.rateId).isEqualTo(stored.id)
     }
 
     @Test
@@ -324,7 +371,7 @@ class FxServiceTest {
 
         val result = service.getRate(query)
 
-        assertThat(result).isEqualTo(rate)
+        assertThat(result).isEqualTo(ResolvedRate(rate, derivedFrom = null))
         coVerify(exactly = 1) { rateRepo.findLatest(query.baseCurrency, query.quoteCurrency, query.rateType) }
     }
 

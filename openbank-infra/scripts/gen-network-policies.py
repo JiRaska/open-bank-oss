@@ -174,7 +174,16 @@ def main():
     edge_ports = defaultdict(set)  # (callee_ns, callee_svc) -> ports
     ingress_backends = defaultdict(set)  # (ns, svc-name) -> ports
     http_scaled_targets = set()  # (ns, app.kubernetes.io/name) fronted by an HTTPScaledObject
-    kafka_clients = set()
+    # ns -> the broker ports that namespace's clients actually name in their bootstrap URLs.
+    # The port is DERIVED rather than hardcoded (#3393): this rule used to emit a literal
+    # `port: 9092` for every client while 35 of 37 bootstrap URLs said 9093, so the allow-list
+    # named the right namespaces on the wrong port. It only ever looked like it worked because
+    # Strimzi's own `openbank-cluster-network-policy-kafka` opens both ports with no `from`
+    # selector and NetworkPolicies union — the same blanket policy this file's ConfigMap note
+    # already admits it is riding on. Hardcoding a port here is therefore a defect that cannot
+    # show up until the day that blanket policy is tightened, which is when the whole fleet's
+    # Kafka traffic would drop at once.
+    kafka_client_ports = defaultdict(set)
     # components/<dir> that declares the Strimzi `Kafka` CR — the broker pods are
     # operator-managed (no Deployment), so the derived broker policy has no workload
     # directory of its own to inherit.
@@ -215,7 +224,7 @@ def main():
                     edge_ports[(callee_ns, svc)].add(int(port))
             for _, kns, kport in KAFKA_RE.findall(blob):
                 if kns == MESSAGING_NS:
-                    kafka_clients.add(ns)
+                    kafka_client_ports[ns].add(int(kport))
 
         elif kind == "ConfigMap" and ns:
             # A Kafka client edge is NOT always visible in Deployment env (issue #2163).
@@ -240,9 +249,9 @@ def main():
             for v in (doc.get("data") or {}).values():
                 if not isinstance(v, str):
                     continue
-                for _, kns, _kport in KAFKA_RE.findall(v):
+                for _, kns, kport in KAFKA_RE.findall(v):
                     if kns == MESSAGING_NS:
-                        kafka_clients.add(ns)
+                        kafka_client_ports[ns].add(int(kport))
 
         elif kind == "Kafka" and ns == MESSAGING_NS:
             kafka_dir = os.path.dirname(path)
@@ -440,7 +449,16 @@ def main():
         })
 
     # ── Strimzi broker: derived client set on the client listener ───────────
-    if kafka_clients:
+    if kafka_client_ports:
+        # One rule per broker port, listing the namespaces that name THAT port. Grouping this
+        # way keeps the allow-list honest in both directions: a namespace on 9093 is not
+        # admitted to 9092, and a port no client names produces no rule at all — so the plain
+        # listener's removal (#3393) empties itself out of this file instead of leaving a rule
+        # nobody notices is stale.
+        ports_to_clients = defaultdict(set)
+        for client_ns, ports in kafka_client_ports.items():
+            for port in ports:
+                ports_to_clients[port].add(client_ns)
         by_dir[kafka_dir or ns_dir.get(MESSAGING_NS)].append({
             "apiVersion": "networking.k8s.io/v1",
             "kind": "NetworkPolicy",
@@ -459,10 +477,13 @@ def main():
                 "policyTypes": ["Ingress"],
                 "ingress": [
                     {"from": [{"podSelector": {}}]},  # operator/entity/kafka-ui
-                    {
-                        "from": [ns_peer(c) for c in sorted(kafka_clients)],
-                        "ports": [{"protocol": "TCP", "port": 9092}],
-                    },
+                    *[
+                        {
+                            "from": [ns_peer(c) for c in sorted(ports_to_clients[port])],
+                            "ports": [{"protocol": "TCP", "port": port}],
+                        }
+                        for port in sorted(ports_to_clients)
+                    ],
                 ],
             },
         })

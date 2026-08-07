@@ -17,7 +17,8 @@
 #   DRIFT is a property of the cluster at this moment. It never blocks a merge: an
 #   undeployed service is an operational signal, not a defect in the PR at hand. It
 #   escalates instead — one open `deploy-drift` issue per drifted service, refreshed
-#   in place and auto-closed when the deployment catches up.
+#   in place, reopened if hand-closed while the drift persists, and auto-closed when
+#   the deployment catches up.
 #
 # WHY IT IS NOT A REQUIRED CHECK
 #   `paths:`-filtered workflows cannot be required contexts (a required context that
@@ -121,9 +122,11 @@ jobs:
               '',
               e.reason,
               '',
-              'What runs is not what is tested (issue #3344). Deploy the current build,',
-              'or accept the drift knowingly by closing this issue with a reason — a',
-              'silent drift is the only unacceptable state.',
+              'What runs is not what is tested (issue #3344). Deploy the current build and',
+              'this watch closes the issue itself. Closing it by hand does not deploy',
+              'anything — the watch reopens it while the drift persists. To accept the',
+              'drift knowingly, say so in a comment; a silent drift is the only',
+              'unacceptable state.',
               '',
               `_Automated: \`${context.workflow}\` run ${context.runId}, threshold ${report.threshold_days}d. Refreshed in place while the drift persists._`,
             ].join('\n')
@@ -131,34 +134,70 @@ jobs:
               `deploy-drift: ${e.service} runs ${e.deployed_version ?? e.tag}, main is ${e.main_version}`
 
             // One open issue per drifted service — refreshed, never stacked. A watch
-            // that spams a new issue per day trains people to filter it.
-            const open = await github.paginate(github.rest.issues.listForRepo, {
-              ...context.repo, state: 'open', labels: LABEL, per_page: 100,
-            })
-            const byMarker = new Map()
-            for (const issue of open) {
-              const m = issue.body && issue.body.match(/<!-- deploy-drift:([a-z0-9-]+) -->/)
-              if (m) byMarker.set(m[1], issue)
+            // that spams a new issue per day trains people to filter it. A hand-closed
+            // issue is not a deployed build either: a recently closed issue for a service
+            // that still drifts is REOPENED with a comment, not duplicated, so one drift
+            // keeps one history (a human closed #3597 at 05:42 and the 06:30 run stacked
+            // #3833 on top — this pairing is why closed issues are matched too). The
+            // reopen window is bounded: an ancient closed issue stays closed and a fresh
+            // one is created instead of resurrecting stale context.
+            const REOPEN_WINDOW_DAYS = 30
+            const markerRe = /<!-- deploy-drift:([a-z0-9-]+) -->/
+            const indexByMarker = (issues, map) => {
+              for (const issue of issues) {
+                const m = issue.body && issue.body.match(markerRe)
+                if (m && !map.has(m[1])) map.set(m[1], issue)
+              }
             }
+            const openByMarker = new Map()
+            indexByMarker(await github.paginate(github.rest.issues.listForRepo, {
+              ...context.repo, state: 'open', labels: LABEL, per_page: 100,
+            }), openByMarker)
+            // First updated-desc page is enough: anything older falls outside the
+            // reopen window anyway.
+            const closedRecent = await github.rest.issues.listForRepo({
+              ...context.repo, state: 'closed', labels: LABEL, per_page: 100,
+              sort: 'updated', direction: 'desc',
+            })
+            const reopenCutoff = Date.now() - REOPEN_WINDOW_DAYS * 24 * 60 * 60 * 1000
+            const closedByMarker = new Map()
+            indexByMarker(
+              closedRecent.data.filter(i => i.closed_at && Date.parse(i.closed_at) >= reopenCutoff),
+              closedByMarker,
+            )
 
+            let reopened = 0
             for (const e of drifted) {
-              const existing = byMarker.get(e.service)
-              if (existing) {
+              const existingOpen = openByMarker.get(e.service)
+              if (existingOpen) {
                 await github.rest.issues.update({
-                  ...context.repo, issue_number: existing.number,
+                  ...context.repo, issue_number: existingOpen.number,
                   title: titleFor(e), body: bodyFor(e),
                 })
-                byMarker.delete(e.service)
-              } else {
-                await github.rest.issues.create({
-                  ...context.repo, title: titleFor(e), body: bodyFor(e),
-                  labels: [LABEL, 'fleet-health'],
-                })
+                openByMarker.delete(e.service)
+                continue
               }
+              const existingClosed = closedByMarker.get(e.service)
+              if (existingClosed) {
+                await github.rest.issues.update({
+                  ...context.repo, issue_number: existingClosed.number,
+                  title: titleFor(e), body: bodyFor(e), state: 'open',
+                })
+                await github.rest.issues.createComment({
+                  ...context.repo, issue_number: existingClosed.number,
+                  body: `Drift persists — reopening. This issue tracks a fact about the cluster, so closing it by hand does not resolve it; the watch closes it itself once the deployed build catches up. To accept the drift knowingly, say so in a comment. _(\`${context.workflow}\` run ${context.runId})_`,
+                })
+                reopened++
+                continue
+              }
+              await github.rest.issues.create({
+                ...context.repo, title: titleFor(e), body: bodyFor(e),
+                labels: [LABEL, 'fleet-health'],
+              })
             }
             // Whatever remains open but is no longer drifted has caught up — say so
             // and close it, or the label rots into a standing red nobody reads.
-            for (const [service, issue] of byMarker) {
+            for (const [service, issue] of openByMarker) {
               await github.rest.issues.createComment({
                 ...context.repo, issue_number: issue.number,
                 body: `Deployed build caught up with main — closing. _(\`${context.workflow}\` run ${context.runId})_`,
@@ -167,4 +206,4 @@ jobs:
                 ...context.repo, issue_number: issue.number, state: 'closed',
               })
             }
-            core.info(`drifted: ${drifted.length}, auto-closed: ${byMarker.size}`)
+            core.info(`drifted: ${drifted.length}, reopened: ${reopened}, auto-closed: ${openByMarker.size}`)

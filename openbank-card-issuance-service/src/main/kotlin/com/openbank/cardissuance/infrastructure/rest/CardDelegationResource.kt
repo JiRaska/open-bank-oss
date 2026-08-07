@@ -37,9 +37,15 @@ class CardDelegationResource(private val guard: CardDelegationGuard) {
     @Operation(summary = "Whether a party may VIEW or MANAGE_LIMITS on a card (holder OR active delegation grant)")
     suspend fun check(
         @PathParam("id") id: UUID,
-        @QueryParam("partyId") partyId: UUID,
-        @QueryParam("intent") intent: CardDelegationIntent,
+        @QueryParam("partyId") partyId: UUID?,
+        @QueryParam("intent") intent: CardDelegationIntent?,
     ): Response {
+        // #3624 — both identify WHAT is being asked, so neither has a defensible default: an absent
+        // `intent` cannot be assumed to be VIEW, and an absent `partyId` has no caller to check.
+        // Declared non-nullable they answered 500; `suspend` emits no intrinsic, so the nulls
+        // reached CardDelegationGuard. libs-runtime maps IllegalArgumentException to 400.
+        requireNotNull(partyId) { "query parameter 'partyId' is required" }
+        requireNotNull(intent) { "query parameter 'intent' is required" }
         val authorized = guard.isAuthorized(id, partyId, intent)
         return Response.ok(mapOf("authorized" to authorized)).build()
     }
