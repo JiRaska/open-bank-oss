@@ -4,12 +4,14 @@
 
 package com.openbank.billing.application.port.out
 
+import com.openbank.billing.domain.AnnualFeeSummary
 import com.openbank.billing.domain.AssessedFee
 import com.openbank.billing.domain.BillableFee
 import com.openbank.billing.domain.BillingAssessment
 import com.openbank.billing.domain.FeeJournalCommand
 import com.openbank.billing.domain.FeeReversalCommand
 import com.openbank.libs.product.FeeContext
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -79,6 +81,37 @@ interface BillingAssessmentRepository {
 
     /** Mark one fee's reversal FAILED — its reversal outbox row reached a terminal DEAD state. */
     suspend fun markReversalFailed(idempotencyKey: String)
+
+    /**
+     * Every [AssessedFee] successfully [com.openbank.billing.domain.PostingStatus.POSTED] for
+     * [accountId] whose [AssessedFee.postedAt] falls in `[from, to)` (ADR-0248, PAD Art. 5 annual
+     * fee-summary aggregation). Deliberately narrower than "every row that exists for the period":
+     * waived/never-charged fees never reach POSTED, and a fee that is under reversal
+     * ([com.openbank.billing.domain.PostingStatus.REVERSAL_PENDING]) or already
+     * [com.openbank.billing.domain.PostingStatus.REVERSED] is excluded too — a fee under or
+     * already compensated is not a fee the customer actually bore for the year.
+     */
+    suspend fun postedFeesForAccount(accountId: String, from: Instant, to: Instant): List<AssessedFee>
+
+    /**
+     * Idempotently appends the `billing.annual-fee-summary.ready` outbox row for
+     * `(summary.accountId, summary.year)` (ADR-0248) — a no-op (returns `false`, nothing written)
+     * if a row for this account/year was already appended, so the annual scheduler is safe to
+     * re-run. Returns `true` if this call actually appended the row.
+     */
+    suspend fun appendAnnualFeeSummaryEvent(summary: AnnualFeeSummary, occurredAt: Instant): Boolean
+}
+
+/**
+ * Reads the account's owning party id (ADR-0248) — billing-service has no `partyRef` anywhere in
+ * its own domain today; this reuses account-service's existing `GET /api/v1/accounts/{id}`
+ * response (`AccountResponse.partyId`, already returned, just not previously mapped by billing's
+ * client DTO) rather than inventing a new source. `null` means the account could not be resolved
+ * (fail-closed — the annual-summary use case skips that account rather than publishing with a
+ * fabricated party reference).
+ */
+interface AccountPartyLookupPort {
+    suspend fun partyIdFor(accountId: String): String?
 }
 
 /** Outbound port to the ledger's journal-posting endpoint (ADR-0143 step 2 / ADR-0039). */

@@ -6,6 +6,7 @@ package com.openbank.billing.infrastructure.adapter
 
 import com.openbank.billing.application.port.out.AccountBilling
 import com.openbank.billing.application.port.out.AccountContextPort
+import com.openbank.billing.application.port.out.AccountPartyLookupPort
 import com.openbank.billing.application.port.out.BillableAccountDiscoveryPort
 import com.openbank.billing.application.port.out.BillableAccountsPage
 import com.openbank.billing.application.port.out.ProductCatalogPort
@@ -91,5 +92,21 @@ class RestProductCatalogPort(@RestClient private val catalog: ProductCatalogRest
         return fees
             .filter { it.currency == currency }
             .map { BillableFee(it.id, it.name, it.type, it.amount, it.currency, it.waivable, it.waiveCondition) }
+    }
+}
+
+/**
+ * Reads an account's owning party id from account-service (ADR-0248 annual fee-summary
+ * `partyRef`). Fail-closed like [RestAccountContextPort]: an unreadable account or a response
+ * with no `partyId` returns `null` rather than fabricating a value — the caller skips that
+ * account for this run instead of publishing a summary with a placeholder party reference.
+ */
+@ApplicationScoped
+class RestAccountPartyLookupPort(@RestClient private val accounts: AccountRestClient) : AccountPartyLookupPort {
+
+    override suspend fun partyIdFor(accountId: String): String? {
+        val account = runCatching { accounts.getAccount(accountId).awaitSuspending() }.getOrNull()
+            ?: return null
+        return account.partyId
     }
 }

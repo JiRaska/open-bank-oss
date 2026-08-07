@@ -116,6 +116,12 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
         // crash between them just means the fee catches up to FAILED on a later markFailed retry
         // or is visible as "PENDING forever" — never silently POSTED).
         val dead = deadRow.awaitSuspending() ?: return
+        if (dead.eventType == ANNUAL_FEE_SUMMARY_EVENT_TYPE) {
+            // ADR-0248: not a fee-posting event — there is no AssessedFee row to flip. A DEAD
+            // annual-summary row is operator-visible via the `billing.outbox.dead` log line above
+            // and the outbox backlog gauge; nothing on the fee side needs (or can) be updated.
+            return
+        }
         val idempotencyKey = dead.idempotencyKey ?: return
         if (dead.eventType == REVERSAL_INTENT_EVENT_TYPE) {
             assessments.markReversalFailed(idempotencyKey)
@@ -135,14 +141,15 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
      * row flags the ORIGINAL fee's `posting_status`, not a phantom row keyed by the reversal's own
      * (never-persisted-as-a-fee-row) idempotency key.
      */
-    private fun extractIdempotencyKey(eventType: String, payload: String): String? = if (eventType ==
-        REVERSAL_INTENT_EVENT_TYPE
-    ) {
-        runCatching {
-            mapper.readValue(payload, OriginalIdempotencyKeyOnly::class.java).originalIdempotencyKey
-        }.getOrNull()
-    } else {
-        runCatching { mapper.readValue(payload, IdempotencyKeyOnly::class.java).idempotencyKey }.getOrNull()
+    private fun extractIdempotencyKey(eventType: String, payload: String): String? = when (eventType) {
+        // ADR-0248: no idempotencyKey field on this payload at all (it is not a fee) — skip the
+        // parse attempt rather than let it fail-and-be-caught below.
+        ANNUAL_FEE_SUMMARY_EVENT_TYPE -> null
+        REVERSAL_INTENT_EVENT_TYPE ->
+            runCatching {
+                mapper.readValue(payload, OriginalIdempotencyKeyOnly::class.java).originalIdempotencyKey
+            }.getOrNull()
+        else -> runCatching { mapper.readValue(payload, IdempotencyKeyOnly::class.java).idempotencyKey }.getOrNull()
     }
 
     private data class DeadRow(val eventType: String, val idempotencyKey: String?)
@@ -171,6 +178,9 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
 
         /** Mirrors `LedgerOutboxEventPublisher.REVERSAL_INTENT_EVENT_TYPE` (ADR-0143 phase 2e). */
         const val REVERSAL_INTENT_EVENT_TYPE = "billing.fee.reversal-intent.v1"
+
+        /** Mirrors `BillingAssessmentRepositoryImpl.ANNUAL_FEE_SUMMARY_EVENT_TYPE` (ADR-0248). */
+        const val ANNUAL_FEE_SUMMARY_EVENT_TYPE = "billing.annual-fee-summary.ready"
 
         @Suppress("MaxLineLength")
         private const val CLAIM_SQL = """

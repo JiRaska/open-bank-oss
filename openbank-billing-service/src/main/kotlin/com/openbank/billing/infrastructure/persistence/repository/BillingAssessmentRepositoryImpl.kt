@@ -5,9 +5,11 @@
 package com.openbank.billing.infrastructure.persistence.repository
 
 import com.openbank.billing.application.port.out.BillingAssessmentRepository
+import com.openbank.billing.domain.AnnualFeeSummary
 import com.openbank.billing.domain.AssessedFee
 import com.openbank.billing.domain.BillingAssessment
 import com.openbank.billing.domain.PostingStatus
+import com.openbank.billing.infrastructure.outbox.AnnualFeeSummaryOutboxPayloads
 import com.openbank.billing.infrastructure.persistence.entity.AssessedFeeEntity
 import com.openbank.billing.infrastructure.persistence.entity.BillingCycleAssessmentEntity
 import com.openbank.billing.infrastructure.persistence.entity.BillingOutboxEntity
@@ -20,6 +22,7 @@ import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.PersistenceException
 import org.hibernate.reactive.mutiny.Mutiny
+import java.nio.charset.StandardCharsets
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -30,8 +33,13 @@ import java.util.UUID
  * outbox row for every chargeable fee **inside one `sf.withTransaction` block** — assessment and
  * the intent-to-post commit atomically, so a crash between them is impossible (either both are
  * durable or neither is), matching ADR-0143 step 2 exactly.
+ *
+ * [TooManyFunctions] suppressed: one Panache repo implementing the full billing-assessment
+ * lifecycle (assess/post/reverse) plus the ADR-0248 annual-summary outbox append; splitting it
+ * would separate operations that share the same `sf.withTransaction` atomicity invariant.
  */
 @ApplicationScoped
+@Suppress("TooManyFunctions")
 class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, private val clock: Clock) :
     BillingAssessmentRepository {
 
@@ -249,6 +257,76 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
                 .executeUpdate()
         }.awaitSuspending()
     }
+
+    /**
+     * ADR-0248 annual fee-summary read. `postingStatus = :st` (POSTED only) is the whole filter —
+     * see [BillingAssessmentRepository.postedFeesForAccount]'s KDoc for why PENDING/FAILED/
+     * REVERSAL_PENDING/REVERSED/NOT_APPLICABLE rows must not count.
+     */
+    override suspend fun postedFeesForAccount(accountId: String, from: Instant, to: Instant): List<AssessedFee> =
+        sf.withSession { s ->
+            s.createQuery(
+                "FROM AssessedFeeEntity WHERE accountId = :a AND postingStatus = :st " +
+                    "AND postedAt >= :from AND postedAt < :to ORDER BY feeId",
+                AssessedFeeEntity::class.java,
+            ).setParameter("a", accountId)
+                .setParameter("st", PostingStatus.POSTED)
+                .setParameter("from", from)
+                .setParameter("to", to)
+                .resultList
+        }.awaitSuspending().map { it.toDomain() }
+
+    /**
+     * ADR-0248 annual fee-summary trigger. [aggregateIdFor] is deterministic on
+     * `(accountId, year)`, so re-running the annual scheduler for an account/year that already
+     * has a row is a genuine no-op — the existence check and the insert happen in the SAME
+     * transaction, closing the same check-then-act race [persistWithPostingIntent] documents for
+     * the charge leg (two concurrent scheduler runs can only ever insert one row per account/year;
+     * the `billing_outbox` primary key has no unique constraint on `aggregate_id` to backstop this
+     * the way `uq_billing_cycle_assessment` backstops the charge leg, so the transactional
+     * read-then-write here IS the whole guarantee — acceptable because, unlike the charge leg,
+     * this table has exactly one writer: the annual scheduler, never a customer-facing request).
+     */
+    override suspend fun appendAnnualFeeSummaryEvent(summary: AnnualFeeSummary, occurredAt: Instant): Boolean {
+        val aggregateId = aggregateIdFor(summary.accountId, summary.year)
+        val now = Instant.now(clock)
+        val payload = AnnualFeeSummaryOutboxPayloads.toJson(summary, occurredAt)
+        return sf.withTransaction { s, _ ->
+            s.createQuery(
+                "FROM BillingOutboxEntity WHERE aggregateId = :id AND eventType = :et",
+                BillingOutboxEntity::class.java,
+            ).setParameter("id", aggregateId)
+                .setParameter("et", ANNUAL_FEE_SUMMARY_EVENT_TYPE)
+                .setMaxResults(1)
+                .singleResultOrNull
+                .chain { existing ->
+                    if (existing != null) {
+                        Uni.createFrom().item(false)
+                    } else {
+                        val entity = BillingOutboxEntity().apply {
+                            eventId = Ids.newId()
+                            this.aggregateId = aggregateId
+                            eventType = ANNUAL_FEE_SUMMARY_EVENT_TYPE
+                            this.payload = payload
+                            status = OutboxStatus.PENDING.name
+                            attemptCount = 0
+                            createdAt = now
+                            updatedAt = now
+                        }
+                        s.persist(entity).replaceWith(true)
+                    }
+                }
+        }.awaitSuspending()
+    }
+
+    companion object {
+        /** Mirrors `LedgerOutboxEventPublisher.ANNUAL_FEE_SUMMARY_EVENT_TYPE` (ADR-0248). */
+        const val ANNUAL_FEE_SUMMARY_EVENT_TYPE = "billing.annual-fee-summary.ready"
+
+        /** Deterministic on (accountId, year) so [appendAnnualFeeSummaryEvent] is naturally idempotent. */
+        private fun aggregateIdFor(accountId: String, year: Int): UUID =
+            UUID.nameUUIDFromBytes("annual-fee-summary:$accountId:$year".toByteArray(StandardCharsets.UTF_8))
+    }
 }
 
 /**
@@ -298,4 +376,5 @@ private fun AssessedFeeEntity.toDomain(): AssessedFee = AssessedFee(
     journalId = journalId,
     reversalJournalId = reversalJournalId,
     reversalReason = reversalReason,
+    postedAt = postedAt,
 )

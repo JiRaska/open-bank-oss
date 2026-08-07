@@ -40,6 +40,12 @@ dependencies {
     implementation(libs.quarkus.scheduler)
     implementation(libs.quarkus.redis.client)
 
+    // ADR-0248: billing's first Kafka publisher — the `billing.annual-fee-summary.ready` event
+    // that triggers document-service's PAD Art. 5 annual-statement render. Every prior outbox row
+    // in this service posts to ledger-service over REST (LedgerOutboxEventPublisher's own class
+    // KDoc), so this dependency did not exist before.
+    implementation(libs.quarkus.smallrye.kafka)
+
     // The shared fee-waiver engine (ADR-0138 phase 1b) + outbox/approval primitives (ADR-0013/0155).
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
