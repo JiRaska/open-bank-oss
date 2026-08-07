@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.100.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.99.0...admin-ui-v0.100.0) (2026-08-07)
+
+
+### Features
+
+* **admin-ui:** author campaign stop and step conditions on the canvas ([#3936](https://github.com/JiRaska/open-bank-oss/issues/3936)) ([7b4aa76](https://github.com/JiRaska/open-bank-oss/commit/7b4aa760b817b6f00b32cb07cac97aa931a950a8))
+
 ## [0.99.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.98.0...admin-ui-v0.99.0) (2026-08-06)
 
 
