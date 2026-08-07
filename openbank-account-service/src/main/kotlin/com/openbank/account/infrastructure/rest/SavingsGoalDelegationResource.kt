@@ -37,9 +37,12 @@ class SavingsGoalDelegationResource(private val guard: SavingsGoalDelegationGuar
     @Operation(summary = "Whether a party may DEPOSIT / WITHDRAW / PROPOSE_WITHDRAW on the account's savings goal")
     suspend fun check(
         @PathParam("accountId") accountId: UUID,
-        @QueryParam("partyId") partyId: UUID,
-        @QueryParam("intent") intent: SavingsDelegationIntent,
+        @QueryParam("partyId") partyId: UUID?,
+        @QueryParam("intent") intent: SavingsDelegationIntent?,
     ): Response {
+        // #3104 — both are required; absent, they used to reach the guard as null and answer 500.
+        requireNotNull(partyId) { "query parameter 'partyId' is required" }
+        requireNotNull(intent) { "query parameter 'intent' is required" }
         val authorized = guard.isAuthorized(accountId, partyId, intent)
         return Response.ok(mapOf("authorized" to authorized)).build()
     }

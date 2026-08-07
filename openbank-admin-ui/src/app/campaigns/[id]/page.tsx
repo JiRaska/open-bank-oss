@@ -23,6 +23,8 @@ interface Campaign {
   createdBy: string
   approvedBy: string | null
   steps: { order: number; template: string; delaySeconds: number }[]
+  /** ADR-0245: a ConversionCatalog key, or absent when the campaign measures no conversion. */
+  conversionRule?: string | null
 }
 
 interface Enrolment {
@@ -65,7 +67,7 @@ type Detail = {
 }
 
 /** Outcomes the send-log filter offers, in the order an operator scans them. */
-const OUTCOMES = ['SENT', 'DRY_RUN', 'FAILED', 'SUPPRESSED_CONSENT', 'SUPPRESSED_CAP', 'SUPPRESSED_QUIET_HOURS'] as const
+const OUTCOMES = ['SENT', 'CONVERTED', 'DRY_RUN', 'FAILED', 'SUPPRESSED_CONSENT', 'SUPPRESSED_CAP', 'SUPPRESSED_QUIET_HOURS'] as const
 
 /**
  * Outcome colouring, passed explicitly rather than added to the shared tone map (see `tone.ts`:
@@ -241,9 +243,20 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
    * debugs with; a marketer needs to know WHY nothing was sent, in words. The raw value stays in
    * the badge title so the two are never disconnected.
    */
+  const conversionLabel = (r: string): string => {
+    switch (r) {
+      case 'ACCOUNT_OPENED': return t('Založení účtu', 'Account opened')
+      case 'CARD_ISSUED': return t('Vydání karty', 'Card issued')
+      default: return r
+    }
+  }
+
   const outcomeLabel = (o: string): string => {
     switch (o) {
       case 'SENT': return t('Odesláno', 'Sent')
+      // Phrased as what it is and no more (ADR-0245 D3): attribution is last-touch inside a window,
+      // so this says the party converted WHILE ENROLLED — never that the campaign caused it.
+      case 'CONVERTED': return t('Splnil cíl (v době kampaně)', 'Converted (while enrolled)')
       // Said as plainly as possible: a rehearsal is not a delivery, and the two must never read
       // as the same number on a screen someone reports upwards.
       case 'DRY_RUN': return t('Nazkoušeno (neodesláno)', 'Rehearsed (not sent)')
@@ -346,6 +359,35 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             {/* Surfaced as a headline number on purpose: "how many were deliberately not
                 contacted" is the question the send log exists to answer (#2895). */}
             <StatCard label={t('Potlačených odeslání', 'Suppressed sends')} value={String(suppressed)} />
+          </div>
+
+          {/* Absent rule and zero conversions are different facts and must never render the same:
+              a campaign measuring nothing has no number, and saying so is the honest empty state
+              (ADR-0245 D1). */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {c.conversionRule ? (
+              <StatCard
+                label={t('Splnili cíl', 'Converted')}
+                value={String(summary.CONVERTED ?? 0)}
+              />
+            ) : (
+              <div className="rounded-lg border p-3 text-xs text-muted-foreground" data-no-conversion-rule>
+                {t(
+                  'Tahle kampaň konverzi neměří — nemá nastavené pravidlo. To není totéž jako nula splněných cílů.',
+                  'This campaign measures no conversion — it has no rule set. That is not the same as nobody converting.',
+                )}
+              </div>
+            )}
+            {c.conversionRule && (
+              <div className="rounded-lg border p-3 text-xs text-muted-foreground">
+                {t('Měří se: ', 'Measuring: ')}
+                <span className="font-medium text-foreground">{conversionLabel(c.conversionRule)}</span>
+                {t(
+                  ' — počítá se, kdo cíl splnil po prvním odeslání a v atribučním okně pravidla.',
+                  ' — counted when it happens after the first send and inside the rule\'s attribution window.',
+                )}
+              </div>
+            )}
           </div>
 
           {Object.keys(byReason).length > 0 && (

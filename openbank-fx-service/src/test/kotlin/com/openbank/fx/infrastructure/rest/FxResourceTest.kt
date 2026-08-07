@@ -9,6 +9,7 @@ import com.openbank.fx.application.port.`in`.ConvertCommand
 import com.openbank.fx.application.port.`in`.FxUseCase
 import com.openbank.fx.application.port.`in`.GetRateHistoryQuery
 import com.openbank.fx.application.port.`in`.GetRateQuery
+import com.openbank.fx.application.port.`in`.ResolvedRate
 import com.openbank.fx.domain.model.FxConversion
 import com.openbank.fx.domain.model.FxConversionStatus
 import com.openbank.fx.domain.model.FxRate
@@ -85,13 +86,35 @@ class FxResourceTest {
     @Test
     fun `getRate with no source returns the internal spot rate`(): Unit = runBlocking {
         val stored = rate()
-        coEvery { fxUseCase.getRate(GetRateQuery("EUR", "CZK")) } returns stored
+        coEvery { fxUseCase.getRate(GetRateQuery("EUR", "CZK")) } returns ResolvedRate(stored, derivedFrom = null)
 
         val resp = resource.getRate(base = "eur", quote = "czk", source = null)
 
         assertThat(resp.status).isEqualTo(200)
-        assertThat(resp.entity).isEqualTo(stored)
+        assertThat(resp.entity).isEqualTo(FxRateResponse.of(stored, derivedFrom = null))
         coVerify(exactly = 0) { cnbIngestion.getCnbRate(any(), any()) }
+    }
+
+    @Test
+    fun `getRate marks an inverted pair as derived - id null, source id in derivedFrom (#3374)`(): Unit = runBlocking {
+        val stored = rate() // EUR/CZK — the only direction the ČNB source ever stores
+        coEvery { fxUseCase.getRate(GetRateQuery("CZK", "EUR")) } returns
+            ResolvedRate(stored.inverted(), derivedFrom = stored.id)
+
+        val resp = resource.getRate(base = "czk", quote = "eur", source = null)
+
+        assertThat(resp.status).isEqualTo(200)
+        val body = resp.entity as FxRateResponse
+        assertThat(body.id).isNull()
+        assertThat(body.derivedFrom).isEqualTo(stored.id)
+        assertThat(body.pair).isEqualTo("CZK/EUR")
+        // The sides swap on inversion: bid = 1 / source ask, ask = 1 / source bid.
+        assertThat(
+            body.bidRate,
+        ).isEqualByComparingTo(BigDecimal.ONE.divide(stored.askRate, 8, java.math.RoundingMode.HALF_UP))
+        assertThat(
+            body.askRate,
+        ).isEqualByComparingTo(BigDecimal.ONE.divide(stored.bidRate, 8, java.math.RoundingMode.HALF_UP))
     }
 
     @Test
@@ -102,7 +125,7 @@ class FxResourceTest {
         val resp = resource.getRate(base = "eur", quote = "czk", source = "cnb")
 
         assertThat(resp.status).isEqualTo(200)
-        assertThat(resp.entity).isEqualTo(stored)
+        assertThat(resp.entity).isEqualTo(FxRateResponse.of(stored, derivedFrom = null))
         coVerify(exactly = 0) { fxUseCase.getRate(any()) }
     }
 

@@ -15,7 +15,7 @@
 
 ### Container image
 
-The `Dockerfile` builds from the **full repo root context** (the root `settings.gradle.kts` `include`s every module), runs `:openbank-product-catalog:quarkusBuild` (fast-jar), and the runtime stage copies `build/quarkus-app/` into a `temurin:25-jre-alpine` image. It runs as a non-root `openbank` user, `EXPOSE`s 8104, and starts with ZGC.
+`:openbank-product-catalog:quarkusBuild` (fast-jar) runs host-side from the **full repo root context** (the root `settings.gradle.kts` `include`s every module), and `.github/workflows/Dockerfile.deploy` copies the resulting `quarkus-app/` into an `eclipse-temurin:25-jre` image (glibc, #3354). It runs as a non-root `openbank` user, `EXPOSE`s 8104, and starts with ZGC. `openbank-product-catalog/Dockerfile` builds nothing (#3016) — the pipeline reads exactly one thing from it, the `EXPOSE` line.
 
 > Platform rule: **always fast-jar, never uber-jar** — the runtime stage copies `quarkus-app/`. Build host-side, not in-Docker Gradle. Generic build helper: `openbank-infra/scripts/build-push-service.sh openbank-product-catalog`.
 

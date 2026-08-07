@@ -155,3 +155,38 @@ describe('campaign builder conditions', () => {
     expect(getByText(/Stops after 2 messages per person/)).toBeTruthy()
   }, 25000)
 })
+
+/**
+ * Conversion (ADR-0245) at authoring time.
+ *
+ * Two properties matter more than the picker existing: the options are a closed catalogue, and the
+ * screen says what is NOT measured. A marketer who assumes "success" includes an email open would
+ * read every number here wrong.
+ */
+describe('campaign builder conversion', () => {
+  it('offers only catalogue rules, and says engagement is not tracked', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (u: string) =>
+      String(u).includes('/preview')
+        ? { ok: true, json: async () => ({ size: 10, state: 'ok' }) }
+        : { ok: true, json: async () => ({ state: 'ok', items: [
+            { name: 'active-clients', version: 1, rules: ['party status is ACTIVE'] }] }) }))
+    const { container, getByText } = render(
+      React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
+    await waitFor(() => getByText('active-clients'), { timeout: 8000 })
+
+    const picks = Array.from(container.querySelectorAll('[data-conversion-pick]'))
+      .map(e => e.getAttribute('data-conversion-pick'))
+    expect(picks).toEqual(['NONE', 'ACCOUNT_OPENED', 'CARD_ISSUED'])
+
+    // Not measuring is the default: a rule chosen after the fact measures nothing retroactively,
+    // so the screen must not imply one was set.
+    expect(container.querySelector('[data-conversion-pick="NONE"]')!.getAttribute('data-selected'))
+      .toBe('true')
+
+    expect(getByText(/never an email open or a click/)).toBeTruthy()
+
+    fireEvent.click(container.querySelector('[data-conversion-pick="CARD_ISSUED"]')!)
+    expect(container.querySelector('[data-conversion-pick="CARD_ISSUED"]')!.getAttribute('data-selected'))
+      .toBe('true')
+  }, 25000)
+})

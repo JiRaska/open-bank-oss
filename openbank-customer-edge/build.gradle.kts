@@ -49,6 +49,13 @@ dependencies {
     // Provider-side Pact verification (ADR-0063, issue #2322): replays copilot's
     // CustomerEdgeContractConsumerTest against a real booted instance.
     testImplementation(libs.pact.provider)
+    // Consumer-side Pact (ADR-0063, issue #2990): customer-edge is a CONSUMER of account-service's
+    // delegated-payment authorization decision — the call that decides whether a delegate may
+    // debit a shared account. Nothing else can catch a wrong path or parameter name there: the
+    // edge's UpstreamClient is a plain HTTP client with no generated stub, so a unit test proves
+    // only that the edge agrees with itself (#2269). Replayed by
+    // account-service's AccountPactFolderProviderVerificationTest on every PR.
+    testImplementation(libs.pact.consumer)
     // Synthesizes the customer JWT (party_id claim) @TestSecurity alone cannot set for a
     // quarkus-oidc-backed resource server — same mechanism openbank-mcp-service already uses.
     testImplementation(libs.quarkus.test.security.oidc)

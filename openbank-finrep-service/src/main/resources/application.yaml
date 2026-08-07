@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000,http://openbank-admin-ui:3000"
       methods: GET,POST,PUT,DELETE,OPTIONS
       headers: Content-Type,Authorization
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   oidc:
     auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
@@ -38,16 +23,25 @@ quarkus:
 
   log:
     level: INFO
-  smallrye-openapi:
-    path: /q/openapi
-  swagger-ui:
-    always-include: true
-    path: /api/docs
+
+  # The management interface the Kubernetes probes and the Prometheus scrape target.
+  #
+  # This block was missing, and its absence is why the finrep pod could never become ready: the
+  # gitops manifest probes and scrapes port 8085 (`port: management`), Quarkus never opened it, and
+  # kubelet got connection refused. Without a management port Quarkus keeps /q/health on the main
+  # HTTP port, so nothing was wrong with the probe PATH — only with the port it was asked for.
+  # 8085 matches every other service in the fleet (ledger, transaction, …), so the manifest was
+  # right and the service configuration was the half that never landed.
   management:
     enabled: true
     port: 8085
     host: 0.0.0.0
     root-path: /q
+  smallrye-openapi:
+    path: /q/openapi
+  swagger-ui:
+    always-include: true
+    path: /api/docs
 
 openbank:
   service:
@@ -63,8 +57,11 @@ openbank:
 
 "%test":
   quarkus:
-    oidc:
-      enabled: false
+    http:
+      test-port: 0
+      header:
+        X-Frame-Options:
+          value: SAMEORIGIN
     management:
       enabled: false
     devservices:

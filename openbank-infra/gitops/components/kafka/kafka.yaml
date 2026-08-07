@@ -214,3 +214,21 @@ spec:
   config:
     retention.ms: 2592000000
     cleanup.policy: delete
+---
+# ADR-0220 D2 feedback loop. No consumer exists yet (allowlisted in rules.yaml:
+# event_consumer_liveness) — this is the first slice's producer, ahead of the analytics
+# consumer ADR-0221's dashboards are meant to read from. Contract:
+# openbank-contracts/openbank-engagement-service/asyncapi.yaml.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.engagement.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

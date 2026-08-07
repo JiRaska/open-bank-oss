@@ -53,6 +53,10 @@ class CampaignSummaryQueryTest {
     )
 
     private class Sends(private val cells: List<CampaignOutcomeCount>, var calls: Int = 0) : SendLogRepository {
+        // ADR-0245: this fake asserts nothing about conversion, so nothing ever converted.
+        override suspend fun conversionContextFor(campaignId: java.util.UUID, partyId: java.util.UUID) =
+            com.openbank.campaign.application.port.out.ConversionContext(null, false)
+
         override suspend fun record(send: SendRecord) = Unit
         override suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long) = 0
         override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID) = 0
@@ -90,6 +94,7 @@ class CampaignSummaryQueryTest {
         override suspend fun findById(id: UUID) = items.firstOrNull { it.id == id }
         override suspend fun list() = items
         override suspend fun save(campaign: Campaign) = campaign
+        override suspend fun findActiveByTrigger(trigger: String) = emptyList<Campaign>()
     }
 
     @Test
