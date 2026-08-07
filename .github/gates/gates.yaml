@@ -1353,6 +1353,35 @@ gates:
     run: |
       bash .github/scripts/check-exception-mapper-collision.sh .
 
+  # A required @QueryParam/@HeaderParam/@MatrixParam declared with a NON-NULLABLE
+  # Kotlin reference type answers 500 when the caller omits it, never 400 — the
+  # caller cannot tell "I sent a bad request" from "the server is broken", and on
+  # a money path that decides whether they retry (issue #3104). Same root shape as
+  # the null-body 500s of #3032/#3050, one argument position over.
+  #
+  # The trap this gate exists to stop being re-learned: writing requireNotNull in
+  # the BODY of a non-suspend handler is dead code. Kotlin emits
+  # Intrinsics.checkNotNullParameter at bytecode offset 0, so the NPE has already
+  # thrown (verified with javap; a suspend function gets no intrinsic at all, and
+  # the null then flows into the body instead). The parameter must be declared
+  # NULLABLE for any guard to be reachable; libs-runtime maps the resulting
+  # IllegalArgumentException to 400 — never add a service-local mapper (#526).
+  #
+  # Ratchet, not a flat fail: remediation is per-handler (required / @DefaultValue
+  # / genuinely optional) and only the handler knows which. The 24 money-path
+  # sites are fixed; the 39 remaining are baselined in the script with their
+  # service, so a NEW occurrence fails and a baseline entry that becomes fixed is
+  # reported too. Self-test first — the must-NOT-flag half is what matters here,
+  # since an outbound REST-client interface carries the identical annotation and
+  # is not a defect (52 of the 115 raw matches on main). ENFORCED.
+  - id: nonnull-jaxrs-param-ratchet
+    name: "non-nullable required JAX-RS param ratchet (issue #3104, enforced)"
+    group: kotlin
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-nonnull-jaxrs-params.py --self-test
+      python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
+
   # openbank.outbox.dispatch-enabled guard (the CLAUDE.md "outbox footgun":
   # a service whose OutboxDispatcher actually gates on this flag silently
   # never dispatches if it's left at its false default — no error,
@@ -1995,6 +2024,21 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-realm-template-importable.py
+  - id: opa-bundle-parses
+    name: "OPA bundle must be loadable by OPA (generated artifact, not its sources)"
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-opa-bundle-parses.py --self-test
+    selftest_expect: pass
+    run: |
+      # sca shipped an unloadable bundle on 2026-08-07 (#3748, repaired by #3971): a source
+      # rego without a trailing newline made the generator emit `}  agents.rego: |`, which
+      # dropped a ConfigMap key and left the embedded policy unparseable. Every existing gate
+      # was green — `opa test` reads the SOURCE rego, and the drift check regenerates with the
+      # same broken generator, so committed and regenerated agreed. This one reads the
+      # ARTIFACT with the consumer's own parser, which is the only layer that can see it.
+      python3 .github/scripts/check-opa-bundle-parses.py --self-test
+      python3 .github/scripts/check-opa-bundle-parses.py --root .
   - id: opa-bundle-apply-size
     name: OPA bundle must be installable (client-side apply annotation ceiling)
     group: gitops

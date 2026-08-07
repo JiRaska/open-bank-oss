@@ -56,6 +56,9 @@ dependencies {
     // capitalization credit leg makes (ADR-0063). interest-service is the fifth ledger-posting
     // consumer; every other one already has a pact with openbank-ledger-service as provider.
     testImplementation(libs.rest.assured.kotlin)
+    // InterestMissingParamStatusIT (#3104) drives `capitalize` over REAL HTTP behind @RolesAllowed —
+    // the only layer at which an omitted @QueryParam can be observed at all.
+    testImplementation(libs.quarkus.test.security)
     testImplementation(libs.pact.consumer)
 }
 

@@ -120,6 +120,30 @@ mp:
         auto:
           offset:
             reset: earliest
+      # ADR-0245 conversion sources. `latest`, not `earliest`, and deliberately: replaying months of
+      # historical account and card events on first boot would attribute conversions to campaigns
+      # that had not sent anything at the time. The attribution window in ConversionCatalog would
+      # reject most of them, which is exactly the kind of correctness nobody should have to rely on.
+      account-conversions-in:
+        connector: smallrye-kafka
+        topic: openbank.accounts.account.created
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        group:
+          id: openbank-campaign-service-account-conversions
+        auto:
+          offset:
+            reset: latest
+      card-conversions-in:
+        connector: smallrye-kafka
+        topic: openbank.cards.events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        group:
+          id: openbank-campaign-service-card-conversions
+        auto:
+          offset:
+            reset: latest
       consent-events-in:
         connector: smallrye-kafka
         topic: openbank.consent.events

@@ -111,6 +111,24 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   (RestAssured + `@TestSecurity`) and assert the row with a plain JDBC read. This is also the only
   way to prove transactional-outbox atomicity (status change + outbox row commit together) — a mocked
   repo can't. Pattern: `LendingOutboxWriteIT`, `ConsentRevocationOutboxIT`.
+- **A non-nullable `@QueryParam`/`@HeaderParam` is a 500, and `requireNotNull` in the body is DEAD
+  CODE — the parameter must be declared nullable.** JAX-RS injects `null` for an absent parameter;
+  Kotlin's null-safety is compile-time only, so the declared type only decides *where* the failure
+  lands, and every landing is a 500 (`GenericExceptionMapper`). Measured with `javap`: a plain `fun`
+  emits `Intrinsics.checkNotNullParameter` at **offset 0**, so a guard written in the body compiles
+  to nothing — the NPE already threw. A **`suspend fun` emits no intrinsic at all**, so the null
+  flows into the body and fails at the first dereference; where nothing dereferences it, the request
+  proceeds with a null the signature promised could not exist, which is worse than the 500 and
+  invisible. That is how three services shipped
+  `require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }` that answered
+  **500 for the absent header** — the exact case it was written for — and 400 only for a blank one.
+  Write `@QueryParam("x") x: String?` + `requireNotNull(x) { "query parameter 'x' is required" }`;
+  libs-runtime maps `IllegalArgumentException` to 400 (never add a service-local mapper, #526). The
+  primitive case differs and is out of scope: JAX-RS supplies `0`, not null. `@DefaultValue` is the
+  other correct answer where one exists. Enforced by `check-nonnull-jaxrs-params.py` (gate
+  `nonnull-jaxrs-param-ratchet`) — money-path fixed, the tail baselined (#3104, #3624). Counting
+  trap: an outbound REST-client **`interface`** carries the identical annotation and is NOT a defect
+  (the caller supplies the argument, compile-time checked), which is half of every naive grep.
 - **A Kotlin annotation binds to the NEXT declaration — a top-level function between `@Path` and its
   class silently steals it.** `McpEndpoint` had `@Path("/mcp")`, then a top-level
   `private fun String?.sanitizeForLog()`, then `class McpEndpoint`. The `@Path` bound to the
@@ -512,6 +530,38 @@ fire from *outside* it, so they stay here:
   `ACCOUNT_SERVICE_URL: …accounts.svc:8101`, where 8101 is ledger's. Both ports transposed, live on
   the pod, invisible to the gate. When a gate's subject can be overridden, either extend it to the
   overriding layer or say in its own header which layer it does not cover.
+- **Evidence cannot corroborate the layer it is DERIVED FROM — extending a gate to that layer
+  silently makes it vacuous, and it still reads as green.** `check-incluster-hostnames.py` widens
+  its known-good set with every host a gitops workload env dials ("if the deployment manifest
+  dials it, the platform believes it exists"), which is sound while the CLAIM comes from
+  `application.yaml` and the CORROBORATION from gitops — two independently-authored places. Point
+  the same gate at the gitops env and that becomes the same statement twice: every host vouches
+  for itself, nothing can ever be flagged, and the output still says OK. The fix is not more
+  cleverness but a parameter — the caller passes what it accepts as existing, so the two layers
+  cannot share a believed-set by accident, and a self-test asserts a corroborated-only host stays
+  clean in one layer and IS flagged in the other (#3966). **Before reusing any "known-good" set on
+  a new input, ask what that set is derived from**; the same shape appears wherever a baseline, an
+  allow-list or a cache is built from the artifact it is about.
+- **The derived alternative to a hand-kept list is not automatically better — measure it against
+  the known cases before preferring it on principle.** This repo rightly distrusts hand-kept lists
+  (a gate whose scope is one reads as PASSING when the list is short). So the instinct for the
+  above was a derived rule: believe a host that ≥2 distinct workloads dial. Measured against the
+  real tree it was wrong in BOTH directions at once — it would have believed two live defects
+  (`tpp-registry-service.tpp.svc` and `sepa-payment-service.payments.svc`, each dialled twice) and
+  flagged three real Helm-provisioned Services dialled only once. A 10-entry list, each entry
+  verified with `kubectl` and **checked both ways** so a stale one fails, beat it outright. The
+  rule that survives is narrower than "never hand-keep a list": never let a gate's SCOPE be
+  hand-kept, because a short list then reads as full coverage — but a hand-kept list of external
+  FACTS is fine when the gate fails on a stale entry, since it can only shrink by being noticed.
+- **A comment that explains away a symptom is worse than no comment — it retires the question.**
+  psd2's manifest annotated its TPP-registry URL "Not yet deployed -> calls 503 until it lands".
+  The service was deployed and serving; the URL named a namespace that has never existed. Anyone
+  who noticed the failing lookup found it already accounted for, so the note survived as long as
+  the bug did. Same family as the stale-prose rule under ktlint/detekt above, but the failure is
+  worse: stale prose merely misinforms, whereas an explanation of a symptom suppresses the
+  investigation. When you write one, name what you VERIFIED and when — and when you fix a defect
+  whose comment predicted it, correct the comment in place rather than deleting it, so the next
+  reader learns the note was wrong rather than that it was never there.
 - **An advisory check over a *generated* artifact is a contradiction.** On a hand-written artifact a
   red advisory check means "someone should look"; on a generated one it means "the committed document
   does not match reality" — there is no judgement left to exercise, so advisory just makes the drift
