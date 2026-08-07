@@ -16,6 +16,8 @@ import com.openbank.mcp.application.McpToolRegistry
 import com.openbank.mcp.application.PolicyFilteredToolCatalog
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
+import com.openbank.mcp.application.port.out.PaymentConfirmationReadPort
+import com.openbank.mcp.application.port.out.StatementReadPort
 import com.openbank.mcp.infrastructure.mcp.CallerContextResolver
 import com.openbank.mcp.infrastructure.mcp.McpEndpoint
 import com.openbank.mcp.infrastructure.observability.McpMetricsAdapter
@@ -111,6 +113,8 @@ class ProposalRefusalTest {
 
     private fun registry() = McpToolRegistry(
         accounts = UnusedAccountReadPort,
+        statements = UnusedStatementReadPort,
+        paymentConfirmations = UnusedPaymentConfirmationReadPort,
         proposals = UnwiredProposalPort(),
         marketingReach = StubMarketingReachPort(mapper),
         masker = McpPiiMasker(mapper),
@@ -158,6 +162,20 @@ class ProposalRefusalTest {
         override fun listTransactions(consentContext: ConsentContext, accountId: String, limit: Int): JsonNode =
             error("not used")
         override fun listConsents(consentContext: ConsentContext): JsonNode = error("not used")
+    }
+
+    private object UnusedStatementReadPort : StatementReadPort {
+        override fun getStatementSummary(
+            consentContext: ConsentContext,
+            accountId: String,
+            currency: String?,
+            legalSequence: Long?,
+        ): JsonNode = error("not used")
+    }
+
+    private object UnusedPaymentConfirmationReadPort : PaymentConfirmationReadPort {
+        override fun getPaymentConfirmation(consentContext: ConsentContext, paymentId: String): JsonNode =
+            error("not used")
     }
 
     private companion object {
