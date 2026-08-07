@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Statement Service API
-  version: 1.1.0
+  version: 1.2.0
   description: >-
     Account statements for the multi-currency current account (ADR-0035). The unit is the per-pocket
     (IBAN + currency) statement: each pocket has its own camt.053.001.08 / MT940 with an independent
@@ -115,6 +115,30 @@ paths:
           description: Rendered statement (application/xml for camt.053, text/plain for MT940/PDF)
         '404':
           description: No closed statement with that sequence
+
+  /api/v1/statements/{accountId}/{currency}/{legalSequence}/document:
+    get:
+      tags: [Statements]
+      summary: Render the customer-facing styled statement document (ADR-0248)
+      description: >-
+        Synchronous, on customer request only. Calls document-service's non-persisting template
+        preview endpoint with data assembled from the same closed period the camt.053/MT940/PDF
+        render path uses; nothing is stored on either side.
+      operationId: renderStatementDocument
+      parameters:
+        - { name: accountId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: currency, in: path, required: true, schema: { type: string, minLength: 3, maxLength: 3 } }
+        - { name: legalSequence, in: path, required: true, schema: { type: integer, format: int64 } }
+        - name: locale
+          in: query
+          schema: { type: string, enum: [cs, en], default: cs }
+      responses:
+        '200':
+          description: Rendered styled statement document
+        '404':
+          description: No closed statement with that sequence
+        '502':
+          description: document-service could not render the template (unreachable, or template not PUBLISHED)
 
   /api/v1/statements/{accountId}/{currency}/export:
     get:
