@@ -129,6 +129,36 @@ initiate edge; downstream (saga → ledger → balance projection) is unchanged.
 **Rollback:** revert the endpoint; the `sweep` verb is inert while `authz.four-eyes.enforce=false`,
 and no existing request's outcome changes.
 
+## 4c. Merchant enrichment (D5) — STRIDE supplement
+
+`GET /api/v1/transactions` gained an optional `merchant` object: the public trading name, logo,
+category and shop coordinates of the merchant behind a card transaction, resolved from a
+`merchant_catalog` table keyed by the normalised acquirer descriptor. No new endpoint, no new
+caller, no new role — the surface change is one additive, omitted-when-absent response field on an
+already-authorised read.
+
+**What the catalogue is, and what it must never become.** It holds PUBLIC BUSINESS data: where a
+shop is. Nothing in it is keyed by customer, card or transaction, and no request writes to it. The
+distinction matters because "merchant location" and "cardholder location" look alike in a schema
+and are not alike at all under GDPR — the first is a business address, the second is tracking a
+person's movements. A future change that keys a row by anything customer-specific crosses that
+line and needs its own review.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **I**nfo disclosure | Enrichment leaks a *cardholder's* whereabouts rather than a shop's | The catalogue has no customer-, card- or transaction-scoped column; a row is per merchant descriptor and identical for every customer who shopped there. Nothing customer-derived is written back |
+| **T**ampering | A wrong or planted catalogue row attributes a payment to the wrong business — a lever for social engineering ("your payment to X") or for hiding one | Rows arrive only by migration, never from a request. Lookup is an **exact** match on the normalised key: no fuzzy or prefix matching, so a near-name cannot inherit another merchant's identity. `description` is passed through unmodified, so the raw acquirer text remains available and authoritative |
+| **R**epudiation | A dispute is raised against a prettified name that does not appear on the acquirer record | Enrichment is display-only and additive. Disputes and SPAYD consume `description`, which this change does not touch; `source: ENRICHED` labels anything the bank resolved |
+| **S**poofing | `logoUrl` points at attacker-controlled content rendered inside the bank app | URLs are catalogue-controlled and expected to be on a bank-controlled CDN; there is no request path that can set one |
+| **D**oS | Enrichment adds a per-row query to every statement page | One query per page: descriptors are normalised, de-duplicated and fetched together, so cost is bounded by distinct merchants on the page, not row count |
+
+**DFD update:** none. Same caller, same endpoint, same authorisation; one additional read of a
+local reference table inside the existing request.
+**Risk class:** integrity of merchant attribution (display), with an explicit privacy boundary on
+what the catalogue may hold.
+**Rollback:** revert; absent the field, responses are byte-identical to before (the field is
+`NON_NULL`, so an unenriched transaction never carried it).
+
 ## 5. Residual risks / assumptions
 
 - **Booked balance is now a ledger projection (ADR-0039 Phase D-2).** The saga no longer debits/credits
@@ -166,6 +196,8 @@ and no existing request's outcome changes.
   this change is inert until a separately-approved cutover.
 
 ## 6. Change log
+
+- **2026-08-07** — Merchant enrichment (D5). `GET /api/v1/transactions` answers an optional `merchant` object (clean name, logo, category, shop geo) resolved from the new `merchant_catalog` table via an exact match on the normalised acquirer descriptor. STRIDE supplement in §4c. No new endpoint, caller, role or Kafka topic. Three properties are load-bearing rather than incidental: matching is **exact** (fuzzy matching would hand one merchant's identity and coordinates to a similarly-named other, which is a fabrication with a trust cost, not a UX nicety); the field is `NON_NULL`, so a transaction with no catalogue entry produces a body byte-identical to before (serialising `"merchant": null` is a wire change for every existing consumer and did in fact fail the sepa-payment Pact verification); and `description` is passed through untouched, because disputes and SPAYD are built from the raw acquirer text and must never inherit a prettified name. Geo is null for card-not-present merchants, with a CHECK constraint keeping lat/lon both-or-neither so a half-filled row cannot render as a pin at 0°. Rollback: revert.
 
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `accountId` on listTransactions. Listing "transactions for an account" with no account is a malformed request; the null reached `ListTransactionsQuery` and answered 500. The sibling searchTransactions endpoint already declares `accountId` nullable by design (search is deliberately multi-criteria) and is untouched. No new caller or boundary; `@RolesAllowed` and `@Authorize(action = "transaction.list")` are unchanged and still run first. Rollback: revert.
 - **2026-07-12** — Wired the four-eyes (maker-checker) enforcement *mechanism* (ADR-0155) onto

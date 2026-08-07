@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.55.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.54.2...customer-edge-v0.55.0) (2026-08-07)
+
+
+### Features
+
+* **customer-edge:** honour delegated read access, so a shared account can actually be seen ([#4021](https://github.com/JiRaska/open-bank-oss/issues/4021)) ([7a93bd4](https://github.com/JiRaska/open-bank-oss/commit/7a93bd4327fae7d26d45aa47419e85da87e6b332))
+* **customer-edge:** resolve a directory hit to a payable target without disclosing the account ([#4014](https://github.com/JiRaska/open-bank-oss/issues/4014)) ([8ea271f](https://github.com/JiRaska/open-bank-oss/commit/8ea271f85811f1a44b168bf1c75c1827e996afc2))
+
+
+### Bug Fixes
+
+* **delegation:** refuse dailyLimit/monthlyLimit — ADR-0232's cumulative ceilings are enforced nowhere ([#3613](https://github.com/JiRaska/open-bank-oss/issues/3613)) ([841d20e](https://github.com/JiRaska/open-bank-oss/commit/841d20e7f6f5e8674a20bdbd08e9488f64365fc6))
+
 ## [0.54.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.54.1...customer-edge-v0.54.2) (2026-08-06)
 
 

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: dispute-service
     app.kubernetes.io/part-of: dispute
   annotations:
-    openbank.tech/policy-checksum: "c05ecd973bc33428"
+    openbank.tech/policy-checksum: "86808f0351d1bac2"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2133,5 +2133,63 @@ data:
             - lending.collateralDecide
             - lending.approval.read
             - lending.approval.decide
+
+    shared_m2m_write_prohibition:
+      # GHSA-58jq-9hq3-66jr. rest.rego denies the shared M2M identity
+      # (`service-account-openbank-services`, which carries ROLE_OPERATOR in the realm) when the
+      # ONLY reasons admitting it are the role-only write reasons listed here.
+      #
+      # OPT-IN, and the reason a name pattern was rejected: matching every `operator-*-write`
+      # would have 403'd transaction.create from six live callers (account-service's
+      # welcome-bonus credit, sepa-instant, domestic-payment, swift, interest, sdd) and
+      # settlement.create — both AUTHZ_ENFORCE=true money paths whose services have no
+      # identity-scoped rule to fall back on. transaction-service's rego states the exposure
+      # itself ("RESIDUAL RISK — shared identity, no per-caller narrowing"), which is precisely
+      # why removing its only path is not the fix.
+      #
+      # A reason joins this list once its service carries a rule that NAMES the caller and
+      # enumerates its actions, so denying the role-only path removes an over-grant rather than
+      # the only path. Each entry below was verified to have such a rule.
+      reasons:
+        - operator-consent-write        # service-consent-m2m + service-consent-m2m-marketing
+        - operator-ledger-write         # service-ledger-post / service-ledger-reverse
+        - operator-balance-write        # service-balance-m2m
+        - operator-fraud-write          # service-fraud-scoring
+        # SAFE TODAY ONLY BY CO-ADMISSION, not by the rule named here: that rule covers
+        # sepaPayment.handleReturn alone, but ROLE_OPERATOR also grants sepaPayment.create /
+        # .transitionStatus / .approval.decide, so `matrix-allows` co-admits and this reason
+        # never becomes the only one. standing-order POSTs sepaPayment.create via the shared
+        # client. When ADR-0223 D2(b) retires those matrix grants, this entry starts denying it.
+        - operator-sepa-payment-write   # service-sepa-payment-shared-client-m2m (see note above)
+        # Restored once #3748 landed: service-sca-shared-client-m2m now admits the shared client
+        # for scaChallenge.read AND scaChallenge.consume, so document-service's consume call
+        # (ScaChallengeClient, oidc-client.client-id openbank-services) keeps an identity-scoped
+        # reason and this entry no longer 403s the document-signing gate. device.list is covered
+        # by matrix-allows. Still uncovered for the shared client: decide/initiate/verify and
+        # device.enroll — no in-repo caller invokes them on that principal.
+        - operator-sca-write            # service-sca-edge-m2m + service-sca-shared-client-m2m
+      # NOT listed, and why. Each needs an identity-scoped rule for its real callers FIRST;
+      # adding it here before that is a money-path outage, not a test failure.
+      deferred:
+        operator-transaction-write: "6 verified callers of transaction.create via the shared client; no identity-scoped rule exists"
+        operator-settlement-write: "settlement.create is resourceless with no alternative rule"
+        operator-swift-write: "no identity-scoped rule; callers unverified"
+        operator-sepa-instant-write: "no identity-scoped rule; callers unverified"
+        operator-billing-write: "no identity-scoped rule; callers unverified"
+        operator-interest-write: "no identity-scoped rule; callers unverified"
+        operator-lending-write: "no identity-scoped rule; callers unverified"
+        operator-sanctions-write: "no identity-scoped rule; m2m-sanctions-screening covers create only"
+        operator-identity-write: "no identity-scoped rule; callers unverified"
+        operator-card-write: "no identity-scoped rule; callers unverified"
+        # These DO carry an identity-pinned rule, but "a rule exists" is not "the rule covers the
+        # actions the role-only path was serving". Listing them on that basis would repeat, one
+        # level down, the guess that made the first revision break transaction.create. Each needs
+        # its identity-scoped rule read against its real callers before it moves up.
+        operator-fx-write: "2 identity-pinned rules; action coverage vs real callers unverified"
+        operator-account-write: "2 identity-pinned rules; action coverage unverified"
+        operator-clearing-write: "1 identity-pinned rule; action coverage unverified"
+        operator-domestic-payment-write: "1 identity-pinned rule; action coverage unverified"
+        operator-party-write: "1 identity-pinned rule, but onboarding-service PUTs party.kyc-status via the shared client (latent: AUTHZ_ENFORCE=false there today)"
+      adr: ADR-0034
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}

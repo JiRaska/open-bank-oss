@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.102.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.101.0...admin-ui-v0.102.0) (2026-08-07)
+
+
+### Features
+
+* **case-coordinator-agent:** create module and register in rules.yaml (ADR-0244) ([#3772](https://github.com/JiRaska/open-bank-oss/issues/3772)) ([fbde2b6](https://github.com/JiRaska/open-bank-oss/commit/fbde2b65efed06296d96c8bb6e5cb7a2801a54a3))
+
 ## [0.101.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.100.0...admin-ui-v0.101.0) (2026-08-07)
 
 

@@ -101,7 +101,7 @@ class OnnxFraudModel(
          * `catch (ex: Exception)` in [loadSession] below never saw them and the class documented a
          * degradation it could not perform.
          *
-         * What that cost: the deploy image is `eclipse-temurin:25-jre-alpine` (musl, no libstdc++),
+         * What that cost: the deploy image was `eclipse-temurin:25-jre-alpine` (musl, no libstdc++),
          * onnxruntime's `libonnxruntime.so` is built against glibc, so `getEnvironment()` threw in
          * a FIELD INITIALIZER — construction of the bean failed, and CDI then failed every
          * injection point of it. `FraudResource.reviewQueue` is a read-only analyst query that

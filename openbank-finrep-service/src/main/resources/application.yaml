@@ -23,6 +23,20 @@ quarkus:
 
   log:
     level: INFO
+
+  # The management interface the Kubernetes probes and the Prometheus scrape target.
+  #
+  # This block was missing, and its absence is why the finrep pod could never become ready: the
+  # gitops manifest probes and scrapes port 8085 (`port: management`), Quarkus never opened it, and
+  # kubelet got connection refused. Without a management port Quarkus keeps /q/health on the main
+  # HTTP port, so nothing was wrong with the probe PATH — only with the port it was asked for.
+  # 8085 matches every other service in the fleet (ledger, transaction, …), so the manifest was
+  # right and the service configuration was the half that never landed.
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
   smallrye-openapi:
     path: /q/openapi
   swagger-ui:
