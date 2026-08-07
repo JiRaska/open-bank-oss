@@ -7,7 +7,7 @@ info:
   # version.txt — classified from the OpenAPI diff, never forced equal to it. The two have not
   # been in lockstep for a long time (version.txt is 1.14.2); the note that used to claim they
   # were invited exactly the wrong "fix".
-  version: 1.10.0
+  version: 1.11.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -421,6 +421,67 @@ components:
           type: string
           nullable: true
           description: MCC-derived merchant category for card spend (ADR-0103).
+        merchant:
+          $ref: "#/components/schemas/Merchant"
+          nullable: true
+          description: >
+            Resolved public identity of the merchant behind a card transaction (D5). ABSENT when
+            the acquirer descriptor is not in the catalogue — which is the normal case — and never
+            populated with a guess: absence is what tells a client to render `description` raw.
+            `description` itself is passed through byte-identical whether or not this is present,
+            because disputes and SPAYD are built from the raw acquirer text.
+
+    Merchant:
+      type: object
+      description: >
+        Public identity of a merchant. Holds PUBLIC BUSINESS data — where a shop is — and never
+        cardholder location: nothing in the catalogue behind it is keyed by customer, card or
+        transaction.
+      properties:
+        cleanName:
+          type: string
+          description: Trading name, e.g. "Alza.cz" for the descriptor "ALZA.CZ A.S. PRAGUE CZ".
+        logoUrl:
+          type: string
+          nullable: true
+          description: Bank-controlled CDN URL. Never a third-party hotlink (privacy + availability).
+        category:
+          type: string
+          nullable: true
+          description: Catalogue category, e.g. GROCERIES, DINING, TRANSPORT.
+        geo:
+          $ref: "#/components/schemas/MerchantGeo"
+          nullable: true
+        source:
+          type: string
+          enum: [ENRICHED]
+          description: >
+            Always ENRICHED when this object is present. The field exists so a client never has to
+            infer whether a name came from the bank or from the acquirer.
+      required: [cleanName, source]
+    MerchantGeo:
+      type: object
+      description: >
+        Location of the SHOP, for card-present spend. Absent for card-not-present merchants: an
+        e-shop has no place where the money was spent, and a head-office pin on a "where you spent"
+        map would be fiction.
+      properties:
+        lat:
+          type: number
+          format: double
+          description: WGS84 latitude.
+        lon:
+          type: number
+          format: double
+          description: WGS84 longitude.
+        city:
+          type: string
+          nullable: true
+        country:
+          type: string
+          nullable: true
+          description: ISO-3166 alpha-2.
+      required: [lat, lon]
 
     InitiateTransactionRequest:
       type: object
