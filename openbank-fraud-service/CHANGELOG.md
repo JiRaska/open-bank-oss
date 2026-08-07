@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.10.1...fraud-service-v0.10.2) (2026-08-07)
+
+
+### Bug Fixes
+
+* **fraud:** a wrongly-typed currency answered 500, not 400 ([#3923](https://github.com/JiRaska/open-bank-oss/issues/3923)) ([4d7f7b7](https://github.com/JiRaska/open-bank-oss/commit/4d7f7b78cc87834b4506ba68321edde7a4cb40c1))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.10.0...fraud-service-v0.10.1) (2026-08-02)
 
 
