@@ -28,4 +28,20 @@ quarkus:
 "%test":
   quarkus:
     oidc:
-      enabled: false
+      # `tenant-enabled: false`, NEVER `enabled: false`. Both stop a test JVM talking to Keycloak,
+      # and only one of them keeps the JsonWebToken bean: disabling the extension outright removes
+      # it, so every bean that injects one fails CDI validation and the whole @QuarkusTest of that
+      # module refuses to boot with `UnsatisfiedResolutionException`.
+      #
+      # This file is on the classpath of every service, which is what makes the distinction
+      # load-bearing rather than academic. A service carrying its own `enabled: false` overrides
+      # this and is unaffected — 51 of 57 do. The rest inherit whatever is written here, and for
+      # them `enabled: false` was a behaviour change nobody asked for: it broke campaign-service
+      # and mcp-service, whose resources take a JsonWebToken constructor parameter.
+      #
+      # campaign-service's own application.yaml has warned about exactly this since it was written
+      # ("`tenant-enabled: false` and NOT `enabled: false`: turning the extension off removes the
+      # JsonWebToken bean"). The two keys are different properties, so a service-level
+      # `tenant-enabled: false` does not override an inherited `enabled: false` — they simply both
+      # apply, and the harder one wins.
+      tenant-enabled: false
