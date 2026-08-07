@@ -137,6 +137,7 @@ export default function LendingPage() {
 
     if (appSummary && loanSummary) {
       const openStates = appSummary.filter(r => !TERMINAL.has(r.status))
+      // eslint-disable-next-line react-hooks/purity -- staleness comparison is inherently time-relative; the timestamps are stable server data.
       const now = Date.now()
       return {
         exact: true,
@@ -161,6 +162,7 @@ export default function LendingPage() {
 
     const book = loans.reduce((s, l) => s + (l.principal?.amount ?? 0), 0)
     const trouble = loans.filter(l => LOAN_TROUBLE.has(l.status))
+    // eslint-disable-next-line react-hooks/purity -- staleness comparison is inherently time-relative; the timestamps are stable server data.
     const now = Date.now()
     const open = applications.filter(a => !TERMINAL.has(a.status))
     const stale = open.filter(a => a.createdAt && now - new Date(a.createdAt).getTime() > STALE_HOURS * 3_600_000)

@@ -84,7 +84,10 @@ BASELINE = {
     "operator-pid-resolve",       # pid.resolve — a lookup; classified here pending confirmation
     "operator-standing-order-pause",
     "operator-vop-verify",        # vop.verify — a verification; same caveat
-    "operator-year-close-attest",
+    # `operator-year-close-attest` was here and is GONE (#3765): the ledger ext rule now carries
+    # `not startswith(input.principal.id, "service-account-")`, so it is no longer role-only and
+    # this list must not name it. The removal was surfaced by this script's own stale-entry
+    # ratchet, not by anyone remembering — which is the argument for keeping that ratchet.
 }
 
 REASON_RE = re.compile(r'allowed_reasons\s+contains\s+"([^"]+)"\s+if\s*\{')

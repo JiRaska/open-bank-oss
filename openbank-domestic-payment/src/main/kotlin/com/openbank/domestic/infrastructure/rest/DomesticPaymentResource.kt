@@ -61,9 +61,13 @@ class DomesticPaymentResource(
     @Operation(summary = "Create a domestic payment")
     suspend fun createPayment(
         request: CreateDomesticPaymentRequest,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
-        require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
+        // #3104 — the guard below could not run when the header was ABSENT: JAX-RS injected null,
+        // and `null.isNotBlank()` threw NPE, so the very case it exists for answered 500. `suspend`
+        // hid it further, since Kotlin emits no checkNotNullParameter intrinsic for a suspend
+        // function — the null reached the first dereference instead of failing at the boundary.
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
 
         idempotencyStore.get(idempotencyKey)?.let { cached ->
             return Response.status(cached.statusCode)

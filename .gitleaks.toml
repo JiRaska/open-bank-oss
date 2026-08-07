@@ -153,6 +153,12 @@ regexes = [
   # placeholder account digits) — a public API-contract example, not a secret;
   # the 10-digit string trips the rod-cislo numeric heuristic.
   '''0800000019''',
+  # Web3Forms' shared free hCaptcha sitekey (public by design — hCaptcha sitekeys are
+  # not secrets, only the widget's client-side identifier, same trust level as a
+  # Google Analytics measurement ID). Previously injected at runtime by the vendor's
+  # own script.js; now inlined in openbank-infra/web/landing/{index.html,main.js}
+  # since that script was dropped for being an SRI-less third-party include.
+  '''50b2fe65-b00b-4b9e-ad62-3ba471098be2''',
   # customer-edge test account base from the demo IBAN CZ6508000000192000145399
   # (bank 0800, prefix 19, base 2000145399). It is NOT a rodné číslo — month digits
   # "00" make it structurally invalid and it fails the mod-11 birth-number check; it

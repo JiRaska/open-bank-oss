@@ -5,7 +5,7 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.1.0
+  version: 1.3.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -31,7 +31,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
-        '400': { description: Validation or SCA failure }
+        '400':
+          description: >-
+            Validation or SCA failure. `code: CUMULATIVE_LIMIT_UNSUPPORTED` when the body carries
+            dailyLimit or monthlyLimit — ceilings this platform accepts nowhere because it enforces
+            nowhere. Refused before the SCA challenge is spent, so the customer keeps their ceremony.
         '403': { description: The authenticated party is not the grantor }
         '422': { description: Eligibility gate, or the grantor does not own the resource (ADR-0232 D5, threat model T1) }
   /api/v1/delegations/{id}:
@@ -268,11 +272,38 @@ components:
             enum: [ACCOUNT_READ_BALANCES, ACCOUNT_READ_TRANSACTIONS, ACCOUNT_INITIATE_PAYMENT,
                    ACCOUNT_PROPOSE_PAYMENT, CARD_VIEW, CARD_MANAGE_LIMITS, SAVINGS_DEPOSIT,
                    SAVINGS_WITHDRAW, SAVINGS_PROPOSE_WITHDRAW, OBJECT_READ, DELEGATION_MANAGE]
-        approvalPolicy: { type: string, enum: [SOLO, ANY_ONE, ALL, N_OF_M] }
-        requiredApprovals: { type: integer }
-        perTransactionLimit: { $ref: '#/components/schemas/MoneyDto' }
-        dailyLimit: { $ref: '#/components/schemas/MoneyDto' }
-        monthlyLimit: { $ref: '#/components/schemas/MoneyDto' }
+        approvalPolicy:
+          type: string
+          enum: [SOLO, ANY_ONE, ALL, N_OF_M]
+          default: SOLO
+          description: >-
+            Only SOLO is enforced. Any other value is rejected with 400 APPROVAL_POLICY_UNSUPPORTED:
+            no service counts approvals against a grant, so a co-signing requirement set here would
+            be stored and echoed while a single owner decision still releases the money. The enum
+            values remain listed because ADR-0232 D8 describes them as intended; they are not built.
+          x-unsupported-values: [ANY_ONE, ALL, N_OF_M]
+        requiredApprovals:
+          type: integer
+          deprecated: true
+          description: >-
+            Meaningful only with approvalPolicy=N_OF_M, which is rejected. Nothing counts approvals.
+        perTransactionLimit:
+          $ref: '#/components/schemas/MoneyDto'
+          description: >-
+            The only limit this platform enforces. Checked per payment amount; it never accumulates.
+        dailyLimit:
+          $ref: '#/components/schemas/MoneyDto'
+          deprecated: true
+          description: >-
+            NOT SUPPORTED — sending this field is rejected with 400 CUMULATIVE_LIMIT_UNSUPPORTED.
+            No service in this platform counts cumulative spend against a grant, so a value here
+            would be stored and echoed back while never capping any payment. Omit it. ADR-0232 D1/D6
+            describes cumulative ceilings as intended; they are not built.
+        monthlyLimit:
+          $ref: '#/components/schemas/MoneyDto'
+          deprecated: true
+          description: >-
+            NOT SUPPORTED — see dailyLimit. Rejected with 400 CUMULATIVE_LIMIT_UNSUPPORTED.
         exposure: { $ref: '#/components/schemas/ExposureDto' }
         validTo: { type: string, format: date-time }
         grantScaSessionId: { type: string, format: uuid }
@@ -302,14 +333,41 @@ components:
         id: { type: string, format: uuid }
         grantorPartyId: { type: string, format: uuid }
         granteePartyId: { type: string, format: uuid }
+        grantorName:
+          type: string
+          description: |
+            Counterparty display name snapshotted onto the grant at offer time (issue #3604),
+            from the pid-service eligibility lookup this service already performs. It is what was
+            true when the grant was made, not a live value — an authorisation record must not be
+            silently rewritten by a later rename.
+
+            Null on grants offered before this field existed, and when pid-service returns no
+            usable name. Clients fall back to the party id; they must not render a blank, which
+            on a consent screen reads as a name that failed to load.
+
+            Only ever returned to a party of the grant (the read paths are party-scoped) or to
+            role-gated bank staff. This is not a party-name lookup.
+        granteeName:
+          type: string
+          description: As grantorName, for the party receiving the grant.
         resourceType: { type: string }
         resourceId: { type: string, format: uuid }
         capabilities: { type: array, items: { type: string } }
         approvalPolicy: { type: string }
         requiredApprovals: { type: integer }
         perTransactionLimit: { $ref: '#/components/schemas/MoneyDto' }
-        dailyLimit: { $ref: '#/components/schemas/MoneyDto' }
-        monthlyLimit: { $ref: '#/components/schemas/MoneyDto' }
+        dailyLimit:
+          $ref: '#/components/schemas/MoneyDto'
+          deprecated: true
+          description: >-
+            Always null on grants offered after this API version — the field is refused on write.
+            A non-null value belongs to a grant stored before that and is NOT enforced: it is a
+            number on a record, not a cap on the delegate. Do not render it as a limit.
+        monthlyLimit:
+          $ref: '#/components/schemas/MoneyDto'
+          deprecated: true
+          description: >-
+            See dailyLimit. Not enforced; do not render it as a limit.
         exposure: { $ref: '#/components/schemas/ExposureDto' }
         validFrom: { type: string, format: date-time }
         validTo: { type: string, format: date-time }

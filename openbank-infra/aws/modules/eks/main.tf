@@ -236,8 +236,27 @@ resource "aws_eks_addon" "vpc_cni" {
   # applied (manual platform-tofu dispatch, ADR-0060) the policies are inert.
   # Kubelet health probes keep working under enforcement — the agent always
   # admits traffic from the node's own IP.
+  #
+  # nodeAgent.enablePolicyEventLogs (issue #2691 stage 1, runbook 0010): make the
+  # node agent write an ACCEPT/DENY verdict per flow to its node-local log. This is
+  # OBSERVATION, not enforcement — it changes no verdict, only whether the verdict
+  # is written down. It is here because the agent has no audit mode: its two modes
+  # are `standard` and `strict` and neither is log-only, so "default-deny in audit
+  # mode on one namespace" cannot be expressed on this CNI and the flow log is the
+  # only way to learn what a default-deny baseline would drop before applying one.
+  #
+  # enableCloudWatchLogs stays FALSE deliberately: the logs remain a file on the
+  # node ($0). Shipping every cross-pod flow verdict on this fleet to CloudWatch is
+  # the same ingest bill the cluster log groups above were already trimmed for.
+  #
+  # Harvest and the comparison procedure:
+  #   docs/runbooks/0010-networkpolicy-default-deny-measurement.md
   configuration_values = jsonencode({
     enableNetworkPolicy = "true"
+    nodeAgent = {
+      enablePolicyEventLogs = "true"
+      enableCloudWatchLogs  = "false"
+    }
   })
 }
 

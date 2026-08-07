@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.12.3...balance-service-v1.13.0) (2026-08-07)
+
+
+### Features
+
+* **balance:** register workflow liveness on the reconciliation schedulers (ADR-0237) ([#3703](https://github.com/JiRaska/open-bank-oss/issues/3703)) ([ba57849](https://github.com/JiRaska/open-bank-oss/commit/ba5784998288dea5f665b97546aeafb081859ac0))
+
 ## [1.12.3](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.12.2...balance-service-v1.12.3) (2026-08-02)
 
 

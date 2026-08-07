@@ -104,7 +104,16 @@ PAIR_LINE = ("There is no verified pact", "The verification for the pact between
 # UNKNOWN is excluded for the same reason from the other direction: an unclassified block is
 # not positive evidence of anything, and the safe default is to say so rather than to name a
 # set. Records with no class at all keep today's behaviour, so older captures still parse.
-CODEPLOY_CLASSES = ("UNVERIFIED", "REGRESSION")
+#
+# UNVERIFIABLE (#3223) IS eligible, and for the reason stated above rather than despite it.
+# It is the one class backed by a measurement that the block is durable: the counterpart
+# version the verdict compared against carries zero pacts, so no verification will ever
+# target it and no reconcile tick can change the answer. It is also the class a co-deploy
+# actually remedies — deploying the counterpart alongside replaces that bookkeeping version
+# with one that has pacts. Before this class existed these same blocks arrived as UNVERIFIED
+# (already eligible) or as PENDING_BUILD (excluded, and mislabelled), so the allow-list
+# entry keeps the honest half of today's behaviour rather than widening it.
+CODEPLOY_CLASSES = ("UNVERIFIED", "REGRESSION", "UNVERIFIABLE")
 TRANSIENT_CLASSES = ("PENDING_BUILD",)
 
 # NOT_ASKED (#3454) is ineligible for a set by construction — CODEPLOY_CLASSES is an
