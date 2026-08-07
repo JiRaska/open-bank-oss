@@ -37,7 +37,17 @@ jobs:
         with:
           java-version: "25"
           distribution: temurin
-          cache: gradle
+
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          # READ-ONLY. setup-java's own `cache: gradle` SAVES a whole Gradle-home entry
+          # (~1.1 GB) on this job's key, into a pool already over the 10 GB ceiling — so
+          # every write here evicts some other job's cache, continuously and silently
+          # (#3299). This job only consumes dependencies; it has no reason to be one of
+          # the lanes that maintains the cache. Reading the shared entry the writing
+          # lanes keep warm (_service-ci.yml's self-hosted lane, auto-deploy.yml) gives
+          # it the same artifacts and costs the pool nothing.
+          cache-read-only: true
 
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
