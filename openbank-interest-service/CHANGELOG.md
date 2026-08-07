@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.14.7...interest-service-v0.15.0) (2026-08-07)
+
+
+### Features
+
+* **interest:** register workflow liveness on accrual and capitalization schedulers (ADR-0237) ([#3705](https://github.com/JiRaska/open-bank-oss/issues/3705)) ([d5f47b9](https://github.com/JiRaska/open-bank-oss/commit/d5f47b910bac985bed0a215a361bc410340d6585))
+
 ## [0.14.7](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.14.6...interest-service-v0.14.7) (2026-08-02)
 
 
