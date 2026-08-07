@@ -1,0 +1,31 @@
+# Makes document-service's Kafka consumer `group.id` reach the connector from a config source
+# SmallRye does not mangle (#686, #2945). Full mechanism + rationale:
+# openbank-infra/gitops/components/accounts/account-service-msg-override.yaml.
+#
+# Short form: a dotted YAML leaf key under mp.messaging.incoming.<channel> registers only as the
+# QUOTED property name, so the connector never reads it and silently falls back to
+# quarkus.application.name. document-service's declared group.id happens to EQUAL that fallback,
+# so the broken key is a no-op by coincidence — until a rename or a channel-specific group makes
+# it one. Deploying this changes no effective value: the group stays `openbank-document-service`,
+# which is what kafka-document-service-mtls.yaml grants Read on and where today's committed
+# offsets live.
+#
+# `auto.offset.reset: earliest` is declared in application.yaml and is subject to the same bug
+# (effective value: the connector default `latest`). It is deliberately NOT set here — making it
+# effective would replay the retained log on the next offset expiry. Owner decision, see #2945.
+#
+# Properties file rather than env vars: the hyphenated channel name hits the unresolved
+# quarkusio/quarkus#30106 / smallrye-reactive-messaging#2028 env-var split bug (SRMSG00071).
+# config_ordinal=500 outranks the baked application.yaml (~254); loaded via QUARKUS_CONFIG_LOCATIONS.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: document-service-msg-override
+  namespace: documents
+  labels:
+    app.kubernetes.io/name: document-service
+    app.kubernetes.io/part-of: documents
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.account-created-in.group.id=openbank-document-service

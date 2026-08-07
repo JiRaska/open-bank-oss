@@ -163,6 +163,13 @@ spec:
             # default-deny NetworkPolicy. Resolves identically to the in-image default.
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
+            # #686 / #2945: load the kyc-events-in / aml-events-in / consent-events-in group.id
+            # override (party-service-msg-override ConfigMap, mounted below) as an external
+            # Quarkus config source, so the dotted YAML keys' declared values actually reach the
+            # Kafka connector instead of silently falling back to quarkus.application.name.
+            # Optional location: if the file is absent Quarkus warns and continues.
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /mnt/msg-config/override.properties
           startupProbe:
             tcpSocket:
               port: management
@@ -194,6 +201,9 @@ spec:
               readOnly: true
             - name: kafka-truststore
               mountPath: /mnt/kafka/truststore
+              readOnly: true
+            - name: msg-override
+              mountPath: /mnt/msg-config
               readOnly: true
           resources:
             requests:
@@ -341,6 +351,9 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
+        - name: msg-override
+          configMap:
+            name: party-service-msg-override
   strategy:
     canary:
       stableService: party-service
