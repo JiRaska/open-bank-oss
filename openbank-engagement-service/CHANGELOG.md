@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.2.4...engagement-service-v0.3.0) (2026-08-08)
+
+
+### Features
+
+* **engagement:** materialise ARREARS + ERASURE_REQUESTED for the D3.5 targeting exclusion ([#4106](https://github.com/JiRaska/open-bank-oss/issues/4106)) ([fb5c455](https://github.com/JiRaska/open-bank-oss/commit/fb5c455bc69fc5749c05c2798d7bcf9358a1b7fd))
+
 ## [0.2.4](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.2.3...engagement-service-v0.2.4) (2026-08-08)
 
 
