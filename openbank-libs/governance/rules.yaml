@@ -1322,6 +1322,20 @@ opa_bundle_sync:
   policy_input_subset: "openbank-libs/governance/rules-opa-data.yaml"
   policy_input_generator: ".github/scripts/gen-rules-opa-data.py"
   policy_input_keys_derived_not_listed: true
+  # The identical treatment for agents.yaml (#3927), which was the larger half and was
+  # left standing when #3357 landed: 50390 B embedded and hashed into all 42 bundles, of
+  # which ~5.6 KB is reachable by any policy. agents.rego never reads an agent object
+  # wholesale — it reads a.id, a.skills, a.tools.allow, a.tools.deny — so the subset is
+  # taken one level DOWN from top-level keys, unlike rules.yaml's. Consequence: a
+  # charter's description, model binding, limits, schedule, compliance or audit block no
+  # longer restamps a single bundle or rolls a single pod.
+  agents_policy_input_subset: "openbank-libs/governance/agents-opa-data.yaml"
+  agents_policy_input_generator: ".github/scripts/gen-agents-opa-data.py"
+  # A field projection cannot be justified by verbatim extraction the way rules.yaml's
+  # is, so the generator proves it instead: it evaluates the real policy over an input
+  # matrix derived from the charters under BOTH documents and requires every MCP and
+  # REST decision to be identical before it writes. --self-test falsifies that proof.
+  agents_policy_input_proved_by_differential_evaluation: true
   # A 100644 generator no-ops a ./... loop and is indistinguishable from "in sync" —
   # gen-ledger-opa-bundle.sh shipped that way and had never once run.
   generators_must_be_executable: true
