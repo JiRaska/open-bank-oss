@@ -65,7 +65,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-customer-edge-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "f565eac2bdf59495"
+        openbank.tech/policy-checksum: "7894fe375b857420"
     spec:
       # Dedicated SA so EKS Pod Identity can hand the edge (and ONLY the edge) the
       # feedback-screenshots S3 role — ADR-0192, openbank-infra/aws/envs/sandbox-platform/
@@ -81,7 +81,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: customer-edge
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-7a93bd43
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-962e9031
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -242,7 +242,7 @@ spec:
               value: openbank-sandbox-feedback
             - name: OBJECTSTORE_S3_REGION
               value: eu-north-1
-            # Redis: nearby-pay payment sessions (ADR-0087) + WebAuthn RP challenge/
+            # Redis: nearby-pay payment sessions (ADR-0095) + WebAuthn RP challenge/
             # credential store (ADR-0066 F2). In-namespace ephemeral Redis (redis.yaml).
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.customer-edge.svc:6379

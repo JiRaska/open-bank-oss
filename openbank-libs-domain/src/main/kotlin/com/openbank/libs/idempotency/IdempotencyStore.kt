@@ -13,11 +13,17 @@ data class IdempotencyRecord(
     val createdAt: OffsetDateTime,
 )
 
+/**
+ * Replay protection for a mutating endpoint. Call [get] before doing the work and [save]
+ * after, keyed on the caller's `Idempotency-Key` header.
+ *
+ * There is deliberately **no `@Idempotent` annotation** (#4011). One existed and was inert —
+ * a plain `RUNTIME` marker with no `@InterceptorBinding` and no interceptor — so applying it
+ * to a payment endpoint compiled, reviewed as correct, and let a duplicate `POST` through.
+ * Anyone adding a declarative form must land the binding and the interceptor in the same
+ * change; that is the only order that is ever safe.
+ */
 interface IdempotencyStore {
     suspend fun get(key: String): IdempotencyRecord?
     suspend fun save(key: String, statusCode: Int, responseBody: String, ttlSeconds: Long = 86400)
 }
-
-@Target(AnnotationTarget.FUNCTION)
-@Retention(AnnotationRetention.RUNTIME)
-annotation class Idempotent(val ttlSeconds: Long = 86400, val headerName: String = "Idempotency-Key")

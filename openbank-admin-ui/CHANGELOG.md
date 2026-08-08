@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.103.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.103.1...admin-ui-v0.103.2) (2026-08-08)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop the ⌘K palette reading a stale result list on keydown ([#4142](https://github.com/JiRaska/open-bank-oss/issues/4142)) ([3f2a3c4](https://github.com/JiRaska/open-bank-oss/commit/3f2a3c444824a409b7b787edc7a0b91d5000e433)), closes [#3886](https://github.com/JiRaska/open-bank-oss/issues/3886)
+
+## [0.103.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.103.0...admin-ui-v0.103.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* **engagement:** add the missing governance.yaml — main is red without it ([#4114](https://github.com/JiRaska/open-bank-oss/issues/4114)) ([a4a94c4](https://github.com/JiRaska/open-bank-oss/commit/a4a94c429eae56fee86e4d5be1abde9c3ccf0245))
+
 ## [0.103.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.102.0...admin-ui-v0.103.0) (2026-08-07)
 
 

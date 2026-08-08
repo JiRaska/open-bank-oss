@@ -65,7 +65,7 @@ class CopilotChatResource {
             message = request.message,
             currentThemeSpec = request.themeSpec,
         )
-        when (val outcome = chat.handle(turn, customerId)) {
+        when (val outcome = chat.handle(turn, customerId, erasureIdentity())) {
             is ChatOutcome.Disabled -> {
                 metrics.recordChatRequest(CopilotMetricsAdapter.OUTCOME_DISABLED)
                 Response.status(Response.Status.NOT_IMPLEMENTED)
@@ -84,6 +84,21 @@ class CopilotChatResource {
         val principal = identity.principal
         return (principal as? JsonWebToken)?.subject?.takeIf { it.isNotBlank() }
             ?: principal?.name?.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * The identity `PARTY_ERASED` will arrive with: the `party_id` claim, falling back to `sub`
+     * (the resolution customer-edge's `RateLimitFilter` and `WebAuthnKeycloakClient` already use).
+     *
+     * Recorded on the conversation row so erasure can find it; it is NOT the storage key, so this
+     * changes nothing about which conversation a customer resumes. Resolving it here rather than in
+     * the consumer is the whole point: at erasure time the Keycloak user is gone, so the `sub` ->
+     * `party_id` mapping no longer exists to be looked up. Measured against the deployed customers
+     * realm, `sub` equalled `party_id` for 0 of 35 users (#3881) — this is not a corner case.
+     */
+    private fun erasureIdentity(): String? {
+        val jwt = identity.principal as? JsonWebToken ?: return customerSubject()
+        return jwt.getClaim<String>("party_id")?.takeIf { it.isNotBlank() } ?: customerSubject()
     }
 
     /**
@@ -107,6 +122,7 @@ class CopilotChatResource {
     @Authorize(action = "copilot.chat")
     fun chatStream(request: ChatRequest): Multi<String> {
         val customerId = customerSubject() ?: return Multi.createFrom().empty()
+        val partyId = erasureIdentity()
         val turn = ChatTurn(
             conversationId = request.conversationId ?: "new",
             message = request.message,
@@ -115,7 +131,7 @@ class CopilotChatResource {
         return Multi.createFrom().emitter<String> { emitter ->
             try {
                 runBlocking {
-                    chat.handleStream(turn, customerId) { chunk ->
+                    chat.handleStream(turn, customerId, partyId) { chunk ->
                         emitter.emit(chunk)
                     }
                 }

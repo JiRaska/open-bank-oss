@@ -3,7 +3,9 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.statement.application.port.`in`
 
+import com.openbank.statement.application.port.out.RenderedDocument
 import com.openbank.statement.domain.model.StatementFormat
+import com.openbank.statement.domain.model.StatementModel
 import com.openbank.statement.domain.model.StatementPeriod
 import com.openbank.statement.domain.render.StatementRenderer
 import io.smallrye.mutiny.Uni
@@ -51,9 +53,39 @@ interface RenderStatementUseCase {
     ): Uni<StatementRenderer.Rendered>
 }
 
+/**
+ * Replays an already-closed period into its canonical [StatementModel] — the same lookup
+ * [RenderStatementUseCase.render] uses internally, exposed so a second consumer (the customer-facing
+ * styled document, ADR-0248) can reuse the reconciliation/lookup logic without duplicating it.
+ */
+interface StatementModelUseCase {
+    fun statementModel(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementModel>
+}
+
+/**
+ * Renders the customer-facing styled statement document (ADR-0248) — synchronous, on customer
+ * request only. Assembles [StatementModel] into document-service's Handlebars data shape and calls
+ * its non-persisting `/api/v1/documents/templates/preview` endpoint; nothing is stored on either
+ * side.
+ */
+interface RenderStatementDocumentUseCase {
+    fun renderDocument(accountId: UUID, currency: String, legalSequence: Long, locale: String): Uni<RenderedDocument>
+}
+
 /** Lists the retained period-close records for an account. */
 interface ListStatementsUseCase {
     fun list(accountId: UUID): Uni<List<StatementPeriod>>
+}
+
+/**
+ * The JSON twin of [RenderStatementUseCase] (issue #4109, ADR-0248): the same closed period,
+ * replayed into the canonical [StatementModel] aggregate instead of a camt.053/MT940/PDF byte
+ * stream. Added for openbank-mcp-service's `query.statement.readonly` tool — an AI agent acting on
+ * a customer's behalf needs structured data it can reason over, not a rendered document. Nothing is
+ * stored; like [RenderStatementUseCase] this replays deterministically from the closed period.
+ */
+interface SummarizeStatementUseCase {
+    fun summary(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementModel>
 }
 
 /**

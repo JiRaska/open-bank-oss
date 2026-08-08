@@ -6,7 +6,10 @@ package com.openbank.statement.infrastructure.client
 import com.openbank.statement.application.port.out.AccountInfoPort
 import com.openbank.statement.application.port.out.BalancePort
 import com.openbank.statement.application.port.out.BookedEntryPort
+import com.openbank.statement.application.port.out.DocumentServiceException
+import com.openbank.statement.application.port.out.DocumentTemplatePort
 import com.openbank.statement.application.port.out.PocketAccountInfo
+import com.openbank.statement.application.port.out.RenderedDocument
 import com.openbank.statement.application.usecase.NotViableAccountException
 import com.openbank.statement.domain.model.BalanceAnchor
 import com.openbank.statement.domain.model.CreditDebit
@@ -157,5 +160,51 @@ class AccountInfoRestAdapter @Inject constructor(
         partyClient.party(partyId)
             .map { it.legalName ?: "" }
             .onFailure().recoverWithItem("")
+    }
+}
+
+/**
+ * Calls document-service's non-persisting template preview flow (ADR-0248): list the PUBLISHED
+ * templates to find the requested code's `bodyHtml` (there is no get-by-code route), then merge the
+ * Handlebars data into it via `/api/v1/documents/templates/preview`. Neither call persists anything;
+ * a failure at either step degrades only the caller's one endpoint, never the rest of
+ * statement-service (fail-closed reconciliation, camt.053/MT940/PDF render are unaffected).
+ */
+@ApplicationScoped
+class DocumentTemplateRestAdapter @Inject constructor(@RestClient private val client: DocumentRestClient) :
+    DocumentTemplatePort {
+
+    override fun renderTemplate(templateCode: String, data: Map<String, Any?>): Uni<RenderedDocument> =
+        client.listTemplates(TEMPLATE_LIST_LIMIT)
+            .onFailure().transform { e ->
+                DocumentServiceException("document-service template list call failed for $templateCode", e)
+            }
+            .flatMap { templates -> renderFromTemplate(templateCode, data, templates) }
+
+    private fun renderFromTemplate(
+        templateCode: String,
+        data: Map<String, Any?>,
+        templates: List<DocumentTemplateDto>,
+    ): Uni<RenderedDocument> {
+        val bodyHtml = templates.firstOrNull { it.code == templateCode && it.status == "PUBLISHED" }?.bodyHtml
+        return if (bodyHtml == null) {
+            Uni.createFrom().failure(
+                DocumentServiceException("no PUBLISHED document-service template found for code=$templateCode"),
+            )
+        } else {
+            client.preview(PreviewTemplateRequestDto(bodyHtml, data))
+                .onFailure().transform { e ->
+                    DocumentServiceException("document-service preview call failed for $templateCode", e)
+                }
+                .map { resp ->
+                    RenderedDocument(contentType = "text/html; charset=utf-8", body = resp.renderedHtml.orEmpty())
+                }
+        }
+    }
+
+    private companion object {
+        /** The API max (`GET /templates` is bounded, not cursor-paginated) — plenty for the small,
+         *  fixed set of PUBLISHED templates this platform seeds. */
+        const val TEMPLATE_LIST_LIMIT = 200
     }
 }
