@@ -10,6 +10,7 @@ import com.openbank.domestic.application.usecase.DomesticPaymentNotFoundExceptio
 import com.openbank.domestic.application.usecase.InvalidDomesticPaymentStateTransitionException
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
@@ -34,7 +35,7 @@ class PaymentNotSettledMapper : ExceptionMapper<PaymentNotSettledException> {
     override fun toResponse(exception: PaymentNotSettledException): Response = Response.status(HTTP_CONFLICT)
         .entity(
             ApiError(
-                UUID.randomUUID().toString(),
+                Ids.randomId().toString(),
                 HTTP_CONFLICT,
                 ErrorCode.CONFLICT.code,
                 exception.message ?: "Conflict",
@@ -52,7 +53,7 @@ class PaymentConfirmationRenderMapper : ExceptionMapper<PaymentConfirmationRende
     override fun toResponse(exception: PaymentConfirmationRenderException): Response = Response.status(HTTP_BAD_GATEWAY)
         .entity(
             ApiError(
-                UUID.randomUUID().toString(),
+                Ids.randomId().toString(),
                 HTTP_BAD_GATEWAY,
                 "DOCUMENT_SERVICE_UNAVAILABLE",
                 exception.message ?: "Confirmation rendering is temporarily unavailable",
