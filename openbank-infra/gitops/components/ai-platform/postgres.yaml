@@ -49,14 +49,21 @@ spec:
   imageName: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/cloudnative-pg/postgresql:18.1
   storage:
     storageClass: gp3
-    size: 2Gi
+    # Raised 2Gi -> 10Gi (#3975). At 2Gi this cluster filled and CNPG parked it in
+    # `phase: "Not enough disk space"` — 301 restarts over 25 h with no recovery point, while the
+    # `litellm` application pod beside it stayed `1/1 Running` with 0 restarts, so every pod-level
+    # health view showed the component as up. gp3 has allowVolumeExpansion=true, so the operator
+    # expands the PVC in place: no data is moved and nothing is recreated.
+    size: 10Gi
   resources:
     requests: {cpu: 100m, memory: 256Mi}
     limits: {cpu: "1", memory: 512Mi}
   postgresql:
     parameters:
       wal_keep_size: "64MB"
-      # Bound WAL so a checkpoint spike cannot fill the 2Gi volume (#1432).
+      # Bound WAL so a checkpoint spike cannot fill the volume (#1432). Kept at 512MB after the
+      # 2Gi -> 10Gi resize (#3975): the cap is cheap and the headroom is the point, not a budget
+      # to spend. Raising it would re-create the failure mode the resize just cleared.
       max_wal_size: "512MB"
   bootstrap:
     initdb:

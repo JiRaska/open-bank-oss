@@ -58,7 +58,7 @@ class AgentPolicyGate {
     fun authorize(identity: AgentIdentity?, tool: String, capability: String?, resource: String?): GateOutcome {
         val mode = parseMode()
         val decision = decide(identity, tool, capability, resource)
-        audit(tool, decision)
+        audit(tool, decision, identity?.modelId ?: "unknown")
 
         // D9 (ADR-0031): BLOCK mode enforces the policy decision — a DENY stops the call.
         // Safety guard: if the PDP engine itself errored (pdpError=true, set by the OPA adapter on
@@ -158,7 +158,7 @@ class AgentPolicyGate {
         )
     }
 
-    private fun audit(tool: String, decision: PolicyDecision) {
+    private fun audit(tool: String, decision: PolicyDecision, modelId: String) {
         val event = AuditEvent(
             actorId = decision.agent,
             actorType = "AI_AGENT",
@@ -171,6 +171,7 @@ class AgentPolicyGate {
                 "capability" to decision.tool,
                 "policy_decision" to if (decision.allow) "ALLOW" else "DENY",
                 "reason" to decision.reason,
+                "model_id" to modelId,
             ),
         )
         runBlocking { auditPublisher.publish(event) }

@@ -9,7 +9,9 @@ import com.openbank.mcp.application.McpToolRegistry
 import com.openbank.mcp.application.ProposedOnly
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
+import com.openbank.mcp.application.port.out.PaymentConfirmationReadPort
 import com.openbank.mcp.application.port.out.ProposalPort
+import com.openbank.mcp.application.port.out.StatementReadPort
 import com.openbank.mcp.infrastructure.read.StubMarketingReachPort
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
@@ -170,6 +172,8 @@ class ProposedOnlyTest {
 
     private fun registryReturning(json: String) = McpToolRegistry(
         accounts = UnusedAccountReadPort,
+        statements = UnusedStatementReadPort,
+        paymentConfirmations = UnusedPaymentConfirmationReadPort,
         proposals = object : ProposalPort {
             override fun proposePayment(consentContext: ConsentContext, request: JsonNode): JsonNode =
                 mapper.readTree(json)
@@ -185,6 +189,20 @@ class ProposedOnlyTest {
         override fun listTransactions(consentContext: ConsentContext, accountId: String, limit: Int): JsonNode =
             error("not used")
         override fun listConsents(consentContext: ConsentContext): JsonNode = error("not used")
+    }
+
+    private object UnusedStatementReadPort : StatementReadPort {
+        override fun getStatementSummary(
+            consentContext: ConsentContext,
+            accountId: String,
+            currency: String?,
+            legalSequence: Long?,
+        ): JsonNode = error("not used")
+    }
+
+    private object UnusedPaymentConfirmationReadPort : PaymentConfirmationReadPort {
+        override fun getPaymentConfirmation(consentContext: ConsentContext, paymentId: String): JsonNode =
+            error("not used")
     }
 
     private companion object {

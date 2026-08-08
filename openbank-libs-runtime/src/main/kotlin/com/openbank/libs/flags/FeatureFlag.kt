@@ -4,6 +4,9 @@
 
 package com.openbank.libs.flags
 
+import jakarta.enterprise.util.Nonbinding
+import jakarta.interceptor.InterceptorBinding
+
 /**
  * Declarative feature gate on a JAX-RS / business method. The companion
  * [FeatureFlagInterceptor] evaluates [flag] through the injected [FeatureClient]
@@ -26,15 +29,19 @@ package com.openbank.libs.flags
  * Fail-open at the annotation layer: if no [FeatureClient] bean is wired (a
  * service without a flagd sidecar), the interceptor proceeds rather than blanket-
  * disabling every gated method — consistent with the fail-static eval contract.
+ *
+ * Lives in openbank-libs-**runtime**, not libs-domain: `@InterceptorBinding` is CDI, and
+ * ADR-0122 puts framework-touching code on the runtime side of the split (#3670). The
+ * package name is unchanged (`com.openbank.libs.flags`), so no consumer import moved.
  */
 @Target(AnnotationTarget.FUNCTION, AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.RUNTIME)
-@jakarta.interceptor.InterceptorBinding
+@InterceptorBinding
 annotation class FeatureFlag(
     /** Flag key as declared in flag-as-code (e.g. `sepa-instant-new-router`). */
-    @get:jakarta.enterprise.util.Nonbinding val flag: String,
+    @get:Nonbinding val flag: String,
     /** `#<paramName>` reference to the targeting key, or empty for a context-free gate. */
-    @get:jakarta.enterprise.util.Nonbinding val targetingKey: String = "",
+    @get:Nonbinding val targetingKey: String = "",
 )
 
 /**

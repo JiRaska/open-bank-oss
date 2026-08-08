@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.16.6...consent-service-v0.17.0) (2026-08-07)
+
+
+### Features
+
+* **consent:** ADR-0219 D3 suppression store — the granular do-not-contact ([#3689](https://github.com/JiRaska/open-bank-oss/issues/3689)) ([621eda0](https://github.com/JiRaska/open-bank-oss/commit/621eda0a758c59fd459330133f1cbaa8ff84fbca))
+
 ## [0.16.6](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.16.5...consent-service-v0.16.6) (2026-08-02)
 
 

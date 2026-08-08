@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.8.1...sanctions-service-v0.8.2) (2026-08-08)
+
+
+### Bug Fixes
+
+* **sanctions:** make the scheduled-refresh de-duplication zone-consistent, and retire two accounting-clock exemptions ([#3889](https://github.com/JiRaska/open-bank-oss/issues/3889)) ([6b0ad07](https://github.com/JiRaska/open-bank-oss/commit/6b0ad078e1fed00599943752f5f3c61c8df55d46))
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.8.0...sanctions-service-v0.8.1) (2026-08-03)
 
 

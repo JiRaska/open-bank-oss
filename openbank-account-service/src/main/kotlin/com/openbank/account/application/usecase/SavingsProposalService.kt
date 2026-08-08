@@ -16,12 +16,15 @@ import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.NotFoundException
 import java.time.Clock
+import java.time.Duration
 import java.time.OffsetDateTime
 import java.util.UUID
 
 class ProposalNotFoundException(id: UUID) : RuntimeException("Withdrawal proposal not found: $id")
 class ProposalForbiddenException(message: String) : RuntimeException(message)
 class ProposalScaException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+class ProposalExpiredException(id: UUID, expiredAt: OffsetDateTime) :
+    RuntimeException("Withdrawal proposal $id expired at $expiredAt")
 
 data class ProposeWithdrawalCommand(
     val accountId: UUID,
@@ -70,6 +73,7 @@ class SavingsProposalService(
             currency = command.currency,
             note = command.note,
             createdAt = now,
+            expiresAt = now.plus(PROPOSAL_TTL),
         )
         val approval = approvalStore.create(
             action = ACTION_EXECUTE,
@@ -97,6 +101,12 @@ class SavingsProposalService(
             ?: throw ProposalNotFoundException(proposalId)
         if (proposal.accountId != accountId) {
             throw ProposalNotFoundException(proposalId)
+        }
+        // Checked BEFORE the challenge is consumed: a doomed decision must not burn the owner's
+        // one-shot second factor. Read off the proposal's own window rather than its stored
+        // status, so the answer does not depend on the sweep having already run.
+        if (proposal.isExpiredAt(OffsetDateTime.now(clock))) {
+            throw ProposalExpiredException(proposalId, proposal.expiresAt)
         }
         verifyOwnerSca(decidedByPartyId, scaSessionId)
 
@@ -137,6 +147,31 @@ class SavingsProposalService(
     suspend fun listForAccount(accountId: UUID, status: WithdrawalProposalStatus?): List<WithdrawalProposal> =
         proposalRepository.findByAccountAndStatus(accountId, status)
 
+    /**
+     * Binds the decision to the owner's own challenge, then SPENDS it.
+     *
+     * Two things were wrong here and each alone made the feature untrue.
+     *
+     * 1. It asserted `status == "COMPLETED"`. A decoupled challenge (PUSH_NOTIFICATION /
+     *    BIOMETRIC) — which is what an owner approving on their phone actually produces — sits at
+     *    PENDING while already holding a signature-verified device decision. `verify()` promotes
+     *    it, and NOTHING a customer can reach calls verify: customer-edge exposes create / read /
+     *    decision only, and `decision` records the signed decision without promoting the
+     *    challenge. So this pre-check rejected exactly the challenges the flow depends on, and
+     *    every owner approval failed with "is not completed". Identical defect to #3537 in
+     *    delegation-service; the fixtures hid it by handing the service a COMPLETED challenge,
+     *    a state the customer path never reaches.
+     *
+     * 2. It only ever READ the challenge. Nothing spent it, so one approved challenge authorised
+     *    an unbounded number of proposals: approve a 100 CZK proposal, then reuse the same
+     *    scaSessionId to approve every other PENDING proposal on the account. Single-use is the
+     *    entire point of a second factor.
+     *
+     * `consume` fixes both: it resolves a pending decoupled challenge itself, refuses one that was
+     * never approved or is already spent (409), checks the party it is TOLD to expect, and
+     * enforces dynamic linking. Approval is still enforced — by the component that owns it.
+     * Purpose is checked here because consume is not told the purpose.
+     */
     private suspend fun verifyOwnerSca(ownerPartyId: UUID, scaSessionId: UUID) {
         val challenge = try {
             scaChallengeClient.getChallenge(scaSessionId)
@@ -148,13 +183,30 @@ class SavingsProposalService(
         if (challenge.partyId != ownerPartyId || challenge.purpose != SCA_PURPOSE) {
             throw ProposalScaException("SCA challenge $scaSessionId does not match the owner or purpose")
         }
-        if (challenge.status != "COMPLETED") {
-            throw ProposalScaException("SCA challenge $scaSessionId is not completed")
+        @Suppress("TooGenericExceptionCaught") // includes sca-service's 409 for an already-spent challenge
+        try {
+            scaChallengeClient.consumeChallenge(scaSessionId, ownerPartyId)
+        } catch (e: Exception) {
+            throw ProposalScaException("SCA challenge $scaSessionId could not be consumed", e)
         }
+    }
+
+    /**
+     * Marks the closed-window proposals EXPIRED. Idempotent and batched; a proposal the sweep has
+     * not reached yet is already un-approvable via [WithdrawalProposal.isExpiredAt], so this is
+     * bookkeeping for the owner's inbox, not the security boundary.
+     */
+    suspend fun expireStale(limit: Int = EXPIRY_BATCH): Int {
+        val now = OffsetDateTime.now(clock)
+        val stale = proposalRepository.findExpirable(now, limit)
+        stale.forEach { proposalRepository.save(it.expire(now)) }
+        return stale.size
     }
 
     private companion object {
         const val ACTION_EXECUTE = "savings.withdraw.execute"
         const val SCA_PURPOSE = "SAVINGS_WITHDRAW_APPROVAL"
+        const val EXPIRY_BATCH = 200
+        val PROPOSAL_TTL: Duration = Duration.ofDays(7)
     }
 }

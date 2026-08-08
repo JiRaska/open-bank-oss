@@ -42,7 +42,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-delegation-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "5a9e3709cc8001a5"
+        openbank.tech/policy-checksum: "21380f2a0f5aa293"
       labels:
         app.kubernetes.io/name: delegation-service
         app.kubernetes.io/part-of: delegation
@@ -63,7 +63,7 @@ spec:
             # be DISPATCHED explicitly (`-f services=openbank-delegation-service`): the push
             # path only matches <svc>/src/main or build.gradle.kts, and this change touches
             # neither. The auto-deploy gitops PR then rewrites the pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-delegation-service:sandbox-6261040e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-delegation-service:sandbox-93429152
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8126 and management 8090 — both read off the service's own
@@ -147,14 +147,13 @@ spec:
             # app dies with InactiveBeanException.
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.delegation.svc:6379
-            # Kept ADVISORY (false) for the first rollout: the interceptor evaluates and
-            # records every decision but does NOT block while false, so the "would DENY"
-            # population can be confirmed empty in the live decision log before the
-            # enforce flip (a separate, deliberate follow-up per the rules.yaml guardrail).
-            # Flipping this before the sidecar is confirmed serving means failing closed on
-            # every call.
+            # OPA sidecar enforced (issue #3679). Advisory through the first rollout; coverage
+            # verified before the flip: delegation_rest_ext.rego grants all ten actions with the
+            # caller-narrowed rules (operator writes exclude service accounts, the edge principal
+            # is scoped to the customer action set, delegation.check is the only M2M action), and
+            # the sole declared caller is the admin-ui relaying a human operator's token.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           resources:
             requests:
               cpu: 100m

@@ -189,10 +189,18 @@ PiiMask.apply(MaskStrategy.EMAIL, anyEmail)   // strategy dispatcher
 Annotation for DTO fields (used by the admin-ui proxy + audit-event sanitiser):
 
 ```kotlin
+// Masking is applied explicitly where the value is rendered or logged.
+// There is no masking annotation and no serialization filter that would honour
+// one — a field merely marked would serialise in full (#4011).
 data class CustomerDto(
     val name: String,
-    @MaskSensitive(MaskStrategy.EMAIL) val email: String,
-    @MaskSensitive(MaskStrategy.IBAN) val iban: String,
+    val email: String,
+    val iban: String,
+)
+
+fun CustomerDto.masked() = copy(
+    email = PiiMask.email(email),
+    iban = PiiMask.iban(iban),
 )
 ```
 
