@@ -738,6 +738,22 @@ fire from *outside* it, so they stay here:
   claims to have run your gate (`gh api .../actions/jobs/<id> --jq '.steps[]'`); a green job name
   is not evidence your step was in it. Fix is always the same: declare it in
   `.github/gates/gates.yaml` with a `group:`, never as an inline step in a conditional job.
+- **`main`'s own CI conclusion is the one signal with no reader — every check in this repo is
+  about a PR.** A red push-triggered run on `main` has no PR to carry it, no reviewer, and no
+  notification; it is a red dot in the Actions tab, and the next PR opened against that commit
+  *inherits* a failure it did not cause. `main` went red four times on 2026-08-07/08 in three
+  independent ways (`Services CI`/engagement-service, `CI`/Admin UI build, `Security scan`/Trivy
+  twice) and every one was found because a human happened to sweep; two PRs merged onto it
+  meanwhile. The near-miss that made it invisible is worth knowing on its own:
+  `deploy-drift-watch.yml` is *named* "Deployed == main watch" and compares the **deployed image**
+  to `main` — so a red commit that deployed reads as perfectly in sync. `main-red-watch.yml` +
+  `check-main-red-watch.py` now close it (#4019), and two details decide whether such a watcher
+  works at all: query `/actions/runs/<id>/attempts/<n>/jobs`, never the unscoped
+  `/actions/runs/<id>/jobs` (which returns the LATEST attempt, so one hand-re-run makes the
+  watcher answer about a different run than the event fired for, silently); and read
+  `.steps[].conclusion`, never the log, since a job log contains the step's own `run:` script.
+  Its coverage set is *derived*, not hand-kept — a new push-on-main workflow fails the
+  `main-red-watch-declaration` gate until it is watched or excluded with a reason.
 - **"Nothing reads this file" is a claim about the whole repo, not about the pipeline — grep
   before you delete a declaration.** The per-service `openbank-*/Dockerfile` files are documented
   as declaration-only with `EXPOSE` the single live field (#3016), so the tidy fix for a stale

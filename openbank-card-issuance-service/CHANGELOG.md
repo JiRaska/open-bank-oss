@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.16.0...card-issuance-service-v0.17.0) (2026-08-08)
+
+
+### Features
+
+* **ci:** check gitops workload env hostnames, and fix the four it finds ([#3974](https://github.com/JiRaska/open-bank-oss/issues/3974)) ([123633f](https://github.com/JiRaska/open-bank-oss/commit/123633fcdb7ce6bfa5b949bd1610196618e36108))
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.15.2...card-issuance-service-v0.16.0) (2026-08-07)
 
 
