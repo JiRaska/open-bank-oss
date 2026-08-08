@@ -2,6 +2,7 @@
 date: 2026-06-09
 decision-status: accepted
 delivery-status: partial
+followup: "openbank-app — the client-side Sentry KMP SDK wiring is tracked in the app repo, as this ADR's own text states"
 authors: [Jiří Raška]
 supersedes: []
 superseded-by: []

@@ -129,6 +129,13 @@ open class DomesticPaymentActivitiesImpl(
     override fun validatePayment(paymentId: UUID): Unit = vtx {
         val payment = paymentRepository.findById(paymentId)
             ?: error("Payment $paymentId not found during validate activity")
+        // RECEIVED is the only status that may become VALIDATED, so on a payment that already
+        // moved past this step there is nothing to do. Without the early return a re-drive of a
+        // stranded payment dies here on "Invalid domestic payment status transition" and never
+        // reaches settlePayment — which is the step that would actually recover it, and which is
+        // idempotent (payment-scoped key, 409 = already booked). submitScheme and settlePayment
+        // below both carry the same guard; validate was the one activity that did not (#4182).
+        if (payment.status != DomesticPaymentStatus.RECEIVED) return@vtx Unit
         val updated = payment.transitionTo(DomesticPaymentStatus.VALIDATED, clock = clock)
         paymentRepository.update(
             payment = updated,
