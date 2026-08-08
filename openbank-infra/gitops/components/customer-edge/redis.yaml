@@ -2,7 +2,7 @@
 #   - WebAuthn RP CREDENTIALS (ADR-0066 F2, `edge:webauthn:cred:*`) — durable, no TTL: a
 #     registered passkey is an authentication factor, not a session artifact. WebAuthnStore's
 #     own KDoc says so.
-#   - nearby-pay payment sessions (ADR-0087), WebAuthn challenges, rate-limit counters,
+#   - nearby-pay payment sessions (ADR-0095), WebAuthn challenges, rate-limit counters,
 #     pending-onboarding entries — all short-lived/TTL'd, and fine to lose.
 #
 # The durable half is why this is no longer an emptyDir (issue #1260): it ran with
