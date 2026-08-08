@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.19.1...account-service-v0.20.0) (2026-08-08)
+
+
+### Features
+
+* **ci:** check gitops workload env hostnames, and fix the four it finds ([#3974](https://github.com/JiRaska/open-bank-oss/issues/3974)) ([123633f](https://github.com/JiRaska/open-bank-oss/commit/123633fcdb7ce6bfa5b949bd1610196618e36108))
+
 ## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.19.0...account-service-v0.19.1) (2026-08-07)
 
 

@@ -142,7 +142,7 @@
   "facts": {
     "agentCharters": {
       "source": "openbank-libs/governance/agents.yaml",
-      "sha256": "93c9ab9c5fcf3c8c",
+      "sha256": "e93d82f28786d1ef",
       "count": 16,
       "ids": [
         "compliance-officer",
@@ -174,12 +174,12 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "7b2ffecbcf6afe7d",
+      "sha256": "07eb0af8e87295d1",
       "counts": {
         "external": 2,
         "not-applicable": 2,
-        "pending": 1,
-        "registered": 11
+        "pending": 0,
+        "registered": 12
       },
       "idsByStatus": {
         "external": [
@@ -190,9 +190,7 @@
           "mcp-anonymous",
           "ap2-anonymous"
         ],
-        "pending": [
-          "authz-policy-auditor"
-        ],
+        "pending": [],
         "registered": [
           "compliance-officer",
           "ui-assistant",
@@ -203,6 +201,7 @@
           "governance-auditor",
           "release-steward",
           "docs-truth-agent",
+          "authz-policy-auditor",
           "flaky-test-hunter",
           "case-coordinator"
         ]
@@ -225,6 +224,13 @@
             "ui-assistant"
           ],
           "buildFile": "openbank-agent-service/build.gradle.kts"
+        },
+        {
+          "module": "openbank-authz-policy-auditor",
+          "charters": [
+            "authz-policy-auditor"
+          ],
+          "buildFile": "openbank-authz-policy-auditor/build.gradle.kts"
         },
         {
           "module": "openbank-case-coordinator-agent",
@@ -283,8 +289,9 @@
           "buildFile": "openbank-release-steward/build.gradle.kts"
         }
       ],
-      "serviceCount": 9,
+      "serviceCount": 10,
       "registeredChartersLoadedFromRegistry": [
+        "authz-policy-auditor",
         "case-coordinator",
         "compliance-officer",
         "control-liveness-sentinel",

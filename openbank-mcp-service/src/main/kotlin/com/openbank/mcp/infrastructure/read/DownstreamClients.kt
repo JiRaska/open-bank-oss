@@ -16,6 +16,7 @@ import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
+import java.util.UUID
 
 // Downstream banking-service reads (ADR-0195 step 2), mirroring agent-service's ServiceClients
 // pattern exactly: MP Rest Client interfaces returning raw JsonNode (the tools pass it straight
@@ -33,6 +34,15 @@ interface AccountServiceClient {
     @GET
     @Path("/iban/{iban}")
     fun getAccountByIban(@PathParam("iban") iban: String): JsonNode
+
+    /**
+     * `GET /api/v1/accounts/{accountId}` — `@Authorize(account.read, resource=#accountId)`. Used by
+     * [RealPaymentConfirmationReadPort] to recover the debtor's IBAN from a domestic payment, which
+     * (unlike a SEPA payment) carries only the internal `debtorAccountId`, never an IBAN.
+     */
+    @GET
+    @Path("/{accountId}")
+    fun getAccountById(@PathParam("accountId") accountId: UUID): JsonNode
 }
 
 @RegisterRestClient(configKey = "balance-service")
@@ -60,4 +70,57 @@ interface TransactionServiceClient {
         @QueryParam("limit") @DefaultValue("20") limit: Int,
         @QueryParam("cursor") cursor: String?,
     ): JsonNode
+}
+
+@RegisterRestClient(configKey = "statement-service")
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
+@Path("/api/v1/statements")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+interface StatementServiceClient {
+    /** `GET /api/v1/statements/{accountId}` — `@Authorize(statement.list, resource=#accountId)`. */
+    @GET
+    @Path("/{accountId}")
+    fun listStatements(@PathParam("accountId") accountId: UUID): JsonNode
+
+    /**
+     * `GET /api/v1/statements/{accountId}/{currency}/{legalSequence}/summary` —
+     * `@Authorize(statement.read, resource=#accountId)`. The JSON twin of the existing
+     * camt.053/MT940/PDF `render` endpoint, added by this PR (statement-service `StatementResource`)
+     * because none of those three formats is something a calling model can reason over directly.
+     */
+    @GET
+    @Path("/{accountId}/{currency}/{legalSequence}/summary")
+    fun statementSummary(
+        @PathParam("accountId") accountId: UUID,
+        @PathParam("currency") currency: String,
+        @PathParam("legalSequence") legalSequence: Long,
+    ): JsonNode
+}
+
+@RegisterRestClient(configKey = "sepa-payment-service")
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
+@Path("/api/v1/sepa-payments")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+interface SepaPaymentServiceClient {
+    /** `GET /api/v1/sepa-payments/{paymentId}` — `@Authorize(sepaPayment.read, resource=#paymentId)`. */
+    @GET
+    @Path("/{paymentId}")
+    fun getPayment(@PathParam("paymentId") paymentId: UUID): JsonNode
+}
+
+@RegisterRestClient(configKey = "domestic-payment-service")
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
+@Path("/api/v1/domestic-payments")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+interface DomesticPaymentServiceClient {
+    /**
+     * `GET /api/v1/domestic-payments/{paymentId}` —
+     * `@Authorize(domestic-payment.read, resource=#paymentId)`.
+     */
+    @GET
+    @Path("/{paymentId}")
+    fun getPayment(@PathParam("paymentId") paymentId: UUID): JsonNode
 }

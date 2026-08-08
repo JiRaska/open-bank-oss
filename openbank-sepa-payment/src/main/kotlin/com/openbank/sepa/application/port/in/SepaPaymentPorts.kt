@@ -49,3 +49,15 @@ interface SepaPaymentUseCase {
     suspend fun transitionStatus(command: TransitionSepaPaymentStatusCommand): SepaPayment
     suspend fun handlePaymentReturn(command: HandlePaymentReturnCommand): SepaPayment
 }
+
+/**
+ * A rendered, never-persisted payment confirmation document (ADR-0248 #3) — rendered synchronously
+ * at the moment the customer requests it and streamed straight back; nothing here is cached or
+ * written to disk anywhere in this service or in document-service.
+ */
+class PaymentConfirmationDocument(val contentType: String, val fileName: String, val bytes: ByteArray)
+
+interface PaymentConfirmationUseCase {
+    /** Only meaningful for a `COMPLETED` payment; throws otherwise (`PaymentNotCompletedException`). */
+    suspend fun getConfirmation(paymentId: UUID, locale: String): PaymentConfirmationDocument
+}

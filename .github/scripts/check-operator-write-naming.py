@@ -77,9 +77,12 @@ BASELINE = {
     # gate on a role the shared account does not hold (ROLE_COMPLIANCE / ROLE_CREDIT_RISK /
     # ROLE_LENDING_OFFICER), or are reads. Overstating a debt list is not a safe error: it hides
     # the real entries among noise and invites the whole thing being ignored.
+    # 2026-08-07: operator-fx-trigger and operator-fx-approval-decide removed. #3734 gave both
+    # the `not startswith(input.principal.id, "service-account-")` guard on 2026-08-05
+    # (fx_rest_ext.rego:50 and :96, recorded in docs/threat-models/openbank-fx-service.md), so
+    # the debt was paid and only the list lagged. The gate had been reporting both as stale on
+    # main ever since, in advisory mode, which is why nobody acted.
     "operator-anacredit-create",
-    "operator-fx-approval-decide",
-    "operator-fx-trigger",
     "operator-party-status",
     "operator-pid-resolve",       # pid.resolve — a lookup; classified here pending confirmation
     "operator-standing-order-pause",

@@ -142,8 +142,16 @@ class RealAccountReadPortTest {
 // @Vetoed: Quarkus's implicit bean discovery would otherwise turn these test doubles into CDI
 // bean candidates for the interfaces they implement (RealAccountReadPortTest is a plain-unit test,
 // no Quarkus context — but @QuarkusTest classes elsewhere in this module share one Arc validation).
+// NOT `private`, and deliberately the ONE implementation of each interface in this test source
+// set: [AccountServiceClient] / [ConsentValidateClient] carry JAX-RS annotations for the MP Rest
+// Client, and RESTEasy Reactive scans the whole test classpath for classes implementing an
+// @Path-annotated interface regardless of CDI/visibility — a SECOND fake implementing the same
+// interface elsewhere in this module (even in a different file) makes Quarkus see two conflicting
+// declarations of the same route and fail every @QuarkusTest at boot
+// ("GET /api/v1/accounts is declared by: ... and ..."). RealStatementReadPortTest and
+// RealPaymentConfirmationReadPortTest reuse these two rather than declaring their own.
 @Vetoed
-private class FakeConsentValidateClient(
+class FakeConsentValidateClient(
     private val valid: Boolean,
     private val grantedAccounts: List<String>? = null,
     private val reason: String? = null,
@@ -165,9 +173,14 @@ private class FakeConsentValidateClient(
 }
 
 @Vetoed
-private class FakeAccountServiceClient(private val byIban: Map<String, JsonNode>) : AccountServiceClient {
+class FakeAccountServiceClient(
+    private val byIban: Map<String, JsonNode> = emptyMap(),
+    private val byId: Map<UUID, JsonNode> = emptyMap(),
+) : AccountServiceClient {
     override fun getAccountByIban(iban: String): JsonNode =
         byIban[iban] ?: throw NoSuchElementException("no such account: $iban")
+    override fun getAccountById(accountId: UUID): JsonNode =
+        byId[accountId] ?: throw NoSuchElementException("no such account: $accountId")
 }
 
 @Vetoed
