@@ -7,6 +7,11 @@
 
 * **engagement:** materialise ARREARS + ERASURE_REQUESTED for the D3.5 targeting exclusion ([#4106](https://github.com/JiRaska/open-bank-oss/issues/4106)) ([fb5c455](https://github.com/JiRaska/open-bank-oss/commit/fb5c455bc69fc5749c05c2798d7bcf9358a1b7fd))
 
+
+### Bug Fixes
+
+* **engagement:** remove the duplicate %test authz key, a second time ([#4184](https://github.com/JiRaska/open-bank-oss/issues/4184)) ([c75dd17](https://github.com/JiRaska/open-bank-oss/commit/c75dd17276771a902e9a8a40fe6dfef9cc52cef2))
+
 ## [0.2.4](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.2.3...engagement-service-v0.2.4) (2026-08-08)
 
 
