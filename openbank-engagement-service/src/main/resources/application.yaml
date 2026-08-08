@@ -60,6 +60,21 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      # group.id / auto.offset.reset for both channels below are set via the
+      # engagement-service-msg-override ConfigMap (override.properties), NOT here — a dotted leaf
+      # map key under mp.messaging.incoming.<channel> in YAML never resolves to the plain
+      # MicroProfile Config property name SmallRye reads (issue #686, ADR-0137 pattern).
+      lending-events-in:
+        connector: smallrye-kafka
+        topic: openbank.lending.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      party-events-in:
+        connector: smallrye-kafka
+        topic: openbank.party.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 "%test":
   # `authz.enforce` carries defaultValue = "true" in AuthorizeInterceptor, and a test JVM has no

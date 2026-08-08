@@ -28,6 +28,17 @@ class DisputeRepositoryImpl @Inject constructor(
         return sf.withTransaction { s -> s.persist(e).map { mapper.toDomain(e) } }
     }
 
+    // Mirrors update(dispute, outbox): one transaction, so a dispute cannot exist without the
+    // event that announced it, nor an event without the dispute.
+    override fun save(dispute: Dispute, outbox: List<OutboxMessage>): Uni<Dispute> = sf.withTransaction { s ->
+        val e = mapper.toEntity(dispute)
+        var chain = s.persist(e)
+        for (message in outbox) {
+            chain = chain.flatMap { s.persist(message.toOutboxEntity()) }
+        }
+        chain.map { mapper.toDomain(e) }
+    }
+
     @WithSession override fun findById(id: UUID): Uni<Dispute?> =
         sf.withSession { s -> s.find(DisputeEntity::class.java, id) }.map { it?.let(mapper::toDomain) }
 

@@ -159,7 +159,7 @@ openbank:
         url: http://psd2-service.psd2.svc:8107
         port: 8107
       - name: tpp-registry-service
-        url: http://tpp-registry-service.tpp.svc:8108
+        url: http://tpp-registry-service.tpp-registry.svc:8108
         port: 8108
       - name: agent-service
         url: http://agent-service.platform.svc:8109

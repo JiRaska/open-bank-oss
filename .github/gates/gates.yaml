@@ -431,14 +431,20 @@ gates:
   # "schema-registry:8081" for the life of the service; the Service is apicurio-registry:8080 in
   # `messaging` (issue #1916). Needs no network: the resolvable set is fully declared in gitops.
   #
-  # ADVISORY (rules.yaml: incluster_hostnames, target_enforce_date 2026-10-31) — 6 pre-existing
-  # findings, all bare `openbank-<svc>` rest-client defaults on services whose pods override them
-  # by env. Four of the owners are money-path, so that cleanup takes the two-approval path rather
-  # than riding along with the guard that found it.
+  # ENFORCED since #3931, which drained the 6 pre-existing findings. The advisory note that stood
+  # here claimed all six were dead defaults "on services whose pods override them by env" — that
+  # was true of only THREE (account-service ×2, card-issuance ×1). The other three were live:
+  # settlement-service's Rollout and onboarding-service's Deployment carried no *_SERVICE_URL at
+  # all, so `openbank-balance-service:8080` / `openbank-ledger-service:8080` /
+  # `openbank-party-service:8090` were the EFFECTIVE values in the cluster — names that resolve
+  # nowhere, on wrong ports (8103 / 8101 / 8111). The triage note was written from the shape of
+  # the findings rather than from the deployed manifests, and being advisory is what let it sit.
+  # Generalize: an advisory gate's "these are all benign" note is itself an unverified claim, and
+  # advisory mode removes the pressure that would have checked it.
   - id: incluster-hostname-resolution
-    name: "in-cluster hostnames resolve to a declared Service (issue #1916, advisory)"
+    name: "in-cluster hostnames resolve to a declared Service (issue #1916, enforced)"
     group: gitops
-    mode: advisory
+    mode: enforced
     selftest: |
       python3 .github/scripts/check-incluster-hostnames.py --self-test
     selftest_expect: pass
@@ -1152,6 +1158,34 @@ gates:
     run: |
       python3 .github/scripts/check-gate-script-registration.py --enforce
 
+  # The DECLARATION half of the main-red watch (issue #4019). `main`'s own CI conclusion was
+  # observed by nothing: the repo's only workflow_run listener re-runs spot-killed runs and
+  # escalates nothing, and deploy-drift-watch.yml — named "Deployed == main watch" — compares
+  # the DEPLOYED IMAGE, so a red commit that deployed reads as perfectly in sync. main went red
+  # four times on 2026-08-07/08 (Services CI/engagement-service, CI/Admin UI build, Security
+  # scan/Trivy twice) and each was found only because a human swept the Actions tab.
+  #
+  # The watch's coverage set is a hand-written `workflows:` list inside a workflow_run trigger,
+  # and this repo has already been bitten by a gate whose scope is a hand-kept list of the thing
+  # it checks (pact-drift-check.yml was green about modules it never regenerated). So the list is
+  # not maintained separately from the artifacts it covers: R1 requires every unconditional
+  # push-on-main workflow to be in it, R2 requires every path-filtered one to be either in it or
+  # in the script's NOT_WATCHED map with a reason, and a stale exclusion fails too.
+  #
+  # The binding copy is HERE, not in main-red-watch.yml: that workflow is workflow_run- and
+  # paths-triggered, so it can never be a required context and its verdict is advisory in
+  # practice. The runtime half (classify a completed run, escalate onto an issue) never gates a
+  # merge — main being red is not a defect in the PR at hand.
+  - id: main-red-watch-declaration
+    name: "every push-on-main workflow is watched or declared (issue #4019, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-main-red-watch.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-main-red-watch.py --check-declaration
+
   - id: opa-sidecar-bundle-shape
     name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"
     group: gitops
@@ -1541,6 +1575,38 @@ gates:
       python3 .github/scripts/check-domain-purity.py --self-test
     run: |
       python3 .github/scripts/check-domain-purity.py .
+
+  # openbank-libs published three annotations — @Idempotent, @Audited, @MaskSensitive —
+  # that were plain RUNTIME markers: no @InterceptorBinding, no interceptor, zero usages.
+  # Applying one compiled, reviewed as correct, and did nothing; @Idempotent on a payment
+  # endpoint would have let a duplicate POST through while the source read as protected.
+  # Two were recorded as SHIPPED CONTROLS — ADR-0014 Phase 3 "✅ Shipped: PiiMask/
+  # @MaskSensitive", and the STRIDE Repudiation mitigation in the onboarding threat model —
+  # which is the half that actively misleads: an unimplemented idea had become evidence.
+  #
+  # Two rules, each falsified separately (#4011). RULE A: an annotation declared in an
+  # openbank-libs-* module must be @InterceptorBinding WITH an interceptor, or be applied at
+  # least once in some src/main — red on the pre-fix tree with exactly the three above.
+  # RULE B: a document in docs/adr, docs/threat-models or openbank-libs/docs may not name an
+  # @Annotation that no Kotlin source declares or imports — red on the intermediate state
+  # (annotations deleted, documents not yet corrected: 25 findings), which is precisely the
+  # shape that made this dangerous rather than untidy. The "real annotation" set is DERIVED
+  # from the sources, never hand-kept.
+  #
+  # Code-about-code precedence was decided BEFORE the first run, since a text guard always
+  # flags the prose explaining the defect it catches: naming an absent annotation is allowed
+  # when the surrounding paragraph cites an issue. Prose about deliberately-unadopted
+  # third-party annotations (ADR-0016's @RunOnVirtualThread, a residual-risk column's
+  # @RateLimited) sits in PROSE_ALLOWLIST with a reason each, and a STALE entry fails in
+  # either direction — an exemption and its removal move together.
+  - id: libs-annotations-implemented
+    name: "openbank-libs annotations are implemented, and no doc names a phantom one (#4011, enforced)"
+    group: kotlin
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-libs-annotations-implemented.py --self-test
+    run: |
+      python3 .github/scripts/check-libs-annotations-implemented.py .
 
   # ==== api ===================================================================
 

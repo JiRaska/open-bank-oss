@@ -4,12 +4,15 @@
 
 package com.openbank.transaction.domain.settlement
 
+import com.openbank.libs.domain.calendar.AccountingClock
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.ZoneOffset
 
 class SettlementDateResolverTest {
 
@@ -119,6 +122,59 @@ class SettlementDateResolverTest {
                 requestedValueDate = LocalDate.of(2026, 6, 13),
             )
             assertThat(dates.valueDate).isEqualTo(LocalDate.of(2026, 6, 15))
+        }
+    }
+
+    @Nested
+    inner class BankZoneOwnership {
+
+        /**
+         * The booking date is an accounting date, so this resolver's zone must be the one
+         * [AccountingClock] owns (ADR-0207 D1) — not a second copy that can drift from it.
+         *
+         * Honest about what this proves: #2963's change to the resolver is value-identical
+         * (`ZoneId.of("Europe/Prague")` -> `AccountingClock.BANK_ZONE`), so no test can tell the
+         * old code from the new one by its output, and none below claims to. What this assertion
+         * catches is the FUTURE divergence the change exists to prevent: if either constant is
+         * edited alone, this goes red.
+         */
+        @Test
+        fun `the resolver's bank zone is the one AccountingClock owns`() {
+            assertThat(SettlementDateResolver.BANK_ZONE).isEqualTo(AccountingClock.BANK_ZONE)
+        }
+
+        /**
+         * And that the choice is load-bearing rather than decorative: a literal instant late on a
+         * summer evening UTC is already the NEXT calendar day in Prague, so the two zones book to
+         * different days from the same instant. The cut-off is widened to end-of-day here so the
+         * only thing under test is the zone — with the production 16:00 cut-off both zones happen
+         * to roll to the same next business day and the disagreement would be masked.
+         *
+         * Note the instant is written as a literal. Deriving it from `BANK_ZONE` (as the helper at
+         * the top of this file does) would move the input and the expectation together and assert
+         * nothing about which zone is right.
+         */
+        @Test
+        fun `a late-evening UTC instant books a day later in the bank zone than in UTC`() {
+            val instant = Instant.parse("2026-06-03T22:30:00Z") // Wed 22:30 UTC == Thu 00:30 Prague
+
+            val inBankZone = SettlementDateResolver.resolve(
+                now = instant,
+                paymentCurrency = "CZK",
+                settlementCurrency = "CZK",
+                cutoff = LocalTime.MAX,
+            )
+            val inUtc = SettlementDateResolver.resolve(
+                now = instant,
+                paymentCurrency = "CZK",
+                settlementCurrency = "CZK",
+                zone = ZoneOffset.UTC,
+                cutoff = LocalTime.MAX,
+            )
+
+            assertThat(inBankZone.bookingDate).isEqualTo(LocalDate.of(2026, 6, 4))
+            assertThat(inUtc.bookingDate).isEqualTo(LocalDate.of(2026, 6, 3))
+            assertThat(inBankZone.bookingDate).isNotEqualTo(inUtc.bookingDate)
         }
     }
 }
