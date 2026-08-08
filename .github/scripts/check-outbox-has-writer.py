@@ -68,6 +68,30 @@ BASELINE = {
 DISPATCHER_RE = re.compile(r"class\s+\w*OutboxDispatcher\b")
 DECLARATION_RE = re.compile(r"(data\s+)?class\s+OutboxMessage\s*\(")
 
+# THE SECOND WRITE IDIOM — raw SQL (#4240).
+#
+# There are two ways to write an outbox row in this fleet, and the first version of this gate could
+# see only one. `openbank-case-coordinator-agent` writes with a plain JDBC `INSERT INTO case_outbox`
+# because Temporal activity threads are bare worker threads with no Vert.x context, where reactive
+# Panache throws HR000068 — the same reason agent-service keeps `JdbcAgentProposalRepository`. It is
+# deliberate, documented in `CaseActivitiesImpl`'s KDoc, and the dispatch side still reads through
+# the Panache entity.
+#
+# The gate reported it as "polls a table nothing writes to", which was not a close call: the writer
+# is a string literal, and `strip_comments_and_strings` removes string literals BEFORE matching, so
+# the JDBC idiom was structurally invisible — no input could ever have made it visible. That is a
+# fact about the probe, not about the service, and it went red on `main` for every PR (#4240).
+#
+# So the SQL check runs over a comment-stripped body that KEEPS strings, while the
+# `OutboxMessage(` check keeps its original strings-stripped body — the two idioms need opposite
+# treatment of literals, which is exactly why one pass could not serve both. The table-name shape is
+# `<something>outbox`, matching every outbox table in the tree (`case_outbox`, `security_outbox`,
+# `outbox_message`), and an INSERT into any OTHER table is not a writer.
+SQL_WRITE_RE = re.compile(
+    r"INSERT\s+INTO\s+[\"'`]?(?:\w+\.)?\w*outbox\w*",
+    re.IGNORECASE,
+)
+
 
 def strip_comments_and_strings(src: str) -> str:
     """Remove string literals, line comments and NESTED block comments.
@@ -95,6 +119,59 @@ def strip_comments_and_strings(src: str) -> str:
     return "".join(out)
 
 
+def strip_comments_keep_strings(src: str) -> str:
+    """Remove line and NESTED block comments while PRESERVING string literals.
+
+    The sibling stripper above cannot be reused for the SQL check: it deletes literals, and the SQL
+    write IS a literal. Comments must still go — a KDoc saying `INSERT INTO x_outbox` is prose, and
+    this repo has been burnt in both directions by guards that could not tell code from code-about-
+    code (#2450, #3072).
+
+    Scanning rather than regex, because comment and string openers alias each other: a `//` inside a
+    string must not start a comment, and a `"` inside a comment must not open a string. Kotlin raw
+    strings (`\"\"\"…\"\"\"`) are handled first — every SQL literal in this fleet is one, and a
+    naive scanner reads the opening `\"\"` as an empty string and then treats the SQL as code.
+    """
+    out: list[str] = []
+    i, n, depth = 0, len(src), 0
+    while i < n:
+        if depth:
+            if src.startswith("/*", i):
+                depth += 1
+                i += 2
+            elif src.startswith("*/", i):
+                depth -= 1
+                i += 2
+            else:
+                i += 1
+            continue
+        if src.startswith("/*", i):
+            depth = 1
+            i += 2
+            continue
+        if src.startswith("//", i):
+            while i < n and src[i] != "\n":
+                i += 1
+            continue
+        if src.startswith('"""', i):
+            end = src.find('"""', i + 3)
+            end = n if end == -1 else end + 3
+            out.append(src[i:end])
+            i = end
+            continue
+        if src[i] == '"':
+            j = i + 1
+            while j < n and src[j] != '"':
+                j += 2 if src[j] == "\\" else 1
+            j = min(j + 1, n)
+            out.append(src[i:j])
+            i = j
+            continue
+        out.append(src[i])
+        i += 1
+    return "".join(out)
+
+
 def classify_service(files: dict[str, str]) -> tuple[bool, bool]:
     """(ships_a_dispatcher, constructs_a_message) for one service's RAW `src/main` sources.
 
@@ -110,6 +187,9 @@ def classify_service(files: dict[str, str]) -> tuple[bool, bool]:
         if DISPATCHER_RE.search(body):
             dispatcher = True
         if "OutboxMessage(" in body and not DECLARATION_RE.search(body):
+            writes = True
+        # Second idiom, opposite treatment of literals — see SQL_WRITE_RE.
+        if SQL_WRITE_RE.search(strip_comments_keep_strings(raw)):
             writes = True
     return dispatcher, writes
 
@@ -179,6 +259,48 @@ def self_test() -> int:
     after = disp + "\n/* note */\n" + write
     expect("a real construction AFTER a comment still counts",
            classify_service({"a.kt": after}), (True, True))
+
+    # ── The raw-SQL write idiom (#4240) ────────────────────────────────────────────────────────
+    # Built from the shape that broke this gate on main, not invented: a Kotlin raw string holding
+    # the INSERT, which the strings-stripped body can never contain.
+    sql = (
+        'private val INSERT = """\n'
+        "    INSERT INTO case_outbox\n"
+        "        (event_id, aggregate_id, event_type, payload, status, created_at, updated_at)\n"
+        "    VALUES (?, ?, ?, ?, ?, ?, ?)\n"
+        '""".trimIndent()\n'
+    )
+    expect("a raw-string INSERT INTO <x>_outbox IS a writer",
+           classify_service({"a.kt": disp, "b.kt": sql}), (True, True))
+    single = disp + '\nval s = "insert into outbox_message (id) values (?)"\n'
+    expect("a single-quoted-style literal and lower case also count",
+           classify_service({"a.kt": single}), (True, True))
+
+    # The negatives matter more than the positive: a widened regex that matches any INSERT would
+    # mark all eight baselined services as fixed and quietly retire the gate.
+    other_table = disp + '\nval s = """INSERT INTO party_events (id) VALUES (?)"""\n'
+    expect("an INSERT into a NON-outbox table is NOT a writer",
+           classify_service({"a.kt": other_table}), (True, False))
+    sql_in_kdoc = disp + "\n/** Drains rows an INSERT INTO case_outbox put there. */\n"
+    expect("SQL named in a KDoc is NOT a writer",
+           classify_service({"a.kt": sql_in_kdoc}), (True, False))
+    sql_in_line_comment = disp + "\n// INSERT INTO case_outbox (id) VALUES (?)\n"
+    expect("a commented-out INSERT is NOT a writer",
+           classify_service({"a.kt": sql_in_line_comment}), (True, False))
+    sql_in_nested = disp + "\n/* outer /* inner */ INSERT INTO case_outbox */\n"
+    expect("an INSERT inside a NESTED comment is NOT a writer",
+           classify_service({"a.kt": sql_in_nested}), (True, False))
+    # A `//` inside the SQL literal must not be read as a comment opener and eat the rest.
+    url_in_sql = (
+        disp + '\nval s = """\n-- see http://wiki/outbox\nINSERT INTO case_outbox (id)\n"""\n'
+    )
+    expect("a // inside the SQL literal does not hide the INSERT",
+           classify_service({"a.kt": url_in_sql}), (True, True))
+    # …and the mirror: a real INSERT after a comment that contains a quote still counts, which is
+    # what breaks if the scanner lets a `"` inside a comment open a string.
+    quote_in_comment = disp + '\n/* the "outbox" table */\nval s = """INSERT INTO case_outbox"""\n'
+    expect("a quote inside a comment does not swallow the following SQL",
+           classify_service({"a.kt": quote_in_comment}), (True, True))
 
     if fails:
         print("check-outbox-has-writer: self-test FAIL")
