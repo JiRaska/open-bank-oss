@@ -17,6 +17,17 @@ interface DisputeRepository {
 
     fun save(dispute: Dispute): Uni<Dispute>
 
+    /**
+     * Persist the dispute and [outbox] in the SAME transaction (transactional outbox,
+     * ADR-0003/0050) — the open path's counterpart to [update].
+     *
+     * A dispute committed without its `dispute.opened` event is invisible to every consumer
+     * downstream, and the one that matters is ADR-0220 D1's vulnerable-customer exclusion: a
+     * customer with an open dispute must stop receiving promotional surfaces, and it can only know
+     * that if opening one is announced.
+     */
+    fun save(dispute: Dispute, outbox: List<OutboxMessage>): Uni<Dispute>
+
     fun findById(id: UUID): Uni<Dispute?>
 
     fun findByReference(reference: String): Uni<Dispute?>

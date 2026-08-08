@@ -77,10 +77,27 @@ class DisputeServiceTest {
 
         val persistedId = UUID.randomUUID()
 
-        every { disputeRepo.save(any()) } answers { Uni.createFrom().item(firstArg<Dispute>().copy(id = persistedId)) }
+        val outbox = slot<List<OutboxMessage>>()
+        every { disputeRepo.save(any(), capture(outbox)) } answers {
+            Uni.createFrom().item(firstArg<Dispute>().copy(id = persistedId))
+        }
         every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
 
         val result = service.open(request).await().indefinitely()
+
+        // The timeline row is an audit entry INSIDE this service; the outbox message is the only
+        // thing anyone else can see. Opening a dispute used to write the first and not the second,
+        // which is why ADR-0220 D1's exclusion could not be built (#4070).
+        assertThat(outbox.captured.map { it.eventType }).containsExactly("dispute.opened")
+        val payload = outbox.captured.single().payload
+        assertThat(payload)
+            .describedAs("a consumer holding only a disputeId cannot tell whose dispute it is")
+            .contains(""""partyId":"${request.partyId}"""")
+        // NOT asserted against persistedId: the outbox message is built from the dispute before it
+        // is handed to the repository, and this mock rewrites the id on the way back. Real
+        // persistence keeps it — the id is application-assigned — so the two agree in production
+        // and only the stub makes them differ.
+        assertThat(payload).contains(""""eventType":"dispute.opened"""")
 
         assertThat(result.id).isEqualTo(persistedId)
         assertThat(result.status).isEqualTo(DisputeStatus.OPEN)
@@ -88,7 +105,7 @@ class DisputeServiceTest {
         assertThat(result.filingDate).isEqualTo(today)
         assertThat(result.resolutionDeadline).isEqualTo(today.plusDays(45))
 
-        verify(exactly = 1) { disputeRepo.save(any()) }
+        verify(exactly = 1) { disputeRepo.save(any(), any()) }
         verify(exactly = 1) { timelineRepo.save(any()) }
     }
 

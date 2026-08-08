@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.104.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.103.2...admin-ui-v0.104.0) (2026-08-08)
+
+
+### Features
+
+* **authz-policy-auditor:** wire ADR-0148 prompt registry and LLM gateway (ADR-0167) ([#3775](https://github.com/JiRaska/open-bank-oss/issues/3775)) ([06aedd6](https://github.com/JiRaska/open-bank-oss/commit/06aedd6dd2176934298b997808d6ad23566d88ae))
+
+
+### Security
+
+* **admin-ui:** pin nanoid to 3.3.17 for CVE-2026-67213 ([#4153](https://github.com/JiRaska/open-bank-oss/issues/4153)) ([f50fb95](https://github.com/JiRaska/open-bank-oss/commit/f50fb95a23b481a2e552e3852bd403104f00ff92)), closes [#4023](https://github.com/JiRaska/open-bank-oss/issues/4023)
+
+## [0.103.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.103.1...admin-ui-v0.103.2) (2026-08-08)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop the ⌘K palette reading a stale result list on keydown ([#4142](https://github.com/JiRaska/open-bank-oss/issues/4142)) ([3f2a3c4](https://github.com/JiRaska/open-bank-oss/commit/3f2a3c444824a409b7b787edc7a0b91d5000e433)), closes [#3886](https://github.com/JiRaska/open-bank-oss/issues/3886)
+
 ## [0.103.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.103.0...admin-ui-v0.103.1) (2026-08-08)
 
 

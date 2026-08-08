@@ -4,6 +4,7 @@
 
 package com.openbank.transaction.domain.settlement
 
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.calendar.BusinessCalendar
 import com.openbank.libs.domain.calendar.BusinessDayConvention
 import java.time.Instant
@@ -30,7 +31,24 @@ data class SettlementDates(val bookingDate: LocalDate, val valueDate: LocalDate)
  */
 object SettlementDateResolver {
 
-    val BANK_ZONE: ZoneId = ZoneId.of("Europe/Prague")
+    /**
+     * The accounting zone the booking date is read in — owned by [AccountingClock.BANK_ZONE]
+     * (ADR-0207 D1), not restated here. The booking date IS an accounting date: it is the day
+     * a payment lands in the books, so it must be the same day the ledger and the year-close
+     * think it is. Restating the zone locally is what let two components inside one service
+     * disagree about the date for two hours a day, half the year.
+     *
+     * This is a same-value substitution: the constant is `Europe/Prague` on both sides, so no
+     * booking or value date moves. What changes is that there is now one owner of the answer.
+     */
+    val BANK_ZONE: ZoneId = AccountingClock.BANK_ZONE
+
+    /**
+     * Daily submission cut-off, in [BANK_ZONE]. Deliberately NOT [AccountingClock.cutoff]: that
+     * is the instant the *accounting day* rolls over (midnight), whereas this is the operational
+     * deadline after which a payment received on a business day books to the next one. The two
+     * are different business rules that happen to be expressed in the same units.
+     */
     val DEFAULT_CUTOFF: LocalTime = LocalTime.of(16, 0)
     const val FX_SPOT_LAG_DAYS: Int = 2
 

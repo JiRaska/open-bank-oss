@@ -32,7 +32,7 @@ import java.util.UUID
  * pre-fix code, where nothing ever deleted anything. So the fixtures are written through the store
  * (the real production write path) and every verdict is read straight out of `conversation_history`.
  *
- * RED against the code before this change: `deleteForCustomer` / `deleteConversation` did not exist
+ * RED against the code before this change: `deleteForParty` / `deleteConversation` did not exist
  * on the port at all, so these tests did not compile — and once stubbed to no-ops they fail on the
  * row count, which is the assertion that matters.
  *
@@ -81,7 +81,7 @@ class ConversationErasureIT {
             .describedAs("fixture must exist before erasure, or the test proves nothing")
             .isEqualTo(2)
 
-        val erased = onEventLoop { store.deleteForCustomer(customer) }
+        val erased = onEventLoop { store.deleteForParty(customer) }
 
         assertThat(erased).isEqualTo(2L)
         assertThat(rowsFor(customer))
@@ -98,7 +98,7 @@ class ConversationErasureIT {
         seed(customer, "conv-a")
         seed(other, "conv-a")
 
-        onEventLoop { store.deleteForCustomer(customer) }
+        onEventLoop { store.deleteForParty(customer) }
 
         assertThat(rowsFor(customer)).isZero()
         assertThat(rowsFor(other))

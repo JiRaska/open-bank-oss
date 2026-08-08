@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/authz-policy-auditor-v0.5.0...authz-policy-auditor-v0.6.0) (2026-08-08)
+
+
+### Features
+
+* **authz-policy-auditor:** wire ADR-0148 prompt registry and LLM gateway (ADR-0167) ([#3775](https://github.com/JiRaska/open-bank-oss/issues/3775)) ([06aedd6](https://github.com/JiRaska/open-bank-oss/commit/06aedd6dd2176934298b997808d6ad23566d88ae))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/authz-policy-auditor-v0.4.0...authz-policy-auditor-v0.5.0) (2026-08-07)
 
 

@@ -369,7 +369,7 @@ services:
       - "/bundle"
     volumes:
       # Layout mirrors openbank-infra/opa/build-bundle.sh; new non-test policies must be added here too.
-      - ../openbank-libs/governance/agents.yaml:/bundle/agents/data.yaml:ro
+      - ../openbank-libs/governance/agents-opa-data.yaml:/bundle/agents/data.yaml:ro
       - ../openbank-libs/governance/rules.yaml:/bundle/rules/data.yaml:ro
       - ./opa/policies/agents.rego:/bundle/agents.rego:ro
       - ../openbank-libs/governance/policies/rest.rego:/bundle/rest.rego:ro

@@ -231,8 +231,10 @@ openbank:
       s3:
         # Path-style S3 endpoint, region and Object-Lock-enabled bucket. Credentials should be a
         # narrowly-scoped key that may PutObject (with retention) but NOT bypass governance retention.
-        endpoint: ${ANALYTICS_WORM_S3_ENDPOINT:https://s3.eu-central-1.amazonaws.com}
-        region: ${ANALYTICS_WORM_S3_REGION:eu-central-1}
+        # Region is the estate region (ADR-0175 §Decision 1: eu-north-1); every bucket in the account
+        # is eu-north-1, and nothing overrides these in gitops (issue #3962).
+        endpoint: ${ANALYTICS_WORM_S3_ENDPOINT:https://s3.eu-north-1.amazonaws.com}
+        region: ${ANALYTICS_WORM_S3_REGION:eu-north-1}
         bucket: ${ANALYTICS_WORM_S3_BUCKET:openbank-analytics-worm}
         access-key: ${ANALYTICS_WORM_S3_ACCESS_KEY:}
         secret-key: ${ANALYTICS_WORM_S3_SECRET_KEY:}
@@ -244,6 +246,12 @@ openbank:
       max-dead-letters: ${ANALYTICS_MAX_DEAD_LETTERS:100}
     residency:
       # Data residency guard checked at startup (F9 / GDPR Art. 44). Boot aborts if region not allowed.
-      region: ${ANALYTICS_RESIDENCY_REGION:eu-central-1}
-      allowed: ${ANALYTICS_RESIDENCY_ALLOWED:eu-central-1,eu-west-1}
+      # eu-north-1 is the estate region decided by ADR-0175 §Decision 1 (NOT by any README — §Decision 2
+      # explicitly rejects the eu-central-1 pin openbank-infra/aws/README.md infers from ADR-0027).
+      # These two defaults previously said eu-central-1 / [eu-central-1, eu-west-1], which made the only
+      # bootable configuration one that misstates the region: the guard logged "data residency OK:
+      # region=eu-central-1" for a warehouse in eu-north-1, and setting the region truthfully aborted
+      # boot because eu-north-1 was not on the allow-list (issue #3962).
+      region: ${ANALYTICS_RESIDENCY_REGION:eu-north-1}
+      allowed: ${ANALYTICS_RESIDENCY_ALLOWED:eu-north-1}
       enforce: ${ANALYTICS_RESIDENCY_ENFORCE:true}
