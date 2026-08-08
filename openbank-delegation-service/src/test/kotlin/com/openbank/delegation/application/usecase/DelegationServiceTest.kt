@@ -200,7 +200,7 @@ class DelegationServiceTest {
      * fields, so no projection could have applied them.
      */
     @Test
-    fun `offer refuses a dailyLimit because nothing enforces it`(): Unit = runBlocking {
+    fun `offer refuses a dailyLimit on a grant that cannot spend`(): Unit = runBlocking {
         scaOk(grantor, "DELEGATION_GRANT")
         eligibilityOk()
 
@@ -214,7 +214,7 @@ class DelegationServiceTest {
     }
 
     @Test
-    fun `offer refuses a monthlyLimit and names both fields when both are set`(): Unit = runBlocking {
+    fun `offer refuses a monthlyLimit on a grant that cannot spend`(): Unit = runBlocking {
         scaOk(grantor, "DELEGATION_GRANT")
         eligibilityOk()
 
@@ -224,15 +224,95 @@ class DelegationServiceTest {
             .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
             .hasMessageContaining("monthlyLimit")
 
-        val both = offerCommand().copy(
-            dailyLimit = Money.of(BigDecimal("5000.00"), "CZK"),
-            monthlyLimit = Money.of(BigDecimal("50000.00"), "CZK"),
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    /**
+     * ADR-0249 D3 — the refusal above is now scoped, not blanket. On a grant that CAN spend, the
+     * two ceilings are counted by `SpendReservationService`, so they are accepted and persisted.
+     * Asserted on the saved aggregate: the whole point of #3613's refusal was that a stored ceiling
+     * nobody counts is worse than no ceiling, and this is the assertion that the storing has become
+     * legitimate.
+     */
+    @Test
+    fun `offer accepts cumulative ceilings on a grant that can spend`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+        val saved = slot<DelegationGrant>()
+        coEvery { repository.save(capture(saved), any()) } answers { firstArg() }
+
+        val daily = Money.of(BigDecimal("5000.00"), "CZK")
+        val monthly = Money.of(BigDecimal("50000.00"), "CZK")
+        service.offer(
+            offerCommand(capabilities = setOf(DelegationCapability.ACCOUNT_INITIATE_PAYMENT))
+                .copy(dailyLimit = daily, monthlyLimit = monthly),
         )
-        assertThatThrownBy { runBlocking { service.offer(both) } }
+
+        assertThat(saved.captured.dailyLimit).isEqualTo(daily)
+        assertThat(saved.captured.monthlyLimit).isEqualTo(monthly)
+    }
+
+    /**
+     * ADR-0249 D5. "Unlimited access to someone else's account" is a product decision no bank
+     * should make by omission, so the grant that would express it is refused at creation rather
+     * than merely discouraged in the UI.
+     */
+    @Test
+    fun `offer refuses ACCOUNT_INITIATE_PAYMENT with no cumulative ceiling at all`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+
+        assertThatThrownBy {
+            runBlocking {
+                service.offer(offerCommand(capabilities = setOf(DelegationCapability.ACCOUNT_INITIATE_PAYMENT)))
+            }
+        }
             .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
-            .hasMessageContaining("dailyLimit and monthlyLimit")
+            .hasMessageContaining("ACCOUNT_INITIATE_PAYMENT")
 
         coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+        // And, like every other content refusal, it does not cost the grantor their ceremony.
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+    }
+
+    /**
+     * A per-transaction ceiling is NOT a substitute for a cumulative one: it caps each payment and
+     * says nothing about how many of them there may be. Ten thousand payments of 1 000 Kč is still
+     * unlimited access.
+     */
+    @Test
+    fun `a perTransactionLimit alone does not satisfy the D5 ceiling requirement`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+
+        assertThatThrownBy {
+            runBlocking {
+                service.offer(
+                    offerCommand(capabilities = setOf(DelegationCapability.ACCOUNT_INITIATE_PAYMENT))
+                        .copy(perTransactionLimit = Money.of(BigDecimal("1000.00"), "CZK")),
+                )
+            }
+        }.isInstanceOf(DelegationUnsupportedConstraintException::class.java)
+    }
+
+    /**
+     * D5 names `ACCOUNT_INITIATE_PAYMENT`, and the rule is deliberately not widened to every
+     * execution capability: savings grants are already live without ceilings, and invalidating the
+     * shape they were offered under would be an unrelated behaviour change riding along on this one.
+     */
+    @Test
+    fun `a savings withdraw grant is still offerable without a cumulative ceiling`(): Unit = runBlocking {
+        scaOk(grantor, "DELEGATION_GRANT")
+        eligibilityOk()
+        coEvery { repository.save(any<DelegationGrant>(), any()) } answers { firstArg() }
+
+        val grant = service.offer(
+            offerCommand(capabilities = setOf(DelegationCapability.SAVINGS_WITHDRAW)).copy(
+                resourceType = DelegationResourceType.SAVINGS_GOAL,
+            ),
+        )
+
+        assertThat(grant.dailyLimit).isNull()
     }
 
     /**
@@ -420,7 +500,14 @@ class DelegationServiceTest {
         scaOk(grantor, "DELEGATION_GRANT")
         eligibilityOk(granteeKyc = "BASIC")
         assertThatThrownBy {
-            runBlocking { service.offer(offerCommand(setOf(DelegationCapability.ACCOUNT_INITIATE_PAYMENT))) }
+            runBlocking {
+                // Carries a daily ceiling so it clears the ADR-0249 D5 gate, which runs first and
+                // would otherwise refuse this command before the KYC rank is ever consulted.
+                service.offer(
+                    offerCommand(setOf(DelegationCapability.ACCOUNT_INITIATE_PAYMENT))
+                        .copy(dailyLimit = Money.of(BigDecimal("5000.00"), "CZK")),
+                )
+            }
         }.isInstanceOf(DelegationEligibilityException::class.java)
             .hasMessageContaining("FULL")
     }
