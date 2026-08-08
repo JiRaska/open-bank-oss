@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/v0.18.0...v0.18.1) (2026-08-08)
+
+
+### Security
+
+* **libs:** ADR-0219 D4 compile-time wiring assertion for the contact gate ([#4072](https://github.com/JiRaska/open-bank-oss/issues/4072)) ([9342915](https://github.com/JiRaska/open-bank-oss/commit/93429152b875d5b0656dc7f7ddfc471e6e96b13f))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/v0.17.0...v0.18.0) (2026-08-07)
 
 
