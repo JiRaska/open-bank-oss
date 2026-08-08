@@ -50,7 +50,7 @@ class RedisConversationStore @Inject constructor(
         }
     }
 
-    override fun append(customerId: String, conversationId: String, newTurns: List<ChatMessage>) {
+    override fun append(customerId: String, conversationId: String, newTurns: List<ChatMessage>, partyId: String?) {
         if (!ConversationStore.persistable(conversationId) || newTurns.isEmpty()) return
         runBlocking {
             val existing = load(customerId, conversationId)
@@ -60,6 +60,16 @@ class RedisConversationStore @Inject constructor(
             val json = mapper.writeValueAsString(merged)
             values.set(key(customerId, conversationId), json, SetArgs().ex(ConversationStore.TTL_SECONDS))
                 .awaitSuspending()
+            // Erasure index (#3881): PARTY_ERASED carries partyId, the history key carries `sub`,
+            // and those are not the same value. Without this pointer an erasure scans a prefix that
+            // matches nothing and reports success. Same TTL, so it cannot outlive what it points at.
+            if (partyId != null && partyId != customerId) {
+                values.set(
+                    partyIndexKey(partyId, conversationId),
+                    customerId,
+                    SetArgs().ex(ConversationStore.TTL_SECONDS),
+                ).awaitSuspending()
+            }
         }
         log.debugf(
             "RedisConversationStore: appended %d turn(s) customer=%s conversation=%s ttl=%ds",
@@ -72,19 +82,32 @@ class RedisConversationStore @Inject constructor(
 
     // ---- Erasure (GDPR Art. 17 / ADR-0117, #3870) --------------------------------------------
 
-    override suspend fun deleteForCustomer(customerId: String): Long {
-        val prefix = "copilot:conv:$customerId:"
+    override suspend fun deleteForParty(partyId: String): Long {
+        // Follow the erasure index first: history is keyed by `sub`, the event carries `partyId`.
+        val idxPrefix = "copilot:conv:party:$partyId:"
+        val indexKeys = keys.keys("$idxPrefix*").awaitSuspending().filter { it.startsWith(idxPrefix) }
+        var viaIndex = 0L
+        indexKeys.forEach { idx ->
+            val subject = values.get(idx).awaitSuspending()
+            val conversationId = idx.removePrefix(idxPrefix)
+            if (subject != null && ConversationStore.persistable(conversationId)) {
+                viaIndex += keys.del(key(subject, conversationId)).awaitSuspending().toLong()
+            }
+            keys.del(idx).awaitSuspending()
+        }
+        // …then the ADR-0069 case, where `sub` IS the party id and no index entry was written.
+        val prefix = "copilot:conv:$partyId:"
         // KEYS takes a glob, and customerId is caller-derived, so a metacharacter in it could widen
         // the pattern across customers. The returned keys are therefore re-filtered on the LITERAL
         // prefix before anything is deleted — the glob only narrows the scan, it never authorises.
         val matched = keys.keys("$prefix*").awaitSuspending()
-            .filter { it.startsWith(prefix) }
-        if (matched.isEmpty()) return 0L
+            .filter { it.startsWith(prefix) && !it.startsWith("copilot:conv:party:") }
+        if (matched.isEmpty()) return viaIndex
         // Deleted one key at a time rather than with a spread vararg: an erasure set is tiny (a
         // customer's open conversations), and the spread would copy the array on every call.
         matched.forEach { keys.del(it).awaitSuspending() }
-        log.infof("RedisConversationStore: erased %d conversation(s) for a customer", matched.size)
-        return matched.size.toLong()
+        log.infof("RedisConversationStore: erased %d conversation(s) for a party", matched.size + viaIndex)
+        return matched.size.toLong() + viaIndex
     }
 
     override suspend fun deleteConversation(customerId: String, conversationId: String): Long {
@@ -101,4 +124,7 @@ class RedisConversationStore @Inject constructor(
     // customerId precedes conversationId, so a crafted conversationId can only ever land inside the
     // SAME customer's namespace — it can never escape to another customer's history.
     private fun key(customerId: String, conversationId: String) = "copilot:conv:$customerId:$conversationId"
+
+    /** Erasure pointer partyId -> the `sub` the history is keyed under. Holds no message content. */
+    private fun partyIndexKey(partyId: String, conversationId: String) = "copilot:conv:party:$partyId:$conversationId"
 }

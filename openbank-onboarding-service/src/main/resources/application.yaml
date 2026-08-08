@@ -43,8 +43,15 @@ quarkus:
     tls:
       verification: none
   rest-client:
+    # Local-dev default ONLY — the in-cluster URL comes from PARTY_SERVICE_URL on the Deployment
+    # (openbank-infra/gitops/components/onboarding/onboarding-service.yaml), as customer-edge,
+    # statement-service and document-service already do. The previous default named
+    # `openbank-party-service:8090`: no Service of that name exists in any namespace, and the
+    # port was wrong too (party-service is 8111 in namespace `party`). The Deployment carried no
+    # override, so that was the EFFECTIVE value and AbandonedRegistrationCleaner's party lookup
+    # could never resolve (issue #3931).
     "party-service":
-      url: ${PARTY_SERVICE_URL:http://openbank-party-service:8090}
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
       connect-timeout: 3000
       read-timeout: 5000
   smallrye-reactive-messaging:

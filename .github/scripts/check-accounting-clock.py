@@ -82,21 +82,14 @@ BANNED = [
 # exemption and its fix move together and this debt cannot quietly become permanent. Tracked in
 # issue #2963; see it for why each is not a one-line change.
 ALLOWLIST: dict[str, str] = {
-    "openbank-transaction-service/src/main/kotlin/com/openbank/transaction/domain/settlement/"
-    "SettlementDateResolver.kt": (
-        "#2963 — settlement/booking-date rolling, entangled with #1302 item 3 (reconciliation false "
-        "drift). Changing the zone handling alone risks moving the drift rather than fixing it."
-    ),
     "openbank-fx-service/src/main/kotlin/com/openbank/fx/application/usecase/"
     "CnbRateIngestionService.kt": (
-        "#2963 — ČNB fixing day may legitimately be a publication calendar rather than the "
-        "accounting day. The code does not currently say which it means; that has to be decided "
-        "before it can be mechanically converted."
-    ),
-    "openbank-sanctions-service/src/main/kotlin/com/openbank/sanctions/application/usecase/"
-    "SanctionsListService.kt": (
-        "#2963 — ZoneId.systemDefault() in list-refresh bookkeeping, not an accounting date. Worst "
-        "in principle (host-dependent), least consequential in practice; wants the injected clock."
+        "#2963 — DECIDED (not deferred): this is the ČNB PUBLICATION calendar, not the accounting "
+        "day. A fixing is declared by the ČNB for a named business day and published at 14:30 "
+        "Prague; the day boundaries that bound validFrom/validTo are the publisher's, not the "
+        "bank's books. Same value as AccountingClock.BANK_ZONE today only because the ČNB is a "
+        "Prague institution and this entity keeps its books in Prague — binding it to the "
+        "accounting zone would encode a coincidence as a dependency. The file states this in place."
     ),
 }
 

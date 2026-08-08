@@ -87,6 +87,21 @@ not change any existing request's outcome until explicitly flipped.
 ## 6. Change log
 
 - **2026-08-05** — Trust-boundary change (#3734): `operator-account-write` now excludes `service-account-*` principals, and a new `prohibited` veto closes `account.{close, freeze, unfreeze, authorize, approval.decide}` to `service-account-openbank-edge`. The role_action_matrix grants ALL ten account.* actions to ROLE_OPERATOR (which the edge service-account carries) and matrix-allows bypasses rule-level exclusions, so both paths needed closing. The edge's verified customer self-service — `account.{create, update}` via `service-edge-account-m2m` (onboarding open-account, pocket add/close, savings goal, ADR-0104/ADR-0153) — is preserved; the shared client keeps `account.read`. Ext moved from generator heredoc to standalone `account_rest_ext.rego` with a 13-test opa suite.
+
+- **2026-08-07** — No trust boundary moved: the `sanctions-service` and `product-catalog`
+  rest-client **defaults** in `application.yaml` were changed from `http://openbank-sanctions-service:8123`
+  and `http://openbank-product-catalog:8080` to `http://localhost:8123` / `http://localhost:8104`
+  (issue #3931). Neither `openbank-` name is a Service in any namespace, and the product-catalog
+  port was wrong as well (the Service is `product-catalog:8104` in `accounts`). **These defaults
+  were dead in every deployed environment** — the account-service Deployment sets
+  `SANCTIONS_SERVICE_URL` and `PRODUCT_CATALOG_SERVICE_URL` (the latter at the KEDA HTTP
+  interceptor, with `PRODUCT_CATALOG_API_HOST_OVERRIDE`) — so no deployed request path changes,
+  and both edges keep their existing postures (sanctions fails **closed**, product-catalog fails
+  **open**, §6 2026-07-09 and 2026-06-06 entries). The change matters for local dev, where the
+  screening gate previously failed closed against a name that could never resolve, and it clears
+  the last findings blocking `incluster-hostname-resolution` from `mode: advisory` to `enforced`.
+  Sibling services on the same edges (`fx`, `kyc`, `sepa-payment`, `billing`, `document-service`)
+  already used these localhost defaults; account-service was the outlier.
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. Six parameters: `Idempotency-Key` on openAccount, `currency` on resolvePocket, and the `partyId`/`role` and `partyId`/`intent` pairs on the two authorization-check endpoints. The authorization pairs are the security-relevant ones: they are the INPUTS to an access decision, so a null reaching the use case is a decision taken on an absent subject rather than a rejected request. No new caller, no new boundary; the endpoints and their `@RolesAllowed`/`@Authorize` gates are unchanged, and every guard runs AFTER authorization. Rollback: revert the commit (restores the 500).
 - **2026-08-03** — Propose-only savings withdrawal: the owner's approval now SPENDS an SCA
   challenge (ADR-0232 AC8). **New outbound trust boundary** `account-service → sca-service`

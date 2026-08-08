@@ -43,7 +43,7 @@ spec:
       annotations:
         # Roll the pod when the OPA policy bundle changes (subPath mounts don't hot-reload).
         # Must match agent-opa-bundle's openbank.tech/policy-checksum (CI verifies, no drift).
-        openbank.tech/policy-checksum: "98677736a698b3c3"
+        openbank.tech/policy-checksum: "e05f4db0c00ea4b8"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -54,7 +54,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: agent-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-agent-service:sandbox-1e6c2870
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-agent-service:sandbox-93429152
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

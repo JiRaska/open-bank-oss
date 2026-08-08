@@ -42,8 +42,11 @@ We also already have most of the governance primitives:
 - `MakerChecker` / `Proposal<T>` four-eyes state machine, with the proposer≠checker rule
   enforced *in code* — `openbank-libs/src/main/kotlin/com/openbank/libs/analytics/MakerChecker.kt`
   (introduced for analytics reloads, ADR-0023; this ADR generalises it into `libs/governance`).
-- The canonical audit envelope `AuditEvent` + `@Audited`
+- The canonical audit envelope `AuditEvent`
   (`openbank-libs/.../audit/AuditEvent.kt`), GDPR Art. 30 / DORA Art. 17 mapped.
+  Producers construct and publish it explicitly. This line once also claimed an
+  `@Audited` annotation; it had no interceptor in libs or in any service and was
+  never applied anywhere, so it was removed rather than counted (#4011).
 - A **read-only** live config endpoint `ServiceConfigResource` (`/api/v1/config`) and the
   admin UI `/system/config` page that today says "change YAML and redeploy".
 - An automatic compliance kill-switch in `openbank-infra/bcp-health-check.sh` that halts
