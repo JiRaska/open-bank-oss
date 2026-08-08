@@ -27,7 +27,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-psd2-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "2206734711723848"
+        openbank.tech/policy-checksum: "55297380adab47d9"
       labels: {app.kubernetes.io/name: psd2-service, app.kubernetes.io/part-of: psd2}
     spec:
       securityContext:
@@ -38,7 +38,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: psd2-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-psd2-service:sandbox-93429152
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-psd2-service:sandbox-1e8ac27c
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8107}
@@ -96,10 +96,16 @@ spec:
             # eIDAS QSEAL message signing stays advisory in the sandbox (no TPP certs / truststore).
             - name: OPENBANK_PSD2_QSEAL_ENFORCE
               value: "false"
-            # TPP registry lookup (eIDAS role/status). Not yet deployed → calls 503 until it lands;
-            # the rest-client is lazy so this does not block boot or the consent/AIS/PIS endpoints.
+            # TPP registry lookup (eIDAS role/status). The namespace was `tpp` here until #3966;
+            # it is `tpp-registry`, so this never resolved and the lookup has always failed.
+            #
+            # The comment that stood here said "Not yet deployed -> calls 503 until it lands",
+            # and that was false when written or soon after: tpp-registry-service is deployed and
+            # serving 8108 in namespace `tpp-registry`. Keeping the note is the point — a comment
+            # that EXPLAINS AWAY the symptom is worse than none, because it retires the question.
+            # The failing lookup looked accounted-for for as long as anyone read this file.
             - name: TPP_REGISTRY_SERVICE_URL
-              value: http://tpp-registry-service.tpp.svc:8108
+              value: http://tpp-registry-service.tpp-registry.svc:8108
             # Real consent-service client backing the AIS consent/validate gate (issue #1500).
             # M2M bearer via oidc-client openbank-services (OIDC_CLIENT_SECRET already set above).
             - name: CONSENT_SERVICE_URL

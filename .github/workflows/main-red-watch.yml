@@ -1,0 +1,264 @@
+# -----------------------------------------------------------------------------
+# main's own CI conclusion watch (issue #4019).
+#
+# WHY THIS EXISTS
+#   A red push-triggered workflow on `main` is addressed to nobody: no PR carries
+#   the check, no reviewer sees it, nothing notifies. The next PR opened against
+#   that commit inherits a red it did not cause. On 2026-08-07/08 `main` was red
+#   four times in three independent ways (Services CI / engagement-service, CI /
+#   Admin UI build, Security scan / Trivy fs scan) and each was found only because
+#   a human swept the Actions tab; two PRs merged onto it meanwhile.
+#
+#   Before this, the repo's only `workflow_run` listener was auto-retry-cancelled
+#   .yml, which re-runs SPOT-KILLED runs and escalates nothing. deploy-drift-watch
+#   .yml is the near-miss -- its name is "Deployed == main watch" but it compares
+#   the DEPLOYED IMAGE to main and never reads main's CI conclusion, so a red
+#   commit that deployed reads as perfectly in sync.
+#
+# ESCALATION, not redness. A workflow_run job going red would reproduce the very
+#   blind spot it exists to close (auto-retry-cancelled.yml's header says the same
+#   thing). So this opens or refreshes ONE `main-red` issue per watched workflow,
+#   reopens it if hand-closed while main is still red, and closes it itself when
+#   that workflow next goes green on main. Refreshed in place, never stacked --
+#   the #3891 lesson.
+#
+# ATTEMPT SCOPING is the detail that decides whether this works at all. The
+#   verdict comes from `/actions/runs/<id>/attempts/<n>/jobs`, never the unscoped
+#   `/actions/runs/<id>/jobs`, which returns the LATEST attempt: once anybody
+#   hand-re-runs a run, the unscoped endpoint answers about a different attempt
+#   than the event fired for -- silently, with no error. Enforced by R4 of
+#   check-main-red-watch.py.
+#
+# WHY IT IS NOT A REQUIRED CHECK
+#   `workflow_run` and `paths:`-filtered workflows cannot be required contexts. The
+#   BINDING copy of the declaration half is the `main-red-watch-declaration` gate
+#   in .github/gates/gates.yaml, which runs unconditionally inside `Validate
+#   manifests`; this workflow's pull_request lane is the fast echo.
+#
+# All reasoning lives in the script headers, never in a `run:` block: an oversized
+#   `run:` step makes the WHOLE workflow unparseable with no size error (#3135).
+# -----------------------------------------------------------------------------
+name: main red watch
+
+on:
+  workflow_run:
+    # R1: every workflow that pushes to main with no paths filter. These run on
+    # every commit, so their conclusion IS main's health. The list is not
+    # hand-maintained scope -- check-main-red-watch.py --check-declaration fails
+    # when a new one appears and is neither here nor in its NOT_WATCHED map.
+    workflows:
+      - "CI"
+      - "Services CI"
+      - "Security scan"
+      - "Secret scan"
+      - "OPA policy"
+      - "Dependency submission"
+      - "Gradle wrapper validation"
+      - "Release Please"
+      # R2: post-merge guards. Path-filtered, so they do NOT run on every commit —
+      # but each is a governance verdict that only ever renders on main, which
+      # makes them the LEAST likely reds to be seen and the most likely to rot.
+      - "ADR registry"
+      - "Agent charter registry"
+      - "AI governance snapshot"
+      - "API contract post-merge guard"
+      - "EU AI Act registry"
+      - "Fleet lint"
+      - "Label sync"
+      - "Pact drift check"
+      - "Product Catalog Native Build (T1 enabler smoke test)"
+    types: [completed]
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - ".github/scripts/check-main-red-watch.py"
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Falsify the watch against a known run id (no issue is touched)"
+        required: false
+      attempt:
+        description: "Attempt number to inspect (defaults to the run's latest)"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # Serialise per watched workflow so two completions cannot race the same issue.
+  # O(1) in the fleet size: a group name is not a place to carry data (#3082).
+  group: main-red-watch-${{ github.event.workflow_run.name || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # PR / dispatch lane: prove the watch's coverage set and its classifier are
+  # honest. Cheap, offline, and it is the only lane that runs on a PR.
+  declaration:
+    name: main-red-watch declaration
+    if: ${{ github.event_name != 'workflow_run' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: pip install --quiet pyyaml
+      - name: Self-test the watcher
+        run: python3 .github/scripts/check-main-red-watch.py --self-test
+      - name: Every push-on-main workflow is watched or declared
+        run: python3 .github/scripts/check-main-red-watch.py --check-declaration
+
+  watch:
+    name: main red watch
+    # Only completions of a PUSH to main are a verdict on main. Without this the
+    # watch fires on every PR run of all eight workflows and opens issues about
+    # branches. `workflow_dispatch` with a run_id enters here too, for
+    # falsification against a known-red and a known-green run.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: pip install --quiet pyyaml
+
+      # A verdict that has only ever said "green" is indistinguishable from a
+      # classifier that finds nothing. This step failing voids the run.
+      - name: Self-test the watcher
+        run: python3 .github/scripts/check-main-red-watch.py --self-test
+
+      - name: Classify the run this event fired for
+        id: verdict
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ inputs.run_id || github.event.workflow_run.id }}
+          ATTEMPT: ${{ inputs.attempt || github.event.workflow_run.run_attempt }}
+          TARGET_REPO: ${{ github.repository }}
+        run: |
+          set +e
+          python3 .github/scripts/check-main-red-watch.py --inspect-run \
+            --repo "$TARGET_REPO" \
+            --run-id "$RUN_ID" --attempt "$ATTEMPT" \
+            --json /tmp/main-red.json | tee /tmp/main-red.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) : ;;
+            1) echo "::error::The main-red watch could not answer for run $RUN_ID"
+               echo "::error::attempt $ATTEMPT. That is a failure of THIS WATCH, not a"
+               echo "::error::'main is green' verdict — see check-main-red-watch.py."
+               exit 1 ;;
+            2) echo "::warning::main is red — escalating onto a main-red issue." ;;
+            *) echo "::error::Unexpected exit $code."; exit "$code" ;;
+          esac
+
+      - name: Escalate or stand down
+        # A manual dispatch inspects without touching an issue: falsifying the
+        # watch must not manufacture the thing it reports.
+        if: ${{ github.event_name == 'workflow_run' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          CODE: ${{ steps.verdict.outputs.code }}
+        with:
+          script: |
+            const fs = require('fs')
+            const v = JSON.parse(fs.readFileSync('/tmp/main-red.json', 'utf8'))
+            const LABEL = 'main-red'
+            const slug = (v.workflow || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-')
+            const marker = `<!-- main-red:${slug} -->`
+            const REOPEN_WINDOW_DAYS = 14
+
+            // Find this workflow's issue by MARKER, not by title: a title carries the
+            // sha and moves every time the issue is refreshed.
+            const findByMarker = async (state) => {
+              const issues = await github.paginate(github.rest.issues.listForRepo, {
+                ...context.repo, state, labels: LABEL, per_page: 100,
+                sort: 'updated', direction: 'desc',
+              })
+              return issues.find(i => (i.body || '').includes(marker))
+            }
+
+            if (v.status !== 'red') {
+              // Green (or not a verdict) closes this workflow's issue. Only THIS
+              // workflow's — Services CI going green says nothing about Trivy.
+              const open = await findByMarker('open')
+              if (open) {
+                await github.rest.issues.createComment({
+                  ...context.repo, issue_number: open.number,
+                  body: `\`${v.workflow}\` is green again on main at \`${(v.head_sha||'').slice(0,9)}\` — closing. _(\`${context.workflow}\` run ${context.runId})_`,
+                })
+                await github.rest.issues.update({
+                  ...context.repo, issue_number: open.number, state: 'closed',
+                })
+                core.info(`closed #${open.number}`)
+              } else {
+                core.info(`${v.workflow} green on main; nothing open.`)
+              }
+              return
+            }
+
+            const first = v.failing[0]
+            const gate = first.steps.length ? `${first.job} / ${first.steps[0]}` : first.job
+            const sha = (v.head_sha || '').slice(0, 9)
+            const title = `main is red: ${v.workflow} — ${gate} @ ${sha}`
+            const body = [
+              marker,
+              `## \`main\` is red — nothing else would have told you`,
+              '',
+              '| | |',
+              '|---|---|',
+              `| workflow | \`${v.workflow}\` |`,
+              `| first failing gate | \`${gate}\` |`,
+              `| head sha | \`${v.head_sha}\` |`,
+              `| run | [${v.run_id} attempt ${v.attempt}](${v.html_url}) |`,
+              '',
+              '### Every failing job in this attempt',
+              '',
+              ...v.failing.map(f =>
+                `- \`${f.job}\` [${f.conclusion}] — ${f.steps.length ? f.steps.map(s => `\`${s}\``).join(', ') : '_no step-level failure reported_'} ([log](${f.job_url}))`),
+              '',
+              'Read this as: **every PR that runs this workflow from now on inherits a red it',
+              'did not cause**, and a PR merged onto this commit merges onto a broken tree.',
+              'Step conclusions above come from the attempt-scoped jobs API, not a log grep —',
+              'a job log contains the step\'s own `run:` script, so a grep matches strings that',
+              'never executed.',
+              '',
+              'This issue is refreshed in place while main stays red and is closed by the watch',
+              'itself the next time `' + v.workflow + '` goes green on main. Closing it by hand',
+              'does not fix main — the watch reopens it. To accept the red knowingly, say so in',
+              'a comment; a silent red main is the only unacceptable state.',
+              '',
+              `_Automated: \`${context.workflow}\` run ${context.runId} (issue #4019)._`,
+            ].join('\n')
+
+            const open = await findByMarker('open')
+            if (open) {
+              await github.rest.issues.update({
+                ...context.repo, issue_number: open.number, title, body,
+              })
+              core.info(`refreshed #${open.number}`)
+              return
+            }
+            const closed = await findByMarker('closed')
+            const fresh = closed && closed.closed_at &&
+              (Date.now() - Date.parse(closed.closed_at)) < REOPEN_WINDOW_DAYS * 864e5
+            if (fresh) {
+              await github.rest.issues.update({
+                ...context.repo, issue_number: closed.number, title, body, state: 'open',
+              })
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: closed.number,
+                body: `main is red again on \`${v.workflow}\` — reopening rather than stacking a new issue. _(\`${context.workflow}\` run ${context.runId})_`,
+              })
+              core.info(`reopened #${closed.number}`)
+              return
+            }
+            const created = await github.rest.issues.create({
+              ...context.repo, title, body, labels: [LABEL, 'fleet-health'],
+            })
+            core.info(`opened #${created.data.number}`)

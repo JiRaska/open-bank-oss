@@ -80,7 +80,12 @@ class DisputeService(
             createdAt = now,
             updatedAt = now,
         )
-        return disputeRepo.save(dispute).flatMap { saved ->
+        // The timeline row and the Kafka event are NOT the same thing, and the difference was a
+        // real gap: "OPENED" below is a DisputeTimelineEvent — an audit entry inside this service
+        // — so until now nothing outside dispute-service could learn that a customer had opened
+        // one. ADR-0220 D1 needs exactly that fact to stop sending promotional surfaces to a
+        // customer in dispute, and #4070 records that the absence made the exclusion unbuildable.
+        return disputeRepo.save(dispute, listOf(openedOutboxMessage(dispute))).flatMap { saved ->
             val event = DisputeTimelineEvent(
                 disputeId = saved.id,
                 eventType = "OPENED",
@@ -243,12 +248,45 @@ class DisputeService(
     private fun isValidPartialAmount(amount: BigDecimal?, claimAmount: BigDecimal): Boolean =
         amount != null && amount > BigDecimal.ZERO && amount < claimAmount
 
+    /**
+     * The `dispute.opened` event.
+     *
+     * `partyId` is the field that makes this consumable at all — a consumer holding only a
+     * disputeId would have to call back into this service to learn whose dispute it is, on a path
+     * where that lookup is exactly what the ADR-0220 eligibility snapshot exists to avoid. Paired
+     * with the existing `dispute.resolved`, the two bracket the window during which a customer is
+     * in dispute, so a consumer can both apply and lift the exclusion.
+     */
+    private fun openedOutboxMessage(dispute: Dispute): OutboxMessage = OutboxMessage(
+        aggregateId = dispute.id,
+        eventType = "dispute.opened",
+        payload = """{"eventType":"dispute.opened","disputeId":"${dispute.id}",""" +
+            """"reference":"${dispute.reference}","partyId":"${dispute.partyId}",""" +
+            """"disputeType":"${dispute.disputeType}","status":"${dispute.status}",""" +
+            """"openedAt":"${dispute.createdAt}"}""",
+        createdAt = Instant.now(clock),
+    )
+
+    /**
+     * `occurredAt` is the RESOLUTION instant, not the outbox-write instant (#3914).
+     *
+     * The two are within microseconds of each other here — both come from the same injected clock
+     * inside one transaction — so the choice looks cosmetic and is not: the outbox row's own
+     * `createdAt` already records when the row was written, and duplicating it under the name of
+     * the business time would make the audit trail assert something it did not measure. The
+     * resolution is the event; `dispute.resolvedAt` is when it happened.
+     */
     private fun resolvedOutboxMessage(dispute: Dispute): OutboxMessage = OutboxMessage(
         aggregateId = dispute.id,
         eventType = "dispute.resolved",
+        // partyId added alongside dispute.opened: without it a consumer can learn that a customer
+        // entered dispute but never that they left it, so an ADR-0220 exclusion applied on open
+        // would never lift. Additive, and `dispute.remediation_requested` already carries one.
         payload = """{"eventType":"dispute.resolved","disputeId":"${dispute.id}",""" +
-            """"reference":"${dispute.reference}","outcome":"${dispute.remediationOutcome}",""" +
-            """"status":"${dispute.status}","resolvedAt":"${dispute.resolvedAt}"}""",
+            """"reference":"${dispute.reference}","partyId":"${dispute.partyId}",""" +
+            """"outcome":"${dispute.remediationOutcome}",""" +
+            """"status":"${dispute.status}","resolvedAt":"${dispute.resolvedAt}",""" +
+            """"occurredAt":"${dispute.resolvedAt?.toInstant() ?: Instant.now(clock)}"}""",
         createdAt = Instant.now(clock),
     )
 
@@ -267,7 +305,12 @@ class DisputeService(
             """"reference":"${dispute.reference}","accountId":"${dispute.accountId}",""" +
             """"transactionId":"${dispute.transactionId}","partyId":"${dispute.partyId}",""" +
             """"outcome":"${dispute.remediationOutcome}","amount":${dispute.remediationAmount},""" +
-            """"currency":"${dispute.currency}"}""",
+            """"currency":"${dispute.currency}",""" +
+            // Same instant as dispute.resolved above, deliberately: this event is emitted in the
+            // same transaction and describes the remediation that resolution warrants. It has no
+            // separate business instant of its own, and inventing one (a fresh clock read) would
+            // put two different "when"s on one indivisible state change.
+            """"occurredAt":"${dispute.resolvedAt?.toInstant() ?: Instant.now(clock)}"}""",
         createdAt = Instant.now(clock),
     )
 

@@ -336,6 +336,8 @@ change_requirements:
         reason: "Tracked future work (ADR-0232 D3): product-service enforcement projections (account/card/savings) are the next implementation slice and are the intended consumers — the publisher ships first so the event contract is stable before consumers land. Re-triage: remove this entry with the first projection consumer PR."
       - topic: "openbank.engagement.events"
         reason: "ADR-0220 D2 feedback loop, first infrastructure slice (#3585). The intended consumers are the analytics layer (ADR-0022) and ADR-0221's campaign dashboards, neither built yet — the producer ships first so the event contract is stable before consumers land, same shape as the delegation.events entry above. Re-triage: remove this entry with the first real consumer PR."
+      - topic: "proposal-events"
+        reason: "ADR-0244 agent-swarm case workflow, first slice (#4181/#4215). Nothing is published today and three facts say so: the topic is declared nowhere under openbank-infra/, the service is absent from auto-deploy.yml's ALL_SERVICES, and no KafkaUser exists for it. The intended consumer is the oversight/review surface that ADR-0244 D7 describes, not yet built — the producer ships first so the wire shape is stable before consumers land, same shape as the delegation.events and engagement.events entries above. Re-triage: remove this entry with the first real consumer PR, and rename the topic to the fleet's openbank.<domain>.<event> convention before the first deploy, while it is still free."
       - topic: "openbank.pid.events"
         reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
   lineage_code_audit:
@@ -1313,6 +1315,20 @@ opa_bundle_sync:
   policy_input_subset: "openbank-libs/governance/rules-opa-data.yaml"
   policy_input_generator: ".github/scripts/gen-rules-opa-data.py"
   policy_input_keys_derived_not_listed: true
+  # The identical treatment for agents.yaml (#3927), which was the larger half and was
+  # left standing when #3357 landed: 50390 B embedded and hashed into all 42 bundles, of
+  # which ~5.6 KB is reachable by any policy. agents.rego never reads an agent object
+  # wholesale — it reads a.id, a.skills, a.tools.allow, a.tools.deny — so the subset is
+  # taken one level DOWN from top-level keys, unlike rules.yaml's. Consequence: a
+  # charter's description, model binding, limits, schedule, compliance or audit block no
+  # longer restamps a single bundle or rolls a single pod.
+  agents_policy_input_subset: "openbank-libs/governance/agents-opa-data.yaml"
+  agents_policy_input_generator: ".github/scripts/gen-agents-opa-data.py"
+  # A field projection cannot be justified by verbatim extraction the way rules.yaml's
+  # is, so the generator proves it instead: it evaluates the real policy over an input
+  # matrix derived from the charters under BOTH documents and requires every MCP and
+  # REST decision to be identical before it writes. --self-test falsifies that proof.
+  agents_policy_input_proved_by_differential_evaluation: true
   # A 100644 generator no-ops a ./... loop and is indistinguishable from "in sync" —
   # gen-ledger-opa-bundle.sh shipped that way and had never once run.
   generators_must_be_executable: true
@@ -1573,14 +1589,35 @@ incluster_hostnames:
   # yaml.safe_load_all output, which drops comments by construction, and --self-test pins it with
   # a fixture whose only bogus host is in a comment.
   #
-  # ADVISORY while the 6 pre-existing findings are triaged. All six are bare `openbank-<svc>` rest
-  # client defaults (account, card-issuance, onboarding, settlement) that name no Service in any
-  # namespace — the deployed pods override them by env, so they are dead defaults rather than a
-  # live outage, but each is a hostname nobody could dial. They are NOT fixed in the PR that
-  # introduced this gate: four of the owning services are money-path, so a default-URL change
-  # there needs the two-approval path rather than riding along with a CI guard.
-  enforced: advisory
-  target_enforce_date: "2026-10-31"   # ADR-0144
+  # ENFORCED since #3931 (ahead of the 2026-10-31 target), which drained all 6 findings to zero.
+  #
+  # The triage note that stood here graded every finding as a dead default "the deployed pods
+  # override by env". Checked against the deployed manifests, that held for three of the six —
+  # account-service's sanctions + product-catalog clients and card-issuance's product-catalog
+  # client. The other three were LIVE: settlement-service's Rollout and onboarding-service's
+  # Deployment carried no *_SERVICE_URL env at all, so `openbank-balance-service:8080`,
+  # `openbank-ledger-service:8080` and `openbank-party-service:8090` were the values those pods
+  # actually dialled — names that resolve in no namespace, on ports that are wrong even for the
+  # right name (balance-service is 8103, ledger-service 8101, party-service 8111). Every
+  # settlement debit/credit, every settlement GL posting, and onboarding's abandoned-registration
+  # party lookup were pointed at nothing.
+  #
+  # THE LESSON, which is why this text stays rather than being deleted with the findings: an
+  # advisory gate's "all of these are benign" note is itself an unverified claim, and advisory
+  # mode is exactly what removes the pressure to verify it. Grading a finding by the SHAPE of the
+  # config line (a bare `openbank-<svc>` default that some peers do override) instead of by the
+  # deployed manifest gets the benign cases right and the live ones wrong, silently. Same class as
+  # the "gate that has only ever passed is unfalsified" rule in root CLAUDE.md, one level up: here
+  # the gate fired correctly and the TRIAGE was the unfalsified artifact.
+  #
+  # The fix follows the fleet convention rather than inventing one: application.yaml keeps a
+  # localhost dev default (what transaction/billing/statement/lending/fx/kyc already do), and the
+  # in-cluster URL is supplied by the workload's env in openbank-infra/gitops. NetworkPolicies are
+  # derived from those env URLs, so gen-network-policies.py was re-run (onboarding gained ingress
+  # to party; payments already had balances/ledger).
+  enforced: enforced
+  enforced_since: "2026-08-07"        # #3931
+  original_target_enforce_date: "2026-10-31"   # ADR-0144 — met early
   ci_producer: .github/scripts/check-incluster-hostnames.py
 
 kafka_dotted_keys:

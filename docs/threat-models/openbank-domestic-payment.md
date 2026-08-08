@@ -23,6 +23,8 @@ to a beneficiary — a primary fraud target.
                                                                                   +--> [fraud-service] (shadow, OIDC CC / mTLS, fail-open)
                                                                                   |
                                                                                   +--> [clearing-simulator] (pacs.008 out / pacs.002 in; OIDC CC; ADR-0104 D4; flag-gated)
+                                                                                  |
+                                                                                  +--> [document-service] (GET .../templates, POST .../templates/preview; OIDC CC; ADR-0248 #3; synchronous, on customer request only)
 ```
 
 - **External entities:** payment-initiating channels/operators, downstream clearing & ledger,
@@ -84,6 +86,36 @@ not change any existing request's outcome until explicitly flipped.
   need an additional store; not implemented in this PR.
 
 ## 6. Change log
+
+- **2026-08-07** — ADR-0248 #3: new outbound trust boundary, `domestic-payment-service →
+  document-service (GET /api/v1/documents/templates, POST /api/v1/documents/templates/preview,
+  OIDC client-credentials)`, plus a new customer-facing endpoint
+  `GET /api/v1/domestic-payments/{paymentId}/confirmation` (`@RolesAllowed("ROLE_VIEWER",
+  "ROLE_OPERATOR","ROLE_ADMIN","ROLE_PAYMENTS")`, `@Authorize(action=
+  "domestic-payment.confirmation.read", resource="#paymentId")`). Renders the payment
+  confirmation document **synchronously, only on explicit customer request** — no
+  pre-generation off `DomesticPaymentStatusChangedEvent`, no Kafka consumer, nothing cached or
+  persisted a second time here or in document-service (document-service's `preview` endpoint is
+  the existing non-persisting one; no `Document` row or `document.generated` outbox event is ever
+  created for this call). `PaymentConfirmationService` reads the payment's own already-persisted
+  record via `DomesticPaymentRepository.findById` and calls neither `save` nor `update` — it
+  cannot affect payment status, and 409s (via `PaymentNotSettledMapper`) unless the payment has
+  reached `SETTLED`. `PaymentConfirmationRenderAdapter` resolves the current PUBLISHED
+  `POTVRZENI_O_PLATBE_CS`/`_EN` template body via `listTemplates`, then merges the payment's own
+  data into it via `previewTemplate` — both document-service calls are read-only/non-persisting on
+  the document-service side, so a retry can never double-render or double-persist anything.
+  **Risk class = availability** (a document-service outage fails only the download itself — never
+  payment initiation, status transition, or clearing/settlement — retryable by the customer, no
+  data lost) and **confidentiality** (payment amount, debtor/creditor account numbers/bank codes,
+  creditor name, and remittance info cross the boundary to document-service in the preview
+  request; mitigated by OIDC client-credentials + cluster-internal-only document-service ingress,
+  same posture as the existing `fraud-service`/`transaction-service` edges above). **New STRIDE
+  rows**: Info disclosure (payment data sent to document-service for a one-shot render, never
+  stored there) and Spoofing (a caller other than the payment's own viewer/operator requesting a
+  confirmation) — mitigated by the same `@RolesAllowed`/`@Authorize` gate as every other read
+  endpoint on this resource. `openapi.yaml` bumped `1.3.0` → `1.4.0` (additive). No DB schema
+  change; rollback = revert the endpoint/use-case/adapter commit (document-service's `preview`
+  endpoint and its own threat model are unaffected either way).
 
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `Idempotency-Key` on createPayment. The existing guard `require(idempotencyKey.isNotBlank())` could not run for an ABSENT header: this handler is `suspend`, so no intrinsic was emitted and `null.isNotBlank()` threw NPE — the replay control answered 500 in exactly the case it was written for, while a BLANK header correctly gave 400. Now `require(!idempotencyKey.isNullOrBlank())`. This is a control that was partially inoperative, not a new one. No new caller or boundary. Rollback: revert.
 - **2026-07-24** — Retire the legacy in-service orchestration; Temporal is the sole orchestrator

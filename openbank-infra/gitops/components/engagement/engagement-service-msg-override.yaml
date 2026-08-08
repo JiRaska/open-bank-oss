@@ -1,0 +1,21 @@
+# issue #686: group.id / auto.offset.reset for lending-events-in / party-events-in
+# (LendingArrearsEventConsumer, PartyErasureConsumer — ADR-0220 D3.5) as an external Quarkus
+# config source. A dotted leaf map key under mp.messaging.incoming.<channel> in YAML never
+# resolves to the plain MicroProfile Config property SmallRye reads (ADR-0137 pattern, see
+# transaction-service-msg-override.yaml). config_ordinal=500 forces this source to outrank the
+# baked application.yaml (~254). Loaded via QUARKUS_CONFIG_LOCATIONS on the Deployment.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: engagement-service-msg-override
+  namespace: engagement
+  labels:
+    app.kubernetes.io/name: engagement-service
+    app.kubernetes.io/part-of: engagement
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.lending-events-in.group.id=openbank-engagement-service
+    mp.messaging.incoming.lending-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.party-events-in.group.id=openbank-engagement-service
+    mp.messaging.incoming.party-events-in.auto.offset.reset=earliest

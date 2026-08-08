@@ -62,6 +62,12 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: psd2
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: security-scanner
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP
