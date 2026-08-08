@@ -207,6 +207,7 @@ class LendingWorkflowLivenessTest {
 
     private companion object {
         const val TOLERANCE_SECONDS = 5.0
+
         // A workflow registered moments ago is seconds old. This ceiling sits far below the
         // tightest real threshold in the fleet (2x an hourly interval) and astronomically below
         // the ~1.8e9 the EPOCH seed produced, so it fails loudly if the seed ever regresses.
