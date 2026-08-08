@@ -4,18 +4,22 @@
 
 package com.openbank.sanctions.infrastructure.persistence.repository
 
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.sanctions.application.port.out.SanctionsOutboxRepository
 import com.openbank.sanctions.application.port.out.SanctionsRepository
-import com.openbank.sanctions.domain.model.*
+import com.openbank.sanctions.domain.model.SanctionsCheck
+import com.openbank.sanctions.domain.model.SanctionsCheckStatus
 import com.openbank.sanctions.infrastructure.persistence.entity.SanctionsCheckEntity
-import com.openbank.sanctions.infrastructure.persistence.mapper.*
+import com.openbank.sanctions.infrastructure.persistence.mapper.toDomain
+import com.openbank.sanctions.infrastructure.persistence.mapper.toEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import org.hibernate.exception.ConstraintViolationException
+import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
@@ -51,7 +55,7 @@ class SanctionsRepositoryImpl(private val outboxRepo: SanctionsOutboxRepository)
         val event = OutboxMessage(
             aggregateId = check.id,
             eventType = eventType,
-            payload = mapper.writeValueAsString(check),
+            payload = eventPayload(check, check.checkedAt),
         )
         return try {
             Panache.withTransaction {
@@ -92,13 +96,32 @@ class SanctionsRepositoryImpl(private val outboxRepo: SanctionsOutboxRepository)
         val event = OutboxMessage(
             aggregateId = check.id,
             eventType = eventType,
-            payload = mapper.writeValueAsString(check),
+            // `reviewedAt`, falling back to `checkedAt`: this path IS the manual disposition, so
+            // the review instant is the business event. The fallback is not decoration —
+            // `SanctionsCheck.reviewedAt` is nullable, and a null here would silently cost the
+            // audit trail the event time of the highest-risk action in this service.
+            payload = eventPayload(check, check.reviewedAt ?: check.checkedAt),
         )
         return Panache.withTransaction {
             Panache.getSession()
                 .flatMap { session -> session.merge(e) }
                 .call { _ -> outboxRepo.persistInTransaction(event) }
         }.awaitSuspending().toDomain()
+    }
+
+    /**
+     * The outbox payload: the serialised [SanctionsCheck] plus the event's own `occurredAt` (#3914).
+     *
+     * ADDITIVE, and it has to be. The payload is the aggregate itself, so the obvious alternative —
+     * an `occurredAt` field on [SanctionsCheck] — would put a per-EVENT value on a per-AGGREGATE
+     * type, where the screening and the review events legitimately disagree about which instant
+     * they mean. Every existing field keeps its name and place; consumers that never look at
+     * `occurredAt` see no change at all.
+     */
+    private fun eventPayload(check: SanctionsCheck, occurredAt: Instant): String {
+        val node = mapper.valueToTree<ObjectNode>(check)
+        node.put("occurredAt", occurredAt.toString())
+        return mapper.writeValueAsString(node)
     }
 
     /**
