@@ -2,6 +2,7 @@
 date: 2026-06-28
 decision-status: accepted
 delivery-status: partial
+followup: "#1915 — the syft-on-image axis: cosign attest on the KMS key and Kyverno verify-images Audit->Enforce"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []

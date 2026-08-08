@@ -951,6 +951,37 @@ gates:
     run: |
       bash .github/scripts/check-adr-registry.sh
 
+  # ADR `partial` delivery-status declares its follow-up (issue #3965).
+  #
+  # rules.yaml's `governance_followup` says an ADR's actionable tail gets an issue. A
+  # `partial` ADR has one by construction — something shipped, something did not — and
+  # that rule lived in prose with no gate: 85 of 241 ADRs record an unbuilt half.
+  #
+  # NOT AN ISSUE SEARCH, deliberately. Grepping the open backlog for `ADR-NNNN` goes red
+  # on ADRs that ARE tracked — by an issue that never types the number (5 false positives
+  # in a 13-ADR hand-triaged sample), in another repo by design (ADR-0075 says so), or on
+  # an ADR whose `partial` means an accepted limitation with no tail at all (ADR-0186).
+  # It is also unbaselineable: the same search gave 52, 55 and 64 on three consecutive
+  # days as issues CLOSED underneath it, with no ADR moving. So the gate is offline and
+  # reads one optional front-matter key the author writes, which can express all four
+  # states. Same offline contract as check-adr-registry.sh, which likewise declines to
+  # resolve issue references.
+  #
+  # RATCHET: today's 85 markerless `partial` ADRs are a BASELINE constant in the script,
+  # so this is enforced from day one and number 86 is red at PR time. A baseline entry
+  # that no longer applies — marker written, status no longer partial, file gone — FAILS,
+  # so the list cannot rot into furniture. Same contract as check-pact-provider-replay.py.
+  # Five were drained in the landing PR, so the committed baseline is 80.
+  - id: adr-partial-followup
+    name: "ADR partial delivery-status declares its follow-up (issue #3965, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-adr-partial-followup.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-adr-partial-followup.py --enforce
+
   # Agent charter parity (ADR-0031 / ADR-0156): every openbank-libs/governance/agents.yaml
   # id has a docs/agents/<id>.md and vice versa.
   #
