@@ -72,7 +72,11 @@ class OpaSidecarPolicyDecisionPoint(
             ),
         )
         put("action", action)
-        if (resource != null) put("resource", mapOf("type" to resource.type, "id" to resource.id))
+        // `let` rather than a smart cast: AuthzQuery.resource is a public API property of
+        // openbank-libs-DOMAIN, and Kotlin refuses to smart-cast across a module boundary
+        // (the declaring module could change it). Only surfaced once this adapter moved out
+        // of libs-domain in #3670 — a same-module compile cannot see it.
+        resource?.let { put("resource", mapOf("type" to it.type, "id" to it.id)) }
         put("attributes", attributes)
     }
 

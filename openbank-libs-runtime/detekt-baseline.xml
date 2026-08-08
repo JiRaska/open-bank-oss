@@ -6,6 +6,22 @@
     <ID>FunctionOnlyReturningConstant:FeatureFlagInterceptorTest.kt$FeatureFlagInterceptorTest.Sample$@FeatureFlag(flag = "new-router") fun gated(): String</ID>
     <ID>FunctionOnlyReturningConstant:FeatureFlagInterceptorTest.kt$FeatureFlagInterceptorTest.Sample$@FeatureFlag(flag = "split-flag", targetingKey = "#partyId") fun targeted(partyId: String): String</ID>
     <ID>FunctionOnlyReturningConstant:FeatureFlagInterceptorTest.kt$FeatureFlagInterceptorTest.Sample$fun ungated(): String</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.ACCOUNT_ALREADY_EXISTS$409</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.ACCOUNT_CLOSED$422</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.ACCOUNT_FROZEN$422</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.ACCOUNT_NOT_FOUND$404</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.CONFLICT$409</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.DUPLICATE_REQUEST$409</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.FORBIDDEN$403</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.INSUFFICIENT_FUNDS$422</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.INTERNAL_ERROR$500</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.INVALID_AMOUNT$400</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.INVALID_CURRENCY$400</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.INVALID_IBAN$400</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.NOT_FOUND$404</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.POLICY_DECISION_POINT_UNAVAILABLE$503</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.UNAUTHORIZED$401</ID>
+    <ID>MagicNumber:ApiError.kt$ErrorCode.VALIDATION_ERROR$400</ID>
     <ID>MagicNumber:AuthorizeInterceptor.kt$AuthorizeInterceptor$100</ID>
     <ID>MagicNumber:CommonExceptionMappers.kt$GenericExceptionMapper$500</ID>
     <ID>MagicNumber:CommonExceptionMappers.kt$IllegalArgumentExceptionMapper$400</ID>
@@ -20,8 +36,14 @@
     <ID>MagicNumber:DomainMetrics.kt$DomainMetrics$0.95</ID>
     <ID>MagicNumber:DomainMetrics.kt$DomainMetrics$0.99</ID>
     <ID>MagicNumber:FeatureFlagInterceptor.kt$FeatureFlagInterceptor$110</ID>
+    <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$200</ID>
+    <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$299</ID>
+    <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$404</ID>
+    <ID>MagicNumber:OpaSidecarPolicyDecisionPoint.kt$OpaSidecarPolicyDecisionPoint$200</ID>
+    <ID>MagicNumber:OpaSidecarPolicyDecisionPoint.kt$OpaSidecarPolicyDecisionPoint$299</ID>
     <ID>MagicNumber:RateLimitFilter.kt$RateLimitFilter$429</ID>
     <ID>MagicNumber:RedisIdempotencyStore.kt$RedisIdempotencyStore$3</ID>
+    <ID>NewLineAtEndOfFile:CursorEncoderTest.kt$com.openbank.libs.api.pagination.CursorEncoderTest.kt</ID>
     <ID>ThrowsCount:AuthorizeInterceptor.kt$AuthorizeInterceptor$@AroundInvoke fun authorize(ctx: InvocationContext): Any?</ID>
     <ID>TooManyFunctions:DomainMetrics.kt$DomainMetrics</ID>
     <ID>UnusedParameter:ApiVersionResponseFilter.kt$ApiVersionResponseFilter$path: String</ID>
