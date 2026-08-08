@@ -18,9 +18,11 @@
 # quarkusio/quarkus#30106 / smallrye-reactive-messaging#2028 env-var split bug (SRMSG00071).
 # config_ordinal=500 outranks the baked application.yaml (~254); loaded via QUARKUS_CONFIG_LOCATIONS.
 #
-# #4217/ADR-0248: same bug hits the new billing-outbox-events-in channel's group.id — added
-# below rather than a second ConfigMap, since QUARKUS_CONFIG_LOCATIONS on the Deployment already
-# points at this one file.
+# #4217/ADR-0248: the new billing-outbox-events-in channel needs the same override, but NOT yet —
+# `gates (gitops)` correctly refuses it here: SmallRye treats a configured channel with no
+# `connector:` in the DEPLOYED image's application.yaml as a hard boot failure (SRMSG00071), and
+# the currently deployed document-service image predates #4122 (which declares the channel).
+# Add the line once #4122 has merged AND deployed, in a follow-up PR — not before.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -33,4 +35,3 @@ data:
   override.properties: |
     config_ordinal=500
     mp.messaging.incoming.account-created-in.group.id=openbank-document-service
-    mp.messaging.incoming.billing-outbox-events-in.group.id=openbank-document-service
