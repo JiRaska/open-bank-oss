@@ -24,5 +24,4 @@ import com.fasterxml.jackson.module.kotlin.registerKotlinModule
  */
 private val fixtureMapper: ObjectMapper = ObjectMapper().registerKotlinModule()
 
-internal fun CompliancePackParser.fromJson(json: String): CompliancePack =
-    fromMap(fixtureMapper.readValue(json))
+internal fun CompliancePackParser.fromJson(json: String): CompliancePack = fromMap(fixtureMapper.readValue(json))
