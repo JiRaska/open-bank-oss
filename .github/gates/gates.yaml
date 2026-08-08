@@ -1158,6 +1158,34 @@ gates:
     run: |
       python3 .github/scripts/check-gate-script-registration.py --enforce
 
+  # The DECLARATION half of the main-red watch (issue #4019). `main`'s own CI conclusion was
+  # observed by nothing: the repo's only workflow_run listener re-runs spot-killed runs and
+  # escalates nothing, and deploy-drift-watch.yml — named "Deployed == main watch" — compares
+  # the DEPLOYED IMAGE, so a red commit that deployed reads as perfectly in sync. main went red
+  # four times on 2026-08-07/08 (Services CI/engagement-service, CI/Admin UI build, Security
+  # scan/Trivy twice) and each was found only because a human swept the Actions tab.
+  #
+  # The watch's coverage set is a hand-written `workflows:` list inside a workflow_run trigger,
+  # and this repo has already been bitten by a gate whose scope is a hand-kept list of the thing
+  # it checks (pact-drift-check.yml was green about modules it never regenerated). So the list is
+  # not maintained separately from the artifacts it covers: R1 requires every unconditional
+  # push-on-main workflow to be in it, R2 requires every path-filtered one to be either in it or
+  # in the script's NOT_WATCHED map with a reason, and a stale exclusion fails too.
+  #
+  # The binding copy is HERE, not in main-red-watch.yml: that workflow is workflow_run- and
+  # paths-triggered, so it can never be a required context and its verdict is advisory in
+  # practice. The runtime half (classify a completed run, escalate onto an issue) never gates a
+  # merge — main being red is not a defect in the PR at hand.
+  - id: main-red-watch-declaration
+    name: "every push-on-main workflow is watched or declared (issue #4019, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-main-red-watch.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-main-red-watch.py --check-declaration
+
   - id: opa-sidecar-bundle-shape
     name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"
     group: gitops
