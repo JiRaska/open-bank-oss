@@ -146,8 +146,18 @@ internal fun outboxFor(complaint: Complaint, eventType: String): OutboxMessage =
     payload = complaintPayload(complaint, eventType),
 )
 
+/**
+ * `occurredAt` is [Complaint.updatedAt] (#3914).
+ *
+ * One builder serves every complaint event, so the instant has to be one the aggregate carries for
+ * ALL of them, and `updatedAt` is exactly that: each transition in [ComplaintService] sets it from
+ * the injected clock as part of the same `copy` that produces the state this event describes. On
+ * `complaint.received` it equals `createdAt`, which is the filing instant. `receivedDate`/`dueDate`
+ * are LocalDates — regulatory deadlines, not instants — and cannot serve.
+ */
 private fun complaintPayload(complaint: Complaint, eventType: String): String =
     """{"eventType":"$eventType","complaintId":"${complaint.id}",""" +
         """"reference":"${complaint.reference}","category":"${complaint.category}",""" +
         """"channel":"${complaint.channel}","status":"${complaint.status}",""" +
-        """"receivedDate":"${complaint.receivedDate}","dueDate":"${complaint.dueDate}"}"""
+        """"receivedDate":"${complaint.receivedDate}","dueDate":"${complaint.dueDate}",""" +
+        """"occurredAt":"${complaint.updatedAt.toInstant()}"}"""
