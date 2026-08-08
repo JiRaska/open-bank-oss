@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.0...domestic-payment-v0.13.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* **domestic-payment:** make validatePayment re-entrant so a stranded payment can be re-driven ([#4200](https://github.com/JiRaska/open-bank-oss/issues/4200)) ([305b98c](https://github.com/JiRaska/open-bank-oss/commit/305b98c75e209505dc52b4432b51498d8133bfa6)), closes [#4182](https://github.com/JiRaska/open-bank-oss/issues/4182)
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.12.0...domestic-payment-v0.13.0) (2026-08-08)
 
 
