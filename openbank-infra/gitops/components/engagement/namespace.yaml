@@ -1,0 +1,16 @@
+# Engagement domain (ADR-0037: domain = namespace). App plane. Holds engagement-service.
+# INERT by design: engagement-service is not in auto-deploy.yml's ALL_SERVICES, so no image
+# is ever built or pushed for it and nothing in this namespace ever runs — these manifests
+# exist to satisfy this repo's gitops-presence gates (kafka-topic-existence,
+# oidc-client-secret-wiring) for the REST/persistence/outbox slice merged ahead of them.
+# Turning the service on (adding it to ALL_SERVICES, provisioning a real Postgres cluster,
+# wiring Kafka mTLS + the OPA bundle + network policies) is a deliberate, separate decision.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: engagement
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

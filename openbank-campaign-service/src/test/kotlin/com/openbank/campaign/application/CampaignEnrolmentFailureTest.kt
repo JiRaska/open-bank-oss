@@ -6,6 +6,7 @@ package com.openbank.campaign.application
 
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignRepository
+import com.openbank.campaign.application.port.out.CampaignScheduler
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
@@ -96,6 +97,7 @@ class CampaignEnrolmentFailureTest {
             override suspend fun findById(id: UUID): Campaign? = campaign.takeIf { it.id == id }
             override suspend fun list(): List<Campaign> = listOf(campaign)
             override suspend fun save(campaign: Campaign): Campaign = campaign
+            override suspend fun findActiveByTrigger(trigger: String): List<Campaign> = emptyList()
         },
         enrolments = enrolments,
         segments = object : SegmentRegistry {
@@ -105,9 +107,23 @@ class CampaignEnrolmentFailureTest {
         },
         segmentEvaluation = object : SegmentEvaluationPort {
             override suspend fun evaluate(segment: Segment): List<UUID> = parties
+            override suspend fun matches(segment: Segment, partyId: UUID): Boolean = true
         },
         journeys = journeys,
+        // Enrolment never touches the scheduler — a stub that throws proves it, and would fail
+        // loudly if a future change started scheduling from inside the enrol path.
+        scheduler = ThrowingScheduler,
     )
+
+    /** Any call is a bug in the code under test: `enrol` has no business creating schedules. */
+    private object ThrowingScheduler : CampaignScheduler {
+        override fun upsert(campaignId: UUID, cron: String, zone: String, endAt: java.time.Instant?) =
+            error("enrol must not touch the scheduler")
+
+        override fun pause(campaignId: UUID) = error("enrol must not touch the scheduler")
+        override fun unpause(campaignId: UUID) = error("enrol must not touch the scheduler")
+        override fun delete(campaignId: UUID) = error("enrol must not touch the scheduler")
+    }
 
     @Test
     fun `a party whose journey start fails is left with no enrolment, so a later enrol retries it`(): Unit =

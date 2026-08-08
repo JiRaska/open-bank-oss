@@ -36,6 +36,10 @@ dependencies {
     compileOnly("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
     compileOnly("jakarta.annotation:jakarta.annotation-api:3.0.0")
     compileOnly("jakarta.enterprise:jakarta.enterprise.cdi-api:4.1.0")
+    // @InterceptorBinding / @Nonbinding for the Authorize and FeatureFlag annotations, which
+    // moved here from libs-domain in #3670 (CDI is framework — ADR-0122's runtime side).
+    // Declared explicitly rather than leaned on transitively via cdi-api.
+    compileOnly("jakarta.interceptor:jakarta.interceptor-api:2.2.0")
     compileOnly("jakarta.inject:jakarta.inject-api:2.0.1")
     compileOnly("org.eclipse.microprofile.config:microprofile-config-api:3.1")
     compileOnly("org.jboss.logging:jboss-logging:3.6.2.Final")

@@ -27,12 +27,31 @@ instruction, but the irreversible debit lives downstream.
 ```
 
 - **External entities:** customer-edge (authenticated), admin-UI (ROLE_OPERATOR).
-- **Trust boundaries:** edge → service (OIDC + OPA); service → transaction-service (mTLS + OIDC, fail-closed).
+- **Trust boundaries:** edge → service (OIDC + OPA); service → transaction-service (mTLS + OIDC, fail-closed);
+  service → `opa` PDP sidecar over loopback (`localhost:8181`, no cross-namespace ingress — the port name
+  `opa` is in `gen-network-policies.py`'s `SIDECAR_LOCAL_ONLY_PORT_NAMES`, so it is not published to sdd's
+  caller set). Residual, and shared with every service that runs this sidecar: the unconditional
+  same-namespace NetworkPolicy rule still reaches 8181 from co-tenant pods, because NetworkPolicy cannot
+  express "loopback only".
 - **Assets:** mandate data (IBAN, BIC, mandate reference, signed mandate PDF), collection schedule, debit amounts.
 
 ## 3. Authn/Authz
 
-- All REST endpoints: `@RolesAllowed` (ROLE_CUSTOMER, ROLE_OPERATOR, ROLE_ADMIN scope-dependent, verified by `SddSecurityTest`).
+- All REST endpoints: `@RolesAllowed` (ROLE_OPERATOR, ROLE_ADMIN, ROLE_PAYMENTS, ROLE_API; reads also
+  ROLE_VIEWER), verified by `SddSecurityTest`.
+- Fine-grained authorization: ten `@Authorize` sites over seven actions (`sdd.create`, `.list`, `.read`,
+  `.approve`, `.update`, `.delete`, `.authorise`), evaluated by the `opa` PDP sidecar against
+  `data.openbank.rest.allow` — base `rest.rego` plus `sdd_rest_ext.rego`.
+- **`AUTHZ_ENFORCE` is `false` — advisory. Decisions are evaluated and logged; none are blocked.** Until it
+  is flipped, the `@Authorize` layer is evidence, not a control, and `@RolesAllowed` plus the customer-edge
+  ownership (IDOR) check are the only enforcing gates. Tracked in #3679; the flip needs the live advisory
+  decision log to show an empty would-DENY population for real callers.
+- Policy shape (`sdd_rest_ext.rego`): `operator-sdd-write` excludes `service-account-*` identities outright
+  — the shared `openbank-services` client carries ROLE_OPERATOR and every `client_credentials` JWT is
+  classified HUMAN, so a role-only write rule would be a fleet-wide mandate-write primitive.
+  `edge-service-sdd` names `service-account-openbank-edge` and enumerates only the five actions the customer
+  app has a route for; `sdd.approve` (bank-side B2B verification) and `sdd.authorise` (the decision that
+  books the debit) are withheld from it. `sdd.authorise` has no M2M rule at all — no caller for it exists.
 - Collection initiation calls to `transaction-service` are service-to-service (OIDC client credentials, OPA policy).
 - Mandate amendments require re-confirmation (SCA) for customer-initiated changes.
 
@@ -57,3 +76,9 @@ instruction, but the irreversible debit lives downstream.
 
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `accountId` on listMandates and `debitDate` on assessRefund. Both handlers are non-suspend and threw at the method boundary. `debitDate` is the input to the refund-window arithmetic (8-week / 13-month), so a request missing it must be rejected rather than defaulted — an UNPARSEABLE date is a different class and already 400 via `DateTimeExceptionMapper`. No new caller or boundary. Rollback: revert.
 - **2026-06-19** — Initial lightweight threat model (ADR-0030 D2).
+- **2026-08-06** — OPA PDP sidecar bootstrapped (#3679/#3807). Section 3 corrected: it had claimed
+  `@RolesAllowed(ROLE_CUSTOMER, …)` (a role this resource never lists) and section 2 claimed an
+  `edge → service (OIDC + OPA)` boundary while **no PDP sidecar and no policy bundle existed for this
+  service at all** — so every `@Authorize` annotation was inert and there was not even a decision to log.
+  The sidecar, the bundle and `sdd_rest_ext.rego` now exist; the loopback PDP boundary is recorded in
+  section 2 and the authorization model in section 3. `AUTHZ_ENFORCE` remains `false`, deliberately.

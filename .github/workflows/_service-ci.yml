@@ -24,6 +24,17 @@ on:
         description: "Service directory, e.g. openbank-ledger-service"
         required: true
         type: string
+      ref:
+        # #3306: a provider verification is published against the sha the build ran on
+        # (-Dpact.provider.version below), and a dispatch runs on the tip of main. On a repo
+        # merging this often the tip is almost never the sha a counterpart has DEPLOYED, so
+        # can-i-deploy asks about a version no verification will ever target. Passing the
+        # deployed sha here makes the verification land where the gate looks. Empty keeps the
+        # previous behaviour exactly: check out whatever ref triggered the run.
+        description: "Commit to check out and publish the verification against. Blank = the triggering ref."
+        required: false
+        default: ""
+        type: string
     secrets:
       PACT_BROKER_PASSWORD:
         # Must be declared here for the caller to pass it explicitly: an undeclared
@@ -125,6 +136,28 @@ jobs:
       # egress at the infra layer (egress-only SG in an isolated VPC, ADR-0027), a
       # stronger control, so the shim is redundant (and unsupported on this host).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Blank resolves to the triggering ref, so the default path is byte-identical to before.
+          ref: ${{ inputs.ref }}
+          # A verification published for a sha is a claim about code; it must be code that is ON
+          # main, never an arbitrary branch tip. fetch-depth 0 so the ancestry check below can run.
+          fetch-depth: ${{ inputs.ref == '' && 1 || 0 }}
+
+      - name: Refuse a ref that is not an ancestor of main
+        if: inputs.ref != ''
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          # Publishing a verification says "this provider version satisfies the consumer contract",
+          # and can-i-deploy then lets a deploy through on it. Allowing an off-main sha would let a
+          # branch that never merged authorise a production deploy, so this is a gate, not a nicety.
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor "$REF" origin/main; then
+            echo "::error::$REF is not an ancestor of origin/main. A verification may only be" \
+                 "published for a commit that is on main (#3306)."
+            exit 1
+          fi
+          echo "$REF is on main — publishing the verification against it."
 
       # Resolve GRADLE_USER_HOME by runner class:
       #  - ARC ephemeral (GRADLE_USER_HOME_NODE_CACHE set by arc-runners.tf): node-local
@@ -446,6 +479,9 @@ jobs:
           # Publish provider verification results only from the main push (the SHA
           # auto-deploy will gate on). PR builds verify but don't publish results.
           PUBLISH_RESULTS: ${{ github.ref == 'refs/heads/main' }}
+          # #3306: must be the sha that was CHECKED OUT, not the sha the workflow was dispatched
+          # on — otherwise the verification is published against a commit whose code never ran.
+          PACT_PROVIDER_VERSION: ${{ inputs.ref != '' && inputs.ref || github.sha }}
         run: |
           # Pact Broker config (ADR-0092) is forwarded as -D system properties; the
           # provider build.gradle.kts copies these into the forked test JVM. Empty
@@ -481,7 +517,7 @@ jobs:
             -Dpactbroker.enablePending=true \
             -Dpactbroker.providerBranch="${BRANCH}" \
             -Dpact.verifier.publishResults="${PUBLISH_RESULTS}" \
-            -Dpact.provider.version="${GITHUB_SHA}" \
+            -Dpact.provider.version="${PACT_PROVIDER_VERSION}" \
             -Dpact.provider.branch="${BRANCH}" \
             -Dpact.provider.tag="${BRANCH}"
 
@@ -535,6 +571,9 @@ jobs:
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
           PUBLISH_RESULTS: ${{ github.ref == 'refs/heads/main' }}
+          # #3306: must be the sha that was CHECKED OUT, not the sha the workflow was dispatched
+          # on — otherwise the verification is published against a commit whose code never ran.
+          PACT_PROVIDER_VERSION: ${{ inputs.ref != '' && inputs.ref || github.sha }}
         run: |
           ./gradlew :${{ inputs.service }}:koverXmlReport --build-cache --console=plain \
             -Dpactbroker.url="${PACT_BROKER_URL:-}" \
@@ -543,7 +582,7 @@ jobs:
             -Dpactbroker.enablePending=true \
             -Dpactbroker.providerBranch="${BRANCH}" \
             -Dpact.verifier.publishResults="${PUBLISH_RESULTS}" \
-            -Dpact.provider.version="${GITHUB_SHA}" \
+            -Dpact.provider.version="${PACT_PROVIDER_VERSION}" \
             -Dpact.provider.branch="${BRANCH}" \
             -Dpact.provider.tag="${BRANCH}"
 

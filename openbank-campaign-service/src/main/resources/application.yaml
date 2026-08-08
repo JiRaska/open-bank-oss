@@ -144,6 +144,33 @@ mp:
         auto:
           offset:
             reset: latest
+      # Enrolment triggers. SAME two topics as the *-conversions-in channels above, deliberately
+      # on their own consumer groups: a conversion only appends a row, a trigger starts a journey
+      # and can reach a customer, so their offsets and their lag must not be tied together.
+      #
+      # `reset: latest` is a safety property here, not a default worth copying casually. On
+      # `earliest` the first deploy would replay the entire history of account openings and card
+      # issuances and enrol every party who ever qualified — a mass send, from a config line.
+      account-triggers-in:
+        connector: smallrye-kafka
+        topic: openbank.accounts.account.created
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        group:
+          id: openbank-campaign-service-account-triggers
+        auto:
+          offset:
+            reset: latest
+      card-triggers-in:
+        connector: smallrye-kafka
+        topic: openbank.cards.events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        group:
+          id: openbank-campaign-service-card-triggers
+        auto:
+          offset:
+            reset: latest
       consent-events-in:
         connector: smallrye-kafka
         topic: openbank.consent.events

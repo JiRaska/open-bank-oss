@@ -5,11 +5,16 @@
 package com.openbank.interest.infrastructure.scheduler
 
 import com.openbank.interest.application.port.`in`.CapitalizeInterestUseCase
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.Duration
 import java.time.LocalDate
 
 /**
@@ -29,8 +34,14 @@ import java.time.LocalDate
 class InterestCapitalizationScheduler(
     private val capitalizeInterestUseCase: CapitalizeInterestUseCase,
     private val clock: Clock,
+    private val domainMetrics: DomainMetrics,
 ) {
     private val log = Logger.getLogger(InterestCapitalizationScheduler::class.java)
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofHours(APPROX_MONTHLY_HOURS))
+    }
 
     @Scheduled(
         cron = "{openbank.interest.capitalization-cron}",
@@ -43,9 +54,15 @@ class InterestCapitalizationScheduler(
         return capitalizeInterestUseCase.capitalizeAll(toDate)
             .onItem().invoke { count ->
                 log.infof("interest capitalization up to %s capitalized %d pair(s)", toDate, count)
+                liveness?.recordSuccess()
             }
             .onFailure().invoke { e -> log.errorf(e, "interest capitalization up to %s failed", toDate) }
             .onFailure().recoverWithItem(0)
             .replaceWithVoid()
+    }
+
+    private companion object {
+        const val APPROX_MONTHLY_HOURS = 720L
+        const val WORKFLOW_NAME = "interest-capitalization"
     }
 }

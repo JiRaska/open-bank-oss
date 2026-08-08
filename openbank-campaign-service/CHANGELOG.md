@@ -1,5 +1,103 @@
 # Changelog
 
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/v0.18.0...v0.18.1) (2026-08-08)
+
+
+### Security
+
+* **libs:** ADR-0219 D4 compile-time wiring assertion for the contact gate ([#4072](https://github.com/JiRaska/open-bank-oss/issues/4072)) ([9342915](https://github.com/JiRaska/open-bank-oss/commit/93429152b875d5b0656dc7f7ddfc471e6e96b13f))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/v0.17.0...v0.18.0) (2026-08-07)
+
+
+### Features
+
+* **campaign:** enrol a party the moment a product event says they qualify ([#4058](https://github.com/JiRaska/open-bank-oss/issues/4058)) ([e7f8a63](https://github.com/JiRaska/open-bank-oss/commit/e7f8a6355e8747b633fbd0b7b4ea060f7f65f7d0)), closes [#3585](https://github.com/JiRaska/open-bank-oss/issues/3585)
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/v0.16.0...v0.17.0) (2026-08-07)
+
+
+### Features
+
+* **campaign:** schedule recurring enrolment on a catalogued cadence ([#4051](https://github.com/JiRaska/open-bank-oss/issues/4051)) ([1f3ba2f](https://github.com/JiRaska/open-bank-oss/commit/1f3ba2fd9d62f2039f700278399fda10a2af5c7f))
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/v0.15.0...v0.16.0) (2026-08-07)
+
+
+### Features
+
+* **campaign:** record conversions from product events (ADR-0245) ([#3977](https://github.com/JiRaska/open-bank-oss/issues/3977)) ([0a14c46](https://github.com/JiRaska/open-bank-oss/commit/0a14c46c3793c6f8ada3a42717f44f0b1cb02885))
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/v0.14.0...v0.15.0) (2026-08-07)
+
+
+### Features
+
+* **campaign:** branch a journey on what the platform can actually observe (ADR-0200 D1) ([#3895](https://github.com/JiRaska/open-bank-oss/issues/3895)) ([4b6eb7e](https://github.com/JiRaska/open-bank-oss/commit/4b6eb7e4d96e15d6020e31cab36a25647227a7e4))
+* **campaign:** record conversions from product events (ADR-0245) ([#3977](https://github.com/JiRaska/open-bank-oss/issues/3977)) ([0a14c46](https://github.com/JiRaska/open-bank-oss/commit/0a14c46c3793c6f8ada3a42717f44f0b1cb02885))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/v0.13.0...v0.14.0) (2026-08-07)
+
+
+### Features
+
+* **campaign:** branch a journey on what the platform can actually observe (ADR-0200 D1) ([#3895](https://github.com/JiRaska/open-bank-oss/issues/3895)) ([4b6eb7e](https://github.com/JiRaska/open-bank-oss/commit/4b6eb7e4d96e15d6020e31cab36a25647227a7e4))
+* **campaign:** let a caller select the PUSH channel on a campaign step ([#3897](https://github.com/JiRaska/open-bank-oss/issues/3897)) ([ee9708f](https://github.com/JiRaska/open-bank-oss/commit/ee9708f2c5008cfa436a6010cf33eff4d842605b))
+* **campaign:** record conversions from product events (ADR-0245) ([#3977](https://github.com/JiRaska/open-bank-oss/issues/3977)) ([0a14c46](https://github.com/JiRaska/open-bank-oss/commit/0a14c46c3793c6f8ada3a42717f44f0b1cb02885))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/v0.12.0...v0.13.0) (2026-08-07)
+
+
+### Features
+
+* **campaign,notification:** tell a delivered message from an accepted handoff (ADR-0239) ([#3838](https://github.com/JiRaska/open-bank-oss/issues/3838)) ([789d662](https://github.com/JiRaska/open-bank-oss/commit/789d6626fde13ab48cd72806a07b7c4e6c19ed0e))
+* **campaign:** branch a journey on what the platform can actually observe (ADR-0200 D1) ([#3895](https://github.com/JiRaska/open-bank-oss/issues/3895)) ([4b6eb7e](https://github.com/JiRaska/open-bank-oss/commit/4b6eb7e4d96e15d6020e31cab36a25647227a7e4))
+* **campaign:** let a caller select the PUSH channel on a campaign step ([#3897](https://github.com/JiRaska/open-bank-oss/issues/3897)) ([ee9708f](https://github.com/JiRaska/open-bank-oss/commit/ee9708f2c5008cfa436a6010cf33eff4d842605b))
+* **campaign:** record conversions from product events (ADR-0245) ([#3977](https://github.com/JiRaska/open-bank-oss/issues/3977)) ([0a14c46](https://github.com/JiRaska/open-bank-oss/commit/0a14c46c3793c6f8ada3a42717f44f0b1cb02885))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/v0.11.0...v0.12.0) (2026-08-07)
+
+
+### Features
+
+* **campaign,notification:** tell a delivered message from an accepted handoff (ADR-0239) ([#3838](https://github.com/JiRaska/open-bank-oss/issues/3838)) ([789d662](https://github.com/JiRaska/open-bank-oss/commit/789d6626fde13ab48cd72806a07b7c4e6c19ed0e))
+* **campaign:** branch a journey on what the platform can actually observe (ADR-0200 D1) ([#3895](https://github.com/JiRaska/open-bank-oss/issues/3895)) ([4b6eb7e](https://github.com/JiRaska/open-bank-oss/commit/4b6eb7e4d96e15d6020e31cab36a25647227a7e4))
+* **campaign:** deliver campaign steps on push as well as email ([#3584](https://github.com/JiRaska/open-bank-oss/issues/3584)) ([d5fdaf3](https://github.com/JiRaska/open-bank-oss/commit/d5fdaf3f321e433c6a602892bd99398cf517f12a))
+* **campaign:** let a caller select the PUSH channel on a campaign step ([#3897](https://github.com/JiRaska/open-bank-oss/issues/3897)) ([ee9708f](https://github.com/JiRaska/open-bank-oss/commit/ee9708f2c5008cfa436a6010cf33eff4d842605b))
+* **campaign:** record conversions from product events (ADR-0245) ([#3977](https://github.com/JiRaska/open-bank-oss/issues/3977)) ([0a14c46](https://github.com/JiRaska/open-bank-oss/commit/0a14c46c3793c6f8ada3a42717f44f0b1cb02885))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/v0.10.0...v0.11.0) (2026-08-07)
+
+
+### Features
+
+* **campaign,notification:** tell a delivered message from an accepted handoff (ADR-0239) ([#3838](https://github.com/JiRaska/open-bank-oss/issues/3838)) ([789d662](https://github.com/JiRaska/open-bank-oss/commit/789d6626fde13ab48cd72806a07b7c4e6c19ed0e))
+* **campaign:** branch a journey on what the platform can actually observe (ADR-0200 D1) ([#3895](https://github.com/JiRaska/open-bank-oss/issues/3895)) ([4b6eb7e](https://github.com/JiRaska/open-bank-oss/commit/4b6eb7e4d96e15d6020e31cab36a25647227a7e4))
+* **campaign:** deliver campaign steps on push as well as email ([#3584](https://github.com/JiRaska/open-bank-oss/issues/3584)) ([d5fdaf3](https://github.com/JiRaska/open-bank-oss/commit/d5fdaf3f321e433c6a602892bd99398cf517f12a))
+* **campaign:** let a caller select the PUSH channel on a campaign step ([#3897](https://github.com/JiRaska/open-bank-oss/issues/3897)) ([ee9708f](https://github.com/JiRaska/open-bank-oss/commit/ee9708f2c5008cfa436a6010cf33eff4d842605b))
+* **campaign:** record conversions from product events (ADR-0245) ([#3977](https://github.com/JiRaska/open-bank-oss/issues/3977)) ([0a14c46](https://github.com/JiRaska/open-bank-oss/commit/0a14c46c3793c6f8ada3a42717f44f0b1cb02885))
+* **campaign:** stop journeys at the campaign's own send cap (ADR-0200 D1, [#3585](https://github.com/JiRaska/open-bank-oss/issues/3585) slice 1) ([#3635](https://github.com/JiRaska/open-bank-oss/issues/3635)) ([9c513e8](https://github.com/JiRaska/open-bank-oss/commit/9c513e83dfc19300a9afe543026ec891063783d3))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/v0.9.2...v0.10.0) (2026-08-07)
+
+
+### Features
+
+* **campaign,notification:** tell a delivered message from an accepted handoff (ADR-0239) ([#3838](https://github.com/JiRaska/open-bank-oss/issues/3838)) ([789d662](https://github.com/JiRaska/open-bank-oss/commit/789d6626fde13ab48cd72806a07b7c4e6c19ed0e))
+* **campaign:** branch a journey on what the platform can actually observe (ADR-0200 D1) ([#3895](https://github.com/JiRaska/open-bank-oss/issues/3895)) ([4b6eb7e](https://github.com/JiRaska/open-bank-oss/commit/4b6eb7e4d96e15d6020e31cab36a25647227a7e4))
+* **campaign:** deliver campaign steps on push as well as email ([#3584](https://github.com/JiRaska/open-bank-oss/issues/3584)) ([d5fdaf3](https://github.com/JiRaska/open-bank-oss/commit/d5fdaf3f321e433c6a602892bd99398cf517f12a))
+* **campaign:** let a caller select the PUSH channel on a campaign step ([#3897](https://github.com/JiRaska/open-bank-oss/issues/3897)) ([ee9708f](https://github.com/JiRaska/open-bank-oss/commit/ee9708f2c5008cfa436a6010cf33eff4d842605b))
+* **campaign:** record conversions from product events (ADR-0245) ([#3977](https://github.com/JiRaska/open-bank-oss/issues/3977)) ([0a14c46](https://github.com/JiRaska/open-bank-oss/commit/0a14c46c3793c6f8ada3a42717f44f0b1cb02885))
+* **campaign:** route journey delivery through the ADR-0219 ContactPolicyGate ([#3665](https://github.com/JiRaska/open-bank-oss/issues/3665)) ([34a8093](https://github.com/JiRaska/open-bank-oss/commit/34a80938df33dfb5d72309ce7a2eb41ed9c9f1b5))
+* **campaign:** stop journeys at the campaign's own send cap (ADR-0200 D1, [#3585](https://github.com/JiRaska/open-bank-oss/issues/3585) slice 1) ([#3635](https://github.com/JiRaska/open-bank-oss/issues/3635)) ([9c513e8](https://github.com/JiRaska/open-bank-oss/commit/9c513e83dfc19300a9afe543026ec891063783d3))
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/v0.15.0...v0.16.0) (2026-08-07)
+
+
+### Features
+
+* **campaign:** record conversions from product events (ADR-0245) ([#3977](https://github.com/JiRaska/open-bank-oss/issues/3977)) ([0a14c46](https://github.com/JiRaska/open-bank-oss/commit/0a14c46c3793c6f8ada3a42717f44f0b1cb02885))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/v0.14.0...v0.15.0) (2026-08-06)
 
 

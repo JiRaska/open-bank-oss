@@ -5,6 +5,7 @@
 package com.openbank.campaign.infrastructure.rest
 
 import com.openbank.campaign.application.usecase.CampaignService
+import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.SegmentRef
@@ -18,6 +19,7 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.jwt.JsonWebToken
+import java.time.Instant
 import java.util.UUID
 
 data class CreateCampaignRequest(
@@ -29,10 +31,29 @@ data class CreateCampaignRequest(
     val stopCondition: StopConditionRequest? = null,
     /** ADR-0245 D1: a ConversionCatalog key, or absent to measure no conversion. */
     val conversionRule: String? = null,
+    /** Absent means one-shot: enrolment happens only on POST /{id}/enrol, as it always has. */
+    val schedule: ScheduleRequest? = null,
+    /**
+     * A TriggerCatalog key, or absent. When set, a matching product event enrols a party at once —
+     * but only one the segment still contains: the trigger decides when, the segment decides who.
+     */
+    val trigger: String? = null,
 )
 
 /** Optional on create (ADR-0200 D1, #3585): absent means the journey runs every step, as before. */
 data class StopConditionRequest(val maxSendsPerParty: Int)
+
+/**
+ * A recurring campaign's cadence.
+ *
+ * [cadence] is a `ScheduleCatalog` key, never a cron expression — the expression and its time zone
+ * live in domain code, so a malformed one cannot be posted and a campaign cannot quietly acquire a
+ * schedule that never fires. `GET /api/v1/campaigns/cadences` lists what may be sent here.
+ *
+ * The schedule is stored on the draft and only becomes a live Temporal schedule at activation, so a
+ * campaign cannot enrol anyone before it has passed four-eyes.
+ */
+data class ScheduleRequest(val cadence: String, val endAt: Instant? = null)
 
 /**
  * A step on the create body.
@@ -113,6 +134,8 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
             createdBy,
             request.stopCondition?.let { StopCondition(it.maxSendsPerParty) },
             request.conversionRule,
+            request.schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
+            request.trigger,
         )
         return Response.status(Response.Status.CREATED).entity(campaign).build()
     }

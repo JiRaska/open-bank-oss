@@ -74,6 +74,7 @@ class CampaignJourneyActivitiesTest {
             override suspend fun findById(id: UUID) = if (id == campaignId) campaign else null
             override suspend fun list() = listOf(campaign)
             override suspend fun save(campaign: Campaign) = campaign
+            override suspend fun findActiveByTrigger(trigger: String) = emptyList<Campaign>()
         }
         val enrolments = object : EnrolmentRepository {
             override suspend fun findByCampaignAndParty(campaignId: UUID, partyId: UUID): Enrolment? = null

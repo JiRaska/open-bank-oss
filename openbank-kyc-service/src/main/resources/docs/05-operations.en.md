@@ -13,7 +13,7 @@
 openbank-infra/scripts/build-push-service.sh kyc-service
 ```
 
-The `Dockerfile` builds a **fast-jar** (`-Dquarkus.package.jar.type=fast-jar`) and the runtime stage copies `quarkus-app/`. Runtime image: `eclipse-temurin:25-jre-alpine`, non-root `openbank` user, ZGC. Never use uber-jar (empty `quarkus-app/` → crashloop).
+The **fast-jar** (`-Dquarkus.package.jar.type=fast-jar`) is built host-side; the image is assembled by `.github/workflows/Dockerfile.deploy`, which copies `quarkus-app/`. Runtime image: `eclipse-temurin:25-jre` (glibc, #3354), non-root `openbank` user, ZGC. Never use uber-jar (empty `quarkus-app/` → crashloop). `openbank-kyc-service/Dockerfile` builds nothing (#3016) — the pipeline reads only its `EXPOSE`.
 
 ## Endpoints
 

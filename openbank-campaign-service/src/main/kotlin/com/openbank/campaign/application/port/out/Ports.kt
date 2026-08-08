@@ -18,6 +18,16 @@ interface CampaignRepository {
     suspend fun findById(id: UUID): Campaign?
     suspend fun list(): List<Campaign>
     suspend fun save(campaign: Campaign): Campaign
+
+    /**
+     * ACTIVE campaigns waiting on [trigger] — the only ones a product event may enrol into.
+     *
+     * A query rather than a filter over `list()`: this runs once per matching product event, and
+     * loading every campaign in the estate to discard almost all of them would put the whole table
+     * on the hot path of a Kafka consumer. The ACTIVE filter is in SQL for the same reason it is a
+     * guard in the service — a DRAFT campaign has not passed four-eyes and must not enrol anyone.
+     */
+    suspend fun findActiveByTrigger(trigger: String): List<Campaign>
 }
 
 interface EnrolmentRepository {
@@ -132,6 +142,16 @@ interface SegmentRegistry {
 /** ADR-0210: evaluates a segment against the silver layer and returns matching party ids. */
 interface SegmentEvaluationPort {
     suspend fun evaluate(segment: Segment): List<UUID>
+
+    /**
+     * Whether [partyId] is in [segment] right now — the membership check on the trigger path.
+     *
+     * Its own method rather than `evaluate(segment).contains(partyId)`: that would pull an entire
+     * audience out of ClickHouse to answer a yes/no question, once per product event. The
+     * implementation adds one predicate to the same generated WHERE clause, so the two can never
+     * disagree about what the segment means.
+     */
+    suspend fun matches(segment: Segment, partyId: UUID): Boolean
 }
 
 /** ADR-0198/0195: live per-call consent check — a cached consent survives its own revocation. */
@@ -162,4 +182,30 @@ interface NotificationSendPort {
 interface JourneySignaller {
     fun signalConsentRevoked(campaignId: UUID, partyId: UUID)
     fun startJourney(campaignId: UUID, partyId: UUID)
+}
+
+/**
+ * The recurring-enrolment schedule of a campaign, held outside this service by Temporal.
+ *
+ * Every method is idempotent on the campaign id, because the caller is a REST lifecycle transition
+ * that can be retried and because the schedule may already be in the requested state — activating
+ * an already-scheduled campaign must not be an error.
+ *
+ * Deliberately NOT a `suspend` interface: the Temporal `ScheduleClient` is blocking, and wrapping it
+ * in `runBlocking` inside a coroutine is the shape that produced `HR000068` across five schedulers
+ * in this repo. The call sites are `@Blocking` REST transitions, so a plain synchronous port is both
+ * honest and correct here.
+ */
+interface CampaignScheduler {
+    /** Creates or updates the schedule so it fires [cron] in [zone] until [endAt]. */
+    fun upsert(campaignId: UUID, cron: String, zone: String, endAt: Instant?)
+
+    /** Stops the schedule firing without forgetting it — the campaign can resume. */
+    fun pause(campaignId: UUID)
+
+    /** Resumes a paused schedule. A no-op when the campaign never had one. */
+    fun unpause(campaignId: UUID)
+
+    /** Removes the schedule entirely. Called when a campaign closes; safe when none exists. */
+    fun delete(campaignId: UUID)
 }

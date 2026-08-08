@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: Apache-2.0
+quarkus:
+  application:
+    name: openbank-engagement-service
+  http:
+    port: 8153
+    test-port: 0
+  datasource:
+    db-kind: postgresql
+    reactive:
+      url: postgresql://localhost:5432/openbank_engagement
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_engagement
+    username: ${DB_USER:engagement}
+    password: ${DB_PASSWORD:engagement}
+  flyway:
+    migrate-at-start: true
+  hibernate-orm:
+    physical-naming-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
+  oidc:
+    auth-server-url: ${KEYCLOAK_URL:http://localhost:8080}/realms/openbank
+    client-id: openbank-services
+  # Outbound M2M token for the consent-service check (ContactPolicyGate's consent port).
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080}/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+  rest-client:
+    consent-service:
+      url: ${CONSENT_SERVICE_URL:http://localhost:8106}
+      scope: jakarta.inject.Singleton
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  log:
+    level: INFO
+
+openbank:
+  engagement:
+    marketing-grantee: party-service:marketing-comms
+    impression-budget-per-window: 1
+  # Every service with an outbox entity must flip this explicitly — it defaults to false, and a
+  # service that forgets ships an outbox that fills forever with no error anywhere.
+  outbox:
+    dispatch-enabled: true
+
+mp:
+  messaging:
+    outgoing:
+      engagement-outbox-out:
+        connector: smallrye-kafka
+        client.id: engagement-service-${quarkus.uuid}
+        topic: openbank.engagement.events
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+
+"%test":
+  # `authz.enforce` carries defaultValue = "true" in AuthorizeInterceptor, and a test JVM has no
+  # PolicyDecisionPoint bean — so every @Authorize call on SurfaceResource's two endpoints fails
+  # closed with 503 before the handler runs, and SurfaceRestContractIT's status assertions fail.
+  # Measured in #4128: removing this key alone turns all four of those tests red with 503.
+  # Advisory HERE ONLY, same pattern and reasoning as campaign-service: that IT is about the HTTP
+  # contract, not about who may call what — the OPA gate and the rego tests own that, and neither
+  # needs the app running. The deployed posture is unchanged, decided by the sidecar (#4068).
+  authz:
+    enforce: false
+  quarkus:
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+    oidc-client:
+      enabled: false
+  openbank:
+    outbox:
+      dispatch-enabled: false
