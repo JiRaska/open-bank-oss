@@ -19,6 +19,7 @@ import com.openbank.dispute.domain.model.RemediationOutcome
 import com.openbank.dispute.domain.model.ResolveDisputeRequest
 import com.openbank.dispute.domain.model.UpdateDisputeRequest
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.audit.AuditEventTime
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -254,6 +255,49 @@ class DisputeServiceTest {
         assertThat(remediationEvent.payload).contains(existing.accountId.toString())
         assertThat(remediationEvent.payload).contains("\"amount\":50.00")
     }
+
+    /**
+     * #3914: red before both payloads gained `occurredAt` — neither carried an event time
+     * `AuditConsumer` reads, so both audit rows recorded the consumer's ingest clock. Asserts BOTH
+     * messages, and asserts the value is the RESOLUTION instant rather than merely present: the
+     * remediation event deliberately shares the resolved event's instant, and a fresh clock read
+     * on either would put two different "when"s on one indivisible state change.
+     */
+    @Test
+    fun `both resolve outbox payloads carry the resolution instant as the audit event time`() {
+        val id = UUID.randomUUID()
+        val existing = Dispute(
+            id = id,
+            reference = "DSP-3001",
+            transactionId = UUID.randomUUID(),
+            accountId = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            disputeType = DisputeType.UNAUTHORIZED,
+            status = DisputeStatus.UNDER_REVIEW,
+            amount = BigDecimal("50.00"),
+            transactionDate = today,
+            filingDate = today,
+            resolutionDeadline = today.plusDays(45),
+            createdAt = now,
+            updatedAt = now,
+        )
+        val messagesSlot = slot<List<OutboxMessage>>()
+        every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
+        every { disputeRepo.update(any(), capture(messagesSlot)) } answers
+            { Uni.createFrom().item(firstArg<Dispute>()) }
+        every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
+
+        val resolved = service.resolve(
+            id,
+            ResolveDisputeRequest(outcome = RemediationOutcome.UPHELD, resolvedBy = "caseworker"),
+        ).await().indefinitely()
+
+        val resolvedAt = requireNonNull(resolved.resolvedAt).toInstant()
+        assertThat(messagesSlot.captured).hasSize(2)
+        messagesSlot.captured.forEach { AuditEventTime.assertRecordedAsEventTime(it.payload, resolvedAt) }
+    }
+
+    private fun <T> requireNonNull(value: T?): T = requireNotNull(value) { "resolvedAt must be set by resolve()" }
 
     @Test
     fun `resolve with REJECTED emits only the resolved event, no remediation amount`() {
