@@ -84,9 +84,16 @@ class DelegatedCardTest {
         resourceId: UUID = account,
         status: String = "ACTIVE",
         from: UUID = grantor,
+        // Was hardcoded "CARD_VIEW" for every resourceType — but CARD_VIEW is not an ACCOUNT
+        // capability at all under DelegationGrant.CAPABILITY_MATRIX, so the ACCOUNT tests asserted
+        // against a grant shape that cannot exist and the happy path passed on one authorising no
+        // spending. Default now follows the resource: an ACCOUNT grant that mints a card must
+        // authorise payment; a CARD grant is about sharing an existing card.
+        capabilities: String =
+            if (resourceType == "ACCOUNT") "\"ACCOUNT_INITIATE_PAYMENT\"" else "\"CARD_VIEW\"",
     ) = Response.ok(
         """[{"id":"$grantId","status":"$status","resourceType":"$resourceType",""" +
-            """"resourceId":"$resourceId","grantorPartyId":"$from","capabilities":["CARD_VIEW"]}]""",
+            """"resourceId":"$resourceId","grantorPartyId":"$from","capabilities":[$capabilities]}]""",
     ).build()
 
     private fun approvedSca(upstream: UpstreamClient) {
@@ -276,6 +283,27 @@ class DelegatedCardTest {
 
         assertThat(resp.status).isEqualTo(200)
         verify { upstream.put(match { it.contains("/cards/$cardId/limits") }, any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a read-only grant cannot mint a payment card`() {
+        // The four filters on activeAccountGrantId (status, resourceType, resourceId, grantor) all
+        // pass for a grant that authorises nothing but reading. Before the capability filter this
+        // issued a live payment card off ACCOUNT_READ_BALANCES — a grandparent sharing balance
+        // visibility would have minted the relative a card that can spend.
+        // Mirrors `no active grant means no card`: same full upstream, same caller (the grantor
+        // issues), and only the grant's capabilities differ — so a 403 here can only be the
+        // capability filter, not a missing mock or a validation refusal.
+        val upstream = happyIssueUpstream()
+        every { upstream.get(match { it.contains("/delegations/grantee/$grantee") }, any()) } returns
+            grantList(capabilities = "\"ACCOUNT_READ_BALANCES\"")
+
+        val resp = resourceFor(upstream, grantor)
+            .issueDelegatedCard(issueBody(), null, UUID.randomUUID().toString())
+
+        assertThat(resp.status).isEqualTo(403)
+        // and no card was ever requested from card-issuance
+        verify(exactly = 0) { upstream.post(match { it.endsWith("/api/v1/cards") }, any(), any(), any()) }
     }
 
     @Test

@@ -3163,7 +3163,12 @@ class CustomerEdgeResource(
         @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?,
     ): Response {
         val customer = customer()
-        if (!ownsCard(id, customer.partyId)) return forbidden("Card does not belong to caller")
+        // HOLDER ONLY, deliberately not ownsCard: that predicate was widened to the account owner
+        // so a grantor can freeze or re-limit a delegate's card, which is right. Reading the full
+        // PAN and CVV is not the same act — D5 refuses a delegated PAN reveal on PCI grounds, and
+        // the account-owner arm would grant exactly that, retroactively, for every card whose
+        // holder differs from the account owner.
+        if (!isCardHolder(id, customer.partyId)) return forbidden("Card does not belong to caller")
         scaCardGate(scaChallengeId, customer, id.toString(), "REVEAL_DETAILS", "cards.details")?.let { return it }
         val resp = upstream.get(
             "$cardIssuanceServiceUrl/api/v1/cards/$id/secure-details",
@@ -3332,6 +3337,12 @@ class CustomerEdgeResource(
         return isHolderOrAccountOwner(cardJson, partyId)
     }
 
+    /** Holder only — see [revealCardDetails] for why the account-owner arm must not apply there. */
+    private fun isCardHolder(id: UUID, partyId: UUID): Boolean {
+        val cardJson = fetchCard(id, partyId) ?: return false
+        return extractOwnerPartyId(cardJson) == partyId.toString()
+    }
+
     private fun isHolderOrAccountOwner(cardJson: String, partyId: UUID): Boolean {
         if (extractOwnerPartyId(cardJson) == partyId.toString()) return true
         val accountId = extractTextField(objectMapper, cardJson, "accountId")
@@ -3414,6 +3425,14 @@ class CustomerEdgeResource(
             .filter { it.path("resourceType").asText() == "ACCOUNT" }
             .filter { it.path("resourceId").asText() == accountId.toString() }
             .filter { it.path("grantorPartyId").asText() == grantorPartyId.toString() }
+            // A card is a spending instrument, so the grant behind it must actually authorise
+            // spending. Without this the four filters above admit a read-only grant — e.g. one
+            // carrying ACCOUNT_READ_BALANCES alone — and mint a live payment card from it. That
+            // also routes around ADR-0232 D5, whose EXECUTION_CAPABILITIES => KycLevel.FULL rule
+            // only engages when an execution capability is present.
+            .filter { grant ->
+                grant.path("capabilities").any { it.asText() == ACCOUNT_INITIATE_PAYMENT_CAPABILITY }
+            }
             .mapNotNull { it.path("id").asText(null)?.takeIf { id -> id.isNotBlank() } }
             .firstOrNull()
     }
@@ -4116,6 +4135,13 @@ class CustomerEdgeResource(
     companion object {
         // A ThemeSpec is a small token document; 8 KiB leaves headroom for future fields
         // while keeping Redis abuse-proof (ADR-0190).
+        /**
+         * The one ACCOUNT capability that authorises spending. Named here rather than inlined
+         * because the delegation capability vocabulary lives in DelegationGrant.CAPABILITY_MATRIX
+         * and this edge only ever sees it as a JSON string.
+         */
+        private const val ACCOUNT_INITIATE_PAYMENT_CAPABILITY = "ACCOUNT_INITIATE_PAYMENT"
+
         private const val THEME_SPEC_MAX_BYTES = 8 * 1024
 
         // Decimal scale for the FX mid-price projected to the app (rate = (bid+ask)/2).
