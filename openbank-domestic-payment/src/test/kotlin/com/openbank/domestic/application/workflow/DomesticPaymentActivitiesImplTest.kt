@@ -215,6 +215,20 @@ class DomesticPaymentActivitiesImplTest {
     }
 
     @Test
+    fun `validatePayment is a no-op on a payment that already moved past validation`() {
+        // A payment stranded in SENT_TO_CLEARING is recovered by re-driving the workflow, which
+        // replays every activity from the top. Without the guard this call throws "Invalid
+        // domestic payment status transition: SENT_TO_CLEARING -> VALIDATED" and the re-drive
+        // never reaches settlePayment — the step that actually recovers it (#4182).
+        val payment = payment(status = DomesticPaymentStatus.SENT_TO_CLEARING)
+        coEvery { paymentRepository.findById(payment.id) } returns payment
+
+        activities.validatePayment(payment.id)
+
+        coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+    }
+
+    @Test
     fun `rejectPayment transitions to REJECTED with SANCTIONS_HIT reason`() {
         val payment = payment()
         coEvery { paymentRepository.findById(payment.id) } returns payment
