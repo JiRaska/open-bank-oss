@@ -8,12 +8,12 @@ import com.openbank.billing.application.port.out.AccountPartyLookupPort
 import com.openbank.billing.application.port.out.BillableAccountDiscoveryPort
 import com.openbank.billing.application.port.out.BillingAssessmentRepository
 import com.openbank.billing.domain.AnnualFeeSummary
+import com.openbank.libs.domain.calendar.AccountingClock
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
 
 /**
  * Builds and publishes the PAD (EU) 2014/92 Art. 5 annual statement of fees (ADR-0248): for one
@@ -21,7 +21,7 @@ import java.time.ZoneId
  * into an [AnnualFeeSummary] and idempotently appends the `billing.annual-fee-summary.ready`
  * outbox row.
  *
- * **`year` is a CALENDAR year in the [ZONE] the bank operates in (Europe/Prague, matching the
+ * **`year` is a CALENDAR year in the [AccountingClock.BANK_ZONE] the bank operates in (Europe/Prague, matching the
  * scheduled trigger's own timezone — see `AnnualFeeSummaryScheduler`), not a rolling 12-month
  * window** — `[Jan 1 00:00, next Jan 1 00:00)` of that zone, converted to the `Instant` boundaries
  * the repository query needs.
@@ -100,13 +100,9 @@ class AnnualFeeSummaryService(
     }
 
     private fun yearBounds(year: Int): Pair<Instant, Instant> {
-        val from = LocalDate.of(year, 1, 1).atStartOfDay(ZONE).toInstant()
-        val to = LocalDate.of(year + 1, 1, 1).atStartOfDay(ZONE).toInstant()
+        val from = LocalDate.of(year, 1, 1).atStartOfDay(AccountingClock.BANK_ZONE).toInstant()
+        val to = LocalDate.of(year + 1, 1, 1).atStartOfDay(AccountingClock.BANK_ZONE).toInstant()
         return from to to
-    }
-
-    private companion object {
-        val ZONE: ZoneId = ZoneId.of("Europe/Prague")
     }
 }
 
