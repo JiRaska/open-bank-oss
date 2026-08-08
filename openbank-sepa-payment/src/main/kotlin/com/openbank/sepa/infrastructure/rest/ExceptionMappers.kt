@@ -6,6 +6,7 @@ package com.openbank.sepa.infrastructure.rest
 
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.sepa.application.port.out.DocumentTemplateUnavailableException
 import com.openbank.sepa.application.usecase.InvalidSepaPaymentStateTransitionException
 import com.openbank.sepa.application.usecase.PaymentNotCompletedException
@@ -41,7 +42,7 @@ class PaymentNotCompletedMapper : ExceptionMapper<PaymentNotCompletedException> 
     override fun toResponse(exception: PaymentNotCompletedException): Response = Response.status(HTTP_CONFLICT)
         .entity(
             ApiError(
-                UUID.randomUUID().toString(),
+                Ids.randomId().toString(),
                 HTTP_CONFLICT,
                 ErrorCode.CONFLICT.code,
                 exception.message ?: "Conflict",
@@ -56,7 +57,7 @@ class DocumentTemplateUnavailableMapper : ExceptionMapper<DocumentTemplateUnavai
         Response.status(HTTP_BAD_GATEWAY)
             .entity(
                 ApiError(
-                    UUID.randomUUID().toString(),
+                    Ids.randomId().toString(),
                     HTTP_BAD_GATEWAY,
                     ErrorCode.INTERNAL_ERROR.code,
                     exception.message ?: "Confirmation document unavailable",
