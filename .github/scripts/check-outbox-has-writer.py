@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+#
+# ---------------------------------------------------------------------------------------
+# A service that ships an outbox must write to it (issue #4007).
+#
+# THE DEFECT THIS CATCHES
+# Eight services ship the whole transactional-outbox apparatus — a `*OutboxDispatcher`, a backlog
+# gauge, a Flyway migration for the table, `openbank.outbox.dispatch-enabled: true` — and construct
+# no `OutboxMessage` anywhere in `src/main`. The dispatcher polls a table nothing writes to, forever.
+#
+# It is invisible from every angle normally checked:
+#   * `dispatch-enabled: true` is set, so the usual "the switch was never flipped" check passes
+#   * the dispatcher runs, finds nothing, and logs nothing
+#   * the backlog gauge reads 0 — indistinguishable from a healthy drained queue
+#   * the events still arrive downstream, because those services publish through a SECOND, direct,
+#     non-transactional `@Channel` emitter — so no consumer notices
+#   * a unit test that mocks the repository cannot tell which publisher a use case called
+#
+# What is lost is the guarantee the outbox exists for: that the state change and the event commit
+# together. A direct emitter cannot do that. `PARTY_MERGED` and `AccountStatusChanged` are exactly
+# the events where that divergence is expensive.
+#
+# WHY THIS PREDICATE AND NOT `persistInTransaction` CALLERS
+# #4007 was written from a count of `persistInTransaction` call sites, and that is the wrong
+# question — it finds the plumbing, not the write. Measured both ways on the same tree, they
+# disagree on four services in both directions: `interest` and `sepa-instant` have no
+# `persistInTransaction` caller yet DO construct an `OutboxMessage`; `balance` and `kyc` have the
+# repository method and construct nothing. Constructing the message IS the write, so that is what
+# this checks.
+#
+# COMMENTS AND STRINGS ARE STRIPPED FIRST
+# This repo has been burnt in both directions — a guard that flagged the comment explaining the bug
+# it exists to catch (#2450), and a test that matched the five-line comment above the very line it
+# asserted on, so deleting the line left it green (#3072). A KDoc saying "constructs an
+# OutboxMessage(...)" must not count as a writer. Kotlin block comments NEST, so the stripper is a
+# depth counter rather than a regex; string literals go first so a `"/*"` inside one cannot open a
+# comment.
+#
+# RATCHET, NOT A BIG BANG
+# The eight below are real and each needs a per-service decision (wire it, or delete the apparatus)
+# that is not this gate's to make. They are baselined against #4007 so the gate can be ENFORCED
+# today: a ninth service cannot be added quietly. A baseline entry that becomes covered is reported
+# too, so the list keeps meaning something rather than silently becoming permanent.
+
+from __future__ import annotations
+
+import argparse
+import pathlib
+import re
+import sys
+
+# Baselined violations. Each is a service that ships an outbox nothing writes to, measured
+# 2026-08-07. Removing one from this list is the definition of done for that service.
+BASELINE = {
+    "openbank-audit-service": "#4007 — dispatcher + gauge, no OutboxMessage construction",
+    "openbank-balance-service": "#4007 — publishes via the direct KafkaBalanceEventPublisher instead",
+    "openbank-billing-service": "#4007 — 2 DEAD rows exist from a writer no longer present; see the issue",
+    "openbank-kyc-service": "#4007 — repository method present, nothing constructs a message",
+    "openbank-party-service": "#4007 — publishes via the direct KafkaPartyEventPublisher instead",
+    "openbank-pid-service": "#4007 — dispatcher + gauge, no OutboxMessage construction",
+    "openbank-psd2-service": "#4007 — dispatcher + gauge, no OutboxMessage construction",
+    "openbank-tpp-registry-service": "#4007 — dispatcher + gauge, no OutboxMessage construction",
+}
+
+DISPATCHER_RE = re.compile(r"class\s+\w*OutboxDispatcher\b")
+DECLARATION_RE = re.compile(r"(data\s+)?class\s+OutboxMessage\s*\(")
+
+
+def strip_comments_and_strings(src: str) -> str:
+    """Remove string literals, line comments and NESTED block comments.
+
+    Strings first: a `"/*"` inside a literal must not open a comment. Kotlin's block comments nest,
+    so `/* /* */ */` closes once — a non-greedy regex would close at the first `*/` and leave the
+    tail of a KDoc as live code.
+    """
+    src = re.sub(r'"(?:\\.|[^"\\])*"', '""', src)
+    src = re.sub(r"//[^\n]*", "", src)
+    out: list[str] = []
+    depth = i = 0
+    while i < len(src):
+        if src.startswith("/*", i):
+            depth += 1
+            i += 2
+            continue
+        if src.startswith("*/", i) and depth:
+            depth -= 1
+            i += 2
+            continue
+        if not depth:
+            out.append(src[i])
+        i += 1
+    return "".join(out)
+
+
+def classify_service(files: dict[str, str]) -> tuple[bool, bool]:
+    """(ships_a_dispatcher, constructs_a_message) for one service's RAW `src/main` sources.
+
+    Stripping happens HERE, not in the caller. The first version of this took pre-stripped input and
+    the self-test — which passes raw source, as any honest test of "does a comment count" must —
+    failed all four comment cases. A seam where the caller is trusted to sanitise is a seam where one
+    forgetful caller silently counts prose as code, which is the exact failure this gate exists to
+    prevent.
+    """
+    dispatcher = writes = False
+    for raw in files.values():
+        body = strip_comments_and_strings(raw)
+        if DISPATCHER_RE.search(body):
+            dispatcher = True
+        if "OutboxMessage(" in body and not DECLARATION_RE.search(body):
+            writes = True
+    return dispatcher, writes
+
+
+def scan(root: pathlib.Path) -> dict[str, bool]:
+    """service -> constructs_a_message, for every service that ships a dispatcher."""
+    result: dict[str, bool] = {}
+    for svc in sorted(p for p in root.glob("openbank-*") if p.is_dir()):
+        # openbank-libs-* ships the ABSTRACT dispatcher every service extends. It owns no table and
+        # constructs no message by design, so including it is a permanent false positive.
+        if svc.name.startswith("openbank-libs"):
+            continue
+        main = svc / "src" / "main" / "kotlin"
+        if not main.is_dir():
+            continue
+        files = {}
+        for kt in main.rglob("*.kt"):
+            try:
+                files[str(kt)] = kt.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+        dispatcher, writes = classify_service(files)
+        if dispatcher:
+            result[svc.name] = writes
+    return result
+
+
+def self_test() -> int:
+    fails = 0
+
+    def expect(name, got, want):
+        nonlocal fails
+        if got == want:
+            print(f"  ok   {name}")
+        else:
+            print(f"  FAIL {name}: want {want}, got {got}")
+            fails = 1
+
+    disp = "class PartyOutboxDispatcher : AbstractOutboxDispatcher() { }"
+    write = "val m = OutboxMessage(eventId = id, aggregateId = a, eventType = t, payload = p)"
+    decl = "data class OutboxMessage(\n  val eventId: UUID,\n)"
+
+    expect("dispatcher + a real construction is clean",
+           classify_service({"a.kt": disp, "b.kt": write}), (True, True))
+    expect("dispatcher with no construction is a violation",
+           classify_service({"a.kt": disp}), (True, False))
+    expect("no dispatcher is out of scope entirely",
+           classify_service({"b.kt": write}), (False, True))
+    # The declaration is not a write — otherwise libs-domain would count as its own writer.
+    expect("the data class declaration alone is not a write",
+           classify_service({"a.kt": disp, "d.kt": decl}), (True, False))
+
+    # Code-about-code: prose naming the constructor must not count.
+    kdoc = disp + "\n/** Builds an OutboxMessage(...) for each transition. */\n"
+    expect("a KDoc mentioning OutboxMessage( is NOT a writer",
+           classify_service({"a.kt": kdoc}), (True, False))
+    line_comment = disp + "\n// val m = OutboxMessage(x)\n"
+    expect("a commented-out construction is NOT a writer",
+           classify_service({"a.kt": line_comment}), (True, False))
+    nested = disp + "\n/* outer /* inner */ still a comment: OutboxMessage(x) */\n"
+    expect("a NESTED block comment stays a comment to its real end",
+           classify_service({"a.kt": nested}), (True, False))
+    in_string = disp + '\nval s = "OutboxMessage(fake)"\n'
+    expect("the constructor named inside a string literal is NOT a writer",
+           classify_service({"a.kt": in_string}), (True, False))
+    # …and the stripper must not swallow real code that merely follows a comment.
+    after = disp + "\n/* note */\n" + write
+    expect("a real construction AFTER a comment still counts",
+           classify_service({"a.kt": after}), (True, True))
+
+    if fails:
+        print("check-outbox-has-writer: self-test FAIL")
+        return 1
+    print("check-outbox-has-writer: self-test PASS")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("root", nargs="?", default=".")
+    ap.add_argument("--self-test", action="store_true")
+    args = ap.parse_args()
+
+    if args.self_test:
+        return self_test()
+
+    found = scan(pathlib.Path(args.root))
+    violations = sorted(svc for svc, writes in found.items() if not writes)
+    new = [v for v in violations if v not in BASELINE]
+    stale = sorted(b for b in BASELINE if b not in violations)
+
+    for svc in new:
+        print(
+            f"::error::{svc}: ships an *OutboxDispatcher but constructs no OutboxMessage in "
+            f"src/main. The dispatcher will poll a table nothing writes to — its backlog gauge "
+            f"reads 0, which is indistinguishable from a drained queue. Either wire the write side "
+            f"or delete the apparatus (#4007)."
+        )
+    for svc in stale:
+        print(
+            f"::error::{svc}: baselined in this script as having no outbox writer, but it now has "
+            f"one. Remove it from BASELINE so the list keeps meaning something."
+        )
+
+    print(
+        f"check-outbox-has-writer: {len(found)} service(s) ship a dispatcher; "
+        f"{len(violations)} without a writer ({len(BASELINE)} baselined, {len(new)} new, "
+        f"{len(stale)} stale baseline entr{'y' if len(stale) == 1 else 'ies'})."
+    )
+    return 1 if (new or stale) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

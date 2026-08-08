@@ -259,6 +259,20 @@ def main():
             w("> absent either way. Residency, DPA and the synthetic-data licence position are")
             w("> recorded in **ADR-0175**.")
             w("")
+        # Closing the egress hole does NOT make a hosted provider unremarkable, and until this
+        # branch existed reaching `full` emitted no warning at all — the residency / DPA /
+        # synthetic-data-licence position and the ADR-0175 pointer simply vanished from the
+        # document the moment the choke point was completed. That is the wrong direction for a
+        # compliance artifact to move on good news: prompt content still leaves the EU, and the
+        # only thing that changed is that it now provably leaves through one door.
+        if hosted and gateway != "none" and egress == "full":
+            w("> ⚠ **Enforced, not resolved (Art. 10 / GDPR).** Every caller is network-forced")
+            w("> through the in-cluster gateway and the provider is unreachable directly, so the")
+            w("> choke point is a control rather than a convention. The exposure it centralises is")
+            w("> unchanged: prompt content still reaches a hosted external provider and still leaves")
+            w("> the EU. Residency, DPA and the synthetic-data licence position are recorded in")
+            w("> **ADR-0175**, and sensitive-data routing is reported separately above.")
+            w("")
         if hosted and gateway == "none":
             w("> ⚠ **Open gap (Art. 10 / GDPR).** A hosted external provider is in use with no")
             w("> gateway and no sensitive-data routing, so prompt content egresses with no enforced")

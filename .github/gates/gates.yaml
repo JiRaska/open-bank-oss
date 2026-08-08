@@ -1576,6 +1576,32 @@ gates:
     run: |
       bash .github/scripts/resolve-record-deployment-version.sh --self-test
 
+  # A service that ships an outbox must write to it (#4007). Eight do not: dispatcher, backlog
+  # gauge, migration and `dispatch-enabled: true`, with no OutboxMessage construction anywhere in
+  # src/main — so the dispatcher polls a table nothing writes to and the gauge reads 0, which is
+  # indistinguishable from a drained queue. Those events still reach consumers, through a second
+  # direct non-transactional emitter, so nothing downstream notices either.
+  #
+  # RATCHET: today's eight are baselined against #4007 (each needs a per-service wire-or-delete
+  # decision this gate does not make), so a NINTH cannot be added quietly. A baseline entry that
+  # becomes covered is also reported, so the list cannot quietly become permanent.
+  #
+  # Falsified both ways on the real tree before wiring in, reading the exit code directly rather
+  # than through a pipe: removing fx-service's writer -> rc=1 with the service named; adding a
+  # bogus baseline entry -> rc=1 as a stale entry; clean tree -> rc=0. The self-test additionally
+  # covers the code-about-code cases — a KDoc, a commented-out call, a NESTED block comment and a
+  # string literal naming the constructor must none of them count as a writer.
+  - id: outbox-has-writer
+    name: "a service shipping an outbox dispatcher must construct an OutboxMessage (#4007, enforced)"
+    group: kotlin
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-outbox-has-writer.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-outbox-has-writer.py --self-test
+      python3 .github/scripts/check-outbox-has-writer.py .
+
   - id: pact-provider-replay-coverage
     name: "Pact provider-replay coverage (issue #2338, enforced)"
     group: api
