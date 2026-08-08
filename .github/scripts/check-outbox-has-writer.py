@@ -67,6 +67,13 @@ BASELINE = {
 
 DISPATCHER_RE = re.compile(r"class\s+\w*OutboxDispatcher\b")
 DECLARATION_RE = re.compile(r"(data\s+)?class\s+OutboxMessage\s*\(")
+# A row written by direct SQL is just as much a write as one built through the domain type, and
+# some services cannot use the domain type at all: a Temporal activity thread carries no Vert.x
+# context, so reactive Panache throws HR000068 there and the service inserts through plain JDBC
+# instead (case-coordinator-agent's CaseActivitiesImpl.emitProposal, agent-service's
+# JdbcAgentProposalRepository). Matching only `OutboxMessage(` called those services writerless
+# and was wrong about them.
+SQL_INSERT_RE = re.compile(r"INSERT\s+INTO\s+\w*outbox\w*", re.IGNORECASE)
 
 
 def strip_comments_and_strings(src: str) -> str:
@@ -77,6 +84,31 @@ def strip_comments_and_strings(src: str) -> str:
     tail of a KDoc as live code.
     """
     src = re.sub(r'"(?:\\.|[^"\\])*"', '""', src)
+    src = re.sub(r"//[^\n]*", "", src)
+    out: list[str] = []
+    depth = i = 0
+    while i < len(src):
+        if src.startswith("/*", i):
+            depth += 1
+            i += 2
+            continue
+        if src.startswith("*/", i) and depth:
+            depth -= 1
+            i += 2
+            continue
+        if not depth:
+            out.append(src[i])
+        i += 1
+    return "".join(out)
+
+
+def strip_comments_only(src: str) -> str:
+    """Remove line and NESTED block comments, keeping string literals intact.
+
+    The SQL predicate needs this: an INSERT lives inside a string literal, which
+    strip_comments_and_strings() blanks. Prose describing an insert must still not count, so the
+    comments still go.
+    """
     src = re.sub(r"//[^\n]*", "", src)
     out: list[str] = []
     depth = i = 0
@@ -107,9 +139,14 @@ def classify_service(files: dict[str, str]) -> tuple[bool, bool]:
     dispatcher = writes = False
     for raw in files.values():
         body = strip_comments_and_strings(raw)
+        # SQL lives INSIDE a string literal, which the stripper blanks — so the SQL predicate reads
+        # a comment-only strip. Prose about an insert still must not count, hence not the raw text.
+        sql_body = strip_comments_only(raw)
         if DISPATCHER_RE.search(body):
             dispatcher = True
         if "OutboxMessage(" in body and not DECLARATION_RE.search(body):
+            writes = True
+        if SQL_INSERT_RE.search(sql_body):
             writes = True
     return dispatcher, writes
 
@@ -175,6 +212,25 @@ def self_test() -> int:
     in_string = disp + '\nval s = "OutboxMessage(fake)"\n'
     expect("the constructor named inside a string literal is NOT a writer",
            classify_service({"a.kt": in_string}), (True, False))
+    # A direct SQL insert IS a write. case-coordinator-agent writes this way on purpose: a Temporal
+    # activity thread has no Vert.x context, so reactive Panache throws HR000068 and it inserts
+    # through plain JDBC. Matching only `OutboxMessage(` called it writerless and was wrong.
+    sql = disp + '''
+    conn.prepareStatement("""
+        INSERT INTO case_outbox (event_id, aggregate_id, event_type, payload, status)
+        VALUES (?, ?, ?, ?, ?)
+    """)
+'''
+    expect("a direct SQL INSERT into the outbox table IS a writer",
+           classify_service({"a.kt": sql}), (True, True))
+    # …but prose describing one is not — the same code-about-code rule as the constructor case.
+    sql_prose = disp + "\n// we should INSERT INTO case_outbox here one day\n"
+    expect("a comment describing an INSERT is NOT a writer",
+           classify_service({"a.kt": sql_prose}), (True, False))
+    sql_kdoc = disp + "\n/** Historically this did INSERT INTO case_outbox directly. */\n"
+    expect("a KDoc describing an INSERT is NOT a writer",
+           classify_service({"a.kt": sql_kdoc}), (True, False))
+
     # …and the stripper must not swallow real code that merely follows a comment.
     after = disp + "\n/* note */\n" + write
     expect("a real construction AFTER a comment still counts",

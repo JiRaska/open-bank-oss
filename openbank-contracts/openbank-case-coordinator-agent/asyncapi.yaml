@@ -1,0 +1,128 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006: every Kafka topic is documented in AsyncAPI 3.0 under openbank-contracts/<service>/.
+#
+# WHAT IS AND IS NOT ENFORCED HERE. `check-event-contract-coverage.py` asserts this FILE EXISTS;
+# nothing validates its content against what the code actually sends, and no schema is registered
+# in Apicurio. Everything below is DERIVED from `CaseActivitiesImpl.emitProposal` — the only
+# writer — and `CaseOutboxDispatcher`, and each claim names its source.
+#
+# NOTHING IS PUBLISHED TODAY, and three independent facts say so rather than one:
+#   * the topic is not declared anywhere under `openbank-infra/` — grep for `proposal-events`
+#     returns nothing outside this service's own `application.yaml`;
+#   * the service is absent from `auto-deploy.yml`'s ALL_SERVICES, so no workload is deployed;
+#   * NO CONSUMER EXISTS — allowlisted in `openbank-libs/governance/rules.yaml:
+#     event_consumer_liveness.allowlist`, topic `proposal-events`, with a re-triage note.
+# This contract therefore documents the wire shape the producer WILL send once turned on — the
+# ordering ADR-0006 itself prescribes ("producers before consumers", #1916), and the same shape
+# engagement-service's and delegation-service's contracts already carry.
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Case Coordinator Agent — events
+  version: 1.0.0
+  description: |
+    Convergence proposals emitted by the ADR-0244 agent-swarm case workflow.
+
+    A `CaseWorkflow` (Temporal) collects contributions from participating agents, asks the LLM
+    port to synthesise a convergence, and emits ONE proposal per case outcome. This is not a
+    `DomainEvent` subtype: there is no aggregate whose lifecycle it describes — it is the
+    workflow's verdict on a case.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: |
+      Strimzi cluster `openbank-cluster` in the `messaging` namespace. mTLS in the shipped design;
+      no KafkaUser exists for this service yet and the topic itself is undeclared, so nothing can
+      authenticate to produce — see the file header.
+
+channels:
+  proposalEvents:
+    address: proposal-events
+    title: Agent-swarm case convergence proposals
+    description: |
+      **The address is a bare name, not the `openbank.<domain>.<event>` convention the rest of the
+      fleet uses.** It comes from `CASE_OUTBOX_TOPIC:proposal-events` in this service's
+      `application.yaml`, and it is recorded here as-is rather than silently normalised — the topic
+      does not exist in gitops yet, so renaming it to `openbank.case.proposals` is still free and
+      is the recommendation before the first deploy.
+
+      Retention, partitioning and cleanup policy are **undeclared**: there is no entry in
+      `openbank-infra/gitops/components/kafka/kafka.yaml`. Whoever declares the topic decides them;
+      this contract states only what the producer sends.
+
+      **Partitioning key: `aggregateId`**, which `emitProposal` sets to the case UUID
+      (`OutboxKafkaHeaders.partitionKey` reads `entry.aggregateId`). All proposals for one case
+      land on one partition and are ordered with respect to each other.
+    messages:
+      CaseProposal:
+        $ref: '#/components/messages/CaseProposal'
+
+operations:
+  publishCaseProposal:
+    action: send
+    channel:
+      $ref: '#/channels/proposalEvents'
+    summary: Emit one convergence proposal for a case.
+    description: |
+      Written by `CaseActivitiesImpl.emitProposal` as a `case_outbox` row inside the activity's own
+      JDBC transaction, then drained by `CaseOutboxDispatcher` (`@Scheduled`, Vert.x context).
+
+      The write goes through plain JDBC rather than the `OutboxMessage` domain type on purpose: a
+      Temporal activity thread carries no Vert.x context, so reactive Panache throws `HR000068`
+      there — the same reason agent-service keeps `JdbcAgentProposalRepository`.
+
+components:
+  messages:
+    CaseProposal:
+      name: CaseProposal
+      title: Case convergence proposal
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/CaseProposalPayload'
+  schemas:
+    CaseProposalPayload:
+      type: object
+      description: |
+        Serialised by `objectMapper.writeValueAsString` from a literal map in `emitProposal`, so
+        this is the exact field set — no envelope, no `eventType` inside the body. The outbox
+        row's `event_type` column carries `proposalType` and reaches Kafka as a header, not as a
+        payload field.
+      additionalProperties: false
+      required: [caseId, proposalType, summary, contested, occurredAt]
+      properties:
+        caseId:
+          type: string
+          description: The case this proposal concludes. Also the row's `aggregate_id` (as a UUID).
+        proposalType:
+          type: string
+          description: |
+            The kind of verdict. Also written to the row's `event_type` column, which is what the
+            dispatcher puts on the Kafka header — so this value is the routing key a consumer
+            filters on.
+        summary:
+          type: string
+          description: |
+            LLM-synthesised convergence text over the participating agents' contributions. Free
+            text, not machine-parseable, and it may contain case content — a consumer that
+            forwards it outward is a disclosure decision, not a plumbing one.
+        contested:
+          type: boolean
+          description: |
+            True when at least one contribution was marked contested. A consumer treating a
+            contested proposal as settled is the most likely way to misuse this event.
+        occurredAt:
+          type: string
+          format: date-time
+          description: |
+            `Instant.now(clock)` at the moment the proposal was written, from the injected clock —
+            the business time, not the dispatch time. The row's own `created_at` records the write.
