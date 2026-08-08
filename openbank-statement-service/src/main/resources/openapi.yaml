@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Statement Service API
-  version: 1.2.0
+  version: 1.3.0
   description: >-
     Account statements for the multi-currency current account (ADR-0035). The unit is the per-pocket
     (IBAN + currency) statement: each pocket has its own camt.053.001.08 / MT940 with an independent
@@ -113,6 +113,28 @@ paths:
       responses:
         '200':
           description: Rendered statement (application/xml for camt.053, text/plain for MT940/PDF)
+        '404':
+          description: No closed statement with that sequence
+
+  /api/v1/statements/{accountId}/{currency}/{legalSequence}/summary:
+    get:
+      tags: [Statements]
+      summary: Render a closed statement on demand as structured JSON (period, balances, itemized entries)
+      description: >-
+        The JSON twin of render — same closed period, replayed into the canonical StatementModel
+        instead of a camt.053/MT940/PDF projection. Nothing is stored.
+      operationId: summarizeStatement
+      parameters:
+        - { name: accountId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: currency, in: path, required: true, schema: { type: string, minLength: 3, maxLength: 3 } }
+        - { name: legalSequence, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: The closed period as structured data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatementModel'
         '404':
           description: No closed statement with that sequence
 
@@ -242,6 +264,53 @@ components:
         status: { type: string, enum: [CLOSED, SUPERSEDED] }
         supersedesSequence: { type: integer, format: int64, nullable: true }
         closedAt: { type: string, format: date-time }
+
+    StatementModel:
+      type: object
+      description: >-
+        The canonical, immutable statement aggregate for ONE pocket over ONE closed period (ADR-0035
+        §C) — every rendered format is a pure projection of this. Returned as-is (not persisted) by
+        the summary endpoint.
+      properties:
+        accountId: { type: string, format: uuid }
+        iban: { type: string }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        holderName: { type: string }
+        periodFrom: { type: string, format: date }
+        periodTo: { type: string, format: date }
+        openingBalance: { $ref: '#/components/schemas/BalanceAnchor' }
+        closingBalance: { $ref: '#/components/schemas/BalanceAnchor' }
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatementEntry'
+        legalSequenceNumber: { type: integer, format: int64 }
+        electronicSequenceNumber: { type: integer, format: int64 }
+        closedAt: { type: string, format: date-time }
+        supersedesSequence: { type: integer, format: int64, nullable: true }
+
+    BalanceAnchor:
+      type: object
+      description: Opening/closing balance anchor for a pocket on a given date.
+      properties:
+        amount: { type: number }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        date: { type: string, format: date }
+
+    StatementEntry:
+      type: object
+      description: >-
+        A single booked entry (ADR-0035 §E). amount is always non-negative; the sign is carried by
+        creditDebit.
+      properties:
+        entryRef: { type: string }
+        amount: { type: number }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        creditDebit: { type: string, enum: [CRDT, DBIT] }
+        bookingDate: { type: string, format: date }
+        valueDate: { type: string, format: date }
+        description: { type: string }
+        counterparty: { type: string, nullable: true }
 
     CloseRun:
       type: object

@@ -10,6 +10,7 @@ import com.openbank.statement.application.port.`in`.ListStatementsUseCase
 import com.openbank.statement.application.port.`in`.RenderStatementDocumentUseCase
 import com.openbank.statement.application.port.`in`.RenderStatementUseCase
 import com.openbank.statement.application.port.`in`.RestatePeriodUseCase
+import com.openbank.statement.application.port.`in`.SummarizeStatementUseCase
 import com.openbank.statement.application.port.out.DocumentServiceException
 import com.openbank.statement.application.usecase.NoClosedPeriodToRestateException
 import com.openbank.statement.application.usecase.ReconciliationException
@@ -43,6 +44,7 @@ class StatementResource(
     private val listStatements: ListStatementsUseCase,
     private val adHocExport: AdHocExportUseCase,
     private val restatePeriod: RestatePeriodUseCase,
+    private val summarizeStatement: SummarizeStatementUseCase,
     private val renderStatementDocument: RenderStatementDocumentUseCase,
 ) {
 
@@ -105,6 +107,26 @@ class StatementResource(
         @QueryParam("format") @DefaultValue("PDF") format: String,
     ): Uni<Response> = renderStatement.render(accountId, currency, legalSequence, parseFormat(format))
         .map { rendered -> Response.ok(rendered.body).type(rendered.contentType).build() }
+        .onFailure(StatementNotFoundException::class.java)
+        .recoverWithItem { e ->
+            Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to e.message)).build()
+        }
+
+    @GET
+    @Path("/{accountId}/{currency}/{legalSequence}/summary")
+    @Authorize(action = "statement.read", resource = "#accountId")
+    @Operation(
+        summary = "Render a closed statement on demand as structured JSON (period, balances, itemized entries)",
+        description = "The JSON twin of render — same closed period, no camt.053/MT940/PDF projection. " +
+            "Added for callers (e.g. the MCP statement-query tool) that need to reason over the data " +
+            "directly rather than parse a rendered document. Nothing is stored.",
+    )
+    fun summary(
+        @PathParam("accountId") accountId: UUID,
+        @PathParam("currency") currency: String,
+        @PathParam("legalSequence") legalSequence: Long,
+    ): Uni<Response> = summarizeStatement.summary(accountId, currency, legalSequence)
+        .map { model -> Response.ok(model).build() }
         .onFailure(StatementNotFoundException::class.java)
         .recoverWithItem { e ->
             Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to e.message)).build()

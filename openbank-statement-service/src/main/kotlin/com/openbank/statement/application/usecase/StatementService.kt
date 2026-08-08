@@ -9,6 +9,7 @@ import com.openbank.statement.application.port.`in`.ClosePocketUseCase
 import com.openbank.statement.application.port.`in`.ListStatementsUseCase
 import com.openbank.statement.application.port.`in`.RenderStatementUseCase
 import com.openbank.statement.application.port.`in`.StatementModelUseCase
+import com.openbank.statement.application.port.`in`.SummarizeStatementUseCase
 import com.openbank.statement.application.port.out.AccountInfoPort
 import com.openbank.statement.application.port.out.BalancePort
 import com.openbank.statement.application.port.out.BookedEntryPort
@@ -58,7 +59,8 @@ class StatementService(
     RenderStatementUseCase,
     StatementModelUseCase,
     ListStatementsUseCase,
-    AdHocExportUseCase {
+    AdHocExportUseCase,
+    SummarizeStatementUseCase {
 
     /** Clock seam: `closedAt` is stamped at close time and then *stored*, so renders stay deterministic
      *  (ADR-0035 §F). Overridable in tests; CDI uses the default. */
@@ -161,6 +163,10 @@ class StatementService(
         format: StatementFormat,
     ): Uni<StatementRenderer.Rendered> =
         statementModel(accountId, currency, legalSequence).map { model -> StatementRenderer.render(model, format) }
+
+    /** [SummarizeStatementUseCase]: the same closed period as [render] and [statementModel], as the canonical model — no renderer. */
+    override fun summary(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementModel> =
+        statementModel(accountId, currency, legalSequence)
 
     override fun statementModel(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementModel> =
         periods.findBySequence(accountId, currency, legalSequence).flatMap { period ->

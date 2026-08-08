@@ -78,6 +78,17 @@ interface ListStatementsUseCase {
 }
 
 /**
+ * The JSON twin of [RenderStatementUseCase] (issue #4109, ADR-0248): the same closed period,
+ * replayed into the canonical [StatementModel] aggregate instead of a camt.053/MT940/PDF byte
+ * stream. Added for openbank-mcp-service's `query.statement.readonly` tool — an AI agent acting on
+ * a customer's behalf needs structured data it can reason over, not a rendered document. Nothing is
+ * stored; like [RenderStatementUseCase] this replays deterministically from the closed period.
+ */
+interface SummarizeStatementUseCase {
+    fun summary(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementModel>
+}
+
+/**
  * On-demand, non-sequenced export for an arbitrary date range (ADR-0035 §F.3) — an *informational*
  * document that is explicitly NOT a numbered legal statement page.
  */

@@ -29,6 +29,7 @@ import java.util.UUID
  * prove without also needing a reachable OIDC token server.
  */
 @QuarkusTest
+@TestSecurity(user = "edge@openbank.test", roles = ["ROLE_OPERATOR"])
 @QuarkusTestResource(SurfaceRestContractIT.NoKafkaResource::class)
 @QuarkusTestResource(EngagementPostgresTestResource::class)
 // SurfaceResource carries @RolesAllowed("ROLE_OPERATOR", "ROLE_API", "ROLE_ADMIN") since #4054.
