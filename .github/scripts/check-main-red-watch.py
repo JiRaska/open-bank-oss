@@ -238,11 +238,7 @@ def check_declaration(root: Path, workflows=None, watched=None, raw=None) -> lis
             )
 
     if raw:
-        if "head_branch" not in raw:
-            findings.append(
-                f"R3 {WATCH_WORKFLOW} does not filter on `head_branch` -- it would fire on "
-                f"every PR run of every watched workflow."
-            )
+        findings.extend(check_head_branch_filter(raw))
     findings.extend(check_attempt_scoped_fetch())
     return findings
 
@@ -279,6 +275,34 @@ def fetch_jobs_scoped(repo: str, run_id: int, attempt: int) -> list[dict]:
     for doc in docs:
         jobs.extend(doc.get("jobs", []) if isinstance(doc, dict) else [])
     return jobs
+
+
+def check_head_branch_filter(raw: str) -> list[str]:
+    """R3, against the PARSED `if:` expressions rather than the file's text.
+
+    `head_branch` genuinely belongs in the yml -- unlike R4's endpoint, which lives in Python --
+    so the fix here is not to look somewhere else, it is to stop looking at the whole file. A
+    `"head_branch" not in raw` test is satisfied by any comment that happens to name the field,
+    and this file's header discusses it at length; R4 shipped exactly that defect. Reading
+    `jobs.*.if` asks the construct instead, and the YAML parser has already dropped comments, so
+    prose cannot answer for behaviour in either direction.
+    """
+    try:
+        doc = yaml.safe_load(raw) or {}
+    except yaml.YAMLError as exc:
+        return [f"R3 {WATCH_WORKFLOW} does not parse: {exc}"]
+    jobs = doc.get("jobs") if isinstance(doc, dict) else None
+    if not isinstance(jobs, dict) or not jobs:
+        return [f"R3 {WATCH_WORKFLOW} declares no jobs -- nothing filters anything."]
+
+    conditions = [str(j.get("if", "")) for j in jobs.values() if isinstance(j, dict)]
+    if any("head_branch" in c for c in conditions):
+        return []
+    return [
+        f"R3 no job in {WATCH_WORKFLOW} filters on `head_branch` in its `if:` -- the watch would "
+        f"fire on every PR run of every watched workflow. Job conditions seen: "
+        f"{[c for c in conditions if c] or 'none'}."
+    ]
 
 
 def check_attempt_scoped_fetch() -> list[str]:
@@ -572,7 +596,14 @@ def self_test() -> int:
          "error": None}
         for n in NOT_WATCHED
     ]
-    raw_ok = "head_branch == 'main'\n/attempts/${{ x }}/jobs\n"
+    # A real (minimal) workflow document, not a string that merely contains the substrings the
+    # old rules grepped for. R3 parses this now, so a fixture that is not a workflow would only
+    # ever prove that a substring was absent from an arbitrary string.
+    raw_ok = (
+        "on:\n  workflow_run:\n    workflows: [CI]\n"
+        "jobs:\n  watch:\n    if: github.event.workflow_run.head_branch == 'main'\n"
+        "    runs-on: ubuntu-latest\n"
+    )
     check("a fully declared set is clean", check_declaration(REPO, wf_ok, wl, raw_ok) == [])
 
     wf_new = wf_ok + [
@@ -589,8 +620,31 @@ def self_test() -> int:
     check("R2: an undeclared paths-filtered push-on-main workflow is FLAGGED",
           any("R2" in x and "Label sync" in x for x in f))
 
-    f = check_declaration(REPO, wf_ok, wl, "/attempts/1/jobs")
-    check("R3: a watcher not filtering on head_branch is FLAGGED", any("R3" in x for x in f))
+    # R3 reads jobs.*.if now, so falsify it with a real workflow document rather than a bare
+    # string. The old case passed "/attempts/1/jobs" as `raw` -- a value that is not a workflow
+    # at all, so it proved only that the substring was missing from an arbitrary string.
+    _yml_no_filter = (
+        "on:\n  workflow_run:\n    workflows: [CI]\n"
+        "jobs:\n  watch:\n    if: github.event.workflow_run.event == 'push'\n"
+        "    runs-on: ubuntu-latest\n"
+    )
+    f = check_declaration(REPO, wf_ok, wl, _yml_no_filter)
+    check("R3: a job not filtering on head_branch is FLAGGED", any("R3" in x for x in f))
+
+    _yml_with_filter = _yml_no_filter.replace(
+        "if: github.event.workflow_run.event == 'push'",
+        "if: github.event.workflow_run.head_branch == 'main'",
+    )
+    check("R3: a job that does filter on head_branch is clean",
+          not any("R3" in x for x in check_declaration(REPO, wf_ok, wl, _yml_with_filter)))
+
+    # Over-block control: prose naming the field must NOT satisfy R3. This is the exact defect
+    # R4 shipped, so the guard against it is a test, not a comment.
+    _yml_comment_only = _yml_no_filter.replace(
+        "jobs:", "# the watch filters on head_branch so PR runs are ignored\njobs:"
+    )
+    check("R3: a COMMENT naming head_branch does not satisfy the rule",
+          any("R3" in x for x in check_declaration(REPO, wf_ok, wl, _yml_comment_only)))
     # R4 is behavioural now, so falsify it by breaking the FETCH, not by handing it a doctored
     # yml. The old case passed a fake `raw` without `/attempts/` -- which no longer proves
     # anything, because the yml never carried the request in the first place.
