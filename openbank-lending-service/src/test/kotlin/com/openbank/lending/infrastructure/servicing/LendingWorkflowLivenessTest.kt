@@ -52,6 +52,12 @@ class LendingWorkflowLivenessTest {
         .gauge()
         ?.value()
 
+    private fun successRecordedOf(registry: MeterRegistry, workflow: String): Double? = registry
+        .find(WorkflowLivenessMetrics.SUCCESS_RECORDED)
+        .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, workflow)
+        .gauge()
+        ?.value()
+
     @BeforeEach
     fun stubPanacheSession() {
         mockkStatic(Panache::class)
@@ -80,7 +86,10 @@ class LendingWorkflowLivenessTest {
 
         val neverRan = ageOf(registry, "lending-interest-accrual")
         assertThat(neverRan).describedAs("liveness gauge was not registered at startup").isNotNull()
-        assertThat(neverRan!!).isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(neverRan!!)
+            .describedAs("the age gauge must be seeded at registration, not at Instant.EPOCH")
+            .isLessThan(BOOT_SEED_CEILING_SECONDS)
+        assertThat(successRecordedOf(registry, "lending-interest-accrual")).isEqualTo(NOT_YET_SUCCEEDED)
         assertThat(
             registry.find(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS)
                 .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "lending-interest-accrual")
@@ -127,9 +136,9 @@ class LendingWorkflowLivenessTest {
 
         runCatching { scheduler.runAccrualPass().await().indefinitely() }
 
-        assertThat(ageOf(registry, "lending-interest-accrual")!!)
-            .describedAs("a failed run was recorded as a success")
-            .isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(successRecordedOf(registry, "lending-interest-accrual"))
+            .describedAs("a failed run must not record a success")
+            .isEqualTo(NOT_YET_SUCCEEDED)
     }
 
     @Test
@@ -152,7 +161,10 @@ class LendingWorkflowLivenessTest {
 
         val neverRan = ageOf(registry, "lending-provisioning-cycle")
         assertThat(neverRan).describedAs("liveness gauge was not registered at startup").isNotNull()
-        assertThat(neverRan!!).isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(neverRan!!)
+            .describedAs("the age gauge must be seeded at registration, not at Instant.EPOCH")
+            .isLessThan(BOOT_SEED_CEILING_SECONDS)
+        assertThat(successRecordedOf(registry, "lending-provisioning-cycle")).isEqualTo(NOT_YET_SUCCEEDED)
         assertThat(
             registry.find(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS)
                 .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "lending-provisioning-cycle")
@@ -188,13 +200,17 @@ class LendingWorkflowLivenessTest {
 
         runCatching { scheduler.runProvisioningPass().await().indefinitely() }
 
-        assertThat(ageOf(registry, "lending-provisioning-cycle")!!)
-            .describedAs("a failed run was recorded as a success")
-            .isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(successRecordedOf(registry, "lending-provisioning-cycle"))
+            .describedAs("a failed run must not record a success")
+            .isEqualTo(NOT_YET_SUCCEEDED)
     }
 
     private companion object {
         const val TOLERANCE_SECONDS = 5.0
-        val FIFTY_YEARS_SECONDS = Duration.ofDays(50 * 365).toSeconds().toDouble()
+        // A workflow registered moments ago is seconds old. This ceiling sits far below the
+        // tightest real threshold in the fleet (2x an hourly interval) and astronomically below
+        // the ~1.8e9 the EPOCH seed produced, so it fails loudly if the seed ever regresses.
+        val BOOT_SEED_CEILING_SECONDS = Duration.ofHours(1).toSeconds().toDouble()
+        const val NOT_YET_SUCCEEDED = 0.0
     }
 }

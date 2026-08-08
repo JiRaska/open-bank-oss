@@ -35,15 +35,19 @@ open class DetectFindingsActivityImpl(
             ControlMechanism.M4_RECONCILIATION_DRIFT_SLA -> detectSustainedDrift(signals)
         }
 
-    // CollectSignalsActivityImpl joins the age gauge with a companion expected-interval gauge
-    // and produces one composite key "<job>|<expectedIntervalSeconds>" per job -> ageSeconds, so
-    // this detector never has to guess an interval or do a second Prometheus round-trip itself.
+    // CollectSignalsActivityImpl joins the age gauge with its companion expected-interval and
+    // has-ever-succeeded gauges and produces one composite key
+    // "<job>|<expectedIntervalSeconds>|<everSucceeded>" per job -> ageSeconds, so this detector
+    // never has to guess an interval or do a second Prometheus round-trip itself. The two trailing
+    // fields are taken from the RIGHT so a job name is free to contain the separator.
     private fun detectStaleHeartbeats(signals: Map<String, Double>): List<LivenessFinding> =
         signals.mapNotNull { (label, ageSeconds) ->
-            val separatorIndex = label.lastIndexOf('|')
-            if (separatorIndex < 0) return@mapNotNull null
-            val job = label.substring(0, separatorIndex)
-            val expectedIntervalSeconds = label.substring(separatorIndex + 1).toDoubleOrNull() ?: return@mapNotNull null
+            val fields = label.split('|')
+            if (fields.size < 3) return@mapNotNull null
+            val job = fields.dropLast(2).joinToString("|")
+            val expectedIntervalSeconds = fields[fields.size - 2].toDoubleOrNull() ?: return@mapNotNull null
+            // Absent/1.0 means the job has produced at least one success in this pod's lifetime.
+            val neverSucceeded = (fields.last().toDoubleOrNull() ?: 1.0) < 1.0
             // ADR-0163: criticalThreshold matches ADR-0160 mechanism 3's own Alertmanager paging
             // line (2x expected interval by default) so this agent's CRITICAL finding and the
             // underlying page can never silently disagree; warnThreshold fires earlier so a
@@ -56,8 +60,13 @@ open class DetectFindingsActivityImpl(
                 mechanism = ControlMechanism.M3_WORKFLOW_WATCHDOG,
                 severity = if (ageSeconds >= criticalThreshold) FindingSeverity.CRITICAL else FindingSeverity.WARNING,
                 detectedAt = Instant.now(),
-                title = "Stale heartbeat for '$job': last success ${"%.0f".format(ageSeconds)}s ago " +
-                    "(expected every ${"%.0f".format(expectedIntervalSeconds)}s)",
+                title = if (neverSucceeded) {
+                    "Stale heartbeat for '$job': no success in the ${"%.0f".format(ageSeconds)}s since " +
+                        "this pod registered it (expected every ${"%.0f".format(expectedIntervalSeconds)}s)"
+                } else {
+                    "Stale heartbeat for '$job': last success ${"%.0f".format(ageSeconds)}s ago " +
+                        "(expected every ${"%.0f".format(expectedIntervalSeconds)}s)"
+                },
                 affectedControl = job,
                 rawMetricValue = BigDecimal.valueOf(ageSeconds),
                 threshold = BigDecimal.valueOf(warnThreshold),

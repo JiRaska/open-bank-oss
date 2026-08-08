@@ -43,6 +43,12 @@ class BalanceWorkflowLivenessTest {
         .gauge()
         ?.value()
 
+    private fun successRecordedOf(registry: MeterRegistry, workflow: String): Double? = registry
+        .find(WorkflowLivenessMetrics.SUCCESS_RECORDED)
+        .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, workflow)
+        .gauge()
+        ?.value()
+
     private fun report(clock: Clock, hasDrift: Boolean = false) = ReconciliationReport(
         asOf = LocalDate.of(2026, 7, 18),
         generatedAt = OffsetDateTime.now(clock),
@@ -70,7 +76,10 @@ class BalanceWorkflowLivenessTest {
 
         val neverRan = ageOf(registry, "balance-reconciliation")
         assertThat(neverRan).isNotNull()
-        assertThat(neverRan!!).isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(neverRan!!)
+            .describedAs("the age gauge must be seeded at registration, not at Instant.EPOCH")
+            .isLessThan(BOOT_SEED_CEILING_SECONDS)
+        assertThat(successRecordedOf(registry, "balance-reconciliation")).isEqualTo(NOT_YET_SUCCEEDED)
         assertThat(
             registry.find(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS)
                 .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "balance-reconciliation")
@@ -93,7 +102,9 @@ class BalanceWorkflowLivenessTest {
 
         job.runDaily()
 
-        assertThat(ageOf(registry, "balance-reconciliation")!!).isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(successRecordedOf(registry, "balance-reconciliation"))
+            .describedAs("a failed run must not record a success")
+            .isEqualTo(NOT_YET_SUCCEEDED)
     }
 
     @Test
@@ -109,7 +120,10 @@ class BalanceWorkflowLivenessTest {
 
             val neverRan = ageOf(registry, "balance-reconciliation-freshness")
             assertThat(neverRan).isNotNull()
-            assertThat(neverRan!!).isGreaterThan(FIFTY_YEARS_SECONDS)
+            assertThat(neverRan!!)
+                .describedAs("the age gauge must be seeded at registration, not at Instant.EPOCH")
+                .isLessThan(BOOT_SEED_CEILING_SECONDS)
+            assertThat(successRecordedOf(registry, "balance-reconciliation-freshness")).isEqualTo(NOT_YET_SUCCEEDED)
             assertThat(
                 registry.find(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS)
                     .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "balance-reconciliation-freshness")
@@ -132,11 +146,17 @@ class BalanceWorkflowLivenessTest {
 
         runCatching { watchdog.checkFreshness() }
 
-        assertThat(ageOf(registry, "balance-reconciliation-freshness")!!).isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(successRecordedOf(registry, "balance-reconciliation-freshness"))
+            .describedAs("a failed run must not record a success")
+            .isEqualTo(NOT_YET_SUCCEEDED)
     }
 
     private companion object {
         const val TOLERANCE_SECONDS = 5.0
-        val FIFTY_YEARS_SECONDS = Duration.ofDays(50 * 365).toSeconds().toDouble()
+        // A workflow registered moments ago is seconds old. This ceiling sits far below the
+        // tightest real threshold in the fleet (2x an hourly interval) and astronomically below
+        // the ~1.8e9 the EPOCH seed produced, so it fails loudly if the seed ever regresses.
+        val BOOT_SEED_CEILING_SECONDS = Duration.ofHours(1).toSeconds().toDouble()
+        const val NOT_YET_SUCCEEDED = 0.0
     }
 }

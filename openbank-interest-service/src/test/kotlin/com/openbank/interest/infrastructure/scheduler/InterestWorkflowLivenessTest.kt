@@ -42,6 +42,12 @@ class InterestWorkflowLivenessTest {
         .gauge()
         ?.value()
 
+    private fun successRecordedOf(registry: MeterRegistry, workflow: String): Double? = registry
+        .find(WorkflowLivenessMetrics.SUCCESS_RECORDED)
+        .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, workflow)
+        .gauge()
+        ?.value()
+
     @Test
     fun `interest accrual registers liveness at startup and collapses after a successful run`() {
         val registry = SimpleMeterRegistry()
@@ -56,7 +62,10 @@ class InterestWorkflowLivenessTest {
 
         val neverRan = ageOf(registry, "interest-accrual")
         assertThat(neverRan).isNotNull()
-        assertThat(neverRan!!).isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(neverRan!!)
+            .describedAs("the age gauge must be seeded at registration, not at Instant.EPOCH")
+            .isLessThan(BOOT_SEED_CEILING_SECONDS)
+        assertThat(successRecordedOf(registry, "interest-accrual")).isEqualTo(NOT_YET_SUCCEEDED)
         assertThat(
             registry.find(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS)
                 .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "interest-accrual")
@@ -82,7 +91,9 @@ class InterestWorkflowLivenessTest {
 
         scheduler.runDailyAccrual().await().indefinitely()
 
-        assertThat(ageOf(registry, "interest-accrual")!!).isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(successRecordedOf(registry, "interest-accrual"))
+            .describedAs("a failed run must not record a success")
+            .isEqualTo(NOT_YET_SUCCEEDED)
     }
 
     @Test
@@ -103,7 +114,10 @@ class InterestWorkflowLivenessTest {
 
         val neverRan = ageOf(registry, "interest-capitalization")
         assertThat(neverRan).isNotNull()
-        assertThat(neverRan!!).isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(neverRan!!)
+            .describedAs("the age gauge must be seeded at registration, not at Instant.EPOCH")
+            .isLessThan(BOOT_SEED_CEILING_SECONDS)
+        assertThat(successRecordedOf(registry, "interest-capitalization")).isEqualTo(NOT_YET_SUCCEEDED)
         assertThat(
             registry.find(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS)
                 .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "interest-capitalization")
@@ -133,11 +147,17 @@ class InterestWorkflowLivenessTest {
 
         scheduler.runMonthlyCapitalization().await().indefinitely()
 
-        assertThat(ageOf(registry, "interest-capitalization")!!).isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(successRecordedOf(registry, "interest-capitalization"))
+            .describedAs("a failed run must not record a success")
+            .isEqualTo(NOT_YET_SUCCEEDED)
     }
 
     private companion object {
         const val TOLERANCE_SECONDS = 5.0
-        val FIFTY_YEARS_SECONDS = Duration.ofDays(50 * 365).toSeconds().toDouble()
+        // A workflow registered moments ago is seconds old. This ceiling sits far below the
+        // tightest real threshold in the fleet (2x an hourly interval) and astronomically below
+        // the ~1.8e9 the EPOCH seed produced, so it fails loudly if the seed ever regresses.
+        val BOOT_SEED_CEILING_SECONDS = Duration.ofHours(1).toSeconds().toDouble()
+        const val NOT_YET_SUCCEEDED = 0.0
     }
 }

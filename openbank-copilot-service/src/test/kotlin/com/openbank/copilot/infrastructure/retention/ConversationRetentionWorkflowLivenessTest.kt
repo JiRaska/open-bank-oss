@@ -45,6 +45,12 @@ class ConversationRetentionWorkflowLivenessTest {
         .gauge()
         ?.value()
 
+    private fun successRecordedOf(registry: MeterRegistry): Double? = registry
+        .find(WorkflowLivenessMetrics.SUCCESS_RECORDED)
+        .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, WORKFLOW)
+        .gauge()
+        ?.value()
+
     private fun schedulerOver(registry: MeterRegistry, store: ConversationStore, enabled: Boolean = true) =
         ConversationRetentionScheduler(store, clock, enabled, metricsOver(registry))
 
@@ -57,7 +63,10 @@ class ConversationRetentionWorkflowLivenessTest {
         val scheduler = schedulerOver(registry, store)
         scheduler.registerLiveness(StartupEvent())
 
-        assertThat(ageOf(registry)).isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(ageOf(registry))
+            .describedAs("the age gauge must be seeded at registration, not at Instant.EPOCH")
+            .isLessThan(BOOT_SEED_CEILING_SECONDS)
+        assertThat(successRecordedOf(registry)).isEqualTo(NOT_YET_SUCCEEDED)
         assertThat(
             registry.find(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS)
                 .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, WORKFLOW)
@@ -70,7 +79,7 @@ class ConversationRetentionWorkflowLivenessTest {
     }
 
     @Test
-    fun `a swallowed sweep failure leaves the heartbeat stale`(): Unit = runBlocking {
+    fun `a swallowed sweep failure records no success`(): Unit = runBlocking {
         val registry = SimpleMeterRegistry()
         val store = mockk<ConversationStore>()
         coEvery { store.deleteExpired(any()) } throws IllegalStateException("db down")
@@ -82,7 +91,9 @@ class ConversationRetentionWorkflowLivenessTest {
         // heartbeat is the only externally visible difference between a broken and a healthy sweep.
         scheduler.sweepExpiredConversations()
 
-        assertThat(ageOf(registry)).isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(successRecordedOf(registry))
+            .describedAs("a failed run must not record a success")
+            .isEqualTo(NOT_YET_SUCCEEDED)
     }
 
     @Test
@@ -95,12 +106,18 @@ class ConversationRetentionWorkflowLivenessTest {
 
         scheduler.sweepExpiredConversations()
 
-        assertThat(ageOf(registry)).isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(successRecordedOf(registry))
+            .describedAs("a failed run must not record a success")
+            .isEqualTo(NOT_YET_SUCCEEDED)
     }
 
     private companion object {
         const val WORKFLOW = "copilot-conversation-retention"
         const val TOLERANCE_SECONDS = 5.0
-        val FIFTY_YEARS_SECONDS = Duration.ofDays(50 * 365).toSeconds().toDouble()
+        // A workflow registered moments ago is seconds old. This ceiling sits far below the
+        // tightest real threshold in the fleet (2x an hourly interval) and astronomically below
+        // the ~1.8e9 the EPOCH seed produced, so it fails loudly if the seed ever regresses.
+        val BOOT_SEED_CEILING_SECONDS = Duration.ofHours(1).toSeconds().toDouble()
+        const val NOT_YET_SUCCEEDED = 0.0
     }
 }
