@@ -66,7 +66,10 @@ mp:
   # defaultValue = "true" in AuthorizeInterceptor — so under @QuarkusTest, with no OPA PDP
   # bean in the graph, every one of them answers 503 and SurfaceRestContractIT's
   # `statusCode(200)` fails. Advisory in tests only; the deployed posture is unchanged and
-  # is decided by the sidecar wired in #4068.
+  # is decided by the sidecar wired in #4068. Same pattern and same reasoning as
+  # campaign-service's application.yaml: the contract IT is about the HTTP contract, not about
+  # who may call what — that is the OPA gate plus the rego tests, neither of which needs the
+  # app running.
   authz:
     enforce: false
   quarkus:
@@ -76,13 +79,6 @@ mp:
       enabled: false
     oidc-client:
       enabled: false
-  # `authz.enforce` has no key elsewhere in this file, so the interceptor's safe default (true)
-  # applies — and with no PolicyDecisionPoint bean in a test JVM every @Authorize call fails
-  # closed (503) before the handler runs. Advisory HERE ONLY, same pattern and same reasoning as
-  # campaign-service's application.yaml: SurfaceRestContractIT is about the HTTP contract, not
-  # about who may call what — that's the OPA gate + rego tests' job, neither needs the app running.
-  authz:
-    enforce: false
   openbank:
     outbox:
       dispatch-enabled: false
