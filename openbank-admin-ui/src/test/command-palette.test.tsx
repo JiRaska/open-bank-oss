@@ -78,6 +78,25 @@ describe('CommandPalette (ADR-0228 D3)', () => {
     expect(recents[0].id).toBe('a-9')
   })
 
+  // #3886 regression, deterministic. The flake (`push` never called, 2.6% of CI runs) was the
+  // rare, load-dependent form of this: a keydown reaching the palette while `shown` is still
+  // empty. ArrowDown used to compute `Math.min(a + 1, shown.length - 1)` = -1, deselecting every
+  // row for good — `push` is then never called, because `shown[-1]` is undefined. Pressing ↓
+  // during the 300 ms debounce reproduces that window on purpose, with no timing luck involved.
+  it('survives an ArrowDown pressed before results arrive — no out-of-range selection (#3886)', async () => {
+    const user = userEvent.setup()
+    renderPalette()
+    await user.type(screen.getByRole('textbox'), 'nov')
+    // Still inside DEBOUNCE_MS: the list is empty and no row exists yet.
+    expect(screen.queryAllByRole('option')).toHaveLength(0)
+    fireEvent.keyDown(window, { key: 'ArrowDown' })
+    await waitFor(() => expect(screen.getByText('Jan Novák')).toBeTruthy(), { timeout: 2000 })
+    const rows = screen.getAllByRole('option')
+    expect(rows.map(r => r.getAttribute('aria-selected'))).toEqual(['true', 'false'])
+    fireEvent.keyDown(window, { key: 'Enter' })
+    expect(push).toHaveBeenCalledWith('/parties/p-1')
+  })
+
   it('highlights the active row with a balanced var() — an unclosed one is dropped by real CSS parsers', async () => {
     const user = userEvent.setup()
     renderPalette()

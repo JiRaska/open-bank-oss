@@ -35,11 +35,11 @@ class PartyErasureConsumerTest {
     @Test
     fun `PARTY_ERASED erases the party's conversation history`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
-        coEvery { conversationStore.deleteForCustomer(partyId.toString()) } returns 3L
+        coEvery { conversationStore.deleteForParty(partyId.toString()) } returns 3L
 
         consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""")
 
-        coVerify(exactly = 1) { conversationStore.deleteForCustomer(partyId.toString()) }
+        coVerify(exactly = 1) { conversationStore.deleteForParty(partyId.toString()) }
     }
 
     @Test
@@ -47,7 +47,7 @@ class PartyErasureConsumerTest {
         consumer.consume("""{"eventType":"PARTY_CREATED","partyId":"${UUID.randomUUID()}"}""")
         consumer.consume("""{"eventType":"PARTY_UPDATED","partyId":"${UUID.randomUUID()}"}""")
 
-        coVerify(exactly = 0) { conversationStore.deleteForCustomer(any()) }
+        coVerify(exactly = 0) { conversationStore.deleteForParty(any()) }
     }
 
     @Test
@@ -56,16 +56,16 @@ class PartyErasureConsumerTest {
         consumer.consume("""{"eventType":"PARTY_ERASED"}""")
         consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"not-a-uuid"}""")
 
-        coVerify(exactly = 0) { conversationStore.deleteForCustomer(any()) }
+        coVerify(exactly = 0) { conversationStore.deleteForParty(any()) }
     }
 
     @Test
     fun `a store failure is swallowed so one bad message cannot wedge the consumer group`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
-        coEvery { conversationStore.deleteForCustomer(partyId.toString()) } throws IllegalStateException("db down")
+        coEvery { conversationStore.deleteForParty(partyId.toString()) } throws IllegalStateException("db down")
 
         consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""")
 
-        coVerify(exactly = 1) { conversationStore.deleteForCustomer(partyId.toString()) }
+        coVerify(exactly = 1) { conversationStore.deleteForParty(partyId.toString()) }
     }
 }

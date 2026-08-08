@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.4](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.2.3...engagement-service-v0.2.4) (2026-08-08)
+
+
+### Bug Fixes
+
+* **engagement:** merge the duplicated %test authz key — main is red ([#4160](https://github.com/JiRaska/open-bank-oss/issues/4160)) ([d0af48b](https://github.com/JiRaska/open-bank-oss/commit/d0af48b68518c9f85003dc3ac69719b158199eba))
+* **engagement:** SurfaceRestContractIT is red on main — an identity and test-profile authz enforcement ([#4128](https://github.com/JiRaska/open-bank-oss/issues/4128)) ([75ed482](https://github.com/JiRaska/open-bank-oss/commit/75ed48229cfda0ce5f099d8ff344b24c7a837b13))
+
 ## [0.2.3](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.2.2...engagement-service-v0.2.3) (2026-08-08)
 
 

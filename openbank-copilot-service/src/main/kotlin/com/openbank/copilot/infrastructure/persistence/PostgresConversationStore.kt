@@ -44,6 +44,12 @@ class ConversationHistoryEntity : PanacheEntityBase() {
     @Column(nullable = false, name = "conversation_id")
     lateinit var conversationId: String
 
+    // Erasure identity captured at write time (#3881, V2 migration). Nullable: rows predating the
+    // migration have none, and a turn whose token carried neither a `party_id` claim nor a subject
+    // cannot invent one. NEVER used for lookup — `customerId` alone decides what a customer resumes.
+    @Column(name = "party_id")
+    var partyId: String? = null
+
     // text not jsonb: the Vert.x PG client returns JsonArray for jsonb columns, which cannot be
     // cast to String — the same V2 lesson from campaign-service and copilot's RedisConversationStore.
     @Column(nullable = false, columnDefinition = "text", name = "messages_json")
@@ -107,7 +113,7 @@ class PostgresConversationStore(private val mapper: ObjectMapper) :
         } ?: emptyList()
     }
 
-    override fun append(customerId: String, conversationId: String, newTurns: List<ChatMessage>) {
+    override fun append(customerId: String, conversationId: String, newTurns: List<ChatMessage>, partyId: String?) {
         if (!ConversationStore.persistable(conversationId) || newTurns.isEmpty()) return
         vtx {
             Panache.withTransaction {
@@ -130,6 +136,10 @@ class PostgresConversationStore(private val mapper: ObjectMapper) :
                         this.conversationId = conversationId
                         createdAt = now
                     }
+                    // Refresh on every append, not only on insert: a row created before V2 (or by a
+                    // turn whose token carried no claim) picks the party id up on the customer's
+                    // next message, which is the only backfill that needs no offline job.
+                    if (partyId != null) upsert.partyId = partyId
                     upsert.messagesJson = mapper.writeValueAsString(merged)
                     upsert.lastMessageAt = now
                     upsert.expiresAt = now.plusSeconds(T1_TTL_SECONDS)
@@ -146,8 +156,11 @@ class PostgresConversationStore(private val mapper: ObjectMapper) :
     // event loop. A DELETE also removes the row outright — unlike `load`, which merely stops serving
     // it once `expires_at` passes.
 
-    override suspend fun deleteForCustomer(customerId: String): Long =
-        Panache.withTransaction { delete("customerId = ?1", customerId) }.awaitSuspending()
+    // Either identity: the party id captured at write time, or the OIDC `sub` for the ADR-0069 case
+    // and for rows written before V2. Deleting on `customerId` alone matched 0 of 35 deployed users.
+    override suspend fun deleteForParty(partyId: String): Long = Panache.withTransaction {
+        delete("partyId = ?1 or customerId = ?1", partyId)
+    }.awaitSuspending()
 
     override suspend fun deleteConversation(customerId: String, conversationId: String): Long =
         Panache.withTransaction {
