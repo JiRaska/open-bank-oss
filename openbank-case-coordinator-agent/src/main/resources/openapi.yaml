@@ -1,0 +1,372 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
+openapi: 3.1.0
+info:
+  title: Case Coordinator Agent API
+  version: 1.0.0
+  description: >-
+    Agent-swarm case coordination (ADR-0244): opens durable Temporal case workflows, accepts
+    mid-flight agent signals (join / contribute / supersede / request-synthesis), and projects
+    case history into the ADR-0246 thread view. Every case converges to exactly one
+    human-in-the-loop proposal (ADR-0031); this API never writes to a business record.
+  license:
+    name: AGPL-3.0-only
+    url: https://www.gnu.org/licenses/agpl-3.0.html
+servers:
+  - url: http://localhost:8130
+    description: Local development
+tags:
+  - name: Cases
+  - name: Service
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/case-coordinator/status:
+    get:
+      tags: [Service]
+      summary: Service identity and liveness for operators
+      operationId: getCaseCoordinatorStatus
+      responses:
+        '200':
+          description: Service identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceStatus'
+
+  /api/v1/case-coordinator/cases:
+    post:
+      tags: [Cases]
+      summary: Open a swarm case (D9 case-open authority)
+      operationId: openCase
+      description: >-
+        Opens a durable Temporal case workflow for one disposition target. Deduplicated by
+        deterministic workflow id (class + subject); rate-limited per opening agent and bounded
+        by the per-class concurrent-open ceiling from `agents.yaml: case_classes`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenCaseRequest'
+      responses:
+        '201':
+          description: Case opened
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenCaseResponse'
+        '202':
+          description: Open accepted, workflow start pending
+        '400':
+          description: Missing or invalid request field
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '403':
+          description: case.open denied by the capability gate, or case class not enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '409':
+          description: A case for this class and subject is already running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '429':
+          description: Case-open quota or concurrent-case ceiling exhausted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '503':
+          description: Temporal case workflows disabled or unreachable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+    get:
+      tags: [Cases]
+      summary: List cases (open first), newest first
+      operationId: listCases
+      description: >-
+        Read model over `case_workflow`. An empty list is the honest empty state (ADR-0231) —
+        no synthetic rows.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filter by case status (OPEN, CONVERGING, CONTESTED, SYNTHESIZED, CLOSED)
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+      responses:
+        '200':
+          description: Case list (possibly empty)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseListResponse'
+
+  /api/v1/case-coordinator/cases/{caseId}:
+    get:
+      tags: [Cases]
+      summary: Case detail with the full ADR-0246 thread
+      operationId: getCaseThread
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          description: Temporal workflow id returned by the open call (case-<class>-<subject>)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Case detail and thread entries, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseThread'
+        '404':
+          description: No case with this id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+
+  /api/v1/case-coordinator/cases/{caseId}/signals:
+    post:
+      tags: [Cases]
+      summary: Deliver a signal to a running case workflow
+      operationId: signalCase
+      description: >-
+        Signal ingress for swarm participants: join, contribute, supersede (deterministic
+        pre-emption, D5) or request-synthesis. Each type is capability-gated (D2).
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignalRequest'
+      responses:
+        '202':
+          description: Signal accepted by the workflow
+        '400':
+          description: Missing or invalid request field
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '403':
+          description: Signal type denied for this agent by the capability gate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          description: No running case with this id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '503':
+          description: Temporal case workflows disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ServiceStatus:
+      type: object
+      required: [service, status]
+      properties:
+        service:
+          type: string
+        status:
+          type: string
+
+    OpenCaseRequest:
+      type: object
+      required: [caseClass, subjectRef, openedBy, dispositionTarget]
+      properties:
+        caseClass:
+          type: string
+          description: Case class from agents.yaml case_classes (e.g. incident-response)
+        subjectRef:
+          type: string
+          description: Stable subject reference; part of the deduplicating workflow id
+        openedBy:
+          type: string
+          description: Agent id opening the case (capability-gated)
+        dispositionTarget:
+          type: string
+          description: What the case is deciding about (alert, incident, proposal lineage)
+
+    OpenCaseResponse:
+      type: object
+      required: [caseId]
+      properties:
+        caseId:
+          type: string
+
+    SignalRequest:
+      type: object
+      required: [type, agentId]
+      properties:
+        type:
+          type: string
+          enum: [join, contribute, supersede, request-synthesis]
+        agentId:
+          type: string
+        role:
+          type: string
+          description: Participant role for join signals
+        summary:
+          type: string
+          description: Contribution content (required for contribute)
+        evidenceRefs:
+          type: array
+          items:
+            type: string
+        contested:
+          type: boolean
+        newEvidenceRef:
+          type: string
+          description: Required for supersede (pre-emption evidence, D5)
+        reason:
+          type: string
+
+    CaseSummary:
+      type: object
+      required:
+        - caseId
+        - caseClass
+        - dispositionTarget
+        - status
+        - openedAtEpochMs
+        - deadlineAtEpochMs
+        - contestedRate
+        - contributionCount
+      properties:
+        caseId:
+          type: string
+        caseClass:
+          type: string
+        dispositionTarget:
+          type: string
+        status:
+          type: string
+        openedAtEpochMs:
+          type: integer
+          format: int64
+        deadlineAtEpochMs:
+          type: integer
+          format: int64
+        contestedRate:
+          type: number
+        contributionCount:
+          type: integer
+
+    CaseListResponse:
+      type: object
+      required: [cases]
+      properties:
+        cases:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseSummary'
+
+    ThreadEntry:
+      type: object
+      required: [type, atEpochMs]
+      properties:
+        type:
+          type: string
+          enum: [CASE_OPENED, CONTRIBUTION, PROPOSAL_EMITTED]
+        atEpochMs:
+          type: integer
+          format: int64
+        actor:
+          type: string
+        summary:
+          type: string
+        evidenceRefs:
+          type: array
+          items:
+            type: string
+        draftVersion:
+          type: integer
+        superseded:
+          type: boolean
+          description: True for contributions on a pre-empted draft (D5 fork marker)
+        contested:
+          type: boolean
+        proposalId:
+          type: string
+        proposalType:
+          type: string
+
+    CaseThread:
+      type: object
+      required:
+        - caseId
+        - caseClass
+        - dispositionTarget
+        - status
+        - openedAtEpochMs
+        - deadlineAtEpochMs
+        - contestedRate
+        - entries
+      properties:
+        caseId:
+          type: string
+        caseClass:
+          type: string
+        dispositionTarget:
+          type: string
+        status:
+          type: string
+        openedAtEpochMs:
+          type: integer
+          format: int64
+        deadlineAtEpochMs:
+          type: integer
+          format: int64
+        contestedRate:
+          type: number
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/ThreadEntry'
+
+    ErrorBody:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string

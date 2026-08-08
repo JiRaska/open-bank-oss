@@ -1,0 +1,117 @@
+{
+  "consumer": {
+    "name": "openbank-admin-ui"
+  },
+  "interactions": [
+    {
+      "description": "fetch the swarm thread for one case",
+      "providerStates": [
+        {
+          "name": "a closed case with a thread exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/case-coordinator/cases/case-incident-response-alert-7"
+      },
+      "response": {
+        "body": {
+          "caseClass": "INCIDENT_RESPONSE",
+          "caseId": "case-incident-response-alert-7",
+          "contestedRate": 0.5,
+          "deadlineAtEpochMs": 1760001200000,
+          "dispositionTarget": "alert-7",
+          "entries": [
+            {
+              "atEpochMs": 1760000000000,
+              "contested": false,
+              "evidenceRefs": [
+
+              ],
+              "summary": "alert-7",
+              "superseded": false,
+              "type": "CASE_OPENED"
+            },
+            {
+              "actor": "fraud-agent",
+              "atEpochMs": 1760000060000,
+              "contested": true,
+              "draftVersion": 1,
+              "evidenceRefs": [
+                "tx-1"
+              ],
+              "summary": "velocity spike",
+              "superseded": false,
+              "type": "CONTRIBUTION"
+            },
+            {
+              "atEpochMs": 1760000120000,
+              "contested": false,
+              "evidenceRefs": [
+
+              ],
+              "proposalId": "11111111-1111-1111-1111-111111111111",
+              "proposalType": "case-synthesis",
+              "superseded": false,
+              "type": "PROPOSAL_EMITTED"
+            }
+          ],
+          "openedAtEpochMs": 1760000000000,
+          "status": "CLOSED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "list open cases for the swarm roster",
+      "providerStates": [
+        {
+          "name": "an open case exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/case-coordinator/cases",
+        "query": {
+          "status": [
+            "OPEN"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "cases": [
+            {
+              "caseClass": "INCIDENT_RESPONSE",
+              "caseId": "case-incident-response-alert-7",
+              "contestedRate": 0.0,
+              "contributionCount": 1,
+              "deadlineAtEpochMs": 1760001200000,
+              "dispositionTarget": "alert-7",
+              "openedAtEpochMs": 1760000000000,
+              "status": "OPEN"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-case-coordinator-agent"
+  }
+}
