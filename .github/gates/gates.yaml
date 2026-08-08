@@ -1158,6 +1158,34 @@ gates:
     run: |
       python3 .github/scripts/check-gate-script-registration.py --enforce
 
+  # The DECLARATION half of the main-red watch (issue #4019). `main`'s own CI conclusion was
+  # observed by nothing: the repo's only workflow_run listener re-runs spot-killed runs and
+  # escalates nothing, and deploy-drift-watch.yml — named "Deployed == main watch" — compares
+  # the DEPLOYED IMAGE, so a red commit that deployed reads as perfectly in sync. main went red
+  # four times on 2026-08-07/08 (Services CI/engagement-service, CI/Admin UI build, Security
+  # scan/Trivy twice) and each was found only because a human swept the Actions tab.
+  #
+  # The watch's coverage set is a hand-written `workflows:` list inside a workflow_run trigger,
+  # and this repo has already been bitten by a gate whose scope is a hand-kept list of the thing
+  # it checks (pact-drift-check.yml was green about modules it never regenerated). So the list is
+  # not maintained separately from the artifacts it covers: R1 requires every unconditional
+  # push-on-main workflow to be in it, R2 requires every path-filtered one to be either in it or
+  # in the script's NOT_WATCHED map with a reason, and a stale exclusion fails too.
+  #
+  # The binding copy is HERE, not in main-red-watch.yml: that workflow is workflow_run- and
+  # paths-triggered, so it can never be a required context and its verdict is advisory in
+  # practice. The runtime half (classify a completed run, escalate onto an issue) never gates a
+  # merge — main being red is not a defect in the PR at hand.
+  - id: main-red-watch-declaration
+    name: "every push-on-main workflow is watched or declared (issue #4019, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-main-red-watch.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-main-red-watch.py --check-declaration
+
   - id: opa-sidecar-bundle-shape
     name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"
     group: gitops
@@ -1296,16 +1324,27 @@ gates:
   # says in place that registering an operator write without it "is a money-path outage, not
   # a test failure".
   #
-  # ADVISORY, deliberately and temporarily. The script has no --enforce flag and exits 1 on
-  # the current tree with one real finding (`operator-mcp-session` in the shared rest.rego
-  # grants on ROLE_OPERATOR/ROLE_ADMIN without pinning input.principal.id). Registering it
-  # enforced would break main on a defect this PR is not fixing; registering it advisory is
-  # what makes that defect visible at all. Graduate to enforced once the finding is closed —
-  # tracked on #3240.
+  # GRADUATED TO ENFORCED by this PR, which is what the advisory note below asked for. It read:
+  # "Graduate to enforced once the finding is closed — tracked on #3240." The finding was
+  # `operator-mcp-session` granting on ROLE_OPERATOR/ROLE_ADMIN without pinning
+  # input.principal.id; this PR closes it with the `service-account-` exclusion, and clears the
+  # two stale BASELINE entries (operator-fx-approval-decide, operator-fx-trigger) that had
+  # accumulated meanwhile. Measured: origin/main exits 1 (1 new + 2 stale), this branch exits 0.
+  #
+  # `mode:` is the whole enforcement, and the run line deliberately does NOT pass --enforce.
+  # That is the ratchet: a NEW escaping rule and a STALE baseline entry each `return 1`
+  # unconditionally, so enforced blocks them, while today's 5 baselined rules print a warning
+  # and exit 0 so the debt can be worked down per rule. Passing --enforce would instead fail on
+  # the debt itself and make the gate unmergeable — a different lever, kept but not wired here.
+  #
+  # Advisory was doing less than it looked: those two `return 1` paths already existed, and
+  # `mode: advisory` converts a script's exit 1 into a warning at the runner. So a brand-new
+  # operator write escaping the prohibition was DETECTED and not blocked, on a rule whose own
+  # text says registering one without it "is a money-path outage, not a test failure".
   - id: operator-write-naming
-    name: "operator-write naming vs. shared-M2M prohibition (GHSA-58jq-9hq3-66jr, advisory)"
+    name: "operator-write naming vs. shared-M2M prohibition (GHSA-58jq-9hq3-66jr, enforced)"
     group: registry
-    mode: advisory
+    mode: enforced
     run: |
       python3 .github/scripts/check-operator-write-naming.py
 
@@ -1547,6 +1586,38 @@ gates:
       python3 .github/scripts/check-domain-purity.py --self-test
     run: |
       python3 .github/scripts/check-domain-purity.py .
+
+  # openbank-libs published three annotations — @Idempotent, @Audited, @MaskSensitive —
+  # that were plain RUNTIME markers: no @InterceptorBinding, no interceptor, zero usages.
+  # Applying one compiled, reviewed as correct, and did nothing; @Idempotent on a payment
+  # endpoint would have let a duplicate POST through while the source read as protected.
+  # Two were recorded as SHIPPED CONTROLS — ADR-0014 Phase 3 "✅ Shipped: PiiMask/
+  # @MaskSensitive", and the STRIDE Repudiation mitigation in the onboarding threat model —
+  # which is the half that actively misleads: an unimplemented idea had become evidence.
+  #
+  # Two rules, each falsified separately (#4011). RULE A: an annotation declared in an
+  # openbank-libs-* module must be @InterceptorBinding WITH an interceptor, or be applied at
+  # least once in some src/main — red on the pre-fix tree with exactly the three above.
+  # RULE B: a document in docs/adr, docs/threat-models or openbank-libs/docs may not name an
+  # @Annotation that no Kotlin source declares or imports — red on the intermediate state
+  # (annotations deleted, documents not yet corrected: 25 findings), which is precisely the
+  # shape that made this dangerous rather than untidy. The "real annotation" set is DERIVED
+  # from the sources, never hand-kept.
+  #
+  # Code-about-code precedence was decided BEFORE the first run, since a text guard always
+  # flags the prose explaining the defect it catches: naming an absent annotation is allowed
+  # when the surrounding paragraph cites an issue. Prose about deliberately-unadopted
+  # third-party annotations (ADR-0016's @RunOnVirtualThread, a residual-risk column's
+  # @RateLimited) sits in PROSE_ALLOWLIST with a reason each, and a STALE entry fails in
+  # either direction — an exemption and its removal move together.
+  - id: libs-annotations-implemented
+    name: "openbank-libs annotations are implemented, and no doc names a phantom one (#4011, enforced)"
+    group: kotlin
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-libs-annotations-implemented.py --self-test
+    run: |
+      python3 .github/scripts/check-libs-annotations-implemented.py .
 
   # ==== api ===================================================================
 

@@ -14,7 +14,6 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
 import java.time.Clock
-import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.UUID
 
@@ -144,7 +143,16 @@ class SanctionsListService(
         if (now.hour != cronHour || now.minute != cronMinute) return false
 
         val lastRun = lastUpdatedAt ?: return true
-        val lastRunAt = ZonedDateTime.ofInstant(lastRun, ZONE_ID)
+        // Read the last run in the SAME zone as [now] — which is the injected clock's zone, UTC in
+        // production. This comparison is a same-minute equality on (year, dayOfYear, hour, minute):
+        // it is only meaningful if both sides are in one zone, and it used to read `now` from the
+        // clock and `lastRunAt` from ZoneId.systemDefault(). Those agree only when the JVM default
+        // happens to be UTC, so on any other host the de-duplication compared two different
+        // clocks and was wrong in BOTH directions: a just-completed run read as not-yet-run (the
+        // list re-imports on the next tick inside the due minute), and an unrelated run offset by
+        // exactly the zone offset read as already-run (the due refresh is skipped). Not a zone
+        // choice: taking the zone from `now` makes both sides one zone by construction.
+        val lastRunAt = ZonedDateTime.ofInstant(lastRun, now.zone)
         return !(
             lastRunAt.year == now.year &&
                 lastRunAt.dayOfYear == now.dayOfYear &&
@@ -155,6 +163,5 @@ class SanctionsListService(
 
     companion object {
         private val ALLOWED_DAYS = setOf("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
-        private val ZONE_ID: ZoneId = ZoneId.systemDefault()
     }
 }

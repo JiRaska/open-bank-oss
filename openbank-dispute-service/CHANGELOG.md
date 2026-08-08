@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.8.5...dispute-service-v0.9.0) (2026-08-08)
+
+
+### Features
+
+* **dispute:** publish dispute.opened so an open dispute is visible outside this service ([#4087](https://github.com/JiRaska/open-bank-oss/issues/4087)) ([ef72727](https://github.com/JiRaska/open-bank-oss/commit/ef72727f32757bb13b104dcdfc664c2b614a30fb)), closes [#4070](https://github.com/JiRaska/open-bank-oss/issues/4070)
+
 ## [0.8.5](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.8.4...dispute-service-v0.8.5) (2026-08-02)
 
 
