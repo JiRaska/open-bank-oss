@@ -19,6 +19,7 @@ fun CardEntity.toDomain() = Card(
     contactlessEnabled = contactlessEnabled, onlineEnabled = onlineEnabled,
     atmEnabled = atmEnabled, abroadEnabled = abroadEnabled,
     panEncrypted = panEncrypted, cvvEncrypted = cvvEncrypted,
+    delegationGrantId = delegationGrantId,
 )
 
 fun Card.toEntity() = CardEntity().also { e ->
@@ -49,4 +50,5 @@ fun Card.toEntity() = CardEntity().also { e ->
     e.updatedAt = updatedAt
     e.panEncrypted = panEncrypted
     e.cvvEncrypted = cvvEncrypted
+    e.delegationGrantId = delegationGrantId
 }

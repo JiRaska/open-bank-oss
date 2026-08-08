@@ -59,9 +59,28 @@ data class Card(
     // cards issued before the pan_encrypted/cvv_encrypted migration have no stored PAN at all.
     val panEncrypted: String? = null,
     val cvvEncrypted: String? = null,
+    /**
+     * The delegation grant that authorised issuing this card to someone other than the account
+     * owner (ADR-0249 D1 — "dodatková karta"). NULL for an ordinary card, which is every card
+     * issued before this existed: absence means "the holder is the account owner", not "unknown".
+     *
+     * It is set once, at issue, and never updated — the whole point is that it names the authority
+     * this instrument rests on. When that authority ends, [Card] does not merely become invisible:
+     * ADR-0249 D2 requires the card to be BLOCKED, because a card that still transacts after its
+     * authorisation ended is the failure everyone would remember. That is what makes this column a
+     * load-bearing link rather than a decorative back-reference.
+     */
+    val delegationGrantId: UUID? = null,
 ) {
     /** True when this card's PAN only ever existed digitally — see [CardType]. */
     val isVirtualForm: Boolean get() = cardType in VIRTUAL_FORM_TYPES
+
+    /**
+     * True when this card was issued to a delegate under a grant (ADR-0249 D1) rather than to the
+     * account's own owner. Derived from [delegationGrantId] alone: `partyId != accountOwner` cannot
+     * be computed here, because this aggregate does not know who owns the account.
+     */
+    val isDelegated: Boolean get() = delegationGrantId != null
 
     fun activate(now: Instant = Instant.EPOCH) = also {
         require(status == CardStatus.PENDING) { "Only PENDING cards can be activated, current: $status" }

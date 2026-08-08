@@ -3,9 +3,10 @@
 openapi: 3.1.0
 info:
   title: Card Issuance Service API
-  version: 1.5.0
+  version: 1.6.0
   description: Debit/credit card lifecycle — issue, activate, block, suspend, resume, cancel;
-    synthetic PAN vault and product-catalog entitlements.
+    synthetic PAN vault, product-catalog entitlements, and additional-cardholder cards issued
+    under a delegation grant (ADR-0249 D1/D2).
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -603,6 +604,15 @@ components:
           type: string
         deliveryAddress:
           type: object
+        delegationGrantId:
+          type: string
+          format: uuid
+          description: >-
+            ADR-0249 D1 — the delegation grant authorising this card for a holder who is NOT the
+            account owner ("dodatková karta"). Omit for an ordinary card. This service records the
+            link but does not verify the grant: the caller (customer-edge) proves the grant and the
+            grantor's SCA. The link is what makes revocation reach the card — when the grant ends,
+            every card carrying its id is blocked (ADR-0249 D2).
 
     CardStatusRequest:
       type: object
@@ -639,6 +649,16 @@ components:
         issuedAt:
           type: string
           format: date-time
+        delegationGrantId:
+          type: string
+          format: uuid
+          nullable: true
+          description: ADR-0249 D1 — present only on an additional-cardholder card.
+        delegated:
+          type: boolean
+          description: >-
+            True when this card was issued to a delegate rather than the account owner. Branch on
+            this rather than on delegationGrantId being non-null.
 
     CardSecureDetailsResponse:
       type: object

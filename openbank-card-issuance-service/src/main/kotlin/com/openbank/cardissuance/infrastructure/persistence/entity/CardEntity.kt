@@ -98,4 +98,9 @@ class CardEntity {
 
     @Column(name = "cvv_encrypted")
     var cvvEncrypted: String? = null
+
+    // ADR-0249 D1: the grant that authorised issuing this card to a delegate. NULL for an ordinary
+    // card. Written once at issue and never updated — see Card.delegationGrantId.
+    @Column(name = "delegation_grant_id")
+    var delegationGrantId: UUID? = null
 }

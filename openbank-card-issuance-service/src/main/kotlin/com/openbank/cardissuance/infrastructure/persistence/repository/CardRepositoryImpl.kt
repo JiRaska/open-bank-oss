@@ -55,6 +55,9 @@ class CardRepositoryImpl(private val outboxRepository: CardOutboxRepositoryImpl)
     override suspend fun findByPartyId(partyId: UUID): List<Card> =
         Panache.withSession { find("partyId", partyId).list() }.awaitSuspending().map { it.toDomain() }
 
+    override suspend fun findByDelegationGrantId(grantId: UUID): List<Card> =
+        Panache.withSession { find("delegationGrantId", grantId).list() }.awaitSuspending().map { it.toDomain() }
+
     override suspend fun anonymizeByPartyId(partyId: UUID) {
         Panache.withTransaction {
             update(
@@ -97,7 +100,13 @@ class CardRepositoryImpl(private val outboxRepository: CardOutboxRepositoryImpl)
         )
     }.awaitSuspending() == 1
 
-    /** Copy the mutable (lifecycle) fields of [card] onto a managed entity for an in-place update. */
+    /**
+     * Copy the mutable (lifecycle) fields of [card] onto a managed entity for an in-place update.
+     *
+     * `delegationGrantId` is deliberately absent, along with the other issue-time identity fields:
+     * the grant a card rests on is fixed at issue (ADR-0249 D1). Re-pointing a live card at a
+     * different grant would let a revoked authority be laundered into a fresh one.
+     */
     private fun CardEntity.applyFrom(card: Card) {
         status = card.status.name
         maskedPan = card.maskedPan

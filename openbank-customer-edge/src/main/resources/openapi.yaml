@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.31.0
+  version: 1.32.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1184,8 +1184,12 @@ paths:
   /cards:
     get:
       tags: [Cards]
-      summary: List the caller's cards (masked PAN only)
-      description: Party-scoped by the JWT — a caller can only ever see their own cards.
+      summary: List the caller's cards (masked PAN only), including cards shared with them
+      description: >-
+        Party-scoped by the JWT, plus any card the caller holds an ACTIVE CARD_VIEW delegation grant
+        over (ADR-0249 D2). A shared card is marked `sharedWithMe: true` and is never presented as
+        the caller's own. An unreachable delegation-service degrades to the caller's own cards only —
+        it never blanks the wallet.
       operationId: listCards
       security:
         - customerOidc: [cards:read]
@@ -1264,6 +1268,96 @@ paths:
               schema:
                 $ref: '#/components/schemas/CardError'
 
+  /cards/delegated:
+    post:
+      tags: [Cards]
+      summary: Issue an additional-cardholder card ("dodatková karta") to a delegate (SCA-gated)
+      description: >-
+        ADR-0249 D1. The caller is the GRANTOR: the card is minted on THEIR account, in the
+        GRANTEE's name, with its own PAN and its own daily/monthly ceilings — the ceilings the card
+        rail already enforces for primary cards. The grantee becomes the card's holder.
+
+
+        Four conditions, each failing closed: the caller owns the account; an ACTIVE delegation
+        grant already runs from the caller to the grantee over that exact account; the caller passes
+        SCA bound to the accountId (no card id exists yet); and BOTH ceilings are supplied. The
+        ceilings are mandatory here although optional on a self-service card, because ADR-0249 D5
+        refuses unlimited access to someone else's account.
+
+
+        The card is linked to the authorising grant, so revoking that grant BLOCKS the card rather
+        than merely hiding it (ADR-0249 D2).
+      operationId: issueDelegatedCard
+      security:
+        - customerOidc: [cards:create]
+      parameters:
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid},
+           description: 'An approved CARD_MANAGEMENT challenge with cardAction=ISSUE_DELEGATED bound to the accountId'}
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: {type: string}
+          description: >-
+            Honoured when supplied; otherwise a stable per-(grantee, account) key is generated so a
+            retry replays rather than minting a second card.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accountId, granteePartyId, dailyLimitMinorUnits, monthlyLimitMinorUnits]
+              properties:
+                accountId: {type: string, format: uuid, description: The GRANTOR's account the card draws on}
+                granteePartyId: {type: string, format: uuid, description: The party who will HOLD the card}
+                cardType: {type: string, enum: [VIRTUAL, SINGLE_USE], default: VIRTUAL}
+                dailyLimitMinorUnits:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: Minor units (haléře). Must not exceed monthlyLimitMinorUnits.
+                monthlyLimitMinorUnits: {type: integer, format: int64, minimum: 0, description: Minor units (haléře).}
+      responses:
+        '201':
+          description: Additional-cardholder card issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Card'
+        '400':
+          description: Malformed body, ids, cardType or limits
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardError'
+              examples:
+                grantee: {value: {error: Missing or malformed granteePartyId, code: CARD_GRANTEE_INVALID}}
+                self:
+                  value:
+                    error: granteePartyId must be another party — use POST /cards to issue your own card
+                    code: CARD_GRANTEE_IS_SELF
+                limits:
+                  value:
+                    error: dailyLimitMinorUnits and monthlyLimitMinorUnits are required, non-negative, and daily <= monthly
+                    code: CARD_LIMITS_REQUIRED
+                unknown: {value: {error: Cannot resolve the cardholder name for that party, code: CARD_GRANTEE_UNKNOWN}}
+        '403':
+          description: >-
+            Account not owned by the caller, no ACTIVE grant to that party on this account, or SCA
+            missing/rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardError'
+        '409':
+          description: >-
+            Refused upstream by product-catalog entitlements — CARD_QUOTA_EXCEEDED,
+            CARD_PRODUCT_DISABLED or CARD_NETWORK_NOT_ALLOWED.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardError'
+
   /cards/entitlements:
     get:
       tags: [Cards]
@@ -1296,7 +1390,11 @@ paths:
   /cards/{id}/freeze:
     post:
       tags: [Cards]
-      summary: Freeze (reversibly suspend) one of the caller's own cards
+      summary: Freeze (reversibly suspend) a card the caller controls
+      description: >-
+        Open to the card's holder, the owner of the account behind it, or a delegate holding an
+        ACTIVE CARD_MANAGE_LIMITS grant on the card (ADR-0249 D2). Reversible, and can only ever
+        reduce what the card may do.
       operationId: freezeCard
       security:
         - customerOidc: [cards:update]
@@ -1309,7 +1407,8 @@ paths:
   /cards/{id}/unfreeze:
     post:
       tags: [Cards]
-      summary: Unfreeze (resume) one of the caller's own cards
+      summary: Unfreeze (resume) a card the caller controls
+      description: Same authority as freeze — holder, account owner, or CARD_MANAGE_LIMITS delegate.
       operationId: unfreezeCard
       security:
         - customerOidc: [cards:update]
@@ -1408,6 +1507,10 @@ paths:
         is allowed with no SCA at all. The X-SCA-Challenge-Id header is therefore optional — a missing
         header on an increase is answered 403 SCA_REQUIRED (so the app can raise a challenge and
         retry), never 400. Unresolvable current limits are treated as an increase (fail closed).
+
+
+        Open to the card's holder, the owner of the account behind it, or a delegate holding an
+        ACTIVE CARD_MANAGE_LIMITS grant on the card (ADR-0249 D2). CARD_VIEW alone is never enough.
       operationId: updateCardLimits
       security:
         - customerOidc: [cards:update]
@@ -1442,11 +1545,15 @@ paths:
   /cards/{id}/controls:
     put:
       tags: [Cards]
-      summary: Set the four channel controls on one of the caller's own cards
+      summary: Set the four channel controls on a card the caller controls
       description: >-
         All four booleans are required and validated at the edge. Deliberately NOT SCA-gated: each
         toggle is reversible at any time and can only narrow or restore what the card may do — no
         money moves and no limit widens beyond what /limits already governs.
+
+
+        Same authority as /limits — holder, account owner, or CARD_MANAGE_LIMITS delegate
+        (ADR-0249 D2).
       operationId: updateCardControls
       security:
         - customerOidc: [cards:update]
@@ -2416,6 +2523,23 @@ components:
         onlineEnabled: {type: boolean}
         atmEnabled: {type: boolean}
         abroadEnabled: {type: boolean}
+        delegated:
+          type: boolean
+          description: >-
+            ADR-0249 D1 — true when this card was issued to a delegate ("dodatková karta") rather
+            than to the account owner. On such a card `partyId` is the DELEGATE, not the account
+            owner.
+        delegationGrantId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The grant this card rests on. Revoking it blocks the card (ADR-0249 D2).
+        sharedWithMe:
+          type: boolean
+          description: >-
+            Present and true only on a card the caller does NOT hold, listed because an ACTIVE
+            CARD_VIEW grant covers it. Absent on the caller's own cards — a borrowed instrument is
+            never presented as the caller's own.
 
     # The ONLY payload on which a full PAN/CVV crosses the edge (POST /cards/{id}/details).
     # Returned no-store; never logged, never cached, never audited by value.

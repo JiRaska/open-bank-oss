@@ -22,10 +22,13 @@ data class IssueCardRequest(
     val dailyLimitMinorUnits: Long = 500_000L,
     val monthlyLimitMinorUnits: Long = 5_000_000L,
     val deliveryAddress: String? = null,
+    /** ADR-0249 D1 — the grant authorising a card for a holder who is not the account owner. */
+    val delegationGrantId: UUID? = null,
 ) {
     fun toCommand(idempotencyKey: String) = IssueCardCommand(
         idempotencyKey, partyId, accountId, productCode, cardType, network,
         cardholderName, embossedName, currency, dailyLimitMinorUnits, monthlyLimitMinorUnits, deliveryAddress,
+        delegationGrantId,
     )
 }
 
@@ -56,6 +59,14 @@ data class CardResponse(
     val onlineEnabled: Boolean = true,
     val atmEnabled: Boolean = true,
     val abroadEnabled: Boolean = true,
+    /**
+     * ADR-0249 D1. Present only on an additional-cardholder card. Callers should branch on
+     * [delegated] rather than on this being non-null; the id is exposed so an operator can trace
+     * the card back to the authority it rests on.
+     */
+    val delegationGrantId: UUID? = null,
+    /** True when this card was issued to a delegate rather than the account owner (ADR-0249 D1). */
+    val delegated: Boolean = false,
 )
 
 fun Card.toResponse() = CardResponse(
@@ -64,6 +75,7 @@ fun Card.toResponse() = CardResponse(
     dailyLimitMinorUnits, monthlyLimitMinorUnits, currency, deliveryAddress,
     activatedAt, blockedAt, blockedReason, createdAt, updatedAt,
     contactlessEnabled, onlineEnabled, atmEnabled, abroadEnabled,
+    delegationGrantId, isDelegated,
 )
 
 /**
