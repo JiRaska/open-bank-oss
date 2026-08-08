@@ -28,15 +28,14 @@ import java.util.UUID
  * does not run in this IT's stack, and stubbing the port proves the path this IT exists to
  * prove without also needing a reachable OIDC token server.
  */
-@QuarkusTest
-@TestSecurity(user = "edge@openbank.test", roles = ["ROLE_OPERATOR"])
-@QuarkusTestResource(SurfaceRestContractIT.NoKafkaResource::class)
-@QuarkusTestResource(EngagementPostgresTestResource::class)
 // SurfaceResource carries @RolesAllowed("ROLE_OPERATOR", "ROLE_API", "ROLE_ADMIN") since #4054.
 // Without a token every request is 401 and the four assertions below never reach the code they
 // exist to exercise — same shape, and same fix, as CampaignRestContractIT, which this IT's KDoc
 // already names as its model.
-@TestSecurity(user = "surface-reader@openbank.test", roles = ["ROLE_OPERATOR"])
+@QuarkusTest
+@TestSecurity(user = "edge@openbank.test", roles = ["ROLE_OPERATOR"])
+@QuarkusTestResource(SurfaceRestContractIT.NoKafkaResource::class)
+@QuarkusTestResource(EngagementPostgresTestResource::class)
 class SurfaceRestContractIT {
 
     class NoKafkaResource : QuarkusTestResourceLifecycleManager {
