@@ -62,11 +62,13 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
 
 "%test":
-  # SurfaceResource's two endpoints are @Authorize-annotated, and `authz.enforce` carries
-  # defaultValue = "true" in AuthorizeInterceptor — so under @QuarkusTest, with no OPA PDP
-  # bean in the graph, every one of them answers 503 and SurfaceRestContractIT's
-  # `statusCode(200)` fails. Advisory in tests only; the deployed posture is unchanged and
-  # is decided by the sidecar wired in #4068.
+  # `authz.enforce` carries defaultValue = "true" in AuthorizeInterceptor, and a test JVM has no
+  # PolicyDecisionPoint bean — so every @Authorize call on SurfaceResource's two endpoints fails
+  # closed with 503 before the handler runs, and SurfaceRestContractIT's status assertions fail.
+  # Measured in #4128: removing this key alone turns all four of those tests red with 503.
+  # Advisory HERE ONLY, same pattern and reasoning as campaign-service: that IT is about the HTTP
+  # contract, not about who may call what — the OPA gate and the rego tests own that, and neither
+  # needs the app running. The deployed posture is unchanged, decided by the sidecar (#4068).
   authz:
     enforce: false
   quarkus:
@@ -76,13 +78,6 @@ mp:
       enabled: false
     oidc-client:
       enabled: false
-  # `authz.enforce` has no key elsewhere in this file, so the interceptor's safe default (true)
-  # applies — and with no PolicyDecisionPoint bean in a test JVM every @Authorize call fails
-  # closed (503) before the handler runs. Advisory HERE ONLY, same pattern and same reasoning as
-  # campaign-service's application.yaml: SurfaceRestContractIT is about the HTTP contract, not
-  # about who may call what — that's the OPA gate + rego tests' job, neither needs the app running.
-  authz:
-    enforce: false
   openbank:
     outbox:
       dispatch-enabled: false
