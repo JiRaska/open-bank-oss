@@ -48,6 +48,10 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.rest.assured.kotlin)
+    // Phase 2 (#4185): git-pact for the admin-ui read contract — consumer test generates
+    // pacts/openbank-admin-ui-openbank-case-coordinator-agent.json, provider replays it (ADR-0063).
+    testImplementation(libs.pact.consumer)
+    testImplementation(libs.pact.provider)
 }
 
 // Package the ADR-0148 prompt registry onto the classpath so CaseCoordinatorLlmAdapter loads its
@@ -59,6 +63,21 @@ tasks.named<Copy>("processResources") {
         include("*.md")
         into("governance-prompts/case-coordinator")
     }
+}
+
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
 
 kover {
