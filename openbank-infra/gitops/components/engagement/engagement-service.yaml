@@ -7,10 +7,16 @@
 #
 # Deliberately still absent, named rather than silently missing:
 #   - Kafka mTLS (KafkaUser + keystore/truststore Secrets) — KAFKA_BOOTSTRAP_SERVERS below has no
-#     SSL config, which is fine only because openbank.outbox.dispatch-enabled defaults false. The
-#     outbox fills, publishes nothing, and no message is silently lost — flipping dispatch on
-#     without also wiring mTLS would just fail every publish attempt, loudly, in the outbox's own
-#     retry/DEAD accounting.
+#     SSL config. openbank.outbox.dispatch-enabled is `true` in application.yaml, so the D2
+#     feedback-loop outbox has been attempting every publish over plaintext against the
+#     mTLS-only :9093 listener since #4048 merged — an immediate TLS-handshake failure per
+#     attempt, loud, never actually delivering. The fix (KafkaUser, ExternalSecrets, SSL env,
+#     msg-override ConfigMap for lending-events-in/party-events-in) is deliberately NOT bundled
+#     into the PR that adds the consumer code (issue #2749): check-msg-channel-image-parity.py
+#     (#3350 class incident, card-issuance) blocks a GitOps config that declares a messaging
+#     channel ahead of an image that can serve it, and this image tag cannot yet be — no image
+#     has been built from the commit that adds the channels. Lands as a fast-follow gitops PR
+#     once auto-deploy produces a real image from this PR's merge (it touches src/main).
 # The OPA sidecar used to be on that deferred list, on the reasoning that a missing PDP left
 # OPA-level policy merely "not consulted yet, not open". That was wrong, and the
 # `authz-enforce ⇒ PDP sidecar parity` gate (#1797) caught it: `authz.enforce` carries
@@ -82,7 +88,6 @@ spec:
                 secretKeyRef:
                   name: engagement-db-app
                   key: password
-            # No SSL config — see the file header on Kafka mTLS being deferred.
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             - name: CONSENT_SERVICE_URL

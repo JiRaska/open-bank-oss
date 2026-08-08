@@ -60,6 +60,21 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      # group.id / auto.offset.reset for both channels below are set via the
+      # engagement-service-msg-override ConfigMap (override.properties), NOT here — a dotted leaf
+      # map key under mp.messaging.incoming.<channel> in YAML never resolves to the plain
+      # MicroProfile Config property name SmallRye reads (issue #686, ADR-0137 pattern).
+      lending-events-in:
+        connector: smallrye-kafka
+        topic: openbank.lending.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      party-events-in:
+        connector: smallrye-kafka
+        topic: openbank.party.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 "%test":
   # `authz.enforce` carries defaultValue = "true" in AuthorizeInterceptor, and a test JVM has no
@@ -78,6 +93,13 @@ mp:
       enabled: false
     oidc-client:
       enabled: false
+  # `authz.enforce` has no key elsewhere in this file, so the interceptor's safe default (true)
+  # applies — and with no PolicyDecisionPoint bean in a test JVM every @Authorize call fails
+  # closed (503) before the handler runs. Advisory HERE ONLY, same pattern and same reasoning as
+  # campaign-service's application.yaml: SurfaceRestContractIT is about the HTTP contract, not
+  # about who may call what — that's the OPA gate + rego tests' job, neither needs the app running.
+  authz:
+    enforce: false
   openbank:
     outbox:
       dispatch-enabled: false
