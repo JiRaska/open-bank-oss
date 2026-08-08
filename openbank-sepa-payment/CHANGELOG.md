@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.8.9...sepa-payment-v0.9.0) (2026-08-08)
+
+
+### Features
+
+* **sepa-payment:** add customer-facing payment confirmation download endpoint ([#4131](https://github.com/JiRaska/open-bank-oss/issues/4131)) ([676a6f2](https://github.com/JiRaska/open-bank-oss/commit/676a6f2db8147dbb245497cfc6483bfc4983ec43))
+
 ## [0.8.9](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.8.8...sepa-payment-v0.8.9) (2026-08-02)
 
 

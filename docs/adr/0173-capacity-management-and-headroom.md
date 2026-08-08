@@ -2,6 +2,7 @@
 date: 2026-07-16
 decision-status: accepted
 delivery-status: partial
+followup: "#3806 — the one-replica-HA item; the NodePool-limit alert and request-drift items are still unfiled"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []

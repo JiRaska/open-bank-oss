@@ -56,6 +56,17 @@ class NotificationRepository : PanacheRepository<NotificationEntity> {
         Panache.withTransaction { delete("partyId", partyId) }.awaitSuspending()
 
     /**
+     * ContactPolicyGate's `sendsInWindow` counter (ADR-0219 D4/D1), backed by this service's own
+     * durable log — same "slice 1" convention as campaign-service's send log, since no shared
+     * Valkey counter exists yet. [templates] narrows to one [com.openbank.notification.domain.model.NotificationCategory]'s
+     * template names (MARKETING today) rather than every send, matching the gate's own send cap
+     * being a marketing-specific budget, not a count of every notification this party received.
+     */
+    suspend fun countSince(partyId: UUID, templates: List<String>, since: Instant): Int = Panache.withSession {
+        count("partyId = ?1 and template in ?2 and createdAt >= ?3", partyId, templates, since)
+    }.awaitSuspending().toInt()
+
+    /**
      * Mark one notification read (idempotent). partyId scopes the UPDATE so the edge's
      * injected identity can never mark another party's row (IDOR guard at the data layer).
      * True when the row exists for that party (freshly marked OR already read); false = not found.
