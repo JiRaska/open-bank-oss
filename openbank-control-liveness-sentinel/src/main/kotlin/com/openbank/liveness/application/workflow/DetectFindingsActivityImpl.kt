@@ -43,7 +43,7 @@ open class DetectFindingsActivityImpl(
     private fun detectStaleHeartbeats(signals: Map<String, Double>): List<LivenessFinding> =
         signals.mapNotNull { (label, ageSeconds) ->
             val fields = label.split('|')
-            if (fields.size < 3) return@mapNotNull null
+            if (fields.size < COMPOSITE_KEY_FIELDS) return@mapNotNull null
             val job = fields.dropLast(2).joinToString("|")
             val expectedIntervalSeconds = fields[fields.size - 2].toDoubleOrNull() ?: return@mapNotNull null
             // Absent/1.0 means the job has produced at least one success in this pod's lifetime.
@@ -134,4 +134,9 @@ open class DetectFindingsActivityImpl(
                 status = FindingStatus.OPEN,
             )
         }
+
+    private companion object {
+        /** `<job>|<expectedIntervalSeconds>|<everSucceeded>` — see [detectStaleHeartbeats]. */
+        const val COMPOSITE_KEY_FIELDS = 3
+    }
 }
