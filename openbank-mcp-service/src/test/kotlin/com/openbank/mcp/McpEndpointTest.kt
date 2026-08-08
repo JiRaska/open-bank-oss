@@ -16,7 +16,9 @@ import com.openbank.mcp.application.McpToolRegistry
 import com.openbank.mcp.application.PolicyFilteredToolCatalog
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
+import com.openbank.mcp.application.port.out.PaymentConfirmationReadPort
 import com.openbank.mcp.application.port.out.ProposalPort
+import com.openbank.mcp.application.port.out.StatementReadPort
 import com.openbank.mcp.infrastructure.mcp.CallerContextResolver
 import com.openbank.mcp.infrastructure.mcp.McpEndpoint
 import com.openbank.mcp.infrastructure.observability.McpMetricsAdapter
@@ -54,7 +56,8 @@ class McpEndpointTest {
         oboEnabled: Boolean = false,
     ): McpEndpoint {
         val stub = StubReads(mapper)
-        val toolRegistry = McpToolRegistry(stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper)
+        val toolRegistry =
+            McpToolRegistry(stub, stub, stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper)
         val caller = CallerContextResolver(jwt, oboEnabled, fakeSessionRepo())
         return McpEndpoint(
             registry = toolRegistry,
@@ -350,7 +353,7 @@ class McpEndpointTest {
         assertThat(event.result).isEqualTo(AuditResult.SUCCESS)
         assertThat(event.payload)
             .containsEntry("tools_returned", 0)
-            .containsEntry("tools_total", 6)
+            .containsEntry("tools_total", 8)
     }
 
     @Test
@@ -359,7 +362,7 @@ class McpEndpointTest {
         assertThat(resp.path("result").path("tools").size()).isZero()
         val event = audit.events.single()
         assertThat(event.result).isEqualTo(AuditResult.DENIED)
-        assertThat(event.payload).containsEntry("pdp_errors", 6)
+        assertThat(event.payload).containsEntry("pdp_errors", 8)
         assertThat(
             registry.get("openbank.mcp.tools_list")
                 .tag("service", "mcp").tag("outcome", "pdp_unavailable").counter().count(),
@@ -390,8 +393,8 @@ class McpEndpointTest {
         assertThat(event.actorType).isEqualTo("AI_AGENT")
         assertThat(event.result).isEqualTo(AuditResult.SUCCESS)
         assertThat(event.payload)
-            .containsEntry("tools_returned", 6)
-            .containsEntry("tools_total", 6)
+            .containsEntry("tools_returned", 8)
+            .containsEntry("tools_total", 8)
             .containsEntry("charter", "test-agent")
     }
 
@@ -404,8 +407,8 @@ class McpEndpointTest {
         val afterFirst = counting.calls.get()
         ep.handle(rpc("tools/list"))
 
-        assertThat(afterFirst).isEqualTo(6)
-        assertThat(counting.calls.get()).isEqualTo(6)
+        assertThat(afterFirst).isEqualTo(8)
+        assertThat(counting.calls.get()).isEqualTo(8)
         assertThat(audit.events).hasSize(2)
     }
 
@@ -417,7 +420,7 @@ class McpEndpointTest {
         ep.handle(rpc("tools/list"))
         ep.handle(rpc("tools/list"))
 
-        assertThat(counting.calls.get()).isEqualTo(12)
+        assertThat(counting.calls.get()).isEqualTo(16)
     }
 
     @Test
@@ -684,6 +687,8 @@ class McpEndpointTest {
 
     private class StubReads(private val m: com.fasterxml.jackson.databind.ObjectMapper) :
         AccountReadPort,
+        StatementReadPort,
+        PaymentConfirmationReadPort,
         ProposalPort {
         override fun listAccounts(consentContext: ConsentContext): JsonNode = m.createObjectNode().put("ok", true)
         override fun getBalance(consentContext: ConsentContext, accountId: String): JsonNode =
@@ -691,6 +696,14 @@ class McpEndpointTest {
         override fun listTransactions(consentContext: ConsentContext, accountId: String, limit: Int): JsonNode =
             m.createObjectNode().put("ok", true)
         override fun listConsents(consentContext: ConsentContext): JsonNode = m.createObjectNode().put("ok", true)
+        override fun getStatementSummary(
+            consentContext: ConsentContext,
+            accountId: String,
+            currency: String?,
+            legalSequence: Long?,
+        ): JsonNode = m.createObjectNode().put("ok", true)
+        override fun getPaymentConfirmation(consentContext: ConsentContext, paymentId: String): JsonNode =
+            m.createObjectNode().put("ok", true)
         override fun proposePayment(consentContext: ConsentContext, request: JsonNode): JsonNode =
             m.createObjectNode().put("status", "PROPOSED")
     }

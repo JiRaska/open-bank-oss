@@ -143,6 +143,34 @@ class StatementServiceTest {
     }
 
     @Test
+    fun `summary returns the same closed period as render, but as the canonical model - no renderer`() {
+        val period = StatementPeriod(
+            id = UUID.randomUUID(), accountId = Fixtures.ACCOUNT_ID, pocketCurrency = "CZK",
+            periodFrom = from, periodTo = to, legalSequenceNumber = 7, electronicSequenceNumber = 7,
+            openingBalance = BigDecimal("1000.00"), closingBalance = BigDecimal("1075.00"),
+            entryCount = 2, closedAt = Fixtures.CLOSED_AT,
+        )
+        every { periods.findBySequence(Fixtures.ACCOUNT_ID, "CZK", 7L) } returns Uni.createFrom().item(period)
+
+        val model = service.summary(Fixtures.ACCOUNT_ID, "CZK", 7L).await().indefinitely()
+
+        assertThat(model.legalSequenceNumber).isEqualTo(7L)
+        assertThat(model.openingBalance.amount).isEqualByComparingTo("1000.00")
+        assertThat(model.closingBalance.amount).isEqualByComparingTo("1075.00")
+        assertThat(model.entries).hasSize(2)
+        assertThat(model.iban).isEqualTo("CZ65")
+    }
+
+    @Test
+    fun `summary of a missing sequence fails with not-found, same as render`() {
+        every { periods.findBySequence(any(), any(), any()) } returns Uni.createFrom().nullItem()
+
+        assertThatThrownBy {
+            service.summary(Fixtures.ACCOUNT_ID, "CZK", 99L).await().indefinitely()
+        }.isInstanceOf(StatementNotFoundException::class.java)
+    }
+
+    @Test
     fun `an ad-hoc export carries no legal sequence`() {
         val rendered = service.export(Fixtures.ACCOUNT_ID, "CZK", from, to, StatementFormat.PDF)
             .await().indefinitely()

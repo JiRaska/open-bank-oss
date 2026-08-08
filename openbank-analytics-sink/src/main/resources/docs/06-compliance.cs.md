@@ -44,7 +44,7 @@ Přímo identifikující PII je maskováno na hranici příjmu (`PayloadMasker`)
 | Přenositelnost (Art. 20) | N/A — analytika není systémem záznamu osobních údajů. |
 
 ### Mezinárodní přenosy (Art. 44)
-`DataResidencyValidator` přeruší boot, pokud region skladu není na allow-listu (výchozí `eu-central-1,eu-west-1`). Žádná osobní data neopouštějí schválené EU regiony.
+`DataResidencyValidator` přeruší boot, pokud region skladu není na allow-listu (výchozí `eu-north-1`, ADR-0175 §1). Žádná osobní data neopouštějí schválené EU regiony.
 
 ### Retence (Art. 5(1)(e))
 
@@ -68,7 +68,7 @@ Přímo identifikující PII je maskováno na hranici příjmu (`PayloadMasker`)
 ## Toky dat ven
 
 - → **BI nástroje (Metabase / Superset):** čtou maskovaný gold/silver v ClickHouse — žádný přístup do provozní DB, žádné surové PII.
-- → **WORM / S3 Object Lock (`eu-central-1`):** integrity kotvy (jen hashe, žádné PII).
+- → **WORM / S3 Object Lock (`eu-north-1`):** integrity kotvy (jen hashe, žádné PII).
 - → **Vault (volitelně):** operace s crypto-erasure klíčem — žádný PII payload.
 
 Žádné surové PII se neukládá ani nepřenáší; žádná data neopouštějí schválený EU region.
