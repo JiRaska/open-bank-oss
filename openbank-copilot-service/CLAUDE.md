@@ -66,9 +66,25 @@ Free-text chat is where the least predictable personal data lands, so the retent
   and no `PARTY_ERASED` consumer "yet". It is deliberately NOT corrected: Flyway checksums the whole
   file including comments, so editing an applied migration fails the service at boot. Believe this
   file, not that one.
-- **Known gap:** the event carries `partyId`, but history is keyed on the OIDC `sub`. The customers
-  realm also defines a separate `party_id` claim, so where those differ the erasure matches nothing.
-  Tracked separately — do not read the consumer as complete coverage.
+- **The erasure identity is captured at WRITE time, and must stay that way (#3881).** `PARTY_ERASED`
+  carries `partyId`; history is keyed on the OIDC `sub`, and those are not the same value — measured
+  against the deployed customers realm, `sub` equalled `party_id` for **0 of 35** users, because
+  `WebAuthnKeycloakClient.ensureUser` never sets the Keycloak user `id`, so Keycloak mints a random
+  UUID and `party_id` survives as a separate attribute. Keyed on `sub`, the consumer received the
+  event, deleted nothing, and logged `erased 0 copilot conversation(s)` at INFO — a GDPR Art. 17
+  control reporting coverage it did not have, provable wrong only by querying the table. It cannot be
+  fixed in the consumer: by erasure time the Keycloak user is gone, so nothing maps `partyId` back to
+  a `sub`. So `CopilotChatResource.erasureIdentity()` (the `party_id` claim, `sub` as fallback — the
+  resolution customer-edge already uses) writes `conversation_history.party_id` (migration V2), and
+  `deleteForParty` matches **either** column. Do not "simplify" that `or` away.
+- **`party_id` is never a lookup key.** `customerId` alone still decides which conversation a
+  customer resumes; changing that would silently move every customer to a different history and
+  orphan every existing row. Rows written before V2 carry no party id and are reachable only by the
+  `customer_id` arm; they pick one up on that customer's next message.
+- **An erasure test whose two identities are the same string cannot see this class of bug.** Every
+  test in `ConversationErasureIT` erases using the id it seeded with, so all four passed against the
+  broken code. `PartyErasureIdentityIT` deliberately seeds `sub != partyId` and asserts by direct
+  JDBC — measured red on the unfixed behaviour with `expected: 2L but was: 0L`.
 
 ## Build
 
