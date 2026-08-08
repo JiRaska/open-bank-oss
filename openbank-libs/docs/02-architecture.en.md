@@ -207,7 +207,7 @@ Audit-grade security primitives — see [ADR 0017](../../docs/adr/0017-secrets-v
 
 | File | Purpose |
 |---|---|
-| `PiiMasking.kt` | `PiiMask.email/iban/pan/phone/name/nationalId/full` + `@MaskSensitive` annotation |
+| `PiiMasking.kt` | `PiiMask.email/iban/pan/phone/name/nationalId/full` — applied explicitly at the render/log site (there is no masking annotation; see #4011) |
 | `Roles.kt` | Canonical role string constants (`ROLE_ADMIN`, `OPERATOR`, `VIEWER`, `COMPLIANCE`, `AUDITOR`, `SUPERVISOR`, `KYC`, `PAYMENTS`, `SERVICE`) |
 | `SecurityContextExtensions.kt` | Kotlin extensions: `securityContext.currentUserId`, `actorName`, `actorType`, `requireAnyRole(...)` |
 | `ServiceTokenProvider.kt` | Port for S2S Bearer tokens; recommended prod impl: `quarkus-oidc-client-reactive-filter` |

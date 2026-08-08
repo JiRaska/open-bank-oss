@@ -1576,6 +1576,38 @@ gates:
     run: |
       python3 .github/scripts/check-domain-purity.py .
 
+  # openbank-libs published three annotations — @Idempotent, @Audited, @MaskSensitive —
+  # that were plain RUNTIME markers: no @InterceptorBinding, no interceptor, zero usages.
+  # Applying one compiled, reviewed as correct, and did nothing; @Idempotent on a payment
+  # endpoint would have let a duplicate POST through while the source read as protected.
+  # Two were recorded as SHIPPED CONTROLS — ADR-0014 Phase 3 "✅ Shipped: PiiMask/
+  # @MaskSensitive", and the STRIDE Repudiation mitigation in the onboarding threat model —
+  # which is the half that actively misleads: an unimplemented idea had become evidence.
+  #
+  # Two rules, each falsified separately (#4011). RULE A: an annotation declared in an
+  # openbank-libs-* module must be @InterceptorBinding WITH an interceptor, or be applied at
+  # least once in some src/main — red on the pre-fix tree with exactly the three above.
+  # RULE B: a document in docs/adr, docs/threat-models or openbank-libs/docs may not name an
+  # @Annotation that no Kotlin source declares or imports — red on the intermediate state
+  # (annotations deleted, documents not yet corrected: 25 findings), which is precisely the
+  # shape that made this dangerous rather than untidy. The "real annotation" set is DERIVED
+  # from the sources, never hand-kept.
+  #
+  # Code-about-code precedence was decided BEFORE the first run, since a text guard always
+  # flags the prose explaining the defect it catches: naming an absent annotation is allowed
+  # when the surrounding paragraph cites an issue. Prose about deliberately-unadopted
+  # third-party annotations (ADR-0016's @RunOnVirtualThread, a residual-risk column's
+  # @RateLimited) sits in PROSE_ALLOWLIST with a reason each, and a STALE entry fails in
+  # either direction — an exemption and its removal move together.
+  - id: libs-annotations-implemented
+    name: "openbank-libs annotations are implemented, and no doc names a phantom one (#4011, enforced)"
+    group: kotlin
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-libs-annotations-implemented.py --self-test
+    run: |
+      python3 .github/scripts/check-libs-annotations-implemented.py .
+
   # ==== api ===================================================================
 
   # The verification reconciler (.github/scripts/pact-reconcile-verifications.py)
