@@ -40,7 +40,11 @@ class SurfaceRestContractIT {
 
     class NoKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("engagement-outbox-out")
+            InMemoryConnector.switchOutgoingChannelsToInMemory("engagement-outbox-out") +
+                // lending-events-in / party-events-in (LendingArrearsEventConsumer,
+                // PartyErasureConsumer) — without this, @QuarkusTest boot tries a real Kafka
+                // consumer connection with no broker in this IT's stack.
+                InMemoryConnector.switchIncomingChannelsToInMemory("lending-events-in", "party-events-in")
 
         override fun stop() = InMemoryConnector.clear()
     }
