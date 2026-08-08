@@ -5,6 +5,7 @@
 package com.openbank.party.infrastructure.persistence.repository
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.party.application.port.out.PartyDocumentFileRepository
 import com.openbank.party.application.port.out.PartyDocumentRepository
@@ -120,7 +121,7 @@ class PartyRepositoryImpl(
         // constraint) but must NOT be derivable from the data subject. A fresh
         // random UUID satisfies uniqueness without re-encoding partyId, so the
         // erased value can't be correlated back to the party (K5).
-        e.email = "erased-${UUID.randomUUID()}@erased.invalid"
+        e.email = "erased-${Ids.randomId()}@erased.invalid"
         e.phone = null
         e.tradingName = null
         e.dateOfBirth = null
