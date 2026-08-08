@@ -6,7 +6,9 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
+import com.openbank.mcp.application.port.out.PaymentConfirmationReadPort
 import com.openbank.mcp.application.port.out.ProposalPort
+import com.openbank.mcp.application.port.out.StatementReadPort
 import com.openbank.mcp.infrastructure.read.StubMarketingReachPort
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -33,6 +35,8 @@ class McpUntrustedDataTest {
 
     private fun registry(payload: String) = McpToolRegistry(
         accounts = FixedReadPort(mapper.readTree(payload)),
+        statements = DenyingStatementReadPort,
+        paymentConfirmations = DenyingPaymentConfirmationReadPort,
         proposals = DenyingProposalPort,
         marketingReach = StubMarketingReachPort(mapper),
         masker = masker,
@@ -131,6 +135,20 @@ class McpUntrustedDataTest {
 
     private object DenyingProposalPort : ProposalPort {
         override fun proposePayment(consentContext: ConsentContext, request: JsonNode): JsonNode =
+            error("not exercised by this test")
+    }
+
+    private object DenyingStatementReadPort : StatementReadPort {
+        override fun getStatementSummary(
+            consentContext: ConsentContext,
+            accountId: String,
+            currency: String?,
+            legalSequence: Long?,
+        ): JsonNode = error("not exercised by this test")
+    }
+
+    private object DenyingPaymentConfirmationReadPort : PaymentConfirmationReadPort {
+        override fun getPaymentConfirmation(consentContext: ConsentContext, paymentId: String): JsonNode =
             error("not exercised by this test")
     }
 }

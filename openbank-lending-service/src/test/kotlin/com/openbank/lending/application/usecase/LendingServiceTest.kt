@@ -1544,6 +1544,13 @@ class LendingServiceTest {
         assertThat(payload).contains(""""previousStage":"STAGE_1"""")
         assertThat(payload).contains(""""newStage":"STAGE_2"""")
         assertThat(payload).contains(""""daysPastDue":40""")
+        // The reason this event is consumable outside lending at all: ADR-0220 D1's
+        // vulnerable-customer exclusion needs to know WHOSE loan moved stage. A consumer holding
+        // only a loanId would have to call back into this service on the app-open hot path, so a
+        // silently dropped partyId turns the arrears feed back into something nobody can use.
+        assertThat(payload)
+            .describedAs("adverse-state consumers key on partyId; without it this event is unusable to them")
+            .contains(""""partyId":"${loan.partyId}"""")
     }
 
     @Test

@@ -50,7 +50,7 @@ class CopilotChatService(
 ) : CopilotChatUseCase {
     private val log = Logger.getLogger(CopilotChatService::class.java)
 
-    override suspend fun handle(turn: ChatTurn, customerId: String): ChatOutcome {
+    override suspend fun handle(turn: ChatTurn, customerId: String, partyId: String?): ChatOutcome {
         if (!enabled) return ChatOutcome.Disabled
 
         guard.scanUserInput(customerId, turn.message)?.let {
@@ -67,7 +67,7 @@ class CopilotChatService(
 
         val outcome = converse(turn.conversationId, messages, customerId)
         if (outcome is ChatOutcome.Replied && outcome.reply.reply.isNotBlank()) {
-            persistTurn(customerId, turn.conversationId, turn.message, outcome.reply.reply)
+            persistTurn(customerId, turn.conversationId, turn.message, outcome.reply.reply, partyId)
         }
         return outcome
     }
@@ -82,7 +82,12 @@ class CopilotChatService(
      * context and the customer bearer for downstream tool calls are propagated correctly.
      */
     @Suppress("TooGenericExceptionCaught", "LongMethod")
-    override suspend fun handleStream(turn: ChatTurn, customerId: String, onChunk: suspend (String) -> Unit) {
+    override suspend fun handleStream(
+        turn: ChatTurn,
+        customerId: String,
+        partyId: String?,
+        onChunk: suspend (String) -> Unit,
+    ) {
         if (!enabled) {
             onChunk(DISABLED_MESSAGE)
             return
@@ -138,7 +143,7 @@ class CopilotChatService(
             if (response.stopReason != StopReason.TOOL_USE || response.toolInvocations.isEmpty()) {
                 emitThemeSentinel(themeSpecs, onChunk)
                 emitProposalSentinel(proposals, onChunk)
-                persistTurn(customerId, turn.conversationId, turn.message, finalText.toString())
+                persistTurn(customerId, turn.conversationId, turn.message, finalText.toString(), partyId)
                 return
             }
 
@@ -162,7 +167,13 @@ class CopilotChatService(
      * conversation memory so the next turn has context. No-op for a blank reply or a non-persistable
      * conversation id (a stateless turn where the client sent no id) — [ConversationStore] guards both.
      */
-    private fun persistTurn(customerId: String, conversationId: String, userMessage: String, assistantText: String) {
+    private fun persistTurn(
+        customerId: String,
+        conversationId: String,
+        userMessage: String,
+        assistantText: String,
+        partyId: String?,
+    ) {
         if (assistantText.isBlank()) return
         conversations.append(
             customerId,
@@ -171,6 +182,7 @@ class CopilotChatService(
                 ChatMessage(ChatRole.USER, userMessage),
                 ChatMessage(ChatRole.ASSISTANT, assistantText),
             ),
+            partyId,
         )
     }
 

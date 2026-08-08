@@ -2,6 +2,7 @@
 date: 2026-07-16
 decision-status: accepted
 delivery-status: partial
+followup: "#3962 — the eu-central-1 defaults; the un-enforced LLM prompt egress to a US provider is still unfiled"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []

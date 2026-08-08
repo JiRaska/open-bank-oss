@@ -26,13 +26,19 @@ import java.util.UUID
  * Vert.x duplicated context and the reactive Panache delete below runs correctly; poison-pill safe,
  * so any parse or delete failure is logged and the message acked rather than wedging the group.
  *
- * ## Identity caveat — read before trusting this as complete
+ * ## Identity — why the delete is not keyed on the storage key (#3881)
  *
- * The event carries only `partyId`. Copilot keys conversation history on the OIDC `sub`
- * (`CopilotChatResource.customerSubject()`), and the customers realm additionally defines a separate
- * `party_id` claim backed by a user attribute, which customer-edge falls back to `sub` for only when
- * that attribute is unset. Where the attribute IS set and differs from `sub`, the delete below
- * matches nothing. That join is not fixed here — see the PR body and the follow-up issue.
+ * The event carries only `partyId`; copilot keys conversation history on the OIDC `sub`. Those are
+ * not the same value: measured against the deployed customers realm, `sub` equalled `party_id` for
+ * **0 of 35** users, because `WebAuthnKeycloakClient.ensureUser` never sets the Keycloak user `id`,
+ * so Keycloak mints a random UUID and `party_id` survives as a separate attribute. Keyed on `sub`
+ * this consumer would receive the event, delete nothing, and log success — a GDPR control reporting
+ * coverage it does not have, detectable only by querying the table.
+ *
+ * It cannot be resolved here either: by erasure time the Keycloak user is gone, so there is nothing
+ * left to map `partyId` back to a `sub`. So the identity is captured at WRITE time
+ * (`CopilotChatResource.erasureIdentity()` -> `conversation_history.party_id`, migration V2) and
+ * [ConversationStore.deleteForParty] matches either column.
  */
 @ApplicationScoped
 class PartyErasureConsumer {
@@ -64,7 +70,7 @@ class PartyErasureConsumer {
         }
 
         try {
-            val erased = conversationStore.deleteForCustomer(partyId.toString())
+            val erased = conversationStore.deleteForParty(partyId.toString())
             log.infof(
                 "[party-events-in] GDPR Art. 17: erased %d copilot conversation(s) for party %s",
                 erased,

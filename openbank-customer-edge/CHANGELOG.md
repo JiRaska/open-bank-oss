@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.57.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.56.0...customer-edge-v0.57.0) (2026-08-07)
+
+
+### Features
+
+* **customer-edge:** honour a shared DOCUMENT, so the share button leads somewhere ([#4115](https://github.com/JiRaska/open-bank-oss/issues/4115)) ([c79f442](https://github.com/JiRaska/open-bank-oss/commit/c79f44251ac7a5ac6605824ae98e1ac84350955a))
+
 ## [0.56.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.55.0...customer-edge-v0.56.0) (2026-08-07)
 
 

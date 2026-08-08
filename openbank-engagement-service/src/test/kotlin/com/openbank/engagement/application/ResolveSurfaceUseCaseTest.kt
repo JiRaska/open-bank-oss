@@ -4,8 +4,10 @@
 
 package com.openbank.engagement.application
 
+import com.openbank.engagement.application.port.out.AdverseStateRepository
 import com.openbank.engagement.application.port.out.EngagementEventRepository
 import com.openbank.engagement.application.usecase.ResolveSurfaceUseCase
+import com.openbank.engagement.domain.model.AdverseState
 import com.openbank.engagement.domain.model.EngagementEvent
 import com.openbank.engagement.domain.model.EngagementEventType
 import com.openbank.engagement.domain.model.SurfaceSlot
@@ -37,12 +39,19 @@ class ResolveSurfaceUseCaseTest {
         policy = ContactPolicy(),
     )
 
+    private fun adverseStates(states: Set<AdverseState> = emptySet()): AdverseStateRepository {
+        val repo = mockk<AdverseStateRepository>()
+        coEvery { repo.activeStates(any()) } returns states
+        return repo
+    }
+
     @Test
     fun `a consented party with no dismissal history sees the slot's catalogue`(): Unit = runBlocking {
         val events = mockk<EngagementEventRepository>()
         coEvery { events.recentForPartyAndSlot(party, SurfaceSlot.HOME_BANNER, any()) } returns emptyList()
 
-        val result = ResolveSurfaceUseCase(gate(consented = true), events).resolve(party, SurfaceSlot.HOME_BANNER)
+        val result = ResolveSurfaceUseCase(gate(consented = true), events, adverseStates())
+            .resolve(party, SurfaceSlot.HOME_BANNER)
 
         assertThat(result).isInstanceOf(ResolveSurfaceUseCase.Result.Rendered::class.java)
         val rendered = result as ResolveSurfaceUseCase.Result.Rendered
@@ -54,7 +63,8 @@ class ResolveSurfaceUseCaseTest {
         val events = mockk<EngagementEventRepository>()
         coEvery { events.recentForPartyAndSlot(any(), any(), any()) } returns emptyList()
 
-        val result = ResolveSurfaceUseCase(gate(consented = false), events).resolve(party, SurfaceSlot.HOME_BANNER)
+        val result = ResolveSurfaceUseCase(gate(consented = false), events, adverseStates())
+            .resolve(party, SurfaceSlot.HOME_BANNER)
 
         assertThat(result).isInstanceOf(ResolveSurfaceUseCase.Result.NotEligible::class.java)
     }
@@ -73,9 +83,24 @@ class ResolveSurfaceUseCaseTest {
         }
         coEvery { events.recentForPartyAndSlot(party, SurfaceSlot.HOME_BANNER, any()) } returns dismissals
 
-        val result = ResolveSurfaceUseCase(gate(consented = true), events).resolve(party, SurfaceSlot.HOME_BANNER)
+        val result = ResolveSurfaceUseCase(gate(consented = true), events, adverseStates())
+            .resolve(party, SurfaceSlot.HOME_BANNER)
 
         assertThat(result).isEqualTo(ResolveSurfaceUseCase.Result.Suppressed)
+    }
+
+    @Test
+    fun `a party in arrears sees no content even though gate and dismissals allow it`(): Unit = runBlocking {
+        val events = mockk<EngagementEventRepository>()
+        coEvery { events.recentForPartyAndSlot(party, SurfaceSlot.HOME_BANNER, any()) } returns emptyList()
+
+        val result = ResolveSurfaceUseCase(gate(consented = true), events, adverseStates(setOf(AdverseState.ARREARS)))
+            .resolve(party, SurfaceSlot.HOME_BANNER)
+
+        // Still a Rendered result (SurfaceResolver's own D3.5 exclusion, not a gate/consent
+        // denial) — the content list is what proves the exclusion actually fired, not the type.
+        assertThat(result).isInstanceOf(ResolveSurfaceUseCase.Result.Rendered::class.java)
+        assertThat((result as ResolveSurfaceUseCase.Result.Rendered).content).isEmpty()
     }
 
     @Test

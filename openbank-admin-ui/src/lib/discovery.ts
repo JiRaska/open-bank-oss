@@ -78,6 +78,7 @@ const NS_GROUP: Record<string, ServiceGroup> = {
   pid:                'identity',    // pid-service (EUDI wallet, ADR-0094)
   psd2:               'open-banking', // psd2-service (Berlin Group)
   documents:          'platform',    // document-service (ADR-0161/0162)
+  engagement:         'platform',    // engagement-service (ADR-0220 in-app surfaces)
 }
 
 export function inCluster(): boolean {

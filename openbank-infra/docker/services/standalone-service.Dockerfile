@@ -24,10 +24,28 @@ RUN chmod +x gradlew && \
       --console=plain && \
     cp /workspace/${SERVICE_DIR}/build/*-runner.jar /workspace/quarkus-run.jar
 
-FROM eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0
+# RUNTIME BASE — keep this digest byte-identical to the FROM in
+# .github/workflows/Dockerfile.deploy, which is the ONE runtime recipe the deploy path uses
+# (auto-deploy.yml, ghcr-publish.yml and openbank-infra/scripts/build-push-service.sh all copy
+# that file verbatim). It is glibc, not musl, since #3354: openbank-fraud-service bundles
+# com.microsoft.onnxruntime, whose libonnxruntime.so is linked against glibc + libstdc++, so on
+# eclipse-temurin:25-jre-alpine OrtEnvironment.getEnvironment() throws UnsatisfiedLinkError —
+# and installing libstdc++ via apk does NOT fix it, it only moves the failure to the glibc
+# dynamic loader. Leaving THIS file on musl meant `docker compose up` and the deployed image
+# had different libc, so a native dependency could work in one and fail in the other; that
+# divergence is exactly how #3354 stayed hidden. Read the reasoning and the measurements in
+# .github/workflows/Dockerfile.deploy — do not keep a second copy of them here.
+#
+# NOTE for whoever bumps this: .github/scripts/verify-image-native-libs.py reads the base out of
+# Dockerfile.deploy ONLY, so it will not tell you whether this file drifted. The check is that
+# the two digests are equal.
+FROM eclipse-temurin:25-jre@sha256:681c543d6f36c50f45e9b5226930a46203dcfa351d3670e9d0bdf0dabae53539
 WORKDIR /app
 
-RUN addgroup -S openbank && adduser -S openbank -G openbank
+# groupadd/useradd, not busybox `adduser -S` — the glibc base has no busybox. uid 100 / gid 101
+# reproduce exactly what `adduser -S` yielded on the alpine base, and match Dockerfile.deploy.
+RUN groupadd --system --gid 101 openbank \
+ && useradd --system --uid 100 --gid 101 --no-create-home --shell /usr/sbin/nologin openbank
 USER openbank
 
 COPY --from=build /workspace/quarkus-run.jar /app/quarkus-run.jar

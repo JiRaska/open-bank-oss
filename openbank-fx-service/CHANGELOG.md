@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.7](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.9.6...fx-service-v0.9.7) (2026-08-08)
+
+
+### Bug Fixes
+
+* **sanctions:** make the scheduled-refresh de-duplication zone-consistent, and retire two accounting-clock exemptions ([#3889](https://github.com/JiRaska/open-bank-oss/issues/3889)) ([6b0ad07](https://github.com/JiRaska/open-bank-oss/commit/6b0ad078e1fed00599943752f5f3c61c8df55d46))
+
 ## [0.9.6](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.9.5...fx-service-v0.9.6) (2026-08-07)
 
 
