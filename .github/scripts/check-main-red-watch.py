@@ -243,12 +243,7 @@ def check_declaration(root: Path, workflows=None, watched=None, raw=None) -> lis
                 f"R3 {WATCH_WORKFLOW} does not filter on `head_branch` -- it would fire on "
                 f"every PR run of every watched workflow."
             )
-        if "/attempts/" not in raw:
-            findings.append(
-                f"R4 {WATCH_WORKFLOW} does not query the attempt-scoped jobs endpoint. "
-                f"`/actions/runs/<id>/jobs` returns the LATEST attempt, so a hand-re-run makes "
-                f"the watch answer about a different attempt than the event fired for."
-            )
+    findings.extend(check_attempt_scoped_fetch())
     return findings
 
 
@@ -284,6 +279,47 @@ def fetch_jobs_scoped(repo: str, run_id: int, attempt: int) -> list[dict]:
     for doc in docs:
         jobs.extend(doc.get("jobs", []) if isinstance(doc, dict) else [])
     return jobs
+
+
+def check_attempt_scoped_fetch() -> list[str]:
+    """R4, by EXERCISE rather than by grep: call the real fetch and read the URL it builds.
+
+    The previous form searched main-red-watch.yml for the literal `/attempts/`. That string lives
+    in the yml only as PROSE -- the request is built here, in Python -- so the rule was satisfied
+    by the comment describing the endpoint and would have passed with the call itself unscoped.
+    Measured before this change: breaking `fetch_jobs_scoped` to `/runs/<id>/jobs` while leaving
+    the comment alone left both `--check-declaration` and `--self-test` at exit 0, while deleting
+    only the comment reddened them. Exactly backwards.
+
+    Grepping this file instead would be the same defect one file over. So: stub `gh_api`, invoke
+    the real function, and assert on the URL it actually asks for. Offline -- nothing is sent.
+    """
+    seen: list[str] = []
+
+    def _record(path: str) -> object:
+        seen.append(path)
+        return []
+
+    global gh_api
+    original = gh_api
+    try:
+        gh_api = _record  # type: ignore[assignment]
+        fetch_jobs_scoped("o/r", 1, 1)
+    except Exception as exc:  # noqa: BLE001 - a fetch that cannot run is itself the finding
+        return [f"R4 fetch_jobs_scoped raised {type(exc).__name__}: {exc}"]
+    finally:
+        gh_api = original  # type: ignore[assignment]
+
+    if not seen:
+        return ["R4 fetch_jobs_scoped issued no request -- it cannot be attempt-scoped."]
+    bad = [u for u in seen if "/attempts/" not in u or re.search(r"/runs/\d+/jobs", u)]
+    if bad:
+        return [
+            f"R4 fetch_jobs_scoped does not query the attempt-scoped jobs endpoint (asked for "
+            f"{bad[0]!r}). `/actions/runs/<id>/jobs` returns the LATEST attempt, so a hand-re-run "
+            f"makes the watch answer about a different attempt than the event fired for."
+        ]
+    return []
 
 
 def classify_run(run: dict, jobs: list[dict]) -> dict:
@@ -415,6 +451,7 @@ def _run(conclusion="failure", attempt=1):
 
 
 def self_test() -> int:
+    global gh_api, fetch_jobs_scoped  # R4 is falsified by swapping these
     failures = []
 
     def check(label, cond):
@@ -478,12 +515,25 @@ def self_test() -> int:
     }
     seen_urls = []
 
-    def fake_fetch(repo, run_id, attempt):
-        seen_urls.append(f"repos/{repo}/actions/runs/{run_id}/attempts/{attempt}/jobs")
-        return attempts[attempt]
+    # Drive the REAL fetch_jobs_scoped with `gh_api` stubbed, so the URL under test is the one the
+    # function builds -- not one the test wrote itself. The previous form hand-wrote the
+    # attempt-scoped URL and then asserted about its own string: symmetric, and therefore green
+    # against a fetch that had been changed to the unscoped endpoint.
+    def _stub(path):
+        seen_urls.append(path)
+        attempt = int(re.search(r"/attempts/(\d+)/", path).group(1)) if "/attempts/" in path else 1
+        return [{"jobs": attempts[attempt]}]
 
-    v1 = classify_run(_run(attempt=1), fake_fetch("o/r", 1, 1))
-    v2 = classify_run(_run("success", attempt=2), fake_fetch("o/r", 1, 2))
+    _original_gh_api = gh_api
+    try:
+        gh_api = _stub  # type: ignore[assignment]
+        jobs1 = fetch_jobs_scoped("o/r", 1, 1)
+        jobs2 = fetch_jobs_scoped("o/r", 1, 2)
+    finally:
+        gh_api = _original_gh_api  # type: ignore[assignment]
+
+    v1 = classify_run(_run(attempt=1), jobs1)
+    v2 = classify_run(_run("success", attempt=2), jobs2)
     check("attempt 1 (the attempt the event fired for) reports RED", v1["status"] == "red")
     check("attempt 2 (the latest) reports green -- the two genuinely differ", v2["status"] == "green")
     check("the fetch URL is attempt-scoped", all("/attempts/" in u for u in seen_urls))
@@ -541,8 +591,31 @@ def self_test() -> int:
 
     f = check_declaration(REPO, wf_ok, wl, "/attempts/1/jobs")
     check("R3: a watcher not filtering on head_branch is FLAGGED", any("R3" in x for x in f))
-    f = check_declaration(REPO, wf_ok, wl, "head_branch\nruns/${{ id }}/jobs")
-    check("R4: a watcher using the UNSCOPED jobs endpoint is FLAGGED", any("R4" in x for x in f))
+    # R4 is behavioural now, so falsify it by breaking the FETCH, not by handing it a doctored
+    # yml. The old case passed a fake `raw` without `/attempts/` -- which no longer proves
+    # anything, because the yml never carried the request in the first place.
+    _real_fetch = fetch_jobs_scoped
+
+    def _unscoped(repo, run_id, attempt):
+        gh_api(f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100")
+        return []
+
+    try:
+        fetch_jobs_scoped = _unscoped  # type: ignore[assignment]
+        f = check_declaration(REPO, wf_ok, wl, raw_ok)
+        check("R4: a fetch using the UNSCOPED jobs endpoint is FLAGGED",
+              any("R4" in x and "attempt-scoped" in x for x in f))
+    finally:
+        fetch_jobs_scoped = _real_fetch  # type: ignore[assignment]
+
+    # ...and the real one is NOT flagged, so the rule is not simply always-on.
+    check("R4: the real attempt-scoped fetch is clean",
+          not any("R4" in x for x in check_declaration(REPO, wf_ok, wl, raw_ok)))
+
+    # Over-block control: R4 must not depend on the yml's prose. Strip every mention of the
+    # endpoint from the workflow text and it stays clean, because the code is still correct.
+    check("R4: deleting the yml comment does NOT flag a correct fetch",
+          not any("R4" in x for x in check_declaration(REPO, wf_ok, wl, "head_branch\n")))
     check("R4 accepts the attempt-scoped form",
           not any("R4" in x for x in check_declaration(REPO, wf_ok, wl, raw_ok)))
 
