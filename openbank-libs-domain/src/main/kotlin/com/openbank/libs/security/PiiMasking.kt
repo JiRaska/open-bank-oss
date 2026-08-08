@@ -11,16 +11,18 @@ package com.openbank.libs.security
  * phone ("the email ending in -ka@gmail.com, IBAN ending 1234") without leaking the full
  * value. None of the strategies are reversible.
  *
- * Use [PiiMask] to apply them. Use [MaskSensitive] to flag DTO fields for downstream
- * serialization filters (admin-ui proxy, audit-event sanitizer).
+ * Use [PiiMask] to apply them — explicitly, at the point the value is rendered or logged.
+ *
+ * There is deliberately **no `@MaskSensitive` annotation** (#4011). One existed and its KDoc
+ * described the contract it did not have: it claimed to "flag DTO fields for downstream
+ * serialization filters (admin-ui proxy, audit-event sanitizer)", and neither filter was ever
+ * written. A field marked with it serialised in full while the source read as protected —
+ * silent disclosure on a GDPR-facing path, which is worse than no marker at all. Any
+ * declarative masking must land together with the serializer that honours it.
  *
  * GDPR Art. 32 (security of processing) + Art. 25 (data protection by design).
  */
 enum class MaskStrategy { EMAIL, IBAN, PAN, PHONE, NAME, NATIONAL_ID, FULL, NONE }
-
-@Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY, AnnotationTarget.PROPERTY_GETTER)
-@Retention(AnnotationRetention.RUNTIME)
-annotation class MaskSensitive(val strategy: MaskStrategy = MaskStrategy.FULL)
 
 object PiiMask {
 

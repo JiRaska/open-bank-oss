@@ -23,13 +23,18 @@ value transfer — a primary fraud target; clears via batch/clearing rather than
                                                                               +--> [fraud-service] (shadow, OIDC CC / mTLS, fail-open)
                                                                               |
                                                                               +--> [clearing-simulator] (pacs.008 out / pacs.002 in; OIDC CC; ADR-0104 D3; flag-gated)
+                                                                              |
+                                                                              +--> [document-service] (GET /templates + POST /templates/preview; OIDC CC; ADR-0248 #3; synchronous, customer-triggered only)
 ```
 
 - **External entities:** payment-initiating channels/operators, downstream clearing & ledger,
-  clearing-simulator (scheme network proxy; swap-point for real SCT scheme connector).
+  clearing-simulator (scheme network proxy; swap-point for real SCT scheme connector),
+  document-service (confirmation-document rendering, non-persisting).
 - **Trust boundaries:** caller↔service (mTLS+OIDC+OPA); service↔Postgres/Kafka;
   service↔fraud-service (OIDC client-credentials + mTLS, internal cluster-only, shadow/read-only);
-  service↔clearing-simulator (OIDC client-credentials; cluster-internal; pilot flag off by default).
+  service↔clearing-simulator (OIDC client-credentials; cluster-internal; pilot flag off by default);
+  service↔document-service (OIDC client-credentials; cluster-internal; synchronous, read-only from
+  this service's perspective — see §5b).
 - **Assets:** payment instructions, amounts, debtor/creditor IBANs.
 
 ## 3. Authn/Authz
@@ -104,8 +109,46 @@ from clearing-simulator (cluster-internal, `ROLE_SERVICE`). New trust boundary:
 **Risk class:** integrity (money-path reversal) + availability (idempotency).
 **Rollback:** feature flag `openbank.sepa.returns.enabled` (off by default); flag OFF = 404 on `/returns`.
 
+## 5b. Payment confirmation download (ADR-0248 #3) — STRIDE supplement
+
+New outbound trust edge: `GET /api/v1/sepa-payments/{paymentId}/confirmation` (customer-facing
+download action) → `sepa-payment-service` → `document-service` (`GET /api/v1/documents/templates`
++ `POST /api/v1/documents/templates/preview`, OIDC client-credentials, cluster-internal). Rendered
+**synchronously, only on this explicit customer request** — no pre-generation on
+`SepaPaymentStatusChangedEvent`, no new Kafka consumer, nothing persisted a second time anywhere:
+the response bytes are read from document-service's non-persisting `preview` endpoint and streamed
+straight back. Only meaningful for a `COMPLETED` payment; every other status is rejected with 409
+before document-service is ever called.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **S**poofing | A caller other than the payment's own owner downloads its confirmation | Same `@RolesAllowed("ROLE_VIEWER","ROLE_OPERATOR","ROLE_ADMIN","ROLE_PAYMENTS")` + `@Authorize(action="sepaPayment.downloadConfirmation", resource="#paymentId")` as the existing `sepaPayment.read` endpoint; no new role is introduced |
+| **T**ampering | The rendered document is altered in flight or a stale template is served | document-service call is OIDC client-credentials + cluster-internal only; `DocumentPreviewAdapter` resolves the template by `code` **and** requires `status == PUBLISHED` — a `DRAFT`/`RETIRED` body is never served |
+| **R**epudiation | No record of who downloaded a confirmation | Same request-level audit trail as every other `sepaPayment.*` endpoint (`AuthorizeInterceptor` decision log); this ADR adds no new unaudited path |
+| **I**nfo disclosure | Payment PII (IBANs, amount, counterparty name) sent to a third service | document-service already sits inside the same trust boundary as fraud-service/clearing-simulator (mTLS + OIDC CC, cluster-internal); the confirmation is the ONLY new data this service ever sends it, and nothing sent is persisted there — `preview` is non-persisting by construction, so document-service never becomes a second copy of the payment record |
+| **D**oS | Flooding the download endpoint to exhaust document-service | No new rate-limit surface beyond the existing per-endpoint controls; a document-service fault or timeout fails the single request (502) and does not retry — no amplification |
+| **E**oP | A non-COMPLETED payment's internal state leaks via a confirmation rendered too early | `PaymentConfirmationService` checks `status == COMPLETED` before ever calling `DocumentPreviewPort` — a `RECEIVED`/`VALIDATED`/`PROCESSING`/`REJECTED`/`RETURNED`/`CANCELLED` payment is rejected 409 with document-service never invoked |
+
+**DFD update:** adds `sepa-payment-service → document-service (templates list + preview)` edge,
+customer-facing-edge/operator-initiated only — no service-account/M2M caller is granted this action.
+**Risk class:** confidentiality (payment data sent to a new outbound peer) + availability (a slow or
+unreachable document-service fails only the download, never a payment transition — see §4/§5:
+**payment execution, settlement, and status-transition logic are entirely unchanged** by this ADR).
+**Rollback:** revert the endpoint + adapter commit; no DB schema change, no flag needed (the route
+simply stops existing).
+
 ## 6. Change log
 
+- **2026-08-08** — ADR-0248 #3: payment confirmation download. New endpoint `GET
+  /api/v1/sepa-payments/{paymentId}/confirmation`, new outbound trust edge to
+  `document-service` (STRIDE supplement §5b). Strictly additive and read-only — no change to
+  payment execution, settlement, or status-transition logic; `PaymentConfirmationService` only
+  reads the payment's own already-persisted record via the existing `SepaPaymentUseCase.getPayment`
+  and rejects (409) anything not `COMPLETED` before document-service is ever called. Rendered
+  synchronously on customer request only, via document-service's existing non-persisting `preview`
+  endpoint; nothing is cached or persisted a second time anywhere. Risk class = confidentiality
+  (new outbound peer receiving payment data) + availability (a document-service fault fails only
+  this one download, never a payment transition). Rollback: revert the endpoint + adapter commit.
 - **2026-08-05** — Trust-boundary change (#3734): `operator-sepa-payment-write` now excludes `service-account-*` principals, and a new `prohibited` veto closes `sepaPayment.{transitionStatus, handleReturn, approval.decide}` to `service-account-openbank-edge` (the role_action_matrix grants those to ROLE_OPERATOR, which the edge service-account carries; matrix-allows does not consult the ext exclusion). The edge's verified legitimate access — `sepaPayment.{create, read}` via `service-sepa-payment-edge-m2m` (customer transfer initiation after the edge's own ownership guard + SCA gate, ADR-0021) — is preserved; clearing-simulator keeps `handleReturn` via the shared-client identity rule. Ext moved from generator heredoc to standalone `sepa_payment_rest_ext.rego` with an opa test suite.
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `Idempotency-Key` on createPayment. As in domestic-payment, the existing `require(idempotencyKey.isNotBlank())` could not run for an ABSENT header — this handler is `suspend`, so `null.isNotBlank()` threw NPE and the replay control answered 500 in exactly the case it existed for. A duplicate submission was never at risk (the store is only consulted with a real key), but the caller was told the server had broken when it had not. Now `require(!idempotencyKey.isNullOrBlank())`. No new caller or boundary. Rollback: revert.
 - **2026-07-24** — Retire the legacy in-service orchestration; Temporal is the sole orchestrator

@@ -44,7 +44,7 @@ Directly-identifying PII is masked at the ingestion boundary (`PayloadMasker`) b
 | Portability (Art. 20) | N/A — analytics is not the system of record for personal data. |
 
 ### International transfers (Art. 44)
-`DataResidencyValidator` aborts boot if the warehouse region is not on the allow-list (default `eu-central-1,eu-west-1`). No personal data leaves the approved EU regions.
+`DataResidencyValidator` aborts boot if the warehouse region is not on the allow-list (default `eu-north-1`, ADR-0175 §1). No personal data leaves the approved EU regions.
 
 ### Retention (Art. 5(1)(e))
 
@@ -68,7 +68,7 @@ Directly-identifying PII is masked at the ingestion boundary (`PayloadMasker`) b
 ## Data flows out
 
 - → **BI tools (Metabase / Superset):** read masked gold/silver in ClickHouse only — no operational DB access, no raw PII.
-- → **WORM / S3 Object Lock (`eu-central-1`):** integrity anchors (hashes only, no PII).
+- → **WORM / S3 Object Lock (`eu-north-1`):** integrity anchors (hashes only, no PII).
 - → **Vault (optional):** crypto-erasure key operations — no PII payload.
 
 No raw PII is stored or transmitted; no data leaves the approved EU region.

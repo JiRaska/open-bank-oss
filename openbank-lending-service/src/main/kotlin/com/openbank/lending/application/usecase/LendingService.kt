@@ -1113,9 +1113,14 @@ class LendingService(
                     LendingOutboxMessage(
                         aggregateId = loan.id.value,
                         eventType = "loan.stage_changed",
-                        payload = """{"loanId":"${loan.id.value}","previousStage":"${prior!!.stage}",""" +
-                            """"newStage":"${snapshot.stage}","daysPastDue":${snapshot.daysPastDue},""" +
-                            """"period":"$period","asOf":"${snapshot.asOf}"}""",
+                        // partyId added for ADR-0220 D6's arrears exclusion (engagement-service's
+                        // LendingArrearsEventConsumer) — additive field, existing consumers
+                        // (anacredit-service's LoanStageEventConsumer) parse via readTree and
+                        // ignore unknown fields, so this cannot break them.
+                        payload = """{"loanId":"${loan.id.value}","partyId":"${loan.partyId}",""" +
+                            """"previousStage":"${prior!!.stage}","newStage":"${snapshot.stage}",""" +
+                            """"daysPastDue":${snapshot.daysPastDue},"period":"$period",""" +
+                            """"asOf":"${snapshot.asOf}"}""",
                     ),
                 )
             } else {
