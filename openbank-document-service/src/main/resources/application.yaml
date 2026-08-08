@@ -220,11 +220,13 @@ mp:
         auto.offset.reset: earliest
       # ADR-0248: the annual statement of fees is the one template family that still needs an
       # async push trigger (PAD Art. 5 duty — the bank must send it, not wait for the customer).
-      # billing-service's own billing-outbox drains to Kafka on this topic (mirrors this service's
-      # own document-events-out naming: openbank.<domain>.<aggregate>.event).
+      # billing-service's own billing-outbox drains ALL its events (fee.post-intent, reversal-intent,
+      # and this one) to the SAME topic via its one "billing-events-out" channel — confirmed against
+      # openbank-billing-service/src/main/resources/application.yaml. eventType filtering (see
+      # AnnualFeeSummaryReadyConsumer) is what makes sharing that topic with billing's other events safe.
       billing-outbox-events-in:
         connector: smallrye-kafka
-        topic: openbank.billing.billing.event
+        topic: openbank.billing.fee.event
         group.id: openbank-document-service
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         auto.offset.reset: earliest
