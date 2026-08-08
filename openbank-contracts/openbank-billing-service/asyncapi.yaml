@@ -1,0 +1,204 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006: every Kafka topic a service PRODUCES is documented in AsyncAPI 3.0 under
+# openbank-contracts/<service>/. `check-event-contract-coverage.py` asserts this file exists for
+# every `mp.messaging.outgoing.*.topic` in the service's application.yaml.
+#
+# WHAT IS AND IS NOT ENFORCED HERE. The coverage gate asserts existence only; nothing validates the
+# content of this document, no AsyncAPI linter is wired, and no schema is registered in Apicurio —
+# a producer that violates this file fails nowhere. Everything below is DERIVED from the code that
+# runs, and each claim names its source so the next reader can re-check it rather than trust it.
+#
+# SCOPE. `billing-events-out` is billing-service's FIRST and ONLY Kafka topic (ADR-0248) —
+# `LedgerOutboxEventPublisher`'s own class KDoc: every prior outbox row here ("billing.fee.post-
+# intent.v1", "billing.fee.reversal-intent.v1") posts to ledger-service directly via
+# `LedgerPostingPort`, never emitted as an event. Only the third eventType,
+# `billing.annual-fee-summary.ready`, is relayed to Kafka. Do not add the charge/reversal intents
+# here — they are not events this service publishes, they are internal ledger-posting outbox rows.
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Billing Service — events
+  version: 1.0.0
+  description: |
+    Annual fee summary, ready for document-service to render on demand (ADR-0248, PAD Art. 5).
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: |
+      Strimzi cluster `openbank-cluster` in the `messaging` namespace. mTLS; the plaintext 9092
+      listener is ACL-denied. Producer authenticates with billing-service's own KafkaUser
+      certificate, whose only Write grant is the topic below.
+
+channels:
+  annualFeeSummaryReady:
+    address: openbank.billing.fee.event
+    title: Annual fee summary ready
+    description: |
+      One partition, one replica, `cleanup.policy: delete`, `retention.ms: 604800000` (7 days) —
+      declared in `openbank-infra/gitops/components/kafka/kafka.yaml`.
+
+      **Retention is 7 days and the topic is not compacted, so it is a change feed, not a source of
+      truth.** A consumer that misses the window cannot replay it; it must re-derive the summary
+      from billing-service's own assessed-fee records instead.
+
+      **Partitioning key: `accountId`** (`OutboxKafkaHeaders.partitionKey`, keyed on the outbox
+      row's aggregate id). Two summaries for the same account land on the same partition and are
+      therefore ordered with respect to each other; summaries for different accounts are not.
+
+      **Transactional outbox.** The row is appended in the same transaction as the annual
+      aggregation that produces it (`BillingAssessmentRepositoryImpl`), so a published event always
+      corresponds to a committed billing-service record (ADR-0003). Dispatch is gated on
+      `openbank.outbox.dispatch-enabled`. Publisher: `LedgerOutboxEventPublisher.publishAnnualFeeSummary`.
+
+      **Delivery is at-least-once.** A consumer must be idempotent on (`accountId`, `year`) — the
+      natural key of one annual summary — since a redelivered or republished row carries the same
+      pair again.
+
+      **Declared consumer:** document-service's `AnnualFeeSummaryReadyConsumer`
+      (`billing-outbox-events-in` channel, ADR-0248) — it does not persist the summary, only uses it
+      to satisfy a customer's on-demand download of the annual statement of fees.
+    messages:
+      annualFeeSummaryReady:
+        $ref: '#/components/messages/AnnualFeeSummaryReady'
+
+operations:
+  publishAnnualFeeSummaryReady:
+    action: send
+    channel:
+      $ref: '#/channels/annualFeeSummaryReady'
+    summary: Emitted once billing-service has aggregated a calendar year's fees for one account.
+    description: |
+      Source: `BillingAssessmentRepositoryImpl` appends the outbox row (eventType
+      `billing.annual-fee-summary.ready`) with the payload already serialized as final wire JSON by
+      `AnnualFeeSummaryOutboxPayloads`; `LedgerOutboxEventPublisher.publishAnnualFeeSummary` relays
+      it to Kafka unchanged.
+    messages:
+      - $ref: '#/channels/annualFeeSummaryReady/messages/annualFeeSummaryReady'
+
+components:
+  messages:
+    AnnualFeeSummaryReady:
+      name: AnnualFeeSummaryReady
+      title: Annual fee summary ready
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AnnualFeeSummaryReadyPayload'
+      examples:
+        - name: accountWithInterest
+          summary: An account whose fee summary also reports an applied interest rate.
+          payload:
+            eventType: AnnualFeeSummaryReady
+            accountId: 0192f3c1-2b4e-7a10-9c3d-5e6f70819234
+            partyRef: 3f2a9c14-7c0e-4f2a-9d31-8b7c6a5e4d33
+            year: 2025
+            currency: CZK
+            fees:
+              - code: MONTHLY_MAINTENANCE
+                name: Monthly account maintenance
+                category: ACCOUNT_MAINTENANCE
+                amount: '600.00'
+              - code: CARD_ISSUANCE
+                name: Card issuance
+                category: CARD
+                amount: '250.00'
+            totalFees: '850.00'
+            interestRate: '0.015'
+            occurredAt: '2026-01-03T02:00:00Z'
+        - name: accountWithNoInterest
+          summary: A fee-only account; no interest rate applies.
+          payload:
+            eventType: AnnualFeeSummaryReady
+            accountId: 0192f3c1-2b4e-7a10-9c3d-5e6f7081aa55
+            partyRef: 3f2a9c14-7c0e-4f2a-9d31-8b7c6a5e4d33
+            year: 2025
+            currency: CZK
+            fees: []
+            totalFees: '0.00'
+            interestRate: null
+            occurredAt: '2026-01-03T02:00:00Z'
+
+  schemas:
+    AnnualFeeSummaryReadyPayload:
+      type: object
+      description: |
+        Source of truth: `com.openbank.billing.infrastructure.outbox.AnnualFeeSummaryReadyPayload`,
+        serialized by `AnnualFeeSummaryOutboxPayloads` with Jackson (`findAndRegisterModules()`,
+        `NON_NULL` inclusion on `interestRate` only — every other field is `required`).
+
+        All monetary fields are JSON STRINGS (`BigDecimal.toPlainString()`), never JSON numbers —
+        the same "never a float" contract every other money-carrying event in this fleet follows.
+      required: [eventType, accountId, partyRef, year, currency, fees, totalFees, occurredAt]
+      additionalProperties: false
+      properties:
+        eventType:
+          type: string
+          const: AnnualFeeSummaryReady
+          description: The outbox `eventType` literal, echoed onto the wire payload itself.
+        accountId:
+          type: string
+          format: uuid
+          description: The account this summary covers. Also the Kafka partitioning key.
+        partyRef:
+          type: string
+          format: uuid
+          description: The account holder, for the statement's addressee line.
+        year:
+          type: integer
+          description: The calendar year the summary aggregates (PAD Art. 5 — a full calendar year).
+        currency:
+          type: string
+          description: ISO 4217 code, shared by every fee line and by `totalFees`.
+        fees:
+          type: array
+          description: |
+            Unbounded — every fee assessed against the account in `year`. Empty for an account with
+            no chargeable activity that year; still emitted, since PAD Art. 5 is an annual push
+            duty regardless of amount.
+          items:
+            $ref: '#/components/schemas/FeeLine'
+        totalFees:
+          type: string
+          description: Sum of every `fees[].amount`, as a JSON string (see the schema note above).
+        interestRate:
+          type: [string, 'null']
+          description: |
+            The debit/credit interest rate applied to the account during `year`, where relevant.
+            Null when no rate applies — never coerced to `"0.00"`, which would claim a rate exists.
+        occurredAt:
+          type: string
+          format: date-time
+          description: |
+            When the annual aggregation ran, ISO-8601 UTC (`DateTimeFormatter.ISO_INSTANT`). Not
+            the calendar year end — the scheduler runs after `year` has fully closed.
+
+    FeeLine:
+      type: object
+      description: One assessed fee, as it appears on the annual summary.
+      required: [code, name, category, amount]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          description: Billing-service's internal fee code.
+        name:
+          type: string
+          description: Human-readable fee name, free text (Czech diacritics), for direct rendering.
+        category:
+          type: string
+          description: |
+            PAD Annex II standardized category. Mapping fee codes to Annex II categories needs
+            legal review before GA (ADR-0248 open question) — this field carries whatever category
+            billing-service currently assigns, not a legally-reviewed final taxonomy.
+        amount:
+          type: string
+          description: This fee line's amount, as a JSON string (see the top-level schema note).
