@@ -116,7 +116,7 @@ class OutboxDispatchTest {
         runBlocking {
             OutboxDispatch.dispatchOnce(repo) { e ->
                 attempted += e.eventId
-                if (e.eventType == "poison") throw IllegalStateException("serialization failed")
+                if (e.eventType == "poison") error("serialization failed")
             }
         }
 
