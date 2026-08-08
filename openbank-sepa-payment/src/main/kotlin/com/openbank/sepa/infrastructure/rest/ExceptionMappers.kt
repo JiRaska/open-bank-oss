@@ -62,6 +62,7 @@ class PaymentNotCompletedMapper : ExceptionMapper<PaymentNotCompletedException> 
                 HTTP_CONFLICT,
                 ErrorCode.CONFLICT.code,
                 exception.message ?: "Conflict",
+                timestamp = Instant.now(),
             ),
         )
         .build()
@@ -77,6 +78,7 @@ class DocumentTemplateUnavailableMapper : ExceptionMapper<DocumentTemplateUnavai
                     HTTP_BAD_GATEWAY,
                     ErrorCode.INTERNAL_ERROR.code,
                     exception.message ?: "Confirmation document unavailable",
+                    timestamp = Instant.now(),
                 ),
             )
             .build()
