@@ -19,6 +19,8 @@ lineage:
     - serviceName: consent-service
       relationType: topic
       description: openbank.consent.events — revocation signals journeys (ADR-0200 D2)
-    - serviceName: analytics-sink
-      relationType: api
-      description: silver-layer segment evaluation (ADR-0210)
+    # Removed (issue #3982): `analytics-sink (api, "silver-layer segment evaluation (ADR-0210)")`.
+    # analytics-sink has no @RegisterRestClient at all and its Deployment env reaches only
+    # apicurio-registry, clickhouse and keycloak; campaign-service reaches clickhouse and
+    # consent-service. The two meet in ClickHouse, which is a shared datastore, not an api edge
+    # between the services — and `databaseLineage` is where that belongs, not `lineage`.
