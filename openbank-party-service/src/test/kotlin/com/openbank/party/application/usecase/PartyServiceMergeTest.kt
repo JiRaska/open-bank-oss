@@ -8,6 +8,7 @@ import com.openbank.party.application.port.`in`.MergePartyCommand
 import com.openbank.party.domain.model.AmlStatus
 import com.openbank.party.domain.model.KycStatus
 import com.openbank.party.domain.model.Party
+import com.openbank.party.domain.model.PartyEvent
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
 import io.mockk.coEvery
@@ -36,7 +37,6 @@ class PartyServiceMergeTest {
         partyRepo = mockk()
         documentRepo = mockk()
         documentFileRepo = mockk()
-        eventPublisher = mockk(relaxed = true)
         gdprAggregation = mockk(relaxed = true)
         accountGuard = mockk()
         metrics = mockk(relaxed = true)
@@ -78,7 +78,8 @@ class PartyServiceMergeTest {
         coEvery { service.partyRepo.findById(targetId) } returns party(targetId)
         coEvery { service.accountGuard.findOpenAccounts(sourceId) } returns emptyList()
         val saved = slot<Party>()
-        coEvery { service.partyRepo.update(capture(saved)) } answers { saved.captured }
+        val eventSlot = slot<PartyEvent>()
+        coEvery { service.partyRepo.update(capture(saved), capture(eventSlot)) } answers { saved.captured }
 
         val result = service.mergeParty(cmd())
 
@@ -87,9 +88,13 @@ class PartyServiceMergeTest {
         // PII must survive a merge — that is the whole point of not reusing GDPR erasure.
         assertThat(saved.captured.legalName).isEqualTo("Person $sourceId")
         assertThat(saved.captured.email).isEqualTo("$sourceId@example.com")
-        coVerify(exactly = 1) { service.eventPublisher.publishPartyMerged(result, targetId) }
+        // The event is written through the repository, in the same transaction as the status
+        // change (issue #4007) — not emitted afterwards by a separate publisher.
+        assertThat(eventSlot.captured.eventType).isEqualTo("PARTY_MERGED")
+        assertThat(eventSlot.captured.aggregateId).isEqualTo(result.id)
+        assertThat(eventSlot.captured.envelope["mergedIntoPartyId"]).isEqualTo(targetId)
         // A merge is NOT an erasure; emitting one would tell consumers a subject-rights request happened.
-        coVerify(exactly = 0) { service.eventPublisher.publishPartyErased(any()) }
+        coVerify(exactly = 0) { service.partyRepo.anonymize(any(), any()) }
     }
 
     @Test
@@ -119,7 +124,7 @@ class PartyServiceMergeTest {
             .hasMessageContaining("connection refused")
 
         coVerify(exactly = 0) { service.partyRepo.update(any()) }
-        coVerify(exactly = 0) { service.eventPublisher.publishPartyMerged(any(), any()) }
+        coVerify(exactly = 0) { service.partyRepo.update(any(), any()) }
     }
 
     @Test
@@ -182,7 +187,8 @@ class PartyServiceMergeTest {
         val merged = party(sourceId, PartyStatus.MERGED, mergedInto = targetId)
         coEvery { service.partyRepo.findById(sourceId) } returns merged
         val saved = slot<Party>()
-        coEvery { service.partyRepo.update(capture(saved)) } answers { saved.captured }
+        val eventSlot = slot<PartyEvent>()
+        coEvery { service.partyRepo.update(capture(saved), capture(eventSlot)) } answers { saved.captured }
 
         service.updateKycStatus(sourceId, KycStatus.APPROVED)
 
