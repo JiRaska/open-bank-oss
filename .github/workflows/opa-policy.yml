@@ -59,7 +59,9 @@ jobs:
           PATTERN="${PATTERN}|^openbank-libs/governance/rules\.yaml$"
           PATTERN="${PATTERN}|^openbank-libs/governance/rules-opa-data\.yaml$"
           PATTERN="${PATTERN}|^openbank-libs/governance/policies/"
+          PATTERN="${PATTERN}|^openbank-libs/governance/agents-opa-data\.yaml$"
           PATTERN="${PATTERN}|^\.github/scripts/gen-rules-opa-data\.py$"
+          PATTERN="${PATTERN}|^\.github/scripts/gen-agents-opa-data\.py$"
           PATTERN="${PATTERN}|^\.github/workflows/opa-policy\.yml$"
 
           # Every component directory that owns a bundle generator — discovered, never
@@ -172,6 +174,24 @@ jobs:
             exit 1
           fi
           echo "ConfigMap is in sync with agents.rego + agents.yaml + bundle.manifest."
+
+      - name: Verify the derived OPA policy-input subset of agents.yaml is in sync
+        run: |
+          # openbank-libs/governance/agents-opa-data.yaml is what the bundles embed — the
+          # paths of agents.yaml a .rego actually reads under data.agents.*, with each
+          # charter projected to the fields an iteration variable dereferences (#3927).
+          # Same ordering rule as rules-opa-data.yaml below: it must be regenerated BEFORE
+          # the bundle generators, or they hash a stale input and the diff check passes
+          # about the wrong thing.
+          #
+          # --self-test first, and it is not decoration: it feeds the generator a
+          # projection that drops `skills` and `tools.allow` and requires the differential
+          # proof to REJECT it. A gate that has only ever passed is unfalsified, and this
+          # one's failure mode (a silently narrower charter document) is invisible from
+          # every other angle — `data.agents.<missing>` is undefined in Rego, not an error.
+          python3 -m pip install --quiet --disable-pip-version-check pyyaml
+          python3 .github/scripts/gen-agents-opa-data.py --self-test
+          python3 .github/scripts/gen-agents-opa-data.py --check
 
       - name: Verify the derived OPA policy-input subset of rules.yaml is in sync
         run: |

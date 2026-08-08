@@ -252,16 +252,28 @@ out of it (they are path-scoped, not less important — several are live-inciden
 ### OPA / Rego policies (ADR-0031/ADR-0034)
 - **Editing any shared policy source ripples the OPA bundle checksum of every service.** Each
   `openbank-infra/gitops/components/**/gen-*opa-bundle*.sh` embeds `rest.rego`, `agents.rego`,
-  `agents.yaml` and (39 of the 40) `rules-opa-data.yaml` verbatim into its ConfigMap and hashes them
-  into that service's `openbank.tech/policy-checksum` annotation. So a new charter entry for a
-  completely unrelated agent still changes *every* service's bundle and annotation.
+  `agents-opa-data.yaml` and (41 of the 42) `rules-opa-data.yaml` verbatim into its ConfigMap and
+  hashes them into that service's `openbank.tech/policy-checksum` annotation. So a new charter
+  entry for a completely unrelated agent still changes *every* service's bundle and annotation —
+  but only if it touches a field a policy reads (see the `agents-opa-data.yaml` note below).
   `opa-policy.yml`'s "build + verify bundle" job discovers the generators with
   `find` and regenerates **all** of them on every OPA-relevant PR, so your PR fails there unless it
   re-runs and commits every generator's output, not just your own service's bundle. Regenerate with:
   ```
   python3 .github/scripts/gen-rules-opa-data.py
+  python3 .github/scripts/gen-agents-opa-data.py     # needs `opa` on PATH
   find openbank-infra/gitops/components -name 'gen-*opa-bundle*.sh' | sort | xargs -n1 bash
   ```
+  **`agents-opa-data.yaml` is DERIVED from `agents.yaml` the same way (#3927)** — the paths a
+  `.rego` reads under `data.agents.*`, with each charter projected to the fields an iteration
+  variable actually dereferences (`id`, `skills`, `tools.allow`, `tools.deny`). 50390 B → 5578 B
+  per bundle, ~1.9 MB across the estate. The projection is one level deeper than `rules.yaml`'s
+  top-level-key subset because that is the granularity `agents.rego` reads at; subsetting only
+  top-level keys would have stripped ~7% and missed the point. Since a field projection cannot be
+  argued from verbatim extraction, `gen-agents-opa-data.py` proves it by evaluating the real
+  policy over a charter-derived input matrix under both documents and requiring every MCP and REST
+  decision to match — that is why it needs `opa`, and why its `--self-test` deliberately feeds it
+  a projection missing `skills`/`tools.allow` and requires the proof to reject it.
   **`rules-opa-data.yaml` is DERIVED from `rules.yaml` and must be regenerated first** — it is the
   subset of top-level keys some `.rego` reads as `data.rules.<key>`, extracted verbatim (#3357).
   Embedding the whole 168 KB file meant an edit to any of the ~30 keys OPA never reads restamped
