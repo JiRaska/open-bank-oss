@@ -5,6 +5,7 @@
 package com.openbank.delegation.application.usecase
 
 import com.openbank.delegation.application.port.`in`.ReserveSpendCommand
+import com.openbank.delegation.application.port.`in`.ReserveSpendResult
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.application.port.out.ReserveOutcome
 import com.openbank.delegation.application.port.out.SpendReservationRepository
@@ -94,16 +95,15 @@ class SpendReservationServiceTest {
     // return a value, but the guard reads shape rather than intent — and a shape that is unsafe on
     // the tests next to it is not worth defending here.
     private fun reserve(amount: String, key: String = UUID.randomUUID().toString()): ReserveSpendResult {
-        return runBlocking {
-            service.reserve(
-                ReserveSpendCommand(
-                    callerPartyId = grantee,
-                    delegationId = currentGrant.id,
-                    amount = czk(amount),
-                    idempotencyKey = key,
-                ),
-            )
-        }
+        // Two statements, not one: ktlint's function-expression-body rule would otherwise demand
+        // the `= runBlocking {` form back, which is exactly what the CI guard forbids.
+        val command = ReserveSpendCommand(
+            callerPartyId = grantee,
+            delegationId = currentGrant.id,
+            amount = czk(amount),
+            idempotencyKey = key,
+        )
+        return runBlocking { service.reserve(command) }
     }
 
     @Test
