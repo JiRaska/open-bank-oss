@@ -12,6 +12,8 @@ import com.openbank.casecoordinator.application.workflow.CaseProposalActivity
 import com.openbank.casecoordinator.application.workflow.CaseSynthesisActivity
 import com.openbank.casecoordinator.domain.model.CaseStart
 import com.openbank.casecoordinator.domain.model.Contribution
+import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.runBlocking
@@ -57,16 +59,20 @@ class CaseActivitiesImpl(
     }
 
     override fun emitProposal(caseId: String, proposalType: String, summary: String, contested: Boolean): String {
-        val eventId = UUID.randomUUID()
-        val now = Instant.now(clock)
-        val payload = objectMapper.writeValueAsString(
-            mapOf(
-                "caseId" to caseId,
-                "proposalType" to proposalType,
-                "summary" to summary,
-                "contested" to contested,
-                "occurredAt" to now.toString(),
+        val message = OutboxMessage(
+            eventId = Ids.newId(),
+            aggregateId = caseUuid(caseId),
+            eventType = proposalType,
+            payload = objectMapper.writeValueAsString(
+                mapOf(
+                    "caseId" to caseId,
+                    "proposalType" to proposalType,
+                    "summary" to summary,
+                    "contested" to contested,
+                    "occurredAt" to Instant.now(clock).toString(),
+                ),
             ),
+            createdAt = Instant.now(clock),
         )
         dataSource.connection.use { conn ->
             conn.prepareStatement(
@@ -76,17 +82,17 @@ class CaseActivitiesImpl(
                 VALUES (?, ?, ?, ?, ?, 0, ?, ?)
                 """.trimIndent(),
             ).use { ps ->
-                ps.setObject(P1, eventId)
-                ps.setObject(P2, caseUuid(caseId))
-                ps.setString(P3, proposalType)
-                ps.setString(P4, payload)
+                ps.setObject(P1, message.eventId)
+                ps.setObject(P2, message.aggregateId)
+                ps.setString(P3, message.eventType)
+                ps.setString(P4, message.payload)
                 ps.setString(P5, OutboxStatus.PENDING.name)
-                ps.setTimestamp(P6, Timestamp.from(now))
-                ps.setTimestamp(P7, Timestamp.from(now))
+                ps.setTimestamp(P6, Timestamp.from(message.createdAt))
+                ps.setTimestamp(P7, Timestamp.from(message.createdAt))
                 ps.executeUpdate()
             }
         }
-        return eventId.toString()
+        return message.eventId.toString()
     }
 
     override fun recordCaseOpened(start: CaseStart, openedAtEpochMs: Long) {
@@ -123,7 +129,7 @@ class CaseActivitiesImpl(
                 """.trimIndent(),
             ).use { ps ->
                 contributions.forEach { c ->
-                    ps.setObject(P1, UUID.randomUUID())
+                    ps.setObject(P1, Ids.newId())
                     ps.setObject(P2, caseUuid(caseId))
                     ps.setString(P3, c.agentId)
                     ps.setTimestamp(P4, now)

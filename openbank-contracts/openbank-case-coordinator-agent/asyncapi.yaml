@@ -1,0 +1,85 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
+#
+# ADR-0006: every Kafka topic a service PRODUCES is documented in AsyncAPI 3.0 under
+# openbank-contracts/<service>/. `check-event-contract-coverage.py` asserts this file exists for
+# every `mp.messaging.outgoing.*.topic` in the service's application.yaml.
+#
+# As with every contract here, the coverage gate asserts existence only — nothing validates this
+# document against the broker and no schema is registered in Apicurio. Everything below is DERIVED
+# from the code that runs: the payload shape is what CaseActivitiesImpl.emitProposal serializes,
+# the partitioning is OutboxKafkaHeaders.partitionKey (the case's aggregate UUID), and the single
+# writer is the case outbox (V2 migration, dispatched by CaseOutboxDispatcher).
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Case Coordinator Agent — events
+  version: 1.0.0
+  description: |
+    Terminal case proposals (ADR-0244 D7, #4181).
+
+    Every swarm case — however it ends: synthesis, contested breaker, or deadline — emits exactly
+    one proposal onto this topic for the ADR-0031 human-in-the-loop approval queue. The proposal
+    is the case-coordinator's ONLY output; it never writes to a business record.
+  license:
+    name: AGPL-3.0-only
+    url: https://www.gnu.org/licenses/agpl-3.0.html
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: |
+      Strimzi cluster `openbank-cluster` in the `messaging` namespace (mTLS). The service is not
+      yet deployed — its KafkaUser and ACL grant land with the Phase 4 GitOps work (#4187).
+
+channels:
+  caseProposals:
+    address: proposal-events
+    description: |
+      Terminal HITL proposal per case, exactly one per workflow run (D7). Declared as
+      `mp.messaging.outgoing.case-outbox-out.topic` in application.yaml
+      (`${CASE_OUTBOX_TOPIC:proposal-events}`).
+    messages:
+      caseProposal:
+        $ref: '#/components/messages/caseProposal'
+
+operations:
+  publishCaseProposal:
+    action: send
+    channel:
+      $ref: '#/channels/caseProposals'
+
+components:
+  messages:
+    caseProposal:
+      summary: Terminal case outcome for human disposition
+      payload:
+        $ref: '#/components/schemas/caseProposalPayload'
+
+  schemas:
+    caseProposalPayload:
+      type: object
+      description: |
+        Serialized by CaseActivitiesImpl.emitProposal; the partitioning key is the case aggregate
+        UUID (OutboxKafkaHeaders), so all events for one case stay ordered on one partition.
+      required: [caseId, proposalType, summary, contested, occurredAt]
+      properties:
+        caseId:
+          type: string
+          description: Temporal workflow id, e.g. case-incident-response-<subject>
+        proposalType:
+          type: string
+          description: case-synthesis (converged), case-contested (breaker), or case-timeout (TTL)
+        summary:
+          type: string
+          description: LLM convergence synthesis or the deterministic breaker/timeout reason
+        contested:
+          type: boolean
+          description: True when the contested-rate breaker tripped — the human sees the dispute
+        occurredAt:
+          type: string
+          format: date-time
