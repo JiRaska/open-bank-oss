@@ -396,11 +396,20 @@ fire from *outside* it, so they stay here:
   `.rego` reads as `data.rules.<key>`, and hash that. So an edit to one of the ~30 keys OPA never
   reads now changes **nothing** under `gitops/` (16 of the last 80 `rules.yaml` revisions touched
   the read set; the other 64 used to restamp ~78 files for nothing). When you DO touch the read
-  set, or any `.rego`, regenerate — the derived file FIRST, then every bundle:
+  set, or any `.rego`, regenerate — the derived files FIRST, then every bundle:
   ```
   python3 .github/scripts/gen-rules-opa-data.py
+  python3 .github/scripts/gen-agents-opa-data.py     # needs `opa` on PATH
   find openbank-infra/gitops/components -name 'gen-*opa-bundle*.sh' | sort | xargs -n1 bash
   ```
+  **`agents.yaml` gets the same treatment (#3927), one level deeper.** The bundles embed
+  `agents-opa-data.yaml`, and because `agents.rego` reads only `a.id`, `a.skills`,
+  `a.tools.allow` and `a.tools.deny` off each charter, the subset projects *inside* each entry —
+  50390 B becomes 5578 B. So editing a charter's `description`, `model`, `limits`, `schedule`,
+  `compliance` or `audit` block now restamps **nothing**. A field projection cannot be argued from
+  verbatim extraction, so `gen-agents-opa-data.py` proves it: it evaluates the real policy over an
+  input matrix derived from the charters under both the full document and the subset and requires
+  every MCP and REST decision to be identical before writing. That is why it needs `opa`.
   Commit the lot; never hand-edit a bundle or an annotation to dodge the diff. Such a PR has a
   short shelf life — merge with `--auto` (not `--admin`), or a competing governance PR conflicts it.
   Adding `data.rules.<newkey>` to a policy needs no list edit anywhere: the key set is derived from
