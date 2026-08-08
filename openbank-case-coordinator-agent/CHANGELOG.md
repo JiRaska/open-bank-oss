@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.2.0...case-coordinator-agent-v0.3.0) (2026-08-08)
+
+
+### Features
+
+* **case-coordinator:** add case thread read API and admin-ui pact ([#4226](https://github.com/JiRaska/open-bank-oss/issues/4226)) ([b99a31f](https://github.com/JiRaska/open-bank-oss/commit/b99a31f45d8cfbc68a9b7c4228944b1378f405d1))
+* **case-coordinator:** add Temporal CaseWorkflow swarm lifecycle ([#4181](https://github.com/JiRaska/open-bank-oss/issues/4181)) ([#4215](https://github.com/JiRaska/open-bank-oss/issues/4215)) ([4405a74](https://github.com/JiRaska/open-bank-oss/commit/4405a74fa23ac7460e3df56e1c51bb42a817a856))
+
 ## [0.2.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.1.0...case-coordinator-agent-v0.2.0) (2026-08-07)
 
 
