@@ -130,13 +130,16 @@ spec:
             # ADR-0120 Phase 1: Temporal payment orchestration — flag ON.
             # Worker connects to temporal-frontend.temporal.svc:7233 (namespace=openbank-payments,
             # queue=openbank-payment-execution). NetworkPolicy allows payments→temporal:7233.
-            - name: OPENBANK_TRANSACTION_ORCHESTRATION_TEMPORAL_ENABLED
+            # ADR-0209 D1 (#2572) moved the binding prefix to `openbank.temporal` — the
+            # OPENBANK_TRANSACTION_ORCHESTRATION_TEMPORAL_* names below were read by nothing, so the
+            # worker fell back to the @WithDefault localhost:7233 and the pod died at StartupEvent.
+            - name: OPENBANK_TEMPORAL_ENABLED
               value: "true"
-            - name: OPENBANK_TRANSACTION_ORCHESTRATION_TEMPORAL_SERVER_URL
+            - name: OPENBANK_TEMPORAL_SERVER_URL
               value: temporal-frontend.temporal.svc.cluster.local:7233
-            - name: OPENBANK_TRANSACTION_ORCHESTRATION_TEMPORAL_NAMESPACE
+            - name: OPENBANK_TEMPORAL_NAMESPACE
               value: openbank-payments
-            - name: OPENBANK_TRANSACTION_ORCHESTRATION_TEMPORAL_TASK_QUEUE
+            - name: OPENBANK_TEMPORAL_TASK_QUEUE
               value: openbank-payment-execution
             # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
             # enables the @Authorize HTTP interceptor to enforce decisions from
