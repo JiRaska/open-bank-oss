@@ -55,6 +55,7 @@ class PaymentNotSettledMapper : ExceptionMapper<PaymentNotSettledException> {
                 HTTP_CONFLICT,
                 ErrorCode.CONFLICT.code,
                 exception.message ?: "Conflict",
+                timestamp = Instant.now(),
             ),
         )
         .build()
@@ -73,6 +74,7 @@ class PaymentConfirmationRenderMapper : ExceptionMapper<PaymentConfirmationRende
                 HTTP_BAD_GATEWAY,
                 "DOCUMENT_SERVICE_UNAVAILABLE",
                 exception.message ?: "Confirmation rendering is temporarily unavailable",
+                timestamp = Instant.now(),
             ),
         )
         .build()
