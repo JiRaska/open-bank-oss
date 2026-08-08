@@ -40,12 +40,17 @@
 #   green, and a NEW occurrence fails. A baseline entry that becomes covered is also reported, so the
 #   list cannot quietly rot in either direction.
 #
+#   That last property only holds if every baseline entry names ONE channel — see the BASELINE
+#   comment (#3928). A `*` channel makes the ratchet unable to see a channel added later, and the
+#   symptom is a confident `OK`, never a red.
+#
 # EXIT CODES
 #   0  no new occurrences, no stale baseline entries
 #   1  a dotted `group.id` with no override ConfigMap, a dotted `auto.offset.reset` asking for a
 #      non-default value with no override — or a baseline entry that is now covered and should be
 #      removed
-#   2  the check could not run (PyYAML missing, tree not found). Never conflated with 0.
+#   2  the check could not run (PyYAML missing, tree not found) or the BASELINE itself is malformed
+#      (a wildcard channel, an unwatched key). Never conflated with 0.
 #
 # Run:  python3 .github/scripts/check-kafka-dotted-keys.py [--root .] [--self-test]
 
@@ -65,15 +70,35 @@ CONNECTOR_DEFAULT_OFFSET_RESET = "latest"
 
 WATCHED_KEYS = ("group.id", "auto.offset.reset")
 
-# Occurrences that exist today. Each entry is (service, channel, key) -> why it is tolerated.
+# Occurrences that exist today. Each entry is (service, CHANNEL, key) -> why it is tolerated.
 # Adding to this list is a deliberate act that needs a reason; see the ratchet note above.
+#
+# THE CHANNEL IS PINNED, AND `*` IS REJECTED OUTRIGHT (#3928)
+#   This list used to carry six `(service, "*", "auto.offset.reset")` entries. A wildcard channel
+#   makes the baseline a property of the SERVICE, so every channel the service gains later is
+#   pre-absorbed: the ratchet reports "no new ones" about a finding it never looked at, and the
+#   exclusion silently grows past what was ever justified. That is not hypothetical —
+#   `openbank-account-service`'s `delegation-events-in` arrived on 2026-08-02 (#3058), one day
+#   after the baseline was written (#2969), and inherited the exemption with nobody deciding it.
+#   Same repo rule as the pact-drift scope: never let a gate's coverage set be maintained
+#   separately from the artifacts it covers, and never let an exclusion be broader than what was
+#   actually justified. `validate_baseline()` now refuses a `*` channel with exit 2, so the shape
+#   cannot come back by hand.
 BASELINE = {
-    ("openbank-account-service", "*", "auto.offset.reset"): "#2945 — declared earliest, effective default; replay risk makes the fix operational",
-    ("openbank-aml-service", "*", "auto.offset.reset"): "#2945 — same",
-    ("openbank-balance-service", "*", "auto.offset.reset"): "#2945 — same",
-    ("openbank-document-service", "*", "auto.offset.reset"): "#2945 — same",
-    ("openbank-party-service", "*", "auto.offset.reset"): "#2945 — same",
-    ("openbank-statement-service", "*", "auto.offset.reset"): "#2945 — same",
+    ("openbank-account-service", "party-events-in", "auto.offset.reset"): "#2945 — declared earliest, effective default; replay risk makes the fix operational",
+    # NOT part of the #2945 decision. Arrived after the baseline and was absorbed by the `*` channel
+    # (#3058 -> #3928). Pinned here so it is a named, reviewable entry rather than an invisible one;
+    # the operational call (msg-override ConfigMap, i.e. a real replay on openbank.delegation.events)
+    # is still open and is exactly what the wildcard was hiding.
+    ("openbank-account-service", "delegation-events-in", "auto.offset.reset"): "#3928 — post-#2945 arrival, absorbed by the old `*` entry; replay decision still OPEN",
+    ("openbank-aml-service", "party-events-in", "auto.offset.reset"): "#2945 — same",
+    ("openbank-balance-service", "ledger-events-in", "auto.offset.reset"): "#2945 — same",
+    ("openbank-balance-service", "balance-init-in", "auto.offset.reset"): "#2945 — same",
+    ("openbank-document-service", "account-created-in", "auto.offset.reset"): "#2945 — same",
+    ("openbank-party-service", "kyc-events-in", "auto.offset.reset"): "#2945 — same",
+    ("openbank-party-service", "aml-events-in", "auto.offset.reset"): "#2945 — same",
+    ("openbank-party-service", "consent-events-in", "auto.offset.reset"): "#2945 — same",
+    ("openbank-statement-service", "account-events-in", "auto.offset.reset"): "#2945 — same",
 }
 
 
@@ -129,11 +154,31 @@ def load_overrides(root):
 
 
 def baseline_key(service, channel, key):
-    """Baseline entries may pin a channel or use '*' for the whole service."""
-    for candidate in ((service, channel, key), (service, "*", key)):
-        if candidate in BASELINE:
-            return candidate
-    return None
+    """Exact `(service, channel, key)` only — a baseline entry can never span channels (#3928)."""
+    candidate = (service, channel, key)
+    return candidate if candidate in BASELINE else None
+
+
+def validate_baseline(baseline=None):
+    """Reject a baseline shape that would silently widen the exclusion. Returns a list of errors.
+
+    The only shape banned here is the one that caused #3928: a `*` channel. It reads as a small
+    convenience and is in fact an open-ended exemption for every channel the service has not been
+    given yet — the failure lands as a green, so nothing else in the pipeline can notice it.
+    """
+    if baseline is None:
+        baseline = BASELINE
+    errors = []
+    for entry in sorted(baseline):
+        service, channel, key = entry
+        if channel == "*":
+            errors.append(
+                f"baseline entry {entry} uses a wildcard channel. A baseline pins ONE channel, "
+                f"or it pre-absorbs every channel {service} gains later (#3928). Enumerate them.",
+            )
+        if key not in WATCHED_KEYS:
+            errors.append(f"baseline entry {entry} names {key!r}, which is not in WATCHED_KEYS.")
+    return errors
 
 
 def scan(root):
@@ -247,6 +292,84 @@ SELF_TEST_EXPECT = {
 }
 
 
+def _build_self_test_tree(root):
+    """Materialise SELF_TEST_SERVICES under `root`. Shared by both halves of the self-test."""
+    for service, (app_yaml, override) in SELF_TEST_SERVICES.items():
+        res = root / service / "src" / "main" / "resources"
+        res.mkdir(parents=True)
+        (res / "application.yaml").write_text(app_yaml, encoding="utf-8")
+        if override is None:
+            continue
+        short = service[len("openbank-"):]
+        comp = root / "openbank-infra" / "gitops" / "components" / short
+        comp.mkdir(parents=True)
+        (comp / f"{short}-msg-override.yaml").write_text(
+            # The leading comment repeats the property name on purpose: a text guard that does
+            # not strip comments would read this prose as coverage (the silent direction of the
+            # "guard matches the text about the thing" failure).
+            f"# explains mp.messaging.incoming.covered-in.group.id=... and why it is here\n"
+            f"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {short}-msg-override\n"
+            f"data:\n  override.properties: |\n    " + override.replace("\n", "\n    "),
+            encoding="utf-8",
+        )
+
+
+def baseline_self_test():
+    """Exercise the BASELINE path itself — the branch #3928 lived in, which had NO coverage.
+
+    Every case here was chosen because the old wildcard code passes it in the WRONG direction:
+    absorbing a channel it was never given, and reporting nothing while doing it. A pinned entry
+    must cover its own channel and NOTHING else, a `*` entry must be refused outright, and an entry
+    matching nothing on the tree must come back as stale.
+    """
+    import tempfile
+
+    global BASELINE
+    saved = BASELINE
+    svc = "openbank-demo-differs-service"
+    cases = []
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            _build_self_test_tree(root)
+
+            # 1. A pinned entry silences its own channel...
+            BASELINE = {(svc, "asks-for-non-default-in", "auto.offset.reset"): "self-test"}
+            findings, matched = scan(str(root))
+            cases.append((
+                "pinned entry silences its own channel",
+                not any("asks-for-non-default-in" in f for f in findings) and len(matched) == 1,
+            ))
+            # ...and does NOT silence a sibling channel of the same service. This is the whole bug.
+            cases.append((
+                "pinned entry does NOT absorb a sibling channel",
+                any("channel 'differs-in'" in f for f in findings),
+            ))
+
+            # 2. An entry matching nothing on the tree is reported stale (the reverse ratchet).
+            BASELINE = {(svc, "channel-that-does-not-exist", "auto.offset.reset"): "self-test"}
+            _, matched = scan(str(root))
+            cases.append((
+                "baseline entry matching no channel is stale",
+                [k for k in BASELINE if k not in matched] == list(BASELINE),
+            ))
+    finally:
+        BASELINE = saved
+
+    # 3. The shape guard refuses the wildcard that caused #3928, and accepts the real baseline.
+    cases.append((
+        "wildcard channel rejected",
+        len(validate_baseline({(svc, "*", "auto.offset.reset"): "self-test"})) == 1,
+    ))
+    cases.append(("shipped BASELINE is well-formed", validate_baseline() == []))
+
+    failures = 0
+    for label, ok in cases:
+        print(f"{'pass' if ok else 'FAIL'}  {label}")
+        failures += 0 if ok else 1
+    return failures, len(cases)
+
+
 def self_test():
     """Drive the REAL scan() over a synthetic tree, not a retyped copy of its classifier.
 
@@ -262,25 +385,7 @@ def self_test():
     failures = 0
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
-        for service, (app_yaml, override) in SELF_TEST_SERVICES.items():
-            res = root / service / "src" / "main" / "resources"
-            res.mkdir(parents=True)
-            (res / "application.yaml").write_text(app_yaml, encoding="utf-8")
-            if override is None:
-                continue
-            short = service[len("openbank-"):]
-            comp = root / "openbank-infra" / "gitops" / "components" / short
-            comp.mkdir(parents=True)
-            (comp / f"{short}-msg-override.yaml").write_text(
-                # The leading comment repeats the property name on purpose: a text guard that does
-                # not strip comments would read this prose as coverage (the silent direction of the
-                # "guard matches the text about the thing" failure).
-                f"# explains mp.messaging.incoming.covered-in.group.id=... and why it is here\n"
-                f"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {short}-msg-override\n"
-                f"data:\n  override.properties: |\n    " + override.replace("\n", "\n    "),
-                encoding="utf-8",
-            )
-
+        _build_self_test_tree(root)
         findings, _ = scan(str(root))
 
     flagged = {ch for ch in SELF_TEST_EXPECT if any(f"channel '{ch}'" in f for f in findings)}
@@ -297,6 +402,11 @@ def self_test():
     failures += 0 if ok else 1
 
     total = len(SELF_TEST_EXPECT) + 1
+
+    bl_failures, bl_total = baseline_self_test()
+    failures += bl_failures
+    total += bl_total
+
     print(f"\nself-test: {total - failures} passed, {failures} failed")
     return 0 if failures == 0 else 2
 
@@ -312,6 +422,12 @@ def main():
         return 2
     if args.self_test:
         return self_test()
+
+    shape_errors = validate_baseline()
+    if shape_errors:
+        for e in shape_errors:
+            print(f"::error::{e}")
+        return 2
 
     findings, matched = scan(args.root)
     stale = [k for k in BASELINE if k not in matched]

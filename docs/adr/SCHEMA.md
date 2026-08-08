@@ -30,6 +30,7 @@ superseded-by: []
 delivery-repos: []
 tags: [payments, sca]
 summary: "One or two sentences: what was decided and why. Max 240 chars."
+followup: "#1234 — what is still unbuilt"     # required iff delivery-status: partial
 ---
 ```
 
@@ -52,6 +53,7 @@ generated, never hand-edited.
 | `delivery-repos` | yes | list | Values must appear in [`known-repos.txt`](known-repos.txt) (ADR-0147). Empty = monorepo-only. |
 | `tags` | yes | list, 1–4 | Values must appear in [`tags.txt`](tags.txt). |
 | `summary` | yes | quoted string, ≤240 chars | See below. |
+| `followup` | iff `partial` | quoted string | Where the unbuilt half is tracked. See below. |
 
 ### The two status axes
 
@@ -64,6 +66,41 @@ has no build axis at all is `delivery-status: n-a`.
 Nuance in the *superseded* case: the ADR keeps whatever `delivery-status` was true when
 it was superseded. A shipped decision that a later ADR replaced is
 `superseded` / `shipped`, not `superseded` / `n-a` — the code really did exist.
+
+### `followup` — required exactly when `delivery-status: partial`
+
+A `partial` ADR says half a decision is unbuilt. `rules.yaml`'s `governance_followup`
+already says that tail gets tracked; nothing enforced it, so 85 of 241 ADRs recorded an
+unbuilt half and the backlog was silent about most of them (issue #3965). This key is
+that statement, written where the status is:
+
+```yaml
+followup: "#3679 — 18 of 39 workloads still run AUTHZ_ENFORCE=false"
+followup: "openbank-app#42 — the client-side SDK wiring lives in the app repo"
+followup: "openbank-app — tracked in the app repo, issue number not mirrored here"
+followup: "none — single-region is an accepted limitation until Milestone M6"
+```
+
+Grammar: `<refs> — <reason>`, double-quoted, one line. `<refs>` is `none`, or a
+comma-separated list of `#N` (this repo) and `<repo>[#N]` (a repo in
+[`known-repos.txt`](known-repos.txt)). The reason is at least 20 characters and may not
+be a placeholder — an unfilled marker reads as a discharged obligation, which is worse
+than no marker at all.
+
+`none` is a first-class answer and is meant to be used. `partial` is overloaded across
+the fleet: some mean "accepted limitation" (ADR-0186, single-region until M6) and some
+mean "delivered differently than prescribed" (ADR-0017, OpenBao + External Secrets
+instead of the Vault extension). Neither has an actionable tail, and saying so in one
+line is the point of the key.
+
+Why an author-written marker rather than a search of the issue backlog: a search for
+`ADR-NNNN` cannot see an issue that tracks the work without citing the number (measured
+at 5 false positives in a 13-ADR sample on #3965), cannot see another repo at all, and
+cannot tell either from an ADR that genuinely has no tail. It is also not a stable
+quantity — the same search gave 52, then 55, then 64 as issues closed underneath it.
+The key is the only signal that survives all three.
+`.github/scripts/check-adr-partial-followup.py` enforces it, against a shrink-only
+baseline of the ADRs that predate the rule.
 
 ### `summary` — the field that pays for the rest
 
