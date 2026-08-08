@@ -58,6 +58,40 @@ interface MarketingReachPort {
 }
 
 /**
+ * The read surface behind `query.statement.readonly` (issue #4109, ADR-0248). Sourced from
+ * statement-service's existing period-close record + the new JSON summary projection this PR adds
+ * there — never from a rendered camt.053/MT940/PDF, which a calling model cannot reason over.
+ *
+ * [accountId] is the caller-presented **IBAN**, matching every other tool on this surface
+ * ([AccountReadPort] KDoc) — the adapter resolves it to the account-service UUID statement-service
+ * is keyed by. When [legalSequence] is omitted the adapter reads the most recent CLOSED period for
+ * [currency] (or, if that is also omitted, the account's most recently closed pocket) from
+ * statement-service's own period list — a caller asking "summarize my March statement" does not
+ * necessarily know its legal sequence number.
+ */
+interface StatementReadPort {
+    fun getStatementSummary(
+        consentContext: ConsentContext,
+        accountId: String,
+        currency: String?,
+        legalSequence: Long?,
+    ): JsonNode
+}
+
+/**
+ * The read surface behind `query.payment_confirmation.readonly` (issue #4109, ADR-0248). [paymentId]
+ * names either a SEPA or a domestic payment — the two rails are separate services with no shared
+ * lookup (customer-edge itself routes to one or the other by caller-selected route, never by
+ * probing both — `CustomerEdgeResource`'s `/domestic-payments/{paymentId}` and
+ * `/sepa-payments/{paymentId}` are distinct endpoints). An MCP caller supplies one opaque payment
+ * reference with no rail hint, so the adapter tries SEPA first, then domestic, and reports "not
+ * found" only once both have said so.
+ */
+interface PaymentConfirmationReadPort {
+    fun getPaymentConfirmation(consentContext: ConsentContext, paymentId: String): JsonNode
+}
+
+/**
  * Produces a reviewable payment PROPOSAL (never a debit). Mirrors agent-service's HITL draft_ticket:
  * the model proposes, a human disposes — money never moves on the model's word (ADR-0031, ADR-0181).
  * Phase 1 returns a proposal id from an in-memory stub; phase 2 writes a PROPOSED row into the

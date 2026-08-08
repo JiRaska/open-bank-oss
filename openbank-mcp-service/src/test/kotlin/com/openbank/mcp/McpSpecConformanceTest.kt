@@ -16,7 +16,9 @@ import com.openbank.mcp.application.McpToolRegistry
 import com.openbank.mcp.application.PolicyFilteredToolCatalog
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
+import com.openbank.mcp.application.port.out.PaymentConfirmationReadPort
 import com.openbank.mcp.application.port.out.ProposalPort
+import com.openbank.mcp.application.port.out.StatementReadPort
 import com.openbank.mcp.infrastructure.mcp.CallerContextResolver
 import com.openbank.mcp.infrastructure.mcp.McpEndpoint
 import com.openbank.mcp.infrastructure.observability.McpMetricsAdapter
@@ -57,7 +59,8 @@ class McpSpecConformanceTest {
 
     private fun endpoint(): McpEndpoint {
         val stub = ConformanceReads(mapper)
-        val toolRegistry = McpToolRegistry(stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper)
+        val toolRegistry =
+            McpToolRegistry(stub, stub, stub, stub, StubMarketingReachPort(mapper), McpPiiMasker(mapper), mapper)
         return McpEndpoint(
             registry = toolRegistry,
             pdp = AllowAll,
@@ -255,6 +258,8 @@ class McpSpecConformanceTest {
 
     private class ConformanceReads(private val m: ObjectMapper) :
         AccountReadPort,
+        StatementReadPort,
+        PaymentConfirmationReadPort,
         ProposalPort {
         private fun payload() = m.createObjectNode().put("status", "ACTIVE").put("currency", "CZK")
         override fun listAccounts(consentContext: ConsentContext): JsonNode = payload()
@@ -262,6 +267,13 @@ class McpSpecConformanceTest {
         override fun listTransactions(consentContext: ConsentContext, accountId: String, limit: Int): JsonNode =
             payload()
         override fun listConsents(consentContext: ConsentContext): JsonNode = payload()
+        override fun getStatementSummary(
+            consentContext: ConsentContext,
+            accountId: String,
+            currency: String?,
+            legalSequence: Long?,
+        ): JsonNode = payload()
+        override fun getPaymentConfirmation(consentContext: ConsentContext, paymentId: String): JsonNode = payload()
         override fun proposePayment(consentContext: ConsentContext, request: JsonNode): JsonNode =
             m.createObjectNode().put("status", "PROPOSED")
     }

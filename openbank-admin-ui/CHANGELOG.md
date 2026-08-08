@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.103.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.103.0...admin-ui-v0.103.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* **engagement:** add the missing governance.yaml — main is red without it ([#4114](https://github.com/JiRaska/open-bank-oss/issues/4114)) ([a4a94c4](https://github.com/JiRaska/open-bank-oss/commit/a4a94c429eae56fee86e4d5be1abde9c3ccf0245))
+
 ## [0.103.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.102.0...admin-ui-v0.103.0) (2026-08-07)
 
 

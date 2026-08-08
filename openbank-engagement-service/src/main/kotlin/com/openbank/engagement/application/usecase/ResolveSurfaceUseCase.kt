@@ -13,6 +13,7 @@ import com.openbank.engagement.domain.model.SurfaceSlot
 import com.openbank.libs.contact.ContactClass
 import com.openbank.libs.contact.ContactGateDecision
 import com.openbank.libs.contact.ContactPolicyGate
+import com.openbank.libs.contact.MarketingCallSite
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Duration
 import java.time.Instant
@@ -38,6 +39,7 @@ class ResolveSurfaceUseCase(
         object Suppressed : Result
     }
 
+    @MarketingCallSite
     suspend fun resolve(partyId: UUID, slot: SurfaceSlot): Result {
         val decision = contactGate.check(
             partyId = partyId,
