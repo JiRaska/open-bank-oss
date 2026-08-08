@@ -48,7 +48,13 @@ class FraudScoringServiceTest {
             mlModel,
             java.time.Clock.systemUTC(),
             false,
-        )
+        ).also {
+            // fraudHoldService is field-injected (LongParameterList, see the class KDoc) — a
+            // plain constructor call here bypasses CDI, so it must be set manually or score()
+            // throws UninitializedPropertyAccessException. relaxed: these tests assert scoring
+            // behaviour, not the fraud-hold side effect (see FraudHoldServiceTest for that).
+            it.fraudHoldService = mockk(relaxed = true)
+        }
 
     private fun request(accountId: UUID = UUID.randomUUID()) = ScoreRequest(
         amount = BigDecimal("99.99"),
