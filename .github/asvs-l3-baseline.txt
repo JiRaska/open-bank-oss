@@ -224,7 +224,6 @@ V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:79: plaintex
 V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:131: plaintext http:// env value http://apicurio-registry.messaging.svc:8080
 V13.1 openbank-analytics-sink: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-authz-policy-auditor: serves REST resources but publishes no openapi.yaml
-V13.1 openbank-case-coordinator-agent: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-control-liveness-sentinel: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-devops-agent: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-docs-truth-agent: serves REST resources but publishes no openapi.yaml
