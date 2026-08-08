@@ -6,10 +6,12 @@ package com.openbank.billing.integration
 
 import com.openbank.billing.it.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -23,10 +25,24 @@ import org.junit.jupiter.api.Test
  * moved from the phase-2b `@QuarkusTest`-only `BillingBootSmokeTest` to the fleet's
  * `*BootSmokeIT` + `PostgresRedisTestResource` convention (mirrors
  * `openbank-standing-order-service`/`openbank-settlement-service`).
+ *
+ * `InMemoryKafkaResource` switches `billing-events-out` (ADR-0248, billing's first Kafka
+ * publisher) to the in-memory connector: `PostgresRedisTestResource` provisions no Kafka broker,
+ * so without this the SmallRye Kafka producer's own readiness check reports the channel `[KO]`
+ * and `/q/health/ready` answers 503 — exactly the `StandingOrderBootSmokeIT` pattern for its
+ * `standing-order-events-out`/`standing-order-due-in` channels.
  */
 @QuarkusTest
+@QuarkusTestResource(BillingBootSmokeIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresRedisTestResource::class)
 class BillingBootSmokeIT {
+
+    class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
+        override fun start(): Map<String, String> =
+            InMemoryConnector.switchOutgoingChannelsToInMemory("billing-events-out")
+
+        override fun stop() = InMemoryConnector.clear()
+    }
 
     @Test
     fun `the app boots and the readiness probe reports UP`() {
