@@ -4,6 +4,7 @@
 
 package com.openbank.delegation.domain.model
 
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.money.Money
 import java.math.BigDecimal
 import java.time.OffsetDateTime
@@ -74,10 +75,14 @@ object SpendWindows {
      *
      * It is deliberately a fixed zone rather than the caller's or the server's: the ceiling belongs
      * to the grant, and a grant whose window moved with whoever happened to call would be
-     * unauditable. If this service is ever operated for another jurisdiction, this constant — and
-     * a migration of the counters — is the one place that changes.
+     * unauditable.
+     *
+     * The zone is [AccountingClock.BANK_ZONE] rather than a second `ZoneId.of("Europe/Prague")`.
+     * ADR-0207 D1 exists because five services each named that zone themselves and one of them
+     * disagreed with its own injected clock for two hours a day; a spend window that drifted from
+     * the accounting day would reproduce exactly that defect on a limit customers rely on.
      */
-    val ZONE: ZoneId = ZoneId.of("Europe/Prague")
+    val ZONE: ZoneId = AccountingClock.BANK_ZONE
 
     fun windowAt(now: OffsetDateTime): SpendWindow {
         val local = now.atZoneSameInstant(ZONE)

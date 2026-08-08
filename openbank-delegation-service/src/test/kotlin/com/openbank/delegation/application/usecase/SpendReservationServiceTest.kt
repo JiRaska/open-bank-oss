@@ -89,15 +89,21 @@ class SpendReservationServiceTest {
         coEvery { delegationRepository.findById(any()) } answers { currentGrant }
     }
 
-    private fun reserve(amount: String, key: String = UUID.randomUUID().toString()) = runBlocking {
-        service.reserve(
-            ReserveSpendCommand(
-                callerPartyId = grantee,
-                delegationId = currentGrant.id,
-                amount = czk(amount),
-                idempotencyKey = key,
-            ),
-        )
+    // Block body, not `= runBlocking {`: the CI guard flags that form because a @Test written
+    // that way returns non-Unit and JUnit5 silently drops it. This helper is not a @Test and does
+    // return a value, but the guard reads shape rather than intent — and a shape that is unsafe on
+    // the tests next to it is not worth defending here.
+    private fun reserve(amount: String, key: String = UUID.randomUUID().toString()): ReserveSpendResult {
+        return runBlocking {
+            service.reserve(
+                ReserveSpendCommand(
+                    callerPartyId = grantee,
+                    delegationId = currentGrant.id,
+                    amount = czk(amount),
+                    idempotencyKey = key,
+                ),
+            )
+        }
     }
 
     @Test
