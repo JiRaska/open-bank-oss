@@ -28,11 +28,20 @@ quarkus:
       "com.openbank":
         level: DEBUG
   rest-client:
+    # Local-dev defaults ONLY. The in-cluster URLs are supplied by the Rollout's env
+    # (BALANCE_SERVICE_URL / LEDGER_SERVICE_URL in
+    # openbank-infra/gitops/components/payments/payments-services.yaml), which is the fleet
+    # convention every other consumer of these two services follows (transaction, billing,
+    # statement, lending). The previous defaults named `openbank-balance-service:8080` and
+    # `openbank-ledger-service:8080` — no Service of either name exists in any namespace, and
+    # the ports were wrong too (balance is 8103, ledger is 8101). Because the Rollout carried
+    # no env override, those were the EFFECTIVE values in the cluster, so every settlement
+    # debit/credit and every GL posting dialled a name that cannot resolve (issue #3931).
     balance-api:
-      url: "${BALANCE_SERVICE_URL:http://openbank-balance-service:8080}"
+      url: "${BALANCE_SERVICE_URL:http://localhost:8103}"
       scope: jakarta.inject.Singleton
     ledger-api:
-      url: "${LEDGER_SERVICE_URL:http://openbank-ledger-service:8080}"
+      url: "${LEDGER_SERVICE_URL:http://localhost:8101}"
       scope: jakarta.inject.Singleton
 
 openbank:

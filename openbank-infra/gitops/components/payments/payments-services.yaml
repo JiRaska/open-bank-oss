@@ -1735,8 +1735,12 @@ spec:
                   name: standing-order-oidc
                   key: OIDC_CLIENT_SECRET
             # #889: initiate the real SEPA credit transfer for a due standing order.
+            # Was `sepa-payment-service.payments.svc:8108` until #3966 — wrong on both halves.
+            # The Service is `sepa-payment` (declared ~line 355 of this file) and it serves
+            # 8115; 8108 is tpp-registry-service's port. So every due standing order's SEPA leg
+            # dialled a name that does not exist, on a port that belongs to another service.
             - name: SEPA_PAYMENT_SERVICE_URL
-              value: http://sepa-payment-service.payments.svc:8108
+              value: http://sepa-payment.payments.svc:8115
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.payments.svc:6379
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
@@ -2259,6 +2263,16 @@ spec:
                 secretKeyRef:
                   name: settlement-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # Downstream money-path dependencies (issue #3931). Until now this Rollout carried
+            # NEITHER, so both rest-clients fell back to application.yaml's defaults — which
+            # named `openbank-balance-service:8080` / `openbank-ledger-service:8080`, hostnames
+            # no Service in this cluster has ever had. Every settlement debit/credit and every
+            # GL posting therefore dialled an unresolvable name. Same shape and same values as
+            # transaction-service above.
+            - name: BALANCE_SERVICE_URL
+              value: http://balance-service.balances.svc:8103
+            - name: LEDGER_SERVICE_URL
+              value: http://ledger-service.ledger.svc:8101
             # Temporal go-live (ADR-0101 P3, runbook 0006 Gate 1): settlement now runs its
             # durable workflow. Namespace openbank-default + SERVER_URL + the temporal-platform
             # NetworkPolicy are already in place; rollback = set this back to "false".
@@ -2532,8 +2546,9 @@ spec:
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
             # ADR-0109: pacs.004 return simulator forwards R-transactions to sepa-payment.
+            # Same wrong name+port as standing-order's copy above, corrected in #3966.
             - name: SEPA_PAYMENT_SERVICE_URL
-              value: http://sepa-payment-service.payments.svc:8108
+              value: http://sepa-payment.payments.svc:8115
           startupProbe:
             tcpSocket:
               port: management
