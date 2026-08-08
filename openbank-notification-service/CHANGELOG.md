@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.18.0...notification-service-v0.18.1) (2026-08-08)
+
+
+### Security
+
+* **notification:** wire ContactPolicyGate at the ADR-0219 D4 choke point ([#4224](https://github.com/JiRaska/open-bank-oss/issues/4224)) ([91902ea](https://github.com/JiRaska/open-bank-oss/commit/91902ea3293a95c78e74cf74d0b61d1f99d0b861))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.17.4...notification-service-v0.18.0) (2026-08-06)
 
 
