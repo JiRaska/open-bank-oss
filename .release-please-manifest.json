@@ -45,7 +45,7 @@
   "openbank-sdd-service": "0.10.0",
   "openbank-security-scanner": "0.7.0",
   "openbank-sepa-instant": "0.7.6",
-  "openbank-sepa-payment": "0.8.9",
+  "openbank-sepa-payment": "0.9.0",
   "openbank-settlement-service": "0.5.0",
   "openbank-standing-order-service": "0.14.5",
   "openbank-statement-service": "0.8.0",
