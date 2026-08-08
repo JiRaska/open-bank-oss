@@ -76,6 +76,9 @@ quarkus:
     transaction-service:
       url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
       scope: jakarta.inject.Singleton
+    document-service:
+      url: ${DOCUMENT_SERVICE_URL:http://localhost:8143}
+      scope: jakarta.inject.Singleton
   smallrye-reactive-messaging:
     kafka:
       bootstrap-servers: "${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}"
