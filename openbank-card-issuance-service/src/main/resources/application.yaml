@@ -64,7 +64,11 @@ quarkus:
     # fail-open (see CardProductCatalogPort) — waiting on a cold start would delay every issue
     # for a rule that is allowed to be skipped.
     "product-catalog-api":
-      url: ${PRODUCT_CATALOG_SERVICE_URL:http://openbank-product-catalog:8080}
+      # `openbank-product-catalog:8080` resolved to nothing and named the wrong port — the
+      # Service is `product-catalog` on 8104 in namespace `accounts`. Overridden in the cluster
+      # (PRODUCT_CATALOG_SERVICE_URL points at the KEDA interceptor); localhost:8104 matches
+      # billing/document-service (issue #3931).
+      url: ${PRODUCT_CATALOG_SERVICE_URL:http://localhost:8104}
       connect-timeout: 3000
       read-timeout: 5000
   redis:
