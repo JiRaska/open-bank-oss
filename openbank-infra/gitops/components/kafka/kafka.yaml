@@ -192,6 +192,24 @@ spec:
     retention.ms: 604800000
     cleanup.policy: delete
 ---
+# billing-service's single outbox topic (#4217, ADR-0248) — carries all its events
+# (billing.fee.post-intent.v1, billing.fee.reversal-intent.v1, and the new
+# AnnualFeeSummaryReady) via its one "billing-events-out" channel. Single partition
+# + RF 1 to match the single-broker sandbox; prod should raise partitions/RF.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.billing.fee.event
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+---
 # Dead-letter topic for account-service's party-events-in channel (SmallRye
 # failure-strategy: dead-letter-queue). A party event whose projection survives the
 # consumer's bounded retry is parked here for inspection/replay instead of being dropped.

@@ -42,7 +42,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: security-scanner-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-security-scanner:sandbox-c5218b90
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-security-scanner:sandbox-123633fc
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -141,7 +141,7 @@ spec:
             - name: OPENBANK_SECURITY_SCANNER_TARGET_PSD2_SERVICE
               value: http://psd2-service.psd2.svc:8107
             - name: OPENBANK_SECURITY_SCANNER_TARGET_TPP_REGISTRY_SERVICE
-              value: http://tpp-registry-service.tpp.svc:8108
+              value: http://tpp-registry-service.tpp-registry.svc:8108
             - name: OPENBANK_SECURITY_SCANNER_TARGET_AGENT_SERVICE
               value: http://agent-service.platform.svc:8109
             - name: OPENBANK_SECURITY_SCANNER_TARGET_SCA_SERVICE

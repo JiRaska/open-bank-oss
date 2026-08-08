@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.statement.application.usecase
 
+import com.openbank.libs.testing.audit.AuditEventTime
 import com.openbank.statement.Fixtures
 import com.openbank.statement.application.port.out.AccountInfoPort
 import com.openbank.statement.application.port.out.BalancePort
@@ -17,6 +18,7 @@ import com.openbank.statement.domain.model.StatementFormat
 import com.openbank.statement.domain.model.StatementPeriod
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
@@ -84,6 +86,30 @@ class StatementServiceTest {
         verify(exactly = 0) { periods.save(any()) }
     }
 
+    /**
+     * #3914: red before the payload gained `occurredAt` — the close instant was in the payload only
+     * as `closedAt`, a name `AuditConsumer` does not read, so the audit row for a statutory
+     * period-close recorded the audit consumer's ingest clock as the close time.
+     *
+     * Asserts the value equals the period's own `closedAt`, not merely that a parseable instant is
+     * present: a serialisation-time clock read would also be parseable, and would make a replayed
+     * or re-emitted close claim a different business time each time.
+     */
+    @Test
+    fun `the period-closed payload carries the close instant as the audit event time`() {
+        every { periods.findByPeriod(any(), any(), any(), any()) } returns Uni.createFrom().nullItem()
+        every { balance.closingBalance(Fixtures.ACCOUNT_ID, "CZK", to) } returns
+            Uni.createFrom().item(BalanceAnchor(BigDecimal("1075.00"), "CZK", to))
+        every { periods.nextLegalSequence(Fixtures.ACCOUNT_ID, "CZK") } returns Uni.createFrom().item(7L)
+        val msg = slot<StatementOutboxMessage>()
+        every { periods.saveWithOutbox(any(), capture(msg)) } answers
+            { Uni.createFrom().item(firstArg<StatementPeriod>()) }
+
+        val closed = service.closeMonth(Fixtures.ACCOUNT_ID, from, to).await().indefinitely().first()
+
+        AuditEventTime.assertRecordedAsEventTime(msg.captured.payload, closed.closedAt)
+    }
+
     @Test
     fun `a re-run is idempotent - it returns the existing close without minting a new sequence`() {
         val existing = StatementPeriod(
@@ -139,6 +165,34 @@ class StatementServiceTest {
 
         assertThatThrownBy {
             service.render(Fixtures.ACCOUNT_ID, "CZK", 99L, StatementFormat.MT940).await().indefinitely()
+        }.isInstanceOf(StatementNotFoundException::class.java)
+    }
+
+    @Test
+    fun `summary returns the same closed period as render, but as the canonical model - no renderer`() {
+        val period = StatementPeriod(
+            id = UUID.randomUUID(), accountId = Fixtures.ACCOUNT_ID, pocketCurrency = "CZK",
+            periodFrom = from, periodTo = to, legalSequenceNumber = 7, electronicSequenceNumber = 7,
+            openingBalance = BigDecimal("1000.00"), closingBalance = BigDecimal("1075.00"),
+            entryCount = 2, closedAt = Fixtures.CLOSED_AT,
+        )
+        every { periods.findBySequence(Fixtures.ACCOUNT_ID, "CZK", 7L) } returns Uni.createFrom().item(period)
+
+        val model = service.summary(Fixtures.ACCOUNT_ID, "CZK", 7L).await().indefinitely()
+
+        assertThat(model.legalSequenceNumber).isEqualTo(7L)
+        assertThat(model.openingBalance.amount).isEqualByComparingTo("1000.00")
+        assertThat(model.closingBalance.amount).isEqualByComparingTo("1075.00")
+        assertThat(model.entries).hasSize(2)
+        assertThat(model.iban).isEqualTo("CZ65")
+    }
+
+    @Test
+    fun `summary of a missing sequence fails with not-found, same as render`() {
+        every { periods.findBySequence(any(), any(), any()) } returns Uni.createFrom().nullItem()
+
+        assertThatThrownBy {
+            service.summary(Fixtures.ACCOUNT_ID, "CZK", 99L).await().indefinitely()
         }.isInstanceOf(StatementNotFoundException::class.java)
     }
 

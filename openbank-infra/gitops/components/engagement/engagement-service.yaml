@@ -5,12 +5,16 @@
 # that rots in place", #3344 class). A real single-instance CNPG Postgres backs it
 # (postgres.yaml).
 #
-# Deliberately still absent, named rather than silently missing:
-#   - Kafka mTLS (KafkaUser + keystore/truststore Secrets) — KAFKA_BOOTSTRAP_SERVERS below has no
-#     SSL config, which is fine only because openbank.outbox.dispatch-enabled defaults false. The
-#     outbox fills, publishes nothing, and no message is silently lost — flipping dispatch on
-#     without also wiring mTLS would just fail every publish attempt, loudly, in the outbox's own
-#     retry/DEAD accounting.
+# Kafka mTLS (kafka-engagement-mtls.yaml) landed as the fast-follow to issue #2749's
+# adverse-state consumers (LendingArrearsEventConsumer, PartyErasureConsumer): SSL env +
+# keystore/truststore volumes below, once the deployed image (sandbox-fb5c455b) was actually
+# built from a commit whose application.yaml declares lending-events-in/party-events-in with a
+# real `connector:` — check-msg-channel-image-parity.py (#3350 class incident, card-issuance)
+# is exactly what blocked landing this alongside the consumer code itself. This also fixes a
+# latent bug, not just adds a feature — openbank.outbox.dispatch-enabled is `true`, so the D2
+# feedback-loop outbox had been attempting every publish over plaintext against the mTLS-only
+# :9093 listener since #4048 merged: an immediate TLS-handshake failure per attempt, loud, never
+# actually delivering.
 # The OPA sidecar used to be on that deferred list, on the reasoning that a missing PDP left
 # OPA-level policy merely "not consulted yet, not open". That was wrong, and the
 # `authz-enforce ⇒ PDP sidecar parity` gate (#1797) caught it: `authz.enforce` carries
@@ -44,7 +48,7 @@ spec:
       annotations:
         # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
         # hot-reload). Kept in sync by gen-engagement-opa-bundle.sh.
-        openbank.tech/policy-checksum: "2f77f3a887a2737a"
+        openbank.tech/policy-checksum: "9a9a4e73759b7ae9"
       labels:
         app.kubernetes.io/name: engagement-service
         app.kubernetes.io/part-of: engagement
@@ -63,7 +67,7 @@ spec:
           # src/main (this merge itself, first) triggers auto-deploy to build a real image and
           # open a gitops PR replacing this with the actual sha. Until then, Kyverno's
           # cosign-signature/SBOM-attestation admission policies reject a tag nothing ever pushed.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-engagement-service:sandbox-7316bb12
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-engagement-service:sandbox-1e8ac27c
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -82,9 +86,34 @@ spec:
                 secretKeyRef:
                   name: engagement-db-app
                   key: password
-            # No SSL config — see the file header on Kafka mTLS being deferred.
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka/keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: engagement-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka/truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
+            # issue #686: group.id/auto.offset.reset for lending-events-in/party-events-in — see
+            # engagement-service-msg-override.yaml's own header for why this can't be plain YAML.
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /mnt/msg-config/override.properties
             - name: CONSENT_SERVICE_URL
               value: http://consent-service.consent.svc:8106
             - name: KEYCLOAK_URL
@@ -124,6 +153,15 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka/keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka/truststore
+              readOnly: true
+            - name: msg-override
+              mountPath: /mnt/msg-config
+              readOnly: true
         # The PDP every @Authorize endpoint on SurfaceResource queries. Without it the
         # interceptor has nothing to ask and fails closed (503/422) — issue #1797, and
         # exactly the state #4054 left this workload in.
@@ -193,6 +231,15 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: kafka-keystore
+          secret:
+            secretName: engagement-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
+        - name: msg-override
+          configMap:
+            name: engagement-service-msg-override
         - name: opa-bundle
           configMap:
             name: engagement-service-opa-bundle

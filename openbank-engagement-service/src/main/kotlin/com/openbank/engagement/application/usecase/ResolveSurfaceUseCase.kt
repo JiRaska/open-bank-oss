@@ -4,6 +4,7 @@
 
 package com.openbank.engagement.application.usecase
 
+import com.openbank.engagement.application.port.out.AdverseStateRepository
 import com.openbank.engagement.application.port.out.EngagementEventRepository
 import com.openbank.engagement.domain.model.DismissalRule
 import com.openbank.engagement.domain.model.EligibilitySnapshot
@@ -13,20 +14,23 @@ import com.openbank.engagement.domain.model.SurfaceSlot
 import com.openbank.libs.contact.ContactClass
 import com.openbank.libs.contact.ContactGateDecision
 import com.openbank.libs.contact.ContactPolicyGate
+import com.openbank.libs.contact.MarketingCallSite
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
 /**
- * ADR-0220 D1 minus the pieces this slice does not build: eligibility snapshot materialisation
- * (no adverse-state event consumer exists yet, see the inline comment below) and NBA ranking
- * (blocked on ADR-0201 D5, unchanged from the domain layer's own [SurfaceResolver] doc).
+ * ADR-0220 D1 minus the pieces this slice does not build: eligibility snapshot materialisation is
+ * now real for two of the four [com.openbank.engagement.domain.model.AdverseState] values (see
+ * the inline comment below), and NBA ranking stays out of scope, blocked on ADR-0201 D5
+ * (unchanged from the domain layer's own [SurfaceResolver] doc).
  */
 @ApplicationScoped
 class ResolveSurfaceUseCase(
     private val contactGate: ContactPolicyGate,
     private val events: EngagementEventRepository,
+    private val adverseState: AdverseStateRepository,
 ) {
 
     sealed interface Result {
@@ -38,6 +42,7 @@ class ResolveSurfaceUseCase(
         object Suppressed : Result
     }
 
+    @MarketingCallSite
     suspend fun resolve(partyId: UUID, slot: SurfaceSlot): Result {
         val decision = contactGate.check(
             partyId = partyId,
@@ -50,14 +55,17 @@ class ResolveSurfaceUseCase(
         val recent = events.recentForPartyAndSlot(partyId, slot, Instant.now().minus(DISMISSAL_LOOKBACK))
         if (DismissalRule.shouldSuppress(recent)) return Result.Suppressed
 
-        // No adverse-state materialisation pipeline exists yet (no consumer for fraud-hold,
-        // arrears, dispute-opened or erasure events) — every party is currently constructed with
-        // an EMPTY adverse-state set, i.e. always eligible for the D3.5 targeting exclusion. This
-        // is an honest gap, not a silent one: the platform is NOT yet excluding vulnerable
-        // customers from proactive surfaces, and that must be read as a launch blocker for
-        // D1/D3.5, not as "the exclusion is live". Wiring the real snapshot is follow-up scope
-        // alongside the adverse-state consumers themselves.
-        val eligibility = EligibilitySnapshot(partyId = partyId, adverseState = emptySet(), asOf = Instant.now())
+        // Half-real (issue #2749): ARREARS (LendingArrearsEventConsumer, openbank.lending.events)
+        // and ERASURE_REQUESTED (PartyErasureConsumer, openbank.party.events) are materialised.
+        // FRAUD_HOLD and DISPUTE_OPENED are NOT — neither signal is published as an event
+        // anywhere in this fleet today (fraud-service has no persisted hold state; dispute-service
+        // emits only on resolution, never on open). That is still an honest gap for those two, not
+        // a silent one — a party with an open dispute or fraud hold is NOT currently excluded.
+        val eligibility = EligibilitySnapshot(
+            partyId = partyId,
+            adverseState = adverseState.activeStates(partyId),
+            asOf = Instant.now(),
+        )
         return Result.Rendered(SurfaceResolver.resolve(slot, eligibility))
     }
 

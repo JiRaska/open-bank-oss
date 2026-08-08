@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.30.0
+  version: 1.31.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -209,14 +209,19 @@ paths:
   /directory/payee:
     post:
       tags: [Directory]
-      summary: Turn a directory hit into a payable target, without disclosing the payee's account
+      summary: Turn a directory hit into a payable target, without disclosing the payee's account at lookup
       description: >
         Takes the SHA-256 hash of a phone number the caller already holds and returns an opaque
-        payment-session token (the same rail nearby-pay uses, ADR-0087) plus a display name and a
-        MASKED account. The payee's real account number never leaves the edge: the token is
-        resolved back to it inside POST /domestic-payments, and SCA is signed against the masked
-        form. Answering with an account number would make this a harvester, since phone numbers
-        are enumerable in a way account numbers are not.
+        payment-session token (the same rail nearby-pay uses, ADR-0095) plus a display name and a
+        MASKED account. This LOOKUP never yields an account number: the token is resolved back to
+        it inside POST /domestic-payments, and SCA is signed against the masked form. Answering
+        with an account number would make this a harvester, since phone numbers are enumerable in
+        a way account numbers are not.
+
+        Scope: this is a request-side control, not a promise that the account never reaches the
+        payer. Once the payment is made, POST /domestic-payments and GET
+        /domestic-payments/{paymentId} both return the creditor's account number, bank code and
+        name — as a statement does. Do not build on the stronger reading (issue #3890).
 
         Opt-in is re-checked here rather than trusted from the caller's earlier lookup — someone
         who has since turned findability off stops being payable immediately. "No such number",

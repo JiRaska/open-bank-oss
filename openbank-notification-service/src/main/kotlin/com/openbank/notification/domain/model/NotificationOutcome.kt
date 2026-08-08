@@ -60,5 +60,10 @@ data class NotificationOutcomeEvent(
         const val REASON_NO_DEVICE: String = "no_active_device"
         const val REASON_PUSH_REJECTED: String = "push_rejected_by_provider"
         const val REASON_PREFERENCE_MUTED: String = "channel_muted_by_preference"
+
+        /** ADR-0219 D4: `ContactPolicyGate` reasons a MARKETING send can now also be denied for. */
+        const val REASON_SEND_CAP_REACHED: String = "send_cap_reached"
+        const val REASON_QUIET_HOURS: String = "quiet_hours"
+        const val REASON_SUPPRESSED_LIST: String = "suppressed_list"
     }
 }

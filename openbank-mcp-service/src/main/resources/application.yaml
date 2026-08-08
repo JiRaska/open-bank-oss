@@ -47,6 +47,17 @@ quarkus:
       url: http://localhost:8102
     consent-service:
       url: http://localhost:8106
+    # get_statement / get_payment_confirmation (issue #4109, ADR-0248). Same M2M principal as the
+    # four clients above (service-account-openbank-services via oidc-client) reaching them through
+    # base rest.rego operator-read-any — statement.read / sepaPayment.read / domestic-payment.read
+    # all end in `.read`, and the shared client's token already carries ROLE_OPERATOR, so no new
+    # rego grant is needed (same reasoning as transaction-service above).
+    statement-service:
+      url: http://localhost:8136
+    sepa-payment-service:
+      url: http://localhost:8115
+    domestic-payment-service:
+      url: http://localhost:8116
   smallrye-openapi:
     info-title: OpenBank MCP Server
     info-version: "1.0.0"
