@@ -17,7 +17,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-AGENTS_YAML="$REPO_ROOT/openbank-libs/governance/agents.yaml"
+# The DERIVED subset, not agents.yaml itself: this is what every deployed bundle mounts at
+# /bundle/agents/data.yaml (gen-agents-opa-data.py, #3927). Staging the full document here
+# would validate a shape the cluster never runs — the probe must read the artifact the
+# service uses, never a second copy of its source.
+AGENTS_YAML="$REPO_ROOT/openbank-libs/governance/agents-opa-data.yaml"
 RULES_YAML="$REPO_ROOT/openbank-libs/governance/rules.yaml"
 POLICIES_DIR="$SCRIPT_DIR/policies"                                  # agents.rego (MCP gate, ADR-0031)
 LIBS_POLICIES_DIR="$REPO_ROOT/openbank-libs/governance/policies"    # rest.rego (REST PEP, ADR-0034)
@@ -26,7 +30,7 @@ DIST_DIR="$SCRIPT_DIR/dist"
 BUNDLE_TARBALL="$DIST_DIR/openbank-agents-bundle.tar.gz"
 
 command -v opa >/dev/null || { echo "ERROR: opa not on PATH (https://www.openpolicyagent.org/docs/latest/#running-opa)"; exit 1; }
-[ -f "$AGENTS_YAML" ] || { echo "ERROR: charter source not found: $AGENTS_YAML"; exit 1; }
+[ -f "$AGENTS_YAML" ] || { echo "ERROR: derived charter data not found: $AGENTS_YAML (run .github/scripts/gen-agents-opa-data.py)"; exit 1; }
 [ -f "$RULES_YAML" ] || { echo "ERROR: rules source not found: $RULES_YAML"; exit 1; }
 [ -f "$BUNDLE_MANIFEST" ] || { echo "ERROR: bundle manifest not found: $BUNDLE_MANIFEST"; exit 1; }
 
@@ -54,7 +58,7 @@ cp "$BUNDLE_MANIFEST" "$STAGE/.manifest"
 echo "==> opa check --strict (bundle)"
 opa check --strict -b "$STAGE"
 
-echo "==> decision assertions against the real agents.yaml"
+echo "==> decision assertions against the derived charter data (agents-opa-data.yaml)"
 fail=0
 assert() { # desc | input-json | expected (true|false)
 	local desc="$1" input="$2" expect="$3" got

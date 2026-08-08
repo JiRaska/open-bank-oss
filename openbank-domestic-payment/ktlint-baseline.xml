@@ -11,6 +11,9 @@
         <error line="38" column="27" source="standard:trailing-comma-on-declaration-site" />
         <error line="61" column="20" source="standard:trailing-comma-on-declaration-site" />
     </file>
+    <file name="src/main/kotlin/com/openbank/domestic/application/port/in/PaymentConfirmationPorts.kt">
+        <error line="5" column="9" source="standard:package-name" />
+    </file>
     <file name="src/main/kotlin/com/openbank/domestic/application/port/out/ScreeningPorts.kt">
         <error line="37" column="31" source="standard:trailing-comma-on-declaration-site" />
     </file>
