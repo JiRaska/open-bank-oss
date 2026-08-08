@@ -14,6 +14,14 @@
 build:
   maxIssues: 0
 
+# ADR-0219 D4's compile-time wiring assertion (openbank-libs-detekt-rules). Custom rule sets
+# are NOT auto-activated by buildUponDefaultConfig — only detekt's own default rule sets are —
+# so both the rule set and the rule need an explicit `active: true` here.
+openbank-contact-policy:
+  active: true
+  MarketingCallSiteWiringRule:
+    active: true
+
 # --- correctness: keep strict ------------------------------------------------------
 
 exceptions:
