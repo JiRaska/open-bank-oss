@@ -76,27 +76,27 @@ PARAM_ANNOTATIONS = ("QueryParam", "HeaderParam", "MatrixParam")
 KOTLIN_PRIMITIVES = {"Int", "Long", "Double", "Float", "Boolean", "Short", "Byte", "Char"}
 
 # The tail left after the money-path fix in #3625, being worked through in #3624. psd2 and
-# card-issuance are done. Each entry is "<service>|<Class>|<param>".
+# card-issuance are done (#3658); customer-edge, dispute and statement are done too.
+#
+# Everything still listed below is a `suspend` handler, which is a materially different fix: no
+# `Intrinsics.checkNotNullParameter` is emitted, so the null flows into the body and each of these
+# already carries a hand-written guard (`isBlank()`, or a dereference) that has to be widened to
+# `isNullOrBlank()` rather than replaced, preserving the service's own error envelope. Left for a
+# separate change so the plain-`fun` half is not held up behind it.
+#
+# Each entry is "<service>|<Class>|<param>".
 # The count per key is not recorded on purpose: several of these repeat the identical parameter
 # across sibling handlers (card-issuance's X-Operator-Id sevenfold), and pinning the count would
 # make an unrelated refactor fail the gate for no defect.
 BASELINE = {
     # openbank-aml-service — POST /api/v1/aml/cases
     "openbank-aml-service|AmlCaseResource|Idempotency-Key",
-    # openbank-customer-edge — the mobile/web BFF
-    "openbank-customer-edge|CustomerEdgeResource|currency",
-    "openbank-customer-edge|CustomerEdgeResource|accountId",
-    # openbank-dispute-service
-    "openbank-dispute-service|DisputeResource|actor",
     # openbank-party-service
     "openbank-party-service|PartyResource|Idempotency-Key",
     # openbank-pid-service
     "openbank-pid-service|PartyResource|index",
     "openbank-pid-service|PartyResource|type",
     "openbank-pid-service|PartyResource|value",
-    # openbank-statement-service
-    "openbank-statement-service|StatementResource|from",
-    "openbank-statement-service|StatementResource|to",
     # openbank-tpp-registry-service
     "openbank-tpp-registry-service|TppRegistryResource|tppId",
     "openbank-tpp-registry-service|TppRegistryResource|role",

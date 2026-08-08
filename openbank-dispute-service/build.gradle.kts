@@ -36,6 +36,11 @@ dependencies {
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    // DisputeMissingParamStatusIT (#3624): the missing-parameter defect lives in JAX-RS parameter
+    // injection, so it is only observable over real HTTP — a unit test calling the handler supplies
+    // the very argument the framework does not.
+    testImplementation(libs.rest.assured.kotlin)
+    testImplementation(libs.quarkus.test.security)
 
     // #1201: isolated PostgreSQL per test JVM via Testcontainers (dispute-service had no IT infra yet).
     testImplementation(libs.testcontainers)
