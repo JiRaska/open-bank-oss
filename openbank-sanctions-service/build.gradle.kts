@@ -37,6 +37,10 @@ dependencies {
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    // AuditEventTime — the ONE copy of the rule openbank-audit-service's AuditConsumer applies to
+    // a domain-event payload, so this service's producer tests assert against the real contract
+    // rather than a per-service restatement of it (#3914).
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
