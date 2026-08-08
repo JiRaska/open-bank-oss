@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.0...statement-service-v0.8.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* send occurredAt on the four non-money-path domain-event producers ([#3926](https://github.com/JiRaska/open-bank-oss/issues/3926)) ([4a2080c](https://github.com/JiRaska/open-bank-oss/commit/4a2080c3a4de10b2a858b7111ac83d63c60114d1))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.7.0...statement-service-v0.8.0) (2026-08-07)
 
 
