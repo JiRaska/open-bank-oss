@@ -260,3 +260,24 @@ set) apply equally to the new `ledger.approval.decide` action.
   existing `ExceptionMappers.kt`. STRIDE supplement added in §7 above. **`authz.four-eyes.enforce`
   stays `false`** — no behavior change to any existing request; this PR only wires the mechanism.
   Rollback: revert the commit (no DB/schema change; `ApprovalStore` records live in Redis with a TTL).
+- **2026-08-08** — **The ČNB fixing's `validFrom` now crosses the fx-service seam** (issue #3921).
+  `CnbRateProvider` returned a bare `BigDecimal?`, and `FxServiceClient`'s DTO declared only
+  `baseCurrency/quoteCurrency/bidRate/askRate` — fx-service was already serving `validFrom`, and
+  `@JsonIgnoreProperties(ignoreUnknown = true)` silently dropped it. The port now returns
+  `CnbFixing(rate, validFrom)` and `FxServiceCnbRateAdapter` carries it through. **Risk class =
+  information disclosure**, and it is a bounded *decrease* in blind trust rather than an increase:
+  no new endpoint, no new caller, no authorization or NetworkPolicy change, and the field was
+  already on the wire — this side simply stops discarding it. It is a published reference rate, so
+  it discloses nothing about any customer or position. The only new outbound artifact is a metric,
+  `openbank.fx.fixing.age_seconds{currency}`, which carries a currency label and an age in seconds
+  and no amount, account or party.
+  **Why it matters here**: nothing anywhere compared a fixing's age to now. The service-side bound
+  is date-blind (`CNB_VALIDITY_DAYS = 3`, `validTo > :now`), so a stale rate revalues silently, and
+  the one alert meant to catch the silent case — `FxRevaluationSkippedAllLegs` — selected
+  `{namespace="fx"}` while the log line it matches is emitted only by this service, deployed to
+  namespace `ledger`. It could never fire. That selector is corrected in the same change.
+  **Explicitly NOT addressed**: a late or corrected fixing still cannot be incorporated.
+  `idempotencyKey = "fx-reval-{date}"` carries no rate identity, so a re-run returns the existing
+  entry and reports success while every position marked that day keeps the superseded rate's CZK
+  counter-value. That needs a correcting-entry decision, not a patch, and #3921 stays open for it.
+  Rollback: revert; the field is read-only on this side and nothing persists it.
