@@ -1,0 +1,21 @@
+# Strimzi-managed KafkaTopic for case-coordinator-agent's terminal HITL proposals
+# (ADR-0244 D7): every case ends in exactly one proposal on this topic, written via the
+# transactional outbox (case_outbox). Lives in `messaging` (the topic operator only watches
+# its own namespace). Single partition + RF 1 for the sandbox; raise both to 3 for production.
+#
+# Consumer: none yet — the ADR-0031 approval queue reads proposals through agent-service's
+# store/REST today; the Kafka consumer is later wiring (tracked at #4187 re-triage note in
+# rules.yaml: event_consumer_liveness.allowlist).
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: proposal-events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
