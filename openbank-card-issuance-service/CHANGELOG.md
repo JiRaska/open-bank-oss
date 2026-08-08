@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.17.0...card-issuance-service-v0.17.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* **libs:** an open circuit breaker must not drive outbox rows to terminal DEAD ([#4163](https://github.com/JiRaska/open-bank-oss/issues/4163)) ([ce0ef79](https://github.com/JiRaska/open-bank-oss/commit/ce0ef7954df5a0e543810828ff0487abda062b7a))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.16.0...card-issuance-service-v0.17.0) (2026-08-08)
 
 
