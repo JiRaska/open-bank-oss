@@ -920,14 +920,20 @@ gates:
   # upstream — must be backed by grep-verifiable code, or a one-line-reasoned allowlist entry.
   # An upstream edge on S naming T is a claim about T's code, so it is checked in T; both
   # directions collapse to one <source>-><target> key. Reuses mechanism 1's topic map via
-  # importlib. ADVISORY (ADR-0144) — findings are ::warning annotations. Flip to enforced once
-  # the first-scan triage (34 downstream + 24 upstream) lands = add --enforce below.
+  # importlib. ENFORCED since #3982: the backlog it was waiting on is at zero. Both sides read
+  # from committed files and the check is derived, so a red carries no judgement to exercise —
+  # either the declaration matches the code or one of them is wrong. It fails in BOTH directions:
+  # an unbacked edge, and an allowlist entry that no longer applies (the second one caught a live
+  # stale exemption the day it was written — interest-service had grown the direct client its
+  # reason said it would never have).
   - id: governance-lineage-vs-code-audit
-    name: "governance lineage-vs-code audit (ADR-0160, advisory)"
+    name: "governance lineage-vs-code audit (ADR-0160, enforced)"
     group: registry
-    mode: advisory
+    mode: enforced
     run: |
-      python3 .github/scripts/check-governance-lineage.py
+      python3 .github/scripts/check-governance-lineage.py --enforce
+    selftest: python3 .github/scripts/check-governance-lineage.py --self-test
+    selftest_expect: pass
 
   # issue #2412 (third residual). openbank-mcp-service masks PII on every tool result
   # UNCONDITIONALLY — deliberately, since a switch that can turn a declared control off is how

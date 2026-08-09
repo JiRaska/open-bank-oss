@@ -364,9 +364,9 @@ change_requirements:
       - "api edge has a matching @RegisterRestClient(configKey) in the same service, or an allowlist entry with a reason"
       - "topic edge has an actual topic overlap with the target service (per mechanism 1's producer/consumer map), or an allowlist entry with a reason"
       - "an edge naming no in-tree service directory (github, prometheus, temporal) is reported as its own class, never counted as code drift"
+      - "an allowlist entry below whose edge is no longer declared, or is now backed by code the audit can see, is itself a finding — delete it"
     gate: lineage-code-audit
-    enforced: advisory
-    target_enforce_date: "2026-10-15"   # ADR-0144 — later than mechanism 1's date: first scan found a much higher (34/48) violation rate, expect a longer triage
+    enforced: enforced   # ADR-0144 graduation, issue #3982 — ahead of the 2026-10-15 target date
     # CI producer is LIVE (advisory): .github/scripts/check-governance-lineage.py runs in the
     # "Validate manifests" job on every PR — fleet-wide scan (not diff-scoped), reuses mechanism 1's
     # topic map via importlib (check-event-consumer-liveness.py's build_topic_maps), findings are
@@ -376,7 +376,35 @@ change_requirements:
     # rate. ALL still unallowlisted below (real triage tracked as a fleet-sweep issue, not resolved
     # by fiat). Flip to enforced once triage brings unallowlisted violations to zero = pass
     # --enforce to the script in ci.yml (one-line change), same as every other ADR-0144 gate here.
-    blocked_on: "issue #1021 triaged the original 34: 4 were a topic-normalization bug in the
+    # ENFORCED since #3982, which drained the backlog below. Re-measured on main that day the
+    # scan read 31 unallowlisted violations of 103 declared edges, not the 30 of 101 the issue
+    # filed — and the triage found the issue's default action (delete the edge) would have been
+    # WRONG for a third of them:
+    #   - 11 were REVERSED, not absent: the relationship is real and backed, declared with source
+    #     and target swapped (finrep<->ledger, delegation<->sca/pid, party<->account/kyc,
+    #     transaction<->fx, account<->transaction, onboarding<->party, notification<->consent,
+    #     document<->sca/product-catalog, and the three customer-edge BFF hops). Deleting those
+    #     would have removed 11 true dependencies from the lineage view, the service map and the
+    #     catalog graph — the same failure the issue was raised about, in the other direction.
+    #     They were flipped to the correct side instead.
+    #   - 3 of the 11 (customer-edge) are ALSO invisible to the heuristic: it is a BFF with zero
+    #     @RegisterRestClient interfaces, hopping via Vert.x WebClient — allowlisted below.
+    #   - 1 was ASPIRATIONAL (case-coordinator-agent -> agent-service: no client, no gitops
+    #     component, declared ahead of ADR-0244's code).
+    #   - 2 findings were ONE relationship counted twice (psd2/sca under two `openbank-`
+    #     spellings), and the transaction/account allowlist entry did not cover the same
+    #     relationship declared from the other end. Edge keys are canonicalized to the service
+    #     DIRECTORY name now, which is what made the docstring's "checked and allowlisted ONCE"
+    #     claim true: 103 declarations collapse to 81 distinct relationships, not 103.
+    #   - the rest were genuinely stale and were deleted, each with an in-place note saying what
+    #     was checked (clients + the service's Deployment env, an independent witness).
+    # Two heuristic blind spots were fixed in the same pass: a trailing `-api` on a configKey
+    # (nine in the fleet) read as no backing code at all, and the un-canonicalized key above.
+    # NetworkPolicies do NOT derive from this data — gen-network-policies.py reads the GitOps
+    # Deployment env — so a lineage edit cannot change what traffic is allowed. The readers are
+    # admin-ui (lineage view, service map, catalog graph, generate-service-graph.mjs,
+    # generate-governance.mjs) and openbank-infra/scripts/generate-service-runbooks.py.
+    prior_backlog: "issue #1021 triaged the original 34: 4 were a topic-normalization bug in the
       checker itself (fixed), 19 are stale governance.yaml edges (corrected/removed), 6 below are
       real dependencies the heuristic's exact-match can't see, and 4 are genuine gaps tracked as
       their own issues, not fixed here. A follow-up scan found 7 more edges outside the original
@@ -392,18 +420,22 @@ change_requirements:
       That is what produced this issue's own 'finds nothing, can graduate free' premise."
     ci_producer: ".github/scripts/check-governance-lineage.py"
     allowlist:
-      - edge: "openbank-copilot-service->balance-service:api"
+      - edge: "openbank-copilot-service->openbank-balance-service:api"
         reason: "Reached only through CustomerEdgeRestClient (configKey=customer-edge), a shared BFF client with no per-target configKey — GET /customer/v1/balances/{accountId}."
-      - edge: "openbank-copilot-service->fx-service:api"
+      - edge: "openbank-copilot-service->openbank-fx-service:api"
         reason: "Same shared CustomerEdgeRestClient (configKey=customer-edge) as balance-service above — GET /customer/v1/fx/rates."
-      - edge: "openbank-copilot-service->ledger-service:api"
+      - edge: "openbank-copilot-service->openbank-ledger-service:api"
         reason: "Same shared CustomerEdgeRestClient (configKey=customer-edge) — GET /customer/v1/statements/{accountId}."
-      - edge: "openbank-copilot-service->transaction-service:api"
+      - edge: "openbank-copilot-service->openbank-transaction-service:api"
         reason: "Same shared CustomerEdgeRestClient (configKey=customer-edge) — listTransactions()."
-      - edge: "openbank-interest-service->account-service:api"
-        reason: "Reaches the account indirectly through TransactionServiceClient (configKey=transaction-service), which books the withholding-tax remittance cash leg — never a direct account-service call."
-      - edge: "openbank-transaction-service->account-service:api"
+      - edge: "openbank-transaction-service->openbank-account-service:api"
         reason: "Validation is implemented via BalanceCoverClient (configKey=balance-service) placing/releasing holds, a sibling of account-service — never a direct account-service call."
+      - edge: "openbank-customer-edge->openbank-account-service:api"
+        reason: "customer-edge is a BFF with ZERO @RegisterRestClient interfaces — every hop is a Vert.x WebClient built from openbank.edge.account-service-url (CustomerEdgeResource); the Deployment env's ACCOUNT_SERVICE_URL is the independent witness."
+      - edge: "openbank-customer-edge->openbank-party-service:api"
+        reason: "Same Vert.x WebClient BFF shape as account-service above — openbank.edge.party-service-url / PARTY_SERVICE_URL."
+      - edge: "openbank-customer-edge->openbank-sca-service:api"
+        reason: "Same Vert.x WebClient BFF shape — openbank.edge.sca-service-url / SCA_SERVICE_URL."
   service_code_change:
     detect: ["<service>/src/main/**"]
     require:

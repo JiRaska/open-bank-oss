@@ -10,14 +10,19 @@ dataClassification: restricted
 retentionPolicy: 10 years
 evidenceExported: true
 lineage:
-  upstream:
+  upstream: []
+  downstream:
+    # Direction corrected (issue #3982): both were declared as `upstream` (account-service
+    # "owner", kyc-service "updates"), i.e. those services calling party-service. The clients
+    # live in party-service — AccountServiceClient(configKey = "account-service") and
+    # GdprDownstreamClients(configKey = "kyc-service") — and party-service's Deployment env
+    # carries ACCOUNT_SERVICE_URL and KYC_SERVICE_URL. Real edges, declared backwards.
     - serviceName: account-service
       relationType: api
-      description: owner
+      description: reads/queries the party's accounts (also GDPR erasure fan-out)
     - serviceName: kyc-service
       relationType: api
-      description: updates
-  downstream:
+      description: GDPR erasure fan-out via GdprDownstreamClients
     - serviceName: audit-service
       relationType: topic
       description: events
