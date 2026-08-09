@@ -73,7 +73,9 @@ dupes=$(
 )
 if [[ -n "$dupes" ]]; then
   while IFS= read -r num; do
-    files=$(ls "$ADR_DIR/$num"-*.md 2>/dev/null | xargs -n1 basename | paste -sd', ' -)
+    files=$(for dupe in "$ADR_DIR/$num"-*.md; do
+      [[ -e "$dupe" ]] && basename "$dupe"
+    done | paste -sd', ' -)
     err "duplicate ADR number $num shared by: $files — renumber all but one to the next free number."
   done <<< "$dupes"
 fi

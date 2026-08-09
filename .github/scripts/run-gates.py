@@ -72,6 +72,10 @@ except ImportError:
     sys.exit(2)
 
 MANIFEST = ".github/gates/gates.yaml"
+# Must match gatelib.CACHE_DIR_ENV. Not imported from it: run-gates.py has to load and validate
+# the manifest even where a checker's dependencies are missing, and the string is the contract.
+PARSE_CACHE_ENV = "GATE_PARSE_CACHE"
+SUBJECTS_PREFIX = "SUBJECTS="  # must match gatelib.SUBJECTS_PREFIX
 VALID_MODES = {"enforced", "advisory"}
 VALID_WHEN = {"always", "pull_request"}
 VALID_EXPECT = {"pass", "fail"}
@@ -103,6 +107,19 @@ def load(root: pathlib.Path, path: str = MANIFEST):
             if k not in g:
                 sys.stderr.write(f"::error::gate {g.get('id', '<no id>')} is missing `{k}`\n")
                 sys.exit(2)
+        # A `run:` that is present but says nothing executes `bash -c ""` and exits 0 — a gate
+        # that reports PASS having done no work, which is the exact failure this runner exists
+        # to make impossible. Presence was checked; emptiness was not, and one gate in the
+        # manifest was shipping that shape deliberately. Comments are stripped first for the
+        # same reason as the ${{ }} check below: a run: block that is only prose is equally a
+        # no-op, and this is the one place that can tell.
+        if not strip_comments(str(g["run"])).strip():
+            sys.stderr.write(
+                f"::error::gate {g['id']}: `run:` is empty (or only comments). `bash -c \"\"` "
+                f"exits 0, so this gate would report PASS without executing anything. Give it "
+                f"a command, or delete the gate.\n"
+            )
+            sys.exit(2)
         if g["id"] in seen:
             sys.stderr.write(f"::error::duplicate gate id `{g['id']}`\n")
             sys.exit(2)
@@ -116,6 +133,23 @@ def load(root: pathlib.Path, path: str = MANIFEST):
         if g["when"] not in VALID_WHEN:
             sys.stderr.write(f"::error::gate {g['id']}: when `{g['when']}` not in {VALID_WHEN}\n")
             sys.exit(2)
+        budget = g.get("budget_seconds")
+        if budget is not None:
+            if isinstance(budget, bool) or not isinstance(budget, (int, float)) or budget <= 0:
+                sys.stderr.write(
+                    f"::error::gate {g['id']}: budget_seconds `{budget}` must be a positive "
+                    f"number\n"
+                )
+                sys.exit(2)
+        floor = g.get("min_subjects")
+        if floor is not None:
+            if not isinstance(floor, int) or isinstance(floor, bool) or floor < 1:
+                sys.stderr.write(
+                    f"::error::gate {g['id']}: min_subjects `{floor}` must be a positive "
+                    f"integer. A floor of 0 states nothing — every gate clears it, including "
+                    f"one whose corpus has vanished, which is the case it exists for.\n"
+                )
+                sys.exit(2)
         exp = g.setdefault("selftest_expect", "pass")
         if exp not in VALID_EXPECT:
             sys.stderr.write(
@@ -286,6 +320,22 @@ def _run(cmd: str, cwd: pathlib.Path, extra_env: dict, timeout: int, index: path
                 pass
 
 
+def last_subject_count(out: str):
+    """The LAST `SUBJECTS=<n>` line in a gate's output, or None.
+
+    Last, not first: a checker that reports per-corpus counts should end with the one that
+    decides, and a self-test fixture's count must never be mistaken for the real run's.
+    """
+    found = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith(SUBJECTS_PREFIX):
+            digits = line[len(SUBJECTS_PREFIX):].split("#")[0].strip()
+            if digits.isdigit():
+                found = int(digits)
+    return found
+
+
 def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> Result:
     r = Result(gate)
     if gate["when"] == "pull_request" and not is_pr:
@@ -329,8 +379,56 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> 
 
     rc, out = _run(gate["run"], root, gate.get("env"), timeout, index)
     buf.append("--- gate ---\n" + out)
-    r.output = "".join(buf)
+
+    # The subject floor. A gate that examined nothing passes everything, and its output says
+    # so out loud — `0 .kt files checked`, `0 @RolesAllowed site(s) checked` — while exiting 0.
+    # Measured 2026-08-09 by deleting the corpus: nine kotlin gates and ten gitops gates stayed
+    # green with their subject gone (#4339). Where the manifest declares `min_subjects:`, the
+    # gate must print how many things it looked at, and clear the floor.
+    floor = gate.get("min_subjects")
+    if floor is not None and rc == 0:
+        found = last_subject_count(out)
+        if found is None:
+            rc = 1
+            buf.append(
+                f"\n[run-gates] this gate declares min_subjects: {floor} but printed no "
+                f"`{SUBJECTS_PREFIX}<n>` line. The floor cannot be checked, so the gate's green "
+                f"means nothing — call gatelib.subjects(n) (python) or echo the line (shell).\n"
+            )
+        elif found < floor:
+            rc = 1
+            buf.append(
+                f"\n[run-gates] this gate examined {found} subject(s), below its declared "
+                f"floor of {floor}. Either its corpus moved (a renamed directory, a changed "
+                f"glob, a moved source root) and the gate is now a no-op, or the fleet really "
+                f"did shrink and the floor in gates.yaml needs a deliberate edit.\n"
+            )
+
     r.seconds = time.monotonic() - t0
+
+    # Wall-time budget. Nothing here ever went red for being slow, and that is how `ci.yml`'s
+    # required check went from a 0.7 min median to 2.4 min in four weeks — each gate cheap,
+    # the total unbounded, and no single change big enough to argue with.
+    #
+    # ENFORCED ONLY UNDER CI, deliberately. A developer laptop running eight gates across four
+    # cores is not a measurement: this repo's own audit read check-adr-registry.sh at 60.4s
+    # locally against a whole shard of 20s in CI. Off the runner the overrun is printed and
+    # nothing fails.
+    budget = gate.get("budget_seconds")
+    if budget is not None and r.seconds > budget:
+        on_ci = os.environ.get("CI") == "true"
+        note = (
+            f"\n[run-gates] this gate took {r.seconds:.1f}s against a budget of {budget}s. "
+            f"Budgets are set well above the observed CI time, so this is a regression rather "
+            f"than noise — profile it, or raise the number in gates.yaml deliberately.\n"
+        )
+        buf.append(note)
+        if on_ci:
+            rc = rc or 1
+        else:
+            buf.append("[run-gates] not on CI (CI != true), so the overrun does not fail.\n")
+
+    r.output = "".join(buf)
     if rc == 0:
         r.status = "ok"
     elif gate["mode"] == "advisory":
@@ -445,9 +543,21 @@ def main(argv=None):
           f"{os.environ.get('GITHUB_EVENT_NAME', '(local)')}")
 
     index = git_index_path(root)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
-        futs = {ex.submit(execute, g, root, is_pr, args.timeout, index): g["id"] for g in sel}
-        done = {futs[f]: f.result() for f in concurrent.futures.as_completed(futs)}
+    # One YAML parse cache for the whole invocation. The gates are separate processes over one
+    # corpus — the 20 single-script python gates in the `gitops` shard cost 231s apart and 8.7s
+    # with the parse shared, same verdicts — so gatelib.py writes each parsed document here,
+    # keyed by content sha, and every later gate reads it back instead of re-decoding. Scoped
+    # to this directory and removed below: nothing survives into the next run, so a gate can
+    # never read a parse from a tree that has since changed.
+    cache = tempfile.mkdtemp(prefix="gate-parse-cache-", dir=os.environ.get("RUNNER_TEMP") or None)
+    os.environ[PARSE_CACHE_ENV] = cache
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
+            futs = {ex.submit(execute, g, root, is_pr, args.timeout, index): g["id"] for g in sel}
+            done = {futs[f]: f.result() for f in concurrent.futures.as_completed(futs)}
+    finally:
+        os.environ.pop(PARSE_CACHE_ENV, None)
+        shutil.rmtree(cache, ignore_errors=True)
     results = [done[g["id"]] for g in sel]
     return report(results, jobs)
 
@@ -499,6 +609,36 @@ gates:
     group: t
     when: pull_request
     run: "exit 1"
+  - id: floor-met
+    name: "a gate that clears its subject floor"
+    group: t
+    min_subjects: 3
+    run: "echo SUBJECTS=3"
+  - id: floor-missed
+    name: "a gate whose corpus vanished"
+    group: t
+    min_subjects: 3
+    run: "echo checked nothing; echo SUBJECTS=0"
+  - id: floor-unreported
+    name: "a gate that declares a floor and never prints a count"
+    group: t
+    min_subjects: 1
+    run: "echo all good"
+  - id: floor-last-wins
+    name: "the LAST count decides, so a self-test fixture cannot stand in for the real run"
+    group: t
+    min_subjects: 5
+    run: "echo 'SUBJECTS=1  # a self-test fixture'; echo SUBJECTS=9"
+  - id: over-budget
+    name: "a gate slower than its declared budget"
+    group: t
+    budget_seconds: 0.2
+    run: "sleep 0.5"
+  - id: within-budget
+    name: "a gate inside its budget"
+    group: t
+    budget_seconds: 30
+    run: "true"
   - id: slow
     name: "a gate that exceeds its timeout"
     group: t
@@ -510,6 +650,12 @@ gates:
 
 EXPECTED = {
     "passing": "ok",
+    "floor-met": "ok",
+    "floor-missed": "failed",
+    "floor-unreported": "failed",
+    "floor-last-wins": "ok",
+    "over-budget": "failed",
+    "within-budget": "ok",
     "failing": "failed",
     "advisory-failing": "warned",
     "harness-ok": "ok",
@@ -528,6 +674,7 @@ def self_test():
         (tmp / ".github" / "gates" / "gates.yaml").write_text(SELF_TEST_MANIFEST)
         gates = load(tmp)
         os.environ["GITHUB_EVENT_NAME"] = "push"  # so the pull_request-only gate skips
+        os.environ["CI"] = "true"  # budgets are enforced on the runner only
         results = [execute(g, tmp, is_pr=False, timeout=2) for g in gates]
         bad = []
         for r in results:
@@ -539,6 +686,12 @@ def self_test():
             # A timeout must SURFACE what the gate printed before it hung — that output is
             # usually the only clue to why. Asserting the status alone passes against a
             # timeout path that raises instead of reporting.
+            if r.id == "over-budget" and "against a budget of" not in r.output:
+                bad.append("over-budget: failed, but not for the budget reason")
+            if r.id == "floor-missed" and "below its declared floor" not in r.output:
+                bad.append("floor-missed: failed, but not for the floor reason")
+            if r.id == "floor-unreported" and "printed no" not in r.output:
+                bad.append("floor-unreported: failed, but not for the missing-count reason")
             if r.id == "slow":
                 for stream in ("on-stdout", "on-stderr"):
                     if stream not in r.output:
@@ -564,6 +717,98 @@ def self_test():
         except SystemExit as exc:
             if exc.code != 2:
                 bad.append(f"empty manifest exited {exc.code}, want 2")
+
+        # An empty (or comment-only) run: must abort. `bash -c ""` exits 0, so without this the
+        # gate reports PASS having run nothing — and the negative case matters just as much:
+        # a run: that merely CONTAINS comments alongside a command is the normal shape here.
+        for body, want_abort in (
+            ('run: ""', True),
+            ('run: "   "', True),
+            ('run: "# only a comment"', True),
+            ('run: "# a comment\\ntrue"', False),
+        ):
+            (tmp / ".github" / "gates" / "gates.yaml").write_text(
+                f"gates:\n  - id: x\n    name: x\n    group: t\n    {body}\n"
+            )
+            try:
+                load(tmp)
+                if want_abort:
+                    bad.append(f"load() accepted a no-op run: ({body})")
+            except SystemExit:
+                if not want_abort:
+                    bad.append(f"load() rejected a run: that does have a command ({body})")
+
+        # Off the runner, the same over-budget gate must PASS — the whole point of gating the
+        # rule on CI is that a laptop's timings are not a measurement.
+        os.environ["CI"] = "false"
+        (tmp / ".github" / "gates" / "gates.yaml").write_text(
+            "gates:\n  - id: x\n    name: x\n    group: t\n    budget_seconds: 0.2\n"
+            '    run: "sleep 0.5"\n'
+        )
+        g = load(tmp)[0]
+        r = execute(g, tmp, is_pr=False, timeout=5)
+        if r.status != "ok":
+            bad.append(f"off-CI over-budget gate: want ok, got {r.status}")
+        if "does not fail" not in r.output:
+            bad.append("off-CI over-budget gate: did not say why it was not failed")
+        os.environ["CI"] = "true"
+
+        # A budget must be a positive number.
+        for body, want_abort in (
+            ("budget_seconds: 0", True),
+            ("budget_seconds: -3", True),
+            ('budget_seconds: "30"', True),
+            ("budget_seconds: 30", False),
+            ("budget_seconds: 0.5", False),
+        ):
+            (tmp / ".github" / "gates" / "gates.yaml").write_text(
+                f"gates:\n  - id: x\n    name: x\n    group: t\n    {body}\n"
+                f'    run: "true"\n'
+            )
+            try:
+                load(tmp)
+                if want_abort:
+                    bad.append(f"load() accepted an unusable budget_seconds ({body})")
+            except SystemExit:
+                if not want_abort:
+                    bad.append(f"load() rejected a valid budget_seconds ({body})")
+
+        # A floor must be a positive integer. `0` is the shape that matters: it reads like a
+        # declaration and asserts nothing at all.
+        for body, want_abort in (
+            ("min_subjects: 0", True),
+            ("min_subjects: -1", True),
+            ('min_subjects: "5"', True),
+            ("min_subjects: true", True),
+            ("min_subjects: 1", False),
+        ):
+            (tmp / ".github" / "gates" / "gates.yaml").write_text(
+                f"gates:\n  - id: x\n    name: x\n    group: t\n    {body}\n"
+                f"    run: \"echo SUBJECTS=1\"\n"
+            )
+            try:
+                load(tmp)
+                if want_abort:
+                    bad.append(f"load() accepted an unusable min_subjects ({body})")
+            except SystemExit:
+                if not want_abort:
+                    bad.append(f"load() rejected a valid min_subjects ({body})")
+
+        # The parse-cache contract is a STRING shared with gatelib.py, in two files that do not
+        # import each other. A rename on one side would silently turn the cross-gate cache off
+        # — everything still green, just slower, which is the kind of regression nothing here
+        # would ever notice.
+        try:
+            sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+            import gatelib
+
+            if gatelib.CACHE_DIR_ENV != PARSE_CACHE_ENV:
+                bad.append(
+                    f"parse-cache env var disagrees: run-gates has {PARSE_CACHE_ENV!r}, "
+                    f"gatelib has {gatelib.CACHE_DIR_ENV!r}"
+                )
+        except ImportError as exc:
+            bad.append(f"gatelib.py is not importable from the scripts directory: {exc}")
 
         # The ${{ }} guard: red on a real command, and — the half that actually needed
         # deciding — GREEN on a comment that merely mentions the syntax.

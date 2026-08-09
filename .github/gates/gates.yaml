@@ -97,6 +97,8 @@ gates:
     name: "yamllint"
     group: lint
     mode: enforced
+    min_subjects: 400   # 900+ yaml/yml files today (2026-08-09)
+    budget_seconds: 40   # 5.8s through the runner at -P4
     run: |
       # Lint the infra/CI manifests this job is named for. Quarkus service
       # application.yaml files are validated by Quarkus itself during the
@@ -134,19 +136,52 @@ gates:
       YML
       # strict:false equivalent — yamllint exits non-zero only on errors,
       # warnings don't fail the job (no --strict).
-      yamllint -f github -c "${RUNNER_TEMP:-/tmp}/yamllint-ci.yml" openbank-infra .github
+      # -P4 over an explicit file list, not `yamllint <dir>`: the linter is single-threaded and
+      # the CI runner has four cores, so the directory form leaves three of them idle for the
+      # whole gate. Measured locally: 15.7s serial, 6.6s at -P4, same findings.
+      #
+      # The list is also what lets the gate say how much it linted. `yamllint` with no file
+      # arguments exits 0, so the directory form could not tell a clean tree from a directory
+      # that had been renamed out from under it (#4339).
+      files=()
+      while IFS= read -r f; do files+=("$f"); done < <(
+        find openbank-infra .github \( -name '*.yaml' -o -name '*.yml' \) -type f | sort
+      )
+      echo "SUBJECTS=${#files[@]}"
+      printf '%s\0' "${files[@]}" \
+        | xargs -0 -P 4 -n 40 yamllint -f github -c "${RUNNER_TEMP:-/tmp}/yamllint-ci.yml"
 
   - id: shellcheck
     name: "shellcheck"
     group: lint
     mode: enforced
+    min_subjects: 30   # 63 shell scripts today (2026-08-09)
+    budget_seconds: 30   # 5.7s over 63 scripts
     run: |
-      files=$(find openbank-infra/scripts -type f -name '*.sh' 2>/dev/null || true)
-      if [ -n "$files" ]; then
-        shellcheck -S warning $files
-      else
-        echo "No shell scripts under openbank-infra/scripts — skipping."
-      fi
+      # BOTH script trees. `.github/scripts` was out of scope until #4337, so the 42 shell
+      # files implementing the gates themselves — the code every other gate's verdict rests
+      # on — were the least linted in the repo. Adding them cost 5 warning-level findings.
+      #
+      # Each root must contribute at least one file. A `find` that matches nothing yields an
+      # empty list, and `shellcheck` with no arguments exits 0: the gate would report a pass
+      # over a directory it never opened, which is exactly the shape this manifest exists to
+      # make impossible (a renamed directory is the realistic way it happens).
+      status=0
+      total=0
+      for root in .github/scripts openbank-infra/scripts; do
+        files=()
+        while IFS= read -r f; do files+=("$f"); done < <(find "$root" -type f -name '*.sh' | sort)
+        if [ "${#files[@]}" -eq 0 ]; then
+          echo "::error::shellcheck: no *.sh found under $root — the scope moved, the gate did not"
+          status=1
+          continue
+        fi
+        echo "shellcheck: ${#files[@]} script(s) under $root"
+        total=$((total + ${#files[@]}))
+        shellcheck -S warning "${files[@]}" || status=1
+      done
+      echo "SUBJECTS=$total"
+      exit $status
 
   # ==== gitops =========================================================
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
@@ -212,6 +247,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-agent-virtual-keys.py --self-test
     selftest_expect: pass
+    budget_seconds: 30   # 7.8s in CI
     run: |
       # Falsified in both directions before it was wired in: 4 findings against the
       # pre-fix tree, 0 after, plus 7 self-test cases covering the exemption and the
@@ -250,6 +286,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-oidc-secret-convention.py --self-test
     selftest_expect: pass
+    budget_seconds: 30   # 14.5s in CI before #4344, ~5s after
     run: |
       # Falsified BOTH ways before wiring in. Detection: 13 cases including the exact #3471
       # defect (a per-service key nobody wrote), a baselined path that migrated (reported
@@ -265,6 +302,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-single-replica-rollout-strategy.py --self-test
     selftest_expect: pass
+    budget_seconds: 30   # 15.2s in CI before #4344, ~5s after
     run: |
       # Two independent questions over the same manifests. The first is #3545: did the workload
       # SAY what it wants, or inherit maxSurge 1 / maxUnavailable 0 by accident. The second is
@@ -281,6 +319,7 @@ gates:
     name: "gen-network-policies drift gate (ADR-0081, issue #854)"
     group: gitops
     mode: enforced
+    budget_seconds: 30   # 7.6s in CI
     run: |
       # PyYAML is a SHARD prerequisite, not this gate's: run-gates.py imports it, so the
       # hash-pinned install that used to sit here now runs once per shard in ci.yml before
@@ -325,6 +364,7 @@ gates:
     mode: enforced
     selftest: |
       python3 .github/scripts/check-podmonitor-namespace-coverage.py --self-test
+    min_subjects: 18   # 38 namespaces running workloads today (2026-08-09)
     run: |
       python3 .github/scripts/check-podmonitor-namespace-coverage.py
 
@@ -433,6 +473,7 @@ gates:
     mode: enforced
     selftest: |
       python3 .github/scripts/check-msg-channel-image-parity.py --self-test
+    budget_seconds: 40   # 9.2s in CI — network-bound, GitHub contents API
     run: |
       python3 .github/scripts/check-msg-channel-image-parity.py
 
@@ -440,6 +481,7 @@ gates:
     name: "gitops ref-integrity guard (referenced Secret/ConfigMap => declared)"
     group: gitops
     mode: enforced
+    budget_seconds: 30   # 7.3s in CI
     run: |
       python3 .github/scripts/check-gitops-secret-refs.py
 
@@ -523,6 +565,8 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-probe-port-listener.py --selftest
     selftest_expect: pass
+    min_subjects: 50   # 116 probed/scraped ports today (2026-08-09)
+    budget_seconds: 30   # ~6s after #4340
     run: |
       python3 .github/scripts/check-probe-port-listener.py --enforce
 
@@ -585,6 +629,7 @@ gates:
     name: "governance-script unit tests"
     group: supplychain
     mode: enforced
+    budget_seconds: 120   # a real test suite
     run: |
       python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts -p '*_test.py' -v
@@ -691,8 +736,7 @@ gates:
     name: "pact version tree-equivalence unit test (issue #3432, enforced)"
     group: supplychain
     mode: enforced
-    selftest: |
-      bash .github/scripts/pact-version-tree-equivalent.sh --self-test
+    budget_seconds: 90   # builds 17 git trees
     run: |
       bash .github/scripts/pact-version-tree-equivalent.sh --self-test
 
@@ -706,8 +750,6 @@ gates:
     name: "pact version probe fails closed (issue #3432, enforced)"
     group: supplychain
     mode: enforced
-    selftest: |
-      bash .github/scripts/probe-pact-version.sh --self-test
     run: |
       bash .github/scripts/probe-pact-version.sh --self-test
 
@@ -723,8 +765,6 @@ gates:
     name: "can-i-deploy counterpart verifiability probe (issue #3223, enforced)"
     group: supplychain
     mode: enforced
-    selftest: |
-      bash .github/scripts/probe-blocking-counterparts.sh --self-test
     run: |
       bash .github/scripts/probe-blocking-counterparts.sh --self-test
 
@@ -973,6 +1013,7 @@ gates:
     name: "ADR registry integrity check"
     group: registry
     mode: enforced
+    budget_seconds: 90   # the registry shard is 20s in CI end to end
     run: |
       bash .github/scripts/check-adr-registry.sh
 
@@ -1104,9 +1145,8 @@ gates:
     name: "ensure-ecr-repository classification (#3423/#3453, enforced)"
     group: supplychain
     mode: enforced
-    selftest: bash .github/scripts/ensure-ecr-repository.sh --self-test
-    selftest_expect: pass
     run: |
+      bash .github/scripts/ensure-ecr-repository.sh --self-test
 
   # campaign-service's rollout died on `/bundle/rules-data.yaml: merge error` (#2872 defect 4).
   # The sidecar runs `opa run --bundle /bundle` — DIRECTORY mode, where OPA derives a data
@@ -1140,6 +1180,7 @@ gates:
     mode: enforced
     selftest: |
       python3 .github/scripts/check-gitops-duplicate-resources.py --self-test
+    min_subjects: 300   # 647 gitops manifests today (2026-08-09)
     run: |
       python3 .github/scripts/check-gitops-duplicate-resources.py --enforce
 
@@ -1252,6 +1293,7 @@ gates:
     mode: enforced
     selftest: |
       python3 .github/scripts/check-opa-sidecar-bundle-shape.py --self-test
+    min_subjects: 20   # 42 OPA sidecars today (2026-08-09)
     run: |
       python3 .github/scripts/check-opa-sidecar-bundle-shape.py --enforce
 
@@ -1480,6 +1522,7 @@ gates:
     name: "test runBlocking ': Unit' guard"
     group: kotlin
     mode: enforced
+    min_subjects: 500   # 1184 test sources today (2026-08-09)
     run: |
       bash .github/scripts/check-test-runblocking-unit.sh .
 
@@ -1500,6 +1543,7 @@ gates:
     name: "no service-local ExceptionMapper collision with libs-runtime (enforced)"
     group: kotlin
     mode: enforced
+    min_subjects: 900   # 1889 service source files today (2026-08-09)
     run: |
       bash .github/scripts/check-exception-mapper-collision.sh .
 
@@ -1545,6 +1589,7 @@ gates:
     name: "outbox dispatch-enabled guard (footgun check, enforced)"
     group: kotlin
     mode: enforced
+    min_subjects: 16   # 33 dispatch-gated services today (2026-08-09)
     run: |
       bash .github/scripts/check-outbox-dispatch-enabled.sh .
 
@@ -1576,6 +1621,7 @@ gates:
     name: "DomainEvent.occurredAt constructor guard (#2662)"
     group: kotlin
     mode: enforced
+    min_subjects: 1500   # 3121 .kt files today (2026-08-09)
     run: |
       bash .github/scripts/check-domain-event-occuredat.sh
 
@@ -1592,6 +1638,7 @@ gates:
     name: "clock-injection gate — domain/application layers (ADR-0100, #1612)"
     group: kotlin
     mode: enforced
+    min_subjects: 70   # 142 money-path domain/application files today (2026-08-09)
     run: |
       bash .github/scripts/check-clock-injection.sh
 
@@ -1707,9 +1754,6 @@ gates:
     name: "record-deployment version resolver (issue #3223, enforced)"
     group: api
     mode: enforced
-    selftest: |
-      bash .github/scripts/resolve-record-deployment-version.sh --self-test
-    selftest_expect: pass
     run: |
       bash .github/scripts/resolve-record-deployment-version.sh --self-test
 
@@ -1728,9 +1772,6 @@ gates:
     name: "runtime conformance: claim-vs-cluster comparators (enforced)"
     group: gitops
     mode: enforced
-    selftest: |
-      python3 .github/scripts/runtime-conformance.py --self-test
-    selftest_expect: pass
     run: |
       python3 .github/scripts/runtime-conformance.py --self-test
   # A service that ships an outbox must write to it (#4007). Eight do not: dispatcher, backlog
@@ -1756,7 +1797,6 @@ gates:
       python3 .github/scripts/check-outbox-has-writer.py --self-test
     selftest_expect: pass
     run: |
-      python3 .github/scripts/check-outbox-has-writer.py --self-test
       python3 .github/scripts/check-outbox-has-writer.py .
 
   - id: pact-provider-replay-coverage
@@ -1915,8 +1955,6 @@ gates:
     name: "libs change fan-out is derived (issue #2983, enforced)"
     group: gitops
     mode: enforced
-    selftest: |
-      bash .github/scripts/libs-change-dependents.sh --selftest
     run: |
       bash .github/scripts/libs-change-dependents.sh --selftest
 
@@ -1943,6 +1981,7 @@ gates:
   # 0 fleet-wide (37 application.yaml files), so this is a hard gate — any new
   # duplicate mapping key at ANY level fails the build (no silent config drop).
   - id: duplicate-yaml-key-guard
+    min_subjects: 40   # 74 files today: 59 service application.yaml + 15 governance (2026-08-09)
     name: "duplicate YAML key guard (application.yaml, #1170/#1193, enforced)"
     group: data
     mode: enforced
@@ -2254,6 +2293,7 @@ gates:
     name: "@RolesAllowed ⇒ realm parity (issue #2404, enforced)"
     group: security
     mode: enforced
+    min_subjects: 200   # 419 @RolesAllowed sites today (2026-08-09)
     run: |
       python3 .github/scripts/check-roles-allowed-realm.py
   # Keycloak realm templates must be IMPORTABLE (issue #3246). The three existing realm checks
@@ -2295,7 +2335,6 @@ gates:
       # was green — `opa test` reads the SOURCE rego, and the drift check regenerates with the
       # same broken generator, so committed and regenerated agreed. This one reads the
       # ARTIFACT with the consumer's own parser, which is the only layer that can see it.
-      python3 .github/scripts/check-opa-bundle-parses.py --self-test
       python3 .github/scripts/check-opa-bundle-parses.py --root .
   - id: opa-bundle-apply-size
     name: OPA bundle must be installable (client-side apply annotation ceiling)
@@ -2455,8 +2494,6 @@ gates:
     name: "proof-of-review script is falsifiable (ADR-0251, enforced)"
     group: lint
     mode: enforced
-    selftest: bash .github/scripts/check-agent-review-happened.sh --self-test
-    selftest_expect: pass
     run: |
       bash .github/scripts/check-agent-review-happened.sh --self-test
 
@@ -2477,8 +2514,6 @@ gates:
     name: "ADR-0251 review scope rule is falsifiable (enforced)"
     group: lint
     mode: enforced
-    selftest: python3 .github/scripts/agent-review-scope.py --self-test
-    selftest_expect: pass
     run: |
       python3 .github/scripts/agent-review-scope.py --self-test
 
@@ -2501,6 +2536,115 @@ gates:
   # are baselined as debt rather than fixed, because a gate that fails on its own backlog is
   # one nobody can merge past. Rule 3 fails on a stale baseline entry in either direction, so
   # the list cannot rot: it shrinks freely, and growing it needs a reviewer.
+  # A gate that examined nothing passes everything. Measured 2026-08-09: delete every .kt in
+  # the tree and nine kotlin gates stay green, several printing `0 ... checked` on the way out;
+  # delete all 647 gitops manifests and ten gitops gates do the same (#4339). `min_subjects:`
+  # plus a `SUBJECTS=<n>` line is the layer that can tell a clean tree from a lost corpus, and
+  # this gate is the ratchet that spreads it: a new gate declares a floor or is listed with a
+  # reason. The floors catch COLLAPSE, not drift — see the script header for why that is the
+  # right target.
+  # ADR-0071 Phase 4: manifest.ts is types-only, no hard-coded versions or inline data.
+  # It used to be an inline step in ci.yml's `ui-build` job, which carries
+  # `if: needs.changes-ui.outputs.changed == 'true'`. That is the #3629 shape exactly — a
+  # gate whose scope is silently narrowed by its host job, with nothing anywhere saying a
+  # gate was not consulted. It happens to be near-harmless here (the file it guards lives
+  # under openbank-admin-ui/, so the filter fires when the subject changes), but "reachable
+  # by coincidence" is not a property anyone can check, and the fix is the same either way:
+  # gates belong in this manifest. 0.02s.
+  - id: manifest-types-only
+    name: "manifest.ts is types-only (ADR-0071 Phase 4, enforced)"
+    group: lint
+    mode: enforced
+    selftest: bash .github/scripts/check-manifest-types-only.sh --self-test
+    selftest_expect: pass
+    min_subjects: 1   # the one file it guards
+    run: |
+      bash .github/scripts/check-manifest-types-only.sh
+
+  # The other half of check-gate-script-registration.py, which says in its own header that it
+  # answers "is anything wired to this script" and deliberately not "can that invocation run".
+  # A gate written as an inline step in ci.yml inherits its host job's conditions instead of
+  # the manifest's — #3629's check-dockerfile-no-build-stage.py could not run on a
+  # Dockerfile-only PR because it sat in `ui-build`. Green with no baseline: the one remaining
+  # instance (check-manifest-types-only.sh) is registered above as a gate in this PR.
+  - id: gate-invocation-reachability
+    name: "no gate hides behind a conditional job in ci.yml (#3629/#4339, enforced)"
+    group: lint
+    mode: enforced
+    min_subjects: 10   # 21 run: steps in ci.yml today (2026-08-09)
+    selftest: python3 .github/scripts/check-gate-invocation-reachability.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-gate-invocation-reachability.py --enforce
+
+  # Nothing lints Python here. Kotlin has ktlint + detekt, YAML has yamllint, shell has
+  # shellcheck (all 63 scripts since #4340) — and the 112 python files the entire governance
+  # layer is built from had no linter at all, which made them the least checked code in a repo
+  # whose whole thesis is checking things. See the config comment for what is selected and why
+  # the style rules are not.
+  - id: python-lint
+    name: "ruff over the governance scripts (#4339, enforced)"
+    group: lint
+    mode: enforced
+    min_subjects: 100   # 112 check-* plus helpers and generators today (2026-08-09)
+    run: |
+      cat > "${RUNNER_TEMP:-/tmp}/ruff-requirements.txt" <<'REQEOF'
+      ruff==0.16.2 \
+          --hash=sha256:9a48cc05c6fbc811ca81b5d7ba95375affea6582d1b8024e455e41afbbf55344 \
+          --hash=sha256:a2c0d14fcbb26c91f0f867a6dc9bd71bbc30b1b6151829c884f23faeab2e5700 \
+          --hash=sha256:335c621622c4650330be50842561c6586ac6971bb8ab5407fe34dcc9efb16bbe \
+          --hash=sha256:20e66910f2c37cc753f9ef6580c914a621b80c4fa3549d3e3521e29d0f5bfc3f \
+          --hash=sha256:c7e36fbfba65510548156902bcf1350a979a958ce0347ce0f90d73894036b39f \
+          --hash=sha256:f0eab35f80df8f134aae5d1630e751901321d317cc8e50dc39e36fa3ed34cd12 \
+          --hash=sha256:40ea8c0594feb894e89c8c61ab9c103d38b0ea72dfde6c594107147ca31b1140 \
+          --hash=sha256:ab3d62dde0b19facdd632008cc4827fc28ada7736c6bd35ab6f1050f0bfed53f \
+          --hash=sha256:e43e1f5b8388da9eca1b9e88328d47a5cec794633ccf6f7484ac2dd15eee92c0 \
+          --hash=sha256:c24788a980581e1d7ea3a0cbe4344c4fbeb0a6a9b1f4713aa46bb104f8294690 \
+          --hash=sha256:81806b08329130005dd4a8a8394a0c9da8c6f4cafb16ba438d2a2ee6a18bedf1 \
+          --hash=sha256:4ce4e02bad779bef557f541a1b31f20d6abeae1cc05ed1b1ac019d4ffd1044c8 \
+          --hash=sha256:e0422abdf70070255fc4073ce9dfc814cc03db577013761ddd09bc1e4a9a4fbd \
+          --hash=sha256:c3d7828d12e8927a6fc65fe38e2c2541b9e762d360a1786d752cb1b8883b3c9c
+      REQEOF
+      # Hash-pinned, same shape and same reason as the PyYAML install in ci.yml (OpenSSF
+      # Scorecard Pinned-Dependencies: pipCommand). ruff ships as a self-contained binary
+      # wheel per platform, so the whole wheel+sdist set is small enough to carry.
+      #
+      # Invoked as `python3 -m ruff`, never the `ruff` console script: pip may put that in a
+      # directory that is not on PATH (~/.local/bin on a hosted runner), and "installed but
+      # not callable" is indistinguishable from "install failed" at the call site.
+      #
+      # The install output is CAPTURED AND PRINTED ON FAILURE. The first version of this gate
+      # sent it to /dev/null and reported only "ruff unavailable — add it to the runner base
+      # image", which is a guess dressed as a diagnosis: it took a CI round-trip to learn
+      # nothing at all. A gate that cannot say why it could not run is a gate nobody can fix.
+      if ! python3 -m ruff --version >/dev/null 2>&1; then
+        log="${RUNNER_TEMP:-/tmp}/ruff-install.log"
+        python3 -m pip install --quiet --require-hashes \
+          -r "${RUNNER_TEMP:-/tmp}/ruff-requirements.txt" --break-system-packages >"$log" 2>&1 \
+          || python3 -m pip install --quiet --require-hashes \
+          -r "${RUNNER_TEMP:-/tmp}/ruff-requirements.txt" >>"$log" 2>&1 \
+          || { echo "::error::ruff install failed — pip said:"; cat "$log"; exit 1; }
+      fi
+      python3 -m ruff --version
+
+      files=()
+      while IFS= read -r f; do files+=("$f"); done < <(
+        find .github/scripts openbank-infra/scripts docs -name '*.py' -type f | sort
+      )
+      echo "SUBJECTS=${#files[@]}"
+      python3 -m ruff check --no-cache --isolated --target-version py311 \
+        --select E9,F,B --output-format concise "${files[@]}"
+
+  - id: gate-subject-floor
+    name: "every gate declares how much it expects to find (#4339, enforced)"
+    group: lint
+    mode: enforced
+    selftest: python3 .github/scripts/check-gate-subject-floor.py --self-test
+    selftest_expect: pass
+    min_subjects: 100   # 130 gates today (2026-08-09)
+    run: |
+      python3 .github/scripts/check-gate-subject-floor.py --enforce
+
   - id: gate-selftest-declaration
     name: "every gate's falsifiability is declared, not inline (enforced)"
     group: lint
