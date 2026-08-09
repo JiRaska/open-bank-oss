@@ -33,6 +33,12 @@ that it *carried* anything. A `GROUP BY` answers in seconds what a week of readi
 does not, because the source is correct — it describes work that the deployed system is not
 doing.
 
+ADR-0252 (synthetic customer fleet) was written the same day against the same push failure and is
+the complement to this one, not a duplicate: it adds a synthetic actor that *exercises* a channel
+so the absence of real traffic stops looking like health, while this ADR governs what any control
+must expose about work it claims to have done. A synthetic probe proves the path can carry
+something; evidence of effect proves the production path did.
+
 Existing decisions do not cover this. ADR-0008 and ADR-0077 establish *how* to emit telemetry;
 ADR-0088 adds SLOs and on-call. All of them assume the thing being measured is running. None
 requires that a control be able to demonstrate it ever acted, and none makes "this counter has
