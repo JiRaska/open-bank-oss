@@ -43,6 +43,7 @@ declare -a DEAD_MARKERS=(
   'Unsupported event type'
   'Could not fetch an OIDC token'
   'Credit balance is too low'
+  'Reached max turns'          # measured: --max-turns 1 cuts the model off before it answers
   'rate limit'
 )
 
@@ -61,13 +62,30 @@ verify() {
     return 1
   fi
 
+  # Strip BACKTICK-QUOTED spans before matching. A review that discusses this very script
+  # quotes its markers — run 7 produced a perfectly good review whose first finding was
+  # "check-agent-review-happened.sh:46 adds the literal string `Reached max turns`", and the
+  # guard rejected it as a dead driver. That is the repo's known trap: a text-matching guard
+  # flags the prose that explains the thing it exists to catch. The driver prints its errors
+  # bare; only a human or a model writing ABOUT them uses backticks.
+  local stripped
+  stripped=$(mktemp)
+  # Fenced blocks FIRST (multi-line, ```), then inline spans. Stripping only inline spans
+  # missed the commonest way to quote a shell or YAML excerpt, so a review discussing this
+  # script inside a code fence was still falsely rejected — the exact scenario the stripping
+  # exists for. Found by the reviewer itself, one run after the inline fix.
+  # shellcheck disable=SC2016  # backticks are DATA here (markdown), not substitution
+  awk '/^[[:space:]]*```/ {fence = !fence; next} !fence' "$f" | sed 's/`[^`]*`//g' > "$stripped"
+
   local m
   for m in "${DEAD_MARKERS[@]}"; do
-    if grep -qiF -- "$m" "$f"; then
-      echo "::error::review output contains '${m}' — the driver never reached a model. NO REVIEW HAPPENED." >&2
+    if grep -qiF -- "$m" "$stripped"; then
+      rm -f "$stripped"
+      echo "::error::review output contains '${m}' outside a quoted span — the driver never reached a model. NO REVIEW HAPPENED." >&2
       return 1
     fi
   done
+  rm -f "$stripped"
 
   if grep -qF -- "$VERDICT_FINDINGS" "$f"; then
     echo "review happened: findings reported."
@@ -83,7 +101,7 @@ verify() {
 }
 
 self_test() {
-  local tmp rc fails=0
+  local tmp rc fails=0 ran=0
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' RETURN
 
@@ -97,6 +115,7 @@ self_test() {
   # avoid, so where two branches agree on the verdict the message is what tells them apart.
   check() {
     local label="$1" want="$2" file="${3:-}" want_msg="${4:-}"
+    ran=$((ran + 1))
     local msg
     msg=$(verify "$file" 2>&1); rc=$?
     if [ "$rc" -ne "$want" ]; then
@@ -129,12 +148,27 @@ self_test() {
   check "a 401 must fail" 1 "$tmp/dead401"
   printf 'Claude Code is not installed on this repository.\n%s\n' "$VERDICT_CLEAN" > "$tmp/app"
   check "a dead marker must beat a verdict line" 1 "$tmp/app"
+  # The real output of the first live run: the model WAS reached, then cut off mid-answer.
+  printf 'Error: Reached max turns (1)\n' > "$tmp/maxturns"
+  check "a max-turns cutoff must fail" 1 "$tmp/maxturns"
+  # ...and the mirror case, measured on run 7: a GENUINE review that QUOTES a marker while
+  # reviewing this very script must pass. Without this the guard rejects any review of its
+  # own source, which is exactly the code most in need of one.
+  # shellcheck disable=SC2016  # the backticks are the fixture
+  printf 'Finding: the script adds `Reached max turns` to its markers.\n%s\n' "$VERDICT_FINDINGS" > "$tmp/quoted"
+  check "a review QUOTING a marker inline must pass" 0 "$tmp/quoted"
+  # ...and inside a FENCE, which is how anyone actually quotes a shell excerpt.
+  # shellcheck disable=SC2016  # the fence is the fixture
+  printf 'Finding:\n\n```\nError: Reached max turns (1)\n```\n\n%s\n' "$VERDICT_FINDINGS" > "$tmp/fenced"
+  check "a review quoting a marker in a CODE FENCE must pass" 0 "$tmp/fenced"
 
   if [ "$fails" -gt 0 ]; then
     echo "self-test FAILED (${fails} case(s))" >&2
     return 1
   fi
-  echo "self-test ok: proof-of-review is falsifiable (9 cases)"
+  # Count DERIVED from the cases actually run, never typed: a hardcoded number stays green
+  # when an added case silently fails to be inserted, which is how this very edit nearly went.
+  echo "self-test ok: proof-of-review is falsifiable (${ran} cases)"
   return 0
 }
 

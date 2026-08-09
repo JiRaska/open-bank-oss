@@ -128,6 +128,33 @@ not change any existing request's outcome until explicitly flipped.
   - **Rollback**: revert the commit; the previous behaviour was to swallow and return
     `SENT_TO_CLEARING`.
 
+- **2026-08-09** — Duplicate clearing submission closed (#4218). No new trust boundary and no new
+  caller: the outbound edge to the scheme gateway (`pacs.008` → clearing-simulator / CERTIS) is the
+  same one, and what changes is how many times a single payment may cross it. Previously: **more
+  than once.** `submitScheme` wrapped both the outbound call and the follow-up status write in one
+  `try/catch`, so a database failure after a successful submit was caught and logged as "holding in
+  VALIDATED" — leaving a live clearing item behind a row asserting nothing was sent. A re-drive read
+  that row and submitted again. Nothing downstream deduplicates: the `pacs.008` carries no
+  idempotency key (only a deterministic `messageId`, which the receiver is free to ignore) and
+  `openbank-clearing-simulator` performs no deduplication of any kind.
+  - **Integrity (STRIDE-T)** is the property at stake, and it was violated in the worst available
+    direction — an unauthorised *duplicate* money movement arising from an internal failure, with
+    no external attacker required and no signal beyond one WARN line.
+  - **Mitigation**: a `scheme_dispatched_at` marker written before the outbound call and in its own
+    transaction, so it outlives any failure of the work that follows; `submitScheme` refuses to
+    submit a payment that already carries it. The catch now covers the gateway call only, so a
+    failed status write surfaces instead of being reported as "not submitted".
+  - **New residual risk, accepted deliberately**: an ambiguous failure (a timeout, where the scheme
+    may or may not hold the item) now **strands** the payment in VALIDATED rather than retrying it.
+    The marker is cleared only when the gateway proves the request never left this process
+    (`ConnectException` / `UnknownHostException`), which keeps the ordinary "scheme is down" case
+    re-drivable. For an outbound money instruction a strand an operator can see is the correct
+    trade against a duplicate nobody can recall — but it is a strand, it needs a human, and it is
+    logged at ERROR for that reason. The partial index added in V8 is the query that finds them.
+  - **Not addressed here**: `DomesticPaymentRepositoryImpl.update` still has no compare-and-set and
+    the entity no `@Version`, so two concurrent workflows can both write one transition (#4218
+    item 3). Pre-existing, independent of this defect, and deliberately left out of a money-path
+    fix rather than enlarged into an aggregate-wide locking change.
 - **2026-08-07** — ADR-0248 #3: new outbound trust boundary, `domestic-payment-service →
   document-service (GET /api/v1/documents/templates, POST /api/v1/documents/templates/preview,
   OIDC client-credentials)`, plus a new customer-facing endpoint

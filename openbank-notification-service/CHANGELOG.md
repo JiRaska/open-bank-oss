@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.19.1...notification-service-v0.20.0) (2026-08-09)
+
+
+### Features
+
+* **notification:** tag push fan-outs by template so an undelivered SCA approval can be alerted on ([#4362](https://github.com/JiRaska/open-bank-oss/issues/4362)) ([347f1c6](https://github.com/JiRaska/open-bank-oss/commit/347f1c6f035da6cba461c5111f567e2e7325e196))
+
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.19.0...notification-service-v0.19.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **notification:** persist WHY a delivery failed (complements ADR-0252's counters) ([#4349](https://github.com/JiRaska/open-bank-oss/issues/4349)) ([28295b3](https://github.com/JiRaska/open-bank-oss/commit/28295b35453627d72e171284126286a7ad44ae43))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.18.1...notification-service-v0.19.0) (2026-08-09)
+
+
+### Features
+
+* **notification:** ADR-0252 synthetic assurance — phase 0, make the push channel observable ([#4351](https://github.com/JiRaska/open-bank-oss/issues/4351)) ([98c3623](https://github.com/JiRaska/open-bank-oss/commit/98c36233a0f8a55bb2be191a8b7142b77e9db492))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.18.0...notification-service-v0.18.1) (2026-08-08)
 
 

@@ -76,6 +76,8 @@ class DomesticPaymentWorkflowLivenessTest {
         override suspend fun list(status: DomesticPaymentStatus?, debtorAccountId: UUID?, limit: Int, offset: Int) =
             error("unused")
         override suspend fun update(payment: DomesticPayment, outboxMessage: OutboxMessage) = error("unused")
+        override suspend fun claimSchemeDispatch(paymentId: UUID, dispatchedAt: Instant): Boolean = error("unused")
+        override suspend fun clearSchemeDispatch(paymentId: UUID) = error("unused")
     }
 
     @Test

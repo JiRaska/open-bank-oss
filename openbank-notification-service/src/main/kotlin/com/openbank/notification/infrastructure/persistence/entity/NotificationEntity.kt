@@ -51,6 +51,16 @@ class NotificationEntity : PanacheEntity() {
     @Column(name = "read_at")
     var readAt: Instant? = null
 
+    // Why this row ended FAILED (V13). The value is the same NotificationOutcomeEvent.REASON_*
+    // constant the outcome event carries — the event is the stream, this is the queryable record,
+    // and the outbox rows behind the event are pruned after dispatch.
+    @Column(name = "failure_reason", length = FAILURE_REASON_MAX_LENGTH)
+    var failureReason: String? = null
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
+
+    companion object {
+        const val FAILURE_REASON_MAX_LENGTH = 64
+    }
 }

@@ -86,6 +86,9 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-09** — **`BalanceServiceClient` now reads and forwards a spendable figure the raw projection did not carry (#1745).** `effectiveAvailableAmount` on the wire is nullable and defaults to `availableAmount` when absent, so this service tolerates talking to an older balance-service during a rollout. **Risk class = none new**: this is a client-side interpretation change on an existing inbound field from an already-trusted M2M dependency (balance-service is inside this service's own trust boundary, not a new edge), no new endpoint, no new listener, no authorization change. The only new datum this service now trusts is a number it already trusted the shape of. Rollback: revert the mapping; the field is additive on balance-service's side and nothing here persists it.
+
+
 - **2026-08-09** — New inbound caller: `fraud-service` (ADR-0220 D3.5, issue #2749). Its new
   `AccountServiceClient` (fraud-service's first-ever outbound rest-client) calls
   `GET /api/v1/accounts/{accountId}` — an existing read-only, already-`@PermitAll` lookup, so no

@@ -58,7 +58,32 @@ interface BalanceRepository {
      * period with no activity after [asOf]) — so the rewind degrades to the current balance, never errors.
      */
     suspend fun sumBookedDeltaAfter(accountId: UUID, currency: String, asOf: java.time.LocalDate): BigDecimal
+
+    /**
+     * The not-yet-effective **credit** tail for one ([accountId], [currency]): Σ of projected booked
+     * deltas that are strictly positive and value-dated strictly after [asOf] (ADR-0178 Phase 2,
+     * #1745). Feeds [com.openbank.balance.domain.model.Balance.notYetEffectiveCredit], which the
+     * cover decision subtracts so a posted-but-not-yet-effective credit cannot be spent.
+     *
+     * Strictly positive deltas only — deliberately NOT the net tail. Netting would add future-dated
+     * debits back into the spendable figure; see `Balance.effectiveAvailable` for why that is the
+     * unsafe direction. Returns ZERO when nothing is value-dated after [asOf], which is the
+     * overwhelmingly common case and makes this a no-op for every account without a forward-dated
+     * credit.
+     */
+    suspend fun sumNotYetEffectiveCredit(accountId: UUID, currency: String, asOf: java.time.LocalDate): BigDecimal
+
+    /**
+     * The ([accountId], [currency]) pairs holding at least one strictly-positive projected delta
+     * value-dated exactly on [date] — i.e. the credits that *become* effective on that accounting
+     * day. Drives the daily value-date roll's maturity announcement (#1745); it reads the derived
+     * figure and mutates nothing, so a skipped run costs a notification, never a balance.
+     */
+    suspend fun findCreditsMaturingOn(date: java.time.LocalDate): List<AccountCurrency>
 }
+
+/** A balance key: the ([accountId], [currency]) pair a projected delta moved. */
+data class AccountCurrency(val accountId: UUID, val currency: String)
 
 /** Outbound persistence port for reservations (holds) against a balance. */
 interface HoldRepository {

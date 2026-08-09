@@ -121,11 +121,11 @@ mp:
         topic: openbank.party.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
     outgoing:
-      kyc-events-out:
-        connector: smallrye-kafka
-        client.id: kyc-service-${quarkus.uuid}
-        topic: openbank.kyc.events
-        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # The `kyc-events-out` channel that used to sit here — a bare @Channel emitter fired AFTER
+      # the repository had already committed — was removed with issue #4007. KYC lifecycle events
+      # are now written to `kyc_outbox` inside the state-change transaction and relayed on
+      # `kyc-outbox-out` below, which targets the same topic. Two publishers on one topic would
+      # race, and only one of them can be atomic.
       kyc-outbox-out:
         connector: smallrye-kafka
         client.id: kyc-outbox-service-${quarkus.uuid}

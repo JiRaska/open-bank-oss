@@ -25,10 +25,17 @@
 # convention that reads as coverage.
 #
 # WHAT THIS ENFORCES
-#   1. HARD, no baseline: a gate whose `run:` invokes `--self-test`/`--selftest` must declare
-#      it in `selftest:`. This is never a judgement call — the harness demonstrably exists,
-#      so there is nothing to weigh. It is also the direction that silently regresses, since
-#      copying an existing gate's shape is how the twelve happened.
+#   1. A gate whose `run:` invokes `--self-test`/`--selftest` must declare it in `selftest:`.
+#      The harness demonstrably exists, so there is nothing to weigh. It is also the direction
+#      that silently regresses, since copying an existing gate's shape is how the twelve
+#      happened. One exception, and it must be WRITTEN DOWN in BASELINE: a gate whose entire
+#      purpose is the harness (`*-unit-test`, the runner's own self-test) has nothing else to
+#      run, and declaring the command would only make it run twice — see rule 4.
+#   4. (listed here because it is the direct consequence of 1) A command must not be BOTH declared in `selftest:` and invoked by `run:`. run-gates.py
+#      runs the declaration first and the gate after it, so that shape executes the suite twice
+#      for one signal. Ten gates landed that way on 2026-08-09 while fixing rule 1: for
+#      `pact-version-tree-equivalence-unit-test` the duplicate half is ~17s, on the shard that
+#      was already the slowest after gitops.
 #   2. RATCHET: a NEW gate must declare `selftest:` or be listed in the baseline below with a
 #      reason. Today's 52 undeclared gates are baselined, not fixed — writing 52 harnesses is
 #      a separate piece of work, and a gate that fails on the debt is a gate nobody can merge
@@ -70,9 +77,20 @@ BASELINE = {
     "can-i-deploy-block-classifier-unit-test": "is-a-test-suite",
     "can-i-deploy-version-selector-unit-test": "is-a-test-suite",
     "co-deploy-set-derivation-unit-test": "is-a-test-suite",
+    "pact-version-tree-equivalence-unit-test": "is-a-test-suite",
+    "pact-version-probe-fail-closed-unit-test": "is-a-test-suite",
+    "blocking-counterpart-probe-unit-test": "is-a-test-suite",
+    "record-deployment-version-resolver": "is-a-test-suite",
+    "runtime-conformance-comparators": "is-a-test-suite",
+    "libs-change-dependents": "is-a-test-suite",
+    "agent-review-proof-falsifiable": "is-a-test-suite",
+    "agent-review-scope-falsifiable": "is-a-test-suite",
+    "ensure-ecr-repository": "is-a-test-suite — the deploy path needs AWS, so the "
+                             "classification harness is the whole gate",
     # --- externally maintained tooling ---------------------------------------------------
     "yamllint": "third-party — yamllint's own test suite is not ours to run",
     "shellcheck": "third-party — shellcheck's own test suite is not ours to run",
+    "python-lint": "third-party — ruff's own test suite is not ours to run",
 }
 
 # Everything else undeclared as of the measurement date is debt, enumerated at import time so
@@ -94,8 +112,12 @@ def load(root="."):
     return gates
 
 
+def _norm(text):
+    return " ".join(str(text or "").split())
+
+
 def analyse(gates, debt, baseline=None):
-    """Return (undeclared_with_harness, new_undeclared, stale_baseline).
+    """Return (undeclared_with_harness, new_undeclared, stale_baseline, run_twice).
 
     `baseline` is a PARAMETER, not the module global, so the self-test can drive fixtures.
     An earlier version read the global here and every fixture inherited the real 8-entry
@@ -106,15 +128,29 @@ def analyse(gates, debt, baseline=None):
     ids = {g.get("id") for g in gates}
     known = set(baseline) | set(debt)
 
-    undeclared_with_harness, new_undeclared = [], []
+    undeclared_with_harness, new_undeclared, run_twice = [], [], []
     for g in gates:
         gid = g.get("id")
-        declared = bool(g.get("selftest"))
-        runs_selftest = bool(SELFTEST_RE.search(str(g.get("run", ""))))
+        declared = _norm(g.get("selftest"))
+        run = _norm(g.get("run"))
+        runs_selftest = bool(SELFTEST_RE.search(run))
         if declared:
+            # Rule 4 — the same harness must not be BOTH declared and invoked by the gate.
+            # run-gates.py runs `selftest:` first and `run:` after it, so a gate whose run:
+            # still contains the command executes the suite twice, for one signal. This is
+            # not hypothetical tidiness: it is how #4336 landed, and on
+            # pact-version-tree-equivalence-unit-test the duplicate half is ~17s of the
+            # supplychain shard. A gate whose ONLY purpose is the harness belongs in
+            # BASELINE as `is-a-test-suite` with the command in run: and no declaration —
+            # same signal, half the cost.
+            if declared in run:
+                run_twice.append(gid)
             continue
-        if runs_selftest and gid != "gate-runner-self-test":
-            # Rule 1 — hard. The harness exists; only the declaration is missing.
+        if runs_selftest and gid not in baseline:
+            # Rule 1 — hard. The harness exists; only the declaration is missing. A BASELINE
+            # entry is the one way out, and it has to be written down: `gate-runner-self-test`
+            # used to be a hardcoded exception here, which made the legitimate shape
+            # unstateable for every other gate of the same kind.
             undeclared_with_harness.append(gid)
         elif gid not in known:
             # Rule 2 — ratchet.
@@ -129,11 +165,17 @@ def analyse(gates, debt, baseline=None):
             g = next(x for x in gates if x.get("id") == gid)
             if g.get("selftest") and gid not in baseline:
                 stale.append(f"{gid}: now declares a self-test — remove it from the debt list")
-    return undeclared_with_harness, new_undeclared, stale
+    return undeclared_with_harness, new_undeclared, stale, run_twice
 
 
-def report(undeclared_with_harness, new_undeclared, stale, enforce):
+def report(undeclared_with_harness, new_undeclared, stale, run_twice, enforce):
     bad = False
+    for gid in run_twice:
+        print(f"::error::{gid}: the command in `selftest:` also appears in `run:`, so the "
+              f"harness executes twice for one signal. Either drop it from run: (the gate has "
+              f"real work of its own), or drop the `selftest:` field and baseline the gate as "
+              f"`is-a-test-suite` (the gate IS the harness).", file=sys.stderr)
+        bad = True
     for gid in undeclared_with_harness:
         print(f"::error::{gid}: its run: invokes a --self-test but `selftest:` is not declared. "
               f"run-gates.py cannot see it, so there is no ordering guarantee, no "
@@ -158,10 +200,11 @@ def report(undeclared_with_harness, new_undeclared, stale, enforce):
 def self_test():
     fails = []
 
-    def case(label, gates, debt, want_harness, want_new, want_stale, baseline=None):
-        h, n, s = analyse(gates, debt, baseline if baseline is not None else {})
-        got = (sorted(h), sorted(n), len(s))
-        exp = (sorted(want_harness), sorted(want_new), want_stale)
+    def case(label, gates, debt, want_harness, want_new, want_stale, baseline=None,
+             want_twice=()):
+        h, n, s, t = analyse(gates, debt, baseline if baseline is not None else {})
+        got = (sorted(h), sorted(n), len(s), sorted(t))
+        exp = (sorted(want_harness), sorted(want_new), want_stale, sorted(want_twice))
         if got != exp:
             fails.append(f"{label}: expected {exp}, got {got}")
 
@@ -198,11 +241,29 @@ def self_test():
     case("a baseline entry that healed is stale",
          [{"id": "healed", "selftest": "x --self-test", "run": "x"}], {"healed": "debt"}, [], [], 1)
 
-    # gate-runner-self-test is the one legitimate inline case: its run: IS the runner's own
-    # self-test, so there is no separate harness to declare.
-    case("the runner's own self-test is exempt",
+    # A gate that IS its harness — the runner's own self-test, and the *-unit-test gates whose
+    # run: is a `--self-test` invocation. There is no separate harness to declare, and
+    # declaring one would just run the suite twice (rule 4). BASELINE is what states that; DEBT
+    # is not, which is why the case above still fails on a DEBT entry.
+    case("a gate that IS its harness is exempt when baselined as such",
          [{"id": "gate-runner-self-test", "run": "python3 .github/scripts/run-gates.py --self-test"}],
          {}, [], [], 0, baseline={"gate-runner-self-test": "is-a-test-suite"})
+
+    # Rule 4: declared AND still invoked by the gate = the suite runs twice for one signal.
+    case("a declared harness also invoked in run: is flagged",
+         [{"id": "twice", "selftest": "x --self-test", "run": "x --self-test\nx --enforce"}],
+         {}, [], [], 0, want_twice=["twice"])
+    case("run: IS the declared harness, verbatim",
+         [{"id": "same", "selftest": "x --self-test", "run": "x --self-test"}],
+         {}, [], [], 0, want_twice=["same"])
+    case("whitespace and line breaks do not hide the duplicate",
+         [{"id": "wrapped", "selftest": "x  --self-test\n", "run": "  x --self-test  \n"}],
+         {}, [], [], 0, want_twice=["wrapped"])
+    # ...and the shape it must NOT flag: a declared harness whose gate does real work. Without
+    # this case a rule that flagged every declared self-test would look correct.
+    case("a declared harness plus unrelated gate work is clean",
+         [{"id": "fine", "selftest": "x --self-test", "run": "x --enforce --root ."}],
+         {}, [], [], 0)
 
     # An empty manifest must RAISE, never report clean.
     try:
@@ -216,22 +277,25 @@ def self_test():
     import contextlib, io
     sink = io.StringIO()
     with contextlib.redirect_stderr(sink), contextlib.redirect_stdout(sink):
-        rc_adv = report(["x"], [], [], enforce=False)
-        rc_enf = report(["x"], [], [], enforce=True)
-        rc_ok = report([], [], [], enforce=True)
+        rc_adv = report(["x"], [], [], [], enforce=False)
+        rc_enf = report(["x"], [], [], [], enforce=True)
+        rc_ok = report([], [], [], [], enforce=True)
+        rc_twice = report([], [], [], ["x"], enforce=True)
     if rc_adv != 0:
         fails.append("advisory mode did not downgrade a violation to 0")
     if rc_enf != 1:
         fails.append("--enforce did not fail on a violation")
     if rc_ok != 0:
         fails.append("a clean run did not exit 0 under --enforce")
+    if rc_twice != 1:
+        fails.append("--enforce did not fail on a run-twice violation")
 
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: gate-selftest-declaration is falsifiable (12 cases)")
+    print("self-test ok: gate-selftest-declaration is falsifiable (17 cases)")
     return 0
 
 
@@ -252,11 +316,11 @@ def main():
         return 1
 
     debt = DEBT
-    h, n, s = analyse(gates, debt)
+    h, n, s, t = analyse(gates, debt)
     declared = len([g for g in gates if g.get("selftest")])
     print(f"gate-selftest-declaration: {declared}/{len(gates)} gates declare a self-test; "
           f"{len(BASELINE)} exempt by kind, {len(DEBT)} baselined as debt.")
-    return report(h, n, s, args.enforce)
+    return report(h, n, s, t, args.enforce)
 
 
 # The debt list, written out rather than derived, so that shrinking it is a visible diff and
@@ -288,11 +352,9 @@ DEBT = {
     "gate-graduation-guard": DEBT_MARKER,
     "gen-network-policies-drift-gate": DEBT_MARKER,
     "gitops-ref-integrity-guard": DEBT_MARKER,
-    "identifier-intent-guard": DEBT_MARKER,
     "mcp-charter-data-scope-binding": DEBT_MARKER,
     "mcp-real-port-requires-caller-auth-first": DEBT_MARKER,
     "no-dead-code-service-principal-rego-rule": DEBT_MARKER,
-    "no-runblocking-in-a-scheduled-body": DEBT_MARKER,
     "no-service-local-exceptionmapper-collision-with-libs-runtime": DEBT_MARKER,
     "openapi-route-conformance": DEBT_MARKER,
     "openapi-server-port": DEBT_MARKER,

@@ -7,7 +7,7 @@
 # 8080 when absent). See openbank-vop-service/Dockerfile / issue #3016 / #3354 for
 # why this file has no build stage and must not grow one.
 
-FROM eclipse-temurin:25-jre@sha256:681c543d6f36c50f45e9b5226930a46203dcfa351d3670e9d0bdf0dabae53539
+FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e
 WORKDIR /app
 RUN groupadd --system --gid 101 openbank \
  && useradd --system --uid 100 --gid 101 --no-create-home --shell /usr/sbin/nologin openbank

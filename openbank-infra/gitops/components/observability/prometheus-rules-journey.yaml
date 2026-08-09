@@ -1,0 +1,95 @@
+# Journey alert rules (ADR-0252 phase 2). Catalog: openbank-libs/governance/journeys.yaml.
+#
+# WHAT FEEDS THESE, AND WHY IT IS NOT THE k6 METRICS
+#   The journey CronJobs push k6's own series (k6_http_req_duration, k6_checks_*) to
+#   Prometheus via remote-write, and those are the right thing for a dashboard. They are the
+#   wrong thing to alert on here, for one reason: naming them correctly is a guess about
+#   k6's remote-write output that nothing in this repo verifies. An alert written against a
+#   metric name that turns out not to exist is permanently silent, and silence is
+#   indistinguishable from health — the exact failure this ADR exists to end.
+#
+#   So the alerts below read kube-state-metrics instead: kube_cronjob_status_*, series that
+#   several rule files here already use (sbom-drift-scanner, keycloak-realm-drift) and that
+#   are therefore known to be present and correctly named in this cluster. The signal is the
+#   Job's exit code, which is exactly what a k6 threshold failure produces.
+#
+# WHAT A RED JOURNEY MEANS
+#   The journey's assertions failed against production. That is a customer-visible defect
+#   until proven otherwise — not a flaky test. `backoffLimit: 0` on the Jobs is deliberate:
+#   a monitor that retries until it passes measures its own persistence.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-journey-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.journey
+      rules:
+        # A journey run failed. Fires per CronJob, not per Job object, so a journey failing
+        # every 5 minutes is one alert rather than a stream of them.
+        #
+        # WHAT THIS RULE STRUCTURALLY CANNOT SEE: a journey that has NEVER succeeded. Until a
+        # first success, kube-state-metrics emits no kube_cronjob_status_last_successful_time
+        # for it at all, and a binary comparison with a missing right-hand side yields nothing
+        # — no result, no alert. Same for JourneyStale below. That case belongs entirely to
+        # JourneyMissing, which is why that rule is not redundant and must not be "simplified"
+        # away: it is the only one of the three that can fire on a journey broken from birth.
+        - alert: JourneyFailing
+          expr: |
+            max by (namespace, cronjob) (
+              kube_cronjob_status_last_schedule_time{namespace="observability", cronjob=~"journey-.*"}
+            )
+            >
+            max by (namespace, cronjob) (
+              kube_cronjob_status_last_successful_time{namespace="observability", cronjob=~"journey-.*"}
+            ) + 900
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Journey {{ $labels.cronjob }} has not succeeded in 15m"
+            description: >-
+              The last successful run of {{ $labels.cronjob }} is more than 15 minutes (three
+              schedule intervals) behind its last scheduled run — the journey's assertions are
+              failing against production, or its pods cannot start. Read the Job logs: k6
+              prints which check failed. Treat as a customer-visible defect until shown
+              otherwise. Catalog: openbank-libs/governance/journeys.yaml.
+        # Absence, which is the failure mode that produced ADR-0252. A CronJob that was
+        # deleted, suspended, or never scheduled produces no failure — it produces nothing,
+        # and every ratio and comparison above is silent. `kube_cronjob_status_last_successful_time`
+        # going stale covers a journey that stopped running for ANY reason including its own
+        # removal; `absent()` covers the CronJob object disappearing entirely.
+        - alert: JourneyStale
+          expr: |
+            time() - max by (namespace, cronjob) (
+              kube_cronjob_status_last_successful_time{namespace="observability", cronjob=~"journey-.*"}
+            ) > 3600
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Journey {{ $labels.cronjob }} has not succeeded for an hour"
+            description: >-
+              No successful run of {{ $labels.cronjob }} in the last hour. Either it is failing
+              (see JourneyFailing), it is suspended, or its schedule is not firing. A journey
+              that is not running is not evidence of anything, and looks exactly like a healthy
+              one from every other angle.
+        - alert: JourneyMissing
+          expr: |
+            absent(kube_cronjob_status_last_successful_time{namespace="observability", cronjob="journey-public-edge"})
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The public-edge journey has never succeeded, or its CronJob is gone"
+            description: >-
+              No kube-state-metrics series exists for journey-public-edge. The CronJob has been
+              deleted, renamed, or has never completed a single successful run — the last of
+              which the two rules above cannot see at all, since both compare against a series
+              that does not exist yet. This alert is
+              named per journey on purpose: a regex cannot detect the absence of something, so
+              every `active` journey in openbank-libs/governance/journeys.yaml needs its own
+              instance of this rule, and check-journey-catalog.py enforces that.

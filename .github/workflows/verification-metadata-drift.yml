@@ -93,7 +93,7 @@ jobs:
 
       - name: Upload this shard's verdict
         if: ${{ always() && hashFiles('/tmp/sweep-verdict/**') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sweep-verdict-${{ matrix.shard }}
           path: /tmp/sweep-verdict/
@@ -118,7 +118,7 @@ jobs:
       # itself dies — which is how #4162 asserted "unpinned artifacts on main" while
       # all three failing shards had died of `Java heap space`.
       - name: Download shard verdicts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: sweep-verdict-*
           path: /tmp/verdicts

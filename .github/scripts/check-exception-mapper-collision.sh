@@ -53,5 +53,6 @@ done < <(find "$root"/openbank-*/src/main/kotlin -name '*.kt' \
   -not -path '*/openbank-libs-runtime/*' \
   -not -path '*/build/*' | sort)
 
+echo "SUBJECTS=$checked"
 echo "check-exception-mapper-collision: $checked service source file(s) checked, $( [ "$fail" -eq 0 ] && echo "none collide with a libs-runtime-owned ExceptionMapper type." || echo "VIOLATIONS above." )"
 exit "$fail"

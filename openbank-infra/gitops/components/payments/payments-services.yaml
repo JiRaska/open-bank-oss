@@ -754,7 +754,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-73d5f0dc
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-11be4658
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1693,7 +1693,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (ADR-0034). Value is stamped by
         # gen-standing-order-opa-bundle.sh — do not hand-edit.
-        openbank.tech/policy-checksum: "7c566db83e5d2f32" # standing-order-opa-bundle
+        openbank.tech/policy-checksum: "831f0828929b4d44" # standing-order-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true

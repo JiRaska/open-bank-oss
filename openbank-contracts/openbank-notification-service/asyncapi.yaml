@@ -194,8 +194,12 @@ components:
             working), `consent_check_unavailable` (consent-service unreachable, failed closed — an
             availability problem, and deliberately never merged with the previous one),
             `no_deliverable_recipient` (no resolvable address, #3581), `mailer_refused`,
-            `no_active_device`, `push_rejected_by_provider`, `channel_muted_by_preference`.
-            Null on `SENT`.
+            `no_active_device`, `push_rejected_by_provider`, `channel_muted_by_preference`,
+            `push_adapter_disabled` (ADR-0252 phase 0 — every device's push adapter was switched
+            off, so nothing left the process; this case used to be reported as `SENT`, because a
+            disabled adapter returns a *successful* skipped result and the fan-out counted
+            successes, which is why a dead push channel produced telemetry identical to a healthy
+            one). Null on `SENT`.
         occurredAt:
           type: string
           format: date-time

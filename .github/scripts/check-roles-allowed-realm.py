@@ -48,6 +48,8 @@ import pathlib
 import re
 import sys
 
+import gatelib
+
 REALM_GLOB = "openbank-infra/gitops/components/keycloak/*realm-template*.json"
 ROLES_KT = "openbank-libs-domain/src/main/kotlin/com/openbank/libs/security/Roles.kt"
 
@@ -154,6 +156,10 @@ def main() -> int:
             f"dead name was reserved for is denied, and nothing else says so. Grant the role in "
             f"Keycloak or delete it from the annotation.",
         )
+
+    # Before the verdict, so a gate that found its corpus and then failed on it is not also
+    # reported as having lost the corpus.
+    gatelib.subjects(checked, "@RolesAllowed sites")
 
     if errors:
         for e in errors:
