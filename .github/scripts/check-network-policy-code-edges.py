@@ -268,8 +268,6 @@ KNOWN_MISSING = {
         "never fail because account-service is unreachable), so the drop is silent.",
     ("customer-edge", "audit-service", "audit", 8113):
         "URL lives only in customer-edge's src/main/resources/application.yaml.",
-    ("customer-edge", "delegation-service", "delegation", 8126):
-        "URL lives only in application.yaml + the resource's @ConfigProperty default.",
     ("platform", "vllm", "copilot", 8000):
         "NO-CALLEE: gitops declares no vllm Service and the copilot namespace is "
         "empty. Dead config, not a policy gap — the fix is in the service, not here.",
