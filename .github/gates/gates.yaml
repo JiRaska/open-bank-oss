@@ -182,8 +182,9 @@ gates:
     name: "deployed image pins name a commit (issue #3344, enforced)"
     group: gitops
     mode: enforced
+    selftest: python3 .github/scripts/check-deploy-drift.py --self-test
+    selftest_expect: pass
     run: |
-      python3 .github/scripts/check-deploy-drift.py --self-test
       python3 .github/scripts/check-deploy-drift.py --root . --offline
 
   # ADR-0081 / issue #854 step 4: NetworkPolicies are DERIVED data (DO NOT
@@ -198,21 +199,23 @@ gates:
     name: every gateway model declares a per-token price (an unpriced model costs $0 and voids every budget)
     group: gitops
     mode: enforced
+    selftest: python3 .github/scripts/check-litellm-model-costs.py --self-test
+    selftest_expect: pass
     run: |
       # Falsified both ways before wiring in: 4 findings against the unpriced tree, 0 after,
       # 9 self-test cases including an explicit zero (which must NOT be treated as a price).
-      python3 .github/scripts/check-litellm-model-costs.py --self-test
       python3 .github/scripts/check-litellm-model-costs.py --enforce
 
   - id: agent-virtual-keys
     name: every agent authenticates with its OWN LiteLLM virtual key, not the shared master key
     group: gitops
     mode: enforced
+    selftest: python3 .github/scripts/check-agent-virtual-keys.py --self-test
+    selftest_expect: pass
     run: |
       # Falsified in both directions before it was wired in: 4 findings against the
       # pre-fix tree, 0 after, plus 7 self-test cases covering the exemption and the
       # near-misses. A gate that has only ever passed is unfalsified.
-      python3 .github/scripts/check-agent-virtual-keys.py --self-test
       python3 .github/scripts/check-agent-virtual-keys.py --enforce
 
   - id: model-residency-claims
@@ -518,8 +521,9 @@ gates:
     name: "probe/scrape port has a listener (issue #2872, enforced)"
     group: gitops
     mode: enforced
+    selftest: python3 .github/scripts/check-probe-port-listener.py --selftest
+    selftest_expect: pass
     run: |
-      python3 .github/scripts/check-probe-port-listener.py --selftest
       python3 .github/scripts/check-probe-port-listener.py --enforce
 
   # ==== supplychain ====================================================
@@ -830,6 +834,8 @@ gates:
     name: "SLO registry consistency (issue #669, rules.yaml: slo)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/check-slo-registry.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-slo-registry.py
 
@@ -1024,13 +1030,14 @@ gates:
     name: "agent case-coordination schema invariants (ADR-0244 D3/D6/D9, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/check-agent-case-schema.py --self-test
+    selftest_expect: pass
     run: |
       # #3771 added case_classes + case_capabilities to agents.yaml with no validator;
       # a threshold of 1.30 or a second charter holding case.coordinate would parse as
       # valid YAML and merge as a governance lie (budgets are the D6 stop-condition,
       # single-coordinator the D3/D9 audit invariant). Falsified both directions by the
       # 15-case self-test; the real file passes.
-      python3 .github/scripts/check-agent-case-schema.py --self-test
       python3 .github/scripts/check-agent-case-schema.py --enforce
 
   # EU AI Act inventory drift (ADR-0148 rule #7, issue #1918).
@@ -1097,8 +1104,9 @@ gates:
     name: "ensure-ecr-repository classification (#3423/#3453, enforced)"
     group: supplychain
     mode: enforced
+    selftest: bash .github/scripts/ensure-ecr-repository.sh --self-test
+    selftest_expect: pass
     run: |
-      bash .github/scripts/ensure-ecr-repository.sh --self-test
 
   # campaign-service's rollout died on `/bundle/rules-data.yaml: merge error` (#2872 defect 4).
   # The sidecar runs `opa run --bundle /bundle` — DIRECTORY mode, where OPA derives a data
@@ -1139,24 +1147,26 @@ gates:
     name: every committed scheduler cron parses (a malformed one is a boot crashloop, not a missed run)
     group: kotlin
     mode: enforced
+    selftest: python3 .github/scripts/check-scheduler-cron-syntax.py --self-test
+    selftest_expect: pass
     run: |
       # Nothing in the test layers parses the PRODUCTION cron: the cron IT overrides it with a
       # fast expression and %test overrides it with a never-fire one, so both run against a
       # different string than the one that ships. Falsified against the real files with three
       # typo classes (bad day name, unix 5-field, both day fields '*'); 12 self-tests.
-      python3 .github/scripts/check-scheduler-cron-syntax.py --self-test
       python3 .github/scripts/check-scheduler-cron-syntax.py --enforce
 
   - id: scheduled-trigger-emitted
     name: a declared SCHEDULED trigger must actually be emitted (an unreachable schedule fails silently)
     group: kotlin
     mode: enforced
+    selftest: python3 .github/scripts/check-scheduled-trigger-emitted.py --self-test
+    selftest_expect: pass
     run: |
       # Falsified in three directions before wiring in: a new unemitted service fails, a
       # baselined service that becomes covered ALSO fails (so the list cannot rot), and the
       # tree as committed passes. 9 self-test cases, including comment-only mentions and
       # Kotlin's NESTED block comments.
-      python3 .github/scripts/check-scheduled-trigger-emitted.py --self-test
       python3 .github/scripts/check-scheduled-trigger-emitted.py --enforce
 
   # On 2026-08-02 PR #3492 squash-merged and silently removed THREE enforced gates from this file
@@ -1518,8 +1528,9 @@ gates:
     name: "non-nullable required JAX-RS param ratchet (issue #3104, enforced)"
     group: kotlin
     mode: enforced
+    selftest: python3 .github/scripts/check-nonnull-jaxrs-params.py --self-test
+    selftest_expect: pass
     run: |
-      python3 .github/scripts/check-nonnull-jaxrs-params.py --self-test
       python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
 
   # openbank.outbox.dispatch-enabled guard (the CLAUDE.md "outbox footgun":
@@ -1843,6 +1854,8 @@ gates:
     name: "ASVS L3 mechanical subset (enforced, baseline-ratcheted)"
     group: api
     mode: enforced
+    selftest: python3 .github/scripts/check-asvs-l3.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-asvs-l3.py --enforce --baseline .github/asvs-l3-baseline.txt
 
@@ -2050,16 +2063,18 @@ gates:
     name: "kafka dotted-key ratchet (issues #686/#2945, enforced)"
     group: data
     mode: enforced
+    selftest: python3 .github/scripts/check-kafka-dotted-keys.py --self-test
+    selftest_expect: pass
     run: |
-      python3 .github/scripts/check-kafka-dotted-keys.py --self-test
       python3 .github/scripts/check-kafka-dotted-keys.py --root .
 
   - id: external-feed-declaration-drift
     name: "external feed declaration drift (issue #2204, enforced)"
     group: data
     mode: enforced
+    selftest: python3 .github/scripts/check-external-feeds.py --self-test
+    selftest_expect: pass
     run: |
-      python3 .github/scripts/check-external-feeds.py --self-test
       python3 .github/scripts/check-external-feeds.py --root . --offline
 
   # ==== security =======================================================
@@ -2466,3 +2481,31 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/agent-review-scope.py --self-test
+
+  # Falsifiability has to be DECLARED, not merely present. `selftest:` is a field run-gates.py
+  # ACTS on — it runs the harness before the gate and skips the gate when the verdict is wrong.
+  # A `--self-test` invoked inside a gate's own `run:` block reads identically to a human and
+  # is invisible to every tool: no ordering, no selftest_expect check, and a harness that
+  # starts failing cannot be told from the gate failing.
+  #
+  # Measured 2026-08-09 over 128 gates: 63 declared one, TWELVE more ran a self-test inline,
+  # and two others (check-slo-registry.py, check-asvs-l3.py) shipped a harness nothing called
+  # at all. Wiring those 13 took no new logic and moved declared falsifiability 63 -> 76.
+  #
+  # Same defect as `mode:` — the repo already learned advisory-vs-enforced must be stated
+  # outright rather than inferred from a step name (#2450, #2392). This is that lesson applied
+  # to the property the whole gate system rests on.
+  #
+  # Rule 1 (an existing harness must be declared) has NO baseline: the harness demonstrably
+  # exists, so nothing is being weighed. Rule 2 is a ratchet — today's 44 undeclared checkers
+  # are baselined as debt rather than fixed, because a gate that fails on its own backlog is
+  # one nobody can merge past. Rule 3 fails on a stale baseline entry in either direction, so
+  # the list cannot rot: it shrinks freely, and growing it needs a reviewer.
+  - id: gate-selftest-declaration
+    name: "every gate's falsifiability is declared, not inline (enforced)"
+    group: lint
+    mode: enforced
+    selftest: python3 .github/scripts/check-gate-selftest-declaration.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-gate-selftest-declaration.py --enforce
