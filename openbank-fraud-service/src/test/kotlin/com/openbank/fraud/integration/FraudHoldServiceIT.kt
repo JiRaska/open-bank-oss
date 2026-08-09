@@ -31,6 +31,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -132,7 +133,10 @@ class FraudHoldServiceIT {
     fun `raising a hold twice for the same party updates the existing row instead of duplicating it`() {
         val accountId = UUID.randomUUID()
         val partyId = UUID.randomUUID()
-        val now = Instant.now()
+        // Postgres timestamp columns are microsecond-precision; Instant.now() on Linux carries real
+        // nanosecond resolution, so an un-truncated value round-trips lossy there (passed on macOS
+        // only because its clock resolution already happens to cap at microseconds).
+        val now = Instant.now().truncatedTo(ChronoUnit.MICROS)
         runSuspendUni {
             holdRepository.raise(partyId, accountId, "repeated_review", "fraud-hold-v1", now, now.plusSeconds(3600))
         }

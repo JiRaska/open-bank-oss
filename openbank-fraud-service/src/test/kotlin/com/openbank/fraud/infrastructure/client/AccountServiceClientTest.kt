@@ -8,6 +8,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.oidc.client.OidcClient
 import io.quarkus.oidc.client.Tokens
+import io.quarkus.test.junit.QuarkusTest
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.inject.Instance
 import kotlinx.coroutines.runBlocking
@@ -21,7 +22,13 @@ import java.util.UUID
  * Real HTTP round-trip against a local [HttpServer] (no network mock library on this service's
  * classpath) — verifies the party-lookup success path plus the 404/error fail-open contract that
  * [com.openbank.fraud.application.usecase.FraudHoldService] depends on never propagating.
+ *
+ * `@QuarkusTest`, not a bare unit test: `RestClientBuilder.newBuilder()` resolves its SPI
+ * implementation only inside a running Quarkus app (build-time augmentation registers it) — a
+ * bare JUnit test throws `IllegalStateException: No RestClientBuilderResolver implementation
+ * found!` on Linux CI (it happened to resolve locally on macOS, which masked this).
  */
+@QuarkusTest
 class AccountServiceClientTest {
 
     private var server: HttpServer? = null
