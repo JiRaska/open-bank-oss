@@ -97,13 +97,15 @@ lapsed (see Consequences), and fund a higher `arc_max_runners` from that saving.
 
 - The build leaves the paid pool. Measured 17.4 runner-hours/day of build work moves from
   spot Graviton nodes (m7gd.xlarge at $0.0566/h spot) to free hosted runners.
-- Retiring `runners-warm` removes 2× m6gd.xlarge **on-demand** at $0.192/h — $9.22/day,
-  ~$277/month. Its stated rationale (keeping a `docker:dind` containerd cache warm to avoid
-  NAT egress) was already retired on 2026-06-13, when the ECR pull-through cache made the
-  image route in-VPC; `variables.tf` records that and sets `arc_min_runners = 0`, but the
-  NodePool was left at `limits.cpu: 8` with `expireAfter: Never`. Its own cost comment
-  understates the bill by ~2.5× — it says "2× c6g.large on-demand = ~$3.72/day", while the
-  nodes actually provisioned are m6gd.xlarge.
+- Retiring `runners-warm` (#4317) moves 2 nodes of the same build work from **on-demand**
+  m6gd.xlarge ($0.192/h, ~$280/month for two) to the `runners` spot pool
+  (m7gd.xlarge $0.0566/h, ~$83/month) — **~$197/month** for identical throughput. Its stated
+  rationale (keeping a `docker:dind` containerd cache warm to avoid NAT egress) was retired on
+  2026-06-13, when the ECR pull-through cache made the image route in-VPC; `variables.tf`
+  records that and sets `arc_min_runners = 0`, but the NodePool was left at `limits.cpu: 8`
+  with `expireAfter: Never`. Its own cost comment also quotes an instance the pool can never
+  select — "2× c6g.large on-demand = ~$3.72/day", where c6g.large has 2 vCPU and the pool
+  requires ≥4.
 - Those two together fund `arc_max_runners` 6 → 12 and still leave the platform cheaper than
   today, because raising concurrency does not raise total runner-hours.
 - `PENDING_BUILD` stops being the fleet's default deploy state, without weakening
@@ -140,8 +142,19 @@ registry state and are not touched.
 
 ## Notes
 
-`runners-warm` also cannot self-heal today, independently of this decision: its disruption
-budget is `10%` on a **two-node** pool, which floors to zero nodes, so Karpenter can never
-consolidate a node there even when `consolidationPolicy: WhenEmpty` and `consolidateAfter: 5m`
-say it should. One of the two nodes was observed carrying only DaemonSets for 2.6 days. That
-is filed separately so it can be fixed without waiting for this ADR.
+`runners-warm` does not self-heal, and the reason is worth stating because the obvious
+explanation is wrong. Its nodes carry `expireAfter: Never` and are declared `WhenEmpty` /
+`consolidateAfter: 5m`, so they should disappear when idle. They do not — but **not** because
+disruption is disabled. The `10%` budget visible on the live object is Karpenter's default,
+not something this repo authors, and Karpenter scales a percentage budget with round-up, so
+10% of two nodes is one node, not zero; Karpenter 1.12.1 is observably disrupting nodes on
+this cluster one at a time. The nodes persist because they are **busy**: runner pods carry
+`karpenter.sh/do-not-disrupt: true`, and with the build backlog described above the pool is
+almost never idle for five consecutive minutes. Retiring the pool is therefore a rate
+question (on-demand vs spot for work that really is being done), not the reclamation of idle
+capacity. Filed as #4317 so it can land without waiting for this ADR.
+
+The first version of this ADR and of #4317 asserted the floor-to-zero mechanism, reasoning
+from the manifest rather than from the running system. It is recorded here rather than
+silently deleted, because the failure mode — inferring a mechanism from the shape of a config
+line and never asking the cluster — is the one this repo has already paid for elsewhere.
