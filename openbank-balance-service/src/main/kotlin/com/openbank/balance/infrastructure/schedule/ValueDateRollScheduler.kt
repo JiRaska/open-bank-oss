@@ -10,9 +10,14 @@ import com.openbank.balance.domain.model.BalanceEvent
 import com.openbank.balance.domain.model.BalanceEventType
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.libs.persistence.lock.ClusterLock
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
+import jakarta.inject.Inject
 import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.time.OffsetDateTime
@@ -62,6 +67,26 @@ class ValueDateRollScheduler(
     private val log = Logger.getLogger(ValueDateRollScheduler::class.java)
 
     /**
+     * Field-injected rather than a constructor parameter: this constructor already had 4, and
+     * threading a 5th purely for the heartbeat is no worse, but the pattern is kept consistent
+     * with the two-heartbeats-added-under-time-pressure siblings (FraudHoldService,
+     * SavingsProposalExpiryScheduler) so a reviewer sees the same shape each time.
+     */
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    /**
+     * Registered from `StartupEvent`, not an `init` block: `@ApplicationScoped` is LAZY, so a bean
+     * created on first use would publish no gauge until something touched it — and for a tick
+     * nothing else calls, that could be never (this repo's own PdfBoxPadesSealAdapter lesson).
+     */
+    fun registerLiveness(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
+
+    /**
      * Runs shortly after the accounting day rolls over, in the bank zone — the credits whose
      * `entry_date` is today became effective at midnight, so the announcement belongs at the start
      * of the day, not at the 23:30 reconciliation tick.
@@ -75,6 +100,12 @@ class ValueDateRollScheduler(
         val ran = clusterLock.tryRunExclusively(JOB_NAME) {
             try {
                 announceMaturities()
+                // Only on the path that completed. A heartbeat inside (or after) the catch would
+                // assert the very thing it exists to disprove — and this tick swallows its own
+                // exception, so a permanently broken roll is otherwise indistinguishable from a
+                // healthy quiet one: no exception escapes, and "0 matured" is the normal case on
+                // most days.
+                liveness?.recordSuccess()
             } catch (ex: Exception) {
                 // Never crash the runtime: the money figures are derived and already correct
                 // without this job, so a failure here costs a notification, not a balance.
@@ -140,5 +171,12 @@ class ValueDateRollScheduler(
 
     private companion object {
         const val JOB_NAME = "balance.value-date-roll"
+        const val WORKFLOW_NAME = "balance-value-date-roll"
+
+        /** Matches the `@Scheduled` default of once daily. Wide on purpose: this job is not the
+         *  money path — a missed run delays a notification, never a wrong figure — so the
+         *  staleness threshold should not page on a single skipped tick under ClusterLock
+         *  contention. */
+        val EXPECTED_INTERVAL: java.time.Duration = java.time.Duration.ofDays(1)
     }
 }
