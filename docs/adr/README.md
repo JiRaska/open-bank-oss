@@ -163,7 +163,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0151](0151-chaos-engineering-and-infrastructure-failure-injection-policy.md) | Chaos engineering and infrastructure failure-injection policy | Accepted | Planned | resilience,testing,kubernetes | — |
 | [0152](0152-single-tenancy-boundary-statement.md) | Single-tenancy boundary statement | Accepted | N/A | architecture,governance | — |
 | [0153](0153-savings-goal-metadata.md) | Savings goal metadata on account-service | Accepted | Shipped | accounts,mobile-app,customer-edge | — |
-| [0154](0154-agent-pr-approval-policy.md) | Independent agent PR approval for non-sensitive changes | Accepted | Shipped | ai-agents,ci,governance | — |
+| [0154](0154-agent-pr-approval-policy.md) | Independent agent PR approval for non-sensitive changes | Deprecated | Shipped | ai-agents,ci,governance | — |
 | [0155](0155-four-eyes-enforcement-for-money-path-actions.md) | Four-eyes enforcement for money-path actions | Proposed | Partial | authz,governance | — |
 | [0156](0156-agent-charters-as-markdown-alongside-agents-yaml.md) | Agent charters as Markdown alongside agents.yaml | Accepted | Shipped | ai-agents,admin-ui,docs | — |
 | [0158](0158-account-opening-validates-against-product-catalog.md) | Account opening validates against product-catalog | Accepted | Shipped | accounts,product-catalog | — |
