@@ -90,6 +90,31 @@ reads only this service's own tables.
 which is the defect, so a rollback should be paired with disabling the customer-facing toggles
 rather than leaving them visibly ineffective.
 
+## 4b. Single-use card lifecycle (D1) — STRIDE supplement
+
+Adds the terminal status `CONSUMED`, a `closedReason`, and an `expiresAt` validity window for
+SINGLE_USE cards. No new endpoint: the card list and detail responses carry the new fields.
+
+**Why a distinct status rather than reusing CANCELLED.** Until now "cancelled" covered a customer
+closing a card, a card reported lost, and a disposable card doing exactly what it promised. Those
+are three different things a customer is owed three different sentences about — and one of them is
+a security signal. "Your disposable card was just used" is the fraud alarm for this product; it
+cannot be distinguished from routine closure if the status is the same.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **E**oP | A consumed card is re-provisioned with a live PAN and spends again | `CONSUMED` is in `TERMINAL_STATUSES`, which the PAN-vault backfill excludes. A pinned test asserts the exact contents of that set, so growing it silently is not possible — that assertion caught this change and had to be updated deliberately |
+| **T**ampering | A card is marked CONSUMED without having been used, hiding a decline or a failure | `consume()` requires `cardType == SINGLE_USE` **and** `status == ACTIVE`, and is driven by the processor's lifecycle event rather than by a customer or operator request. Any other type or status throws |
+| **R**epudiation | The customer cannot tell why their card stopped working | `closedReason` distinguishes `SINGLE_USE_CONSUMED` from `VALIDITY_EXPIRED`, `LOST_OR_STOLEN` and `CUSTOMER_CANCEL`; an unused card that times out becomes EXPIRED, never CONSUMED, because nothing was spent |
+| **I**nfo disclosure | Revealing the PAN of a card that already spent | Unchanged and still correct: `CONSUMED` is terminal, so the existing "card not live" guard on secure details refuses it |
+| **D**oS | A disposable card issued and forgotten stays a live PAN indefinitely | `expiresAt` bounds the window even if the card is never presented; a partial index supports finding those cards without weighing on the hot path |
+
+**Not in this change, and load-bearing:** the authorize-once guarantee itself lives at the card
+processor. This models the outcome so the customer can see it; it does not enforce single use. Until
+the processor is configured, a SINGLE_USE card is a virtual card with a validity window — the status
+machine is ready, the guarantee is not. Anything that presents it to customers as "authorises once"
+before the processor side lands would be claiming a control the bank does not yet have.
+
 ## 5. Residual risks / assumptions
 
 - **No optimistic locking today.** `Card` lacks a `version` column; two concurrent lifecycle
@@ -109,6 +134,8 @@ rather than leaving them visibly ineffective.
   is implemented, erasure is manual.
 
 ## 6. Change log
+
+- **2026-08-07** — Single-use card lifecycle (D1 server preparation). New terminal status `CONSUMED`, `CardClosedReason` (`SINGLE_USE_CONSUMED | VALIDITY_EXPIRED | LOST_OR_STOLEN | CUSTOMER_CANCEL`), and `expiresAt`; `consume()` and `expireUnused()` transitions; migration V9. STRIDE supplement in §4b. `CONSUMED` joins `TERMINAL_STATUSES`, which excludes a card from PAN-vault backfill — the pinned assertion on that set failed on this change, which is the change-detector working, and was updated deliberately rather than relaxed. **The authorize-once guarantee is NOT in this change:** it lives at the card processor, and until it is configured a SINGLE_USE card is a virtual card with a validity window. Do not present it to customers as "authorises once" before then. Rollback: revert; a card sitting in CONSUMED must be remapped to CANCELLED first, or it becomes a status no older build understands.
 
 - **2026-08-07** — Card authorization decision point (D3). New `CardAuthorizationPolicy` (pure, 15 unit tests) plus `POST /cards/{id}/authorizations`, `GET|PUT /cards/{id}/category-limits` and `GET /cards/category-taxonomy`; new `card_category_rules` table. STRIDE supplement in §4a. **This closes a live defect, not just a missing feature:** the channel controls stored since V5 were read by nothing, so a customer switching off "payments abroad" got a 200 and no protection. The policy is deliberately pure — no repository, no clock — so every branch of a money-path decision is reachable in a unit test rather than only against a live acquirer. Per-category spend is not yet tracked; the response says `spendTracking: false` so a client shows "no data" instead of a progress ring against a zero that looks measured. Rollback: revert, but pair it with hiding the customer-facing toggles rather than leaving controls that visibly do nothing.
 
