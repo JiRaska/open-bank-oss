@@ -116,7 +116,7 @@ V9.1 openbank-infra/gitops/components/mcp/mcp-service.yaml:72: plaintext http://
 V9.1 openbank-infra/gitops/components/mcp/mcp-service.yaml:74: plaintext http:// env value http://consent-service.consent.svc:8106
 V9.1 openbank-infra/gitops/components/observability/holmes-rca.yaml:183: plaintext http:// env value http://holmesgpt-holmes.observability.svc:80
 V9.1 openbank-infra/gitops/components/observability/holmes-rca.yaml:185: plaintext http:// env value http://loki.observability.svc:3100
-V9.1 openbank-infra/gitops/components/observability/k6-synthetic.yaml:63: plaintext http:// env value http://kube-prometheus-stack-prometheus.observability.svc:90
+V9.1 openbank-infra/gitops/components/observability/cronjob-journey-public-edge.yaml:146: plaintext http:// env value http://kube-prometheus-stack-prometheus.observability.svc:90
 V9.1 openbank-infra/gitops/components/observability/cronjob-rum-attribute-audit.yaml:58: plaintext http:// env value http://tempo.observability.svc:3200
 V9.1 openbank-infra/gitops/components/lending/lending-service.yaml:109: plaintext http:// env value http://ledger-service.ledger.svc:8101
 V9.1 openbank-infra/gitops/components/lending/lending-service.yaml:122: plaintext http:// env value http://tempo.observability.svc:4317
