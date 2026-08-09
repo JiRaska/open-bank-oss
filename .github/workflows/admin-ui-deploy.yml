@@ -93,7 +93,8 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write  # GitHub OIDC → openbank-arc-build-runner
-      actions: read    # gh run list / gh run download for SBOM staging
+      actions: read    # gh run list / gh run download for SBOM staging; also read by
+                       # collect-gate-health.mjs (ADR-0255) for the same reason — no new grant
     timeout-minutes: 30
     env:
       ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
@@ -393,6 +394,21 @@ jobs:
         run: |
           if ! node scripts/collect-prod-readiness.mjs 2>&1; then
             echo "::warning::prod-readiness collector failed — scorecard page will show no data"
+          fi
+
+      - name: Collect CI gate-estate health snapshot (ADR-0255)
+        # Derives gate-health.json from the GitHub Actions API — same read-only,
+        # baked-at-build-time shape as prod-readiness above and DORA (ADR-0061):
+        # the token this step holds (actions: read, job-scoped) never reaches the
+        # runtime pod. Best-effort: a failure must not abort the deploy, same as
+        # the prod-readiness collector — a missing snapshot degrades the DevOps
+        # page's QG panel to a small inline notice, never a build failure.
+        working-directory: openbank-admin-ui
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! node scripts/collect-gate-health.mjs 2>&1; then
+            echo "::warning::gate-health collector failed — QG panel will show no data"
           fi
 
       - name: Install Trivy
