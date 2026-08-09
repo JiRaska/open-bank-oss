@@ -33,7 +33,7 @@
   "openbank-ledger-service": "1.20.1",
   "openbank-lending-service": "0.24.1",
   "openbank-mcp-service": "0.15.0",
-  "openbank-notification-service": "0.19.0",
+  "openbank-notification-service": "0.19.1",
   "openbank-onboarding-service": "0.6.0",
   "openbank-party-service": "0.15.4",
   "openbank-pid-service": "0.8.14",
