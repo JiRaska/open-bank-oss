@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.4.1...engagement-service-v0.5.0) (2026-08-09)
+
+
+### Features
+
+* **engagement:** expose a party's active adverse states as a read API ([#4302](https://github.com/JiRaska/open-bank-oss/issues/4302)) ([8617fa9](https://github.com/JiRaska/open-bank-oss/commit/8617fa9e5502c80accb1b5154acbedbef01a1e0a)), closes [#4265](https://github.com/JiRaska/open-bank-oss/issues/4265)
+
 ## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.4.0...engagement-service-v0.4.1) (2026-08-09)
 
 
