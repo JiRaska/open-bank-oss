@@ -170,8 +170,16 @@ jobs:
           HEAD_SHA: ${{ steps.pr.outputs.head }}
         run: |
           base="${BASE_SHA}"
-          # workflow_dispatch checks out the default branch, so HEAD is not the PR.
+          # workflow_dispatch checks out the default branch, so HEAD is not the PR. A
+          # swallowed failure here (fork PR, force-push, deleted branch) leaves the sha
+          # unreachable and the diff empty or garbage — reviewing the wrong thing while
+          # reporting nothing. Verify the object EXISTS rather than trusting the fetch.
           git fetch -q origin "${HEAD_SHA}" 2>/dev/null || true
+          if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::head sha ${HEAD_SHA} is not reachable after fetch — refusing to"
+            echo "::error::review an empty or wrong diff."
+            exit 1
+          fi
           # Merge-base, not the frozen creation-time base: the repo has been bitten by the
           # difference (#481 x #524).
           head="${HEAD_SHA}"

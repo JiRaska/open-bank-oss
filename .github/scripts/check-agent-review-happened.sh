@@ -70,8 +70,12 @@ verify() {
   # bare; only a human or a model writing ABOUT them uses backticks.
   local stripped
   stripped=$(mktemp)
-  # shellcheck disable=SC2016  # backticks are DATA here (markdown spans), not substitution
-  sed 's/`[^`]*`//g' "$f" > "$stripped"
+  # Fenced blocks FIRST (multi-line, ```), then inline spans. Stripping only inline spans
+  # missed the commonest way to quote a shell or YAML excerpt, so a review discussing this
+  # script inside a code fence was still falsely rejected — the exact scenario the stripping
+  # exists for. Found by the reviewer itself, one run after the inline fix.
+  # shellcheck disable=SC2016  # backticks are DATA here (markdown), not substitution
+  awk '/^[[:space:]]*```/ {fence = !fence; next} !fence' "$f" | sed 's/`[^`]*`//g' > "$stripped"
 
   local m
   for m in "${DEAD_MARKERS[@]}"; do
@@ -152,7 +156,11 @@ self_test() {
   # own source, which is exactly the code most in need of one.
   # shellcheck disable=SC2016  # the backticks are the fixture
   printf 'Finding: the script adds `Reached max turns` to its markers.\n%s\n' "$VERDICT_FINDINGS" > "$tmp/quoted"
-  check "a review QUOTING a marker must pass" 0 "$tmp/quoted"
+  check "a review QUOTING a marker inline must pass" 0 "$tmp/quoted"
+  # ...and inside a FENCE, which is how anyone actually quotes a shell excerpt.
+  # shellcheck disable=SC2016  # the fence is the fixture
+  printf 'Finding:\n\n```\nError: Reached max turns (1)\n```\n\n%s\n' "$VERDICT_FINDINGS" > "$tmp/fenced"
+  check "a review quoting a marker in a CODE FENCE must pass" 0 "$tmp/fenced"
 
   if [ "$fails" -gt 0 ]; then
     echo "self-test FAILED (${fails} case(s))" >&2
