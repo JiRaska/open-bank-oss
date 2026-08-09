@@ -10,12 +10,16 @@ import com.openbank.fraud.application.port.out.FraudScoreRepository
 import com.openbank.fraud.domain.model.FraudVerdict
 import com.openbank.fraud.infrastructure.persistence.FraudOutboxRepositoryImpl
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
@@ -52,6 +56,24 @@ class FraudHoldService @Inject constructor(
     private val ttlDays: Long,
 ) {
     private val log = Logger.getLogger(FraudHoldService::class.java)
+
+    /**
+     * Field-injected rather than a constructor parameter: the constructor already takes 8, and
+     * detekt's LongParameterList fires AT `constructorThreshold: 9`, not above it.
+     */
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    /**
+     * Registered from `StartupEvent` rather than an `init` block: `@ApplicationScoped` is LAZY, so
+     * a bean created on first use would publish no gauge until something happened to touch it —
+     * and for a sweep that nothing else calls, that could be never.
+     */
+    fun registerLiveness(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
 
     /**
      * Checked after every scoring decision, but only ever acts on REVIEW — ALLOW/CHALLENGE/DECLINE
@@ -118,6 +140,11 @@ class FraudHoldService @Inject constructor(
             if (expired.isNotEmpty()) {
                 log.infof("fraud-hold expiry sweep cleared=%d", expired.size)
             }
+            // Only on the path that actually completed. A heartbeat inside (or after) the catch
+            // would assert the very thing it exists to disprove — and this sweep swallows its
+            // exception, so a permanently broken run is otherwise indistinguishable from a healthy
+            // quiet one: no exception escapes, and "cleared=0" is the normal case.
+            liveness?.recordSuccess()
         } catch (ex: Exception) {
             log.warnf(ex, "fraud-hold expiry sweep failed")
         }
@@ -147,5 +174,14 @@ class FraudHoldService @Inject constructor(
         const val RULE_VERSION = "fraud-hold-v1"
         const val REASON_REPEATED_REVIEW = "repeated_review"
         const val REASON_EXPIRED = "expired"
+        const val WORKFLOW_NAME = "fraud-hold-expiry-sweep"
+
+        /**
+         * Matches the `openbank.fraud-hold.sweep-interval` default. The staleness rule bakes in a
+         * 2x multiplier, so this is the schedule, not a tighter SLA — but a deployment that widens
+         * the cron without widening this makes the gauge over-strict rather than lax, which is the
+         * safe direction to be wrong in.
+         */
+        val EXPECTED_INTERVAL: Duration = Duration.ofHours(1)
     }
 }
