@@ -73,7 +73,30 @@ DECLARATION_RE = re.compile(r"(data\s+)?class\s+OutboxMessage\s*\(")
 # instead (case-coordinator-agent's CaseActivitiesImpl.emitProposal, agent-service's
 # JdbcAgentProposalRepository). Matching only `OutboxMessage(` called those services writerless
 # and was wrong about them.
-SQL_INSERT_RE = re.compile(r"INSERT\s+INTO\s+\w*outbox\w*", re.IGNORECASE)
+#
+# The table reference is matched in the three forms Postgres accepts, not just the bare one:
+# `case_outbox`, schema-qualified `cc.case_outbox`, and quoted `"case_outbox"` (or backticked, for
+# a copy-pasted MySQL-ism). Neither of the extra two appears in the tree today and schema-qualified
+# INSERT is not an idiom here at all — this is latent, and it is written down because the failure
+# is a FALSE NEGATIVE: a service that does write its outbox gets reported as writerless, which
+# reads as a clean finding rather than as a gap in the pattern (#4240).
+#
+# The `\w*outbox\w*` on the table NAME is what keeps this narrow. Widening to any INSERT would
+# mark all eight baselined services as fixed and silently retire the gate, so the negatives in the
+# self-test are the cases that matter here, not the positives.
+#
+# The trailing `(?!\w*\s*\.)` is not decoration and was measured, not reasoned: because the schema
+# group is OPTIONAL, `INSERT INTO outbox_schema.events` otherwise backtracks into matching
+# `outbox_schema` as the TABLE and reports a writer for an insert into `events`. A false positive
+# here is the opposite failure — it would let a genuinely writerless service off — so the lookahead
+# says "this name is the table only if no dot follows it".
+SQL_INSERT_RE = re.compile(
+    r"INSERT\s+INTO\s+"
+    r"(?:[\"`]?\w+[\"`]?\s*\.\s*)?"  # optional schema qualifier, quoted or bare
+    r"[\"`]?\w*outbox\w*[\"`]?"
+    r"(?!\w*\s*\.)",  # ...and it must not itself be a qualifier
+    re.IGNORECASE,
+)
 
 
 def strip_comments_and_strings(src: str) -> str:
@@ -258,6 +281,31 @@ def self_test() -> int:
 '''
     expect("a direct SQL INSERT into the outbox table IS a writer",
            classify_service({"a.kt": sql}), (True, True))
+
+    # ── Qualified and quoted table references (#4240 follow-up) ────────────────────────────────
+    # Latent: neither form appears in the tree today, and schema-qualified INSERT is not an idiom
+    # here at all. Covered because the failure direction is a FALSE NEGATIVE — a service that does
+    # write its outbox reported as writerless, which reads as a clean finding.
+    schema_qualified = disp + '\nval s = """INSERT INTO cc.case_outbox (id) VALUES (?)"""\n'
+    expect("a schema-qualified INSERT IS a writer",
+           classify_service({"a.kt": schema_qualified}), (True, True))
+    quoted = disp + '\nval s = """INSERT INTO "case_outbox" (id) VALUES (?)"""\n'
+    expect("a quoted table name IS a writer",
+           classify_service({"a.kt": quoted}), (True, True))
+    both = disp + '\nval s = """INSERT INTO "cc"."case_outbox" (id) VALUES (?)"""\n'
+    expect("quoted schema AND quoted table IS a writer",
+           classify_service({"a.kt": both}), (True, True))
+
+    # The negative that pays for the optional schema group. Because that group is OPTIONAL, the
+    # pattern otherwise backtracks into reading `outbox_schema` as the TABLE and calls an insert
+    # into `events` a writer — which would let a genuinely writerless service off. Measured
+    # failing without the trailing lookahead.
+    schema_named_outbox = disp + '\nval s = """INSERT INTO outbox_schema.events (id) VALUES (?)"""\n'
+    expect("a SCHEMA named *outbox* with a non-outbox table is NOT a writer",
+           classify_service({"a.kt": schema_named_outbox}), (True, False))
+    qualified_other = disp + '\nval s = """INSERT INTO cc.party_events (id) VALUES (?)"""\n'
+    expect("a schema-qualified NON-outbox table is NOT a writer",
+           classify_service({"a.kt": qualified_other}), (True, False))
     # …but prose describing one is not — the same code-about-code rule as the constructor case.
     sql_prose = disp + "\n// we should INSERT INTO case_outbox here one day\n"
     expect("a comment describing an INSERT is NOT a writer",
