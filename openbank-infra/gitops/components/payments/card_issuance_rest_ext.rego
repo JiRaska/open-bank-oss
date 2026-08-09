@@ -14,6 +14,9 @@
 #                    (self-service freeze, /customer/v1/cards/{id}/freeze)
 #   card.resume    — resume (#id) — same, customer self-service unfreeze
 #
+# Actions gated (CardOutboxAdminResource, #4005):
+#   card.outbox.requeue — requeueDead — ROLE_ADMIN ONLY (not ROLE_OPERATOR)
+#
 # Base rest.rego already grants operator-read-any (ROLE_OPERATOR/ROLE_ADMIN) for card.list/.read
 # — no extension needed for those. The remaining actions have no generic base-rego grant.
 #
@@ -42,6 +45,19 @@ allowed_reasons contains "operator-card-write" if {
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action in {"card.create", "card.activate", "card.block", "card.suspend", "card.resume"}
+}
+
+# Requeueing dead-lettered outbox rows (CardOutboxAdminResource, #4005) republishes events that
+# may already have been delivered — openbank-audit-service appends a second, permanently
+# undeletable audit record for each — so it is granted to ROLE_ADMIN **only**, exactly matching
+# that method's @RolesAllowed("ROLE_ADMIN"). Deliberately NOT folded into the
+# operator-card-write set above: adding it there would widen the grant to ROLE_OPERATOR and make
+# the policy broader than the resource, the mirror image of the card.block bug this file already
+# documents. Keeping the two in lockstep in either direction is the point.
+allowed_reasons contains "admin-card-outbox-requeue" if {
+	input.principal.type == "HUMAN"
+	"ROLE_ADMIN" in input.principal.roles
+	input.action == "card.outbox.requeue"
 }
 
 # Blocking a card (fraud/compliance hold) is also grantable to ROLE_COMPLIANCE alone — a

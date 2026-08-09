@@ -199,3 +199,49 @@ spec:
           annotations:
             summary: "domestic-payment outbox backlog stuck"
             description: "domestic-payment outbox has >100 unrelayed rows for >15m — payment events are not being dispatched."
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-card-issuance-alerts
+  namespace: payments
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: card-issuance-service
+spec:
+  groups:
+    - name: openbank.card-issuance.outbox
+      rules:
+        # #4005. Every one of card-issuance's 24 outbox rows was parked in terminal DEAD by a
+        # latched-open circuit breaker, so the service had published zero events for its entire
+        # life — and the only outbox alert this repo had, *OutboxBacklogStuck, could not see it.
+        # DEAD is excluded from openbank_outbox_backlog by design (it is not work waiting to be
+        # done), so a service that dead-lettered everything reads as a flat, healthy 0 backlog.
+        #
+        # Deliberately the openbank_outbox_dead_lettered GAUGE and not the openbank_outbox_dead
+        # counter: a counter answers "since this process started", it resets on every pod restart
+        # while the rows remain, and Micrometer does not create a counter until its first
+        # increment — measured 2026-08-09, openbank_outbox_dead_total had ZERO series fleet-wide
+        # while card-issuance held 24 DEAD rows. An alert on it would have matched nothing,
+        # forever, and read exactly like "no problem".
+        #
+        # Threshold is > 0, not a rate: dead-lettering is terminal (ADR-0050 N5), nothing retries
+        # a DEAD row, and there is no automatic drain — a single one is a permanently lost event
+        # until an operator requeues it via POST /api/v1/cards/outbox/requeue. The 15m `for:`
+        # only outlives a rollout window, in which the old and new pod both publish the gauge.
+        - alert: CardIssuanceOutboxDeadLettered
+          expr: openbank_outbox_dead_lettered{service="card-issuance"} > 0
+          for: 15m
+          labels:
+            severity: critical
+            service: card-issuance
+          annotations:
+            summary: "card-issuance outbox has dead-lettered rows"
+            description: >-
+              {{ $value }} card outbox row(s) are parked in terminal DEAD and will never be
+              retried by anything — card issued/status/limit/control events are not reaching
+              openbank.cards.events. Requeue is manual and attributable
+              (POST /api/v1/cards/outbox/requeue, ROLE_ADMIN, X-Operator-Id required) because
+              openbank-audit-service is not idempotent: a replay appends a second, permanently
+              undeletable audit record per event. Establish whether these were ever delivered
+              before requeueing.
