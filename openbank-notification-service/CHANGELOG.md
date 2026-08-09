@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.19.0...notification-service-v0.19.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **notification:** persist WHY a delivery failed (complements ADR-0252's counters) ([#4349](https://github.com/JiRaska/open-bank-oss/issues/4349)) ([28295b3](https://github.com/JiRaska/open-bank-oss/commit/28295b35453627d72e171284126286a7ad44ae43))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.18.1...notification-service-v0.19.0) (2026-08-09)
 
 
