@@ -156,6 +156,49 @@ def balanced_span(src: str, open_idx: int) -> tuple[int, int] | None:
     return None
 
 
+def class_body(src: str, ctor_end: int) -> str:
+    """The data class's OWN body — from its opening brace to the matching close, or empty.
+
+    Bounding this at "the next top-level `data class`" instead is wrong in a way that reports
+    AGREEMENT rather than a finding, which is the direction that never announces itself. A file
+    laid out as
+
+        data class Payload(val a: String, val b: String)
+
+        class SomethingPublisher {
+            companion object { const val EVENT_TYPE = "x.y" }
+        }
+
+    would attribute the publisher's literal to `Payload`, or to whichever data class precedes it —
+    so the contract for `x.y` gets compared against the wrong class's properties. Both live
+    producers of this shape are in customer-edge (`OnboardingFunnelPublisher`,
+    `FeedbackPublisher`); nothing is wrong today only because that service has no contract yet.
+
+    A data class with no body (the common single-line case) yields "", which is correct: it
+    declares no literal, so it is simply not indexed.
+    """
+    i = ctor_end + 1
+    n = len(src)
+    while i < n:
+        ch = src[i]
+        if ch == "{":
+            depth = 0
+            for j in range(i, n):
+                if src[j] == "{":
+                    depth += 1
+                elif src[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        return src[i + 1 : j]
+            return src[i + 1 :]
+        # A newline followed by a non-space character is the next top-level declaration, so this
+        # data class has no body of its own.
+        if ch == "\n" and i + 1 < n and src[i + 1] not in " \t\r\n":
+            return ""
+        i += 1
+    return ""
+
+
 def split_top_level(params: str) -> list[str]:
     """Split a Kotlin parameter list on top-level commas, aware of (), <>, [] and {}.
 
@@ -213,9 +256,7 @@ def parse_event_classes(service_dir: pathlib.Path) -> dict[str, dict]:
                 for part in split_top_level(src[ctor_start:ctor_end])
                 if (pm := PARAM_NAME_RE.search(part))
             ]
-            # The class body: from the ctor close to the start of the next top-level data class.
-            nxt = DATA_CLASS_RE.search(src, ctor_end)
-            body = src[ctor_end : nxt.start() if nxt else len(src)]
+            body = class_body(src, ctor_end)
             supertypes = src[ctor_end : ctor_end + 200]
             domain_event = bool(re.search(r"\bDomainEvent\s*\(", supertypes))
             literal = None
@@ -248,8 +289,30 @@ def produced_topics(service_dir: pathlib.Path) -> set[str]:
         return set()
     outgoing = (((doc.get("mp") or {}).get("messaging") or {}).get("outgoing")) or {}
     return {
-        c["topic"] for c in outgoing.values() if isinstance(c, dict) and isinstance(c.get("topic"), str)
+        _resolve_topic(c["topic"])
+        for c in outgoing.values()
+        if isinstance(c, dict) and isinstance(c.get("topic"), str)
     }
+
+
+ENV_DEFAULT_RE = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*:(?P<default>[^}]*)\}$")
+
+
+def _resolve_topic(raw: str) -> str:
+    """`${CASE_OUTBOX_TOPIC:proposal-events}` -> `proposal-events`.
+
+    SmallRye expands these at boot, so the committed default IS the address the service publishes
+    to unless an env override says otherwise — and a contract can only ever document the name, not
+    the override. Comparing the raw string instead produced three findings against
+    openbank-case-coordinator-agent that were all one non-defect: the contract said
+    `proposal-events`, the config said `${CASE_OUTBOX_TOPIC:proposal-events}`, and the gate called
+    that both an undocumented topic and an unproduced channel at once.
+
+    A topic with no default (`${VAR}`) is deliberately left as-is: there is no committed name to
+    compare, so reporting the mismatch is correct.
+    """
+    m = ENV_DEFAULT_RE.match(raw.strip())
+    return m.group("default").strip() if m else raw
 
 
 def resolve_ref(doc: dict, ref: str):
@@ -295,8 +358,22 @@ def check_contract(path: pathlib.Path) -> list[str]:
     service = path.parent.name
     service_dir = REPO / service
     errors: list[str] = []
-    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     rel = path.relative_to(REPO)
+    # A malformed contract is a FINDING, not a crash. Letting the ScannerError escape ends the run
+    # with a traceback and no verdict about any OTHER contract either — and a gate that dies is
+    # indistinguishable from a gate that was never wired. It also hides which file is at fault
+    # behind a stack trace. This is not hypothetical: openbank-fraud-service/asyncapi.yaml carried
+    # an unquoted backtick-leading `description:` on main, which no gate could see because the
+    # existing coverage check counts contract FILES without parsing their bodies — it reported
+    # "5 with an event contract" including one it could not read.
+    try:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as ex:
+        first = str(ex).splitlines()[0]
+        return [
+            f"{rel}: is not parseable YAML ({first}). A contract nothing can read documents "
+            f"nothing — quote a scalar that starts with a backtick, a colon or an at-sign."
+        ]
 
     if not service_dir.is_dir():
         return [
@@ -461,6 +538,24 @@ def self_test() -> int:
             "topic: openbank.notification.outcomes.v2",
         ),
         "no channel declares that address",
+    )
+    # B0: the event-type literal declared by a NON-data class that follows the payload.
+    #
+    # This is the case the gate could not see: with the class body bounded at "the next top-level
+    # data class", the publisher's literal was attributed to whichever data class preceded it, and
+    # the contract was then compared against the WRONG class's properties — reported as agreement,
+    # never as a finding. Two live producers already have this layout
+    # (customer-edge's OnboardingFunnelPublisher and FeedbackPublisher); they are only harmless
+    # because that service carries no contract yet.
+    case(
+        "event-type literal owned by a following non-data class",
+        "openbank-notification-service",
+        lambda t: edit(
+            t / "openbank-notification-service" / "src/main/kotlin/com/openbank/notification/domain/model/NotificationOutcome.kt",
+            ") {\n    companion object {",
+            ")\n\nclass NotificationOutcomePublisher {\n    companion object {",
+        ),
+        "no class in",
     )
     # B: a message the code does not declare.
     case(

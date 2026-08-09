@@ -151,4 +151,4 @@ components:
           occurredAt:
             type: string
             format: date-time
-            description: `Instant.toString()` — ISO-8601. The moment the transition was decided.
+            description: "`Instant.toString()` — ISO-8601. The moment the transition was decided."
