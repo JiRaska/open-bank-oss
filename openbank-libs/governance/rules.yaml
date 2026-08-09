@@ -272,6 +272,31 @@ change_requirements:
     # cannot key a for_each; a tofu plan of that design read "0 to add, 35 to destroy"), and
     # yamldecode cannot parse the 30-of-42 multi-doc manifests. Same lesson as the OPA generator
     # gate (#1184): the list must be checked mechanically, not remembered.
+  attestation_ttl:
+    detect: ["openbank-libs/governance/attestations.yaml"]
+    require:
+      - "every attestation entry carries a parseable date and an integer ttl_days"
+      - "no attestation is past date + ttl_days"
+    gate: attestation-ttl-watch
+    enforced: advisory
+    target_enforce_date: "2026-09-15"   # ADR-0144
+    ci_producer: ".github/scripts/check-attestation-ttl.py"
+    # WHY THE DATE IS 2026-09-15 AND NOT SOONER. The gate is correct today and would go RED on
+    # 2026-08-17: ledger.pentest and consent-service.pentest expire 2026-08-16 and 2026-08-18.
+    # `Validate manifests` is a required context, so enforcing now blocks every PR in the repo
+    # eight days from merge -- and the only honest remedy for an expired pentest attestation is
+    # to perform a pentest, which no commit can do. An anti-rot gate that makes the repo
+    # unmergeable in order to announce a rotting attestation has traded a small problem for a
+    # larger one. The date is set past a realistic re-attestation, at which point the fuse is 21
+    # days out and the 14-day warning window gives real notice.
+    #
+    # WHAT IT CANNOT SEE, stated because a passing gate hides it: it only reads attestations that
+    # EXIST. #2365 is about the 57 that do not (3 of a required 60), and nothing here measures
+    # that -- a file with one valid entry and a file with sixty both read as clean.
+    #
+    # It never writes. There is no --fix and there will not be one: a gate that can renew the
+    # evidence it checks is a gate that cannot fail. Deleting a stale entry is always available
+    # and is the truthful exit, since the readiness score then shows its derived value.
   db_change:
     detect: ["src/main/resources/db/migration/*.sql", "Flyway/Liquibase changeset"]
     require:
