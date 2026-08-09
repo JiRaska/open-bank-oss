@@ -356,7 +356,6 @@ DEBT = {
     "mcp-charter-data-scope-binding": DEBT_MARKER,
     "mcp-real-port-requires-caller-auth-first": DEBT_MARKER,
     "no-dead-code-service-principal-rego-rule": DEBT_MARKER,
-    "no-runblocking-in-a-scheduled-body": DEBT_MARKER,
     "no-service-local-exceptionmapper-collision-with-libs-runtime": DEBT_MARKER,
     "openapi-route-conformance": DEBT_MARKER,
     "openapi-server-port": DEBT_MARKER,

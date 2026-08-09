@@ -1511,6 +1511,8 @@ gates:
     name: "no runBlocking in a @Scheduled body (rules.yaml: scheduled_methods, enforced)"
     group: kotlin
     mode: enforced
+    selftest: python3 .github/scripts/check-no-runblocking-in-scheduled.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-no-runblocking-in-scheduled.py
 
