@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: anacredit-service
     app.kubernetes.io/part-of: anacredit
   annotations:
-    openbank.tech/policy-checksum: "a0f1780e85d909b9"
+    openbank.tech/policy-checksum: "b98e0b6827706146"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -554,8 +554,21 @@ data:
 
     import rego.v1
 
+    # HUMANS ONLY (GHSA-58jq-9hq3-66jr, issue #4228). This IS a write: `@POST
+    # /api/v1/anacredit/exposures` (AnaCreditResource.registerExposure). Without the exclusion the
+    # rule was role-only, and `service-account-openbank-services` — the identity nearly every backend
+    # service authenticates as — carries ROLE_OPERATOR in the docker and CI realms and is classified
+    # HUMAN by AuthorizeInterceptor, so every backend service could feed the ECB regulatory return.
+    # anacredit-service runs AUTHZ_ENFORCE=false today, so this was latent rather than live; the
+    # exclusion lands before the enforce flip rather than after it.
+    #
+    # The exclusion strands no caller, and this is the one entry where the audit was already on
+    # record: the header above states it ("No verified M2M caller exists for anacredit-service") and
+    # re-confirming it in #4228 found no REST client in the fleet targeting the service. That claim
+    # is now load-bearing rather than advisory, which is the point of writing the exclusion down.
     allowed_reasons contains "operator-anacredit-create" if {
     	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	input.action == "anacredit.create"

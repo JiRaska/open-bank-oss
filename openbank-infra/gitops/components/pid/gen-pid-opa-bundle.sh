@@ -9,72 +9,18 @@ RULES_YAML=$REPO/openbank-libs/governance/rules-opa-data.yaml
 MANIFEST=$REPO/openbank-infra/opa/bundle.manifest
 
 # Pid REST extension — identity + EUDI + party actions for operators/admins
-PID_REST_EXT=$(cat << 'REGO'
-# SPDX-License-Identifier: Apache-2.0
 # Pid-service REST extension (ADR-0034, ADR-0094, ADR-0072).
-# Extends openbank.rest with identity-domain allow reasons.
-# Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
 #
-# Actions gated:
-#   identity.eudi.issue   — EudiCredentialIssuerResource.issue
-#   identity.eudi.revoke  — EudiCredentialIssuerResource.revoke
-#   identity.eudi.request — EudiOpenId4VpResource.request
-#   identity.eudi.poll    — EudiOpenId4VpResource.poll
-#   identity.eudi.verify  — EudiPresentationResource.verify
-#   identity.case.list    — VerificationCaseResource.list
-#   identity.case.get     — VerificationCaseResource.get
-#   identity.case.decide  — VerificationCaseResource.decide (four-eyes in handler)
-#   identity.case.reopen  — VerificationCaseResource.reopen
-#   identity.register     — PartyResource.register
-#   identity.resolve      — PartyResource.resolve
-#   identity.link         — PartyResource.link
-#   pid.resolve           — PartyResource.resolvePid
-#   party.changeStatus    — PartyResource.changeStatus
-
-package openbank.rest
-
-import rego.v1
-
-# Operators and admins may perform any identity.* write operation on the pid-service.
-# ROLE_OPERATOR covers onboarding cockpit staff; ROLE_ADMIN covers platform administrators.
-# The specific four-eyes enforcement for identity.case.decide is inside the handler.
-allowed_reasons contains "operator-identity-write" if {
-	input.principal.type == "HUMAN"
-	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-	role in input.principal.roles
-	startswith(input.action, "identity.")
-}
-
-# Operators and admins may resolve a PID record (pid.resolve) — used by onboarding dedup.
-allowed_reasons contains "operator-pid-resolve" if {
-	input.principal.type == "HUMAN"
-	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-	role in input.principal.roles
-	input.action == "pid.resolve"
-}
-
-# Operators and admins may change party status (party.changeStatus) — onboarding state machine.
-allowed_reasons contains "operator-party-status" if {
-	input.principal.type == "HUMAN"
-	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-	role in input.principal.roles
-	input.action == "party.changeStatus"
-}
-
-# Authenticated customers may request and poll their own EUDI credential presentation
-# (OpenID4VP relying-party flow, ADR-0094). The resource.id (partyId) is checked against
-# principal.id in the handler; OPA grants the action class.
-allowed_reasons contains "customer-eudi-request" if {
-	input.principal.type == "HUMAN"
-	input.principal.id != ""
-	input.action in {"identity.eudi.request", "identity.eudi.poll", "identity.eudi.verify"}
-}
-REGO
-)
+# Extension extracted to a standalone .rego (mirroring vop_rest_ext.rego, #4239, and the #1322
+# pattern) so `opa test` can load and cover it — see pid_rest_ext_test.rego in this same
+# directory. It was a heredoc until #4228, which is why its rules had no test at all:
+# opa-policy.yml discovers suites by the *_rest_ext.rego / *_rest_ext_test.rego file PAIR, and a
+# heredoc has no file to pair with.
+PID_REST_EXT=$REPO/openbank-infra/gitops/components/pid/pid_rest_ext.rego
 
 CHECKSUM=$(printf '%s\n' \
     "$(cat "$REST_REGO")" \
-    "$(echo "$PID_REST_EXT")" \
+    "$(cat "$PID_REST_EXT")" \
     "$(cat "$AGENTS_REGO")" \
     "$(cat "$AGENTS_YAML")" \
     "$(cat "$RULES_YAML")" \
@@ -100,7 +46,7 @@ OUT=$REPO/openbank-infra/gitops/components/pid/pid-opa-bundle.yaml
   echo "  rest.rego: |"
   sed 's/^/    /' "$REST_REGO" | sed 's/[[:space:]]*$//'
   echo "  pid_rest_ext.rego: |"
-  echo "$PID_REST_EXT" | sed 's/^/    /' | sed 's/[[:space:]]*$//'
+  sed 's/^/    /' "$PID_REST_EXT" | sed 's/[[:space:]]*$//'
   echo "  agents.rego: |"
   sed 's/^/    /' "$AGENTS_REGO" | sed 's/[[:space:]]*$//'
   echo "  agents-data.yaml: |"

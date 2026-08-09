@@ -51,6 +51,19 @@ openbank-sdd-service.
   observation window (rules.yaml AUTHZ_ENFORCE guardrail, issue #3679 cohort).
 - Execution calls to sepa-payment are service-to-service (OIDC client credentials via
   `OidcClientRequestReactiveFilter`), not ambient authority.
+- **`standingOrder.pause` is identity-scoped, not role-only (GHSA-58jq-9hq3-66jr, #4228).**
+  `standing_order_rest_ext.rego` grants it two ways and only two: `operator-standing-order-pause`
+  for HUMANS holding ROLE_OPERATOR/ROLE_ADMIN, now carrying
+  `not startswith(input.principal.id, "service-account-")`; and `m2m-standing-order-pause`, pinned
+  to the single client id `service-account-openbank-edge`. Before this, the role branch was the
+  ONLY reason and it admitted every backend service — measured against
+  `standing-order-opa-bundle.yaml`, `service-account-openbank-services` + ROLE_OPERATOR resolved
+  exactly `["operator-standing-order-pause"]`. The identity-scoped grant had to land in the same
+  change rather than after it, because unlike vop/fx/ledger this action has a real M2M caller and
+  an exclusion alone would have broken customer self-service pause. The pin is one client id
+  rather than `startswith("service-account-")`: pausing mutates a customer's payment schedule and
+  has exactly one legitimate caller, so any-service-account would re-create the exposure.
+  Ownership is still enforced in the handler (`X-Customer-Party-Id`); OPA grants the action class.
 - The scheduler/consumer path has no human in the loop by design; there is no operator
   force-execute endpoint.
 
@@ -79,5 +92,10 @@ openbank-sdd-service.
 
 ## 6. Change log
 
+- **2026-08-09** — `standingOrder.pause` narrowed from a role-only grant to an identity-scoped
+  one (GHSA-58jq-9hq3-66jr, issue #4228): added `m2m-standing-order-pause` pinned to
+  `service-account-openbank-edge`, then the `not startswith(input.principal.id,
+  "service-account-")` exclusion on `operator-standing-order-pause`. Covered by
+  `standing_order_rest_ext_test.rego` (9 cases; stripping either half reddens a disjoint subset).
 - **2026-08-03** — Initial lightweight threat model (ADR-0030 D2), written for the
   `money_path_services` classification (issue #2188).

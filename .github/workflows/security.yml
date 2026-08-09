@@ -204,7 +204,7 @@ jobs:
       # that invokes gradlew.
       - name: Validate Gradle wrapper
         if: matrix.language == 'java-kotlin'
-        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
       # The javascript-typescript extractor needs Node.js on PATH even in
       # build-mode: none — it shells out to autobuild.sh internally to verify a
@@ -217,7 +217,7 @@ jobs:
         with:
           node-version: "20"
 
-      - uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
+      - uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -234,7 +234,7 @@ jobs:
       # minutes; the two-phase step below keeps the empty-analysis guard that the cold
       # flag was protecting (a run where every compile resolves FROM-CACHE would trace
       # zero compilations and record an empty CodeQL analysis).
-      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         if: matrix.language == 'java-kotlin'
 
       # Two-phase: try the cached build; if NO compile task actually executed (all
@@ -266,7 +266,7 @@ jobs:
             echo "compile tasks executed: $executed"
           fi
 
-      - uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
+      - uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
         with:
           category: "/language:${{ matrix.language }}"
 
@@ -393,14 +393,14 @@ jobs:
       # this repo went public failed here). Distinct categories per file fixes it.
       - name: Upload Trivy fs SARIF
         if: always() && steps.verify-trivy.outcome == 'success' && github.event.repository.private == false
-        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
 
       - name: Upload Trivy config SARIF
         if: always() && steps.verify-trivy.outcome == 'success' && github.event.repository.private == false
-        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
         with:
           sarif_file: trivy-config.sarif
           category: trivy-config
@@ -458,7 +458,7 @@ jobs:
           distribution: temurin
           java-version: "25"
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
       - name: Cache Gradle
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
         with:

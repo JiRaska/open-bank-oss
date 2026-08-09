@@ -1693,7 +1693,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (ADR-0034). Value is stamped by
         # gen-standing-order-opa-bundle.sh — do not hand-edit.
-        openbank.tech/policy-checksum: "7c566db83e5d2f32" # standing-order-opa-bundle
+        openbank.tech/policy-checksum: "831f0828929b4d44" # standing-order-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
