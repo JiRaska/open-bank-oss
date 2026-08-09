@@ -596,7 +596,7 @@ class NotificationConsumer {
             .chain { tokens ->
                 if (tokens.isEmpty()) {
                     log.infof("PUSH: no active devices for party=%s template=%s", req.partyId, req.template)
-                    pushMetrics.recordFanOut(NotificationOutcome.FAILED, 0)
+                    pushMetrics.recordFanOut(req.template, NotificationOutcome.FAILED, 0)
                     return@chain markStatus(
                         req,
                         entity,
@@ -655,7 +655,7 @@ class NotificationConsumer {
         )
         val outcome = pushOutcomeOf(accepted, skipped)
         val reason = pushReasonOf(accepted, skipped)
-        pushMetrics.recordFanOut(outcome, results.size)
+        pushMetrics.recordFanOut(req.template, outcome, results.size)
         return Panache.withTransaction {
             deviceTokenRepo.invalidate(invalidIds).chain { _ ->
                 notificationRepo.find("notificationId", entity.notificationId).firstResult()
