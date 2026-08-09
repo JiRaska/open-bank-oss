@@ -7,13 +7,29 @@ package com.openbank.libs.api.error
 import com.fasterxml.jackson.annotation.JsonInclude
 import java.time.Instant
 
+/**
+ * The fleet-wide error envelope.
+ *
+ * [timestamp] is deliberately **not defaulted** (#3874). It used to default to [Instant.EPOCH], and
+ * no call site in the fleet ever passed it, so every error response the platform served carried
+ * `1970-01-01T00:00:00Z` — a syntactically valid value that nothing fails on, which is why it
+ * survived. The support path this envelope exists for ("contact support with traceId=…") lost the
+ * one field that would place a trace in time.
+ *
+ * The fix is the *absence* of a default, not a better one. `Instant.now()` as a default would have
+ * made every existing call site silently correct and left no way to distinguish "the caller meant
+ * now" from "the caller forgot" — the same failure mode, one value to the right. It would also put
+ * a hidden, unmockable clock read inside a framework-free domain type whose equality this repo's
+ * tests rely on. A required argument makes the compiler enumerate every construction site, and an
+ * epoch timestamp can now only appear because someone wrote it.
+ */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class ApiError(
     val traceId: String,
     val status: Int,
     val code: String,
     val message: String,
-    val timestamp: Instant = Instant.EPOCH,
+    val timestamp: Instant,
     val details: List<FieldError>? = null,
 )
 

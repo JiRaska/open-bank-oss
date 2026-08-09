@@ -76,8 +76,7 @@
 #
 gates:
 
-  # ==== lint ==================================================================
-
+  # ==== lint ===========================================================
   # The runner's own falsification, riding the cheapest shard. run-gates.py decides for
   # every other gate in this file whether a non-zero exit fails the build, whether an
   # advisory warning is emitted, and — the part with no second opinion anywhere — whether a
@@ -149,17 +148,25 @@ gates:
         echo "No shell scripts under openbank-infra/scripts — skipping."
       fi
 
-  # ==== gitops ================================================================
-
+  # ==== gitops =========================================================
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
-  # mechanism-3 liveness gauge. ADVISORY with a baseline ratchet — the 37 files
-  # without a heartbeat at introduction are listed in the producer; a NEW job
-  # without one fails even now, and the baseline may only shrink. rules.yaml:
-  # scheduled_methods.liveness_adoption, enforce target 2026-09-30.
+  # mechanism-3 liveness gauge. ENFORCED as of #3931, ahead of the 2026-09-30
+  # target — a baseline ratchet, not a sweep gate: the 16 files still without a
+  # heartbeat are grandfathered in the producer's BASELINE, and only two things
+  # are red — a NEW domain @Scheduled job with no registerWorkflowLiveness, and a
+  # baseline entry that HEALED without being removed. Both directions, so the list
+  # cannot rot either way. rules.yaml: scheduled_methods.liveness_adoption.
+  #
+  # Why the mode had to move: the script already returned 1 on both of those
+  # branches, and `mode: advisory` converted it to a warning at the runner
+  # (run-gates.py:333-338). So the ratchet's forward half never blocked — #3875
+  # merged a heartbeat-less ConversationRetentionScheduler on the day the gate
+  # reported it, and account-service's SavingsProposalExpiryScheduler followed it
+  # in the same way. A ratchet whose forward half does not block is not a ratchet.
   - id: scheduler-liveness-adoption
-    name: "scheduler liveness adoption (ADR-0237, advisory)"
+    name: "scheduler liveness adoption (ADR-0237)"
     group: gitops
-    mode: advisory
+    mode: enforced
     selftest: |
       python3 .github/scripts/check-scheduler-liveness.py --self-test
     run: |
@@ -175,8 +182,9 @@ gates:
     name: "deployed image pins name a commit (issue #3344, enforced)"
     group: gitops
     mode: enforced
+    selftest: python3 .github/scripts/check-deploy-drift.py --self-test
+    selftest_expect: pass
     run: |
-      python3 .github/scripts/check-deploy-drift.py --self-test
       python3 .github/scripts/check-deploy-drift.py --root . --offline
 
   # ADR-0081 / issue #854 step 4: NetworkPolicies are DERIVED data (DO NOT
@@ -191,21 +199,23 @@ gates:
     name: every gateway model declares a per-token price (an unpriced model costs $0 and voids every budget)
     group: gitops
     mode: enforced
+    selftest: python3 .github/scripts/check-litellm-model-costs.py --self-test
+    selftest_expect: pass
     run: |
       # Falsified both ways before wiring in: 4 findings against the unpriced tree, 0 after,
       # 9 self-test cases including an explicit zero (which must NOT be treated as a price).
-      python3 .github/scripts/check-litellm-model-costs.py --self-test
       python3 .github/scripts/check-litellm-model-costs.py --enforce
 
   - id: agent-virtual-keys
     name: every agent authenticates with its OWN LiteLLM virtual key, not the shared master key
     group: gitops
     mode: enforced
+    selftest: python3 .github/scripts/check-agent-virtual-keys.py --self-test
+    selftest_expect: pass
     run: |
       # Falsified in both directions before it was wired in: 4 findings against the
       # pre-fix tree, 0 after, plus 7 self-test cases covering the exemption and the
       # near-misses. A gate that has only ever passed is unfalsified.
-      python3 .github/scripts/check-agent-virtual-keys.py --self-test
       python3 .github/scripts/check-agent-virtual-keys.py --enforce
 
   - id: model-residency-claims
@@ -250,14 +260,22 @@ gates:
       python3 .github/scripts/check-oidc-secret-convention.py --enforce
 
   - id: single-replica-rollout-strategy
-    name: "one-replica workloads declare their rollout strategy (issue #3545, enforced, baseline-ratcheted)"
+    name: "one-replica workloads declare their rollout strategy AND their canary is realisable (issues #3545/#3806, enforced, baseline-ratcheted)"
     group: gitops
     mode: enforced
     selftest: python3 .github/scripts/check-single-replica-rollout-strategy.py --self-test
     selftest_expect: pass
     run: |
+      # Two independent questions over the same manifests. The first is #3545: did the workload
+      # SAY what it wants, or inherit maxSurge 1 / maxUnavailable 0 by accident. The second is
+      # #3806: a canary block counted as "declared" and stopped there, which is how 21 of 21
+      # canary Rollouts (17 money-path) declaring `setWeight: 10` on ONE replica were never
+      # findings — without trafficRouting a weight is pods-out-of-pods, so one pod expresses 0 or
+      # 100 and nothing else, while status.phase reads Healthy throughout. Separate baselines:
+      # #3545's is empty on purpose and must stay that way.
       python3 .github/scripts/check-single-replica-rollout-strategy.py --enforce \
-        --baseline .github/single-replica-rollout-strategy-baseline.txt
+        --baseline .github/single-replica-rollout-strategy-baseline.txt \
+        --canary-baseline .github/canary-rollout-realisable-baseline.txt
 
   - id: gen-network-policies-drift-gate
     name: "gen-network-policies drift gate (ADR-0081, issue #854)"
@@ -503,12 +521,12 @@ gates:
     name: "probe/scrape port has a listener (issue #2872, enforced)"
     group: gitops
     mode: enforced
+    selftest: python3 .github/scripts/check-probe-port-listener.py --selftest
+    selftest_expect: pass
     run: |
-      python3 .github/scripts/check-probe-port-listener.py --selftest
       python3 .github/scripts/check-probe-port-listener.py --enforce
 
-  # ==== supplychain ===========================================================
-
+  # ==== supplychain ====================================================
   - id: license-header-consistency
     name: "License header consistency (issue #2280, enforced)"
     group: supplychain
@@ -808,8 +826,7 @@ gates:
     run: |
       python3 .github/scripts/check-advisory-gate-registration.py --expect-manifest
 
-  # ==== registry ==============================================================
-
+  # ==== registry =======================================================
   # issue #669 scope item 3 / rules.yaml: slo. Every money_path_services entry needs a
   # matching availability + latency Pyrra ServiceLevelObjective whose target/window match
   # the governed values in rules.yaml — pyyaml is already installed by the step above.
@@ -817,6 +834,8 @@ gates:
     name: "SLO registry consistency (issue #669, rules.yaml: slo)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/check-slo-registry.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-slo-registry.py
 
@@ -907,14 +926,20 @@ gates:
   # upstream — must be backed by grep-verifiable code, or a one-line-reasoned allowlist entry.
   # An upstream edge on S naming T is a claim about T's code, so it is checked in T; both
   # directions collapse to one <source>-><target> key. Reuses mechanism 1's topic map via
-  # importlib. ADVISORY (ADR-0144) — findings are ::warning annotations. Flip to enforced once
-  # the first-scan triage (34 downstream + 24 upstream) lands = add --enforce below.
+  # importlib. ENFORCED since #3982: the backlog it was waiting on is at zero. Both sides read
+  # from committed files and the check is derived, so a red carries no judgement to exercise —
+  # either the declaration matches the code or one of them is wrong. It fails in BOTH directions:
+  # an unbacked edge, and an allowlist entry that no longer applies (the second one caught a live
+  # stale exemption the day it was written — interest-service had grown the direct client its
+  # reason said it would never have).
   - id: governance-lineage-vs-code-audit
-    name: "governance lineage-vs-code audit (ADR-0160, advisory)"
+    name: "governance lineage-vs-code audit (ADR-0160, enforced)"
     group: registry
-    mode: advisory
+    mode: enforced
     run: |
-      python3 .github/scripts/check-governance-lineage.py
+      python3 .github/scripts/check-governance-lineage.py --enforce
+    selftest: python3 .github/scripts/check-governance-lineage.py --self-test
+    selftest_expect: pass
 
   # issue #2412 (third residual). openbank-mcp-service masks PII on every tool result
   # UNCONDITIONALLY — deliberately, since a switch that can turn a declared control off is how
@@ -1005,13 +1030,14 @@ gates:
     name: "agent case-coordination schema invariants (ADR-0244 D3/D6/D9, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/check-agent-case-schema.py --self-test
+    selftest_expect: pass
     run: |
       # #3771 added case_classes + case_capabilities to agents.yaml with no validator;
       # a threshold of 1.30 or a second charter holding case.coordinate would parse as
       # valid YAML and merge as a governance lie (budgets are the D6 stop-condition,
       # single-coordinator the D3/D9 audit invariant). Falsified both directions by the
       # 15-case self-test; the real file passes.
-      python3 .github/scripts/check-agent-case-schema.py --self-test
       python3 .github/scripts/check-agent-case-schema.py --enforce
 
   # EU AI Act inventory drift (ADR-0148 rule #7, issue #1918).
@@ -1078,8 +1104,9 @@ gates:
     name: "ensure-ecr-repository classification (#3423/#3453, enforced)"
     group: supplychain
     mode: enforced
+    selftest: bash .github/scripts/ensure-ecr-repository.sh --self-test
+    selftest_expect: pass
     run: |
-      bash .github/scripts/ensure-ecr-repository.sh --self-test
 
   # campaign-service's rollout died on `/bundle/rules-data.yaml: merge error` (#2872 defect 4).
   # The sidecar runs `opa run --bundle /bundle` — DIRECTORY mode, where OPA derives a data
@@ -1120,24 +1147,26 @@ gates:
     name: every committed scheduler cron parses (a malformed one is a boot crashloop, not a missed run)
     group: kotlin
     mode: enforced
+    selftest: python3 .github/scripts/check-scheduler-cron-syntax.py --self-test
+    selftest_expect: pass
     run: |
       # Nothing in the test layers parses the PRODUCTION cron: the cron IT overrides it with a
       # fast expression and %test overrides it with a never-fire one, so both run against a
       # different string than the one that ships. Falsified against the real files with three
       # typo classes (bad day name, unix 5-field, both day fields '*'); 12 self-tests.
-      python3 .github/scripts/check-scheduler-cron-syntax.py --self-test
       python3 .github/scripts/check-scheduler-cron-syntax.py --enforce
 
   - id: scheduled-trigger-emitted
     name: a declared SCHEDULED trigger must actually be emitted (an unreachable schedule fails silently)
     group: kotlin
     mode: enforced
+    selftest: python3 .github/scripts/check-scheduled-trigger-emitted.py --self-test
+    selftest_expect: pass
     run: |
       # Falsified in three directions before wiring in: a new unemitted service fails, a
       # baselined service that becomes covered ALSO fails (so the list cannot rot), and the
       # tree as committed passes. 9 self-test cases, including comment-only mentions and
       # Kotlin's NESTED block comments.
-      python3 .github/scripts/check-scheduled-trigger-emitted.py --self-test
       python3 .github/scripts/check-scheduled-trigger-emitted.py --enforce
 
   # On 2026-08-02 PR #3492 squash-merged and silently removed THREE enforced gates from this file
@@ -1416,8 +1445,7 @@ gates:
     run: |
       python3 .github/scripts/gen-ai-governance-snapshot.py --check
 
-  # ==== kotlin ================================================================
-
+  # ==== kotlin =========================================================
   # ADR-0160 mechanism 1 / rules.yaml: change_requirements.event_consumer_liveness.
   # Fleet-wide scan (not diff-scoped): every Kafka topic a service publishes must have a
   # real @Incoming consumer somewhere in the fleet, or a one-line-reasoned allowlist entry.
@@ -1500,8 +1528,9 @@ gates:
     name: "non-nullable required JAX-RS param ratchet (issue #3104, enforced)"
     group: kotlin
     mode: enforced
+    selftest: python3 .github/scripts/check-nonnull-jaxrs-params.py --self-test
+    selftest_expect: pass
     run: |
-      python3 .github/scripts/check-nonnull-jaxrs-params.py --self-test
       python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
 
   # openbank.outbox.dispatch-enabled guard (the CLAUDE.md "outbox footgun":
@@ -1684,6 +1713,26 @@ gates:
     run: |
       bash .github/scripts/resolve-record-deployment-version.sh --self-test
 
+  # The other half of every other gate in this file. Every other gate here reads committed text,
+  # because that is what CI can see; this one compares that text to what the cluster actually
+  # does. Only the COMPARISON runs in CI — it is a pure function of (snapshot, repo) and is what
+  # the self-test drives. Collection needs cluster credentials no workflow has yet, so it is
+  # dispatch-only for now (runtime-conformance.yml), the same split check-external-feeds.py uses.
+  #
+  # Falsified before wiring in: the 22-case self-test fails when any comparator is broken, and the
+  # first run against the LIVE estate exposed two defects in the tool itself — libs-runtime's
+  # abstract dispatcher counted as a service, and outbox facts keyed by table name never matched
+  # claims keyed by directory name, so nine real findings were silently skipped. Both are now
+  # self-test cases.
+  - id: runtime-conformance-comparators
+    name: "runtime conformance: claim-vs-cluster comparators (enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/runtime-conformance.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/runtime-conformance.py --self-test
   # A service that ships an outbox must write to it (#4007). Eight do not: dispatcher, backlog
   # gauge, migration and `dispatch-enabled: true`, with no OutboxMessage construction anywhere in
   # src/main — so the dispatcher polls a table nothing writes to and the gauge reads 0, which is
@@ -1805,6 +1854,8 @@ gates:
     name: "ASVS L3 mechanical subset (enforced, baseline-ratcheted)"
     group: api
     mode: enforced
+    selftest: python3 .github/scripts/check-asvs-l3.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-asvs-l3.py --enforce --baseline .github/asvs-l3-baseline.txt
 
@@ -1818,8 +1869,7 @@ gates:
     run: |
       python3 .github/scripts/check-openapi-server-port.py --enforce
 
-  # ==== data ==================================================================
-
+  # ==== data ===========================================================
   - id: kafka-topic-existence
     name: "Kafka topic existence (issue #2598, enforced)"
     group: data
@@ -2013,20 +2063,21 @@ gates:
     name: "kafka dotted-key ratchet (issues #686/#2945, enforced)"
     group: data
     mode: enforced
+    selftest: python3 .github/scripts/check-kafka-dotted-keys.py --self-test
+    selftest_expect: pass
     run: |
-      python3 .github/scripts/check-kafka-dotted-keys.py --self-test
       python3 .github/scripts/check-kafka-dotted-keys.py --root .
 
   - id: external-feed-declaration-drift
     name: "external feed declaration drift (issue #2204, enforced)"
     group: data
     mode: enforced
+    selftest: python3 .github/scripts/check-external-feeds.py --self-test
+    selftest_expect: pass
     run: |
-      python3 .github/scripts/check-external-feeds.py --self-test
       python3 .github/scripts/check-external-feeds.py --root . --offline
 
-  # ==== security ==============================================================
-
+  # ==== security =======================================================
   # rules.yaml: alerting.critical_alerts_must_egress. A severity=critical alert must
   # reach a receiver that leaves the cluster. Guards the "severity inversion": critical
   # routed only to GoAlert/ntfy/Holmes — all cluster-internal with no Ingress
@@ -2309,3 +2360,152 @@ gates:
       # closed. Falsified against the real tree before wiring in: injecting one production
       # caller and, separately, flipping the declared status each produce exactly one finding.
       python3 .github/scripts/check-enforcement-reachability.py --enforce
+  - id: readiness-attestation-format
+    name: "prod-readiness attestations: format + freshness (#2365, enforced)"
+    group: registry
+    mode: enforced
+    selftest: python3 .github/scripts/check-readiness-attestations.py --self-test
+    selftest_expect: pass
+    run: |
+      # attestations.yaml is the ONLY hand-entered input to the prod-readiness matrix, and
+      # nothing read it before this gate. It shipped with `consent-service:` as a service
+      # heading; the collector looks attestations up by the SHORT name (`consent`), so that
+      # entry matched nothing and scored nothing — measured, renaming the one key flips
+      # consent C7 from 2 to 3. A wrong key is invisible from both ends: the file reads as
+      # attested and the matrix reads as underscored, and neither points at the other.
+      #
+      # ENFORCED covers AUTHORING defects only — missing field, non-date, future date,
+      # unknown service, unknown attestation key, unresolvable ref. Each is introduced and
+      # fixable by the PR that writes it. DECAY deliberately only warns (the script prints
+      # ::warning and still exits 0): the collector's TTL already stops counting an expired
+      # entry, so a lapse cannot buy a green cell, and failing the whole fleet the morning a
+      # pentest TTL rolls over is the alert-fatigue trade this repo has already paid for.
+      # Expired for more than 30 days IS an error — that is stale bookkeeping, not a lapse.
+      #
+      # The attestation count prints on every run: a green reading "0 attestations" would be
+      # a gate that never opened the file.
+      python3 .github/scripts/check-readiness-attestations.py
+  - id: label-description-length
+    name: "a labels.yml description fits GitHub's 100-character cap (#4192)"
+    group: lint
+    mode: enforced
+    selftest: python3 .github/scripts/check-label-descriptions.py --self-test
+    selftest_expect: pass
+    run: |
+      # GitHub caps a label description at 100 characters and Label sync fails the whole apply on
+      # the first over-long entry, so ONE wordy label turns main red on a push-triggered workflow
+      # addressed to nobody. This has happened THREE times, each fixed by shortening the string —
+      # which leaves the next occurrence exactly as reachable. The limit is invisible from every
+      # angle a contributor uses: the YAML is valid, yamllint is clean, and the failure surfaces
+      # only after the merge. Falsified on the real file: the #4192 entry at 110 chars exits 1 and
+      # is named; at 100 it exits 0.
+      python3 .github/scripts/check-label-descriptions.py .
+
+  # rules.yaml pr_file_overlap. Every other check in this repo is scoped to ONE pull request
+  # against ONE base, so two PRs editing the same file are structurally invisible to CI — and
+  # the failures that produces are precisely the ones git calls CLEAN. Three shapes, all
+  # measured here: a duplicate guard merged twice (#2984 vs #3009, the second fully GREEN on
+  # all five required contexts), two neighbouring list entries merging to one
+  # (.release-please-manifest.json, 56 -> 55, caught only by an unrelated registration gate),
+  # and two spec PRs claiming the same openapi info.version because each is classified against
+  # its own creation-time base (#481 x #524, and again from an already-MERGED PR in #3055).
+  #
+  # ADVISORY on purpose, and not on a graduation path: enforcing would red BOTH PRs the moment
+  # two of them touched rules.yaml, clearable only by the other merging first — a queue
+  # deadlock. The gate reports and classifies; a human decides which of the three real
+  # outcomes it is (identical content / true duplicate / genuine divergence).
+  #
+  # The one thing it decides rather than reports: `identical content`. The blob sha at each
+  # PR's head says whether the bytes already agree, which matters because the file list comes
+  # from the MERGE-BASE — after a competing PR squash-merges, the survivor still lists the
+  # overlap as a diff (#3103's security.yml matched main byte for byte). Without that
+  # comparison the gate would warn loudest exactly when the work was already done.
+  #
+  # PR-only: there is no "other open PR" to compare against on a push to main. Needs GH_TOKEN,
+  # which the shard job already exports. Exit 2 = the enumeration FAILED and the verdict is
+  # not clean — on GitHub a permission-shaped absence is byte-identical to a real one.
+  - id: pr-file-overlap
+    name: "PR file overlap (other open PRs editing the same files, advisory)"
+    group: lint
+    mode: advisory
+    when: pull_request
+    selftest: python3 .github/scripts/check-pr-file-overlap.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-pr-file-overlap.py
+
+  # ADR-0251. The script this falsifies is the PROOF that an independent review happened, and
+  # its predecessor is the reason the control was retired: ADR-0154's "Verify the Claude
+  # fallback actually reviewed" step carried the SAME `if:` as the review it verified, so
+  # across 10 consecutive runs both were `skipped` while every run concluded `success`
+  # (#4281). A verifier that can be switched off by the thing it verifies is not one.
+  #
+  # So the script itself must stay falsifiable, which is what this gate is for. Its self-test
+  # drives 9 cases: the two shapes that ARE a review must pass, and seven that are not — a
+  # missing file, no argument, an empty file, a whitespace-only file, plausible prose with no
+  # verdict line, a real `401 OAuth access token is invalid`, and a dead-driver marker sitting
+  # next to a verdict line (the marker must win).
+  #
+  # Three of those assert on the MESSAGE, not just the exit code. That is not thoroughness for
+  # its own sake: deleting the empty-file check left this self-test GREEN, because an empty
+  # file also fails one branch later for want of a verdict line. Two branches agreeing on the
+  # verdict made the earlier one unfalsifiable — inside the very script whose job is to make
+  # a non-review impossible to mistake for a clean one.
+  - id: agent-review-proof-falsifiable
+    name: "proof-of-review script is falsifiable (ADR-0251, enforced)"
+    group: lint
+    mode: enforced
+    selftest: bash .github/scripts/check-agent-review-happened.sh --self-test
+    selftest_expect: pass
+    run: |
+      bash .github/scripts/check-agent-review-happened.sh --self-test
+
+  # ADR-0251's other half: WHICH PRs get reviewed. Both of this rule's clauses were wrong in
+  # the first draft, and both failed silently toward reviewing LESS than the ADR claimed —
+  # `governance` written as a commit TYPE (no such type exists in rules.yaml `commits.types`,
+  # so the branch was unreachable dead code, 0 hits in 7 days), and the money-path list
+  # matched literally (`money_path_services` says `openbank-ledger-service`, real scopes say
+  # both `fraud` and `fraud-service`, so `fix(ledger)` — the most obviously in-scope shape
+  # here — was not covered; 48 PRs instead of 114).
+  #
+  # Neither was visible by reading the rule. The self-test drives 18 titles whose answer is
+  # known, plus an unreadable rules.yaml which must RAISE rather than classify everything out
+  # of scope. It reads its fixture through the real money_path_scopes() — an earlier version
+  # built the normalised set inline and stayed green when that function was gutted, the
+  # counter-example never reaching the code under test.
+  - id: agent-review-scope-falsifiable
+    name: "ADR-0251 review scope rule is falsifiable (enforced)"
+    group: lint
+    mode: enforced
+    selftest: python3 .github/scripts/agent-review-scope.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/agent-review-scope.py --self-test
+
+  # Falsifiability has to be DECLARED, not merely present. `selftest:` is a field run-gates.py
+  # ACTS on — it runs the harness before the gate and skips the gate when the verdict is wrong.
+  # A `--self-test` invoked inside a gate's own `run:` block reads identically to a human and
+  # is invisible to every tool: no ordering, no selftest_expect check, and a harness that
+  # starts failing cannot be told from the gate failing.
+  #
+  # Measured 2026-08-09 over 128 gates: 63 declared one, TWELVE more ran a self-test inline,
+  # and two others (check-slo-registry.py, check-asvs-l3.py) shipped a harness nothing called
+  # at all. Wiring those 13 took no new logic and moved declared falsifiability 63 -> 76.
+  #
+  # Same defect as `mode:` — the repo already learned advisory-vs-enforced must be stated
+  # outright rather than inferred from a step name (#2450, #2392). This is that lesson applied
+  # to the property the whole gate system rests on.
+  #
+  # Rule 1 (an existing harness must be declared) has NO baseline: the harness demonstrably
+  # exists, so nothing is being weighed. Rule 2 is a ratchet — today's 44 undeclared checkers
+  # are baselined as debt rather than fixed, because a gate that fails on its own backlog is
+  # one nobody can merge past. Rule 3 fails on a stale baseline entry in either direction, so
+  # the list cannot rot: it shrinks freely, and growing it needs a reviewer.
+  - id: gate-selftest-declaration
+    name: "every gate's falsifiability is declared, not inline (enforced)"
+    group: lint
+    mode: enforced
+    selftest: python3 .github/scripts/check-gate-selftest-declaration.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-gate-selftest-declaration.py --enforce

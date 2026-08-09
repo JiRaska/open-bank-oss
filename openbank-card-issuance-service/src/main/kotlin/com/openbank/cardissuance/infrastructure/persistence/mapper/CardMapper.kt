@@ -15,6 +15,8 @@ fun CardEntity.toDomain() = Card(
     dailyLimitMinorUnits = dailyLimitMinorUnits, monthlyLimitMinorUnits = monthlyLimitMinorUnits,
     currency = currency, deliveryAddress = deliveryAddress,
     activatedAt = activatedAt, blockedAt = blockedAt, blockedReason = blockedReason,
+    expiresAt = expiresAt,
+    closedReason = closedReason?.let { r -> runCatching { CardClosedReason.valueOf(r) }.getOrNull() },
     createdAt = createdAt, updatedAt = updatedAt,
     contactlessEnabled = contactlessEnabled, onlineEnabled = onlineEnabled,
     atmEnabled = atmEnabled, abroadEnabled = abroadEnabled,
@@ -45,8 +47,41 @@ fun Card.toEntity() = CardEntity().also { e ->
     e.activatedAt = activatedAt
     e.blockedAt = blockedAt
     e.blockedReason = blockedReason
+    e.expiresAt = expiresAt
+    e.closedReason = closedReason?.name
     e.createdAt = createdAt
     e.updatedAt = updatedAt
     e.panEncrypted = panEncrypted
     e.cvvEncrypted = cvvEncrypted
+}
+
+/**
+ * The UPDATE half of `CardRepositoryImpl.save`. It must stay field-for-field in step with
+ * [toEntity], the INSERT half — a column set by one and not the other means the value is written at
+ * issue and then silently dropped by every later transition. `CardMapperUpdateParityTest` compares
+ * the two paths over every mutable property, so a new column cannot reach only one of them.
+ *
+ * Lives here rather than inside the repository so the parity test can call it without a Vert.x
+ * context.
+ */
+internal fun CardEntity.applyFrom(card: Card) {
+    status = card.status.name
+    maskedPan = card.maskedPan
+    cardholderName = card.cardholderName
+    embossedName = card.embossedName
+    expiryDate = card.expiryDate
+    dailyLimitMinorUnits = card.dailyLimitMinorUnits
+    monthlyLimitMinorUnits = card.monthlyLimitMinorUnits
+    contactlessEnabled = card.contactlessEnabled
+    onlineEnabled = card.onlineEnabled
+    atmEnabled = card.atmEnabled
+    abroadEnabled = card.abroadEnabled
+    currency = card.currency
+    deliveryAddress = card.deliveryAddress
+    activatedAt = card.activatedAt
+    blockedAt = card.blockedAt
+    blockedReason = card.blockedReason
+    expiresAt = card.expiresAt
+    closedReason = card.closedReason?.name
+    updatedAt = card.updatedAt
 }

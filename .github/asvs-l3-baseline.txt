@@ -236,6 +236,13 @@ V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:108: pl
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:114: plaintext http:// env value http://account-service.accounts.svc:8100
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:116: plaintext http:// env value http://card-issuance-service.payments.svc:8118
 V9.1 openbank-infra/gitops/components/engagement/engagement-service.yaml:81: plaintext http:// env value http://consent-service.consent.svc:8106
+# V9.1 — customer-edge -> delegation-service. NOT a new plaintext edge: the call already
+# ran over plaintext via the resource's @ConfigProperty default
+# (openbank-customer-edge/src/main/resources/application.yaml:121), where neither this gate nor
+# gen-network-policies.py could see it. #4248 declares the same URL in gitops env so the
+# NetworkPolicy generator stops dropping the edge; that makes an EXISTING plaintext hop visible,
+# it does not add one. Retires with the fleet-wide mTLS work alongside the other 215 lines here.
+V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:178: plaintext http:// env value http://delegation-service.delegation.svc:8126
 
 # fraud -> account-service (ADR-0220 D3.5, issue #2749). Genuinely a NEW plaintext edge, declared
 # as such: fraud-service's first-ever outbound rest-client (AccountServiceClient, partyId lookup
@@ -244,3 +251,7 @@ V9.1 openbank-infra/gitops/components/engagement/engagement-service.yaml:81: pla
 # instead (https is not an available alternative here, same as analytics-sink -> Apicurio above).
 # Paid off by the Layer 1 mesh-mTLS work, not before, and not by this PR alone.
 V9.1 openbank-infra/gitops/components/fraud-service/fraud-service.yaml:124: plaintext http:// env value http://account-service.accounts.svc:8100
+V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:477: plaintext http:// env value http://fraud-service.fraud.svc:8133
+V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:832: plaintext http:// env value http://fraud-service.fraud.svc:8133
+V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:1160: plaintext http:// env value http://fraud-service.fraud.svc:8133
+V9.1 openbank-infra/gitops/components/fx-service/fx-service.yaml:89: plaintext http:// env value http://fraud-service.fraud.svc:8133

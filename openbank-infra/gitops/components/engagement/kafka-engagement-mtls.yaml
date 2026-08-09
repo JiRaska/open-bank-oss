@@ -16,6 +16,7 @@
 #   Read  + Describe: openbank.lending.events        (LendingArrearsEventConsumer, ADR-0220 D3.5)
 #   Read  + Describe: openbank.party.events          (PartyErasureConsumer, ADR-0220 D3.5)
 #   Read  + Describe: openbank.fraud.hold.changed    (FraudHoldEventConsumer, ADR-0220 D3.5, #2749)
+#   Read  + Describe: openbank.dispute.events        (DisputeOpenedEventConsumer, ADR-0220 D3.5, #4262)
 #   Read:             group openbank-engagement-service
 #
 # The fraud-hold grant is NOT deferred like the two above were: `fraud-hold-events-in`'s
@@ -23,6 +24,10 @@
 # there is no image/config ordering gap for check-msg-channel-image-parity.py to catch — that
 # guard is about a GitOps *ConfigMap* declaring a channel override ahead of its image, and this
 # is a KafkaUser ACL grant, not a msg-override ConfigMap.
+#
+# The dispute grant (#4262) has the same shape: `dispute-events-in`'s `connector:` and this ACL
+# land in one PR. Its group.id/auto.offset.reset stay OUT of engagement-service-msg-override until
+# the deployed image carries the channel, exactly as fraud-hold-events-in's still do.
 #
 # Cert projection: Strimzi User Operator mints the keystore Secret in `messaging`;
 # the ExternalSecrets below project it into `engagement` via the kafka-messaging-certs
@@ -65,6 +70,12 @@ spec:
       - resource:
           type: topic
           name: openbank.fraud.hold.changed
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dispute.events
           patternType: literal
         operations: [Read, Describe]
         host: "*"

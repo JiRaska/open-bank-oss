@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.11.0...fraud-service-v0.11.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **fraud:** register the ADR-0237 liveness heartbeat on the hold-expiry sweep ([#4286](https://github.com/JiRaska/open-bank-oss/issues/4286)) ([a9ed56a](https://github.com/JiRaska/open-bank-oss/commit/a9ed56ac866f76c896b975e9742bccb6e2168d30)), closes [#3345](https://github.com/JiRaska/open-bank-oss/issues/3345)
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.10.2...fraud-service-v0.11.0) (2026-08-09)
 
 

@@ -28,6 +28,14 @@ data class AuditEntry(
      * one that quietly claims the queue's clock was the event's (#3883).
      */
     val occurredAtSource: OccurredAtSource,
+    /**
+     * Whether [sourceService] is the producer's own claim or the broker topic standing in for it.
+     *
+     * The same distinction [occurredAtSource] draws for time, drawn for attribution, and for the
+     * same reason: a value the consumer supplied must never be indistinguishable from one the
+     * producer asserted (#3994).
+     */
+    val sourceServiceSource: AttributionSource = AttributionSource.ABSENT,
     /** Ingress channel the event arrived through — ui|mcp|api (ADR-0226); null = unknown/legacy. */
     val channel: String? = null,
     /** Ordered on-behalf-of delegation chain from the RFC 8693 `act` claim (ADR-0224); empty = direct. */
@@ -63,6 +71,34 @@ data class AuditEntry(
  * silence this exists to end. A producer that emits the wrong key now shows up as [INGEST] rows
  * and on `openbank.audit.event.time.missing`, and gets fixed at the producer.
  */
+/**
+ * Provenance of an attribution field — who says so (#3994).
+ *
+ * `source_service` was `node["sourceService"] ?: "unknown"`, and 76% of the live audit trail is
+ * that `"unknown"`: `customer-edge` is the only producer in the fleet that populates the field.
+ * The consumer can now recover the producer from the Kafka topic for every subscribed topic
+ * (`TopicAttribution`), which retires almost all of that — but a recovered value is a different
+ * kind of claim from a declared one, and an evidentiary store must not blur the two.
+ *
+ * That is the whole point of this enum. Substituting a plausible value silently is exactly the
+ * defect being fixed: it converts a visibly missing attribution into an invisible wrong one, and
+ * the second is far harder to ever notice again. The row now carries who supplied the answer.
+ */
+enum class AttributionSource {
+    /** The producer put the field in its own payload; the strongest claim available. */
+    EVENT,
+
+    /**
+     * Derived from the Kafka topic the record arrived on. Sound — the topic is transport-level
+     * addressing the producer cannot forge by omission — but it identifies the producing SERVICE,
+     * not a producer's own assertion about itself.
+     */
+    TOPIC,
+
+    /** Neither available: the field holds the `"unknown"` sentinel and attributes nothing. */
+    ABSENT,
+}
+
 enum class OccurredAtSource {
     /** The producer sent a parseable `occurredAt`; [AuditEntry.occurredAt] is the real event time. */
     EVENT,
