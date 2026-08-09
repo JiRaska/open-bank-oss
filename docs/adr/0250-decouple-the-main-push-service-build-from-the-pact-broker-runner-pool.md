@@ -151,6 +151,8 @@ runs, p50 queue 85 min) and roughly 90% of what it computes has no in-cluster de
 residual is provider verification, which is embedded in `test` and therefore not visible as
 its own line above.
 
+## Compliance impact
+
 No regulated data changes hands and no control is removed. `can-i-deploy` keeps asking the same
 question against the same broker state, so the contract gate that guards money-path deploys is
 unchanged in scope and in strictness — this ADR moves where the build executes, not what is
