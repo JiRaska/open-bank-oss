@@ -171,7 +171,7 @@ def stale_helpers(covered: dict[str, str]) -> list[str]:
     """A HELPERS entry that is wrong in either direction is itself a finding."""
     names = {p.name for p in check_scripts()}
     stale = []
-    for name, reason in HELPERS.items():
+    for name in HELPERS:
         if name not in names:
             stale.append(f"{name} is declared a helper but does not exist")
         elif not covered.get(name, "").startswith("declared helper"):

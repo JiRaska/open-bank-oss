@@ -73,11 +73,13 @@ import argparse
 import pathlib
 import sys
 
+import gatelib
+
 try:
     import yaml
 except ImportError:  # pragma: no cover - the runner image always has it
     print("::error::pyyaml unavailable — add it to the runner base image", file=sys.stderr)
-    raise SystemExit(1)
+    raise SystemExit(1) from None
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 GITOPS = REPO / "openbank-infra" / "gitops"
@@ -140,9 +142,9 @@ def unrealisable_weights(doc: dict) -> list[int] | None:
 def canary_findings(root: pathlib.Path) -> list[str]:
     """One line per canary Rollout whose declared weights its replica count cannot express."""
     out: list[str] = []
-    for path in sorted(root.rglob("*.yaml")):
+    for path in gatelib.rglob(root, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except (yaml.YAMLError, UnicodeDecodeError):
             continue
         for doc in docs:
@@ -164,9 +166,9 @@ def canary_findings(root: pathlib.Path) -> list[str]:
 
 def findings(root: pathlib.Path) -> list[str]:
     out: list[str] = []
-    for path in sorted(root.rglob("*.yaml")):
+    for path in gatelib.rglob(root, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except (yaml.YAMLError, UnicodeDecodeError):
             continue
         for doc in docs:

@@ -128,7 +128,7 @@ def _gh(args):
     try:
         return json.loads(proc.stdout)
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"gh {' '.join(args)} returned non-JSON: {e}")
+        raise RuntimeError(f"gh {' '.join(args)} returned non-JSON: {e}") from e
 
 
 def fetch_open_prs():

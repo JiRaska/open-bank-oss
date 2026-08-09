@@ -67,8 +67,6 @@ NO_CORPUS = {
     "pact-version-tree-equivalence-unit-test",
     "record-deployment-version-resolver",
     "runtime-conformance-comparators",
-    "shellcheck",
-    "yamllint",
 }
 
 # Gates that examine a real corpus and do not yet report how much of it they found. This list
@@ -100,7 +98,6 @@ DEBT = {
     "dockerfile-runtime-only": DEBT_MARKER,
     "domain-purity-gate": DEBT_MARKER,
     "dotted-mp-messaging-key-guard": DEBT_MARKER,
-    "duplicate-yaml-key-guard": DEBT_MARKER,
     "enforcement-reachability": DEBT_MARKER,
     "eu-ai-act-inventory-drift": DEBT_MARKER,
     "evals-gate-replay": DEBT_MARKER,

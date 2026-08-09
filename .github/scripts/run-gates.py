@@ -133,6 +133,14 @@ def load(root: pathlib.Path, path: str = MANIFEST):
         if g["when"] not in VALID_WHEN:
             sys.stderr.write(f"::error::gate {g['id']}: when `{g['when']}` not in {VALID_WHEN}\n")
             sys.exit(2)
+        budget = g.get("budget_seconds")
+        if budget is not None:
+            if isinstance(budget, bool) or not isinstance(budget, (int, float)) or budget <= 0:
+                sys.stderr.write(
+                    f"::error::gate {g['id']}: budget_seconds `{budget}` must be a positive "
+                    f"number\n"
+                )
+                sys.exit(2)
         floor = g.get("min_subjects")
         if floor is not None:
             if not isinstance(floor, int) or isinstance(floor, bool) or floor < 1:
@@ -396,8 +404,31 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> 
                 f"did shrink and the floor in gates.yaml needs a deliberate edit.\n"
             )
 
-    r.output = "".join(buf)
     r.seconds = time.monotonic() - t0
+
+    # Wall-time budget. Nothing here ever went red for being slow, and that is how `ci.yml`'s
+    # required check went from a 0.7 min median to 2.4 min in four weeks — each gate cheap,
+    # the total unbounded, and no single change big enough to argue with.
+    #
+    # ENFORCED ONLY UNDER CI, deliberately. A developer laptop running eight gates across four
+    # cores is not a measurement: this repo's own audit read check-adr-registry.sh at 60.4s
+    # locally against a whole shard of 20s in CI. Off the runner the overrun is printed and
+    # nothing fails.
+    budget = gate.get("budget_seconds")
+    if budget is not None and r.seconds > budget:
+        on_ci = os.environ.get("CI") == "true"
+        note = (
+            f"\n[run-gates] this gate took {r.seconds:.1f}s against a budget of {budget}s. "
+            f"Budgets are set well above the observed CI time, so this is a regression rather "
+            f"than noise — profile it, or raise the number in gates.yaml deliberately.\n"
+        )
+        buf.append(note)
+        if on_ci:
+            rc = rc or 1
+        else:
+            buf.append("[run-gates] not on CI (CI != true), so the overrun does not fail.\n")
+
+    r.output = "".join(buf)
     if rc == 0:
         r.status = "ok"
     elif gate["mode"] == "advisory":
@@ -598,6 +629,16 @@ gates:
     group: t
     min_subjects: 5
     run: "echo 'SUBJECTS=1  # a self-test fixture'; echo SUBJECTS=9"
+  - id: over-budget
+    name: "a gate slower than its declared budget"
+    group: t
+    budget_seconds: 0.2
+    run: "sleep 0.5"
+  - id: within-budget
+    name: "a gate inside its budget"
+    group: t
+    budget_seconds: 30
+    run: "true"
   - id: slow
     name: "a gate that exceeds its timeout"
     group: t
@@ -613,6 +654,8 @@ EXPECTED = {
     "floor-missed": "failed",
     "floor-unreported": "failed",
     "floor-last-wins": "ok",
+    "over-budget": "failed",
+    "within-budget": "ok",
     "failing": "failed",
     "advisory-failing": "warned",
     "harness-ok": "ok",
@@ -631,6 +674,7 @@ def self_test():
         (tmp / ".github" / "gates" / "gates.yaml").write_text(SELF_TEST_MANIFEST)
         gates = load(tmp)
         os.environ["GITHUB_EVENT_NAME"] = "push"  # so the pull_request-only gate skips
+        os.environ["CI"] = "true"  # budgets are enforced on the runner only
         results = [execute(g, tmp, is_pr=False, timeout=2) for g in gates]
         bad = []
         for r in results:
@@ -642,6 +686,8 @@ def self_test():
             # A timeout must SURFACE what the gate printed before it hung — that output is
             # usually the only clue to why. Asserting the status alone passes against a
             # timeout path that raises instead of reporting.
+            if r.id == "over-budget" and "against a budget of" not in r.output:
+                bad.append("over-budget: failed, but not for the budget reason")
             if r.id == "floor-missed" and "below its declared floor" not in r.output:
                 bad.append("floor-missed: failed, but not for the floor reason")
             if r.id == "floor-unreported" and "printed no" not in r.output:
@@ -691,6 +737,41 @@ def self_test():
             except SystemExit:
                 if not want_abort:
                     bad.append(f"load() rejected a run: that does have a command ({body})")
+
+        # Off the runner, the same over-budget gate must PASS — the whole point of gating the
+        # rule on CI is that a laptop's timings are not a measurement.
+        os.environ["CI"] = "false"
+        (tmp / ".github" / "gates" / "gates.yaml").write_text(
+            "gates:\n  - id: x\n    name: x\n    group: t\n    budget_seconds: 0.2\n"
+            '    run: "sleep 0.5"\n'
+        )
+        g = load(tmp)[0]
+        r = execute(g, tmp, is_pr=False, timeout=5)
+        if r.status != "ok":
+            bad.append(f"off-CI over-budget gate: want ok, got {r.status}")
+        if "does not fail" not in r.output:
+            bad.append("off-CI over-budget gate: did not say why it was not failed")
+        os.environ["CI"] = "true"
+
+        # A budget must be a positive number.
+        for body, want_abort in (
+            ("budget_seconds: 0", True),
+            ("budget_seconds: -3", True),
+            ('budget_seconds: "30"', True),
+            ("budget_seconds: 30", False),
+            ("budget_seconds: 0.5", False),
+        ):
+            (tmp / ".github" / "gates" / "gates.yaml").write_text(
+                f"gates:\n  - id: x\n    name: x\n    group: t\n    {body}\n"
+                f'    run: "true"\n'
+            )
+            try:
+                load(tmp)
+                if want_abort:
+                    bad.append(f"load() accepted an unusable budget_seconds ({body})")
+            except SystemExit:
+                if not want_abort:
+                    bad.append(f"load() rejected a valid budget_seconds ({body})")
 
         # A floor must be a positive integer. `0` is the shape that matters: it reads like a
         # declaration and asserts nothing at all.
