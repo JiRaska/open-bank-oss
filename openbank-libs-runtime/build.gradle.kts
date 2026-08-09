@@ -93,6 +93,16 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
     jvmArgs("-Dnet.bytebuddy.experimental=true")
+
+    // OutboxDeadLetterAlertNamingTest asserts that the committed PrometheusRule selector matches
+    // what a real Micrometer registration exports — a producer/consumer seam whose two halves live
+    // in different trees. Without declaring the rule file as an input, Gradle sees no reason to
+    // re-run: editing the alert to `openbank_TOTALLY_WRONG` reports `test UP-TO-DATE` and BUILD
+    // SUCCESSFUL, and only `--rerun-tasks` goes red. Combined with path-scoped CI — a gitops-only
+    // PR never builds this module — the guard could not see the change it exists to catch.
+    inputs.file(rootProject.file("openbank-infra/gitops/components/payments/prometheus-rules.yaml"))
+        .withPropertyName("alertRulesUnderTest")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 kover {
