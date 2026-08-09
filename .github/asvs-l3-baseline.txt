@@ -236,3 +236,11 @@ V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:108: pl
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:114: plaintext http:// env value http://account-service.accounts.svc:8100
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:116: plaintext http:// env value http://card-issuance-service.payments.svc:8118
 V9.1 openbank-infra/gitops/components/engagement/engagement-service.yaml:81: plaintext http:// env value http://consent-service.consent.svc:8106
+
+# fraud -> account-service (ADR-0220 D3.5, issue #2749). Genuinely a NEW plaintext edge, declared
+# as such: fraud-service's first-ever outbound rest-client (AccountServiceClient, partyId lookup
+# for the fraud-hold signal) reaches account-service the only way any of the 200+ other callers in
+# this baseline do — there is no mTLS-terminated HTTPS listener on account-service to point at
+# instead (https is not an available alternative here, same as analytics-sink -> Apicurio above).
+# Paid off by the Layer 1 mesh-mTLS work, not before, and not by this PR alone.
+V9.1 openbank-infra/gitops/components/fraud-service/fraud-service.yaml:124: plaintext http:// env value http://account-service.accounts.svc:8100

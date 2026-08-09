@@ -86,6 +86,17 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-09** — New inbound caller: `fraud-service` (ADR-0220 D3.5, issue #2749). Its new
+  `AccountServiceClient` (fraud-service's first-ever outbound rest-client) calls
+  `GET /api/v1/accounts/{accountId}` — an existing read-only, already-`@PermitAll` lookup, so no
+  endpoint or authz rule changed — to resolve the `partyId` a repeated-REVIEW fraud-hold applies
+  to. **New trust boundary**: fraud-service's namespace now has NetworkPolicy ingress to
+  account-service (`openbank-infra/gitops/components/accounts/network-policies.yaml`), and OIDC
+  M2M via the shared `openbank-services` client (already trusted by ~10 other callers on this
+  same read). Plaintext in-cluster (V9.1 baseline, same as every other caller here) — no TLS
+  listener exists to point at instead. account-service's own state, endpoints and mutation authz
+  are unchanged; this adds a reader, not a writer.
+
 - **2026-08-05** — Trust-boundary change (#3734): `operator-account-write` now excludes `service-account-*` principals, and a new `prohibited` veto closes `account.{close, freeze, unfreeze, authorize, approval.decide}` to `service-account-openbank-edge`. The role_action_matrix grants ALL ten account.* actions to ROLE_OPERATOR (which the edge service-account carries) and matrix-allows bypasses rule-level exclusions, so both paths needed closing. The edge's verified customer self-service — `account.{create, update}` via `service-edge-account-m2m` (onboarding open-account, pocket add/close, savings goal, ADR-0104/ADR-0153) — is preserved; the shared client keeps `account.read`. Ext moved from generator heredoc to standalone `account_rest_ext.rego` with a 13-test opa suite.
 
 - **2026-08-07** — No trust boundary moved: the `sanctions-service` and `product-catalog`

@@ -75,6 +75,11 @@ mp:
         topic: openbank.party.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      fraud-hold-events-in:
+        connector: smallrye-kafka
+        topic: openbank.fraud.hold.changed
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 "%test":
   # `authz.enforce` carries defaultValue = "true" in AuthorizeInterceptor, and a test JVM has no
