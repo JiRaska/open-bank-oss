@@ -75,6 +75,7 @@ MANIFEST = ".github/gates/gates.yaml"
 # Must match gatelib.CACHE_DIR_ENV. Not imported from it: run-gates.py has to load and validate
 # the manifest even where a checker's dependencies are missing, and the string is the contract.
 PARSE_CACHE_ENV = "GATE_PARSE_CACHE"
+SUBJECTS_PREFIX = "SUBJECTS="  # must match gatelib.SUBJECTS_PREFIX
 VALID_MODES = {"enforced", "advisory"}
 VALID_WHEN = {"always", "pull_request"}
 VALID_EXPECT = {"pass", "fail"}
@@ -132,6 +133,15 @@ def load(root: pathlib.Path, path: str = MANIFEST):
         if g["when"] not in VALID_WHEN:
             sys.stderr.write(f"::error::gate {g['id']}: when `{g['when']}` not in {VALID_WHEN}\n")
             sys.exit(2)
+        floor = g.get("min_subjects")
+        if floor is not None:
+            if not isinstance(floor, int) or isinstance(floor, bool) or floor < 1:
+                sys.stderr.write(
+                    f"::error::gate {g['id']}: min_subjects `{floor}` must be a positive "
+                    f"integer. A floor of 0 states nothing — every gate clears it, including "
+                    f"one whose corpus has vanished, which is the case it exists for.\n"
+                )
+                sys.exit(2)
         exp = g.setdefault("selftest_expect", "pass")
         if exp not in VALID_EXPECT:
             sys.stderr.write(
@@ -302,6 +312,22 @@ def _run(cmd: str, cwd: pathlib.Path, extra_env: dict, timeout: int, index: path
                 pass
 
 
+def last_subject_count(out: str):
+    """The LAST `SUBJECTS=<n>` line in a gate's output, or None.
+
+    Last, not first: a checker that reports per-corpus counts should end with the one that
+    decides, and a self-test fixture's count must never be mistaken for the real run's.
+    """
+    found = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith(SUBJECTS_PREFIX):
+            digits = line[len(SUBJECTS_PREFIX):].split("#")[0].strip()
+            if digits.isdigit():
+                found = int(digits)
+    return found
+
+
 def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> Result:
     r = Result(gate)
     if gate["when"] == "pull_request" and not is_pr:
@@ -345,6 +371,31 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> 
 
     rc, out = _run(gate["run"], root, gate.get("env"), timeout, index)
     buf.append("--- gate ---\n" + out)
+
+    # The subject floor. A gate that examined nothing passes everything, and its output says
+    # so out loud — `0 .kt files checked`, `0 @RolesAllowed site(s) checked` — while exiting 0.
+    # Measured 2026-08-09 by deleting the corpus: nine kotlin gates and ten gitops gates stayed
+    # green with their subject gone (#4339). Where the manifest declares `min_subjects:`, the
+    # gate must print how many things it looked at, and clear the floor.
+    floor = gate.get("min_subjects")
+    if floor is not None and rc == 0:
+        found = last_subject_count(out)
+        if found is None:
+            rc = 1
+            buf.append(
+                f"\n[run-gates] this gate declares min_subjects: {floor} but printed no "
+                f"`{SUBJECTS_PREFIX}<n>` line. The floor cannot be checked, so the gate's green "
+                f"means nothing — call gatelib.subjects(n) (python) or echo the line (shell).\n"
+            )
+        elif found < floor:
+            rc = 1
+            buf.append(
+                f"\n[run-gates] this gate examined {found} subject(s), below its declared "
+                f"floor of {floor}. Either its corpus moved (a renamed directory, a changed "
+                f"glob, a moved source root) and the gate is now a no-op, or the fleet really "
+                f"did shrink and the floor in gates.yaml needs a deliberate edit.\n"
+            )
+
     r.output = "".join(buf)
     r.seconds = time.monotonic() - t0
     if rc == 0:
@@ -527,6 +578,26 @@ gates:
     group: t
     when: pull_request
     run: "exit 1"
+  - id: floor-met
+    name: "a gate that clears its subject floor"
+    group: t
+    min_subjects: 3
+    run: "echo SUBJECTS=3"
+  - id: floor-missed
+    name: "a gate whose corpus vanished"
+    group: t
+    min_subjects: 3
+    run: "echo checked nothing; echo SUBJECTS=0"
+  - id: floor-unreported
+    name: "a gate that declares a floor and never prints a count"
+    group: t
+    min_subjects: 1
+    run: "echo all good"
+  - id: floor-last-wins
+    name: "the LAST count decides, so a self-test fixture cannot stand in for the real run"
+    group: t
+    min_subjects: 5
+    run: "echo 'SUBJECTS=1  # a self-test fixture'; echo SUBJECTS=9"
   - id: slow
     name: "a gate that exceeds its timeout"
     group: t
@@ -538,6 +609,10 @@ gates:
 
 EXPECTED = {
     "passing": "ok",
+    "floor-met": "ok",
+    "floor-missed": "failed",
+    "floor-unreported": "failed",
+    "floor-last-wins": "ok",
     "failing": "failed",
     "advisory-failing": "warned",
     "harness-ok": "ok",
@@ -567,6 +642,10 @@ def self_test():
             # A timeout must SURFACE what the gate printed before it hung — that output is
             # usually the only clue to why. Asserting the status alone passes against a
             # timeout path that raises instead of reporting.
+            if r.id == "floor-missed" and "below its declared floor" not in r.output:
+                bad.append("floor-missed: failed, but not for the floor reason")
+            if r.id == "floor-unreported" and "printed no" not in r.output:
+                bad.append("floor-unreported: failed, but not for the missing-count reason")
             if r.id == "slow":
                 for stream in ("on-stdout", "on-stderr"):
                     if stream not in r.output:
@@ -612,6 +691,27 @@ def self_test():
             except SystemExit:
                 if not want_abort:
                     bad.append(f"load() rejected a run: that does have a command ({body})")
+
+        # A floor must be a positive integer. `0` is the shape that matters: it reads like a
+        # declaration and asserts nothing at all.
+        for body, want_abort in (
+            ("min_subjects: 0", True),
+            ("min_subjects: -1", True),
+            ('min_subjects: "5"', True),
+            ("min_subjects: true", True),
+            ("min_subjects: 1", False),
+        ):
+            (tmp / ".github" / "gates" / "gates.yaml").write_text(
+                f"gates:\n  - id: x\n    name: x\n    group: t\n    {body}\n"
+                f"    run: \"echo SUBJECTS=1\"\n"
+            )
+            try:
+                load(tmp)
+                if want_abort:
+                    bad.append(f"load() accepted an unusable min_subjects ({body})")
+            except SystemExit:
+                if not want_abort:
+                    bad.append(f"load() rejected a valid min_subjects ({body})")
 
         # The parse-cache contract is a STRING shared with gatelib.py, in two files that do not
         # import each other. A rename on one side would silently turn the cross-gate cache off

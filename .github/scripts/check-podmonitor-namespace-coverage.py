@@ -36,6 +36,8 @@ import re
 import shutil
 import subprocess
 import sys
+
+import gatelib
 import tempfile
 from pathlib import Path
 
@@ -143,6 +145,7 @@ def run_gate(repo: Path, quiet: bool = False) -> int:
 
     gitops = repo / "openbank-infra" / "gitops"
     unscraped, stale, covered = audit_fleet(gitops)
+    gatelib.subjects(covered + len(unscraped), "namespaces running workloads")
     say(
         f"management-port scrape coverage: {covered} namespaces scraped, "
         f"{len(unscraped)} unscraped, {len(NOT_SCRAPED)} declared not-scraped"

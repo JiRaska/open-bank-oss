@@ -279,6 +279,7 @@ def main() -> int:
     for line in messages:
         print(line if args.enforce else line.replace("::error", "::warning", 1))
     verdict = "clean." if not messages else f"{len(messages)} finding(s) above."
+    gatelib.subjects(checked, "probed/scraped ports")
     print(f"check-probe-port-listener: {checked} probed/scraped port(s) checked — {verdict}")
     return 1 if messages and args.enforce else 0
 

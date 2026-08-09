@@ -244,6 +244,7 @@ def main() -> int:
     found, sidecars = findings()
     for line in found:
         print(("::error::" if args.enforce else "::warning::") + line)
+    gatelib.subjects(sidecars, "OPA sidecars")
     print(f"check-opa-sidecar-bundle-shape: {sidecars} OPA sidecar(s) — "
           f"{'clean.' if not found else f'{len(found)} finding(s) above.'}")
     return 1 if found and args.enforce else 0

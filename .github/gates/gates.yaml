@@ -340,6 +340,7 @@ gates:
     mode: enforced
     selftest: |
       python3 .github/scripts/check-podmonitor-namespace-coverage.py --self-test
+    min_subjects: 18   # 38 namespaces running workloads today (2026-08-09)
     run: |
       python3 .github/scripts/check-podmonitor-namespace-coverage.py
 
@@ -538,6 +539,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-probe-port-listener.py --selftest
     selftest_expect: pass
+    min_subjects: 50   # 116 probed/scraped ports today (2026-08-09)
     run: |
       python3 .github/scripts/check-probe-port-listener.py --enforce
 
@@ -1148,6 +1150,7 @@ gates:
     mode: enforced
     selftest: |
       python3 .github/scripts/check-gitops-duplicate-resources.py --self-test
+    min_subjects: 300   # 647 gitops manifests today (2026-08-09)
     run: |
       python3 .github/scripts/check-gitops-duplicate-resources.py --enforce
 
@@ -1260,6 +1263,7 @@ gates:
     mode: enforced
     selftest: |
       python3 .github/scripts/check-opa-sidecar-bundle-shape.py --self-test
+    min_subjects: 20   # 42 OPA sidecars today (2026-08-09)
     run: |
       python3 .github/scripts/check-opa-sidecar-bundle-shape.py --enforce
 
@@ -1488,6 +1492,7 @@ gates:
     name: "test runBlocking ': Unit' guard"
     group: kotlin
     mode: enforced
+    min_subjects: 500   # 1184 test sources today (2026-08-09)
     run: |
       bash .github/scripts/check-test-runblocking-unit.sh .
 
@@ -1508,6 +1513,7 @@ gates:
     name: "no service-local ExceptionMapper collision with libs-runtime (enforced)"
     group: kotlin
     mode: enforced
+    min_subjects: 900   # 1889 service source files today (2026-08-09)
     run: |
       bash .github/scripts/check-exception-mapper-collision.sh .
 
@@ -1553,6 +1559,7 @@ gates:
     name: "outbox dispatch-enabled guard (footgun check, enforced)"
     group: kotlin
     mode: enforced
+    min_subjects: 16   # 33 dispatch-gated services today (2026-08-09)
     run: |
       bash .github/scripts/check-outbox-dispatch-enabled.sh .
 
@@ -1584,6 +1591,7 @@ gates:
     name: "DomainEvent.occurredAt constructor guard (#2662)"
     group: kotlin
     mode: enforced
+    min_subjects: 1500   # 3121 .kt files today (2026-08-09)
     run: |
       bash .github/scripts/check-domain-event-occuredat.sh
 
@@ -1600,6 +1608,7 @@ gates:
     name: "clock-injection gate — domain/application layers (ADR-0100, #1612)"
     group: kotlin
     mode: enforced
+    min_subjects: 70   # 142 money-path domain/application files today (2026-08-09)
     run: |
       bash .github/scripts/check-clock-injection.sh
 
@@ -2253,6 +2262,7 @@ gates:
     name: "@RolesAllowed ⇒ realm parity (issue #2404, enforced)"
     group: security
     mode: enforced
+    min_subjects: 200   # 419 @RolesAllowed sites today (2026-08-09)
     run: |
       python3 .github/scripts/check-roles-allowed-realm.py
   # Keycloak realm templates must be IMPORTABLE (issue #3246). The three existing realm checks
@@ -2495,6 +2505,23 @@ gates:
   # are baselined as debt rather than fixed, because a gate that fails on its own backlog is
   # one nobody can merge past. Rule 3 fails on a stale baseline entry in either direction, so
   # the list cannot rot: it shrinks freely, and growing it needs a reviewer.
+  # A gate that examined nothing passes everything. Measured 2026-08-09: delete every .kt in
+  # the tree and nine kotlin gates stay green, several printing `0 ... checked` on the way out;
+  # delete all 647 gitops manifests and ten gitops gates do the same (#4339). `min_subjects:`
+  # plus a `SUBJECTS=<n>` line is the layer that can tell a clean tree from a lost corpus, and
+  # this gate is the ratchet that spreads it: a new gate declares a floor or is listed with a
+  # reason. The floors catch COLLAPSE, not drift — see the script header for why that is the
+  # right target.
+  - id: gate-subject-floor
+    name: "every gate declares how much it expects to find (#4339, enforced)"
+    group: lint
+    mode: enforced
+    selftest: python3 .github/scripts/check-gate-subject-floor.py --self-test
+    selftest_expect: pass
+    min_subjects: 100   # 130 gates today (2026-08-09)
+    run: |
+      python3 .github/scripts/check-gate-subject-floor.py --enforce
+
   - id: gate-selftest-declaration
     name: "every gate's falsifiability is declared, not inline (enforced)"
     group: lint
