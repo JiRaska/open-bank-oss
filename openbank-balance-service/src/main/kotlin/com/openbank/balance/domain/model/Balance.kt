@@ -21,10 +21,22 @@ data class Balance(
     // Arranged (povolený) overdraft limit per ČNB/AnaCredit. The balance may be drawn down to
     // -arrangedOverdraftLimit; beyond that is an unarranged (nepovolený) overdraft and is rejected.
     val arrangedOverdraftLimit: BigDecimal = BigDecimal.ZERO,
+    // ADR-0178 Phase 2 (#1745). The not-yet-effective CREDIT tail: Σ of projected booked deltas for
+    // this (account, currency) that are strictly positive and value-dated after the current
+    // accounting day. Derived per read from the dated projection audit (`ledger_projection_event`),
+    // never materialized — see [effectiveAvailable] for why that matters. ZERO whenever it has not
+    // been hydrated, which keeps every existing construction site (and the point-in-time rewind in
+    // BalanceService, which already excludes the tail by rewinding) behaving exactly as before.
+    val notYetEffectiveCredit: BigDecimal = BigDecimal.ZERO,
 ) {
     init {
         require(arrangedOverdraftLimit.signum() >= 0) {
             "arrangedOverdraftLimit must be non-negative: $arrangedOverdraftLimit"
+        }
+        // Credits only, by construction of the query that fills it. A negative value here would mean
+        // future-dated DEBITS were netted in, which would add spendable money back (see below).
+        require(notYetEffectiveCredit.signum() >= 0) {
+            "notYetEffectiveCredit must be non-negative: $notYetEffectiveCredit"
         }
     }
 
@@ -35,14 +47,72 @@ data class Balance(
     fun booked(): BigDecimal = bookedAmount
     fun reserved(): BigDecimal = reservedAmount
 
+    /**
+     * Booked on the ledger's value-date basis: the receipt-dated running total less the credits that
+     * are posted but not yet effective. This is the figure that ties to the ledger deposit-control
+     * as of today (`entry_date <= :asOf`), by construction rather than by after-the-fact
+     * reconciliation (ADR-0178, #1745).
+     */
+    fun effectiveBooked(): BigDecimal = bookedAmount - notYetEffectiveCredit
+
+    /**
+     * **The spendable figure.** `availableAmount` less the not-yet-effective credit tail.
+     *
+     * ## Why only the credit tail is removed, and the debit tail deliberately is not
+     *
+     * A pure value-date restatement would subtract the *net* future tail, which for a future-dated
+     * DEBIT (Σ delta < 0) means adding money back — handing the customer spendable funds that are
+     * already committed to an outbound payment leaving on its booking date. That is the unsafe
+     * direction, and it is a risk decision, not a bookkeeping one. So the tail is filtered to
+     * strictly positive deltas: a not-yet-effective credit stops being spendable, while a
+     * not-yet-effective debit stays deducted exactly as it is today. Both candidate product
+     * semantics for #1745 — "visible but unspendable" and "hidden until value date" — agree that a
+     * future-dated credit must not be spendable, so this half needs no product decision; what is
+     * still open is only whether [bookedAmount] should *display* it.
+     *
+     * ## Why derived and not materialized
+     *
+     * The tail is recomputed per read from the dated projection audit, so it becomes correct the
+     * moment the accounting day passes the value date with nothing having to run. The daily roll
+     * (`ValueDateRollScheduler`) therefore only *announces* maturity to downstream consumers; a
+     * missed roll delays a notification and can never leave a balance wrong. A materialized
+     * `effective_booked` column would invert that: a missed roll would be a wrong money figure.
+     */
+    fun effectiveAvailable(): BigDecimal = availableAmount - notYetEffectiveCredit
+
+    /**
+     * The spendable figure, ON THE WIRE (#1745).
+     *
+     * A property rather than a second function, because `BalanceResource` serialises this object
+     * directly and Jackson does not see `fun effectiveAvailable()` — a Kotlin function compiles to
+     * `effectiveAvailable()`, not `getEffectiveAvailable()`, and a `val`'s getter does carry that
+     * name. Declared without a Jackson annotation on purpose: this is the domain layer and it must
+     * stay framework-free (ADR-0002) — the enforced domain-purity gate rejects the import, which
+     * is how I found out. Without this the payload carried
+     * `availableAmount` and a `notYetEffectiveCredit` field no consumer read, so every caller
+     * outside balance-service kept spending the pre-fix number while the invariant looked fixed:
+     * `openbank-account-service`'s `BalanceServiceClient.toView()` maps `available = availableAmount`
+     * and drops the tail entirely.
+     *
+     * `availableAmount` deliberately keeps its meaning. Consumers that want "what may be spent now"
+     * read this; anything reconciling against the raw projection still has the unmodified figure.
+     */
+    val effectiveAvailableAmount: BigDecimal
+        get() = effectiveAvailable()
+
     /** Drawn overdraft (credit exposure for AnaCredit): how far booked is below zero, else zero. */
     fun overdraftUsed(): BigDecimal = bookedAmount.negate().max(BigDecimal.ZERO)
 
     fun isOverdrawn(): Boolean = bookedAmount.signum() < 0
 
+    // Guards on effectiveAvailable(), NOT availableAmount: the cover decision is the one place the
+    // not-yet-effective credit must not be spendable (#1745). With no future-dated credit the two
+    // are equal and this is the previous behaviour exactly.
     fun withReservation(amount: BigDecimal): Balance {
-        require(availableAmount - amount >= overdraftFloor()) {
-            "Insufficient funds: available=$availableAmount, overdraftLimit=$arrangedOverdraftLimit, requested=$amount"
+        val spendable = effectiveAvailable()
+        require(spendable - amount >= overdraftFloor()) {
+            "Insufficient funds: available=$spendable (of which $notYetEffectiveCredit not yet " +
+                "effective), overdraftLimit=$arrangedOverdraftLimit, requested=$amount"
         }
         return copy(
             availableAmount = availableAmount - amount,
