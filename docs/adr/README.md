@@ -258,7 +258,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0247](0247-fraud-hold-as-a-party-level-adverse-state.md) | Fraud hold as a party-level adverse state | Proposed | Planned | fraud,privacy-gdpr,kafka | — |
 | [0248](0248-statement-and-payment-confirmation-document-templates.md) | Statement and payment confirmation document templates | Proposed | Planned | documents,statements,psd2-api | — |
 | [0249](0249-dispositor-model-additional-cardholders-and-enforced-delegated-spending.md) | Dispositor model: additional cardholders and enforced delegated spending | Proposed | Planned | authz,cards,payments,sca | — |
-| [0250](0250-decouple-the-main-push-service-build-from-the-pact-broker-runner-pool.md) | Decouple the main-push service build from the Pact Broker runner pool | Proposed | Planned | ci,finops,capacity,testing | — |
+| [0250](0250-decouple-the-main-push-service-build-from-the-pact-broker-runner-pool.md) | Decouple the main-push service build from the Pact Broker runner pool | Accepted | Partial | ci,finops,capacity,testing | — |
 | [0251](0251-independent-model-review-of-money-path-and-governance-prs.md) | Independent model review of money-path and governance PRs | Proposed | Planned | ci,governance,ai-agents,compliance | — |
 | [0252](0252-synthetic-customer-fleet.md) | Synthetic customer fleet and journey-based production assurance | Accepted | Partial | testing,observability,notifications,compliance | openbank-app |
 | [0253](0253-evidence-of-effect-a-control-must-be-able-to-show-it-carried-work.md) | Evidence of effect: a control must be able to show it carried work | Proposed | Planned | observability,testing,governance,architecture | — |
