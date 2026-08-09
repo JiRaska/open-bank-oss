@@ -57,6 +57,7 @@
 
 import argparse
 import concurrent.futures
+import json
 import os
 import pathlib
 import shutil
@@ -479,6 +480,40 @@ def report(results, jobs):
     return 1 if failed else 0
 
 
+def json_records(results) -> list[dict]:
+    """One record per gate, for ADR-0255's Tier 1 snapshot.
+
+    Deliberately NOT the same shape as the text report: a machine reader needs a stable,
+    typed field per property (`subjects` as an int or null, never embedded in prose it would
+    have to re-parse), which is the whole reason this exists instead of a collector re-reading
+    the printed log — CLAUDE.md documents at length why parsing a job's own log back out is
+    fragile (the log contains the step's own `run:` script text; several real false positives
+    and negatives came from exactly that). This is the structured alternative: one artifact,
+    typed, no parsing risk.
+    """
+    out = []
+    for r in results:
+        g = r.gate
+        out.append({
+            "id": g["id"],
+            "group": g.get("group"),
+            "mode": g.get("mode", "enforced"),
+            "status": r.status,
+            "seconds": round(r.seconds, 3),
+            "subjects": last_subject_count(r.output),
+            "selftest_declared": bool(g.get("selftest")),
+            # A gate whose selftest is declared but came back "unfalsified" did not reach its
+            # own run: at all (see execute()) — status alone already encodes this, repeated
+            # here as an explicit boolean so a consumer never has to know that convention.
+            "selftest_passed": (
+                None if not g.get("selftest") else r.status != "unfalsified"
+            ),
+            "budget_seconds": g.get("budget_seconds"),
+            "min_subjects": g.get("min_subjects"),
+        })
+    return out
+
+
 def select(gates, args):
     sel = gates
     if args.group:
@@ -511,6 +546,9 @@ def main(argv=None):
     ap.add_argument("--list", action="store_true", help="print the manifest and exit")
     ap.add_argument("--jobs", type=int, default=0, help="concurrency (default: cpu count)")
     ap.add_argument("--timeout", type=int, default=420, help="per-gate seconds")
+    ap.add_argument("--json", metavar="PATH", help="write a structured per-gate JSON summary "
+                     "(ADR-0255) alongside the normal text report; does not change the exit "
+                     "code or the text output")
     ap.add_argument("--self-test", action="store_true", help="falsify the runner itself")
     args = ap.parse_args(argv)
 
@@ -559,6 +597,15 @@ def main(argv=None):
         os.environ.pop(PARSE_CACHE_ENV, None)
         shutil.rmtree(cache, ignore_errors=True)
     results = [done[g["id"]] for g in sel]
+    if args.json:
+        # Written BEFORE report()'s exit code is returned, so a shard that goes on to fail
+        # still leaves its JSON behind for the artifact-upload step — an observability
+        # snapshot that only appears on a green run would be useless for the one case anyone
+        # actually wants to look at it.
+        try:
+            pathlib.Path(args.json).write_text(json.dumps(json_records(results), indent=2))
+        except OSError as exc:
+            sys.stderr.write(f"::warning::run-gates: could not write --json {args.json}: {exc}\n")
     return report(results, jobs)
 
 
@@ -690,6 +737,30 @@ def self_test():
                 bad.append("over-budget: failed, but not for the budget reason")
             if r.id == "floor-missed" and "below its declared floor" not in r.output:
                 bad.append("floor-missed: failed, but not for the floor reason")
+            # ADR-0255's json_records() must round-trip through json.dumps (a Result carrying
+            # something non-serialisable would crash the whole run at the very end, after
+            # every gate had already finished) and preserve the SUBJECTS= count this record
+            # exists to make machine-readable in the first place.
+            if r.id == "floor-met":
+                rec = json_records([r])[0]
+                try:
+                    json.dumps(rec)
+                except TypeError as exc:
+                    bad.append(f"floor-met: json_records() is not JSON-serialisable: {exc}")
+                if rec["subjects"] != 3:
+                    bad.append(f"floor-met: json_records() subjects want 3, got {rec['subjects']}")
+                if rec["selftest_declared"] is not False:
+                    bad.append("floor-met: selftest_declared should be False (no selftest: set)")
+            if r.id == "harness-ok":
+                rec = json_records([r])[0]
+                if rec["selftest_declared"] is not True or rec["selftest_passed"] is not True:
+                    bad.append(f"harness-ok: want selftest_declared=True/selftest_passed=True, "
+                               f"got {rec['selftest_declared']}/{rec['selftest_passed']}")
+            if r.id == "harness-broken":
+                rec = json_records([r])[0]
+                if rec["selftest_passed"] is not False:
+                    bad.append(f"harness-broken: want selftest_passed=False, "
+                               f"got {rec['selftest_passed']}")
             if r.id == "floor-unreported" and "printed no" not in r.output:
                 bad.append("floor-unreported: failed, but not for the missing-count reason")
             if r.id == "slow":
@@ -883,6 +954,45 @@ def self_test():
                     f"empty PR_DIFF_BASE + {decl}: failed for the wrong reason — expected "
                     f"the guard's message, got: {r.output.strip()[:120]}"
                 )
+
+        # --json end to end: a real file gets written and round-trips through json.load, and
+        # an unwritable path warns instead of taking the whole run down (main()'s own
+        # try/except, exercised here rather than only unit-testing json_records() in
+        # isolation — the file-write path is where a real deploy would actually break).
+        #
+        # The manifest on disk was overwritten by every needs_base/${{ }} case run above —
+        # restore SELF_TEST_MANIFEST before driving main() through it, or this exercises
+        # whatever single-gate fixture happened to be written last.
+        (tmp / ".github" / "gates" / "gates.yaml").write_text(SELF_TEST_MANIFEST)
+        # --timeout 3, not the 420s default: group "t" includes the "slow" fixture, which
+        # sleeps 30s specifically to exercise the timeout path — without capping it here,
+        # every future run of THIS self-test would silently cost 30 extra seconds.
+        out_path = tmp / "gate-results.json"
+        argv_json = ["--root", str(tmp), "--group", "t", "--json", str(out_path), "--timeout", "3"]
+        rc = main(argv_json)
+        if rc == 0:
+            bad.append("--json run: expected a non-zero exit (the manifest has failing gates)")
+        if not out_path.is_file():
+            bad.append("--json: no file was written")
+        else:
+            try:
+                records = json.loads(out_path.read_text())
+                if not any(r["id"] == "passing" and r["status"] == "ok" for r in records):
+                    bad.append("--json: the written file does not contain the expected record")
+            except json.JSONDecodeError as exc:
+                bad.append(f"--json: written file is not valid JSON: {exc}")
+
+        import io
+        import contextlib
+
+        sink = io.StringIO()
+        with contextlib.redirect_stderr(sink):
+            rc2 = main(["--root", str(tmp), "--group", "t", "--timeout", "3",
+                        "--json", str(tmp / "no" / "such" / "dir" / "x.json")])
+        if "could not write --json" not in sink.getvalue():
+            bad.append("--json to an unwritable path did not warn")
+        if rc2 == 0:
+            bad.append("--json to an unwritable path unexpectedly reported success overall")
 
         if bad:
             print("\n::error::run-gates self-test FAILED:")
