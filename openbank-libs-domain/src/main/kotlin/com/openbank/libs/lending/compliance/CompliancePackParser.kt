@@ -4,9 +4,6 @@
 
 package com.openbank.libs.lending.compliance
 
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.readValue
-import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.libs.decision.PolicyAttribute
 import com.openbank.libs.decision.PolicyOperator
 import com.openbank.libs.decision.PolicyRule
@@ -21,14 +18,13 @@ class CompliancePackParseException(message: String) : IllegalArgumentException(m
  * Strict, fail-closed decoder for compliance packs. The schema is closed: an unknown
  * key, an unknown enum value, a wrong type or a missing mandatory field rejects the
  * whole pack — the bank never originates under a rule set it could not fully read.
- * Format-agnostic: [fromMap] does the decoding; [fromJson] is the JSON convenience
- * (a YAML front-end needs no change here, only a YAML→Map step at the caller).
+ * Format-agnostic BY CONSTRUCTION: [fromMap] is the whole decoder and it takes an already
+ * parsed `Map`, so no serialization library is reachable from here. The JSON front-end is
+ * `com.openbank.libs.lending.compliance.CompliancePackJson` in **openbank-libs-runtime** —
+ * Jackson is framework, and ADR-0122 puts framework-touching code on the runtime side
+ * (#3670). A YAML front-end would be a second adapter there and need no change in this file.
  */
 object CompliancePackParser {
-
-    private val mapper: ObjectMapper = ObjectMapper().registerKotlinModule()
-
-    fun fromJson(json: String): CompliancePack = fromMap(mapper.readValue(json))
 
     fun fromMap(raw: Map<String, Any?>): CompliancePack {
         val node = Node(raw, "pack")

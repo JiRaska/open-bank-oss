@@ -9,7 +9,7 @@ import com.openbank.libs.governance.Proposal
 import com.openbank.libs.governance.ProposalState
 import com.openbank.libs.lending.compliance.CompiledCompliancePack
 import com.openbank.libs.lending.compliance.CompliancePackCompiler
-import com.openbank.libs.lending.compliance.CompliancePackParser
+import com.openbank.libs.lending.compliance.CompliancePackJson
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
 import com.openbank.libs.lending.compliance.PackProductType
 import io.quarkus.runtime.StartupEvent
@@ -51,7 +51,7 @@ class CompliancePackBootLoader(
             sessionFactory.withSession { activations.findActivated() }
         }
         rows.forEach { row ->
-            val compiled = CompliancePackCompiler.compile(CompliancePackParser.fromJson(row.payload))
+            val compiled = CompliancePackCompiler.compile(CompliancePackJson.fromJson(row.payload))
             registry.activate(
                 Proposal(
                     id = "boot-${row.id}",

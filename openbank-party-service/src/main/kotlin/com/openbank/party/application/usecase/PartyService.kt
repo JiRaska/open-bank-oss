@@ -40,8 +40,6 @@ class PartyService : PartyUseCase {
 
     @Inject lateinit var documentFileRepo: PartyDocumentFileRepository
 
-    @Inject lateinit var eventPublisher: PartyEventPublisher
-
     @Inject lateinit var gdprAggregation: GdprAggregationPort
 
     @Inject lateinit var portabilityAggregation: PortabilityAggregationPort
@@ -101,8 +99,7 @@ class PartyService : PartyUseCase {
             consentMarketing = cmd.consentMarketing,
             consentCapturedAt = consentCapturedAt,
         )
-        val saved = partyRepo.save(party)
-        eventPublisher.publishPartyCreated(saved)
+        val saved = partyRepo.save(party, PartyEvents.created(party, Instant.now(clock)))
         metrics.partyCreated(saved.partyType.name)
         return saved
     }
@@ -187,8 +184,7 @@ class PartyService : PartyUseCase {
             tradingName = cmd.tradingName ?: party.tradingName,
             updatedAt = Instant.now(clock),
         )
-        val saved = partyRepo.update(updated)
-        eventPublisher.publishPartyUpdated(saved)
+        val saved = partyRepo.update(updated, PartyEvents.updated(updated, Instant.now(clock)))
         return saved
     }
 
@@ -291,8 +287,7 @@ class PartyService : PartyUseCase {
             status = deriveStatus(status, party.amlStatus, party.status),
             updatedAt = Instant.now(clock),
         )
-        val saved = partyRepo.update(updated)
-        eventPublisher.publishKycStatusChanged(saved)
+        val saved = partyRepo.update(updated, PartyEvents.kycStatusChanged(updated, Instant.now(clock)))
         countIfVerifyingTransition(party.status, saved)
         return saved
     }
@@ -304,10 +299,9 @@ class PartyService : PartyUseCase {
             status = deriveStatus(party.kycStatus, amlStatus, party.status),
             updatedAt = Instant.now(clock),
         )
-        val saved = partyRepo.update(updated)
         // Emits the party's current status (incl. ACTIVE) to downstream consumers
         // (account-service activation, onboarding cockpit) on the party events topic.
-        eventPublisher.publishKycStatusChanged(saved)
+        val saved = partyRepo.update(updated, PartyEvents.kycStatusChanged(updated, Instant.now(clock)))
         countIfVerifyingTransition(party.status, saved)
         return saved
     }
@@ -352,8 +346,7 @@ class PartyService : PartyUseCase {
         // GDPR Art. 17: delete binary document files before anonymizing the party row.
         // Order matters: files first (they carry biometric PII), then anonymize identity.
         documentFileRepo.deleteByPartyId(cmd.id)
-        partyRepo.anonymize(cmd.id)
-        eventPublisher.publishPartyErased(cmd.id)
+        partyRepo.anonymize(cmd.id, PartyEvents.erased(cmd.id, Instant.now(clock)))
     }
 
     /**
@@ -405,8 +398,7 @@ class PartyService : PartyUseCase {
             mergedIntoPartyId = target.id,
             updatedAt = Instant.now(clock),
         )
-        val saved = partyRepo.update(merged)
-        eventPublisher.publishPartyMerged(saved, target.id)
+        val saved = partyRepo.update(merged, PartyEvents.merged(merged, target.id, Instant.now(clock)))
         return saved
     }
 
@@ -431,8 +423,7 @@ class PartyService : PartyUseCase {
             createdAt = Instant.now(clock),
             updatedAt = Instant.now(clock),
         )
-        val saved = partyRepo.save(party)
-        eventPublisher.publishPartyCreated(saved)
+        val saved = partyRepo.save(party, PartyEvents.created(party, Instant.now(clock)))
         return Pair(saved, true)
     }
 

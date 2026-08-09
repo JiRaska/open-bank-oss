@@ -22,11 +22,13 @@ import com.openbank.statement.domain.model.StatementEntry
 import com.openbank.statement.domain.model.StatementFormat
 import com.openbank.statement.domain.model.StatementModel
 import com.openbank.statement.domain.model.StatementPeriod
+import com.openbank.statement.domain.model.StatementSnapshot
 import com.openbank.statement.domain.reconcile.ReconciliationPolicy
 import com.openbank.statement.domain.render.StatementRenderer
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
+import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -61,6 +63,8 @@ class StatementService(
     ListStatementsUseCase,
     AdHocExportUseCase,
     SummarizeStatementUseCase {
+
+    private val log = Logger.getLogger(StatementService::class.java)
 
     /** Clock seam: `closedAt` is stamped at close time and then *stored*, so renders stay deterministic
      *  (ADR-0035 §F). Overridable in tests; CDI uses the default. */
@@ -139,6 +143,9 @@ class StatementService(
             entryCount = entries.size,
             closedAt = clock(),
             status = PeriodCloseStatus.CLOSED,
+            // Freeze the render inputs from the reads this close already did (#3986). No extra
+            // query, and no second clock read — `closedAt` above stays the single time anchor.
+            snapshot = StatementSnapshot(account.iban, account.holderName, entries),
         )
         // Atomic: the period record and its `period.closed` outbox event commit together,
         // so a crash can't leave a closed period whose event was never emitted (was two
@@ -168,14 +175,37 @@ class StatementService(
     override fun summary(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementModel> =
         statementModel(accountId, currency, legalSequence)
 
+    /**
+     * The canonical model of a CLOSED period (issue #3986).
+     *
+     * A period with a [StatementSnapshot] is replayed **purely from stored state** — no
+     * `pocketAccount` read, no `bookedEntries` read — so two renders of the same `legalSequence`
+     * are byte-identical however much the live projections have moved since (ADR-0035 §D/§F).
+     *
+     * A period closed *before* #3986 has no snapshot and still replays the live projections. That
+     * is the old, non-deterministic behaviour, kept deliberately: those renders were never frozen,
+     * and inventing a snapshot from today's data would freeze whatever drift has already happened
+     * and present it as the issued document. It is logged, not silently equivalent.
+     */
     override fun statementModel(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementModel> =
         periods.findBySequence(accountId, currency, legalSequence).flatMap { period ->
-            if (period == null) {
-                Uni.createFrom().failure(StatementNotFoundException(accountId, currency, legalSequence))
-            } else {
-                accountInfo.pocketAccount(accountId).flatMap { account ->
-                    bookedEntries.bookedEntries(accountId, currency, period.periodFrom, period.periodTo)
-                        .map { entries -> modelFromPeriod(account, period, entries) }
+            when {
+                period == null ->
+                    Uni.createFrom().failure(StatementNotFoundException(accountId, currency, legalSequence))
+                period.snapshot != null ->
+                    Uni.createFrom().item(modelFromSnapshot(period, period.snapshot!!))
+                else -> {
+                    log.warnf(
+                        "Statement %s/%s seq=%d closed before the render snapshot existed (#3986); " +
+                            "replaying live projections — this render is NOT guaranteed to match the issued document",
+                        accountId,
+                        currency,
+                        legalSequence,
+                    )
+                    accountInfo.pocketAccount(accountId).flatMap { account ->
+                        bookedEntries.bookedEntries(accountId, currency, period.periodFrom, period.periodTo)
+                            .map { entries -> modelFromPeriod(account, period, entries) }
+                    }
                 }
             }
         }
@@ -211,6 +241,27 @@ class StatementService(
     }
 
     override fun list(accountId: UUID): Uni<List<StatementPeriod>> = periods.listForAccount(accountId)
+
+    /**
+     * The deterministic replay path: every field comes from the closed period or its frozen
+     * snapshot, so this function reads no live data and takes no clock (#3986).
+     */
+    private fun modelFromSnapshot(period: StatementPeriod, snapshot: StatementSnapshot): StatementModel =
+        StatementModel(
+            accountId = period.accountId,
+            iban = snapshot.iban,
+            currency = period.pocketCurrency,
+            holderName = snapshot.holderName,
+            periodFrom = period.periodFrom,
+            periodTo = period.periodTo,
+            openingBalance = BalanceAnchor(period.openingBalance, period.pocketCurrency, period.periodFrom),
+            closingBalance = BalanceAnchor(period.closingBalance, period.pocketCurrency, period.periodTo),
+            entries = snapshot.entries,
+            legalSequenceNumber = period.legalSequenceNumber,
+            electronicSequenceNumber = period.electronicSequenceNumber,
+            closedAt = period.closedAt,
+            supersedesSequence = period.supersedesSequence,
+        )
 
     private fun modelFromPeriod(
         account: PocketAccountInfo,
