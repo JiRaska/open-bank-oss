@@ -18,6 +18,7 @@ import java.util.UUID
  * so the row and its outbox entry are written in the SAME database transaction (transactional
  * outbox pattern): either both commit or neither does.
  */
+@Suppress("TooManyFunctions") // one method per persistence question the rail asks (hexagonal)
 interface DomesticPaymentRepository {
 
     /** Persist a new payment together with its domain-event outbox message, atomically. */
@@ -52,7 +53,25 @@ interface DomesticPaymentRepository {
      * must keep the marker, because the scheme may hold a live clearing item; for an outbound money
      * instruction a strand an operator can see beats a duplicate payment nobody can recall.
      */
-    suspend fun setSchemeDispatched(paymentId: UUID, dispatchedAt: Instant?)
+    /**
+     * Claims the scheme dispatch for [paymentId], returning `true` only if THIS caller won it.
+     *
+     * Compare-and-set, not a plain write, and the distinction is the whole guard: a read of
+     * `schemeDispatchedAt` followed by an unconditional UPDATE lets two concurrent attempts both
+     * observe `null`, both pass, and both hand a pacs.008 to the gateway — the duplicate clearing
+     * item #4218 exists to prevent. The predicate lives in the UPDATE so the database arbitrates.
+     *
+     * A `false` return means someone else is already dispatching (or has dispatched) this payment.
+     * The caller must NOT submit.
+     */
+    suspend fun claimSchemeDispatch(paymentId: UUID, dispatchedAt: Instant): Boolean
+
+    /**
+     * Releases a dispatch claim, and may be called ONLY when the gateway has proved the request
+     * never left this process. Clearing it re-arms submission, so an ambiguous failure must keep
+     * the claim instead.
+     */
+    suspend fun clearSchemeDispatch(paymentId: UUID)
 
     /**
      * Ids of payments still in `RECEIVED` that are worth screening again (#3266).

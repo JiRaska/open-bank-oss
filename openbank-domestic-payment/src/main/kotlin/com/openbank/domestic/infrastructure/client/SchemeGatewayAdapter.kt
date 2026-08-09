@@ -23,6 +23,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
+import org.eclipse.microprofile.faulttolerance.exceptions.CircuitBreakerOpenException
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 import java.math.BigInteger
@@ -30,6 +31,7 @@ import java.net.ConnectException
 import java.net.UnknownHostException
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Submits a real ISO 20022 `pacs.008` to the scheme gateway and maps the `pacs.002` response to a
@@ -67,13 +69,20 @@ class SchemeGatewayAdapter(
             "rail built a non-conforming pacs.008 for payment ${payment.id}"
         }
 
+        // Per-INVOCATION, and it has to be: @Retry below makes up to three attempts inside one
+        // call, and only the LAST one's exception reaches the catch. An attempt that timed out may
+        // have been accepted by the gateway; if the next attempt then fails with ConnectException,
+        // the final cause chain says "never left" about a request that did.
+        val anyAttemptAmbiguous = AtomicBoolean(false)
+
         val pacs002 = try {
-            self.submitWithResilience(pacs008)
+            self.submitWithResilience(pacs008, anyAttemptAmbiguous)
         } catch (ex: Exception) {
             // #4218: say whether the request can possibly have reached the scheme. Only a refused
-            // connection or an unresolvable host proves it did not; a timeout does NOT, since the
-            // gateway may have accepted the pacs.008 and merely answered too late.
-            val left = requestLeftThisProcess(ex)
+            // connection, an unresolvable host, or a breaker that never made the call proves it did
+            // not; a timeout does NOT, since the gateway may have accepted the pacs.008 and merely
+            // answered too late. Any ambiguous EARLIER attempt makes the whole invocation ambiguous.
+            val left = anyAttemptAmbiguous.get() || !isPreTransmission(ex)
             log.warnf(
                 ex,
                 "Scheme gateway unavailable for payment %s; holding (requestLeftThisProcess=%s)",
@@ -94,8 +103,14 @@ class SchemeGatewayAdapter(
     @CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10_000, successThreshold = 2)
     @Retry(maxRetries = 2, delay = 300, jitter = 150)
     @Timeout(5_000)
-    open suspend fun submitWithResilience(pacs008Xml: String): String =
+    open suspend fun submitWithResilience(pacs008Xml: String, anyAttemptAmbiguous: AtomicBoolean): String = try {
         client.submitCreditTransfer(pacs008Xml).awaitSuspending()
+    } catch (@Suppress("TooGenericExceptionCaught") ex: Throwable) {
+        // Recorded HERE, once per attempt, because this is the only place that sees an attempt
+        // that @Retry will swallow and replace. Sticky by design: ambiguity never downgrades.
+        if (!isPreTransmission(ex)) anyAttemptAmbiguous.set(true)
+        throw ex
+    }
 
     /**
      * Did the pacs.008 leave this process (#4218)? Answered from the cause chain, and biased hard
@@ -107,14 +122,21 @@ class SchemeGatewayAdapter(
      * `TimeoutException` and a circuit-breaker rejection wrapping a timed-out attempt, is
      * ambiguous: `@Retry` above may also have delivered an earlier attempt the gateway processed.
      */
-    private fun requestLeftThisProcess(ex: Throwable): Boolean {
+    private fun isPreTransmission(ex: Throwable): Boolean {
         var cause: Throwable? = ex
         val seen = mutableSetOf<Throwable>()
         while (cause != null && seen.add(cause)) {
-            if (cause is ConnectException || cause is UnknownHostException) return false
-            cause = cause.cause
+            when (cause) {
+                // The peer refused the TCP connection, or DNS never resolved.
+                is ConnectException, is UnknownHostException -> return true
+                // The breaker short-circuited: it rejects BEFORE any I/O, so by construction not a
+                // byte was written. Classifying this as ambiguous stranded every payment behind an
+                // open breaker permanently — nothing was sent, yet nothing could be re-sent either.
+                is CircuitBreakerOpenException -> return true
+                else -> cause = cause.cause
+            }
         }
-        return true
+        return false
     }
 
     private fun instruction(

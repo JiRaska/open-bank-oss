@@ -208,19 +208,24 @@ open class DomesticPaymentActivitiesImpl(
         // Held rather than progressed on purpose: we know a pacs.008 went out, not what the scheme
         // said about it, and guessing either way is worse than stopping. Recovering it is an
         // operator action against the scheme's own record — see the index this migration adds.
-        if (payment.schemeDispatchedAt != null) {
+        // The claim IS the guard, and it has to be one statement. Reading `schemeDispatchedAt`
+        // here and writing it below would leave a window where two attempts both see null, both
+        // pass, and both submit — the duplicate clearing item this whole change exists to prevent.
+        // The database arbitrates; `false` means we lost the race and must not send anything.
+        //
+        // Claimed BEFORE the call, so it survives any failure after it. Held rather than progressed
+        // on purpose: we know a pacs.008 went out, not what the scheme said about it, and guessing
+        // either way is worse than stopping. Recovering it is an operator action against the
+        // scheme's own record — see the index the migration adds.
+        if (!paymentRepository.claimSchemeDispatch(paymentId, Instant.now(clock))) {
             log.errorf(
-                "Payment %s is VALIDATED but was already dispatched to the scheme at %s — " +
+                "Payment %s is VALIDATED but the scheme dispatch is already claimed — " +
                     "NOT re-submitting (#4218). A clearing item may exist without a recorded " +
                     "outcome; reconcile against the scheme before releasing this payment.",
                 paymentId,
-                payment.schemeDispatchedAt,
             )
             return@vtx DomesticPaymentStatus.VALIDATED
         }
-
-        // Committed in its own transaction BEFORE the call, so it survives any failure after it.
-        paymentRepository.setSchemeDispatched(paymentId, Instant.now(clock))
 
         // The catch covers the GATEWAY CALL ONLY (#4218). It used to wrap the status write below as
         // well, which is what merged "never submitted" with "submitted, bookkeeping failed".
@@ -234,7 +239,7 @@ open class DomesticPaymentActivitiesImpl(
             if (ex.requestLeftThisProcess) {
                 log.ambiguousDispatch(paymentId, ex)
             } else {
-                paymentRepository.setSchemeDispatched(paymentId, null)
+                paymentRepository.clearSchemeDispatch(paymentId)
                 log.warnf(ex, "Scheme gateway unreachable for payment %s; holding in VALIDATED", paymentId)
             }
             return@vtx DomesticPaymentStatus.VALIDATED

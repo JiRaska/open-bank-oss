@@ -88,7 +88,8 @@ class DomesticPaymentActivitiesImplTest {
         coEvery { paymentRepository.update(any(), any()) } answers { firstArg() }
         every { eventPublisher.statusChangedPayload(any(), any()) } returns "{\"event\":\"status-changed\"}"
         coJustRun { amlCasePort.openCase(any()) }
-        coJustRun { paymentRepository.setSchemeDispatched(any(), any()) }
+        coEvery { paymentRepository.claimSchemeDispatch(any(), any()) } returns true
+        coJustRun { paymentRepository.clearSchemeDispatch(any()) }
 
         schemeGatewayPort = mockk()
         settlementPort = mockk()
@@ -335,13 +336,33 @@ class DomesticPaymentActivitiesImplTest {
             schemeDispatchedAt = Instant.parse("2026-08-09T10:15:30Z"),
         )
         coEvery { paymentRepository.findById(stranded.id) } returns stranded
+        // The claim is what refuses now, not a read of the row: `false` is the database saying the
+        // dispatch is already held.
+        coEvery { paymentRepository.claimSchemeDispatch(stranded.id, any()) } returns false
 
         val result = activitiesWithScheme.submitScheme(stranded.id)
 
         assertThat(result).isEqualTo(DomesticPaymentStatus.VALIDATED)
         coVerify(exactly = 0) { schemeGatewayPort.submit(any()) }
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
-        coVerify(exactly = 0) { paymentRepository.setSchemeDispatched(any(), any()) }
+        coVerify(exactly = 0) { paymentRepository.clearSchemeDispatch(any()) }
+    }
+
+    @Test
+    fun `submitScheme does not submit when a concurrent attempt won the dispatch claim`() {
+        // The case a read-then-write guard cannot refuse: both attempts read a null marker, both
+        // pass, both submit. Here the loser is told so by the claim's return value and stops before
+        // the gateway — the row is untouched, and the winner owns the outcome.
+        val validated = payment(status = DomesticPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(validated.id) } returns validated
+        coEvery { paymentRepository.claimSchemeDispatch(validated.id, any()) } returns false
+
+        val result = activitiesWithScheme.submitScheme(validated.id)
+
+        assertThat(result).isEqualTo(DomesticPaymentStatus.VALIDATED)
+        coVerify(exactly = 0) { schemeGatewayPort.submit(any()) }
+        coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+        coVerify(exactly = 0) { paymentRepository.clearSchemeDispatch(any()) }
     }
 
     @Test
@@ -356,7 +377,7 @@ class DomesticPaymentActivitiesImplTest {
         activitiesWithScheme.submitScheme(validated.id)
 
         coVerifyOrder {
-            paymentRepository.setSchemeDispatched(validated.id, any())
+            paymentRepository.claimSchemeDispatch(validated.id, any())
             schemeGatewayPort.submit(any())
             paymentRepository.update(any(), any())
         }
@@ -376,7 +397,7 @@ class DomesticPaymentActivitiesImplTest {
 
         // Scheme is simply down: no clearing item exists, so the payment must stay re-drivable.
         assertThat(result).isEqualTo(DomesticPaymentStatus.VALIDATED)
-        coVerify(exactly = 1) { paymentRepository.setSchemeDispatched(validated.id, null) }
+        coVerify(exactly = 1) { paymentRepository.clearSchemeDispatch(validated.id) }
     }
 
     @Test
@@ -390,7 +411,11 @@ class DomesticPaymentActivitiesImplTest {
         val result = activitiesWithScheme.submitScheme(validated.id)
 
         assertThat(result).isEqualTo(DomesticPaymentStatus.VALIDATED)
-        coVerify(exactly = 0) { paymentRepository.setSchemeDispatched(any(), null) }
+        // BOTH halves, deliberately. Asserting only "never released" passes against code that
+        // never claims either — which is exactly what the pre-#4218 implementation did, so the
+        // assertion held while proving nothing.
+        coVerify(exactly = 1) { paymentRepository.claimSchemeDispatch(validated.id, any<Instant>()) }
+        coVerify(exactly = 0) { paymentRepository.clearSchemeDispatch(any()) }
     }
 
     @Test
@@ -408,8 +433,8 @@ class DomesticPaymentActivitiesImplTest {
             .isInstanceOf(RuntimeException::class.java)
             .hasMessageContaining("db blip")
 
-        coVerify(exactly = 1) { paymentRepository.setSchemeDispatched(validated.id, any<Instant>()) }
-        coVerify(exactly = 0) { paymentRepository.setSchemeDispatched(any(), null) }
+        coVerify(exactly = 1) { paymentRepository.claimSchemeDispatch(validated.id, any<Instant>()) }
+        coVerify(exactly = 0) { paymentRepository.clearSchemeDispatch(any()) }
     }
 
     @Test

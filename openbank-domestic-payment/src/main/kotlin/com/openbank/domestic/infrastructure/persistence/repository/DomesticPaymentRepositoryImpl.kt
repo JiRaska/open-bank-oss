@@ -19,6 +19,7 @@ import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
+@Suppress("TooManyFunctions") // one method per persistence question the rail asks (hexagonal)
 class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymentOutboxRepositoryImpl) :
     DomesticPaymentRepository,
     PanacheRepository<DomesticPaymentEntity> {
@@ -97,9 +98,21 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
     // the update() above, so it must not share a transaction with anything that can roll back.
     // Written as a bulk update rather than find-then-mutate so it touches only this one column and
     // cannot race the aggregate write on any other field.
-    override suspend fun setSchemeDispatched(paymentId: UUID, dispatchedAt: Instant?) {
+    override suspend fun claimSchemeDispatch(paymentId: UUID, dispatchedAt: Instant): Boolean =
         Panache.withTransaction {
-            update("schemeDispatchedAt = ?1 where paymentId = ?2", dispatchedAt, paymentId)
+            // `and schemeDispatchedAt is null` is the guard, not decoration: without it this is a
+            // read-then-write and two concurrent attempts both submit (#4218). The row count is the
+            // verdict — 1 means this caller claimed it, 0 means someone else already had it.
+            update(
+                "schemeDispatchedAt = ?1 where paymentId = ?2 and schemeDispatchedAt is null",
+                dispatchedAt,
+                paymentId,
+            )
+        }.awaitSuspending() == 1
+
+    override suspend fun clearSchemeDispatch(paymentId: UUID) {
+        Panache.withTransaction {
+            update("schemeDispatchedAt = null where paymentId = ?1", paymentId)
         }.awaitSuspending()
     }
 }
