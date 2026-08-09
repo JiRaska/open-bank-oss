@@ -272,6 +272,16 @@ jobs:
     name: gates (${{ matrix.group }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # `administration: read` is ADDITIVE to the workflow-level `contents: read` and is used
+    # by exactly one gate — `ruleset-context-parity` (ADR-0254) reads main-protection's
+    # required-status-check list via `GET /repos/{owner}/{repo}/rulesets/{id}` to compare it
+    # against the job names tracked workflows actually emit. Granted here, on the whole
+    # matrixed job, rather than split into a ninth shard: it is read-only, costs one API call,
+    # and every shard already shares this job definition. It is over-granted to the other
+    # seven shards' invocations in exchange for not adding a job.
+    permissions:
+      contents: read
+      administration: read
     strategy:
       # Never fail-fast: one red shard must not hide the state of the other seven, or a PR
       # gets a one-gate-at-a-time debugging loop instead of the whole picture in one run.
