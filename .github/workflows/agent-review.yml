@@ -50,16 +50,36 @@
 # credential — the repo secret and the local launchd env file — and they rotate separately.
 name: agent-review
 
+# workflow_dispatch is not a convenience. A control you can only exercise by waiting for
+# production is one you cannot exercise: after this landed, the ONLY way to learn whether a
+# review comment ever reaches a PR was to wait for someone to mark an in-scope PR ready, and
+# until that happened "installed" and "working" were indistinguishable — the exact state
+# ADR-0154 sat in for weeks. `dry_run` (default TRUE) prints the review to the job log instead
+# of commenting, so the whole chain can be proven end-to-end without writing on anyone's PR.
+#
+# Note workflow_dispatch only appears once this file is on the DEFAULT branch; before then,
+# exercise it by marking an in-scope PR ready for review.
 on:
   pull_request:
     types: [ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to review"
+        required: true
+        type: string
+      dry_run:
+        description: "print the review to the log instead of commenting"
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
   pull-requests: write   # to post the review comment
 
 concurrency:
-  group: agent-review-${{ github.event.pull_request.number }}
+  group: agent-review-${{ github.event.pull_request.number || inputs.pr }}
   cancel-in-progress: true
 
 jobs:
@@ -68,11 +88,43 @@ jobs:
     timeout-minutes: 15
     # Draft PRs never reach ready_for_review with a draft flag set, but a bot PR can, and
     # reviewing release-please or auto-deploy output is 45% of the queue for no signal.
-    if: github.event.pull_request.draft == false
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      # One place both triggers resolve to, so no later step has to know which fired.
+      - id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          INPUT_PR: ${{ inputs.pr }}
+          EVT_NUM: ${{ github.event.pull_request.number }}
+          EVT_TITLE: ${{ github.event.pull_request.title }}
+          EVT_BASE: ${{ github.event.pull_request.base.sha }}
+          EVT_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT}" = "workflow_dispatch" ]; then
+            # Refuse a non-numeric input rather than interpolating it anywhere.
+            case "${INPUT_PR}" in ''|*[!0-9]*) echo "::error::pr must be a number"; exit 1 ;; esac
+            data=$(gh pr view "${INPUT_PR}" -R "${GITHUB_REPOSITORY}" --json number,title,baseRefOid,headRefOid)
+            {
+              printf 'number=%s\n' "$(echo "$data" | jq -r .number)"
+              printf 'base=%s\n'   "$(echo "$data" | jq -r .baseRefOid)"
+              printf 'head=%s\n'   "$(echo "$data" | jq -r .headRefOid)"
+              # Heredoc form: a title is attacker-controlled text and may contain anything.
+              echo 'title<<PR_TITLE_EOF'; echo "$data" | jq -r .title; echo 'PR_TITLE_EOF'
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              printf 'number=%s\n' "${EVT_NUM}"
+              printf 'base=%s\n'   "${EVT_BASE}"
+              printf 'head=%s\n'   "${EVT_HEAD}"
+              echo 'title<<PR_TITLE_EOF'; echo "${EVT_TITLE}"; echo 'PR_TITLE_EOF'
+            } >> "$GITHUB_OUTPUT"
+          fi
 
       # ---- scope gate ---------------------------------------------------------------
       # In scope iff the conventional-commit scope names a money_path_services entry, the type
@@ -81,7 +133,7 @@ jobs:
       # covered without editing this file.
       - id: scope
         env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_TITLE: ${{ steps.pr.outputs.title }}
         run: |
           # PyYAML is not guaranteed on the runner image, and a scope step that dies leaves
           # in_scope unset — which silently means "never review".
@@ -107,13 +159,17 @@ jobs:
       - id: diff
         if: steps.scope.outputs.in_scope == 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ steps.pr.outputs.base }}
+          HEAD_SHA: ${{ steps.pr.outputs.head }}
         run: |
           base="${BASE_SHA}"
+          # workflow_dispatch checks out the default branch, so HEAD is not the PR.
+          git fetch -q origin "${HEAD_SHA}" 2>/dev/null || true
           # Merge-base, not the frozen creation-time base: the repo has been bitten by the
           # difference (#481 x #524).
-          mb=$(git merge-base "$base" HEAD)
-          git diff "$mb"...HEAD -- . \
+          head="${HEAD_SHA}"
+          mb=$(git merge-base "$base" "$head")
+          git diff "$mb".."$head" -- . \
             ':!**/*.lock' ':!**/package-lock.json' ':!**/CHANGELOG.md' \
             ':!openbank-infra/gitops/**/*-opa-bundle.yaml' \
             ':!docs/adr/README.md' ':!docs/adr/DIGEST.md' ':!docs/adr/index.json' \
@@ -136,7 +192,7 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           TRUNCATED: ${{ steps.diff.outputs.truncated }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_TITLE: ${{ steps.pr.outputs.title }}
         run: |
           set +e
           npm install -g @anthropic-ai/claude-code >/dev/null 2>&1
@@ -177,6 +233,8 @@ jobs:
         if: steps.scope.outputs.in_scope == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
           {
             echo "### Independent model review (ADR-0251)"
@@ -187,4 +245,9 @@ jobs:
             echo
             echo "<sub>Scope: money-path services, \`security\` type, \`governance\` scope. Diff ${{ steps.diff.outputs.raw_lines }} lines, truncated=${{ steps.diff.outputs.truncated }}.</sub>"
           } > /tmp/comment.md
-          gh pr comment '${{ github.event.pull_request.number }}' -R '${{ github.repository }}' --body-file /tmp/comment.md
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "DRY RUN — the comment below is NOT posted:"
+            cat /tmp/comment.md
+            exit 0
+          fi
+          gh pr comment "${PR_NUMBER}" -R "${GITHUB_REPOSITORY}" --body-file /tmp/comment.md
