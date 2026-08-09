@@ -1093,6 +1093,9 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-agent-model-parity.py --self-test
     selftest_expect: pass
+    min_subjects: 13   # 13 charters declare a real model: today (2026-08-09) — a gate that
+                        # examines nothing passes everything, so this floor must move with the
+                        # count printed by the gate's own summary line.
     run: |
       python3 .github/scripts/check-agent-model-parity.py
 

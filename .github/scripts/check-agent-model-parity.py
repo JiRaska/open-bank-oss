@@ -51,6 +51,9 @@ import sys
 
 import yaml
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import gatelib
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 AGENTS_YAML = ROOT / "openbank-libs" / "governance" / "agents.yaml"
 APPLICATION_YAML = ROOT / "openbank-agent-service" / "src" / "main" / "resources" / "application.yaml"
@@ -198,6 +201,11 @@ def main() -> int:
     declared = load_agents_yaml_models(AGENTS_YAML)
     covered = load_application_yaml_models(APPLICATION_YAML)
     findings, lines = check(declared, covered, BASELINE_UNCOVERED)
+
+    # Unconditional, including on the failure path (gatelib.subjects' own contract) — a gate that
+    # found its 13 charters and then flagged a drift among them must not also read as having lost
+    # its corpus.
+    gatelib.subjects(len(declared), "charters declaring a model in agents.yaml")
 
     if args.list:
         for line in lines:
