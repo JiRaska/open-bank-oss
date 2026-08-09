@@ -1,0 +1,39 @@
+# THROWAWAY probe — does CLAUDE_CODE_OAUTH_TOKEN still authenticate?
+# #2161 recorded it rejected at the gateway (is_error:true, num_turns:1, ~2s). The secret
+# has not been rotated since 2026-07-06, so that measurement may still hold. This asks the
+# real gateway with the real CI credential rather than assuming either way. Delete after.
+name: probe claude token
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: claude
+        continue-on-error: true
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: "Reply with exactly the word ALIVE and nothing else."
+      - name: verdict
+        if: always()
+        run: |
+          # The action exits 0 on its own recorded failure (#2161), so the transcript is the
+          # only honest source. A missing file is also a failure, not a pass.
+          f=$(ls ${RUNNER_TEMP}/claude-execution-output.json 2>/dev/null || true)
+          echo "outcome=${{ steps.claude.outcome }}"
+          if [ -z "$f" ]; then echo "::error::NO TRANSCRIPT — token verdict UNKNOWN, not alive"; exit 1; fi
+          python3 - "$f" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1]))
+          rec=[x for x in (d if isinstance(d,list) else [d]) if isinstance(x,dict)]
+          err=any(x.get("is_error") for x in rec)
+          txt=json.dumps(rec)[:400]
+          print("is_error:", err)
+          print("head:", txt)
+          sys.exit(1 if err else 0)
+          PY
