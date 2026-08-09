@@ -15,10 +15,47 @@ info:
     graduates from shadow (D5). No `@Authorize` OPA rule for these actions yet; the shared policy's
     `default allow := false` denies both endpoints fail-closed under enforcement until that rule
     lands.
-  version: 1.0.0
+  version: 1.1.0
 tags:
   - name: Surfaces
+  - name: Eligibility
 paths:
+  /api/v1/eligibility/adverse-states:
+    get:
+      tags: [Eligibility]
+      summary: List a party's active adverse states (ADR-0220 D3.5 targeting exclusions)
+      description: >-
+        The staff-plane read of `party_adverse_state` (issue #4265). Answers "why is this party
+        suppressed from marketing surfaces" with the set of flags currently set for them; an empty
+        list means no exclusion is active, which is a different fact from the endpoint being
+        unreachable and is why this is a list rather than a nullable object.
+
+        Not the customer-app plane: `ROLE_API` is deliberately absent, and the action
+        `engagement.adverseState.read` is outside the two actions the customer edge's
+        `edge-service-engagement` policy reason grants.
+
+        Returns flag names and a party id only — no balance, transaction or KYC content — so the
+        ADR-0210 D3 non-authoritative boundary is unchanged by it.
+      parameters:
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: the party's active adverse states, possibly empty
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdverseStateResponse"
+        "400":
+          description: partyId absent or not a UUID
+        "401":
+          description: no bearer token
+        "403":
+          description: token lacks ROLE_OPERATOR / ROLE_ADMIN / ROLE_COMPLIANCE
   /api/v1/surfaces/{slot}:
     get:
       tags: [Surfaces]
@@ -65,6 +102,21 @@ paths:
           description: unknown slot or event type
 components:
   schemas:
+    AdverseStateResponse:
+      type: object
+      required: [partyId, adverseStates]
+      properties:
+        partyId: { type: string, format: uuid }
+        adverseStates:
+          type: array
+          description: >-
+            Sorted by name so the body is deterministic. Every value is a member of the enum
+            below; a value being absent from the list means the exclusion is not active for this
+            party, NOT that the signal is unwired — which of the four have a producing consumer is
+            a fact about this service's @Incoming consumers, tracked in AdverseState's KDoc.
+          items:
+            type: string
+            enum: [ARREARS, DISPUTE_OPENED, ERASURE_REQUESTED, FRAUD_HOLD]
     SurfaceContent:
       type: object
       properties:
