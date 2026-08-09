@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.24.0...lending-service-v0.24.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **lending:** make origination state transitions atomic ([#3876](https://github.com/JiRaska/open-bank-oss/issues/3876)) ([cff2570](https://github.com/JiRaska/open-bank-oss/commit/cff2570e52c5d5281005c73f752f6a2f39162aef)), closes [#3850](https://github.com/JiRaska/open-bank-oss/issues/3850)
+
 ## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.23.1...lending-service-v0.24.0) (2026-08-08)
 
 

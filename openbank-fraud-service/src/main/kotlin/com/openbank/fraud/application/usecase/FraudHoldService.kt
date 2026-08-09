@@ -10,12 +10,16 @@ import com.openbank.fraud.application.port.out.FraudScoreRepository
 import com.openbank.fraud.domain.model.FraudVerdict
 import com.openbank.fraud.infrastructure.persistence.FraudOutboxRepositoryImpl
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
@@ -51,6 +55,20 @@ class FraudHoldService @Inject constructor(
     @ConfigProperty(name = "openbank.fraud-hold.ttl-days", defaultValue = "30")
     private val ttlDays: Long,
 ) {
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    /**
+     * Registered on StartupEvent, not @PostConstruct: @ApplicationScoped is LAZY, so a
+     * @PostConstruct would first run when the cron first fires and the gauge would be ABSENT until
+     * then — and absent is a different signal from stale.
+     */
+    fun registerLiveness(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
+
     private val log = Logger.getLogger(FraudHoldService::class.java)
 
     /**
@@ -118,6 +136,7 @@ class FraudHoldService @Inject constructor(
             if (expired.isNotEmpty()) {
                 log.infof("fraud-hold expiry sweep cleared=%d", expired.size)
             }
+            liveness?.recordSuccess()
         } catch (ex: Exception) {
             log.warnf(ex, "fraud-hold expiry sweep failed")
         }
@@ -144,6 +163,11 @@ class FraudHoldService @Inject constructor(
     }
 
     private companion object {
+        const val WORKFLOW_NAME = "fraud-hold-expiry-sweep"
+
+        /** Matches the @Scheduled default `openbank.fraud-hold.sweep-interval:1h`. */
+        val EXPECTED_INTERVAL: Duration = Duration.ofHours(1)
+
         const val RULE_VERSION = "fraud-hold-v1"
         const val REASON_REPEATED_REVIEW = "repeated_review"
         const val REASON_EXPIRED = "expired"
