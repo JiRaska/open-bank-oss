@@ -23,6 +23,8 @@ to a beneficiary — a primary fraud target.
                                                                                   +--> [fraud-service] (shadow, OIDC CC / mTLS, fail-open)
                                                                                   |
                                                                                   +--> [clearing-simulator] (pacs.008 out / pacs.002 in; OIDC CC; ADR-0104 D4; flag-gated)
+                                                                                  |
+                                                                                  +--> [document-service] (GET .../templates, POST .../templates/preview; OIDC CC; ADR-0248 #3; synchronous, on customer request only)
 ```
 
 - **External entities:** payment-initiating channels/operators, downstream clearing & ledger,
@@ -84,6 +86,63 @@ not change any existing request's outcome until explicitly flipped.
   need an additional store; not implemented in this PR.
 
 ## 6. Change log
+
+- **2026-08-09** — Duplicate clearing submission closed (#4218). No new trust boundary and no new
+  caller: the outbound edge to the scheme gateway (`pacs.008` → clearing-simulator / CERTIS) is the
+  same one, and what changes is how many times a single payment may cross it. Previously: **more
+  than once.** `submitScheme` wrapped both the outbound call and the follow-up status write in one
+  `try/catch`, so a database failure after a successful submit was caught and logged as "holding in
+  VALIDATED" — leaving a live clearing item behind a row asserting nothing was sent. A re-drive read
+  that row and submitted again. Nothing downstream deduplicates: the `pacs.008` carries no
+  idempotency key (only a deterministic `messageId`, which the receiver is free to ignore) and
+  `openbank-clearing-simulator` performs no deduplication of any kind.
+  - **Integrity (STRIDE-T)** is the property at stake, and it was violated in the worst available
+    direction — an unauthorised *duplicate* money movement arising from an internal failure, with
+    no external attacker required and no signal beyond one WARN line.
+  - **Mitigation**: a `scheme_dispatched_at` marker written before the outbound call and in its own
+    transaction, so it outlives any failure of the work that follows; `submitScheme` refuses to
+    submit a payment that already carries it. The catch now covers the gateway call only, so a
+    failed status write surfaces instead of being reported as "not submitted".
+  - **New residual risk, accepted deliberately**: an ambiguous failure (a timeout, where the scheme
+    may or may not hold the item) now **strands** the payment in VALIDATED rather than retrying it.
+    The marker is cleared only when the gateway proves the request never left this process
+    (`ConnectException` / `UnknownHostException`), which keeps the ordinary "scheme is down" case
+    re-drivable. For an outbound money instruction a strand an operator can see is the correct
+    trade against a duplicate nobody can recall — but it is a strand, it needs a human, and it is
+    logged at ERROR for that reason. The partial index added in V8 is the query that finds them.
+  - **Not addressed here**: `DomesticPaymentRepositoryImpl.update` still has no compare-and-set and
+    the entity no `@Version`, so two concurrent workflows can both write one transition (#4218
+    item 3). Pre-existing, independent of this defect, and deliberately left out of a money-path
+    fix rather than enlarged into an aggregate-wide locking change.
+- **2026-08-07** — ADR-0248 #3: new outbound trust boundary, `domestic-payment-service →
+  document-service (GET /api/v1/documents/templates, POST /api/v1/documents/templates/preview,
+  OIDC client-credentials)`, plus a new customer-facing endpoint
+  `GET /api/v1/domestic-payments/{paymentId}/confirmation` (`@RolesAllowed("ROLE_VIEWER",
+  "ROLE_OPERATOR","ROLE_ADMIN","ROLE_PAYMENTS")`, `@Authorize(action=
+  "domestic-payment.confirmation.read", resource="#paymentId")`). Renders the payment
+  confirmation document **synchronously, only on explicit customer request** — no
+  pre-generation off `DomesticPaymentStatusChangedEvent`, no Kafka consumer, nothing cached or
+  persisted a second time here or in document-service (document-service's `preview` endpoint is
+  the existing non-persisting one; no `Document` row or `document.generated` outbox event is ever
+  created for this call). `PaymentConfirmationService` reads the payment's own already-persisted
+  record via `DomesticPaymentRepository.findById` and calls neither `save` nor `update` — it
+  cannot affect payment status, and 409s (via `PaymentNotSettledMapper`) unless the payment has
+  reached `SETTLED`. `PaymentConfirmationRenderAdapter` resolves the current PUBLISHED
+  `POTVRZENI_O_PLATBE_CS`/`_EN` template body via `listTemplates`, then merges the payment's own
+  data into it via `previewTemplate` — both document-service calls are read-only/non-persisting on
+  the document-service side, so a retry can never double-render or double-persist anything.
+  **Risk class = availability** (a document-service outage fails only the download itself — never
+  payment initiation, status transition, or clearing/settlement — retryable by the customer, no
+  data lost) and **confidentiality** (payment amount, debtor/creditor account numbers/bank codes,
+  creditor name, and remittance info cross the boundary to document-service in the preview
+  request; mitigated by OIDC client-credentials + cluster-internal-only document-service ingress,
+  same posture as the existing `fraud-service`/`transaction-service` edges above). **New STRIDE
+  rows**: Info disclosure (payment data sent to document-service for a one-shot render, never
+  stored there) and Spoofing (a caller other than the payment's own viewer/operator requesting a
+  confirmation) — mitigated by the same `@RolesAllowed`/`@Authorize` gate as every other read
+  endpoint on this resource. `openapi.yaml` bumped `1.3.0` → `1.4.0` (additive). No DB schema
+  change; rollback = revert the endpoint/use-case/adapter commit (document-service's `preview`
+  endpoint and its own threat model are unaffected either way).
 
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `Idempotency-Key` on createPayment. The existing guard `require(idempotencyKey.isNotBlank())` could not run for an ABSENT header: this handler is `suspend`, so no intrinsic was emitted and `null.isNotBlank()` threw NPE — the replay control answered 500 in exactly the case it was written for, while a BLANK header correctly gave 400. Now `require(!idempotencyKey.isNullOrBlank())`. This is a control that was partially inoperative, not a new one. No new caller or boundary. Rollback: revert.
 - **2026-07-24** — Retire the legacy in-service orchestration; Temporal is the sole orchestrator
@@ -206,3 +265,20 @@ not change any existing request's outcome until explicitly flipped.
   — the exact condition #3274 exists to fix. Rollback: revert; the adapter's previous behaviour was
   to store the account id in `partyId`. Recorded here because #3431's measurement showed this change
   landed with no threat-model update.
+
+- **2026-08-06** — **Error-envelope disclosure: `ApiError.timestamp` now carries a real
+  clock reading.** `#3874` — the shared `ApiError` envelope (openbank-libs-domain) defaulted
+  `timestamp` to `Instant.EPOCH` and no call site passed it, so every error this service served
+  carried `1970-01-01T00:00:00Z`. The field is now a required constructor argument, stamped
+  `Instant.now()` at construction in this service's mappers. **Risk class = information
+  disclosure**, and it is a deliberate, bounded increase: error responses now reveal the server's
+  wall-clock time to any caller who can provoke an error, including an unauthenticated one on
+  endpoints that answer 401/403 through this envelope. Assessed as acceptable — the value is
+  second-resolution UTC already implied by the HTTP `Date` header on the same response, so it
+  discloses nothing a caller could not already read, and it is what makes the envelope's own
+  instruction ("contact support with traceId=…") actionable by letting support bind a trace to a
+  moment. No new field, no new endpoint, no authorization or ingress change; the response SHAPE is
+  unchanged (`string`/`date-time`), so no API-contract bump under ADR-0048. Not a timing oracle:
+  the stamp is taken when the error object is built, not measured against request start, so it
+  does not expose per-request processing duration. Rollback: revert; the field is
+  serialisation-only and nothing persists it.

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.57.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.57.0...customer-edge-v0.57.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **customer-edge:** answer 400, not 500, for a missing required query parameter ([#4211](https://github.com/JiRaska/open-bank-oss/issues/4211)) ([4ddb6ef](https://github.com/JiRaska/open-bank-oss/commit/4ddb6efeb23864fe65a4f2624f8722e1fcae04fb)), closes [#3624](https://github.com/JiRaska/open-bank-oss/issues/3624)
+
+## [0.57.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.56.0...customer-edge-v0.57.0) (2026-08-07)
+
+
+### Features
+
+* **customer-edge:** honour a shared DOCUMENT, so the share button leads somewhere ([#4115](https://github.com/JiRaska/open-bank-oss/issues/4115)) ([c79f442](https://github.com/JiRaska/open-bank-oss/commit/c79f44251ac7a5ac6605824ae98e1ac84350955a))
+
 ## [0.56.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.55.0...customer-edge-v0.56.0) (2026-08-07)
 
 

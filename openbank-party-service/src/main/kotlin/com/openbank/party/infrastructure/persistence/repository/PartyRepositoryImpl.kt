@@ -4,16 +4,30 @@
 
 package com.openbank.party.infrastructure.persistence.repository
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.party.application.port.out.PartyDocumentFileRepository
 import com.openbank.party.application.port.out.PartyDocumentRepository
+import com.openbank.party.application.port.out.PartyOutboxRepository
 import com.openbank.party.application.port.out.PartyRepository
-import com.openbank.party.domain.model.*
+import com.openbank.party.domain.model.Address
+import com.openbank.party.domain.model.AmlStatus
+import com.openbank.party.domain.model.DocumentType
+import com.openbank.party.domain.model.KycStatus
+import com.openbank.party.domain.model.Party
+import com.openbank.party.domain.model.PartyDocument
+import com.openbank.party.domain.model.PartyDocumentFile
+import com.openbank.party.domain.model.PartyEvent
 import com.openbank.party.domain.model.PartyStatus
+import com.openbank.party.domain.model.PartyType
+import com.openbank.party.domain.model.PhoneDirectory
 import com.openbank.party.infrastructure.persistence.entity.PartyDocumentEntity
 import com.openbank.party.infrastructure.persistence.entity.PartyDocumentFileEntity
 import com.openbank.party.infrastructure.persistence.entity.PartyEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -22,14 +36,29 @@ import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
-class PartyRepositoryImpl :
-    PartyRepository,
+class PartyRepositoryImpl(
+    private val outboxRepository: PartyOutboxRepository,
+    private val objectMapper: ObjectMapper,
+) : PartyRepository,
     PanacheRepository<PartyEntity> {
     @Inject lateinit var clock: Clock
 
     override suspend fun save(party: Party): Party {
         val e = party.toEntity()
         Panache.withTransaction { persist(e) }.awaitSuspending()
+        return party.copy()
+    }
+
+    // Aggregate state change + outbox row in ONE transaction (issue #4007): the bare persist()
+    // inside persistInTransaction joins this session, so the party row and its event commit
+    // together. persist() and not merge() here because PartyEntity extends PanacheEntity — the id
+    // is generated, so this is a genuine INSERT; the app-assigned-id trap that forces merge()
+    // elsewhere in the fleet does not apply. `party_id` is the business key, not the @Id.
+    override suspend fun save(party: Party, event: PartyEvent): Party {
+        val e = party.toEntity()
+        Panache.withTransaction {
+            persist(e).flatMap { outboxRepository.persistInTransaction(event.toOutboxMessage()) }
+        }.awaitSuspending()
         return party.copy()
     }
 
@@ -75,59 +104,73 @@ class PartyRepositoryImpl :
     override suspend fun countAll(): Long = Panache.withSession { count() }.awaitSuspending()
 
     override suspend fun anonymize(id: UUID) {
+        Panache.withTransaction { applyAnonymize(id) }.awaitSuspending()
+    }
+
+    /** Transactional outbox (issue #4007) — the erasure and PARTY_ERASED share one transaction. */
+    override suspend fun anonymize(id: UUID, event: PartyEvent) {
         Panache.withTransaction {
-            find("partyId", id).firstResult().chain { e ->
-                if (e == null) return@chain io.smallrye.mutiny.Uni.createFrom().voidItem()
-                e.legalName = "ANONYMIZED"
-                // GDPR Art. 17 erasure: the tombstone email must stay unique (DB unique
-                // constraint) but must NOT be derivable from the data subject. A fresh
-                // random UUID satisfies uniqueness without re-encoding partyId, so the
-                // erased value can't be correlated back to the party (K5).
-                e.email = "erased-${UUID.randomUUID()}@erased.invalid"
-                e.phone = null
-                e.tradingName = null
-                e.dateOfBirth = null
-                e.nationality = null
-                e.taxId = null
-                e.registrationNumber = null
-                e.addressLine1 = null
-                e.addressLine2 = null
-                e.addressCity = null
-                e.addressPostalCode = null
-                e.addressCountryCode = null
-                e.status = "CLOSED"
-                e.updatedAt = java.time.Instant.now(clock)
-                io.smallrye.mutiny.Uni.createFrom().voidItem()
-            }
+            applyAnonymize(id).flatMap { outboxRepository.persistInTransaction(event.toOutboxMessage()) }
         }.awaitSuspending()
     }
 
-    override suspend fun update(party: Party): Party = Panache.withTransaction {
-        find("partyId", party.id).firstResult().map { e ->
-            e?.also {
-                it.status = party.status.name
-                it.email = party.email
-                it.phone = party.phone
-                // The hash is derived state, never supplied by a caller — recomputing it here is
-                // what keeps it from drifting out of step with the number it indexes.
-                it.phoneHash = PhoneDirectory.hash(party.phone)
-                it.discoverable = party.discoverable
-                it.tradingName = party.tradingName
-                it.kycStatus = party.kycStatus.name
-                it.amlStatus = party.amlStatus.name
-                it.addressLine1 = party.address?.line1
-                it.addressLine2 = party.address?.line2
-                it.addressCity = party.address?.city
-                it.addressPostalCode = party.address?.postalCode
-                it.addressCountryCode = party.address?.countryCode
-                it.updatedAt = party.updatedAt
-                // Written in the same UPDATE as `status`: the DB enforces
-                // (status = 'MERGED') = (merged_into IS NOT NULL) as a CHECK, so setting one
-                // without the other fails the statement (ADR-0179).
-                it.mergedInto = party.mergedIntoPartyId
-            }
-        }.replaceWith(party)
+    private fun applyAnonymize(id: UUID): Uni<Void> = find("partyId", id).firstResult().chain { e ->
+        if (e == null) return@chain io.smallrye.mutiny.Uni.createFrom().voidItem()
+        e.legalName = "ANONYMIZED"
+        // GDPR Art. 17 erasure: the tombstone email must stay unique (DB unique
+        // constraint) but must NOT be derivable from the data subject. A fresh
+        // random UUID satisfies uniqueness without re-encoding partyId, so the
+        // erased value can't be correlated back to the party (K5).
+        e.email = "erased-${Ids.randomId()}@erased.invalid"
+        e.phone = null
+        e.tradingName = null
+        e.dateOfBirth = null
+        e.nationality = null
+        e.taxId = null
+        e.registrationNumber = null
+        e.addressLine1 = null
+        e.addressLine2 = null
+        e.addressCity = null
+        e.addressPostalCode = null
+        e.addressCountryCode = null
+        e.status = "CLOSED"
+        e.updatedAt = java.time.Instant.now(clock)
+        io.smallrye.mutiny.Uni.createFrom().voidItem()
+    }
+
+    override suspend fun update(party: Party): Party = Panache.withTransaction { applyUpdate(party) }.awaitSuspending()
+
+    /** Transactional outbox (issue #4007) — the UPDATE and the event row share one transaction. */
+    override suspend fun update(party: Party, event: PartyEvent): Party = Panache.withTransaction {
+        applyUpdate(party).flatMap { updated ->
+            outboxRepository.persistInTransaction(event.toOutboxMessage()).replaceWith(updated)
+        }
     }.awaitSuspending()
+
+    private fun applyUpdate(party: Party): Uni<Party> = find("partyId", party.id).firstResult().map { e ->
+        e?.also {
+            it.status = party.status.name
+            it.email = party.email
+            it.phone = party.phone
+            // The hash is derived state, never supplied by a caller — recomputing it here is
+            // what keeps it from drifting out of step with the number it indexes.
+            it.phoneHash = PhoneDirectory.hash(party.phone)
+            it.discoverable = party.discoverable
+            it.tradingName = party.tradingName
+            it.kycStatus = party.kycStatus.name
+            it.amlStatus = party.amlStatus.name
+            it.addressLine1 = party.address?.line1
+            it.addressLine2 = party.address?.line2
+            it.addressCity = party.address?.city
+            it.addressPostalCode = party.address?.postalCode
+            it.addressCountryCode = party.address?.countryCode
+            it.updatedAt = party.updatedAt
+            // Written in the same UPDATE as `status`: the DB enforces
+            // (status = 'MERGED') = (merged_into IS NOT NULL) as a CHECK, so setting one
+            // without the other fails the statement (ADR-0179).
+            it.mergedInto = party.mergedIntoPartyId
+        }
+    }.replaceWith(party)
 
     /**
      * Discoverable parties whose phone hash is in [hashes]. Non-discoverable rows are excluded in
@@ -161,6 +204,16 @@ class PartyRepositoryImpl :
             update("consentMarketing = ?1, consentMarketingUpdatedAt = ?2 where partyId = ?3", granted, at, partyId)
         }.awaitSuspending()
     }
+
+    // The outbox payload is the event's own flat envelope verbatim — `party-outbox-out` and the
+    // retired `party-events-out` both target topic `openbank.party.events`, so a consumer sees
+    // exactly the bytes it saw before, plus the additive OutboxKafkaHeaders and a partition key.
+    private fun PartyEvent.toOutboxMessage() = OutboxMessage(
+        aggregateId = aggregateId,
+        eventType = eventType,
+        payload = objectMapper.writeValueAsString(envelope),
+        createdAt = occurredAt,
+    )
 
     private fun Party.toEntity() = PartyEntity().also {
         it.partyId = id

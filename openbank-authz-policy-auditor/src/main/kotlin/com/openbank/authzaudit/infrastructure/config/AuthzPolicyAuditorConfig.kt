@@ -32,6 +32,9 @@ interface AuthzPolicyAuditorConfig {
     @WithDefault("http://litellm.ai-platform:4000")
     fun llmGatewayUrl(): String
 
+    @WithDefault("deepseek-ai/DeepSeek-V3.2")
+    fun modelId(): String
+
     // Filesystem path to the monorepo checkout this agent reads openbank-infra/opa/policies/*.rego,
     // openbank-libs/governance/policies/*.rego, openbank-libs-runtime's AuthorizeInterceptor.kt, and
     // openbank-libs/governance/agents.yaml from (PolicyScanAdapter). Defaults to the working

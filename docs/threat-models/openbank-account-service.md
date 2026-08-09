@@ -86,7 +86,33 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-09** — New inbound caller: `fraud-service` (ADR-0220 D3.5, issue #2749). Its new
+  `AccountServiceClient` (fraud-service's first-ever outbound rest-client) calls
+  `GET /api/v1/accounts/{accountId}` — an existing read-only, already-`@PermitAll` lookup, so no
+  endpoint or authz rule changed — to resolve the `partyId` a repeated-REVIEW fraud-hold applies
+  to. **New trust boundary**: fraud-service's namespace now has NetworkPolicy ingress to
+  account-service (`openbank-infra/gitops/components/accounts/network-policies.yaml`), and OIDC
+  M2M via the shared `openbank-services` client (already trusted by ~10 other callers on this
+  same read). Plaintext in-cluster (V9.1 baseline, same as every other caller here) — no TLS
+  listener exists to point at instead. account-service's own state, endpoints and mutation authz
+  are unchanged; this adds a reader, not a writer.
+
 - **2026-08-05** — Trust-boundary change (#3734): `operator-account-write` now excludes `service-account-*` principals, and a new `prohibited` veto closes `account.{close, freeze, unfreeze, authorize, approval.decide}` to `service-account-openbank-edge`. The role_action_matrix grants ALL ten account.* actions to ROLE_OPERATOR (which the edge service-account carries) and matrix-allows bypasses rule-level exclusions, so both paths needed closing. The edge's verified customer self-service — `account.{create, update}` via `service-edge-account-m2m` (onboarding open-account, pocket add/close, savings goal, ADR-0104/ADR-0153) — is preserved; the shared client keeps `account.read`. Ext moved from generator heredoc to standalone `account_rest_ext.rego` with a 13-test opa suite.
+
+- **2026-08-07** — No trust boundary moved: the `sanctions-service` and `product-catalog`
+  rest-client **defaults** in `application.yaml` were changed from `http://openbank-sanctions-service:8123`
+  and `http://openbank-product-catalog:8080` to `http://localhost:8123` / `http://localhost:8104`
+  (issue #3931). Neither `openbank-` name is a Service in any namespace, and the product-catalog
+  port was wrong as well (the Service is `product-catalog:8104` in `accounts`). **These defaults
+  were dead in every deployed environment** — the account-service Deployment sets
+  `SANCTIONS_SERVICE_URL` and `PRODUCT_CATALOG_SERVICE_URL` (the latter at the KEDA HTTP
+  interceptor, with `PRODUCT_CATALOG_API_HOST_OVERRIDE`) — so no deployed request path changes,
+  and both edges keep their existing postures (sanctions fails **closed**, product-catalog fails
+  **open**, §6 2026-07-09 and 2026-06-06 entries). The change matters for local dev, where the
+  screening gate previously failed closed against a name that could never resolve, and it clears
+  the last findings blocking `incluster-hostname-resolution` from `mode: advisory` to `enforced`.
+  Sibling services on the same edges (`fx`, `kyc`, `sepa-payment`, `billing`, `document-service`)
+  already used these localhost defaults; account-service was the outlier.
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. Six parameters: `Idempotency-Key` on openAccount, `currency` on resolvePocket, and the `partyId`/`role` and `partyId`/`intent` pairs on the two authorization-check endpoints. The authorization pairs are the security-relevant ones: they are the INPUTS to an access decision, so a null reaching the use case is a decision taken on an absent subject rather than a rejected request. No new caller, no new boundary; the endpoints and their `@RolesAllowed`/`@Authorize` gates are unchanged, and every guard runs AFTER authorization. Rollback: revert the commit (restores the 500).
 - **2026-08-03** — Propose-only savings withdrawal: the owner's approval now SPENDS an SCA
   challenge (ADR-0232 AC8). **New outbound trust boundary** `account-service → sca-service`
@@ -360,3 +386,19 @@ not change any existing request's outcome until explicitly flipped.
   legacy `account_authorizations.transaction_limit` **is** enforced on this path, because wiring
   the old behaviour to a live debit route would have made an operator-set per-transaction ceiling
   decoration. Rollback: revert the edge call site — the endpoint alone moves no money.
+- **2026-08-06** — **Error-envelope disclosure: `ApiError.timestamp` now carries a real
+  clock reading.** `#3874` — the shared `ApiError` envelope (openbank-libs-domain) defaulted
+  `timestamp` to `Instant.EPOCH` and no call site passed it, so every error this service served
+  carried `1970-01-01T00:00:00Z`. The field is now a required constructor argument, stamped
+  `Instant.now()` at construction in this service's mappers. **Risk class = information
+  disclosure**, and it is a deliberate, bounded increase: error responses now reveal the server's
+  wall-clock time to any caller who can provoke an error, including an unauthenticated one on
+  endpoints that answer 401/403 through this envelope. Assessed as acceptable — the value is
+  second-resolution UTC already implied by the HTTP `Date` header on the same response, so it
+  discloses nothing a caller could not already read, and it is what makes the envelope's own
+  instruction ("contact support with traceId=…") actionable by letting support bind a trace to a
+  moment. No new field, no new endpoint, no authorization or ingress change; the response SHAPE is
+  unchanged (`string`/`date-time`), so no API-contract bump under ADR-0048. Not a timing oracle:
+  the stamp is taken when the error object is built, not measured against request start, so it
+  does not expose per-request processing duration. Rollback: revert; the field is
+  serialisation-only and nothing persists it.

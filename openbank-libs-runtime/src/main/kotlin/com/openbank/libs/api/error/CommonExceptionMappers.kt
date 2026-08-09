@@ -14,6 +14,7 @@ import jakarta.ws.rs.ext.Provider
 import org.jboss.logging.Logger
 import org.jboss.logging.MDC
 import java.time.DateTimeException
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -29,8 +30,14 @@ import java.util.UUID
  */
 private fun traceId(): String = (MDC.get("correlationId") as? String) ?: UUID.randomUUID().toString()
 
-private fun apiError(status: Int, code: String, message: String, details: List<FieldError>? = null) =
-    ApiError(traceId = traceId(), status = status, code = code, message = message, details = details)
+private fun apiError(status: Int, code: String, message: String, details: List<FieldError>? = null) = ApiError(
+    traceId = traceId(),
+    status = status,
+    code = code,
+    message = message,
+    timestamp = Instant.now(),
+    details = details,
+)
 
 @Provider
 class IllegalArgumentExceptionMapper : ExceptionMapper<IllegalArgumentException> {
@@ -177,6 +184,7 @@ class GenericExceptionMapper : ExceptionMapper<Exception> {
                     status = 500,
                     code = ErrorCode.INTERNAL_ERROR.code,
                     message = "An unexpected error occurred. Please contact support with traceId=$id.",
+                    timestamp = Instant.now(),
                 ),
             )
             .build()

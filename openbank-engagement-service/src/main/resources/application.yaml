@@ -60,8 +60,42 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      # group.id / auto.offset.reset for the channels below are set via the
+      # engagement-service-msg-override ConfigMap (override.properties), NOT here — a dotted leaf
+      # map key under mp.messaging.incoming.<channel> in YAML never resolves to the plain
+      # MicroProfile Config property name SmallRye reads (issue #686, ADR-0137 pattern).
+      lending-events-in:
+        connector: smallrye-kafka
+        topic: openbank.lending.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      party-events-in:
+        connector: smallrye-kafka
+        topic: openbank.party.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      fraud-hold-events-in:
+        connector: smallrye-kafka
+        topic: openbank.fraud.hold.changed
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      dispute-events-in:
+        connector: smallrye-kafka
+        topic: openbank.dispute.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 "%test":
+  # `authz.enforce` carries defaultValue = "true" in AuthorizeInterceptor, and a test JVM has no
+  # PolicyDecisionPoint bean — so every @Authorize call on SurfaceResource's two endpoints fails
+  # closed with 503 before the handler runs, and SurfaceRestContractIT's status assertions fail.
+  # Measured in #4128: removing this key alone turns all four of those tests red with 503.
+  # Advisory HERE ONLY, same pattern and reasoning as campaign-service: that IT is about the HTTP
+  # contract, not about who may call what — the OPA gate and the rego tests own that, and neither
+  # needs the app running. The deployed posture is unchanged, decided by the sidecar (#4068).
+  authz:
+    enforce: false
   quarkus:
     management:
       enabled: false

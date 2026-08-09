@@ -1,0 +1,132 @@
+# Kafka mTLS identity + ACLs for the `engagement` service namespace (ADR-0137 Tier 2c).
+#
+# Deferred out of the original consumer-code PR (issue #2749): check-msg-channel-image-parity.py
+# (#3350 class incident, card-issuance) blocks a GitOps config that declares a messaging channel
+# ahead of an image that can serve it. Landing now that the deployed image
+# (sandbox-fb5c455b) is built from a commit whose application.yaml declares
+# lending-events-in/party-events-in with a real `connector:`.
+#
+# This also fixes a latent bug, not just adds a feature — openbank.outbox.dispatch-enabled is
+# `true`, so the D2 feedback-loop outbox has been attempting every publish over plaintext against
+# the mTLS-only :9093 listener since #4048 merged: an immediate TLS-handshake failure per
+# attempt, loud, never actually delivering.
+#
+# engagement-service ACL surface:
+#   Write + Describe: openbank.engagement.events    (own D2 feedback-loop output)
+#   Read  + Describe: openbank.lending.events        (LendingArrearsEventConsumer, ADR-0220 D3.5)
+#   Read  + Describe: openbank.party.events          (PartyErasureConsumer, ADR-0220 D3.5)
+#   Read  + Describe: openbank.fraud.hold.changed    (FraudHoldEventConsumer, ADR-0220 D3.5, #2749)
+#   Read  + Describe: openbank.dispute.events        (DisputeOpenedEventConsumer, ADR-0220 D3.5, #4262)
+#   Read:             group openbank-engagement-service
+#
+# The fraud-hold grant is NOT deferred like the two above were: `fraud-hold-events-in`'s
+# `connector:` and this ACL land in the SAME PR (#4252) as fraud-service's producer side, so
+# there is no image/config ordering gap for check-msg-channel-image-parity.py to catch — that
+# guard is about a GitOps *ConfigMap* declaring a channel override ahead of its image, and this
+# is a KafkaUser ACL grant, not a msg-override ConfigMap.
+#
+# The dispute grant (#4262) has the same shape: `dispute-events-in`'s `connector:` and this ACL
+# land in one PR. Its group.id/auto.offset.reset stay OUT of engagement-service-msg-override until
+# the deployed image carries the channel, exactly as fraud-hold-events-in's still do.
+#
+# Cert projection: Strimzi User Operator mints the keystore Secret in `messaging`;
+# the ExternalSecrets below project it into `engagement` via the kafka-messaging-certs
+# ClusterSecretStore (kubernetes provider, RBAC in kafka-scheme-accepted-acl.yaml).
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs must land before the engagement Deployment rolls onto mTLS; lower waves
+    # sync first and ArgoCD blocks on the ExternalSecrets reaching SecretSynced.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: engagement-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.engagement.events
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.lending.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.party.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.fraud.hold.changed
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dispute.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-engagement-service
+          patternType: literal
+        operations: [Read]
+        host: "*"
+---
+# Keystore for engagement-service projected from `messaging` into `engagement`.
+# Source: Strimzi User Operator secret `engagement-service` in namespace `messaging`.
+# `dataFrom.extract` preserves binary PKCS#12 (`user.p12`) byte-for-byte.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: engagement-service-kafka-keystore
+  namespace: engagement
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: engagement-service-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: engagement-service
+---
+# Shared cluster-CA truststore projected from `messaging` into `engagement`.
+# Source: Strimzi Cluster Operator secret `openbank-cluster-cluster-ca-cert`.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: engagement
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert

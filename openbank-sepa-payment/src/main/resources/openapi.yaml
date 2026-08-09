@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SEPA Payment Service API
-  version: 1.5.0
+  version: 1.6.0
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
     creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
@@ -136,6 +136,41 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/sepa-payments/{paymentId}/confirmation:
+    get:
+      tags: [SEPA Payments]
+      summary: >-
+        Download the payment confirmation document for a COMPLETED SEPA payment (ADR-0248 #3).
+        Rendered synchronously on this request only, via document-service's non-persisting
+        preview endpoint — never pre-generated, never cached, never persisted anywhere.
+      operationId: getSepaPaymentConfirmation
+      security:
+        - bearerAuth: [ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN, ROLE_PAYMENTS]
+      parameters:
+        - $ref: '#/components/parameters/paymentId'
+        - name: locale
+          in: query
+          schema:
+            type: string
+            enum: [cs, en]
+            default: en
+      responses:
+        '200':
+          description: Rendered confirmation document (HTML)
+          content:
+            text/html:
+              schema:
+                type: string
+                format: binary
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Payment exists but is not COMPLETED — no confirmation available
+        '502':
+          description: document-service unreachable, or no PUBLISHED template for the requested locale
 
   /api/v1/sepa-payments/{paymentId}/status:
     patch:

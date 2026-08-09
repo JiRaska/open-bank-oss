@@ -1,0 +1,52 @@
+# Makes account-service's Kafka consumer `group.id` reach the connector from a config source
+# SmallRye does not mangle (#686, #2945).
+#
+# THE MECHANISM
+#   application.yaml writes `group.id:` as a YAML leaf key under
+#   mp.messaging.incoming.<channel>. SmallRye's YAML config source quotes any leaf key containing
+#   a literal dot, so it registers only as ...<channel>."group.id" — quotes included — and
+#   KafkaConnectorIncomingConfiguration's plain getOptionalValue("group.id", …) never finds it.
+#   Nothing errors; the connector falls back to quarkus.application.name.
+#
+# WHY THIS FILE EXISTS WHEN NOTHING IS BROKEN
+#   account-service's declared group.id IS `openbank-account-service`, which is exactly what the
+#   fallback produces — so the broken key is a no-op today, by coincidence rather than by design.
+#   It stops being a no-op the moment the service is renamed, or a channel is given its own group
+#   (exactly what transaction-service did). This file makes the declared value the EFFECTIVE value,
+#   so that day is a config edit and not a silent consumer-group change on a money-path topic.
+#
+#   Deploying this changes no effective value: both channels keep the group
+#   `openbank-account-service`, which is the group the KafkaUser ACL
+#   (kafka-account-mtls.yaml) grants Read on, and the group that holds today's committed offsets.
+#
+# WHAT IS DELIBERATELY NOT HERE
+#   `auto.offset.reset: earliest` is declared for both channels in application.yaml and is subject
+#   to the same bug, so its effective value is the connector default (`latest`). It is NOT set here.
+#   Making it effective is an operational decision, not a config tidy-up: auto.offset.reset applies
+#   whenever a group has no valid committed offset, so on the next offset expiry
+#   (offsets.retention, 7d default — reachable for a KEDA-scaled service) the group would replay
+#   the whole retained log instead of resuming at the tail. See #2945 for the per-channel
+#   assessment and the owner decision that has to precede it.
+#
+#   Why a properties FILE and not env vars: quarkusio/quarkus#30106 and
+#   smallrye/smallrye-reactive-messaging#2028 document an unresolved upstream bug where an env-var
+#   override of a single leaf property on a HYPHENATED channel name crashes Quarkus at startup
+#   (SRMSG00071). Both channels here are hyphenated. Same reasoning as transaction-service's and
+#   kyc-service's equivalents, which this mirrors.
+#
+# config_ordinal=500 outranks the baked application.yaml (~254). Loaded via
+# QUARKUS_CONFIG_LOCATIONS on the Rollout; the location is optional, so an absent file warns
+# and boots.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: account-service-msg-override
+  namespace: accounts
+  labels:
+    app.kubernetes.io/name: account-service
+    app.kubernetes.io/part-of: accounts
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.party-events-in.group.id=openbank-account-service
+    mp.messaging.incoming.delegation-events-in.group.id=openbank-account-service

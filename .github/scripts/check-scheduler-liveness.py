@@ -59,22 +59,15 @@ ALLOWLIST = {
     "openbank-control-liveness-sentinel/src/main/kotlin/com/openbank/liveness/infrastructure/schedule/LivenessCheckScheduler.kt",
 }
 
-# Today's non-compliant set (first scan 2026-08-03, 37 files), money-path first
-# (ADR-0237 rollout order). Each entry disappears in its adoption PR; the gate
-# fails if the list GROWS or if an entry healed without being removed here.
+# Today's non-compliant set (first scan 2026-08-03, 37 files; 27 at the 2026-08-07
+# re-derivation; 16 here). Each entry disappears in its adoption PR; the gate fails
+# if the list GROWS or if an entry healed without being removed here.
+#
+# The money-path block is EMPTY as of 2026-08-08 (#3931) — all 11 money-path entries
+# adopted the heartbeat and were removed in the same PR that flipped this gate to
+# `mode: enforced`. Their being left here after healing is what kept the gate at
+# exit 1, which `mode: advisory` then converted to a warning; nothing else noticed.
 BASELINE = [
-    # money-path
-    "openbank-balance-service/src/main/kotlin/com/openbank/balance/infrastructure/schedule/BalanceReconciliationScheduler.kt",
-    "openbank-balance-service/src/main/kotlin/com/openbank/balance/infrastructure/schedule/ReconciliationFreshnessWatchdog.kt",
-    "openbank-domestic-payment/src/main/kotlin/com/openbank/domestic/infrastructure/observability/DomesticPaymentStrandedGauge.kt",
-    "openbank-domestic-payment/src/main/kotlin/com/openbank/domestic/infrastructure/scheduler/ScreeningRedriveScheduler.kt",
-    "openbank-interest-service/src/main/kotlin/com/openbank/interest/infrastructure/scheduler/InterestAccrualScheduler.kt",
-    "openbank-interest-service/src/main/kotlin/com/openbank/interest/infrastructure/scheduler/InterestCapitalizationScheduler.kt",
-    "openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/partition/JournalPartitionMaintainer.kt",
-    "openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/schedule/TieOutFreshnessWatchdog.kt",
-    "openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/servicing/InterestAccrualScheduler.kt",
-    "openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/servicing/ProvisioningCycleScheduler.kt",
-    "openbank-sdd-service/src/main/kotlin/com/openbank/sdd/infrastructure/scheduler/MandateExpiryScheduler.kt",
     # non-money-path
     "openbank-agent-service/src/main/kotlin/com/openbank/agent/application/OversightService.kt",
     "openbank-agent-service/src/main/kotlin/com/openbank/agent/infrastructure/observability/AgentMetricsAdapter.kt",

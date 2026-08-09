@@ -10,7 +10,7 @@ import com.openbank.libs.governance.Proposal
 import com.openbank.libs.governance.ProposalState
 import com.openbank.libs.lending.compliance.CompiledCompliancePack
 import com.openbank.libs.lending.compliance.CompliancePackCompiler
-import com.openbank.libs.lending.compliance.CompliancePackParser
+import com.openbank.libs.lending.compliance.CompliancePackJson
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -47,7 +47,7 @@ class CompliancePackActivationService(
 ) {
     fun propose(packJson: String, maker: String): Uni<PackActivationView> {
         require(maker.isNotBlank()) { "Proposer identity is required" }
-        val compiled = CompliancePackCompiler.compile(CompliancePackParser.fromJson(packJson))
+        val compiled = CompliancePackCompiler.compile(CompliancePackJson.fromJson(packJson))
         val now = OffsetDateTime.now(clock)
         val entity = CompliancePackActivationEntity().apply {
             id = com.openbank.libs.domain.identifiers.Ids.newId()
@@ -97,9 +97,20 @@ class CompliancePackActivationService(
             // Measured, not theorised: with the persist-vs-merge defect still in place, the decide
             // call returned 500 and `GET /compliance-packs/active` nonetheless listed the pack
             // (CompliancePackActivationIT step 3 failing while step 4 passed).
-            activations.save(entity).map { saved ->
+            //
+            // The write is a CONDITIONAL update, not a blind save. The `require` above tested a
+            // snapshot read in a different transaction, so on its own it cannot stop two decisions
+            // arriving together from both passing and both writing — and the approve leg would then
+            // activate the pack whether or not its write won, leaving a REJECTED row next to a pod
+            // enforcing the pack it refused. `compareAndSetDecision` re-tests PROPOSED inside the
+            // UPDATE, so exactly one decision claims the row; everyone else is refused here, with
+            // the same 400 they would have received a second later.
+            activations.compareAndSetDecision(entity).map { claimed ->
+                require(claimed == 1) {
+                    "Activation proposal $proposalId was decided concurrently and is no longer decidable"
+                }
                 if (approve) registry.activate(decided)
-                saved.toView()
+                entity.toView()
             }
         }
 
@@ -125,7 +136,7 @@ class CompliancePackActivationService(
 
     private fun CompliancePackActivationEntity.toProposal(): Proposal<CompiledCompliancePack> = Proposal(
         id = id.toString(),
-        action = CompliancePackCompiler.compile(CompliancePackParser.fromJson(payload)),
+        action = CompliancePackCompiler.compile(CompliancePackJson.fromJson(payload)),
         proposedBy = proposedBy,
         proposedAt = proposedAt.toInstant(),
         state = state,

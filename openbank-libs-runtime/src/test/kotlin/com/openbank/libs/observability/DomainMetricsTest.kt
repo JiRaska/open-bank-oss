@@ -113,7 +113,7 @@ class DomainMetricsTest {
     }
 
     @Test
-    fun `a never-succeeded workflow reads as maximally stale`() {
+    fun `a freshly registered workflow reads an age of seconds, not decades`() {
         val reg = SimpleMeterRegistry()
         val dm = withRegistry(reg)
 
@@ -121,14 +121,35 @@ class DomainMetricsTest {
 
         val age = reg.find("openbank.workflow.last_success.age_seconds")
             .tag("workflow", "standing-order-execution").gauge()
-        // Age is computed from Instant.EPOCH (1970) — trivially past any real threshold, no
-        // special-casing needed for "this workflow has literally never run".
         assertThat(age).isNotNull
-        assertThat(age!!.value()).isGreaterThan(Duration.ofDays(365 * 50).toSeconds().toDouble())
+        // Pinned BY VALUE on purpose. The gauge used to seed from Instant.EPOCH and read ~1.8e9
+        // seconds on every fresh pod, which fires WorkflowLivenessStale (age > 2x interval, for:
+        // 15m) 15 minutes after every deploy for every daily workflow. assertThat(age).isNotNull()
+        // passes against exactly that value, so the assertion has to be an upper bound: a workflow
+        // registered moments ago is seconds old, and anything approaching the 2-day threshold of a
+        // daily job is the regression.
+        assertThat(age!!.value())
+            .describedAs("the age gauge must be seeded at registration, not at Instant.EPOCH")
+            .isLessThan(Duration.ofHours(1).toSeconds().toDouble())
     }
 
     @Test
-    fun `recordSuccess resets the age gauge close to zero`() {
+    fun `a freshly registered workflow reports that it has not succeeded yet`() {
+        val reg = SimpleMeterRegistry()
+        val dm = withRegistry(reg)
+
+        dm.registerWorkflowLiveness("standing-order-execution", Duration.ofDays(1))
+
+        // The one bit the boot-seed gives up, published rather than lost: with the age gauge now
+        // small in both cases, this flag is the only thing separating "never succeeded since boot"
+        // from "succeeded a moment ago", and it is what the sentinel triages on.
+        val recorded = reg.find("openbank.workflow.success.recorded")
+            .tag("workflow", "standing-order-execution").gauge()
+        assertThat(recorded!!.value()).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `recordSuccess resets the age gauge close to zero and flips the success flag`() {
         val reg = SimpleMeterRegistry()
         val dm = withRegistry(reg)
 
@@ -138,6 +159,9 @@ class DomainMetricsTest {
         val age = reg.find("openbank.workflow.last_success.age_seconds")
             .tag("workflow", "standing-order-execution").gauge()
         assertThat(age!!.value()).isLessThan(5.0)
+        val recorded = reg.find("openbank.workflow.success.recorded")
+            .tag("workflow", "standing-order-execution").gauge()
+        assertThat(recorded!!.value()).isEqualTo(1.0)
     }
 
     @Test
