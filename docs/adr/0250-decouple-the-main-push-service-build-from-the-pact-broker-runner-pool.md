@@ -117,10 +117,12 @@ lapsed (see Consequences), and fund a higher `arc_max_runners` from that saving.
   onto that pool can starve the required PR checks that share it. The split therefore needs a
   concurrency governor, and `max-parallel` must be chosen against the 20 ceiling rather than
   against the ARC pool's aio limits as it is today.
-- Provider verification runs in the Gradle test JVM, so the `contract` job cannot be reduced
-  to a `curl`. It needs either the build artifact plus a test-only Gradle invocation, or a
-  second compile in-cluster. Which of the two is cheaper is **not yet measured**, and the
-  answer decides how much of the saving above is actually realised.
+- Provider verification runs inside the Gradle `test` task, not as a step of its own, so the
+  `contract` job cannot be reduced to a `curl` the way consumer publishing can. It needs
+  either the build artifact plus a test-only invocation, or a second compile in-cluster. The
+  step timings below bound how much this can cost but do not resolve it, because provider
+  verification is not separately observable in them — isolating it is the first task of the
+  implementation.
 - A two-job split adds an artifact hand-off between jobs, and an artifact that fails to upload
   becomes a new way for a pact never to be published. That failure must be loud, or it
   reproduces `PENDING_BUILD` with a cause that is harder to see.
@@ -128,7 +130,26 @@ lapsed (see Consequences), and fund a higher `arc_max_runners` from that saving.
   interruption can now kill a main-push build mid-job. The `runners` pool already tolerates
   this for PR builds; main-push inherits that exposure.
 
-## Compliance impact
+## How much of the job actually needs the cluster
+
+Step timings from 25 successful main-push builds on `openbank-build`, 2026-08-09:
+
+| step | share of job |
+|---|---|
+| `Build + test` | 61–83% |
+| `Generate Kover XML report` | 10.3–33.6%, mean ~22% |
+| `Publish consumer pacts to broker` | **0–1 second** |
+
+The step that requires cluster DNS is **free**: publishing a consumer pact is a `curl` to the
+broker's `/contracts/publish`, and it costs 0–1 s in every sample. Everything expensive —
+compile, test, and a coverage XML that is ~22% of every build — needs nothing from the
+cluster at all. Coverage cannot simply be dropped from the main lane (it is the ratchet
+baseline), but it does not need to be computed *in-cluster*, and today it is.
+
+That is the quantitative case for this ADR: the in-cluster pool is scarce (6 slots, 42 queued
+runs, p50 queue 85 min) and roughly 90% of what it computes has no in-cluster dependency. The
+residual is provider verification, which is embedded in `test` and therefore not visible as
+its own line above.
 
 No regulated data changes hands and no control is removed. `can-i-deploy` keeps asking the same
 question against the same broker state, so the contract gate that guards money-path deploys is
