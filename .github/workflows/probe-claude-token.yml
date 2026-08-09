@@ -4,7 +4,8 @@
 # real gateway with the real CI credential rather than assuming either way. Delete after.
 name: probe claude token
 on:
-  workflow_dispatch:
+  push:
+    branches: [ci/probe-claude-token]
 permissions:
   contents: read
 jobs:
