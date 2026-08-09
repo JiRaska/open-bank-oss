@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0\n// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.\n// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.\n
 package com.openbank.balance.application.usecase
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.balance.application.port.`in`.CreditAccountCommand
 import com.openbank.balance.application.port.`in`.DebitAccountCommand
 import com.openbank.balance.application.port.`in`.InitializeBalanceCommand
@@ -13,8 +15,10 @@ import com.openbank.balance.application.port.out.HoldRepository
 import com.openbank.balance.application.port.out.MovementOutcome
 import com.openbank.balance.domain.model.Balance
 import com.openbank.balance.domain.model.BalanceEvent
+import com.openbank.balance.domain.model.BalanceEventActors
 import com.openbank.balance.domain.model.BalanceEventType
 import com.openbank.balance.domain.model.BalanceHold
+import com.openbank.libs.domain.event.EventActor
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -238,6 +242,89 @@ class BalanceServiceTest {
         assertThrows<BalanceNotFoundException> {
             service.setOverdraftLimit(SetOverdraftLimitCommand(UUID.randomUUID(), "EUR", BigDecimal.ZERO))
         }
+    }
+
+    /**
+     * #3994 — red against `origin/main`, where `BalanceEvent` had no `actorId` at all and the three
+     * balance event types accounted for 542 of the 1341 unattributed rows in the live audit trail.
+     *
+     * Asserts the EXACT id, not that one is present: `assertNotNull` would pass against the empty
+     * string, against `"null"` (the four-character string #4307 removed from `actor_id`) and
+     * against a mechanism copied from the wrong call site, and the mechanism segment is the only
+     * part that makes the value worth storing.
+     */
+    @Test
+    fun `an inbound hold names the balance API as its system origin - no person placed it`(): Unit = runBlocking {
+        val balance = sampleBalance()
+        val balanceRepo = FakeBalanceRepository(balance)
+        val publisher = RecordingBalanceEventPublisher()
+        val service = BalanceService(
+            balanceRepo,
+            FakeHoldRepository(),
+            publisher,
+            FakeBalanceMovementPort(balanceRepo),
+        )
+
+        service.placeHold(
+            PlaceHoldCommand(balance.accountId, BigDecimal("20.00"), "CZK", "card auth", "ref-1", ttlSeconds = 60),
+        )
+
+        val event = publisher.events.single()
+        assertEquals("system:balance-service:balance-api", event.actorId)
+        assertEquals("SYSTEM", event.actorType)
+    }
+
+    @Test
+    fun `a credit carries the same system origin`(): Unit = runBlocking {
+        val balanceRepo = FakeBalanceRepository(sampleBalance())
+        val publisher = RecordingBalanceEventPublisher()
+        val service = BalanceService(
+            balanceRepo,
+            FakeHoldRepository(),
+            publisher,
+            FakeBalanceMovementPort(balanceRepo),
+        )
+
+        service.credit(CreditAccountCommand(balanceRepo.seed.accountId, BigDecimal("5.00"), "CZK", "ref-credit"))
+
+        assertEquals("system:balance-service:balance-api", publisher.events.single().actorId)
+        assertEquals("SYSTEM", publisher.events.single().actorType)
+    }
+
+    /**
+     * The wire, not the object (#3994).
+     *
+     * `BalanceEvent` is a SERIALISED data class — `KafkaBalanceEventPublisher` hands it to
+     * `ObjectMapper.writeValueAsString`, so the JSON keys are Kotlin property names and no string
+     * literal `"actorId"` exists anywhere in this module. A `command grep '"actorId"'` over
+     * balance-service therefore reports nothing whether the field is on the wire or not, which is
+     * exactly how a survey by grep misses half this fleet's event fields. Only serialising can
+     * tell, so this test serialises.
+     */
+    @Test
+    fun `the serialised event puts the actor on the wire under the key AuditConsumer reads`() {
+        // findAndRegisterModules mirrors the Quarkus-configured mapper the real publisher uses.
+        val mapper = ObjectMapper().findAndRegisterModules()
+        val json: JsonNode = mapper.readTree(
+            mapper.writeValueAsString(
+                BalanceEvent(
+                    eventId = UUID.randomUUID(),
+                    eventType = BalanceEventType.BALANCE_UPDATED,
+                    accountId = UUID.randomUUID(),
+                    currency = "CZK",
+                    amount = BigDecimal("1.00"),
+                    bookedAmount = BigDecimal("1.00"),
+                    availableAmount = BigDecimal("1.00"),
+                    reservedAmount = BigDecimal.ZERO,
+                    occurredAt = OffsetDateTime.parse("2026-01-01T00:00:00Z"),
+                    actorId = BalanceEventActors.LEDGER_PROJECTION,
+                    actorType = EventActor.TYPE_SYSTEM,
+                ),
+            ),
+        )
+
+        assertEquals("system:balance-service:ledger-projection", json.get("actorId").asText())
+        assertEquals("SYSTEM", json.get("actorType").asText())
     }
 
     private class FakeBalanceRepository(initial: Balance? = null) : BalanceRepository {
