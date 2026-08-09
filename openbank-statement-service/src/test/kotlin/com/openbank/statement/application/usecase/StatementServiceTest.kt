@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.statement.application.usecase
 
+import com.openbank.libs.testing.audit.AuditEventTime
 import com.openbank.statement.Fixtures
 import com.openbank.statement.application.port.out.AccountInfoPort
 import com.openbank.statement.application.port.out.BalancePort
@@ -17,6 +18,7 @@ import com.openbank.statement.domain.model.StatementFormat
 import com.openbank.statement.domain.model.StatementPeriod
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
@@ -84,6 +86,30 @@ class StatementServiceTest {
         verify(exactly = 0) { periods.save(any()) }
     }
 
+    /**
+     * #3914: red before the payload gained `occurredAt` — the close instant was in the payload only
+     * as `closedAt`, a name `AuditConsumer` does not read, so the audit row for a statutory
+     * period-close recorded the audit consumer's ingest clock as the close time.
+     *
+     * Asserts the value equals the period's own `closedAt`, not merely that a parseable instant is
+     * present: a serialisation-time clock read would also be parseable, and would make a replayed
+     * or re-emitted close claim a different business time each time.
+     */
+    @Test
+    fun `the period-closed payload carries the close instant as the audit event time`() {
+        every { periods.findByPeriod(any(), any(), any(), any()) } returns Uni.createFrom().nullItem()
+        every { balance.closingBalance(Fixtures.ACCOUNT_ID, "CZK", to) } returns
+            Uni.createFrom().item(BalanceAnchor(BigDecimal("1075.00"), "CZK", to))
+        every { periods.nextLegalSequence(Fixtures.ACCOUNT_ID, "CZK") } returns Uni.createFrom().item(7L)
+        val msg = slot<StatementOutboxMessage>()
+        every { periods.saveWithOutbox(any(), capture(msg)) } answers
+            { Uni.createFrom().item(firstArg<StatementPeriod>()) }
+
+        val closed = service.closeMonth(Fixtures.ACCOUNT_ID, from, to).await().indefinitely().first()
+
+        AuditEventTime.assertRecordedAsEventTime(msg.captured.payload, closed.closedAt)
+    }
+
     @Test
     fun `a re-run is idempotent - it returns the existing close without minting a new sequence`() {
         val existing = StatementPeriod(
@@ -131,6 +157,122 @@ class StatementServiceTest {
         assertThat(rendered.contentType).isEqualTo("application/xml")
         assertThat(rendered.body).contains("<LglSeqNb>7</LglSeqNb>")
         assertThat(rendered.body).contains("<CreDtTm>2026-02-01T02:30:00Z</CreDtTm>")
+    }
+
+    /**
+     * #3986 — **the falsifying test for this defect.** RED before the close-time snapshot existed.
+     *
+     * ADR-0035 §D/§F promise a closed period re-renders byte-identically. `statementModel` broke
+     * that by rebuilding the model at render time from two LIVE projections, so this test mutates
+     * exactly those two between the two renders:
+     *
+     *  - a late entry whose `bookingDate` (2026-01-20) falls inside the already-closed window —
+     *    changes the entry lines AND makes the document stop reconciling, since the closing balance
+     *    is a stored column and does not move with it;
+     *  - a holder rename + IBAN change — rewrites the header of an already-issued legal document.
+     *
+     * Rendering once proves nothing here: the failure is *between* two renders, so the mutation has
+     * to sit between them. All three formats are asserted — a snapshot that fixed camt but not
+     * MT940/PDF would be a partial fix that a single-format assertion would call done.
+     */
+    @Test
+    fun `two renders of a closed period are byte-identical across a late entry and a holder rename`() {
+        every { periods.findByPeriod(any(), any(), any(), any()) } returns Uni.createFrom().nullItem()
+        every { balance.closingBalance(Fixtures.ACCOUNT_ID, "CZK", to) } returns
+            Uni.createFrom().item(BalanceAnchor(BigDecimal("1075.00"), "CZK", to))
+        every { periods.nextLegalSequence(Fixtures.ACCOUNT_ID, "CZK") } returns Uni.createFrom().item(7L)
+        val closed = slot<StatementPeriod>()
+        every { periods.saveWithOutbox(capture(closed), any()) } answers {
+            Uni.createFrom().item(firstArg<StatementPeriod>())
+        }
+
+        // Close through the REAL path, so the snapshot is minted by production code, not by the test.
+        service.closeMonth(Fixtures.ACCOUNT_ID, from, to).await().indefinitely()
+        every { periods.findBySequence(Fixtures.ACCOUNT_ID, "CZK", 7L) } returns
+            Uni.createFrom().item(closed.captured)
+
+        val before = StatementFormat.entries.associateWith {
+            service.render(Fixtures.ACCOUNT_ID, "CZK", 7L, it).await().indefinitely().body
+        }
+
+        // --- the world moves under the closed period ---
+        every { bookedEntries.bookedEntries(any(), any(), any(), any()) } returns Uni.createFrom().item(
+            listOf(
+                Fixtures.entry(ref = "TX-1", amount = "100.00", cd = CreditDebit.CRDT),
+                Fixtures.entry(ref = "TX-2", amount = "25.00", cd = CreditDebit.DBIT),
+                Fixtures.entry(ref = "TX-3-LATE", amount = "500.00", cd = CreditDebit.DBIT, booking = "2026-01-20"),
+            ),
+        )
+        every { accountInfo.pocketAccount(Fixtures.ACCOUNT_ID) } returns
+            Uni.createFrom().item(PocketAccountInfo(Fixtures.ACCOUNT_ID, "CZ99", "Jana Novakova", listOf("CZK")))
+
+        val after = StatementFormat.entries.associateWith {
+            service.render(Fixtures.ACCOUNT_ID, "CZK", 7L, it).await().indefinitely().body
+        }
+
+        assertThat(after).isEqualTo(before)
+        // ...and the reason it holds, pinned so a future refactor cannot pass this by accident:
+        // exactly ONE read of each live port in the whole test — the one the CLOSE makes. The six
+        // renders above add none. (`exactly = 0` would be wrong: the close must read them, that is
+        // where the frozen values come from.)
+        verify(exactly = 1) { bookedEntries.bookedEntries(Fixtures.ACCOUNT_ID, "CZK", from, to) }
+        verify(exactly = 1) { accountInfo.pocketAccount(Fixtures.ACCOUNT_ID) }
+    }
+
+    /**
+     * #3986, the deliberate other half: a period closed BEFORE the snapshot existed has none, and
+     * still replays the live projections. Pinned so the fallback cannot be quietly deleted (it is
+     * the only way those rows render at all) and cannot be quietly widened into a backfill —
+     * inventing a snapshot from today's data would freeze drift and stamp it as the issued document.
+     */
+    @Test
+    fun `a period closed before the snapshot existed still replays live data`() {
+        val legacy = StatementPeriod(
+            id = UUID.randomUUID(), accountId = Fixtures.ACCOUNT_ID, pocketCurrency = "CZK",
+            periodFrom = from, periodTo = to, legalSequenceNumber = 7, electronicSequenceNumber = 7,
+            openingBalance = BigDecimal("1000.00"), closingBalance = BigDecimal("1075.00"),
+            entryCount = 2, closedAt = Fixtures.CLOSED_AT, snapshot = null,
+        )
+        every { periods.findBySequence(Fixtures.ACCOUNT_ID, "CZK", 7L) } returns Uni.createFrom().item(legacy)
+
+        val rendered = service.render(Fixtures.ACCOUNT_ID, "CZK", 7L, StatementFormat.MT940)
+            .await().indefinitely()
+
+        assertThat(rendered.body).contains("TX-1")
+        verify(exactly = 1) { bookedEntries.bookedEntries(Fixtures.ACCOUNT_ID, "CZK", from, to) }
+        verify(exactly = 1) { accountInfo.pocketAccount(Fixtures.ACCOUNT_ID) }
+    }
+
+    /**
+     * #3986 — a correction must not be born with the defect it corrects: the superseding page
+     * freezes its OWN render inputs, or the restated statement would drift exactly as the original
+     * one did.
+     */
+    @Test
+    fun `a restatement freezes the superseding page's own snapshot`() {
+        val standing = StatementPeriod(
+            id = UUID.randomUUID(), accountId = Fixtures.ACCOUNT_ID, pocketCurrency = "CZK",
+            periodFrom = from, periodTo = to, legalSequenceNumber = 7, electronicSequenceNumber = 7,
+            openingBalance = BigDecimal("1000.00"), closingBalance = BigDecimal("9999.00"),
+            entryCount = 1, closedAt = Fixtures.CLOSED_AT,
+        )
+        every { periods.findByPeriod(Fixtures.ACCOUNT_ID, "CZK", from, to) } returns
+            Uni.createFrom().item(standing)
+        every { balance.closingBalance(Fixtures.ACCOUNT_ID, "CZK", to) } returns
+            Uni.createFrom().item(BalanceAnchor(BigDecimal("1075.00"), "CZK", to))
+        every { periods.nextLegalSequence(Fixtures.ACCOUNT_ID, "CZK") } returns Uni.createFrom().item(8L)
+        every { periods.supersedeAndReplace(any(), any(), any()) } answers {
+            Uni.createFrom().item(secondArg<StatementPeriod>())
+        }
+
+        val replacement = restatement.restatePocketPeriod(Fixtures.ACCOUNT_ID, "CZK", from, to)
+            .await().indefinitely()
+
+        assertThat(replacement.legalSequenceNumber).isEqualTo(8L)
+        val frozen = replacement.snapshot
+        assertThat(frozen).isNotNull
+        assertThat(frozen!!.holderName).isEqualTo("Jan Novak")
+        assertThat(frozen.entries.map { it.entryRef }).containsExactly("TX-1", "TX-2")
     }
 
     @Test

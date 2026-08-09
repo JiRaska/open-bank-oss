@@ -14,7 +14,9 @@ import com.openbank.lending.domain.model.LoanStateSummary
 import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
+import com.openbank.libs.lending.origination.OriginationState
 import io.smallrye.mutiny.Uni
+import java.time.OffsetDateTime
 import java.util.UUID
 
 interface LoanApplicationRepository {
@@ -31,7 +33,30 @@ interface LoanApplicationRepository {
      * pages to add up rows would be the same wrong answer, slower.
      */
     fun summariseByState(): Uni<List<ApplicationStateSummary>>
+
+    /**
+     * Blind write of the decision fields. Correct only where the caller is not deciding anything
+     * from the value it is overwriting — [compareAndSetStatus] is what an origination transition
+     * must use.
+     */
     fun update(application: LoanApplication): Uni<LoanApplication>
+
+    /**
+     * Move the application from [from] to [to] **only if** the stored row is still in [from], as a
+     * single statement. Returns the rows claimed: `1` when this caller won the transition, `0` when
+     * someone else already moved the row on.
+     *
+     * The caller must treat `0` as a refusal and must not perform any side effect of the transition
+     * — no evidence event, no workflow signal (issue #3850).
+     */
+    fun compareAndSetStatus(
+        id: LoanApplicationId,
+        from: OriginationState,
+        to: OriginationState,
+        decidedBy: String?,
+        decisionReason: String?,
+        decidedAt: OffsetDateTime?,
+    ): Uni<Int>
 }
 
 interface LoanRepository {

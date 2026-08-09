@@ -24,3 +24,26 @@
   runner. Note `audit_entries` carries `no_update_audit`/`no_delete_audit` rules (V2), so a test
   cannot clean up after itself — write with fresh `aggregate_id`s and anchor `verifyChain` with
   `fromEntryId` instead of assuming an empty table.
+- **A consumer that takes `payload: String` cannot see the envelope, and its `?:` defaults make the
+  gap look like data.** `AuditConsumer` read the body only, so the outbox `ce-type` header (the
+  event type) and the topic (the producing service) were dropped at ingest and fell through to
+  `?: "UNKNOWN"` / `?: "unknown"`. Measured on the live database: **1353 of 1774 rows** named no
+  source and 131 no event type, with only TWO distinct `source_service` values in the whole table —
+  `unknown` and `customer-edge`, the one producer that populates the field. Nothing could see it:
+  the fallbacks are *successful parses* (no exception, no metric, no log line), and every existing
+  assertion was `isNotNull()`-shaped, which a default satisfies. **Assert the VALUE of an
+  attribution field, never its non-nullity** — same lesson as `Instant.EPOCH` in the root guide.
+  Fixed in #3994 by taking `Message<String>`, exactly as the analytics sink did in #2598.
+- **Do not derive a service name from the topic by convention here — nine of the twenty-one
+  subscribed topics disagree with it.** `openbank.cards.events` is card-issuance-service,
+  `openbank.payments.swift.event` is swift-service, `openbank.customer.audit` is customer-edge,
+  `openbank.security.*` is security-scanner, and accounts/transactions/documents are plural where
+  the module is singular. A convention-based derivation does not under-attribute, it writes a
+  confident FALSE service name into a chain-hashed evidentiary row — worse than the `unknown` it
+  replaces. `TopicAttribution` is a verified table whose COVERAGE (not values) is derived from
+  `application.yaml`, so a newly subscribed topic fails `TopicAttributionCoverageTest` instead of
+  silently defaulting again.
+- **Switching an `@Incoming` from `String` to `Message<String>` switches SmallRye from auto-ack to
+  MANUAL ack.** A missed ack stalls the partition and the audit trail stops dead — worse than the
+  under-attribution being fixed. Ack explicitly, in a `finally`, and test it on the path most
+  likely to skip it (an unparseable payload).

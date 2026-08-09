@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.4.1...engagement-service-v0.5.0) (2026-08-09)
+
+
+### Features
+
+* **engagement:** expose a party's active adverse states as a read API ([#4302](https://github.com/JiRaska/open-bank-oss/issues/4302)) ([8617fa9](https://github.com/JiRaska/open-bank-oss/commit/8617fa9e5502c80accb1b5154acbedbef01a1e0a)), closes [#4265](https://github.com/JiRaska/open-bank-oss/issues/4265)
+
+## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.4.0...engagement-service-v0.4.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **engagement:** consume dispute.opened so an open dispute suppresses marketing ([#4297](https://github.com/JiRaska/open-bank-oss/issues/4297)) ([d0031f5](https://github.com/JiRaska/open-bank-oss/commit/d0031f56e1ac7f8e421501c13b98867719013fd8)), closes [#4262](https://github.com/JiRaska/open-bank-oss/issues/4262)
+
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.3.0...engagement-service-v0.4.0) (2026-08-09)
+
+
+### Features
+
+* **fraud:** raise a marketing-suppression fraud-hold signal (ADR-0220 D3.5, [#2749](https://github.com/JiRaska/open-bank-oss/issues/2749)) ([#4252](https://github.com/JiRaska/open-bank-oss/issues/4252)) ([26486a0](https://github.com/JiRaska/open-bank-oss/commit/26486a014c2df3b32b6523fd494d7071d76406f4))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.2.4...engagement-service-v0.3.0) (2026-08-08)
 
 

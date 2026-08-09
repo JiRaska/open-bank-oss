@@ -1,0 +1,30 @@
+# Outbound M2M OIDC client secret (ADR-0220 D3.5, #2749) — fraud-service's first outbound
+# rest-client (AccountServiceClient) needs a client_credentials token to call account-service.
+# Removed by #2929 when there was no rest-client to use it; re-added here alongside that client.
+# Shares the `openbank-services` Keycloak client secret, same as every other AccountServiceClient
+# caller in this fleet (balance-service, aml-service) — see those services' identical ExternalSecret.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: fraud-service-oidc
+  namespace: fraud
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: vault-kv
+  target:
+    name: fraud-service-oidc
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      engineVersion: v2
+      mergePolicy: Merge
+      metadata:
+        annotations:
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+  data:
+    - secretKey: OIDC_CLIENT_SECRET
+      remoteRef:
+        key: account-service
+        property: OIDC_CLIENT_SECRET

@@ -10,7 +10,7 @@ import com.openbank.libs.governance.Proposal
 import com.openbank.libs.governance.ProposalState
 import com.openbank.libs.lending.compliance.CompiledCompliancePack
 import com.openbank.libs.lending.compliance.CompliancePackCompiler
-import com.openbank.libs.lending.compliance.CompliancePackParser
+import com.openbank.libs.lending.compliance.CompliancePackJson
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -47,7 +47,7 @@ class CompliancePackActivationService(
 ) {
     fun propose(packJson: String, maker: String): Uni<PackActivationView> {
         require(maker.isNotBlank()) { "Proposer identity is required" }
-        val compiled = CompliancePackCompiler.compile(CompliancePackParser.fromJson(packJson))
+        val compiled = CompliancePackCompiler.compile(CompliancePackJson.fromJson(packJson))
         val now = OffsetDateTime.now(clock)
         val entity = CompliancePackActivationEntity().apply {
             id = com.openbank.libs.domain.identifiers.Ids.newId()
@@ -136,7 +136,7 @@ class CompliancePackActivationService(
 
     private fun CompliancePackActivationEntity.toProposal(): Proposal<CompiledCompliancePack> = Proposal(
         id = id.toString(),
-        action = CompliancePackCompiler.compile(CompliancePackParser.fromJson(payload)),
+        action = CompliancePackCompiler.compile(CompliancePackJson.fromJson(payload)),
         proposedBy = proposedBy,
         proposedAt = proposedAt.toInstant(),
         state = state,

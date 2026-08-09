@@ -6,6 +6,7 @@ package com.openbank.party.application.usecase
 
 import com.openbank.party.application.port.`in`.CreatePartyCommand
 import com.openbank.party.domain.model.Party
+import com.openbank.party.domain.model.PartyEvent
 import com.openbank.party.domain.model.PartyType
 import io.mockk.coEvery
 import io.mockk.mockk
@@ -30,7 +31,6 @@ class PartyServiceConsentTest {
         partyRepo = mockk()
         documentRepo = mockk()
         documentFileRepo = mockk()
-        eventPublisher = mockk(relaxed = true)
         metrics = mockk(relaxed = true)
         gdprAggregation = mockk(relaxed = true)
         rcPepper = Optional.empty()
@@ -41,8 +41,9 @@ class PartyServiceConsentTest {
     fun `createParty stores consent flags and stamps consentCapturedAt when either is present`(): Unit = runBlocking {
         val service = newService()
         val savedSlot = slot<Party>()
+        val eventSlot = slot<PartyEvent>()
         coEvery { service.partyRepo.findByEmail(any()) } returns null
-        coEvery { service.partyRepo.save(capture(savedSlot)) } answers { savedSlot.captured }
+        coEvery { service.partyRepo.save(capture(savedSlot), capture(eventSlot)) } answers { savedSlot.captured }
 
         service.createParty(
             CreatePartyCommand(
@@ -71,8 +72,9 @@ class PartyServiceConsentTest {
     fun `createParty leaves consent fields and consentCapturedAt null when neither is sent`(): Unit = runBlocking {
         val service = newService()
         val savedSlot = slot<Party>()
+        val eventSlot = slot<PartyEvent>()
         coEvery { service.partyRepo.findByEmail(any()) } returns null
-        coEvery { service.partyRepo.save(capture(savedSlot)) } answers { savedSlot.captured }
+        coEvery { service.partyRepo.save(capture(savedSlot), capture(eventSlot)) } answers { savedSlot.captured }
 
         service.createParty(
             CreatePartyCommand(

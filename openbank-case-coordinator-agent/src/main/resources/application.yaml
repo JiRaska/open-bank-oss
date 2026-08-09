@@ -45,6 +45,11 @@ quarkus:
       generation: none
   flyway:
     migrate-at-start: true
+  jackson:
+    # The ADR-0246 thread entries carry optional fields (actor, draftVersion, proposalId, ...);
+    # omitting nulls keeps the wire shape stable for the admin-ui consumer pact — a null-emitting
+    # serializer would fail the pact's exact-key matching on every sparse entry.
+    serialization-inclusion: non_null
   shutdown:
     timeout: 30S
   log:
@@ -96,6 +101,10 @@ openbank:
     server-url: ${TEMPORAL_HOST:temporal-frontend.temporal:7233}
     namespace: ${TEMPORAL_NAMESPACE:openbank}
     task-queue: case-coordinator
+  outbox:
+    # ADR-0244 D7: the case proposal path actually dispatches — the default `false` would leave
+    # every emitted proposal PENDING forever with no error (the security-scanner #3350 lesson).
+    dispatch-enabled: ${OUTBOX_DISPATCH_ENABLED:true}
   case-coordinator:
     # ADR-0244: case-coordinator sweep placeholder. The real schedule is disabled until
     # Temporal case workflows are implemented; this key exists for test-profile override.
@@ -105,3 +114,24 @@ openbank:
     # key degrades the synthesis call instead of CrashLooping the pod.
     model-endpoint: ${CASE_COORDINATOR_MODEL_ENDPOINT:https://api.deepinfra.com/v1/openai}
     model-id: ${CASE_COORDINATOR_MODEL_ID:deepseek-ai/DeepSeek-V3.2}
+
+mp:
+  messaging:
+    # mTLS to Strimzi (ADR-0137). Defaults keep local dev/test on PLAINTEXT; the workload
+    # manifest sets KAFKA_* env in prod to switch to mTLS (account-service shape).
+    connector:
+      smallrye-kafka:
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl.keystore.location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+        ssl.keystore.type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+        ssl.keystore.password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+        ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+        ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+        ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+        bootstrap.servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    outgoing:
+      case-outbox-out:
+        connector: smallrye-kafka
+        # ADR-0244 D7: every case ends in exactly one HITL proposal on this topic.
+        topic: ${CASE_OUTBOX_TOPIC:proposal-events}
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer

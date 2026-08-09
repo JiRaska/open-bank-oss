@@ -92,7 +92,7 @@ class DocumentRenderService(
                     templateCode = template.code,
                     templateVersion = template.version,
                     sha256 = document.sha256,
-                    at = now,
+                    occurredAt = now,
                 ),
             ),
         )
