@@ -46,6 +46,8 @@ from pathlib import Path
 
 import yaml
 
+import gatelib
+
 GITOPS = Path("openbank-infra/gitops")
 
 # Kinds whose pod template consumes Secrets/ConfigMaps.
@@ -137,7 +139,7 @@ def main():
         return 2
 
     declared, consumed = set(), []
-    for path in sorted(GITOPS.rglob("*.yaml")):
+    for path in gatelib.rglob(GITOPS, "*.yaml"):
         try:
             docs = [d for d in yaml.safe_load_all(path.read_text()) if isinstance(d, dict)]
         except yaml.YAMLError as exc:
@@ -176,7 +178,7 @@ def main():
     for ns, kind, name, path, owner in out:
         print(f"  {kind} {ns}/{name}", file=sys.stderr)
         print(f"    consumed by {owner} in {path}", file=sys.stderr)
-        print(f"    nothing declares it -- the pod will sit in CreateContainerConfigError.",
+        print("    nothing declares it -- the pod will sit in CreateContainerConfigError.",
               file=sys.stderr)
         if kind == "Secret":
             print(f"    fix: add an ExternalSecret with target.name: {name} "

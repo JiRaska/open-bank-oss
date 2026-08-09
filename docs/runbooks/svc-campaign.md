@@ -22,7 +22,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 ## Dependencies
 
-- **Upstream (this service consumes):** `consent-service`, `analytics-sink`
+- **Upstream (this service consumes):** `consent-service`
 - **Downstream (depends on this service):** `notification-service`, `consent-service`
 
 A failure here propagates to the downstream services above — check them when

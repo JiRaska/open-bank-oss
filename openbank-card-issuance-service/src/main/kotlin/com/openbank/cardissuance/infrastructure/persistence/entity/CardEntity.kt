@@ -85,6 +85,14 @@ class CardEntity {
     @Column(name = "blocked_reason")
     var blockedReason: String? = null
 
+    /** SINGLE_USE only: when the card stops being usable even if never presented. */
+    @Column(name = "expires_at")
+    var expiresAt: Instant? = null
+
+    /** Why the card reached a terminal status; null while alive. */
+    @Column(name = "closed_reason")
+    var closedReason: String? = null
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
 

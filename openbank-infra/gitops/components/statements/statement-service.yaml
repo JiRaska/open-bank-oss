@@ -18,6 +18,15 @@ metadata:
     app.kubernetes.io/part-of: statements
 spec:
   replicas: 1
+  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
+  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
+  # resources - on a full cluster the rollout never completes while reporting 1/1 READY.
+  # No HA to lose: this workload is already unavailable for the moment its pod is replaced.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: statement-service
@@ -26,7 +35,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-statement-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "295fea349a6a7b8a"
+        openbank.tech/policy-checksum: "09fb1b363476df8f"
       labels:
         app.kubernetes.io/name: statement-service
         app.kubernetes.io/part-of: statements
@@ -45,7 +54,7 @@ spec:
           # Kyverno's verify-openbank-image-sbom-attestation policy blocked every pod
           # (Deployment stuck at 0/1) → the EoM close / Closings screen read "not
           # responding". sandbox-a407c3ae is the #706 main build with a valid attestation.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-statement-service:sandbox-e532b32e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-statement-service:sandbox-73d5f0dc
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -126,6 +135,13 @@ spec:
             # load-bearing.
             - name: AUTHZ_ENFORCE
               value: "false"
+            # #686 / #2945: load the account-events-in group.id override
+            # (statement-service-msg-override ConfigMap, mounted below) as an external Quarkus
+            # config source, so the dotted YAML key's declared value actually reaches the Kafka
+            # connector instead of silently falling back to quarkus.application.name.
+            # Optional location: if the file is absent Quarkus warns and continues.
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /mnt/msg-config/override.properties
           startupProbe:
             tcpSocket:
               port: management
@@ -161,6 +177,9 @@ spec:
               readOnly: true
             - name: kafka-truststore
               mountPath: /mnt/kafka-truststore
+              readOnly: true
+            - name: msg-override
+              mountPath: /mnt/msg-config
               readOnly: true
           resources:
             requests:
@@ -255,6 +274,9 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
+        - name: msg-override
+          configMap:
+            name: statement-service-msg-override
 ---
 apiVersion: v1
 kind: Service

@@ -88,6 +88,20 @@ kover {
 // Pact: write generated consumer contracts to the shared pacts/ dir at the repo root (git-pact).
 // account-service is BOTH a consumer (PARTY_CREATED) and a provider (AccountCreated).
 tasks.withType<Test> {
+    // Gradle's default test-JVM heap is 512m, which no module in this fleet overrides. That was
+    // survivable while account-service booted Quarkus once; it now has two @QuarkusTestProfile
+    // classes (the outbox-claim IT and the savings-proposal expiry-scheduler IT), and each profile
+    // forces its OWN Quarkus boot in the same forked JVM alongside Testcontainers. CI died with
+    // `java.lang.OutOfMemoryError` inside QuarkusTestExtension, surfacing as a scheduler assertion
+    // failure — the misleading part, because the test it names is a negative control that asserts
+    // nothing happened.
+    //
+    // Deliberately per-module rather than a fleet default: nothing measures test heap anywhere, so
+    // a global bump would be an unmeasured ratchet applied to 50 modules to fix one. If a second
+    // module starts OOMing, that is the signal to raise it in build-logic and to count the Quarkus
+    // boots per module rather than keep paying for them.
+    maxHeapSize = "2g"
+
     systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
 
     // Pact Broker verification (ADR-0092): forward the broker config CI passes with `-D` into the

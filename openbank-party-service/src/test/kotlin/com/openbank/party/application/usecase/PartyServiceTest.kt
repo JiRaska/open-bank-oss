@@ -18,6 +18,7 @@ import com.openbank.party.domain.model.KycStatus
 import com.openbank.party.domain.model.Party
 import com.openbank.party.domain.model.PartyDocument
 import com.openbank.party.domain.model.PartyDocumentFile
+import com.openbank.party.domain.model.PartyEvent
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
 import io.mockk.coEvery
@@ -42,12 +43,21 @@ class PartyServiceTest {
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")
     private val otherPartyId = UUID.fromString("22222222-2222-2222-2222-222222222222")
 
+    // JUnit 5's default PER_METHOD lifecycle gives every test a fresh instance, so one slot per
+    // class is one slot per test. Captures the PartyEvent handed to the repository — the event now
+    // travels IN the state-change transaction (#4007), so the repository call is where to assert it.
+    private val eventSlot = slot<PartyEvent>()
+
+    private fun assertEvent(type: String, aggregateId: UUID) {
+        assertThat(eventSlot.captured.eventType).isEqualTo(type)
+        assertThat(eventSlot.captured.aggregateId).isEqualTo(aggregateId)
+    }
+
     @Test
     fun `createParty saves and publishes event`(): Unit = runBlocking {
         val service = PartyService().apply {
             partyRepo = mockk()
             documentRepo = mockk()
-            eventPublisher = mockk(relaxed = true)
             metrics = mockk(relaxed = true)
             rcPepper = Optional.empty()
             clock = Clock.fixed(now, ZoneOffset.UTC)
@@ -55,7 +65,8 @@ class PartyServiceTest {
 
         val savedPartySlot = slot<Party>()
         coEvery { service.partyRepo.findByEmail("alice@example.com") } returns null
-        coEvery { service.partyRepo.save(capture(savedPartySlot)) } answers { savedPartySlot.captured }
+        coEvery { service.partyRepo.save(capture(savedPartySlot), capture(eventSlot)) } answers
+            { savedPartySlot.captured }
 
         val result = service.createParty(
             CreatePartyCommand(
@@ -77,7 +88,7 @@ class PartyServiceTest {
         assertThat(savedPartySlot.captured.status).isEqualTo(PartyStatus.PENDING_KYC)
         assertThat(savedPartySlot.captured.kycStatus).isEqualTo(KycStatus.NOT_STARTED)
         assertThat(result).isSameAs(savedPartySlot.captured)
-        coVerify(exactly = 1) { service.eventPublisher.publishPartyCreated(result) }
+        assertEvent("PARTY_CREATED", result.id)
         verify(exactly = 1) { service.metrics.partyCreated("INDIVIDUAL") }
     }
 
@@ -91,7 +102,7 @@ class PartyServiceTest {
         )
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
-        coEvery { service.partyRepo.update(capture(updatedSlot)) } answers { updatedSlot.captured }
+        coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers { updatedSlot.captured }
 
         service.updateKycStatus(original.id, KycStatus.APPROVED)
 
@@ -105,7 +116,7 @@ class PartyServiceTest {
         val original = sampleParty(status = PartyStatus.PENDING_KYC, kycStatus = KycStatus.IN_PROGRESS)
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
-        coEvery { service.partyRepo.update(capture(updatedSlot)) } answers { updatedSlot.captured }
+        coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers { updatedSlot.captured }
 
         service.updateKycStatus(original.id, KycStatus.REJECTED)
 
@@ -118,7 +129,6 @@ class PartyServiceTest {
         val service = PartyService().apply {
             partyRepo = mockk()
             documentRepo = mockk()
-            eventPublisher = mockk(relaxed = true)
             metrics = mockk(relaxed = true)
             rcPepper = Optional.empty()
             clock = Clock.fixed(now, ZoneOffset.UTC)
@@ -208,7 +218,7 @@ class PartyServiceTest {
         val original = sampleParty()
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
-        coEvery { service.partyRepo.update(capture(updatedSlot)) } answers { updatedSlot.captured }
+        coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers { updatedSlot.captured }
 
         val result = service.updateParty(
             UpdatePartyCommand(
@@ -227,7 +237,7 @@ class PartyServiceTest {
         assertThat(updatedSlot.captured.legalName).isEqualTo(original.legalName)
         assertThat(updatedSlot.captured.status).isEqualTo(original.status)
         assertThat(result).isSameAs(updatedSlot.captured)
-        coVerify(exactly = 1) { service.eventPublisher.publishPartyUpdated(result) }
+        assertEvent("PARTY_UPDATED", result.id)
     }
 
     @Test
@@ -285,14 +295,14 @@ class PartyServiceTest {
         )
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
-        coEvery { service.partyRepo.update(capture(updatedSlot)) } answers { updatedSlot.captured }
+        coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers { updatedSlot.captured }
 
         val result = service.updateKycStatus(original.id, KycStatus.APPROVED)
 
         assertThat(updatedSlot.captured.kycStatus).isEqualTo(KycStatus.APPROVED)
         assertThat(updatedSlot.captured.status).isEqualTo(PartyStatus.ACTIVE)
         assertThat(result).isSameAs(updatedSlot.captured)
-        coVerify(exactly = 1) { service.eventPublisher.publishKycStatusChanged(result) }
+        assertEvent("KYC_STATUS_CHANGED", result.id)
     }
 
     @Test
@@ -305,7 +315,7 @@ class PartyServiceTest {
         )
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
-        coEvery { service.partyRepo.update(capture(updatedSlot)) } answers { updatedSlot.captured }
+        coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers { updatedSlot.captured }
 
         service.updateKycStatus(original.id, KycStatus.APPROVED)
 
@@ -322,7 +332,7 @@ class PartyServiceTest {
         )
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
-        coEvery { service.partyRepo.update(capture(updatedSlot)) } answers { updatedSlot.captured }
+        coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers { updatedSlot.captured }
 
         service.updateAmlStatus(original.id, AmlStatus.CLEARED)
 
@@ -340,7 +350,7 @@ class PartyServiceTest {
         )
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
-        coEvery { service.partyRepo.update(capture(updatedSlot)) } answers { updatedSlot.captured }
+        coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers { updatedSlot.captured }
 
         service.updateAmlStatus(original.id, AmlStatus.BLOCKED)
 
@@ -353,14 +363,14 @@ class PartyServiceTest {
         val original = sampleParty(status = PartyStatus.ACTIVE, kycStatus = KycStatus.IN_PROGRESS)
         val updatedSlot = slot<Party>()
         coEvery { service.partyRepo.findById(original.id) } returns original
-        coEvery { service.partyRepo.update(capture(updatedSlot)) } answers { updatedSlot.captured }
+        coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers { updatedSlot.captured }
 
         val result = service.updateKycStatus(original.id, KycStatus.REJECTED)
 
         assertThat(updatedSlot.captured.kycStatus).isEqualTo(KycStatus.REJECTED)
         assertThat(updatedSlot.captured.status).isEqualTo(PartyStatus.SUSPENDED)
         assertThat(result).isSameAs(updatedSlot.captured)
-        coVerify(exactly = 1) { service.eventPublisher.publishKycStatusChanged(result) }
+        assertEvent("KYC_STATUS_CHANGED", result.id)
     }
 
     @Test
@@ -372,7 +382,8 @@ class PartyServiceTest {
             val original = sampleParty(status = PartyStatus.PENDING_KYC, kycStatus = KycStatus.IN_PROGRESS)
             val updatedSlot = slot<Party>()
             coEvery { service.partyRepo.findById(original.id) } returns original
-            coEvery { service.partyRepo.update(capture(updatedSlot)) } answers { updatedSlot.captured }
+            coEvery { service.partyRepo.update(capture(updatedSlot), capture(eventSlot)) } answers
+                { updatedSlot.captured }
 
             val result = service.updateKycStatus(original.id, KycStatus.EXPIRED)
 
@@ -424,7 +435,7 @@ class PartyServiceTest {
         val sub = "keycloak-sub-001"
         val savedSlot = slot<Party>()
         coEvery { service.partyRepo.findByKeycloakSub(sub) } returns null
-        coEvery { service.partyRepo.save(capture(savedSlot)) } answers { savedSlot.captured }
+        coEvery { service.partyRepo.save(capture(savedSlot), capture(eventSlot)) } answers { savedSlot.captured }
 
         val (party, isNew) = service.selfRegisterParty(
             SelfRegisterPartyCommand(
@@ -437,7 +448,7 @@ class PartyServiceTest {
         assertThat(isNew).isTrue()
         assertThat(party.keycloakSub).isEqualTo(sub)
         assertThat(party.status).isEqualTo(PartyStatus.PENDING_KYC)
-        coVerify(exactly = 1) { service.eventPublisher.publishPartyCreated(party) }
+        assertThat(eventSlot.captured.eventType).isEqualTo("PARTY_CREATED")
     }
 
     @Test
@@ -458,7 +469,7 @@ class PartyServiceTest {
         assertThat(isNew).isFalse()
         assertThat(party).isEqualTo(existing)
         coVerify(exactly = 0) { service.partyRepo.save(any()) }
-        coVerify(exactly = 0) { service.eventPublisher.publishPartyCreated(any()) }
+        coVerify(exactly = 0) { service.partyRepo.save(any(), any()) }
     }
 
     @Test
@@ -533,14 +544,14 @@ class PartyServiceTest {
         val service = newService()
         coEvery { service.partyRepo.findById(partyId) } returns sampleParty(id = partyId)
         coJustRun { service.documentFileRepo.deleteByPartyId(partyId) }
-        coJustRun { service.partyRepo.anonymize(partyId) }
+        coJustRun { service.partyRepo.anonymize(partyId, capture(eventSlot)) }
 
         service.eraseParty(ErasePartyCommand(partyId))
 
         // Files must be deleted before anonymize — verify both were called.
         coVerify(exactly = 1) { service.documentFileRepo.deleteByPartyId(partyId) }
-        coVerify(exactly = 1) { service.partyRepo.anonymize(partyId) }
-        coVerify(exactly = 1) { service.eventPublisher.publishPartyErased(partyId) }
+        coVerify(exactly = 1) { service.partyRepo.anonymize(partyId, any()) }
+        assertEvent("PARTY_ERASED", partyId)
     }
 
     @Test
@@ -660,7 +671,7 @@ class PartyServiceTest {
         val service = newService().also { it.rcPepper = Optional.of("pepper") }
         val savedSlot = slot<Party>()
         coEvery { service.partyRepo.findByEmail(any()) } returns null
-        coEvery { service.partyRepo.save(capture(savedSlot)) } answers { savedSlot.captured }
+        coEvery { service.partyRepo.save(capture(savedSlot), capture(eventSlot)) } answers { savedSlot.captured }
 
         service.createParty(
             CreatePartyCommand(
@@ -687,7 +698,7 @@ class PartyServiceTest {
         val service = newService() // no pepper
         val savedSlot = slot<Party>()
         coEvery { service.partyRepo.findByEmail(any()) } returns null
-        coEvery { service.partyRepo.save(capture(savedSlot)) } answers { savedSlot.captured }
+        coEvery { service.partyRepo.save(capture(savedSlot), capture(eventSlot)) } answers { savedSlot.captured }
 
         service.createParty(
             CreatePartyCommand(
@@ -713,7 +724,6 @@ class PartyServiceTest {
         partyRepo = mockk()
         documentRepo = mockk()
         documentFileRepo = mockk()
-        eventPublisher = mockk(relaxed = true)
         metrics = mockk(relaxed = true)
         gdprAggregation = mockk(relaxed = true)
         rcPepper = Optional.empty()

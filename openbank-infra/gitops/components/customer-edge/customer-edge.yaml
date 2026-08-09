@@ -65,7 +65,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-customer-edge-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "6c500a6f3b582bd1"
+        openbank.tech/policy-checksum: "9a9a4e73759b7ae9"
     spec:
       # Dedicated SA so EKS Pod Identity can hand the edge (and ONLY the edge) the
       # feedback-screenshots S3 role — ADR-0192, openbank-infra/aws/envs/sandbox-platform/
@@ -81,7 +81,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: customer-edge
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-d9b48764
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-4ddb6efe
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -167,6 +167,15 @@ spec:
             # Declared here so gen-network-policies.py opens the edge->lending ingress allow.
             - name: LENDING_SERVICE_URL
               value: http://lending-service.lending.svc:8126
+            # Delegated access / sharing (ADR-0232): the edge asks delegation-service whether an
+            # ACTIVE grant lets the caller read someone else's account, card or document. The URL
+            # was already correct as a CODE default, which is exactly why this was invisible: the
+            # call worked in every test and was DROPPED in the cluster, because
+            # gen-network-policies.py derives the ingress allow-list from DECLARED env URLs and an
+            # undeclared caller does not exist as far as the generator is concerned. Every edge
+            # -> delegation call timed out for as long as this line was missing.
+            - name: DELEGATION_SERVICE_URL
+              value: http://delegation-service.delegation.svc:8126
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
             - name: DOMESTIC_PAYMENT_SERVICE_URL
@@ -242,7 +251,7 @@ spec:
               value: openbank-sandbox-feedback
             - name: OBJECTSTORE_S3_REGION
               value: eu-north-1
-            # Redis: nearby-pay payment sessions (ADR-0087) + WebAuthn RP challenge/
+            # Redis: nearby-pay payment sessions (ADR-0095) + WebAuthn RP challenge/
             # credential store (ADR-0066 F2). In-namespace ephemeral Redis (redis.yaml).
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.customer-edge.svc:6379

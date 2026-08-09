@@ -137,11 +137,9 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     outgoing:
-      party-events-out:
-        connector: smallrye-kafka
-        client.id: party-service-${quarkus.uuid}
-        topic: openbank.party.events
-        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # `party-events-out` (the direct, non-transactional emitter) was removed with issue #4007.
+      # Party lifecycle events now leave only through the outbox dispatcher below, which targets
+      # the SAME topic — so consumers are unaffected, and there is exactly one publisher.
       party-outbox-out:
         connector: smallrye-kafka
         client.id: party-outbox-service-${quarkus.uuid}

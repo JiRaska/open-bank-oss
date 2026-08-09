@@ -173,6 +173,27 @@ also be deleted (nothing else in balance-service depends on it).
 
 ## 7. Change log
 
+- **2026-08-05** — Prohibit the customer-edge M2M principal from balance writes (#3734). The
+  `operator-balance-write` ext rule was role-only, and `rules.yaml`'s `role_action_matrix` grants
+  the balance writes (`hold`/`holdRelease`/`credit`/`debit`/`initialize`/`reconciliation.run`) to
+  `ROLE_OPERATOR`. Two realm service accounts carry that role and are classified HUMAN by
+  `AuthorizeInterceptor`: `service-account-openbank-services` (shared backend client — a
+  legitimate writer, graduated via `service-balance-m2m` + `shared_m2m_write_prohibition`) and
+  `service-account-openbank-edge` — customer-facing, and since 2026-08-02 genuinely reachable from
+  the public edge (the entry above). A role-only rule plus the matrix grant therefore handed the
+  *internet-reachable* edge identity the fleet's money-moving primitives (`balance.credit` /
+  `balance.debit`) — the exact escalation class fixed for interest in #3698. Fleet caller audit:
+  customer-edge only ever GETs `/api/v1/balances/{accountId}` (three call sites in
+  `CustomerEdgeResource.kt`); no edge write path exists. The tightening is two-layered:
+  `operator-balance-write` and `supervisor-overdraft-limit` now exclude every `service-account-*`
+  principal, AND an edge-scoped `prohibited` clause vetoes all seven write actions at the allow
+  head — so neither the matrix grant nor any future reason can admit the edge to a write. The
+  veto is deliberately edge-scoped, not interest's all-service-accounts shape: the shared client
+  IS a legitimate writer here. Reads untouched. Falsified by `balance_rest_ext_test.rego`
+  (stripping either layer turns 7 of 12 tests red); the ext moved from a generator heredoc to a
+  standalone `balance_rest_ext.rego` so `opa test` can load it (interest/delegation pattern).
+  Rollback: revert the ext to the pre-#3734 shape — no live caller is lost, as no edge write
+  path exists.
 - **2026-08-02** — **balance-service is now genuinely reachable from the public edge**, and the
   honest framing is that the *intent* did not change while the *reality* did. `accounts/accounts-api`
   had declared `api.open-bank.tech/api/v1/balances` since the Ingress was written, so the exposure was

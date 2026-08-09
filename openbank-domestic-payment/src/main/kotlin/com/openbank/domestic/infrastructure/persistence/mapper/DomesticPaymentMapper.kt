@@ -36,6 +36,7 @@ fun DomesticPayment.toEntity() = DomesticPaymentEntity().also {
     it.rejectReason = rejectReason?.name
     it.rejectDetail = rejectDetail
     it.submittedAt = submittedAt
+    it.schemeDispatchedAt = schemeDispatchedAt
     it.settledAt = settledAt
     it.createdAt = createdAt
     it.updatedAt = updatedAt
@@ -69,4 +70,5 @@ fun DomesticPaymentEntity.toDomain() = DomesticPayment(
     settledAt = settledAt,
     createdAt = createdAt,
     updatedAt = updatedAt,
+    schemeDispatchedAt = schemeDispatchedAt,
 )

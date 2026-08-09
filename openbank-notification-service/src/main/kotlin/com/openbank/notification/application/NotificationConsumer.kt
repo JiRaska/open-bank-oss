@@ -8,6 +8,10 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
+import com.openbank.libs.contact.ContactClass
+import com.openbank.libs.contact.ContactDenyReason
+import com.openbank.libs.contact.ContactPolicyGate
+import com.openbank.libs.contact.MarketingCallSite
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.notification.application.port.out.NotificationOutboxRepository
@@ -25,7 +29,6 @@ import com.openbank.notification.domain.model.NotificationStatus
 import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushPlatform
 import com.openbank.notification.domain.model.TemplateSensitivity
-import com.openbank.notification.infrastructure.client.ConsentServiceClient
 import com.openbank.notification.infrastructure.client.PartyContactClient
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
@@ -35,10 +38,14 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.mailer.Mail
 import io.quarkus.mailer.reactive.ReactiveMailer
 import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.asUni
 import io.vertx.core.Vertx
 import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
@@ -60,12 +67,6 @@ class NotificationConsumer {
          * party-scoped GET /api/v1/notifications/{id}/self.
          */
         const val GENERIC_PUSH_BODY = "Open the OpenBank app to view details."
-
-        /**
-         * The fixed internal marketing grantee every MARKETING consent is checked against
-         * (ADR-0205 D3). A constant so the gate cannot drift per call site.
-         */
-        const val MARKETING_GRANTEE = "party-service:marketing-comms"
 
         /**
          * The consent scope a MARKETING send is checked against, per target channel (ADR-0198 D4).
@@ -100,9 +101,7 @@ class NotificationConsumer {
 
     @Inject lateinit var audit: AuditEventPublisher
 
-    @Inject
-    @RestClient
-    lateinit var consentServiceClient: ConsentServiceClient
+    @Inject lateinit var contactGate: ContactPolicyGate
 
     /** Resolves the EMAIL envelope address from `partyId` (issue #3581) — see [resolveEmailRecipient]. */
     @Inject
@@ -298,20 +297,29 @@ class NotificationConsumer {
     // mail never went out" from "the mail went out, but recording SENT failed" — Mutiny's
     // Uni#chain composes onto ONE failure channel, so it would catch both: a transient Postgres
     /**
-     * The ADR-0198 D4 consent gate (#2660): every MARKETING send asks consent-service for the
-     * party's ACTIVE consent under grantee `party-service:marketing-comms` (ADR-0205 D3), scoped
-     * to the target channel. A send with no ACTIVE consent records SUPPRESSED and audits it.
+     * The ADR-0219 D4 contact gate (#2749) — this service's own `consentServiceClient` call was
+     * the choke point ADR-0219 D4 names outright ("its consent call becomes this gate call"): one
+     * `ContactPolicyGate.check(...)` now wraps suppression list -> send cap -> quiet hours ->
+     * live consent pull, in the gate's ordering (same composition campaign-service and
+     * engagement-service already reuse), instead of a bespoke consent-only check.
      *
-     * Fail-closed in BOTH failure modes, deliberately distinguishable in the audit (#2660 §3):
-     *  - `granted == false`  → SUPPRESSED with reason `no_active_consent` (a genuine refusal)
-     *  - client error/timeout → SUPPRESSED with reason `consent_check_unavailable` (an outage)
-     * A consent-service outage must never read as a grant, and the two numbers must never merge
-     * into one — the first is a GDPR control working, the second is an availability problem.
+     * Bridged into this `Uni` chain via `CoroutineScope(Dispatchers.Unconfined).async {
+     * }.asUni()` — the same suspend-into-Uni idiom `CampaignJourneyActivitiesImpl` uses (the
+     * gate itself is a `suspend fun`; this dispatch pipeline is Mutiny `Uni`, not coroutines).
+     *
+     * Fail-closed in every deny reason, deliberately distinguishable in the audit (#2660 §3,
+     * carried forward): `NO_CONSENT` -> `no_active_consent` (a genuine refusal),
+     * `GATE_UNAVAILABLE` -> `consent_check_unavailable` (a port outage — consent, counter or
+     * suppression) — a gate outage must never read as a grant, and the two numbers must never
+     * merge into one. `SEND_CAP_REACHED`/`QUIET_HOURS`/`SUPPRESSED_LIST` are new reasons this
+     * service could not previously produce; each gets its own outcome code rather than folding
+     * into one of the two above.
      *
      * The check is per send, never cached (ADR-0198). `notification_preference`'s columns
      * (`payments_push` / `product_push` / `marketing_push`) remain a per-channel mute *within* a
      * granted consent — a different and legitimate control, not the Art. 6(1)(a) basis.
      */
+    @MarketingCallSite
     private fun gateMarketingOnConsent(
         req: NotificationRequest,
         subject: String,
@@ -319,50 +327,38 @@ class NotificationConsumer {
         entity: NotificationEntity,
     ): Uni<Void> {
         val scope = marketingScopeFor(req.channel)
-        return consentServiceClient.hasActiveConsent(req.partyId, MARKETING_GRANTEE, scope)
-            .onItemOrFailure().transformToUni { check, failure ->
-                when {
-                    failure != null -> {
-                        log.warnf(
-                            failure,
-                            "MARKETING %s suppressed: consent-service unreachable (template=%s party=%s) — " +
-                                "failing closed (ADR-0198 D4, #2660)",
-                            req.channel,
-                            req.template,
-                            req.partyId,
-                        )
-                        markStatus(
-                            req,
-                            entity,
-                            NotificationOutcome.SUPPRESSED,
-                            NotificationOutcomeEvent.REASON_CONSENT_UNAVAILABLE,
-                        ).invoke { _ ->
-                            auditMarketingSuppressed(req, NotificationOutcomeEvent.REASON_CONSENT_UNAVAILABLE)
-                        }
-                    }
-                    check.granted ->
-                        when (req.channel) {
-                            NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
-                            NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
-                        }
-                    else -> {
-                        log.infof(
-                            "MARKETING %s suppressed: no ACTIVE consent (template=%s party=%s, ADR-0198 D4)",
-                            req.channel,
-                            req.template,
-                            req.partyId,
-                        )
-                        markStatus(
-                            req,
-                            entity,
-                            NotificationOutcome.SUPPRESSED,
-                            NotificationOutcomeEvent.REASON_NO_CONSENT,
-                        ).invoke { _ ->
-                            auditMarketingSuppressed(req, NotificationOutcomeEvent.REASON_NO_CONSENT)
-                        }
-                    }
+        val decisionUni = CoroutineScope(Dispatchers.Unconfined).async {
+            contactGate.check(req.partyId, ContactClass.OUTBOUND_SEND, scope)
+        }.asUni()
+        return decisionUni.chain { decision ->
+            if (decision.allowed) {
+                when (req.channel) {
+                    NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
+                    NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
                 }
+            } else {
+                val reason = when (decision.denyReason) {
+                    ContactDenyReason.NO_CONSENT -> NotificationOutcomeEvent.REASON_NO_CONSENT
+                    ContactDenyReason.GATE_UNAVAILABLE -> NotificationOutcomeEvent.REASON_CONSENT_UNAVAILABLE
+                    ContactDenyReason.SEND_CAP_REACHED -> NotificationOutcomeEvent.REASON_SEND_CAP_REACHED
+                    ContactDenyReason.QUIET_HOURS -> NotificationOutcomeEvent.REASON_QUIET_HOURS
+                    ContactDenyReason.SUPPRESSED_LIST -> NotificationOutcomeEvent.REASON_SUPPRESSED_LIST
+                    // IMPRESSION_BUDGET_REACHED, null: never produced for OUTBOUND_SEND — the
+                    // gate's own `when` is exhaustive over ContactClass, so this branch exists
+                    // only for a future ContactDenyReason value this file has not been taught yet.
+                    else -> NotificationOutcomeEvent.REASON_CONSENT_UNAVAILABLE
+                }
+                log.infof(
+                    "MARKETING %s suppressed: %s (template=%s party=%s, ADR-0219 D4)",
+                    req.channel,
+                    reason,
+                    req.template,
+                    req.partyId,
+                )
+                markStatus(req, entity, NotificationOutcome.SUPPRESSED, reason)
+                    .invoke { _ -> auditMarketingSuppressed(req, reason) }
             }
+        }
     }
 
     /**

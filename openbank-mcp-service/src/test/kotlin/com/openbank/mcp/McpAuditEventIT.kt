@@ -122,7 +122,7 @@ class McpAuditEventIT {
         assertThat(event.operation).isEqualTo("mcp.tools.list")
         assertThat(event.result).isEqualTo(AuditResult.DENIED)
         assertThat(event.payload["reason"]).isEqualTo("caller authentication failed")
-        assertThat(event.payload["tools_total"]).isEqualTo(6)
+        assertThat(event.payload["tools_total"]).isEqualTo(8)
     }
 
     // ADR-0195 step 4 (BLOCKER #2206): a tools/call with NO agent token must be denied, never

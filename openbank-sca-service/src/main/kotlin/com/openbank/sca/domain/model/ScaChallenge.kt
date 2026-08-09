@@ -43,6 +43,15 @@ enum class ScaPurpose {
      * [DELEGATION_GRANT] on purpose: a challenge completed by the grantor must never be
      * spendable as the grantee's acceptance, and purpose equality is what enforces that. */
     DELEGATION_ACCEPT,
+
+    /** The account owner approving a delegate's propose-only savings withdrawal (ADR-0232 D8).
+     * The delegate holds SAVINGS_PROPOSE_WITHDRAW and can never execute; this challenge IS the
+     * owner's half of that maker-checker split, so it must be its own purpose — a challenge
+     * raised for anything else must never be spendable as a withdrawal approval, and purpose
+     * equality is what enforces that. Carries no [DynamicLinkingData] today, so a consume that
+     * states no operation is what authorises it; binding it to the proposal's amount and
+     * account needs a proposal-shaped [DynamicLinkingData] and is tracked separately. */
+    SAVINGS_WITHDRAW_APPROVAL,
 }
 
 enum class ScaStatus {

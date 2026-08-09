@@ -27,7 +27,7 @@ All external dependencies are **opt-in** via env, defaulting to offline no-op/lo
 | Erasure | `ANALYTICS_ERASURE_BACKEND` (`vault`), `ANALYTICS_VAULT_*` | NoOpCryptoErasure |
 | WORM | `ANALYTICS_WORM_BACKEND` (`s3`), `ANALYTICS_WORM_S3_*` | mirror/logging |
 | Health / RPO | `ANALYTICS_MAX_LAG_SECONDS` (`900`), `ANALYTICS_MAX_DEAD_LETTERS` (`100`) | — |
-| Residency | `ANALYTICS_RESIDENCY_REGION` (`eu-central-1`), `..._ALLOWED`, `..._ENFORCE` (`true`) | enforced |
+| Residency | `ANALYTICS_RESIDENCY_REGION` (`eu-north-1`), `..._ALLOWED`, `..._ENFORCE` (`true`) | enforced |
 | Auth | `OIDC_CLIENT_SECRET` | dev placeholder (blocked in prod) |
 
 ## Deploy & FinOps tier

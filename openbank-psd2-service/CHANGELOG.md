@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.13](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.8.12...psd2-service-v0.8.13) (2026-08-07)
+
+
+### Bug Fixes
+
+* **psd2:** answer 400, not 500, for a missing required query/header parameter ([#3658](https://github.com/JiRaska/open-bank-oss/issues/3658)) ([0abed33](https://github.com/JiRaska/open-bank-oss/commit/0abed33edb9d9748058573d3352c0a2daf825d74))
+
 ## [0.8.12](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.8.11...psd2-service-v0.8.12) (2026-08-02)
 
 

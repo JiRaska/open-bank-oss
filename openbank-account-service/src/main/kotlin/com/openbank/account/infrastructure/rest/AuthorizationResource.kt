@@ -83,9 +83,12 @@ class AuthorizationResource(private val authorizationUseCase: AuthorizationUseCa
     @Authorize(action = "account.read", resource = "#accountId")
     suspend fun check(
         @PathParam("accountId") accountId: UUID,
-        @QueryParam("partyId") partyId: UUID,
-        @QueryParam("role") role: com.openbank.account.domain.model.AuthorizationRole,
+        @QueryParam("partyId") partyId: UUID?,
+        @QueryParam("role") role: com.openbank.account.domain.model.AuthorizationRole?,
     ): Response {
+        // #3104 — both are required; absent, they used to reach the use case as null and answer 500.
+        requireNotNull(partyId) { "query parameter 'partyId' is required" }
+        requireNotNull(role) { "query parameter 'role' is required" }
         val authorized = authorizationUseCase.isAuthorized(accountId, partyId, role)
         return Response.ok(mapOf("authorized" to authorized)).build()
     }

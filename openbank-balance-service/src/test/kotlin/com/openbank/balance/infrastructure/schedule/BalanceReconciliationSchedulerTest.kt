@@ -31,7 +31,8 @@ class BalanceReconciliationSchedulerTest {
     private val today = LocalDate.of(2026, 7, 18)
     private val clock = Clock.fixed(Instant.parse("2026-07-18T22:00:00Z"), ZoneOffset.UTC)
     private val reconcile = mockk<ReconcileBalancesUseCase>()
-    private val scheduler = BalanceReconciliationScheduler(reconcile, clock, NoOpClusterLock())
+    private val scheduler =
+        BalanceReconciliationScheduler(reconcile, clock, NoOpClusterLock(), domainMetrics = mockk(relaxed = true))
 
     private fun report(hasDrift: Boolean) = ReconciliationReport(
         asOf = today,

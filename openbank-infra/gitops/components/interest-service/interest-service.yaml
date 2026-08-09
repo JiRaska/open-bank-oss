@@ -9,6 +9,15 @@ metadata:
   labels: {app.kubernetes.io/name: interest-service, app.kubernetes.io/part-of: interest}
 spec:
   replicas: 1
+  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
+  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
+  # resources - on a full cluster the rollout never completes while reporting 1/1 READY.
+  # No HA to lose: this workload is already unavailable for the moment its pod is replaced.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector: {matchLabels: {app.kubernetes.io/name: interest-service}}
   template:
     metadata:
@@ -16,7 +25,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-interest-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "095cbc2a932f316b"
+        openbank.tech/policy-checksum: "5adc9e402474419f"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -26,7 +35,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: interest-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-interest-service:sandbox-e532b32e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-interest-service:sandbox-73d5f0dc
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8125}
@@ -84,12 +93,13 @@ spec:
             # (GET /accounts/active) and reads their booked balance (GET /accounts/{id}/balance).
             - name: ACCOUNT_SERVICE_URL
               value: "http://account-service.accounts.svc:8100"
-            # OPA sidecar bootstrap (ADR-0034 Phase 5, issue #938). Advisory mode first
-            # (AUTHZ_ENFORCE=false, @Authorize logs "would DENY" without blocking) — matches
-            # every other service's rollout convention. Flip to true only after an observation
-            # window with a clean advisory report.
+            # OPA sidecar enforced (ADR-0034 Phase 5, issue #3679). Advisory since the Phase-5
+            # sidecar bootstrap (issue #938); coverage verified before the flip: all five
+            # @Authorize actions (interest.list/read/create/delete/trigger) are granted to
+            # ROLE_OPERATOR by the rules.yaml role_action_matrix, reads additionally reach the
+            # shared M2M client via operator-read-any, and no M2M writer exists.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           startupProbe: {tcpSocket: {port: management}, initialDelaySeconds: 10, periodSeconds: 5, failureThreshold: 30}
           readinessProbe: {tcpSocket: {port: http}, periodSeconds: 10, failureThreshold: 3}
           livenessProbe: {httpGet: {path: /q/health/live, port: management}, periodSeconds: 15, failureThreshold: 3}

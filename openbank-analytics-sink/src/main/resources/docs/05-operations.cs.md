@@ -27,7 +27,7 @@ Všechny externí závislosti jsou **opt-in** přes env, výchozí jsou offline 
 | Výmaz | `ANALYTICS_ERASURE_BACKEND` (`vault`), `ANALYTICS_VAULT_*` | NoOpCryptoErasure |
 | WORM | `ANALYTICS_WORM_BACKEND` (`s3`), `ANALYTICS_WORM_S3_*` | zrcadlo/logging |
 | Health / RPO | `ANALYTICS_MAX_LAG_SECONDS` (`900`), `ANALYTICS_MAX_DEAD_LETTERS` (`100`) | — |
-| Rezidence | `ANALYTICS_RESIDENCY_REGION` (`eu-central-1`), `..._ALLOWED`, `..._ENFORCE` (`true`) | vynuceno |
+| Rezidence | `ANALYTICS_RESIDENCY_REGION` (`eu-north-1`), `..._ALLOWED`, `..._ENFORCE` (`true`) | vynuceno |
 | Auth | `OIDC_CLIENT_SECRET` | dev placeholder (blokován v prod) |
 
 ## Deploy & FinOps tier

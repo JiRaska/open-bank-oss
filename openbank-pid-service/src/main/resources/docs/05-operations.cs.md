@@ -9,11 +9,11 @@
 # Dev režim (live reload)
 ./gradlew :openbank-pid-service:quarkusDev
 
-# Kontejner (vícestupňový Dockerfile, fast-jar, běží pod non-root uživatelem `openbank`)
-docker build -t openbank-pid-service -f openbank-pid-service/Dockerfile .
+# Kontejner (fast-jar, běží pod non-root uživatelem `openbank`)
+openbank-infra/scripts/build-push-service.sh pid-service
 ```
 
-Dockerfile staví na `eclipse-temurin:25-jdk-alpine`, běží na `25-jre-alpine`, kopíruje layout `quarkus-app/` a startuje s `-XX:+UseZGC`.
+Image skládá `.github/workflows/Dockerfile.deploy` z fast-jaru sestaveného na hostu: kopíruje layout `quarkus-app/` do runtime base `eclipse-temurin:25-jre` (glibc, #3354) a startuje s `-XX:+UseZGC`. `openbank-pid-service/Dockerfile` nic nestaví (#3016) — pipeline z něj čte jedinou věc, řádek `EXPOSE`.
 
 ## Endpointy / porty
 

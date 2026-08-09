@@ -58,6 +58,24 @@ is the **authentication assurance gate** for payments and consent — defeating 
 
 ## 6. Change log
 
+- **2026-08-05** — Close the role-only M2M path on the SCA ceremony; widen the shared-client
+  identity rule to `scaChallenge.consume` FIRST (#3734). `operator-sca-write` was role-only over
+  the whole `scaChallenge.*`/`device.*` families, so both M2M clients (HUMAN-classified,
+  ROLE_OPERATOR) were admitted to every SCA write — including `scaChallenge.verify` (the OTP
+  fallback, documented human-channel-only) and any future action in those families. SCA differs
+  from the other #3734 rows: the edge IS a legitimate ceremony caller (initiate/read/decide/
+  consume via `service-sca-edge-m2m`; `device.*` via base `edge-service-notification`) and the
+  shared client legitimately consumes challenges — delegation-service's grant-accept ceremony
+  and document-service's DOCUMENT_SIGNING ceremony (ADR-0169 D2) both POST
+  `/api/v1/sca/challenges/{id}/consume` and rode the role-only hole until now. So the ordering
+  is the #3734 "identity-scoped rule FIRST" pattern: `service-sca-shared-client-m2m` gains
+  `scaChallenge.consume`, THEN `operator-sca-write` excludes every `service-account-*`
+  principal. No prohibition clause: `rules.yaml`'s matrix grants no `scaChallenge.*`/`device.*`
+  write to ROLE_OPERATOR, so `matrix-allows` admits nothing the exclusion doesn't close (unlike
+  balance/ledger/fraud). Falsified by `sca_rest_ext_test.rego` — stripping the exclusion turns
+  4 of 11 red; removing the consume widening turns the delegation/document regression test red.
+  The ext moved from a generator heredoc to a standalone `sca_rest_ext.rego` so `opa test` can
+  load it. Rollback: revert the ext — the ceremonies keep working via the widened identity rule.
 - **2026-06-11** — Domain metrics + outbox-backlog gauge (ADR-0077 / ADR-0079). New `DomainMetrics`
   call sites: `scaChallengeIssued(method)` after a challenge is persisted in `initiate`, and
   `scaChallengeResolved(method, outcome)` once a challenge reaches a terminal `ScaStatus`
@@ -95,3 +113,20 @@ is the **authentication assurance gate** for payments and consent — defeating 
   never had, and that property is the mitigation this edge depends on. Rollback: drop the
   `namespaceSelector` entry for `delegation`. Recorded here because #3431's measurement showed this
   change landed with no threat-model update.
+
+- **2026-08-06** — **Error-envelope disclosure: `ApiError.timestamp` now carries a real
+  clock reading.** `#3874` — the shared `ApiError` envelope (openbank-libs-domain) defaulted
+  `timestamp` to `Instant.EPOCH` and no call site passed it, so every error this service served
+  carried `1970-01-01T00:00:00Z`. The field is now a required constructor argument, stamped
+  `Instant.now()` at construction in this service's mappers. **Risk class = information
+  disclosure**, and it is a deliberate, bounded increase: error responses now reveal the server's
+  wall-clock time to any caller who can provoke an error, including an unauthenticated one on
+  endpoints that answer 401/403 through this envelope. Assessed as acceptable — the value is
+  second-resolution UTC already implied by the HTTP `Date` header on the same response, so it
+  discloses nothing a caller could not already read, and it is what makes the envelope's own
+  instruction ("contact support with traceId=…") actionable by letting support bind a trace to a
+  moment. No new field, no new endpoint, no authorization or ingress change; the response SHAPE is
+  unchanged (`string`/`date-time`), so no API-contract bump under ADR-0048. Not a timing oracle:
+  the stamp is taken when the error object is built, not measured against request start, so it
+  does not expose per-request processing duration. Rollback: revert; the field is
+  serialisation-only and nothing persists it.
