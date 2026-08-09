@@ -352,7 +352,6 @@ DEBT = {
     "gate-graduation-guard": DEBT_MARKER,
     "gen-network-policies-drift-gate": DEBT_MARKER,
     "gitops-ref-integrity-guard": DEBT_MARKER,
-    "identifier-intent-guard": DEBT_MARKER,
     "mcp-charter-data-scope-binding": DEBT_MARKER,
     "mcp-real-port-requires-caller-auth-first": DEBT_MARKER,
     "no-dead-code-service-principal-rego-rule": DEBT_MARKER,
