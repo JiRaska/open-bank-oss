@@ -1104,6 +1104,18 @@ gates:
     run: |
       bash .github/scripts/check-agent-charter-registry.sh
 
+  - id: agent-model-parity
+    name: "agent model-id parity, agents.yaml vs application.yaml (ADR-0031 D5, enforced)"
+    group: registry
+    mode: enforced
+    selftest: python3 .github/scripts/check-agent-model-parity.py --self-test
+    selftest_expect: pass
+    min_subjects: 13   # 13 charters declare a real model: today (2026-08-09) — a gate that
+                        # examines nothing passes everything, so this floor must move with the
+                        # count printed by the gate's own summary line.
+    run: |
+      python3 .github/scripts/check-agent-model-parity.py
+
   - id: agent-case-schema
     name: "agent case-coordination schema invariants (ADR-0244 D3/D6/D9, enforced)"
     group: registry
