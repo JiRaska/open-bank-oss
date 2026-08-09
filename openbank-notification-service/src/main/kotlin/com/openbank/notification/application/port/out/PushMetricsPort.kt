@@ -5,6 +5,7 @@
 package com.openbank.notification.application.port.out
 
 import com.openbank.notification.domain.model.NotificationOutcome
+import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushPlatform
 import com.openbank.notification.domain.model.PushSendOutcome
 
@@ -38,6 +39,12 @@ interface PushMetricsPort {
      *
      * Emitted for every fan-out including the zero-device case, so "nobody has a device
      * registered" is a visible number rather than an absence.
+     *
+     * [template] is carried because not every push is worth the same alert. A lost
+     * `SCA_APPROVAL` is the prompt telling a customer a payment waits on their approval — a
+     * PSD2 Art. 97 control — and without this label it is indistinguishable at the metrics
+     * layer from a lost marketing message. `NotificationTemplate` is a closed enum, so the
+     * label is bounded by construction and cannot become a cardinality problem.
      */
-    fun recordFanOut(outcome: NotificationOutcome, devices: Int)
+    fun recordFanOut(template: NotificationTemplate, outcome: NotificationOutcome, devices: Int)
 }
