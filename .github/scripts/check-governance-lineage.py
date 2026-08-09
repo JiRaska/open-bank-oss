@@ -41,12 +41,28 @@ un-resolvable claim is exactly the class this gate exists for. Findings may be a
 for a legitimate case this heuristic can't see — e.g. a REST call made through a shared/generic
 client class without a per-target configKey.
 
-ADVISORY (ADR-0144 gate-graduation): findings are ::warning:: annotations; exits 0 unless invoked
-with --enforce. Not yet run against the full fleet to establish a first-scan baseline — do that
-before setting target_enforce_date to a real graduation deadline.
+THE ALLOWLIST CAN GO STALE, AND THAT IS ALSO A FINDING (#3982). An entry survives its edge being
+deleted, and it survives the code growing the very client its reason swore would never exist —
+`openbank-interest-service->account-service` sat there reading "never a direct account-service
+call" while the service held `@RegisterRestClient(configKey = "account-service")`. An exemption
+list that can only grant is furniture, so an entry that no longer applies is reported at the same
+severity as an unbacked edge.
+
+WHAT THIS AUDIT STRUCTURALLY CANNOT SEE, and therefore what the allowlist is legitimately for: a
+service that reaches its dependency without a per-target `@RegisterRestClient`. customer-edge is
+the extreme case — a BFF with ZERO such interfaces, hopping via a Vert.x WebClient built from an
+`openbank.edge.<svc>-url` @ConfigProperty. The independent witness for those is the GitOps
+Deployment env (`http://<svc>.<ns>.svc:<port>`), which is also what gen-network-policies.py
+derives the NetworkPolicies from — NetworkPolicies do NOT read this file's data, so a lineage
+edit can never change what traffic is allowed.
+
+ENFORCED since #3982 (ADR-0144 gate-graduation): findings are ::error:: annotations and a
+non-zero exit under --enforce. `--self-test` exercises both failure directions on a synthetic
+tree; a gate that has only ever passed is unfalsified.
 
 stdlib + PyYAML (already installed earlier in the same CI job, matching check-slo-registry.py).
-Usage: check-governance-lineage.py [--root .] [--rules openbank-libs/governance/rules.yaml] [--enforce]
+Usage: check-governance-lineage.py [--root .] [--rules openbank-libs/governance/rules.yaml]
+                                   [--enforce] [--self-test]
 """
 from __future__ import annotations
 
@@ -75,9 +91,18 @@ def normalize_service_name(name: str) -> str:
     edge's target resolves to), and bare `product-catalog` — so both the `openbank-` prefix and
     the `-service` suffix are stripped. Stripping only the suffix silently failed EVERY upstream
     api edge, because that side is always the full directory name.
+
+    A trailing `-api` is stripped too, and that one was a silent false-POSITIVE source: nine
+    configKeys in the fleet carry it (`account-api`, `account-service-api`, `balance-api`,
+    `document-api`, `ledger-api`, `party-api`, `party-service-api`, `product-catalog-api`,
+    `transaction-api`), so e.g. document-service's `ProductCatalogClient(configKey =
+    "product-catalog-api")` — a real, live REST call — read as no backing code at all. No service
+    directory in the tree ends in `-api`, so the strip cannot collapse two distinct services.
     """
     if name.startswith("openbank-"):
         name = name[len("openbank-"):]
+    if name.endswith("-api"):
+        name = name[: -len("-api")]
     return name[: -len("-service")] if name.endswith("-service") else name
 
 
@@ -114,6 +139,22 @@ def service_dir_for(root: pathlib.Path, name: str) -> pathlib.Path | None:
     return None
 
 
+def canonical(root: pathlib.Path, name: str) -> str:
+    """One spelling per service, for the `<source>-><target>:<relation>` key.
+
+    The docstring above has always claimed a relationship declared from both ends is checked and
+    allowlisted ONCE. It was not: the key was built from whatever each side happened to spell, so
+    `psd2-service -> openbank-sca-service` and `openbank-psd2-service -> sca-service` were two
+    keys for one relationship (both counted, #3982), and the allowlist entry
+    `openbank-transaction-service->account-service:api` did not cover the very same relationship
+    declared from account-service's end. Resolving each side to its DIRECTORY name makes the
+    promise true; a name with no directory in the tree (github, prometheus, temporal) keeps its
+    literal spelling, since inventing `openbank-github` would be a lie.
+    """
+    service_dir = service_dir_for(root, name)
+    return service_dir.name if service_dir is not None else name
+
+
 def load_allowlist(rules_path: pathlib.Path) -> dict[str, str]:
     if not rules_path.exists():
         return {}
@@ -129,16 +170,10 @@ def load_allowlist(rules_path: pathlib.Path) -> dict[str, str]:
     return allowlist
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--root", default=".")
-    parser.add_argument("--rules", default="openbank-libs/governance/rules.yaml")
-    parser.add_argument("--enforce", action="store_true")
-    args = parser.parse_args()
-
-    root = pathlib.Path(args.root)
+def scan(root: pathlib.Path, rules_path: pathlib.Path) -> dict:
+    """Everything the audit finds, as data — so --self-test can assert on it directly."""
     all_producers, all_consumers, _ = liveness.build_topic_maps(root)
-    allowlist = load_allowlist(root / args.rules)
+    allowlist = load_allowlist(rules_path)
 
     service_dirs = sorted(d for d in root.glob("openbank-*") if (d / "governance.yaml").exists())
 
@@ -191,7 +226,7 @@ def main() -> int:
                 continue
             target = other if direction == "downstream" else service
             source_dir = service_dir if direction == "downstream" else service_dir_for(root, source)
-            edge_key = f"{source}->{target}:{relation}"
+            edge_key = f"{canonical(root, source)}->{canonical(root, target)}:{relation}"
             checked[direction] += 1
             if edge_key in seen:
                 continue
@@ -212,6 +247,133 @@ def main() -> int:
             else:
                 violations.append((edge_key, relation))
 
+    return {
+        "violations": violations,
+        "allowlisted_hits": allowlisted_hits,
+        "stale_allowlist": sorted(set(allowlist) - {key for key, _ in allowlisted_hits}),
+        "unresolved": sorted(set(unresolved)),
+        "checked": checked,
+        "seen": seen,
+        "service_dirs": service_dirs,
+    }
+
+
+def _fixture(tmp: pathlib.Path, name: str, lineage: str, config_keys: tuple[str, ...] = ()) -> None:
+    d = tmp / name
+    (d).mkdir(parents=True, exist_ok=True)
+    (d / "governance.yaml").write_text(f"dataDomain: test\nlineage:\n{lineage}", encoding="utf-8")
+    if config_keys:
+        src = d / "src" / "main" / "kotlin"
+        src.mkdir(parents=True, exist_ok=True)
+        body = "\n".join(
+            f'@RegisterRestClient(configKey = "{k}")\ninterface C{i}' for i, k in enumerate(config_keys)
+        )
+        (src / "Clients.kt").write_text(body, encoding="utf-8")
+
+
+def self_test() -> int:
+    """Feed the audit inputs it MUST flag and inputs it MUST NOT, on a synthetic tree.
+
+    A gate that has only ever passed is unfalsified, and this one's failure path is the whole
+    point of it. Both directions are exercised: an unbacked edge, and an allowlist entry that no
+    longer applies — the second in BOTH of its shapes (edge no longer declared / edge now backed),
+    because they arise from different code and only one of them has ever been seen in the wild.
+    """
+    import tempfile
+
+    failures: list[str] = []
+
+    def check(label: str, condition: bool) -> None:
+        print(f"  {'ok  ' if condition else 'FAIL'} {label}")
+        if not condition:
+            failures.append(label)
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = pathlib.Path(td)
+        # alpha declares a downstream edge to beta and holds no client at all -> must be flagged.
+        _fixture(tmp, "openbank-alpha-service", "  downstream:\n    - serviceName: beta-service\n      relationType: api\n")
+        # beta calls gamma through a `-api`-suffixed configKey -> must NOT be flagged (#3982).
+        _fixture(
+            tmp,
+            "openbank-beta-service",
+            "  downstream:\n    - serviceName: gamma-service\n      relationType: api\n",
+            config_keys=("gamma-api",),
+        )
+        # gamma declares the MIRROR of beta's edge under the other spelling -> one relationship,
+        # not two (the canonical-key fix; this used to count twice).
+        _fixture(tmp, "openbank-gamma-service", "  upstream:\n    - serviceName: openbank-beta-service\n      relationType: api\n")
+        rules = tmp / "rules.yaml"
+
+        def write_rules(*entries: str) -> None:
+            body = "change_requirements:\n  lineage_code_audit:\n    allowlist:\n"
+            body += "".join(f'      - edge: "{e}"\n        reason: "self-test"\n' for e in entries) or "      []\n"
+            rules.write_text(body, encoding="utf-8")
+
+        write_rules()
+        r = scan(tmp, rules)
+        keys = {k for k, _ in r["violations"]}
+        check("[flags] an unbacked edge is a violation", "openbank-alpha-service->openbank-beta-service:api" in keys)
+        check("[passes] a `-api` configKey counts as backing code", "openbank-beta-service->openbank-gamma-service:api" not in keys)
+        check("[passes] a mirrored edge is ONE relationship, not two", len(r["seen"]) == 2)
+        check("[passes] a clean-enough tree reports no stale allowlist", r["stale_allowlist"] == [])
+
+        # Allowlisting the real finding must suppress it and NOT read as stale.
+        write_rules("openbank-alpha-service->openbank-beta-service:api")
+        r = scan(tmp, rules)
+        check("[passes] an allowlisted edge is suppressed", r["violations"] == [])
+        check("[passes] a USED allowlist entry is not stale", r["stale_allowlist"] == [])
+
+        # Direction 2a: an entry for a relationship nothing declares.
+        write_rules("openbank-alpha-service->openbank-beta-service:api", "openbank-alpha-service->openbank-gamma-service:api")
+        r = scan(tmp, rules)
+        check(
+            "[flags] allowlist entry whose edge is no longer declared",
+            r["stale_allowlist"] == ["openbank-alpha-service->openbank-gamma-service:api"],
+        )
+
+        # Direction 2b: an entry for an edge that IS backed by code — the exemption is unnecessary.
+        write_rules("openbank-alpha-service->openbank-beta-service:api", "openbank-beta-service->openbank-gamma-service:api")
+        r = scan(tmp, rules)
+        check(
+            "[flags] allowlist entry whose edge is now backed by code",
+            r["stale_allowlist"] == ["openbank-beta-service->openbank-gamma-service:api"],
+        )
+
+        # An edge naming nothing in the tree is its own class, never a code-drift violation.
+        _fixture(tmp, "openbank-delta-service", "  upstream:\n    - serviceName: github\n      relationType: api\n")
+        write_rules("openbank-alpha-service->openbank-beta-service:api")
+        r = scan(tmp, rules)
+        check("[passes] an edge naming no in-tree service is not a violation", r["violations"] == [])
+        check("[flags] ...but it IS reported as unresolved", any("github" in k for k, _ in r["unresolved"]))
+
+    print(
+        f"check-governance-lineage --self-test: {'PASS' if not failures else 'FAIL'} "
+        f"({10 - len(failures)}/10 cases, both directions)"
+    )
+    return 1 if failures else 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", default=".")
+    parser.add_argument("--rules", default="openbank-libs/governance/rules.yaml")
+    parser.add_argument("--enforce", action="store_true")
+    parser.add_argument("--self-test", action="store_true", dest="self_test")
+    args = parser.parse_args()
+
+    if args.self_test:
+        return self_test()
+
+    root = pathlib.Path(args.root)
+    result = scan(root, root / args.rules)
+    violations = result["violations"]
+    allowlisted_hits = result["allowlisted_hits"]
+    stale_allowlist = result["stale_allowlist"]
+    unresolved = result["unresolved"]
+    checked = result["checked"]
+    seen = result["seen"]
+    service_dirs = result["service_dirs"]
+
     for edge_key, source in sorted(set(unresolved)):
         print(
             f"::notice::lineage-code-audit: {edge_key} names '{source}', which has no service "
@@ -221,6 +383,20 @@ def main() -> int:
 
     for edge_key, reason in sorted(allowlisted_hits):
         print(f"::notice::lineage-code-audit: {edge_key} has no backing code found — allowlisted: {reason}")
+
+    # An allowlist that only ever GRANTS is furniture: an entry stays after its edge is deleted,
+    # or after the code that was invisible to the heuristic grows a real @RegisterRestClient, and
+    # nothing ever says so. Then the list reads as a set of live exemptions when some of it is
+    # archaeology, and the next reader trusts a reason nobody has re-checked. So a stale entry is
+    # a finding in its own right, same severity as an unbacked edge (issue #3982).
+    for edge_key in stale_allowlist:
+        annotation = "error" if args.enforce else "warning"
+        print(
+            f"::{annotation}::lineage-code-audit: rules.yaml lineage_code_audit.allowlist entry "
+            f"{edge_key} no longer applies — that relationship is either no longer declared in any "
+            f"governance.yaml, or it is now backed by code the audit can see. Delete the entry. An "
+            f"allowlist that cannot go stale stops being a list of decisions and becomes furniture."
+        )
 
     for edge_key, relation in sorted(violations):
         annotation = "error" if args.enforce else "warning"
@@ -236,11 +412,11 @@ def main() -> int:
         f"check-governance-lineage: {checked['downstream']} downstream + {checked['upstream']} "
         f"upstream edge(s) declared across {len(service_dirs)} service(s) with a governance.yaml, "
         f"{len(seen)} distinct relationship(s) checked; {len(violations)} unallowlisted "
-        f"violation(s), {len(allowlisted_hits)} allowlisted, {len(set(unresolved))} naming no "
-        f"in-tree service."
+        f"violation(s), {len(allowlisted_hits)} allowlisted, {len(stale_allowlist)} stale "
+        f"allowlist entr(ies), {len(set(unresolved))} naming no in-tree service."
     )
 
-    if violations and args.enforce:
+    if (violations or stale_allowlist) and args.enforce:
         return 1
     return 0
 

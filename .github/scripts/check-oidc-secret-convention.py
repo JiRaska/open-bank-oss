@@ -26,13 +26,23 @@ the entry 28 of today's 38 already read and the only one demonstrably populated 
 consumers). A per-service key requires a KV write nobody is prompted to make, which is exactly
 the step that was skipped.
 
-BASELINE. The 10 pre-existing per-service entries are baselined against #3485, NOT migrated:
-switching a live ExternalSecret's remoteRef re-projects the Secret, and this repo cannot see what
-those KV entries hold. If they hold a stale value the switch is a no-op improvement; if
-`account-service` were the stale one it would break 10 services at once. That is not a call to
-make blind, so this gate freezes the split instead of moving it. The baseline is SHRINK-ONLY and
-a stale entry (one that no longer violates) is reported too -- so a migration done later cannot
-leave a dead exemption behind, and a new service cannot join the losing side quietly.
+BASELINE IS NOW EMPTY, and the reason is a measurement rather than a decision. #3485 froze the
+10 per-service entries because "this repo cannot see what those KV entries hold", and the stated
+worst case was that `account-service` is the stale one, breaking 10 services at once. That was the
+right call to make from the repo alone -- but it is answerable from outside it. Read-only against
+the live KV store on 2026-08-09, all eleven entries (the shared one and the ten per-service ones)
+hold a value of the same length and the same digest: they are byte-identical copies of the single
+`openbank-services` client secret. The digests are deliberately not reproduced anywhere in this
+repo; what is recorded is only the equality.
+
+So re-pointing the ten manifests at `account-service` cannot change any projected Secret's value.
+It is not a risky migration -- it is deleting ten copies that were never allowed to differ. The
+one that did differ in kind, mcp-service, was documented in its own manifest as "NOT YET SEEDED"
+while `optional: true` kept the pod green; it now reads the shared entry like everything else.
+
+The baseline stays SHRINK-ONLY and empty. A stale entry (one that no longer violates) is reported
+too, so a later migration cannot leave a dead exemption behind, and a new service cannot join the
+losing side quietly.
 
 Run standalone:  .github/scripts/check-oidc-secret-convention.py [--enforce]
 Self-test:       .github/scripts/check-oidc-secret-convention.py --self-test
@@ -51,21 +61,12 @@ COMPONENTS = REPO / "openbank-infra" / "gitops" / "components"
 SECRET_FIELD = "OIDC_CLIENT_SECRET"
 SHARED_KEY = "account-service"
 
-# Pre-existing per-service entries, measured mechanically on origin/main 2026-08-06 (#3485).
 # path relative to gitops/components  ->  the KV key it reads.
-# SHRINK-ONLY: remove an entry when the manifest is migrated to SHARED_KEY. Do not add.
-BASELINE: dict[str, str] = {
-    "anacredit/oidc-externalsecret.yaml": "anacredit-service",
-    "statements/external-secret-oidc.yaml": "statement-service",
-    "campaign/external-secret-oidc.yaml": "campaign-service",
-    "sdd/oidc-externalsecret.yaml": "sdd-service",
-    "tpp-registry/oidc-externalsecret.yaml": "tpp-registry-service",
-    "external-secrets/es-sanctions-service-oidc.yaml": "sanctions-service",
-    "external-secrets/es-audit-service-oidc.yaml": "audit-service",
-    "external-secrets/es-mcp-service.yaml": "mcp-service",
-    "external-secrets/es-agent-service.yaml": "agent-service",
-    "external-secrets/es-balance-service-oidc.yaml": "balance-service",
-}
+# EMPTY, and it must stay that way. SHRINK-ONLY: an entry may only be removed, never added.
+# The ten #3485 entries were removed here after the live KV store was measured (see module
+# docstring): every one held a byte-identical copy of the shared secret, so migrating them
+# changed no projected value.
+BASELINE: dict[str, str] = {}
 
 
 def entries_in(doc, rel: str) -> list[tuple[str, str]]:
@@ -87,15 +88,24 @@ def entries_in(doc, rel: str) -> list[tuple[str, str]]:
     return out
 
 
-def classify(found: list[tuple[str, str]]) -> tuple[list[str], list[str], int]:
-    """-> (violations, stale baseline entries, count of conforming entries)."""
+def classify(found, baseline: dict[str, str] | None = None):
+    """-> (violations, stale baseline entries, count of conforming entries).
+
+    `baseline` is a PARAMETER and not a read of the module global, so the self-test can supply a
+    synthetic one. It used to derive its fixtures from the real BASELINE with
+    `next(iter(BASELINE.items()))`, which meant the day the baseline was emptied the self-test
+    stopped being able to run at all -- StopIteration, not a FAIL. A gate whose falsifiability
+    is derived from the very data it checks loses that falsifiability exactly when the data is
+    clean, which is the moment it is least obvious.
+    """
+    baseline = BASELINE if baseline is None else baseline
     violations, conforming = [], 0
     still_violating: set[str] = set()
     for rel, key in found:
         if key == SHARED_KEY:
             conforming += 1
             continue
-        if BASELINE.get(rel) == key:
+        if baseline.get(rel) == key:
             still_violating.add(rel)
             continue
         violations.append(
@@ -109,7 +119,7 @@ def classify(found: list[tuple[str, str]]) -> tuple[list[str], list[str], int]:
     stale = [
         f"{rel}: baselined as reading `{key}` but no longer does. Delete the entry from "
         f"BASELINE in {Path(__file__).name} -- a stale exemption hides the next regression."
-        for rel, key in BASELINE.items()
+        for rel, key in baseline.items()
         if rel not in still_violating
     ]
     return violations, stale, conforming
@@ -144,24 +154,27 @@ def self_test() -> int:
     """Feed it inputs it MUST flag and inputs it MUST NOT -- a gate that has only ever passed is
     unfalsified. Both the DETECTION (can it express the construct?) and the SCOPE (did it open
     any file at all?) are asserted; the scope half is the one a passing gate hides."""
-    a_baselined = next(iter(BASELINE.items()))
+    # A SYNTHETIC baseline, never the real one. The real BASELINE is empty today, and a self-test
+    # that reads it would have nothing to exercise the exemption and stale-detection paths with.
+    SYNTH = {"synthetic/es-example.yaml": "example-service"}
+    a_baselined = next(iter(SYNTH.items()))
     cases: list[tuple[str, list[tuple[str, str]], int, int]] = [
         # (name, found-entries, expected violations, expected stale)
         ("the exact #3471 defect -- a key nobody wrote",
-         [("delegation/oidc-externalsecret.yaml", "delegation-service")], 1, len(BASELINE)),
+         [("delegation/oidc-externalsecret.yaml", "delegation-service")], 1, len(SYNTH)),
         ("the shared key passes",
-         [("delegation/oidc-externalsecret.yaml", SHARED_KEY)], 0, len(BASELINE)),
+         [("delegation/oidc-externalsecret.yaml", SHARED_KEY)], 0, len(SYNTH)),
         ("a baselined entry is exempt, and not reported stale",
-         [a_baselined], 0, len(BASELINE) - 1),
+         [a_baselined], 0, len(SYNTH) - 1),
         ("a baselined path that MIGRATED is reported stale",
-         [(a_baselined[0], SHARED_KEY)], 0, len(BASELINE)),
+         [(a_baselined[0], SHARED_KEY)], 0, len(SYNTH)),
         ("a baselined path pointing at a DIFFERENT wrong key is still a violation",
-         [(a_baselined[0], "somewhere-else")], 1, len(BASELINE)),
-        ("today's tree, minus baseline, is clean", [], 0, len(BASELINE)),
+         [(a_baselined[0], "somewhere-else")], 1, len(SYNTH)),
+        ("today's tree, minus baseline, is clean", [], 0, len(SYNTH)),
     ]
     failed = 0
     for name, found, want_v, want_s in cases:
-        v, s, _ = classify(found)
+        v, s, _ = classify(found, SYNTH)
         ok = (len(v), len(s)) == (want_v, want_s)
         failed += not ok
         print(f"  {'PASS' if ok else 'FAIL'}  {name} "

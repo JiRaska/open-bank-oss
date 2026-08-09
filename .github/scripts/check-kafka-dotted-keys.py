@@ -99,6 +99,12 @@ BASELINE = {
     ("openbank-party-service", "aml-events-in", "auto.offset.reset"): "#2945 — same",
     ("openbank-party-service", "consent-events-in", "auto.offset.reset"): "#2945 — same",
     ("openbank-statement-service", "account-events-in", "auto.offset.reset"): "#2945 — same",
+    # #4122/#4217/ADR-0248, temporary — neither override can be added yet:
+    # check-msg-channel-image-parity.py correctly refuses it while the deployed
+    # document-service image predates this channel (SRMSG00071 boot-crash risk). Remove both
+    # entries in the follow-up PR that adds the overrides, once #4122 has merged and deployed.
+    ("openbank-document-service", "billing-outbox-events-in", "group.id"): "#4122 — deferred until the deployed image has the channel; see check-msg-channel-image-parity.py",
+    ("openbank-document-service", "billing-outbox-events-in", "auto.offset.reset"): "#4122 — same, deferred",
 }
 
 

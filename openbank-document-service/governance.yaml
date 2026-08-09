@@ -11,15 +11,21 @@ retentionPolicy: 10 years
 evidenceExported: true
 lineage:
   upstream:
+    - serviceName: account-service
+      relationType: topic
+      description: consumes account.created for onboarding document issuance (ADR-0162 D7)
+  downstream:
+    # Direction corrected (issue #3982): both were declared as `upstream`, though their own
+    # descriptions already said document-service is the caller ("looks up ..."). The clients live
+    # HERE — ScaChallengeClient(configKey = "sca-service") and ProductCatalogClient(configKey =
+    # "product-catalog-api"). The product-catalog one was additionally invisible to the audit
+    # until #3982 taught normalize_service_name to strip a trailing `-api`.
     - serviceName: sca-service
       relationType: api
       description: SCA verification for a SIGNED signature-ceremony decision (ADR-0021/ADR-0162 D4)
     - serviceName: product-catalog
       relationType: api
       description: looks up TermsAndConditions.documentTemplateCode for the account's product (ADR-0162 D7)
-    - serviceName: account-service
-      relationType: topic
-      description: consumes account.created for onboarding document issuance (ADR-0162 D7)
 databaseLineage:
   ownedDatabases:
     - openbank_documents

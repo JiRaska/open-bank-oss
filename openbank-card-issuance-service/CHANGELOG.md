@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.18.0...card-issuance-service-v0.18.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **libs:** stamp ApiError.timestamp at construction instead of serving 1970 ([#3880](https://github.com/JiRaska/open-bank-oss/issues/3880)) ([b3e6672](https://github.com/JiRaska/open-bank-oss/commit/b3e6672c9e13470fc6353ad8a5483e4075875b1f))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.17.1...card-issuance-service-v0.18.0) (2026-08-09)
 
 
