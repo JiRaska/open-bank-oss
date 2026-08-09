@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.4.0...engagement-service-v0.4.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **engagement:** consume dispute.opened so an open dispute suppresses marketing ([#4297](https://github.com/JiRaska/open-bank-oss/issues/4297)) ([d0031f5](https://github.com/JiRaska/open-bank-oss/commit/d0031f56e1ac7f8e421501c13b98867719013fd8)), closes [#4262](https://github.com/JiRaska/open-bank-oss/issues/4262)
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.3.0...engagement-service-v0.4.0) (2026-08-09)
 
 
