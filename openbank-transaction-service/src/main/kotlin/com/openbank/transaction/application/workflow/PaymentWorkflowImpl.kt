@@ -34,15 +34,38 @@ class PaymentWorkflowImpl : PaymentWorkflow {
         .setRetryOptions(retryOptions)
         .build()
 
+    /**
+     * Options for the terminal write (#4238). Deliberately more patient than the side-effecting
+     * steps: by the time it runs the money has already moved, so giving up on recording that is
+     * strictly worse than retrying for another half hour. No maximum-attempts cap — the
+     * scheduleToClose window is the only bound, and if it does expire the WORKFLOW fails, which is
+     * visible in Temporal, rather than a COMPLETED workflow sitting next to a PENDING row.
+     */
+    private val finalisationOptions: ActivityOptions = ActivityOptions.newBuilder()
+        .setScheduleToCloseTimeout(Duration.ofMinutes(FINALISATION_SCHEDULE_TO_CLOSE_MINUTES))
+        .setRetryOptions(
+            RetryOptions.newBuilder()
+                .setInitialInterval(Duration.ofSeconds(INITIAL_INTERVAL_SECONDS))
+                .setBackoffCoefficient(BACKOFF_COEFFICIENT)
+                .setMaximumInterval(Duration.ofSeconds(FINALISATION_MAX_INTERVAL_SECONDS))
+                .build(),
+        )
+        .build()
+
     companion object {
         private const val MAX_ATTEMPTS = 3
         private const val INITIAL_INTERVAL_SECONDS = 2L
         private const val BACKOFF_COEFFICIENT = 2.0
         private const val SCHEDULE_TO_CLOSE_MINUTES = 10L
+        private const val FINALISATION_SCHEDULE_TO_CLOSE_MINUTES = 30L
+        private const val FINALISATION_MAX_INTERVAL_SECONDS = 30L
     }
 
     private val activities: PaymentActivities =
         Workflow.newActivityStub(PaymentActivities::class.java, activityOptions)
+
+    private val finalisation: PaymentActivities =
+        Workflow.newActivityStub(PaymentActivities::class.java, finalisationOptions)
 
     override fun execute(transactionId: UUID): SagaState {
         var holdId: UUID = PaymentActivities.SENTINEL_HOLD
@@ -53,7 +76,7 @@ class PaymentWorkflowImpl : PaymentWorkflow {
         // returns COMPENSATED (matching PaymentSagaOrchestrator.executeSteps, whose whole body is the
         // try) rather than failing the workflow and orphaning the transaction. holdId is still the
         // sentinel in that case, so the catch releases nothing.
-        return try {
+        val state = try {
             holdId = activities.placeHold(transactionId)
             journalId = activities.postJournal(transactionId)
             journalPosted = true
@@ -76,5 +99,20 @@ class PaymentWorkflowImpl : PaymentWorkflow {
             }
             SagaState.COMPENSATED
         }
+
+        // The terminal write is the LAST STEP OF THIS WORKFLOW, not caller code after execute()
+        // returns (#4238). Before, TransactionService wrote the status once the blocking
+        // stub.execute() came back, so the durable half of a payment ended at the journal posting
+        // and the record of it lived in one HTTP request: a pod eviction in that window left the
+        // money moved, the workflow COMPLETED, and the row PENDING forever with no completed event.
+        // Outside the try/catch on purpose — a finalisation failure must NOT drop into compensation
+        // and reverse a journal that already settled; it fails the workflow instead, and Temporal
+        // retries the activity from history.
+        if (state == SagaState.COMPLETED) {
+            finalisation.markCompleted(transactionId)
+        } else {
+            finalisation.markFailed(transactionId, "Payment workflow did not complete (state=$state)")
+        }
+        return state
     }
 }

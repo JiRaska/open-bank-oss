@@ -53,14 +53,13 @@ class PaymentWorkflowImplTest {
         val journalId = UUID.randomUUID()
         val releaseCalls = AtomicInteger(0)
         val reverseCalls = AtomicInteger(0)
-        worker.registerActivitiesImplementations(
-            RecordingActivities(
-                placeHoldResult = holdId,
-                postJournalResult = journalId,
-                releaseCalls = releaseCalls,
-                reverseCalls = reverseCalls,
-            ),
+        val activities = RecordingActivities(
+            placeHoldResult = holdId,
+            postJournalResult = journalId,
+            releaseCalls = releaseCalls,
+            reverseCalls = reverseCalls,
         )
+        worker.registerActivitiesImplementations(activities)
         env.start()
 
         val result = newWorkflow().execute(UUID.randomUUID())
@@ -68,6 +67,28 @@ class PaymentWorkflowImplTest {
         assertThat(result).isEqualTo(SagaState.COMPLETED)
         assertThat(releaseCalls.get()).isZero()
         assertThat(reverseCalls.get()).isZero()
+        // #4238: the terminal write is a step of THIS workflow, so it has already happened by the
+        // time execute() returns — losing the caller can no longer strand the row on PENDING.
+        assertThat(activities.completedCalls.get()).isEqualTo(1)
+        assertThat(activities.failedCalls.get()).isZero()
+    }
+
+    @Test
+    fun `a compensated run records the FAILED terminal state from inside the workflow`() {
+        val activities = RecordingActivities(
+            placeHoldResult = UUID.randomUUID(),
+            postJournalResult = null, // throws -> compensation
+            releaseCalls = AtomicInteger(0),
+            reverseCalls = AtomicInteger(0),
+        )
+        worker.registerActivitiesImplementations(activities)
+        env.start()
+
+        val result = newWorkflow().execute(UUID.randomUUID())
+
+        assertThat(result).isEqualTo(SagaState.COMPENSATED)
+        assertThat(activities.failedCalls.get()).isEqualTo(1)
+        assertThat(activities.completedCalls.get()).isZero()
     }
 
     @Test
@@ -144,7 +165,17 @@ class PaymentWorkflowImplTest {
         private val releaseCalls: AtomicInteger,
         private val reverseCalls: AtomicInteger,
         private val failPlaceHold: Boolean = false,
+        val completedCalls: AtomicInteger = AtomicInteger(0),
+        val failedCalls: AtomicInteger = AtomicInteger(0),
     ) : PaymentActivities {
+        override fun markCompleted(transactionId: UUID) {
+            completedCalls.incrementAndGet()
+        }
+
+        override fun markFailed(transactionId: UUID, reason: String) {
+            failedCalls.incrementAndGet()
+        }
+
         override fun placeHold(transactionId: UUID): UUID {
             if (failPlaceHold) throw ApplicationFailure.newNonRetryableFailure("balance down", "BalanceError")
             return placeHoldResult

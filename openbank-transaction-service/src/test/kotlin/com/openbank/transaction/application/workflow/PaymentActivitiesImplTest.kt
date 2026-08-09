@@ -5,7 +5,9 @@
 package com.openbank.transaction.application.workflow
 
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.transaction.application.port.out.BalanceCoverPort
+import com.openbank.transaction.application.port.out.TransactionEventPublisher
 import com.openbank.transaction.application.port.out.TransactionRepository
 import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
@@ -25,8 +27,10 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.UUID
 
 class PaymentActivitiesImplTest {
@@ -34,12 +38,84 @@ class PaymentActivitiesImplTest {
     private val transactionRepository: TransactionRepository = mockk()
     private val ledgerCallGuard: LedgerCallGuard = mockk()
     private val balanceCoverPort: BalanceCoverPort = mockk()
+    private val eventPublisher: TransactionEventPublisher = mockk()
+    private val clock: Clock = Clock.fixed(Instant.parse("2026-06-28T10:00:00Z"), ZoneOffset.UTC)
 
     private lateinit var activities: PaymentActivitiesImpl
 
     @BeforeEach
     fun setUp() {
-        activities = TestableActivities(transactionRepository, ledgerCallGuard, balanceCoverPort)
+        activities = TestableActivities(
+            transactionRepository,
+            ledgerCallGuard,
+            balanceCoverPort,
+            eventPublisher,
+            clock,
+        )
+    }
+
+    @Test
+    fun `markCompleted writes COMPLETED and the completed outbox message in one call`(): Unit = runBlocking {
+        val tx = transaction(sourceAccountId = UUID.randomUUID())
+        coEvery { transactionRepository.findById(tx.id) } returns tx
+        every { eventPublisher.completedPayload(any()) } returns "{\"event\":\"completed\"}"
+        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+
+        activities.markCompleted(tx.id)
+
+        coVerify {
+            transactionRepository.update(
+                match { it.id == tx.id && it.status == TransactionStatus.COMPLETED && it.completedAt != null },
+                match<OutboxMessage> {
+                    it.eventType == "openbank.transactions.transaction.completed" && it.aggregateId == tx.id
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `markCompleted is a no-op on an already COMPLETED row (at-least-once replay)`(): Unit = runBlocking {
+        // Temporal re-runs an activity whose completion never reached the workflow history. A second
+        // update would fail the version check and enqueue a duplicate completed event.
+        val tx = transaction(sourceAccountId = UUID.randomUUID())
+            .copy(status = TransactionStatus.COMPLETED, completedAt = Instant.parse("2026-06-28T09:00:00Z"))
+        coEvery { transactionRepository.findById(tx.id) } returns tx
+
+        activities.markCompleted(tx.id)
+
+        coVerify(exactly = 0) { transactionRepository.update(any(), any()) }
+    }
+
+    @Test
+    fun `markFailed writes FAILED and the failed outbox message`(): Unit = runBlocking {
+        val tx = transaction(sourceAccountId = UUID.randomUUID())
+        coEvery { transactionRepository.findById(tx.id) } returns tx
+        every { eventPublisher.failedPayload(any(), any()) } returns "{\"event\":\"failed\"}"
+        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+
+        activities.markFailed(tx.id, "Payment workflow did not complete (state=COMPENSATED)")
+
+        coVerify {
+            transactionRepository.update(
+                match {
+                    it.status == TransactionStatus.FAILED &&
+                        it.failureReason?.contains("COMPENSATED") == true
+                },
+                match<OutboxMessage> { it.eventType == "openbank.transactions.transaction.failed" },
+            )
+        }
+    }
+
+    @Test
+    fun `markFailed refuses to touch a COMPLETED row`(): Unit = runBlocking {
+        val tx = transaction(sourceAccountId = UUID.randomUUID())
+            .copy(status = TransactionStatus.COMPLETED, completedAt = Instant.parse("2026-06-28T09:00:00Z"))
+        coEvery { transactionRepository.findById(tx.id) } returns tx
+
+        // No throw (which would make Temporal retry forever) and no write.
+        activities.markFailed(tx.id, "late compensation")
+
+        coVerify(exactly = 0) { transactionRepository.update(any(), any()) }
     }
 
     @Test
@@ -172,6 +248,8 @@ private class TestableActivities(
     transactionRepository: TransactionRepository,
     ledgerCallGuard: LedgerCallGuard,
     balanceCoverPort: BalanceCoverPort,
-) : PaymentActivitiesImpl(transactionRepository, ledgerCallGuard, balanceCoverPort) {
+    eventPublisher: TransactionEventPublisher,
+    clock: Clock,
+) : PaymentActivitiesImpl(transactionRepository, ledgerCallGuard, balanceCoverPort, eventPublisher, clock) {
     override fun <T> runOnVertxContext(block: suspend () -> T): T = runBlocking { block() }
 }
