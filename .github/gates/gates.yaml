@@ -141,12 +141,27 @@ gates:
     group: lint
     mode: enforced
     run: |
-      files=$(find openbank-infra/scripts -type f -name '*.sh' 2>/dev/null || true)
-      if [ -n "$files" ]; then
-        shellcheck -S warning $files
-      else
-        echo "No shell scripts under openbank-infra/scripts — skipping."
-      fi
+      # BOTH script trees. `.github/scripts` was out of scope until #4337, so the 42 shell
+      # files implementing the gates themselves — the code every other gate's verdict rests
+      # on — were the least linted in the repo. Adding them cost 5 warning-level findings.
+      #
+      # Each root must contribute at least one file. A `find` that matches nothing yields an
+      # empty list, and `shellcheck` with no arguments exits 0: the gate would report a pass
+      # over a directory it never opened, which is exactly the shape this manifest exists to
+      # make impossible (a renamed directory is the realistic way it happens).
+      status=0
+      for root in .github/scripts openbank-infra/scripts; do
+        files=()
+        while IFS= read -r f; do files+=("$f"); done < <(find "$root" -type f -name '*.sh' | sort)
+        if [ "${#files[@]}" -eq 0 ]; then
+          echo "::error::shellcheck: no *.sh found under $root — the scope moved, the gate did not"
+          status=1
+          continue
+        fi
+        echo "shellcheck: ${#files[@]} script(s) under $root"
+        shellcheck -S warning "${files[@]}" || status=1
+      done
+      exit $status
 
   # ==== gitops =========================================================
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
@@ -691,8 +706,6 @@ gates:
     name: "pact version tree-equivalence unit test (issue #3432, enforced)"
     group: supplychain
     mode: enforced
-    selftest: |
-      bash .github/scripts/pact-version-tree-equivalent.sh --self-test
     run: |
       bash .github/scripts/pact-version-tree-equivalent.sh --self-test
 
@@ -706,8 +719,6 @@ gates:
     name: "pact version probe fails closed (issue #3432, enforced)"
     group: supplychain
     mode: enforced
-    selftest: |
-      bash .github/scripts/probe-pact-version.sh --self-test
     run: |
       bash .github/scripts/probe-pact-version.sh --self-test
 
@@ -723,8 +734,6 @@ gates:
     name: "can-i-deploy counterpart verifiability probe (issue #3223, enforced)"
     group: supplychain
     mode: enforced
-    selftest: |
-      bash .github/scripts/probe-blocking-counterparts.sh --self-test
     run: |
       bash .github/scripts/probe-blocking-counterparts.sh --self-test
 
@@ -1104,9 +1113,8 @@ gates:
     name: "ensure-ecr-repository classification (#3423/#3453, enforced)"
     group: supplychain
     mode: enforced
-    selftest: bash .github/scripts/ensure-ecr-repository.sh --self-test
-    selftest_expect: pass
     run: |
+      bash .github/scripts/ensure-ecr-repository.sh --self-test
 
   # campaign-service's rollout died on `/bundle/rules-data.yaml: merge error` (#2872 defect 4).
   # The sidecar runs `opa run --bundle /bundle` — DIRECTORY mode, where OPA derives a data
@@ -1707,9 +1715,6 @@ gates:
     name: "record-deployment version resolver (issue #3223, enforced)"
     group: api
     mode: enforced
-    selftest: |
-      bash .github/scripts/resolve-record-deployment-version.sh --self-test
-    selftest_expect: pass
     run: |
       bash .github/scripts/resolve-record-deployment-version.sh --self-test
 
@@ -1728,9 +1733,6 @@ gates:
     name: "runtime conformance: claim-vs-cluster comparators (enforced)"
     group: gitops
     mode: enforced
-    selftest: |
-      python3 .github/scripts/runtime-conformance.py --self-test
-    selftest_expect: pass
     run: |
       python3 .github/scripts/runtime-conformance.py --self-test
   # A service that ships an outbox must write to it (#4007). Eight do not: dispatcher, backlog
@@ -1756,7 +1758,6 @@ gates:
       python3 .github/scripts/check-outbox-has-writer.py --self-test
     selftest_expect: pass
     run: |
-      python3 .github/scripts/check-outbox-has-writer.py --self-test
       python3 .github/scripts/check-outbox-has-writer.py .
 
   - id: pact-provider-replay-coverage
@@ -1915,8 +1916,6 @@ gates:
     name: "libs change fan-out is derived (issue #2983, enforced)"
     group: gitops
     mode: enforced
-    selftest: |
-      bash .github/scripts/libs-change-dependents.sh --selftest
     run: |
       bash .github/scripts/libs-change-dependents.sh --selftest
 
@@ -2295,7 +2294,6 @@ gates:
       # was green — `opa test` reads the SOURCE rego, and the drift check regenerates with the
       # same broken generator, so committed and regenerated agreed. This one reads the
       # ARTIFACT with the consumer's own parser, which is the only layer that can see it.
-      python3 .github/scripts/check-opa-bundle-parses.py --self-test
       python3 .github/scripts/check-opa-bundle-parses.py --root .
   - id: opa-bundle-apply-size
     name: OPA bundle must be installable (client-side apply annotation ceiling)
@@ -2455,8 +2453,6 @@ gates:
     name: "proof-of-review script is falsifiable (ADR-0251, enforced)"
     group: lint
     mode: enforced
-    selftest: bash .github/scripts/check-agent-review-happened.sh --self-test
-    selftest_expect: pass
     run: |
       bash .github/scripts/check-agent-review-happened.sh --self-test
 
@@ -2477,8 +2473,6 @@ gates:
     name: "ADR-0251 review scope rule is falsifiable (enforced)"
     group: lint
     mode: enforced
-    selftest: python3 .github/scripts/agent-review-scope.py --self-test
-    selftest_expect: pass
     run: |
       python3 .github/scripts/agent-review-scope.py --self-test
 

@@ -50,6 +50,8 @@ import sys
 
 import yaml
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 COMPONENTS = REPO / "openbank-infra/gitops/components"
 WORKLOADS = {"Deployment", "Rollout", "StatefulSet", "DaemonSet"}
@@ -57,9 +59,9 @@ DATA_FILES = ("data.yaml", "data.json")
 
 
 def documents(root: pathlib.Path):
-    for path in sorted(root.rglob("*.yaml")):
+    for path in gatelib.rglob(root, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except (yaml.YAMLError, OSError, UnicodeDecodeError):
             continue
         for doc in docs:

@@ -48,6 +48,8 @@ import tempfile
 
 import yaml
 
+import gatelib
+
 ROOTS = ("openbank-infra/gitops",)
 
 # A value worth de-duplicating: several comma-separated slugs, nothing else. This
@@ -81,7 +83,7 @@ def _env_lists(node, path=""):
 def check_file(path: pathlib.Path) -> list[str]:
     problems: list[str] = []
     try:
-        docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+        docs = gatelib.load_yaml_all(path)
     except yaml.YAMLError as exc:
         return [f"{path}: not parseable as YAML ({type(exc).__name__}) — fix that first."]
 

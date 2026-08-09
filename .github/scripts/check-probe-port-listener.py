@@ -50,6 +50,8 @@ import sys
 
 import yaml
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 GITOPS = REPO / "openbank-infra" / "gitops"
 PROBES = ("livenessProbe", "readinessProbe", "startupProbe")
@@ -75,7 +77,7 @@ def _ports_of(doc: dict) -> dict[str, int | None]:
 
 def _load(path: pathlib.Path) -> dict | None:
     try:
-        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return gatelib.load_yaml(path) or {}
     except (yaml.YAMLError, OSError):
         return None
 
@@ -90,7 +92,7 @@ def service_ports() -> dict[str, dict[str, int | None]]:
     """{service: {"http": port, "management": port}}, service file layered over the shared base."""
     base = base_ports()
     out: dict[str, dict[str, int | None]] = {}
-    for path in sorted(REPO.glob("openbank-*/src/main/resources/application.yaml")):
+    for path in gatelib.glob(REPO, "openbank-*/src/main/resources/application.yaml"):
         if path == BASE_CONFIG:
             continue  # the base is not a service
         doc = _load(path)
@@ -107,9 +109,9 @@ def service_ports() -> dict[str, dict[str, int | None]]:
 def workloads() -> list[tuple[pathlib.Path, dict]]:
     """Every Deployment/Rollout manifest in gitops, with its path."""
     found: list[tuple[pathlib.Path, dict]] = []
-    for path in GITOPS.rglob("*.yaml"):
+    for path in gatelib.rglob(GITOPS, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except (yaml.YAMLError, UnicodeDecodeError):
             continue
         for doc in docs:
@@ -127,9 +129,9 @@ def podmonitor_ports() -> dict[str, set[str]]:
     the name is the key and a non-matching name simply contributes no finding.
     """
     out: dict[str, set[str]] = {}
-    for path in GITOPS.rglob("*.yaml"):
+    for path in gatelib.rglob(GITOPS, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except (yaml.YAMLError, UnicodeDecodeError):
             continue
         for doc in docs:

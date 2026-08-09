@@ -46,6 +46,8 @@ from pathlib import Path
 
 import yaml
 
+import gatelib
+
 GITOPS = Path("openbank-infra/gitops")
 
 # Kinds whose pod template consumes Secrets/ConfigMaps.
@@ -137,7 +139,7 @@ def main():
         return 2
 
     declared, consumed = set(), []
-    for path in sorted(GITOPS.rglob("*.yaml")):
+    for path in gatelib.rglob(GITOPS, "*.yaml"):
         try:
             docs = [d for d in yaml.safe_load_all(path.read_text()) if isinstance(d, dict)]
         except yaml.YAMLError as exc:

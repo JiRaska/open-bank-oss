@@ -55,6 +55,8 @@ from pathlib import Path
 
 import yaml
 
+import gatelib
+
 REPO = Path(__file__).resolve().parents[2]
 COMPONENTS = REPO / "openbank-infra" / "gitops" / "components"
 
@@ -128,7 +130,7 @@ def classify(found, baseline: dict[str, str] | None = None):
 def audit() -> tuple[list[str], list[str], int, int]:
     found: list[tuple[str, str]] = []
     scanned = 0
-    for path in sorted(COMPONENTS.rglob("*.yaml")):
+    for path in gatelib.rglob(COMPONENTS, "*.yaml"):
         scanned += 1
         rel = path.relative_to(COMPONENTS).as_posix()
         try:

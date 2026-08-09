@@ -72,6 +72,9 @@ except ImportError:
     sys.exit(2)
 
 MANIFEST = ".github/gates/gates.yaml"
+# Must match gatelib.CACHE_DIR_ENV. Not imported from it: run-gates.py has to load and validate
+# the manifest even where a checker's dependencies are missing, and the string is the contract.
+PARSE_CACHE_ENV = "GATE_PARSE_CACHE"
 VALID_MODES = {"enforced", "advisory"}
 VALID_WHEN = {"always", "pull_request"}
 VALID_EXPECT = {"pass", "fail"}
@@ -103,6 +106,19 @@ def load(root: pathlib.Path, path: str = MANIFEST):
             if k not in g:
                 sys.stderr.write(f"::error::gate {g.get('id', '<no id>')} is missing `{k}`\n")
                 sys.exit(2)
+        # A `run:` that is present but says nothing executes `bash -c ""` and exits 0 — a gate
+        # that reports PASS having done no work, which is the exact failure this runner exists
+        # to make impossible. Presence was checked; emptiness was not, and one gate in the
+        # manifest was shipping that shape deliberately. Comments are stripped first for the
+        # same reason as the ${{ }} check below: a run: block that is only prose is equally a
+        # no-op, and this is the one place that can tell.
+        if not strip_comments(str(g["run"])).strip():
+            sys.stderr.write(
+                f"::error::gate {g['id']}: `run:` is empty (or only comments). `bash -c \"\"` "
+                f"exits 0, so this gate would report PASS without executing anything. Give it "
+                f"a command, or delete the gate.\n"
+            )
+            sys.exit(2)
         if g["id"] in seen:
             sys.stderr.write(f"::error::duplicate gate id `{g['id']}`\n")
             sys.exit(2)
@@ -445,9 +461,21 @@ def main(argv=None):
           f"{os.environ.get('GITHUB_EVENT_NAME', '(local)')}")
 
     index = git_index_path(root)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
-        futs = {ex.submit(execute, g, root, is_pr, args.timeout, index): g["id"] for g in sel}
-        done = {futs[f]: f.result() for f in concurrent.futures.as_completed(futs)}
+    # One YAML parse cache for the whole invocation. The gates are separate processes over one
+    # corpus — the 20 single-script python gates in the `gitops` shard cost 231s apart and 8.7s
+    # with the parse shared, same verdicts — so gatelib.py writes each parsed document here,
+    # keyed by content sha, and every later gate reads it back instead of re-decoding. Scoped
+    # to this directory and removed below: nothing survives into the next run, so a gate can
+    # never read a parse from a tree that has since changed.
+    cache = tempfile.mkdtemp(prefix="gate-parse-cache-", dir=os.environ.get("RUNNER_TEMP") or None)
+    os.environ[PARSE_CACHE_ENV] = cache
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
+            futs = {ex.submit(execute, g, root, is_pr, args.timeout, index): g["id"] for g in sel}
+            done = {futs[f]: f.result() for f in concurrent.futures.as_completed(futs)}
+    finally:
+        os.environ.pop(PARSE_CACHE_ENV, None)
+        shutil.rmtree(cache, ignore_errors=True)
     results = [done[g["id"]] for g in sel]
     return report(results, jobs)
 
@@ -564,6 +592,42 @@ def self_test():
         except SystemExit as exc:
             if exc.code != 2:
                 bad.append(f"empty manifest exited {exc.code}, want 2")
+
+        # An empty (or comment-only) run: must abort. `bash -c ""` exits 0, so without this the
+        # gate reports PASS having run nothing — and the negative case matters just as much:
+        # a run: that merely CONTAINS comments alongside a command is the normal shape here.
+        for body, want_abort in (
+            ('run: ""', True),
+            ('run: "   "', True),
+            ('run: "# only a comment"', True),
+            ('run: "# a comment\\ntrue"', False),
+        ):
+            (tmp / ".github" / "gates" / "gates.yaml").write_text(
+                f"gates:\n  - id: x\n    name: x\n    group: t\n    {body}\n"
+            )
+            try:
+                load(tmp)
+                if want_abort:
+                    bad.append(f"load() accepted a no-op run: ({body})")
+            except SystemExit:
+                if not want_abort:
+                    bad.append(f"load() rejected a run: that does have a command ({body})")
+
+        # The parse-cache contract is a STRING shared with gatelib.py, in two files that do not
+        # import each other. A rename on one side would silently turn the cross-gate cache off
+        # — everything still green, just slower, which is the kind of regression nothing here
+        # would ever notice.
+        try:
+            sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+            import gatelib
+
+            if gatelib.CACHE_DIR_ENV != PARSE_CACHE_ENV:
+                bad.append(
+                    f"parse-cache env var disagrees: run-gates has {PARSE_CACHE_ENV!r}, "
+                    f"gatelib has {gatelib.CACHE_DIR_ENV!r}"
+                )
+        except ImportError as exc:
+            bad.append(f"gatelib.py is not importable from the scripts directory: {exc}")
 
         # The ${{ }} guard: red on a real command, and — the half that actually needed
         # deciding — GREEN on a comment that merely mentions the syntax.
