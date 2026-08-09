@@ -2608,18 +2608,31 @@ gates:
       # Hash-pinned, same shape and same reason as the PyYAML install in ci.yml (OpenSSF
       # Scorecard Pinned-Dependencies: pipCommand). ruff ships as a self-contained binary
       # wheel per platform, so the whole wheel+sdist set is small enough to carry.
-      command -v ruff >/dev/null 2>&1 || python3 -m pip install --quiet --require-hashes \
-        -r "${RUNNER_TEMP:-/tmp}/ruff-requirements.txt" --break-system-packages 2>/dev/null \
-        || python3 -m pip install --quiet --require-hashes \
-        -r "${RUNNER_TEMP:-/tmp}/ruff-requirements.txt" 2>/dev/null \
-        || { echo "::error::ruff unavailable — add it to the runner base image"; exit 1; }
+      #
+      # Invoked as `python3 -m ruff`, never the `ruff` console script: pip may put that in a
+      # directory that is not on PATH (~/.local/bin on a hosted runner), and "installed but
+      # not callable" is indistinguishable from "install failed" at the call site.
+      #
+      # The install output is CAPTURED AND PRINTED ON FAILURE. The first version of this gate
+      # sent it to /dev/null and reported only "ruff unavailable — add it to the runner base
+      # image", which is a guess dressed as a diagnosis: it took a CI round-trip to learn
+      # nothing at all. A gate that cannot say why it could not run is a gate nobody can fix.
+      if ! python3 -m ruff --version >/dev/null 2>&1; then
+        log="${RUNNER_TEMP:-/tmp}/ruff-install.log"
+        python3 -m pip install --quiet --require-hashes \
+          -r "${RUNNER_TEMP:-/tmp}/ruff-requirements.txt" --break-system-packages >"$log" 2>&1 \
+          || python3 -m pip install --quiet --require-hashes \
+          -r "${RUNNER_TEMP:-/tmp}/ruff-requirements.txt" >>"$log" 2>&1 \
+          || { echo "::error::ruff install failed — pip said:"; cat "$log"; exit 1; }
+      fi
+      python3 -m ruff --version
 
       files=()
       while IFS= read -r f; do files+=("$f"); done < <(
         find .github/scripts openbank-infra/scripts docs -name '*.py' -type f | sort
       )
       echo "SUBJECTS=${#files[@]}"
-      ruff check --no-cache --isolated --target-version py311 \
+      python3 -m ruff check --no-cache --isolated --target-version py311 \
         --select E9,F,B --output-format concise "${files[@]}"
 
   - id: gate-subject-floor
