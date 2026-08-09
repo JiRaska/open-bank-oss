@@ -43,6 +43,12 @@ class SavingsProposalExpiryWorkflowLivenessTest {
         .gauge()
         ?.value()
 
+    private fun successRecordedOf(registry: MeterRegistry): Double? = registry
+        .find(WorkflowLivenessMetrics.SUCCESS_RECORDED)
+        .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, WORKFLOW)
+        .gauge()
+        ?.value()
+
     @Test
     fun `registers the gauges at startup and records success after a sweep`(): Unit = runBlocking {
         val registry = SimpleMeterRegistry()
@@ -52,9 +58,13 @@ class SavingsProposalExpiryWorkflowLivenessTest {
         val scheduler = SavingsProposalExpiryScheduler(service, metricsOver(registry))
         scheduler.registerLiveness(StartupEvent())
 
-        // Registered but never succeeded: the age gauge starts at the epoch, which is the
-        // "absent-vs-stale" distinction ADR-0160 mechanism 3 relies on.
-        assertThat(ageOf(registry)).isGreaterThan(FIFTY_YEARS_SECONDS)
+        // Registered but never succeeded. The age gauge is SEEDED AT REGISTRATION (#4208), so a
+        // never-run job reads as old as its pod rather than as decades — the "absent-vs-stale"
+        // distinction ADR-0160 mechanism 3 relies on now lives in the success flag, not in the age.
+        assertThat(ageOf(registry))
+            .describedAs("the age gauge must be seeded at registration, not at Instant.EPOCH")
+            .isLessThan(BOOT_SEED_CEILING_SECONDS)
+        assertThat(successRecordedOf(registry)).isEqualTo(NOT_YET_SUCCEEDED)
         assertThat(
             registry.find(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS)
                 .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, WORKFLOW)
@@ -79,7 +89,12 @@ class SavingsProposalExpiryWorkflowLivenessTest {
         // the only externally visible difference between a broken sweep and a healthy one.
         scheduler.sweep()
 
-        assertThat(ageOf(registry)).isGreaterThan(FIFTY_YEARS_SECONDS)
+        // Asserted on the success FLAG, not on the age. Under the boot seed a failed run and a
+        // freshly registered one have the same small age, so an age assertion here would pass
+        // whatever the sweep did.
+        assertThat(successRecordedOf(registry))
+            .describedAs("a swallowed failure must not record a success")
+            .isEqualTo(NOT_YET_SUCCEEDED)
     }
 
     @Test
@@ -94,6 +109,12 @@ class SavingsProposalExpiryWorkflowLivenessTest {
         scheduler.sweep()
 
         // A quiet run IS a successful run — the heartbeat tracks the schedule, not the workload.
+        // The age assertion alone cannot say that any more: the boot seed already puts the age
+        // under the tolerance before sweep() is called, so it would hold against a scheduler that
+        // recorded nothing. The flag is what distinguishes them.
+        assertThat(successRecordedOf(registry))
+            .describedAs("a quiet run still records a success")
+            .isEqualTo(SUCCEEDED)
         assertThat(ageOf(registry)).isLessThan(TOLERANCE_SECONDS)
     }
 
@@ -101,6 +122,12 @@ class SavingsProposalExpiryWorkflowLivenessTest {
         const val WORKFLOW = "account-savings-proposal-expiry"
         const val EXPECTED_INTERVAL_MINUTES = 10L
         const val TOLERANCE_SECONDS = 5.0
-        val FIFTY_YEARS_SECONDS = Duration.ofDays(50 * 365).toSeconds().toDouble()
+
+        // A workflow registered moments ago is seconds old. This ceiling sits far below the
+        // tightest real threshold in the fleet (2x an hourly interval) and astronomically below
+        // the ~1.8e9 the EPOCH seed produced, so it fails loudly if the seed ever regresses.
+        val BOOT_SEED_CEILING_SECONDS = Duration.ofHours(1).toSeconds().toDouble()
+        const val NOT_YET_SUCCEEDED = 0.0
+        const val SUCCEEDED = 1.0
     }
 }
