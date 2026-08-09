@@ -407,7 +407,25 @@ jobs:
           echo "PR_DIFF_BASE=${base}" >> "$GITHUB_ENV"
 
       - name: Run gates
-        run: python3 .github/scripts/run-gates.py --group "${{ matrix.group }}"
+        run: |
+          python3 .github/scripts/run-gates.py --group "${{ matrix.group }}" \
+            --json "${RUNNER_TEMP}/gate-results-${{ matrix.group }}.json"
+
+      # ADR-0255. A structured record per gate, not another log for something to re-parse —
+      # CLAUDE.md documents at length why scraping a job's own printed log is fragile (the log
+      # contains the step's own `run:` script text; real false positives/negatives came from
+      # exactly that). `if: always()` because a red shard is the run most worth capturing, not
+      # the one to skip: this step must still upload after "Run gates" has already failed the
+      # job. `--json` itself writes the file before run-gates.py returns its exit code (see
+      # run-gates.py's own comment at the call site), so a failed shard still has one to upload.
+      - name: Upload gate results (ADR-0255)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gate-results-${{ matrix.group }}
+          path: ${{ runner.temp }}/gate-results-${{ matrix.group }}.json
+          if-no-files-found: warn
+          retention-days: 90
 
   # Aggregates the shards into the single REQUIRED context named in the main-protection
   # ruleset. `cancelled` is treated as a failure on a PR for the same reason the Admin UI
