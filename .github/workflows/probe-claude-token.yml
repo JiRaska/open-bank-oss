@@ -1,42 +1,46 @@
 # THROWAWAY probe — does CLAUDE_CODE_OAUTH_TOKEN still authenticate?
-# #2161 recorded it rejected at the gateway (is_error:true, num_turns:1, ~2s). The secret
-# has not been rotated since 2026-07-06, so that measurement may still hold. This asks the
-# real gateway with the real CI credential rather than assuming either way. Delete after.
+# Attempt 5. The claude-code-action route is blocked before it reaches the gateway
+# ("Claude Code is not installed on this repository" — it needs the Claude GitHub App,
+# an owner-only install). The CLI needs no App, so it answers the credential question
+# directly. #2161 recorded this token rejected at the gateway; that has never been
+# re-measured, and restoring independent review must not be built on an assumption.
 name: probe claude token
 on:
   pull_request:
     branches: [main]
 permissions:
   contents: read
-  pull-requests: read
-  id-token: write   # claude-code-action mints an OIDC token to reach the gateway
 jobs:
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - id: claude
-        continue-on-error: true
-        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v5.0.0
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          prompt: "Reply with exactly the word ALIVE and nothing else."
-      - name: verdict
-        if: always()
+          node-version: '22'
+      - name: ask the gateway
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
-          # The action exits 0 on its own recorded failure (#2161), so the transcript is the
-          # only honest source. A missing file is also a failure, not a pass.
-          f=$(ls ${RUNNER_TEMP}/claude-execution-output.json 2>/dev/null || true)
-          echo "outcome=${{ steps.claude.outcome }}"
-          if [ -z "$f" ]; then echo "::error::NO TRANSCRIPT — token verdict UNKNOWN, not alive"; exit 1; fi
-          python3 - "$f" <<'PY'
-          import json,sys
-          d=json.load(open(sys.argv[1]))
-          rec=[x for x in (d if isinstance(d,list) else [d]) if isinstance(x,dict)]
-          err=any(x.get("is_error") for x in rec)
-          txt=json.dumps(rec)[:400]
-          print("is_error:", err)
-          print("head:", txt)
-          sys.exit(1 if err else 0)
-          PY
+          set -o pipefail
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN}" ]; then
+            echo "::error::secret is EMPTY in this context — not a token verdict"; exit 1
+          fi
+          npm install -g @anthropic-ai/claude-code >/dev/null 2>&1
+          # -p is headless. Capture both streams: an auth rejection is printed, not thrown,
+          # and the exit code alone has already fooled this repo once (#2161).
+          set +e
+          out=$(claude -p "Reply with exactly the word ALIVE and nothing else." --max-turns 1 2>&1)
+          rc=$?
+          set -e
+          echo "rc=${rc}"
+          echo "--- output ---"
+          echo "${out}"
+          echo "--- end ---"
+          # The verdict is the CONTENT, not rc. A token that is rejected can still exit 0.
+          if echo "${out}" | grep -qi 'ALIVE'; then
+            echo "TOKEN VERDICT: ALIVE"
+          else
+            echo "::error::TOKEN VERDICT: NOT ALIVE (no model reply in output)"; exit 1
+          fi
