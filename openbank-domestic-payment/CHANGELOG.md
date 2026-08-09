@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.2...domestic-payment-v0.13.3) (2026-08-09)
+
+
+### Bug Fixes
+
+* **domestic-payment:** never submit a payment to the clearing scheme twice ([#4218](https://github.com/JiRaska/open-bank-oss/issues/4218)) ([#4275](https://github.com/JiRaska/open-bank-oss/issues/4275)) ([11be465](https://github.com/JiRaska/open-bank-oss/commit/11be4658b2ac4224fdd9256925419c4b90ae3306))
+
 ## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.1...domestic-payment-v0.13.2) (2026-08-09)
 
 
