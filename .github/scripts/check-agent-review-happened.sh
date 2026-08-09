@@ -43,6 +43,7 @@ declare -a DEAD_MARKERS=(
   'Unsupported event type'
   'Could not fetch an OIDC token'
   'Credit balance is too low'
+  'Reached max turns'          # measured: --max-turns 1 cuts the model off before it answers
   'rate limit'
 )
 
@@ -83,7 +84,7 @@ verify() {
 }
 
 self_test() {
-  local tmp rc fails=0
+  local tmp rc fails=0 ran=0
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' RETURN
 
@@ -97,6 +98,7 @@ self_test() {
   # avoid, so where two branches agree on the verdict the message is what tells them apart.
   check() {
     local label="$1" want="$2" file="${3:-}" want_msg="${4:-}"
+    ran=$((ran + 1))
     local msg
     msg=$(verify "$file" 2>&1); rc=$?
     if [ "$rc" -ne "$want" ]; then
@@ -129,12 +131,17 @@ self_test() {
   check "a 401 must fail" 1 "$tmp/dead401"
   printf 'Claude Code is not installed on this repository.\n%s\n' "$VERDICT_CLEAN" > "$tmp/app"
   check "a dead marker must beat a verdict line" 1 "$tmp/app"
+  # The real output of the first live run: the model WAS reached, then cut off mid-answer.
+  printf 'Error: Reached max turns (1)\n' > "$tmp/maxturns"
+  check "a max-turns cutoff must fail" 1 "$tmp/maxturns"
 
   if [ "$fails" -gt 0 ]; then
     echo "self-test FAILED (${fails} case(s))" >&2
     return 1
   fi
-  echo "self-test ok: proof-of-review is falsifiable (9 cases)"
+  # Count DERIVED from the cases actually run, never typed: a hardcoded number stays green
+  # when an added case silently fails to be inserted, which is how this very edit nearly went.
+  echo "self-test ok: proof-of-review is falsifiable (${ran} cases)"
   return 0
 }
 
