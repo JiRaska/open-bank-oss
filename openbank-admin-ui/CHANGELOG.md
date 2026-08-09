@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.106.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.105.0...admin-ui-v0.106.0) (2026-08-09)
+
+
+### Features
+
+* **engagement:** expose a party's active adverse states as a read API ([#4302](https://github.com/JiRaska/open-bank-oss/issues/4302)) ([8617fa9](https://github.com/JiRaska/open-bank-oss/commit/8617fa9e5502c80accb1b5154acbedbef01a1e0a)), closes [#4265](https://github.com/JiRaska/open-bank-oss/issues/4265)
+* **governance:** guard prod-readiness attestation format and freshness ([#2365](https://github.com/JiRaska/open-bank-oss/issues/2365)) ([#3929](https://github.com/JiRaska/open-bank-oss/issues/3929)) ([5a1ae1c](https://github.com/JiRaska/open-bank-oss/commit/5a1ae1cff97167d8cd78e0ad2e8525e13ea268a8))
+
 ## [0.105.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.104.0...admin-ui-v0.105.0) (2026-08-08)
 
 

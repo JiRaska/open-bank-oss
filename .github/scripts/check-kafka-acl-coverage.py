@@ -48,6 +48,8 @@ import sys
 
 import yaml
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 GITOPS = REPO / "openbank-infra" / "gitops"
 
@@ -96,7 +98,7 @@ def required(app_yaml: pathlib.Path) -> set[tuple[str, str]]:
     the operation checkable at all — a bare topic name says nothing about which way it flows.
     """
     try:
-        doc = yaml.safe_load(app_yaml.read_text(encoding="utf-8"))
+        doc = gatelib.load_yaml(app_yaml)
     except yaml.YAMLError:
         return set()
     flat: list[tuple[list[str], object]] = []
@@ -121,9 +123,9 @@ def required(app_yaml: pathlib.Path) -> set[tuple[str, str]]:
 def kafka_users() -> dict[str, list[tuple[str, str, set[str]]]]:
     """{user: [(topic-or-prefix, patternType, {operations})]} across every KafkaUser CR."""
     users: dict[str, list[tuple[str, str, set[str]]]] = {}
-    for path in GITOPS.rglob("*.yaml"):
+    for path in gatelib.rglob(GITOPS, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except (yaml.YAMLError, UnicodeDecodeError):
             continue
         for doc in docs:
@@ -195,7 +197,7 @@ def main() -> int:
     used_gaps: set[str] = set()
     checked = 0
 
-    for app_yaml in sorted(REPO.glob("openbank-*/src/main/resources/application.yaml")):
+    for app_yaml in gatelib.glob(REPO, "openbank-*/src/main/resources/application.yaml"):
         service = app_yaml.parts[len(REPO.parts)]
         wanted = required(app_yaml)
         if not wanted:

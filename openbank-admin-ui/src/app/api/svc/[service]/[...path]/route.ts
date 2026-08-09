@@ -48,6 +48,7 @@ const SERVICE_MAP: Record<string, { container: string; port: number }> = {
   'dispute-service':        { container: 'openbank-dispute-service',        port: 8135 },
   'sepa-instant':           { container: 'openbank-sepa-instant',           port: 8127 },
   'document-service':       { container: 'openbank-document-service',       port: 8143 },
+  'engagement-service':     { container: 'openbank-engagement-service',     port: 8153 },
   'vop-service':            { container: 'openbank-vop-service',            port: 8149 },
 }
 

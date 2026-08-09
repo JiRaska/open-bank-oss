@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.2...domestic-payment-v0.13.3) (2026-08-09)
+
+
+### Bug Fixes
+
+* **domestic-payment:** never submit a payment to the clearing scheme twice ([#4218](https://github.com/JiRaska/open-bank-oss/issues/4218)) ([#4275](https://github.com/JiRaska/open-bank-oss/issues/4275)) ([11be465](https://github.com/JiRaska/open-bank-oss/commit/11be4658b2ac4224fdd9256925419c4b90ae3306))
+
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.1...domestic-payment-v0.13.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **libs:** stamp ApiError.timestamp at construction instead of serving 1970 ([#3880](https://github.com/JiRaska/open-bank-oss/issues/3880)) ([b3e6672](https://github.com/JiRaska/open-bank-oss/commit/b3e6672c9e13470fc6353ad8a5483e4075875b1f))
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.0...domestic-payment-v0.13.1) (2026-08-08)
 
 

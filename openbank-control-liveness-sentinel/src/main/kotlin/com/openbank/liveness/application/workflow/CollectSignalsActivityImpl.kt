@@ -26,6 +26,14 @@ open class CollectSignalsActivityImpl(private val prometheusQuery: PrometheusQue
     // composite key -> ageSeconds map, so DetectFindingsActivityImpl never has to guess an
     // interval or make a second Prometheus round-trip of its own. A job with an age gauge but no
     // matching interval gauge is dropped rather than guessed at.
+    //
+    // The key carries a third field, the has-ever-succeeded flag, because the age gauge is seeded
+    // at registration (ADR-0237): on a fresh pod "has never succeeded" and "succeeded a second ago"
+    // are the same small age, and the flag is the only thing that separates them. It changes no
+    // verdict — a job that never ran crosses its threshold once its grace elapses, exactly like one
+    // that stopped — only what the finding says, which is this agent's whole job. A job whose flag
+    // is missing (an older pod still emitting two gauges) is treated as having succeeded, so a
+    // rolling upgrade cannot manufacture never-succeeded findings.
     override fun collectWatchdogHeartbeats(): Map<String, Double> = runOnVertxContext {
         log.debug("Collecting WorkflowLivenessWatchdog heartbeat gauges")
         // Series names come from WorkflowLivenessMetrics — the same constants DomainMetrics
@@ -35,9 +43,11 @@ open class CollectSignalsActivityImpl(private val prometheusQuery: PrometheusQue
         // unconditionally — the exact vacuous-green shape the mechanism exists to catch.
         val ages = prometheusQuery.queryVector(WorkflowLivenessMetrics.LAST_SUCCESS_AGE_SERIES)
         val intervals = prometheusQuery.queryVector(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SERIES)
+        val succeeded = prometheusQuery.queryVector(WorkflowLivenessMetrics.SUCCESS_RECORDED_SERIES)
         ages.mapNotNull { (job, age) ->
             val interval = intervals[job] ?: return@mapNotNull null
-            "$job|$interval" to age
+            val everSucceeded = succeeded[job] ?: 1.0
+            "$job|$interval|$everSucceeded" to age
         }.toMap()
     }
 

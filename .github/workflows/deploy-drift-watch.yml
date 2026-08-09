@@ -98,8 +98,14 @@ jobs:
                exit "$code" ;;
           esac
 
+      # Runs on a clean scan (code 0) too: the auto-close half of this step is the
+      # only thing that closes a tracker whose drift has resolved. Gating on drift
+      # alone meant the LAST open deploy-drift issue was never auto-closed — with
+      # zero drifted services the step was skipped and the issue sat open forever
+      # (measured 2026-08-08: run 31277854742 reported 56 in sync / 0 drifted and
+      # #3366 stayed open; it was closed by hand).
       - name: Escalate drift per service
-        if: ${{ github.event_name != 'pull_request' && steps.probe.outputs.code == '2' }}
+        if: ${{ github.event_name != 'pull_request' && (steps.probe.outputs.code == '0' || steps.probe.outputs.code == '2') }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |

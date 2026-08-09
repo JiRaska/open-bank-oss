@@ -10,13 +10,19 @@ dataClassification: confidential
 retentionPolicy: 5 years
 evidenceExported: true
 lineage:
-  upstream:
+  upstream: []
+  downstream:
+    # Direction corrected (issue #3982): both were declared as `upstream`, i.e. sca-service and
+    # pid-service calling delegation-service. Both clients live HERE —
+    # ScaChallengeClient(configKey = "sca-service") and PartyEligibilityClient(configKey =
+    # "pid-service") — and delegation-service's Deployment env carries SCA_SERVICE_URL and
+    # PID_SERVICE_URL. sca-service's own Deployment env lists only keycloak and tempo.
     - serviceName: sca-service
       relationType: api
-      description: verifies grant/accept SCA challenges
+      description: verifies grant/accept SCA challenges via ScaChallengeClient
     - serviceName: pid-service
       relationType: api
-      description: grantor/grantee eligibility (party status, KYC level)
+      description: grantor/grantee eligibility (party status, KYC level) via PartyEligibilityClient
 databaseLineage:
   ownedDatabases:
     - openbank_delegations

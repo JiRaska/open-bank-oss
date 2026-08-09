@@ -58,6 +58,8 @@ import re
 import subprocess
 import sys
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = REPO / ".github/scripts"
 MANIFEST = REPO / ".github/gates/gates.yaml"
@@ -131,7 +133,7 @@ def coverage(names: list[str] | None = None) -> tuple[dict[str, str], list[str]]
     script resolved left the self-test green.
     """
     names = names if names is not None else [p.name for p in check_scripts()]
-    manifest_text = MANIFEST.read_text(encoding="utf-8") if MANIFEST.is_file() else ""
+    manifest_text = gatelib.read_text(MANIFEST) if MANIFEST.is_file() else ""
 
     covered: dict[str, str] = {}
     pending = []
@@ -149,7 +151,7 @@ def coverage(names: list[str] | None = None) -> tuple[dict[str, str], list[str]]
             if path.parent == SCRIPTS_DIR or path == MANIFEST:
                 continue
             try:
-                text = strip_comments(path.read_text(encoding="utf-8", errors="ignore"))
+                text = strip_comments(gatelib.read_text(path, errors="ignore"))
             except OSError:
                 continue
             for name in list(pending):
@@ -169,7 +171,7 @@ def stale_helpers(covered: dict[str, str]) -> list[str]:
     """A HELPERS entry that is wrong in either direction is itself a finding."""
     names = {p.name for p in check_scripts()}
     stale = []
-    for name, reason in HELPERS.items():
+    for name in HELPERS:
         if name not in names:
             stale.append(f"{name} is declared a helper but does not exist")
         elif not covered.get(name, "").startswith("declared helper"):
@@ -234,7 +236,7 @@ def selftest() -> int:
     # an earlier version asserted only "something was covered", and stayed green when the manifest
     # lookup was broken to cover everything unconditionally.
     orphan_probe = "check-this-name-is-referenced-nowhere-selftest.py"
-    real = next((p.name for p in names if p.name in MANIFEST.read_text(encoding="utf-8")), None)
+    real = next((p.name for p in names if p.name in gatelib.read_text(MANIFEST)), None)
     if real is None:
         print("selftest FAIL: no check-* script is in gates.yaml — the manifest read is broken.")
         return 1

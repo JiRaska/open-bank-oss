@@ -197,6 +197,22 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   mass replay on money-path channels. `check-kafka-dotted-keys.py` ratchets it (enforced in
   `Validate manifests`) — new occurrences fail, today's six are baselined against #2945, and a
   baseline entry that becomes covered is reported too (#686, #2945).
+- **A "successful no-op" result and a real success must not share a boolean — an off-by-default
+  adapter then reports as a working one, and no signal anywhere disagrees.** `PushResult.skipped()`
+  (returned when `openbank.notification.push.apns.enabled=false`) carries `success = true`, and the
+  fan-out asked `count { success }`. So every push in an environment with no APNs credentials was
+  counted as delivered, the row committed `SENT` with `sentAt` set, and the outcome event announced
+  a delivery that never left the process. Three things made it unrecoverable from telemetry: the
+  channel emitted **no metric at all** (one class in that whole service touched `MeterRegistry`), a
+  200 from APNs means *accepted*, not delivered — APNs issues no receipt, so delivery is not
+  observable server-side at any effort — and the disabled path is the *quiet* one, so there was no
+  error to find. It shipped that way and a customer reported it. Two rules: give a
+  skipped/disabled/no-op outcome its **own enum value**, never a flag shared with success (`PushResult.outcome`
+  is now `ACCEPTED | SKIPPED | FAILED`); and name the metric for what you can actually establish —
+  `accepted`, never `delivered`. Then alert on the success state: "adapter skipping and accepting
+  nothing" is the alert that was missing, not an error rate. The same shape is anywhere a stub, a
+  dry-run or a feature-flagged-off adapter returns success — grep for `enabled` defaults of `false`
+  next to a `success = true` return (ADR-0252 phase 0, #4348).
 - **`Instant.EPOCH` as a data-class default is a lie every test agrees with, and a non-null
   assertion is not a check.** `AuditEvent.timestamp` and `FlagExposure.timestamp` both defaulted to
   it; 23 of the 25 fleet `AuditEvent(` sites take the default, and `FlagExposure.of` — the KDoc's
@@ -204,6 +220,34 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   1970-01-01, and `FlagExposureTest` already asserted *every other* field of `of()`. Assert
   **recency** (`isBetween(before, now)`), never non-nullity, for any field meaning "when did this
   happen" (#3882). Grep the shape: `: Instant = Instant.EPOCH`.
+- **A sentinel default that is right for a REPORT becomes a defect the day something ALERTS on it,
+  and the alert's own comments will describe the value it wishes it had.**
+  `DomainMetrics.registerWorkflowLiveness` seeded its age gauge from `Instant.EPOCH`, so
+  `openbank_workflow_last_success_age_seconds` read ~1.8e9 seconds — decades — for any workflow not
+  yet successful, including every workflow on a freshly started pod. Fine while the only consumer
+  was the control-liveness-sentinel filing a daily finding ("never ran" is trivially over any
+  threshold, no special-casing needed — the KDoc said exactly that). Then ADR-0237 added
+  `WorkflowLivenessStale` (`age > 2 * expected_interval`, `for: 15m`) over the same gauge: for a
+  daily job the threshold is 2 days and a fresh pod reported decades, so it fired **15 minutes after
+  every deploy or restart, for every daily workflow**, until that workflow's next success — up to
+  24h, across ~28 call sites, and no `for:` helps because the condition genuinely persists. Noise on
+  the control that exists to make a dead scheduler visible is the one thing that hides a dead
+  scheduler. Both the rule's comments and the ADR asserted the gauge was "seeded at registration —
+  never as decades"; it was not, and the KDoc next to the code said so the whole time (#2239 Gap 2,
+  fixed by #4208). **When you point an alert at an existing metric, re-derive its value at t=0 on a
+  cold pod** — a boot-time reading is a fourth state next to healthy/degraded/absent, and prose in
+  the rule is not evidence anyone did.
+- **Fixing a magnitude-based defect makes every test that discriminated BY that magnitude vacuous —
+  silently, and they stay green.** The fleet's liveness tests asserted `age > FIFTY_YEARS_SECONDS`,
+  and that one assertion was doing two unrelated jobs: at a startup site it meant "registered, not
+  yet succeeded", and in the `a failed X run records no success` tests it was the *only* thing
+  separating a failed run from a successful one. Seeding the gauge at registration makes both read
+  ~0, so 18 services' failure-path tests would have kept passing while testing nothing. Before
+  changing a sentinel value, grep every assertion that mentions it and ask what each one is really
+  discriminating; where the answer is "the defect's magnitude", the test needs a different
+  observable, not a retuned bound (here `openbank_workflow_success_recorded`, 0/1). Same family as
+  the `isNotNull()` trap above, one step later: there the assertion never could fail, here it stops
+  being able to.
 - **Before calling a wrong-looking value a live defect, find out whether anything READS it — a
   field no code path consumes is a latent trap, not corruption, and the two need different fixes.**
   The audit envelope above looked like the worst case (evidentiary record, append-only store), and

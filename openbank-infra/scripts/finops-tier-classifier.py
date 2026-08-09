@@ -185,7 +185,7 @@ def main() -> int:
     try:
         rows, findings = classify(args.prometheus_url, args.idle_cpu, args.window)
     except Exception as e:  # network/Prometheus unreachable -> degrade, never crash CI
-        print(f"FINOPS_TIER_CLASSIFIER_FINDING=0")
+        print("FINOPS_TIER_CLASSIFIER_FINDING=0")
         print(f"classifier could not reach Prometheus ({args.prometheus_url}): {e}")
         print("(advisory — skipped, not a failure)")
         return 0

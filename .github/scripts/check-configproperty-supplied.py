@@ -52,6 +52,8 @@ import sys
 
 import yaml
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 COMPONENTS = REPO / "openbank-infra/gitops/components"
 WORKLOADS = {"Deployment", "Rollout", "StatefulSet", "DaemonSet"}
@@ -75,9 +77,9 @@ def deployment_env(components: pathlib.Path) -> dict[str, set[str]]:
     out: dict[str, set[str]] = collections.defaultdict(set)
     if not components.is_dir():
         return out
-    for path in components.rglob("*.yaml"):
+    for path in gatelib.rglob(components, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except (yaml.YAMLError, OSError, UnicodeDecodeError):
             continue
         for doc in docs:
@@ -102,7 +104,7 @@ def declared_keys(application_yaml: pathlib.Path) -> set[str]:
     if not application_yaml.is_file():
         return set()
     try:
-        doc = yaml.safe_load(application_yaml.read_text(encoding="utf-8")) or {}
+        doc = gatelib.load_yaml(application_yaml) or {}
     except (yaml.YAMLError, OSError, UnicodeDecodeError):
         return set()
 
@@ -126,7 +128,7 @@ def findings(repo: pathlib.Path = REPO) -> tuple[list[str], int]:
     out: list[str] = []
     required = 0
 
-    for main in sorted(repo.glob("openbank-*/src/main")):
+    for main in gatelib.glob(repo, "openbank-*/src/main"):
         service = main.parts[len(repo.parts)]
         if service.startswith(SKIP_PREFIXES):
             continue
@@ -136,9 +138,9 @@ def findings(repo: pathlib.Path = REPO) -> tuple[list[str], int]:
         for candidate in (service, short, f"{short}-service"):
             supplied_env |= env.get(candidate, set())
 
-        for source in main.rglob("*.kt"):
+        for source in gatelib.rglob(main, "*.kt"):
             try:
-                text = source.read_text(encoding="utf-8", errors="ignore")
+                text = gatelib.read_text(source, errors="ignore")
             except OSError:
                 continue
             for match in CONFIG_RE.finditer(text):

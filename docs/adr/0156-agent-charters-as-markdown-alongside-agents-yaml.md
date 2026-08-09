@@ -53,7 +53,9 @@ We will add a **Markdown narrative layer** alongside `agents.yaml`, and use it t
    never restates an enforced field (tool lists, limits, data scope) — those stay singly-sourced in
    `agents.yaml`; the Markdown links to it instead. This mirrors the existing `docs/adr/` +
    `docs/threat-models/` split: YAML/code is what's enforced, Markdown is what's explained.
-2. **`.github/scripts/check-agent-charter-registry.sh`** (+ `agent-charter-registry.yml`) — a CI
+2. **`.github/scripts/check-agent-charter-registry.sh`** (gate `agent-charter-registry-parity`
+   in `.github/gates/gates.yaml`; the standalone `agent-charter-registry.yml` workflow it
+   originally shipped with was a duplicate of that gate and was removed in #4339) — a CI
    gate enforcing full id parity between `agents.yaml` and `docs/agents/*.md`, mirroring
    `check-adr-registry.sh`'s role for the ADR registry. It checks parity only, deliberately not
    content — content sync stays a PR-review concern, the same way an ADR's prose isn't

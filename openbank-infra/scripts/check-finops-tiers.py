@@ -78,7 +78,6 @@ def parse_finops_tiers(text: str) -> tuple[set[str], dict[str, str], str]:
     in_tiers = False
     in_declared = False
     for line in block:
-        stripped = line.strip()
         # section toggles (2-space indent keys under finops_tiers)
         if re.match(r"^  tiers:\s*$", line):
             in_tiers, in_declared = True, False
