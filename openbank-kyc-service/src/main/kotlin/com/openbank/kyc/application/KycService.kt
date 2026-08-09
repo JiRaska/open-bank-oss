@@ -11,8 +11,8 @@ import com.openbank.kyc.domain.model.CheckType
 import com.openbank.kyc.domain.model.KycCase
 import com.openbank.kyc.domain.model.KycCaseStatus
 import com.openbank.kyc.domain.model.KycCheck
+import com.openbank.kyc.domain.model.KycEvents
 import com.openbank.kyc.domain.model.RiskLevel
-import com.openbank.kyc.infrastructure.kafka.KycEventPublisher
 import com.openbank.libs.observability.DomainMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -74,8 +74,6 @@ class KycService {
 
     @Inject lateinit var repo: KycCaseRepository
 
-    @Inject lateinit var eventPublisher: KycEventPublisher
-
     @Inject lateinit var metrics: DomainMetrics
 
     @Inject lateinit var clock: Clock
@@ -122,9 +120,8 @@ class KycService {
             createdAt = Instant.now(clock),
             updatedAt = Instant.now(clock),
         )
-        val saved = repo.save(case)
+        val saved = repo.save(case, KycEvents.caseOpened(case, Instant.now(clock)))
         metrics.kycSubmitted(caseType)
-        eventPublisher.publishCaseOpened(saved)
         return saved
     }
 
@@ -169,8 +166,7 @@ class KycService {
             reviewedAt = Instant.now(clock),
             updatedAt = Instant.now(clock),
         )
-        val saved = repo.update(cleared)
-        eventPublisher.publishCaseApproved(saved)
+        val saved = repo.update(cleared, KycEvents.caseApproved(cleared, Instant.now(clock)))
         return saved
     }
 
@@ -208,8 +204,11 @@ class KycService {
             else -> case.status
         }
         val updated = case.copy(checks = updatedChecks, status = newStatus, updatedAt = Instant.now(clock))
-        val saved = repo.update(updated)
-        if (newStatus != case.status) eventPublisher.publishCaseStatusChanged(saved)
+        val saved = if (newStatus != case.status) {
+            repo.update(updated, KycEvents.caseStatusChanged(updated, Instant.now(clock)))
+        } else {
+            repo.update(updated)
+        }
         return saved
     }
 
@@ -263,8 +262,12 @@ class KycService {
             riskLevel = escalatedRisk,
             updatedAt = Instant.now(clock),
         )
-        val saved = repo.update(updated)
-        if (newStatus != case.status || escalatedRisk != case.riskLevel) eventPublisher.publishCaseStatusChanged(saved)
+        val changed = newStatus != case.status || escalatedRisk != case.riskLevel
+        val saved = if (changed) {
+            repo.update(updated, KycEvents.caseStatusChanged(updated, Instant.now(clock)))
+        } else {
+            repo.update(updated)
+        }
         return saved
     }
 
@@ -314,9 +317,8 @@ class KycService {
             reviewedAt = Instant.now(clock),
             updatedAt = Instant.now(clock),
         )
-        val saved = repo.update(updated)
+        val saved = repo.update(updated, KycEvents.caseApproved(updated, Instant.now(clock)))
         metrics.kycVerdict(caseType, "approved")
-        eventPublisher.publishCaseApproved(saved)
         return saved
     }
 
@@ -329,9 +331,8 @@ class KycService {
             notes = reason,
             updatedAt = Instant.now(clock),
         )
-        val saved = repo.update(updated)
+        val saved = repo.update(updated, KycEvents.caseRejected(updated, Instant.now(clock)))
         metrics.kycVerdict(caseType, "rejected")
-        eventPublisher.publishCaseRejected(saved)
         return saved
     }
 
@@ -345,7 +346,7 @@ class KycService {
      * On success:
      * 1. The case status transitions UNDER_REVIEW → APPROVED.
      * 2. The [reason] and [approvedBy] are recorded as [KycCase.notes] and [KycCase.reviewedBy].
-     * 3. A KYC_CASE_APPROVED outbox event is emitted via [KycEventPublisher].
+     * 3. A KYC_CASE_APPROVED row is written to `kyc_outbox` in the same transaction.
      *
      * @throws KycCaseNotFoundException when [caseId] does not exist.
      * @throws InvalidStateTransitionException when the case is not in UNDER_REVIEW status.
@@ -363,9 +364,8 @@ class KycService {
             notes = reason,
             updatedAt = Instant.now(clock),
         )
-        val saved = repo.update(updated)
+        val saved = repo.update(updated, KycEvents.caseApproved(updated, Instant.now(clock)))
         metrics.kycVerdict(caseType, "approved")
-        eventPublisher.publishCaseApproved(saved)
         return saved
     }
 
@@ -379,7 +379,7 @@ class KycService {
      * On success:
      * 1. The case status transitions UNDER_REVIEW → REJECTED.
      * 2. The [reason] and [rejectedBy] are recorded as [KycCase.notes] and [KycCase.reviewedBy].
-     * 3. A KYC_CASE_REJECTED outbox event is emitted via [KycEventPublisher].
+     * 3. A KYC_CASE_REJECTED row is written to `kyc_outbox` in the same transaction.
      *
      * @throws KycCaseNotFoundException when [caseId] does not exist.
      * @throws InvalidStateTransitionException when the case is not in UNDER_REVIEW status.
@@ -397,9 +397,8 @@ class KycService {
             notes = reason,
             updatedAt = Instant.now(clock),
         )
-        val saved = repo.update(updated)
+        val saved = repo.update(updated, KycEvents.caseRejected(updated, Instant.now(clock)))
         metrics.kycVerdict(caseType, "rejected")
-        eventPublisher.publishCaseRejected(saved)
         return saved
     }
 
