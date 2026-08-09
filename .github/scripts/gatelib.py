@@ -185,6 +185,25 @@ def glob(root: os.PathLike | str, pattern: str) -> tuple[pathlib.Path, ...]:
     return tuple(sorted(pathlib.Path(root).glob(pattern)))
 
 
+SUBJECTS_PREFIX = "SUBJECTS="
+
+
+def subjects(count: int, label: str = "") -> None:
+    """Declare how many things this checker actually examined.
+
+    run-gates.py reads the LAST such line and fails the gate when it is below the
+    `min_subjects:` declared in gates.yaml. The point is the failure mode measured on
+    2026-08-09: delete every `.kt` file in the tree and nine Kotlin-subject gates still report
+    PASS, several of them printing `0 ... checked` while exiting 0. The count was already in
+    the output; nothing acted on it. A renamed directory, a moved source root or a changed
+    glob turns a gate into a green no-op, and there was no layer that could tell.
+
+    Print it unconditionally, including on the failure path — a gate that found its corpus and
+    then failed on it must not also be reported as having lost its corpus.
+    """
+    print(f"{SUBJECTS_PREFIX}{int(count)}" + (f"  # {label}" if label else ""))
+
+
 def clear() -> None:
     """Drop the in-process parse cache. For tests."""
     _parse_cache.clear()

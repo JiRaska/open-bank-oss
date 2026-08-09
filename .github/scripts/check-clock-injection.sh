@@ -32,6 +32,7 @@ TARGET_LAYERS=(domain application)
 PATTERN='Instant[.]now[(][)]\|LocalDateTime[.]now[(][)]\|LocalDate[.]now[(][)]\|System[.]currentTimeMillis[(][)]'
 
 VIOLATIONS=0
+SCANNED=0
 
 for svc in "${MONEY_PATH_SERVICES[@]}"; do
   for layer in "${TARGET_LAYERS[@]}"; do
@@ -49,6 +50,7 @@ for svc in "${MONEY_PATH_SERVICES[@]}"; do
       fi
 
       matches=$(grep -n "$PATTERN" "$file" | grep -v '[[:space:]]*//' | grep -v '[[:space:]]\*' || true)
+      SCANNED=$((SCANNED + 1))
       if [ -n "$matches" ]; then
         echo "VIOLATION [$svc/$layer] $file"
         echo "$matches"
@@ -58,6 +60,8 @@ for svc in "${MONEY_PATH_SERVICES[@]}"; do
     done < <(find "$search_dir" -type f -name "*.kt" -print0)
   done
 done
+
+echo "SUBJECTS=$SCANNED"
 
 if [ "$VIOLATIONS" -gt 0 ]; then
   echo ""

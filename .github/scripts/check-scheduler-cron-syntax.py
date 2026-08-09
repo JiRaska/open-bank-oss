@@ -60,7 +60,9 @@ def validate(expr: str) -> list[str]:
     if len(parts) not in (6, 7):
         return [f"expected 6 or 7 fields (second minute hour day-of-month month day-of-week [year]), got {len(parts)}"]
     problems = []
-    for (name, lo, hi, extra), field in zip(FIELDS, parts):
+    # NOT strict: a wrong field count is a finding this function reports elsewhere, so
+    # pairing what there is and letting that check speak is deliberate.
+    for (name, lo, hi, extra), field in zip(FIELDS, parts, strict=False):
         for token in re.split(r"[,/]", field):
             token = token.strip()
             if token in ("", "*") or token in extra:

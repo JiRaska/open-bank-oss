@@ -51,7 +51,7 @@ observability/governance agents) governed under ADR-0031 / ADR-0136.
 
 | AIGF control area | Our implementation | Evidence artifact | Status |
 |---|---|---|---|
-| AI system inventory / agents-as-code | Agents declared as least-privilege workloads in `agents.yaml`, passing the same PR/CI/OPA gates as humans; Markdown charters with an id-parity gate | ADR-0031; ADR-0156; agent-charter-registry.yml | implemented |
+| AI system inventory / agents-as-code | Agents declared as least-privilege workloads in `agents.yaml`, passing the same PR/CI/OPA gates as humans; Markdown charters with an id-parity gate | ADR-0031; ADR-0156; gates.yaml: agent-charter-registry-parity | implemented |
 | Human oversight (model-proposes / bank-disposes) | Every agent output is a proposal, never auto-remediation; HolmesGPT read-only + on-demand only; DevOps/FinOps agents propose PRs a human must approve | ADR-0091; ADR-0119; ADR-0112; ADR-0102 | implemented |
 | Access control for AI tool-use | Policy-gated MCP `tools/call` through the same OPA sidecar as REST; principal type `AI_AGENT` distinct from `HUMAN` | ADR-0034; `authz-policy-auditor` (ADR-0167) | partial — OPA enforce staged; agent-service blanket-ROLE_OPERATOR priv-esc tracked as a draft advisory |
 | Attribution / auditability of AI actions | AI-attributed entries on the tamper-evident audit chain; agent charter identity threads into incident declarations | ADR-0031 D5; ADR-0133; `incident-response.md` §3 | implemented |

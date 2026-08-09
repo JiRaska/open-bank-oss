@@ -134,7 +134,7 @@ def audit() -> tuple[list[str], list[str], int, int]:
         scanned += 1
         rel = path.relative_to(COMPONENTS).as_posix()
         try:
-            docs = list(yaml.safe_load_all(path.read_text()))
+            docs = gatelib.load_yaml_all(path)
         except yaml.YAMLError:
             # Not this gate's job: `Validate manifests` already fails on unparseable YAML.
             continue

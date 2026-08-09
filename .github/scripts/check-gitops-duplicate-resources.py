@@ -219,6 +219,8 @@ def main() -> int:
             checked += 1
             problems.extend(check_file(path))
 
+    gatelib.subjects(checked, "gitops manifests")
+
     if not problems:
         print(f"check-gitops-duplicate-resources: OK — {checked} manifests, no duplicate resource or list entry")
         return 0

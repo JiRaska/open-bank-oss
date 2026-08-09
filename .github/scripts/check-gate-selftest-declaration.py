@@ -90,6 +90,7 @@ BASELINE = {
     # --- externally maintained tooling ---------------------------------------------------
     "yamllint": "third-party — yamllint's own test suite is not ours to run",
     "shellcheck": "third-party — shellcheck's own test suite is not ours to run",
+    "python-lint": "third-party — ruff's own test suite is not ours to run",
 }
 
 # Everything else undeclared as of the measurement date is debt, enumerated at import time so

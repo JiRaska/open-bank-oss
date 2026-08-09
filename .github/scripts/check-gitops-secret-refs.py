@@ -178,7 +178,7 @@ def main():
     for ns, kind, name, path, owner in out:
         print(f"  {kind} {ns}/{name}", file=sys.stderr)
         print(f"    consumed by {owner} in {path}", file=sys.stderr)
-        print(f"    nothing declares it -- the pod will sit in CreateContainerConfigError.",
+        print("    nothing declares it -- the pod will sit in CreateContainerConfigError.",
               file=sys.stderr)
         if kind == "Secret":
             print(f"    fix: add an ExternalSecret with target.name: {name} "

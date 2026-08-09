@@ -27,6 +27,11 @@ violations="$(
     | grep -v ': Unit' || true
 )"
 
+scanned="$(find "$ROOT" \
+     \( -type d \( -name node_modules -o -name build -o -name .claude -o -name .git \) -prune \) -o \
+     \( -path '*/src/test/*' -name '*.kt' -print \) 2>/dev/null | wc -l | tr -d ' ')"
+echo "SUBJECTS=$scanned"
+
 if [ -n "$violations" ]; then
   count="$(printf '%s\n' "$violations" | grep -c . || true)"
   echo "::error::Found $count test function(s) using the unsafe '= runBlocking {' form without ': Unit'."
