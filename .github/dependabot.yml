@@ -172,15 +172,30 @@ updates:
     commit-message:
       prefix: "chore(docker-svc)"
     groups:
-      # One PR per week for base-image minor/patch bumps across the whole
-      # fleet; majors (e.g. JDK 25 -> 26) stay separate — they need a
-      # coordinated bump per CLAUDE.md's JDK toolchain pin.
-      docker-svc-minor:
+      # Majors first, so they land in their own PR: a JDK 25 -> 26 bump needs a coordinated
+      # change per CLAUDE.md's toolchain pin and must not ride along with a base rebuild.
+      # Groups are matched in declaration order, so this one claims majors before the
+      # catch-all below sees them.
+      docker-svc-major:
         patterns:
           - "*"
         update-types:
-          - "minor"
-          - "patch"
+          - "major"
+      # Everything else — deliberately WITHOUT an update-types filter, and that is the fix.
+      #
+      # The base is pinned by digest against a floating tag (`eclipse-temurin:25-jre@sha256:...`),
+      # so a rebuild changes the digest and NOT the tag. A `[minor, patch]` filter has no semver
+      # delta to match on such an update, which is why the previous config missed the 2026-07-16 ->
+      # 08-04 drift on the 51 `openbank-*` directories it was ALREADY watching: Dependabot's last
+      # eclipse-temurin PR of any kind is #70/#71/#72, dated 2026-07-01. Adding directories under
+      # the same filter would have inherited that.
+      #
+      # Grouping is not cosmetic here either. `check-dockerfile-no-build-stage.py` (enforced)
+      # requires the FROM line to be byte-identical across all 56 files, so a per-directory PR
+      # changes one of them and is red by construction — exactly the shape #70/#71/#72 had.
+      docker-svc-rest:
+        patterns:
+          - "*"
 
   # Terraform / OpenTofu — provider and module version constraints
   - package-ecosystem: "terraform"
