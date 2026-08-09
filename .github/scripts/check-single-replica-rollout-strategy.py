@@ -79,7 +79,7 @@ try:
     import yaml
 except ImportError:  # pragma: no cover - the runner image always has it
     print("::error::pyyaml unavailable — add it to the runner base image", file=sys.stderr)
-    raise SystemExit(1)
+    raise SystemExit(1) from None
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 GITOPS = REPO / "openbank-infra" / "gitops"
