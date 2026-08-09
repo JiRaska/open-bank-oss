@@ -34,8 +34,9 @@ import java.time.LocalDate
  * The test drives the SCHEDULER, not `DomainMetrics`: asserting the library method works would pass
  * against a scheduler that never calls it, which is the whole defect. It pins both halves — the
  * gauge is registered at startup under the scheduler's own workflow tag, AND the age collapses when
- * the job succeeds. A gauge registered but never recorded reads as maximally stale forever, which
- * is a different bug wearing the same green.
+ * the job succeeds. A gauge registered but never recorded still alerts once its own grace elapses,
+ * which is a different bug wearing the same green — `openbank.workflow.success.recorded` is what
+ * separates the two for triage.
  */
 class LedgerWorkflowLivenessTest {
 
@@ -48,6 +49,12 @@ class LedgerWorkflowLivenessTest {
 
     private fun ageOf(registry: MeterRegistry, workflow: String): Double? = registry
         .find(WorkflowLivenessMetrics.LAST_SUCCESS_AGE_SECONDS)
+        .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, workflow)
+        .gauge()
+        ?.value()
+
+    private fun successRecordedOf(registry: MeterRegistry, workflow: String): Double? = registry
+        .find(WorkflowLivenessMetrics.SUCCESS_RECORDED)
         .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, workflow)
         .gauge()
         ?.value()
@@ -72,11 +79,14 @@ class LedgerWorkflowLivenessTest {
 
             job.onStart(StartupEvent())
 
-            // Registered, and never-succeeded reads as maximally stale (age from Instant.EPOCH) —
-            // decades, not seconds.
+            // Registered, seeded at registration — seconds of age, not the decades Instant.EPOCH
+            // used to produce — and flagged as not having succeeded yet.
             val neverRan = ageOf(registry, WORKFLOW)
             assertThat(neverRan).describedAs("liveness gauge was not registered at startup").isNotNull()
-            assertThat(neverRan!!).isGreaterThan(FIFTY_YEARS_SECONDS)
+            assertThat(neverRan!!)
+                .describedAs("the age gauge must be seeded at registration, not at Instant.EPOCH")
+                .isLessThan(BOOT_SEED_CEILING_SECONDS)
+            assertThat(successRecordedOf(registry, WORKFLOW)).isEqualTo(NOT_YET_SUCCEEDED)
 
             // The expected-interval gauge is the other half of the generic rule's expression;
             // without it the age has no threshold to be compared against.
@@ -107,14 +117,19 @@ class LedgerWorkflowLivenessTest {
         // assertion is that swallowing it must not look like a success.
         job.revalueDaily()
 
-        assertThat(ageOf(registry, WORKFLOW)!!)
-            .describedAs("a failed run was recorded as a success")
-            .isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(successRecordedOf(registry, WORKFLOW))
+            .describedAs("a failed run must not record a success")
+            .isEqualTo(NOT_YET_SUCCEEDED)
     }
 
     private companion object {
         const val WORKFLOW = "ledger-fx-revaluation"
         const val TOLERANCE_SECONDS = 5.0
-        val FIFTY_YEARS_SECONDS = Duration.ofDays(50 * 365).toSeconds().toDouble()
+
+        // A workflow registered moments ago is seconds old. This ceiling sits far below the
+        // tightest real threshold in the fleet (2x an hourly interval) and astronomically below
+        // the ~1.8e9 the EPOCH seed produced, so it fails loudly if the seed ever regresses.
+        val BOOT_SEED_CEILING_SECONDS = Duration.ofHours(1).toSeconds().toDouble()
+        const val NOT_YET_SUCCEEDED = 0.0
     }
 }

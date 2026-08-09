@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.14.1...audit-service-v0.14.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **audit:** stop an explicit JSON null becoming the actor "null" ([#4307](https://github.com/JiRaska/open-bank-oss/issues/4307)) ([2848bc5](https://github.com/JiRaska/open-bank-oss/commit/2848bc566f3f19c856f909b3509b0b2286138562)), closes [#3994](https://github.com/JiRaska/open-bank-oss/issues/3994)
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.14.0...audit-service-v0.14.1) (2026-08-09)
 
 

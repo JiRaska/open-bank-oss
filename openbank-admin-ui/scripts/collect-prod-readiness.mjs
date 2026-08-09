@@ -173,10 +173,13 @@ function attestFresh(svc, key) {
   const rec = ATT[svc]?.[key]
   if (!rec || typeof rec !== 'object' || !rec.date) return false
   const ttl = parseInt(rec.ttl_days ?? '365', 10) || 365
-  const d = rec.date.split('-').map(Number)
-  const t = TODAY.split('-').map(Number)
-  const days = (t[0] - d[0]) * 365 + (t[1] - d[1]) * 30 + (t[2] - d[2])
-  return days >= 0 && days <= ttl
+  // Exact calendar arithmetic. The previous form approximated a year as 365 days and a
+  // month as 30, which let a TTL run past its own expiry (#2365): ledger's 21-day pentest,
+  // dated 2026-07-26, still counted on 2026-08-17. A TTL that outlives itself is the one
+  // thing this mechanism exists to prevent.
+  const DAY = 86400000
+  const days = Math.round((Date.parse(`${TODAY}T00:00:00Z`) - Date.parse(`${rec.date}T00:00:00Z`)) / DAY)
+  return Number.isFinite(days) && days >= 0 && days <= ttl
 }
 
 // ---------------------------------------------------------------------------

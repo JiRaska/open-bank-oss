@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.10.1...document-service-v0.11.0) (2026-08-09)
+
+
+### Features
+
+* **document-service:** consume annual fee-summary events and deliver statement documents ([#4122](https://github.com/JiRaska/open-bank-oss/issues/4122)) ([02e4373](https://github.com/JiRaska/open-bank-oss/commit/02e43736724d0e383546a4d382798d981a90a0ab))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.10.0...document-service-v0.10.1) (2026-08-08)
 
 
