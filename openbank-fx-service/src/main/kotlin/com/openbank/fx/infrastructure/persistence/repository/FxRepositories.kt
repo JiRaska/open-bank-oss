@@ -80,6 +80,17 @@ class FxRateRepositoryImpl(private val clock: Clock) : FxRateRepository {
                 .setMaxResults(1).singleResultOrNull
         }.awaitSuspending()?.toDomain()
 
+    override suspend fun findBySourceAsOf(base: String, quote: String, source: RateSource, at: Instant): FxRate? =
+        sf.withSession { s ->
+            s.createQuery(
+                "from FxRateEntity where baseCurrency=:b and quoteCurrency=:q and source=:src" +
+                    " and validFrom <= :at and validTo > :at order by validFrom desc, createdAt desc",
+                FxRateEntity::class.java,
+            ).setParameter("b", base).setParameter("q", quote)
+                .setParameter("src", source.name).setParameter("at", at)
+                .setMaxResults(1).singleResultOrNull
+        }.awaitSuspending()?.toDomain()
+
     override suspend fun findBySourceAndValidFrom(
         base: String,
         quote: String,

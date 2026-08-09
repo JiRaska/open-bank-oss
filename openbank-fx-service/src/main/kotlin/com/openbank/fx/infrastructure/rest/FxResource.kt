@@ -29,6 +29,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.math.BigDecimal
 import java.net.URI
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 data class ConvertRequest(
@@ -104,17 +105,37 @@ class FxResource(private val fxUseCase: FxUseCase, private val cnbIngestion: Cnb
     @Path("/rates/{base}/{quote}")
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
     @Authorize(action = "fx.read", resource = "")
-    @Operation(summary = "Get specific FX rate; ?source=CNB returns the central-bank fixing")
+    @Operation(summary = "Get specific FX rate; ?source=CNB returns the central-bank fixing, ?asOf pins its day")
     suspend fun getRate(
         @PathParam("base") base: String,
         @PathParam("quote") quote: String,
         @QueryParam("source") source: String?,
+        // Nullable ON PURPOSE, and it is the declaration that decides this, not the body: JAX-RS
+        // injects null for an absent query parameter, and a non-nullable Kotlin `String` emits
+        // `Intrinsics.checkNotNullParameter` at offset 0 — on a `suspend fun` it emits nothing at
+        // all and the null flows in unchecked. Either way the guard would be a 500 or worse
+        // (`check-nonnull-jaxrs-params.py`, #3104).
+        @QueryParam("asOf") asOfStr: String?,
     ): Response {
         val requestedBase = base.uppercase()
         val requestedQuote = quote.uppercase()
+        val asOf = asOfStr?.let {
+            runCatching { LocalDate.parse(it) }.getOrNull()
+                ?: return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(mapOf("error" to "Invalid 'asOf' date: $it (expected ISO yyyy-MM-dd)")).build()
+        }
+        // `asOf` is meaningful only for the central-bank fixing, which is the only source with a
+        // per-business-day identity; a commercial quote is a live price with no "as of yesterday".
+        // Rejecting the combination rather than ignoring it — a silently-dropped date parameter is
+        // how a backfill reads as correct while marking at today's rate, the defect this closes.
+        if (asOf != null && source?.uppercase() != RateSource.CNB.name) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                .entity(mapOf("error" to "'asOf' is only supported with source=CNB")).build()
+        }
         val body = if (source?.uppercase() == RateSource.CNB.name) {
             // The ČNB path only ever looks up the exact stored direction — never derived.
-            cnbIngestion.getCnbRate(requestedBase, requestedQuote)?.let { FxRateResponse.of(it, derivedFrom = null) }
+            cnbIngestion.getCnbRate(requestedBase, requestedQuote, asOf)
+                ?.let { FxRateResponse.of(it, derivedFrom = null) }
         } else {
             fxUseCase.getRate(GetRateQuery(requestedBase, requestedQuote))
                 ?.let { FxRateResponse.of(it.rate, it.derivedFrom) }

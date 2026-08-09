@@ -17,6 +17,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
 
@@ -103,8 +104,19 @@ class CnbRateIngestionService(
         return CnbIngestionResult(fixing.date, fixing.sequence, ingested, skipped, stored)
     }
 
-    override suspend fun getCnbRate(base: String, quote: String): FxRate? =
-        rateRepo.findLatestBySource(base.uppercase(), quote.uppercase(), RateSource.CNB)
+    override suspend fun getCnbRate(base: String, quote: String, asOf: LocalDate?): FxRate? {
+        val b = base.uppercase()
+        val q = quote.uppercase()
+        // No asOf: the live daily path, unchanged — "the latest fixing still valid right now".
+        if (asOf == null) return rateRepo.findLatestBySource(b, q, RateSource.CNB)
+        // With asOf: the fixing that was in effect at the START of that business day, in the ČNB
+        // publication zone the validity bounds above are written in. Start-of-day, not end-of-day:
+        // a fixing published for day D carries validFrom = D 00:00 Prague, so `validFrom <= at`
+        // admits D's own fixing while `validTo > at` still admits the Friday fixing that carries a
+        // Saturday and a Sunday. End-of-day would additionally admit a fixing whose window closed
+        // during the day, which is the stale-mark this is meant to prevent (#3921).
+        return rateRepo.findBySourceAsOf(b, q, RateSource.CNB, asOf.atStartOfDay(zone).toInstant())
+    }
 
     private companion object {
         const val QUOTE = "CZK"

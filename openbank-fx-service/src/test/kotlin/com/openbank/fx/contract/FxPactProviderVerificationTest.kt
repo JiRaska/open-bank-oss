@@ -31,7 +31,10 @@ import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
 import java.math.BigDecimal
+import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
@@ -130,6 +133,39 @@ class FxPactProviderVerificationTest {
                 validFrom = now.minusSeconds(3600),
                 validTo = now.plusSeconds(86400),
                 createdAt = now,
+            ),
+        )
+        Unit
+    }
+
+    /**
+     * #3921: the fixing ledger's revaluation asks for by business day. The window must CONTAIN the
+     * start of 2026-05-27 in the ČNB publication zone, because that is the instant
+     * `CnbRateIngestionService.getCnbRate(asOf)` compares against — seeding "some CNB row" would
+     * verify a query this interaction is not about.
+     */
+    @State("an EUR/CZK CNB fixing is in effect on 2026-05-27")
+    fun stateEurCzkCnbFixingAsOf() = runOnVertxContext {
+        val validFrom = LocalDate.of(2026, 5, 27).atStartOfDay(ZoneId.of("Europe/Prague")).toInstant()
+        // Same double-invocation guard as the sibling state above: pact-jvm 4.7.3 runs each SETUP
+        // callback twice per interaction and there is no unique constraint to make a duplicate loud.
+        if (rateRepo.findBySourceAndValidFrom("EUR", "CZK", RateSource.CNB, validFrom) != null) {
+            return@runOnVertxContext
+        }
+        rateRepo.save(
+            FxRate(
+                id = UUID.randomUUID(),
+                baseCurrency = "EUR",
+                quoteCurrency = "CZK",
+                bidRate = BigDecimal("24.90"),
+                askRate = BigDecimal("24.90"),
+                rateType = RateType.INDICATIVE,
+                source = RateSource.CNB,
+                validFrom = validFrom,
+                // Three days, matching CnbRateIngestionService.CNB_VALIDITY_DAYS — the window that
+                // carries a Friday fixing across a weekend.
+                validTo = validFrom.plus(Duration.ofDays(3)),
+                createdAt = Instant.now(),
             ),
         )
         Unit

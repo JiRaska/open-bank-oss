@@ -1,0 +1,80 @@
+{
+  "consumer": {
+    "name": "openbank-ledger-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the EUR/CZK CNB fixing in effect on a given business day",
+      "providerStates": [
+        {
+          "name": "an EUR/CZK CNB fixing is in effect on 2026-05-27"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/fx/rates/EUR/CZK",
+        "query": {
+          "asOf": [
+            "2026-05-27"
+          ],
+          "source": [
+            "CNB"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "askRate": 24.9,
+          "baseCurrency": "EUR",
+          "bidRate": 24.9,
+          "quoteCurrency": "CZK",
+          "validFrom": "2026-05-26T22:00:00Z"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.askRate": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.bidRate": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.validFrom": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-fx-service"
+  }
+}
