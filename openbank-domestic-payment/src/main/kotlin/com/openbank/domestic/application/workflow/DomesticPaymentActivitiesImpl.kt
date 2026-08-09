@@ -234,30 +234,59 @@ open class DomesticPaymentActivitiesImpl(
         }
     }
 
-    @Suppress("TooGenericExceptionCaught")
+    /**
+     * Book the funds for a payment the scheme has accepted (ADR-0108).
+     *
+     * This activity FAILS on a settlement fault instead of returning a status (#4182). Returning
+     * `SENT_TO_CLEARING` here made the activity a success, and a successful activity is one
+     * Temporal never retries — so the workflow completed on a non-terminal business state and the
+     * payment was stranded with no timer, no retry and no reader. The configured retry policy
+     * existed the whole time; nothing could ever reach it.
+     *
+     * Retrying is safe, and that is established from the code rather than assumed:
+     *  - [SettlementAdapter][com.openbank.domestic.infrastructure.client.SettlementAdapter] sends
+     *    `idempotencyKey = "domestic-settlement-<paymentId>"` — payment-scoped and stable across
+     *    attempts (no timestamp, no nonce), so every retry carries the key of the first attempt.
+     *  - transaction-service answers a duplicate with HTTP 409, which the adapter maps to
+     *    `SettlementOutcome(settled = true)` — an already-booked payment is a success, not a fault.
+     *  - the `SENT_TO_CLEARING` guard above makes the activity re-entrant: once the status write
+     *    lands, a retry (or an operator re-drive) returns `SETTLED` without calling the port again.
+     *
+     * So the failure direction is the dangerous one here, not the retry direction: a retry costs at
+     * worst a 409, whereas swallowing costs a customer a payment that left and never arrived.
+     */
     override fun settlePayment(paymentId: UUID): DomesticPaymentStatus = vtx {
         val payment = paymentRepository.findById(paymentId)
             ?: error("Payment $paymentId not found during settlePayment activity")
         if (payment.status != DomesticPaymentStatus.SENT_TO_CLEARING) return@vtx payment.status
         try {
             settlementPort.settle(payment)
-            val updated = payment.transitionTo(DomesticPaymentStatus.SETTLED, clock = clock)
-            paymentRepository.update(
-                payment = updated,
-                outboxMessage = OutboxMessage(
-                    aggregateId = updated.id,
-                    eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                    payload = eventPublisher.statusChangedPayload(payment, updated),
-                ),
-            )
-            DomesticPaymentStatus.SETTLED
         } catch (ex: SettlementUnavailableException) {
-            log.warnf(ex, "Settlement unavailable for payment %s; holding in SENT_TO_CLEARING", paymentId)
-            DomesticPaymentStatus.SENT_TO_CLEARING
-        } catch (ex: Exception) {
-            log.warnf(ex, "Unexpected error during settlement for payment %s; holding in SENT_TO_CLEARING", paymentId)
-            DomesticPaymentStatus.SENT_TO_CLEARING
+            // Rethrown, not absorbed: this is the planned-degradation case, and failing the
+            // activity is what arms the workflow's retry policy. ERROR rather than WARN because a
+            // payment that reaches here has left the bank and has not been booked.
+            log.errorf(
+                ex,
+                "Settlement unavailable for payment %s — failing the activity so Temporal retries; " +
+                    "the payment stays in SENT_TO_CLEARING and the workflow stays running (#4182)",
+                paymentId,
+            )
+            throw ex
         }
+        // Deliberately outside the catch, and with no blanket `catch (Exception)` anywhere in this
+        // method. Any other fault — an invalid transition, a repository failure, an adapter bug —
+        // propagates with its own type, so Temporal records what actually broke instead of
+        // recording the same terminal-looking success the outage produced.
+        val updated = payment.transitionTo(DomesticPaymentStatus.SETTLED, clock = clock)
+        paymentRepository.update(
+            payment = updated,
+            outboxMessage = OutboxMessage(
+                aggregateId = updated.id,
+                eventType = PAYMENT_STATUS_CHANGED_EVENT,
+                payload = eventPublisher.statusChangedPayload(payment, updated),
+            ),
+        )
+        DomesticPaymentStatus.SETTLED
     }
 
     @Suppress("TooGenericExceptionCaught")

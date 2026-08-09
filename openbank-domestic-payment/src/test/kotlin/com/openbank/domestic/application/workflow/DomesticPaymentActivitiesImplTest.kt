@@ -440,28 +440,72 @@ class DomesticPaymentActivitiesImplTest {
         coVerify(exactly = 1) { settlementPort.settle(any()) }
     }
 
+    // The two tests below replace a pair that asserted the defect (#4182). They read as coverage of
+    // the outage path and were the reason it survived: both called settlePayment during a simulated
+    // settlement outage and asserted it RETURNED SENT_TO_CLEARING — which is exactly the swallow
+    // that made the activity a success, put the retry policy out of reach, and completed the
+    // workflow on a non-terminal state. A green test asserting the bug is worse than no test.
+
     @Test
-    fun `settlePayment holds in SENT_TO_CLEARING when settlement unavailable`() {
+    fun `settlePayment FAILS the activity when settlement is unavailable so Temporal retries`() {
         val sentToClearing = payment(status = DomesticPaymentStatus.SENT_TO_CLEARING)
         coEvery { paymentRepository.findById(sentToClearing.id) } returns sentToClearing
         coEvery { settlementPort.settle(any()) } throws
             SettlementUnavailableException("transaction-service down")
 
-        val result = activitiesWithScheme.settlePayment(sentToClearing.id)
+        // Temporal drives the activity retry policy off activity FAILURE. An activity that returns
+        // normally is a success, so this must throw or the retries are structurally unreachable.
+        assertThatThrownBy { activitiesWithScheme.settlePayment(sentToClearing.id) }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+            .hasMessageContaining("transaction-service down")
 
-        assertThat(result).isEqualTo(DomesticPaymentStatus.SENT_TO_CLEARING)
+        // The durable record still says SENT_TO_CLEARING — no status is invented from a fault.
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
     }
 
     @Test
-    fun `settlePayment holds in SENT_TO_CLEARING on unexpected exception`() {
+    fun `settlePayment propagates an unexpected exception instead of absorbing it into a status`() {
         val sentToClearing = payment(status = DomesticPaymentStatus.SENT_TO_CLEARING)
         coEvery { paymentRepository.findById(sentToClearing.id) } returns sentToClearing
         coEvery { settlementPort.settle(any()) } throws RuntimeException("unexpected crash")
 
-        val result = activitiesWithScheme.settlePayment(sentToClearing.id)
+        // The blanket catch(Exception) is the actual defect: it made a settlement BUG
+        // indistinguishable from a planned degradation, both reported as a terminal-looking
+        // success. An unexpected fault must surface with its own type.
+        assertThatThrownBy { activitiesWithScheme.settlePayment(sentToClearing.id) }
+            .isInstanceOf(RuntimeException::class.java)
+            .hasMessageContaining("unexpected crash")
 
-        assertThat(result).isEqualTo(DomesticPaymentStatus.SENT_TO_CLEARING)
+        coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+    }
+
+    @Test
+    fun `settlePayment fails rather than reporting SETTLED when the status write fails`() {
+        val sentToClearing = payment(status = DomesticPaymentStatus.SENT_TO_CLEARING)
+        coEvery { paymentRepository.findById(sentToClearing.id) } returns sentToClearing
+        coEvery { settlementPort.settle(any()) } returns
+            SettlementOutcome(settled = true, transactionId = UUID.randomUUID())
+        coEvery { paymentRepository.update(any(), any()) } throws RuntimeException("db write failed")
+
+        // Booked but not recorded. Retrying is safe (payment-scoped idempotency key, 409 = already
+        // booked — see SettlementAdapterTest), so failing the activity re-attempts the write rather
+        // than leaving a booked payment behind a row that still says SENT_TO_CLEARING.
+        assertThatThrownBy { activitiesWithScheme.settlePayment(sentToClearing.id) }
+            .isInstanceOf(RuntimeException::class.java)
+            .hasMessageContaining("db write failed")
+    }
+
+    @Test
+    fun `settlePayment is re-entrant on an already SETTLED payment and does not book twice`() {
+        // This is what makes retrying safe at the activity level: once the status write has landed,
+        // a Temporal retry (or an operator re-drive) never reaches the settlement port again.
+        val settled = payment(status = DomesticPaymentStatus.SETTLED)
+        coEvery { paymentRepository.findById(settled.id) } returns settled
+
+        val result = activitiesWithScheme.settlePayment(settled.id)
+
+        assertThat(result).isEqualTo(DomesticPaymentStatus.SETTLED)
+        coVerify(exactly = 0) { settlementPort.settle(any()) }
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
     }
 
