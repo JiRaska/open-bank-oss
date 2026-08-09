@@ -35,16 +35,28 @@ class PaymentWorkflowImpl : PaymentWorkflow {
         .build()
 
     /**
-     * Options for the terminal write (#4238). Deliberately more patient than the side-effecting
-     * steps: by the time it runs the money has already moved, so giving up on recording that is
-     * strictly worse than retrying for another half hour. No maximum-attempts cap — the
-     * scheduleToClose window is the only bound, and if it does expire the WORKFLOW fails, which is
-     * visible in Temporal, rather than a COMPLETED workflow sitting next to a PENDING row.
+     * Options for the terminal write (#4238). Patient in SHAPE — retrying is strictly better than
+     * giving up, because by the time this runs the money has already moved — but bounded like every
+     * other activity in this workflow, and for a reason that is not about durability.
+     *
+     * `TransactionService` blocks the caller's HTTP request on `stub.execute()` inside
+     * `Dispatchers.IO` until the workflow closes, so an activity's window is also a bound on a
+     * pinned IO thread. The earlier 30-minute window with no attempt cap made a database failover
+     * pin one thread per already-journalled payment for half an hour, which exhausts the dispatcher
+     * and takes down endpoints that have nothing to do with payments. Ten minutes and
+     * [MAX_ATTEMPTS] is what the four side-effecting activities already use, so the worst case
+     * grows by one activity's window instead of by three.
+     *
+     * What this costs: an outage longer than ten minutes now fails the WORKFLOW rather than
+     * converging. That is the same visible-in-Temporal outcome the 30-minute window ended in — it
+     * simply arrives sooner, and a failed workflow next to a stale row is still far better than a
+     * COMPLETED workflow next to a PENDING one, which is the defect #4238 fixed.
      */
     private val finalisationOptions: ActivityOptions = ActivityOptions.newBuilder()
-        .setScheduleToCloseTimeout(Duration.ofMinutes(FINALISATION_SCHEDULE_TO_CLOSE_MINUTES))
+        .setScheduleToCloseTimeout(Duration.ofMinutes(SCHEDULE_TO_CLOSE_MINUTES))
         .setRetryOptions(
             RetryOptions.newBuilder()
+                .setMaximumAttempts(MAX_ATTEMPTS)
                 .setInitialInterval(Duration.ofSeconds(INITIAL_INTERVAL_SECONDS))
                 .setBackoffCoefficient(BACKOFF_COEFFICIENT)
                 .setMaximumInterval(Duration.ofSeconds(FINALISATION_MAX_INTERVAL_SECONDS))
@@ -57,7 +69,6 @@ class PaymentWorkflowImpl : PaymentWorkflow {
         private const val INITIAL_INTERVAL_SECONDS = 2L
         private const val BACKOFF_COEFFICIENT = 2.0
         private const val SCHEDULE_TO_CLOSE_MINUTES = 10L
-        private const val FINALISATION_SCHEDULE_TO_CLOSE_MINUTES = 30L
         private const val FINALISATION_MAX_INTERVAL_SECONDS = 30L
     }
 
