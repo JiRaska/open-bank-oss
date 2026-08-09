@@ -65,9 +65,13 @@ class DelegationGrantEntityTest {
             capabilities = setOf(DelegationCapability.ACCOUNT_INITIATE_PAYMENT),
             approvalPolicy = ApprovalPolicy.N_OF_M,
             requiredApprovals = 2,
-            perTransactionLimit = Money.of("5000".toBigDecimal(), "CZK"),
-            dailyLimit = Money.of("10000".toBigDecimal(), "CZK"),
-            monthlyLimit = Money.of("50000".toBigDecimal(), "CZK"),
+            // Scaled to the currency's minor unit, which is what the mapper now guarantees on the
+            // way back: the columns are NUMERIC(20,6) and Postgres returns scale 6, so the mapper
+            // re-scales or `Money` refuses the value outright. Writing the fixture at scale 0 hid
+            // that, because `fromDomain`/`toDomain` in isolation never sees the database's scale.
+            perTransactionLimit = Money.of("5000.00".toBigDecimal(), "CZK"),
+            dailyLimit = Money.of("10000.00".toBigDecimal(), "CZK"),
+            monthlyLimit = Money.of("50000.00".toBigDecimal(), "CZK"),
             validFrom = now,
             validTo = null,
             status = DelegationStatus.REVOKED,
@@ -82,6 +86,33 @@ class DelegationGrantEntityTest {
 
         assertThat(restored).isEqualTo(grant)
         assertThat(restored.perTransactionLimit?.currency?.code).isEqualTo("CZK")
+    }
+
+    /**
+     * The database column is NUMERIC(20,6); `Money` refuses a scale wider than the currency has.
+     * Read straight through, a stored CZK ceiling therefore threw "Amount scale 6 exceeds currency
+     * CZK fraction digits 2" and took the whole read with it. Nothing caught it before ADR-0249
+     * because #3613 refused the cumulative ceilings at the API, so no row carried one.
+     */
+    @Test
+    fun `a ceiling stored at the column's scale rehydrates instead of throwing`() {
+        val entity = DelegationGrantEntity().apply {
+            id = UUID.randomUUID()
+            grantorPartyId = UUID.randomUUID()
+            granteePartyId = UUID.randomUUID()
+            resourceType = DelegationResourceType.ACCOUNT
+            resourceId = UUID.randomUUID()
+            capabilities = mutableSetOf(DelegationCapability.ACCOUNT_INITIATE_PAYMENT)
+            approvalPolicy = ApprovalPolicy.SOLO
+            dailyLimitAmount = "5000.000000".toBigDecimal()
+            dailyLimitCurrency = "CZK"
+            validFrom = now
+            status = DelegationStatus.ACTIVE
+            createdAt = now
+            updatedAt = now
+        }
+
+        assertThat(entity.toDomain().dailyLimit).isEqualTo(Money.of("5000.00".toBigDecimal(), "CZK"))
     }
 
     @Test

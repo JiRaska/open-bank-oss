@@ -2,8 +2,16 @@
 # load/journey scripts as Kubernetes Jobs from a TestRun CR. blackbox-exporter
 # already covers single-request uptime + TLS; k6 adds multi-step journeys (e.g.
 # the customer login → balance read path) with assertions and rich latency
-# percentiles, exported to Prometheus via the operator's remote-write. The
-# example journey + TestRun live in components/observability/k6-synthetic.yaml.
+# percentiles, exported to Prometheus via the operator's remote-write.
+#
+# NOTE (ADR-0252 phase 2): the journeys no longer use this operator. The periodic
+# synthetic is a plain CronJob running the k6 image
+# (components/observability/cronjob-journey-public-edge.yaml) — a one-shot TestRun
+# CR cannot be periodic without a ServiceAccount that can delete and recreate it,
+# and a CronJob needs no cluster permissions at all. As of this commit there is
+# NO `kind: TestRun` anywhere in the tree, so this Application currently manages
+# nothing. Left in place rather than removed in the same PR that changed the
+# journey mechanism; retiring it is tracked in #4348.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

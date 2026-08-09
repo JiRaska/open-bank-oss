@@ -17,6 +17,17 @@ import jakarta.inject.Inject
  *
  *  - `openbank_copilot_chat_requests_total{service="copilot",outcome}` — completed turns by
  *    outcome: `replied`, `disabled`, `injection_blocked`.
+ *  - `openbank_copilot_erasure_identity_total{service="copilot",source}` — how each conversation
+ *    row's GDPR Art. 17 erasure identity was resolved at WRITE time: `claim` (the token carried a
+ *    `party_id`) or `absent` (it did not, so the row is reachable only by its OIDC `sub`).
+ *  - `openbank_copilot_party_erasure_total{service="copilot",outcome}` — `PARTY_ERASED` events by
+ *    what the delete actually did: `erased` (>=1 row) or `no_match` (0 rows).
+ *
+ * The last two exist because a count in a log line is not a control (#4175). `no_match` is a
+ * legitimate outcome — a party that never chatted holds nothing — so it is not on its own an
+ * alert; what is alertable is `no_match` staying at 100% of `party_erasure_total` while
+ * `erasure_identity_total{source="absent"}` is non-zero, which is the signature of erasure
+ * requests arriving for people whose rows were written without a resolvable party id.
  *
  * Counters are created lazily on first call (Micrometer deduplicates by name+tags), so no
  * `@PostConstruct` registration is required.
@@ -45,11 +56,56 @@ class CopilotMetricsAdapter(private val registry: MeterRegistry?) {
         }
     }
 
+    /**
+     * Record how the erasure identity was resolved for one written turn. [source] is
+     * [SOURCE_CLAIM] or [SOURCE_ABSENT].
+     */
+    fun recordErasureIdentity(source: String) {
+        registry?.let {
+            Counter.builder(METRIC_ERASURE_IDENTITY)
+                .tag("service", SERVICE)
+                .tag("source", source)
+                .description("Copilot conversation writes by how the GDPR erasure identity was resolved")
+                .register(it)
+                .increment()
+        }
+    }
+
+    /**
+     * Record the result of one `PARTY_ERASED` delete. [outcome] is [OUTCOME_ERASED] or
+     * [OUTCOME_NO_MATCH] — the distinction a log line carrying only the count cannot express.
+     */
+    fun recordPartyErasure(outcome: String) {
+        registry?.let {
+            Counter.builder(METRIC_PARTY_ERASURE)
+                .tag("service", SERVICE)
+                .tag("outcome", outcome)
+                .description("PARTY_ERASED events processed, tagged by whether any row was removed")
+                .register(it)
+                .increment()
+        }
+    }
+
     companion object {
         private const val SERVICE = "copilot"
         const val OUTCOME_REPLIED = "replied"
         const val OUTCOME_DISABLED = "disabled"
         const val OUTCOME_INJECTION_BLOCKED = "injection_blocked"
+
+        /** The bearer carried a usable `party_id` claim. */
+        const val SOURCE_CLAIM = "claim"
+
+        /** The bearer carried no usable `party_id`; the row is reachable only by its OIDC `sub`. */
+        const val SOURCE_ABSENT = "absent"
+
+        /** The erasure delete removed at least one conversation. */
+        const val OUTCOME_ERASED = "erased"
+
+        /** The erasure delete removed nothing. */
+        const val OUTCOME_NO_MATCH = "no_match"
+
         private const val METRIC_CHAT_REQUESTS = "openbank.copilot.chat.requests"
+        private const val METRIC_ERASURE_IDENTITY = "openbank.copilot.erasure.identity"
+        private const val METRIC_PARTY_ERASURE = "openbank.copilot.party.erasure"
     }
 }

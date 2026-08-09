@@ -55,6 +55,24 @@ import yaml
 WORKFLOW = ".github/workflows/ci.yml"
 CHECK_RE = re.compile(r"(?:^|[\s/])(check-[\w.-]+\.(?:py|sh))")
 
+# A step that CALLS ITSELF a gate, for the gates that are not a `check-*` script. The
+# ADR-0071 governance-manifest gate was `node scripts/generate-governance.mjs` inline in
+# `ui-build` — no check-* script anywhere in it, so the rule above could not see it, and it
+# sat in the conditional job for the whole time this checker was green about that job
+# (#4083). A probe that cannot express the failure reports clean; this is the second
+# detector, keyed on the one thing such a step always has: a name asserting it is a gate.
+GATE_NAME_RE = re.compile(r"\b(gate|enforced|advisory)\b", re.IGNORECASE)
+
+# `always()` does not NARROW anything — it makes a job run in cases it otherwise would not,
+# which is the opposite defect from the one this checker is about. `validate` carries it, and
+# treating it as a condition would flag a step that is strictly more reachable than an
+# unconditional one. Any other expression is narrowing until someone proves otherwise.
+NON_NARROWING = {"always()", "${{ always() }}"}
+
+
+def is_narrowing(cond) -> bool:
+    return cond is not None and str(cond).strip() not in NON_NARROWING
+
 
 def strip_comments(text: str) -> str:
     """Drop whole-line `#` comments.
@@ -85,16 +103,32 @@ def findings(root: pathlib.Path = pathlib.Path(".")):
             if not run.strip():
                 continue
             examined += 1
-            for script in sorted(set(CHECK_RE.findall(run))):
-                label = step.get("name") or run.strip().split("\n")[0][:60]
-                if job_if is not None:
+            label = step.get("name") or run.strip().split("\n")[0][:60]
+            scripts = sorted(set(CHECK_RE.findall(run)))
+            if not scripts and GATE_NAME_RE.search(step.get("name") or ""):
+                if is_narrowing(job_if):
+                    errors.append(
+                        f"step '{label}' in job '{job_name}' names itself a gate but runs no "
+                        f"check-* script, and the job is conditional (if: {job_if}). The gate "
+                        f"cannot run when that condition is false, and an absent job reports "
+                        f"nothing — declare it in .github/gates/gates.yaml instead (#4083)."
+                    )
+                elif is_narrowing(step.get("if")):
+                    errors.append(
+                        f"step '{label}' in job '{job_name}' names itself a gate but runs no "
+                        f"check-* script, and carries a step-level condition "
+                        f"(if: {step['if']}). Same problem, one level down — declare it in "
+                        f".github/gates/gates.yaml instead."
+                    )
+            for script in scripts:
+                if is_narrowing(job_if):
                     errors.append(
                         f"{script} is invoked by step '{label}' in job '{job_name}', which is "
                         f"conditional (if: {job_if}). The gate cannot run when that condition "
                         f"is false, and an absent job reports nothing — declare it in "
                         f".github/gates/gates.yaml instead (#3629)."
                     )
-                elif step.get("if") is not None:
+                elif is_narrowing(step.get("if")):
                     errors.append(
                         f"{script} is invoked by step '{label}' in job '{job_name}' under a "
                         f"step-level condition (if: {step['if']}). Same problem, one level "
@@ -173,6 +207,45 @@ jobs:
           npm run build
 """, 0, 0)
 
+    # #4083: the governance-manifest gate ran `node scripts/generate-governance.mjs`, so the
+    # check-* rule above was structurally blind to it. These four pin the second detector,
+    # including both directions of the always() carve-out.
+    case("a gate-NAMED step with no check-* script in a conditional job is an error", """
+jobs:
+  ui-build:
+    if: needs.changes-ui.outputs.changed == 'true'
+    steps:
+      - name: Governance manifest gate (ADR-0071, enforced)
+        run: node scripts/generate-governance.mjs
+""", 1, 0)
+
+    case("a gate-NAMED step under a step-level condition is an error", """
+jobs:
+  validate:
+    steps:
+      - name: some gate
+        if: github.event_name == 'push'
+        run: node scripts/generate-governance.mjs
+""", 1, 0)
+
+    case("always() is not a narrowing condition", """
+jobs:
+  validate:
+    if: always()
+    steps:
+      - name: Verify no gate shard failed
+        run: echo ok
+""", 0, 0)
+
+    case("an ordinary step in a conditional job is not a gate", """
+jobs:
+  ui-build:
+    if: needs.changes-ui.outputs.changed == 'true'
+    steps:
+      - name: Build
+        run: npm run build
+""", 0, 0)
+
     # A workflow that cannot be read must never report clean.
     for bad, exc in ((None, FileNotFoundError), ("jobs: {}\n", ValueError)):
         with tempfile.TemporaryDirectory() as d:
@@ -191,7 +264,7 @@ jobs:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: gate-invocation-reachability is falsifiable (7 cases)")
+    print("self-test ok: gate-invocation-reachability is falsifiable (11 cases)")
     return 0
 
 

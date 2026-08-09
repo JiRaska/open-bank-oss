@@ -2331,7 +2331,12 @@ governance_manifest:
   generator: openbank-admin-ui/scripts/generate-governance.mjs
   schema_source: openbank-admin-ui/scripts/governance-schema.mjs   # Zod; the JSON Schema is DERIVED from it
   derived_artifact: openbank-libs/governance/governance.schema.json
-  wired_into: .github/workflows/ci.yml   # "Governance manifest gate (ADR-0071, enforced)" in Admin UI build
+  # Was ci.yml's conditional `ui-build` job until #4083. The gate's subject is every module
+  # with a version.txt, but the job fires only for openbank-admin-ui/, */governance.yaml or
+  # the governance schema — so a PR adding a service and omitting governance.yaml made the
+  # job ABSENT, not skipped, and the aggregate check read green.
+  wired_into: .github/gates/gates.yaml   # gate id `governance-manifest`, group `lint`, enforced
+  gate_script: .github/scripts/check-governance-manifest.sh
   # THE RULE (ADR-0071 + ADR-0196, issue #2165): a per-service governance.yaml declares only
   # facts, and every fact the code can settle is cross-checked against the tree at generation
   # time. A curatorial field nobody verifies decays into fiction, and the decay is invisible

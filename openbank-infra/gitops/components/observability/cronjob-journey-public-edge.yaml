@@ -1,0 +1,192 @@
+# Journey: public-edge (ADR-0252, catalog: openbank-libs/governance/journeys.yaml).
+#
+# The periodic multi-step synthetic that k6-synthetic.yaml's own header called "the
+# documented follow-up". That file's TestRun ran `iterations: 1` ONCE on ArgoCD sync, so
+# between syncs the platform verified nothing about the customer-facing path — which is
+# how a broken journey stays broken until a customer says so.
+#
+# This file SUPERSEDES k6-synthetic.yaml, which is deleted in the same commit rather than
+# left alongside. Two manifests carrying the same journey script is a second copy free to
+# drift from the first, and the one that runs on a schedule would not be the one anyone
+# edits.
+#
+# WHY A CRONJOB AND NOT A PERIODIC k6-operator TestRun
+#   A TestRun is a one-shot CR; making it periodic means deleting and recreating the object
+#   on a schedule, which needs a ServiceAccount with delete/create on k6.io CRs just to get
+#   a timer. A CronJob running the k6 image directly needs no cluster permissions at all
+#   (automountServiceAccountToken: false below), and its Job exit code IS the signal —
+#   surfaced by kube-state-metrics, which is what prometheus-rules-journey.yaml alerts on.
+#
+# WHAT A RED RUN MEANS
+#   k6 exits non-zero when a threshold fails. The checks assert `status < 500`: a 401 from
+#   an authenticated route is the service working (it challenged us), a 502 is not. So a red
+#   run means an edge is serving errors or is unreachable from in-cluster — not that
+#   something needs a login.
+#
+# WHAT IT CANNOT SAY
+#   This journey proves the front door answers as itself. It does not touch a payment, a
+#   notification or any authenticated flow — those need a synthetic party (ADR-0252 phase 1)
+#   and, for push, a canary device (phase 3). Both are listed as `planned` in the catalog
+#   with their blockers, so the gap is declared rather than implied by absence.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: journey-public-edge-script
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: public-edge
+data:
+  journey.js: |
+    import http from 'k6/http';
+    import { check, group } from 'k6';
+
+    // One iteration per scheduled run: this is a synthetic monitor, not a load test.
+    // A threshold failure is what makes k6 exit non-zero, which is the whole signal —
+    // `checks: rate==1.0` means any failed check fails the run.
+    export const options = {
+      vus: 1,
+      iterations: 1,
+      thresholds: {
+        checks: ['rate==1.0'],
+        http_req_duration: ['p(95)<2000'],
+      },
+      tags: { journey: 'public-edge' },
+    };
+
+    // Hosts come from __ENV with the production values as defaults, so the falsification the
+    // catalog promises is actually executable: set API_BASE to a host that serves 502 and the
+    // run must go red. A journey whose falsification instruction names a knob the script does
+    // not have is a falsification claim nobody can carry out, which is the same thing as an
+    // unfalsified journey.
+    const API_BASE = __ENV.API_BASE || 'https://api.open-bank.tech';
+    const CUSTOMER_BASE = __ENV.CUSTOMER_BASE || 'https://customer.open-bank.tech';
+    const ADMIN_BASE = __ENV.ADMIN_BASE || 'https://admin.open-bank.tech';
+
+    // Status < 500 is the assertion, deliberately. A 401 from an authenticated route means
+    // the service is up and challenged us; a 502 means it is not. Asserting `status == 200`
+    // would make an auth challenge look like an outage, and asserting only "a response
+    // arrived" would make an outage look healthy — an nginx 502 is a valid HTTP response.
+    function reachable(res) {
+      return res.status >= 200 && res.status < 500;
+    }
+
+    export default function () {
+      group('api info', () => {
+        const r = http.get(`${API_BASE}/api/v1/info`);
+        check(r, { 'api edge answers': reachable });
+      });
+      group('customer edge', () => {
+        // Root path is empty — the ingress only routes /customer/v1, so 401 is the healthy
+        // answer here: the route exists and demands a token.
+        const r = http.get(`${CUSTOMER_BASE}/customer/v1/accounts`);
+        check(r, { 'customer edge answers': reachable });
+      });
+      group('admin ui', () => {
+        const r = http.get(`${ADMIN_BASE}/`);
+        check(r, { 'admin ui answers': reachable });
+      });
+    }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: journey-public-edge
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: public-edge
+spec:
+  # Every 5 minutes. The alert window in prometheus-rules-journey.yaml is derived from this
+  # interval — change one and the other has to move with it.
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  # If the controller misses a scheduled start by more than 2 minutes (paused controller,
+  # node pressure), skip that slot rather than firing it late — a run attributed to the wrong
+  # window is worse than a missing one, because the staleness alert reads the timestamps.
+  # The 4-minute kill for a run that hangs is activeDeadlineSeconds below, one slot short of
+  # the next schedule.
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 3
+  # failedJobsHistoryLimit: 1 — kube-prometheus-stack's KubeJobFailed fires per surviving
+  # failed Job OBJECT, so a higher limit turns one recurring failure into several permanent
+  # alerts (the reasoning cronjob-rum-attribute-audit.yaml records, measured 2026-08-02).
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 240
+      # No retry: a synthetic monitor that retries until it passes is measuring its own
+      # persistence, not the platform's availability.
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: journey
+            openbank.tech/journey: public-edge
+        spec:
+          restartPolicy: Never
+          # Least privilege: the journey talks to public HTTPS endpoints and Prometheus'
+          # remote-write receiver. It needs no Kubernetes API access whatsoever.
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 12345
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: k6
+              # 1.2.0, not 0.58.0: the `0.58.0` tag's binary self-reports `k6 v1.0.0-rc1`
+              # (measured with `docker run grafana/k6:0.58.0 version`), so that pin runs a
+              # release candidate in a production monitor while reading as the last stable
+              # 0.x. `1.2.0` reports `k6 v1.2.0`.
+              image: docker.io/grafana/k6:1.2.0
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              # Measured against this image, read-only rootfs and UID 12345, before pinning:
+              # a failing threshold exits 99 and a passing run exits 0, which is the entire
+              # signal these alerts read. `-o experimental-prometheus-rw` is accepted by
+              # 1.2.0 (it is still the flag name, not yet promoted out of experimental).
+              args:
+                - run
+                - --quiet
+                - -o
+                - experimental-prometheus-rw
+                - --tag
+                - journey=public-edge
+                - /scripts/journey.js
+              env:
+                # Same remote-write receiver the k6-operator TestRun used
+                # (enableRemoteWriteReceiver on kube-prometheus-stack). NOTE: a remote-write
+                # failure does NOT fail the run — k6 still exits 0 — so these metrics are for
+                # the dashboard and must never be what an alert depends on. That is the second
+                # reason prometheus-rules-journey.yaml reads kube-state-metrics instead.
+                - name: K6_PROMETHEUS_RW_SERVER_URL
+                  value: http://kube-prometheus-stack-prometheus.observability.svc:9090/api/v1/write
+                - name: K6_PROMETHEUS_RW_TREND_STATS
+                  value: "p(95),p(99),avg,max"
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 192Mi
+          volumes:
+            - name: script
+              configMap:
+                name: journey-public-edge-script
+          nodeSelector:
+            workload: observability
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: observability
+              effect: NoSchedule
