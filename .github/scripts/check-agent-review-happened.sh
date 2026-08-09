@@ -62,13 +62,26 @@ verify() {
     return 1
   fi
 
+  # Strip BACKTICK-QUOTED spans before matching. A review that discusses this very script
+  # quotes its markers — run 7 produced a perfectly good review whose first finding was
+  # "check-agent-review-happened.sh:46 adds the literal string `Reached max turns`", and the
+  # guard rejected it as a dead driver. That is the repo's known trap: a text-matching guard
+  # flags the prose that explains the thing it exists to catch. The driver prints its errors
+  # bare; only a human or a model writing ABOUT them uses backticks.
+  local stripped
+  stripped=$(mktemp)
+  # shellcheck disable=SC2016  # backticks are DATA here (markdown spans), not substitution
+  sed 's/`[^`]*`//g' "$f" > "$stripped"
+
   local m
   for m in "${DEAD_MARKERS[@]}"; do
-    if grep -qiF -- "$m" "$f"; then
-      echo "::error::review output contains '${m}' — the driver never reached a model. NO REVIEW HAPPENED." >&2
+    if grep -qiF -- "$m" "$stripped"; then
+      rm -f "$stripped"
+      echo "::error::review output contains '${m}' outside a quoted span — the driver never reached a model. NO REVIEW HAPPENED." >&2
       return 1
     fi
   done
+  rm -f "$stripped"
 
   if grep -qF -- "$VERDICT_FINDINGS" "$f"; then
     echo "review happened: findings reported."
@@ -134,6 +147,12 @@ self_test() {
   # The real output of the first live run: the model WAS reached, then cut off mid-answer.
   printf 'Error: Reached max turns (1)\n' > "$tmp/maxturns"
   check "a max-turns cutoff must fail" 1 "$tmp/maxturns"
+  # ...and the mirror case, measured on run 7: a GENUINE review that QUOTES a marker while
+  # reviewing this very script must pass. Without this the guard rejects any review of its
+  # own source, which is exactly the code most in need of one.
+  # shellcheck disable=SC2016  # the backticks are the fixture
+  printf 'Finding: the script adds `Reached max turns` to its markers.\n%s\n' "$VERDICT_FINDINGS" > "$tmp/quoted"
+  check "a review QUOTING a marker must pass" 0 "$tmp/quoted"
 
   if [ "$fails" -gt 0 ]; then
     echo "self-test FAILED (${fails} case(s))" >&2
