@@ -22,5 +22,16 @@ interface SchemeGatewayPort {
  */
 data class SchemeSubmissionOutcome(val accepted: Boolean, val reasonCode: String?)
 
-/** Thrown when the scheme gateway is unreachable; the rail holds the payment in VALIDATED. */
-class SchemeGatewayUnavailableException(cause: Throwable) : RuntimeException("scheme gateway unavailable", cause)
+/**
+ * Thrown when the scheme gateway is unreachable; the rail holds the payment in VALIDATED.
+ *
+ * [requestLeftThisProcess] answers the only question that matters for #4218: may the scheme be
+ * holding a live clearing item for this payment? `false` is a POSITIVE claim that it cannot —
+ * the connection was refused or the host did not resolve, so no bytes were delivered — and only
+ * that claim makes the payment safe to submit again. Every other failure, a timeout above all, is
+ * ambiguous and must be treated as "possibly delivered": the default is therefore `true`.
+ */
+class SchemeGatewayUnavailableException(
+    cause: Throwable,
+    val requestLeftThisProcess: Boolean = true,
+) : RuntimeException("scheme gateway unavailable", cause)

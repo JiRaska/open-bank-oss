@@ -26,6 +26,8 @@ import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 import java.math.BigInteger
+import java.net.ConnectException
+import java.net.UnknownHostException
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 
@@ -68,8 +70,17 @@ class SchemeGatewayAdapter(
         val pacs002 = try {
             self.submitWithResilience(pacs008)
         } catch (ex: Exception) {
-            log.warnf(ex, "Scheme gateway unavailable for payment %s; holding", payment.id)
-            throw SchemeGatewayUnavailableException(ex)
+            // #4218: say whether the request can possibly have reached the scheme. Only a refused
+            // connection or an unresolvable host proves it did not; a timeout does NOT, since the
+            // gateway may have accepted the pacs.008 and merely answered too late.
+            val left = requestLeftThisProcess(ex)
+            log.warnf(
+                ex,
+                "Scheme gateway unavailable for payment %s; holding (requestLeftThisProcess=%s)",
+                payment.id,
+                left,
+            )
+            throw SchemeGatewayUnavailableException(ex, requestLeftThisProcess = left)
         }
 
         val status = statusReader.read(pacs002)
@@ -85,6 +96,26 @@ class SchemeGatewayAdapter(
     @Timeout(5_000)
     open suspend fun submitWithResilience(pacs008Xml: String): String =
         client.submitCreditTransfer(pacs008Xml).awaitSuspending()
+
+    /**
+     * Did the pacs.008 leave this process (#4218)? Answered from the cause chain, and biased hard
+     * towards `true`: the caller uses `false` to justify submitting the payment AGAIN, so only a
+     * failure that provably happened before any byte was written may say so.
+     *
+     * `ConnectException` — the peer refused the TCP connection. `UnknownHostException` — DNS never
+     * resolved. Both are pre-transmission by construction. Everything else, including
+     * `TimeoutException` and a circuit-breaker rejection wrapping a timed-out attempt, is
+     * ambiguous: `@Retry` above may also have delivered an earlier attempt the gateway processed.
+     */
+    private fun requestLeftThisProcess(ex: Throwable): Boolean {
+        var cause: Throwable? = ex
+        val seen = mutableSetOf<Throwable>()
+        while (cause != null && seen.add(cause)) {
+            if (cause is ConnectException || cause is UnknownHostException) return false
+            cause = cause.cause
+        }
+        return true
+    }
 
     private fun instruction(
         payment: DomesticPayment,

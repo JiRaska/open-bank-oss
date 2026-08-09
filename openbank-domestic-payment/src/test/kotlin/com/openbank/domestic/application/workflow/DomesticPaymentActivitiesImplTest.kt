@@ -34,6 +34,7 @@ import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.coEvery
 import io.mockk.coJustRun
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -87,6 +88,8 @@ class DomesticPaymentActivitiesImplTest {
         coEvery { paymentRepository.update(any(), any()) } answers { firstArg() }
         every { eventPublisher.statusChangedPayload(any(), any()) } returns "{\"event\":\"status-changed\"}"
         coJustRun { amlCasePort.openCase(any()) }
+        coJustRun { paymentRepository.markSchemeDispatched(any(), any()) }
+        coJustRun { paymentRepository.clearSchemeDispatched(any()) }
 
         schemeGatewayPort = mockk()
         settlementPort = mockk()
@@ -310,12 +313,104 @@ class DomesticPaymentActivitiesImplTest {
         val validated = payment(status = DomesticPaymentStatus.VALIDATED)
         coEvery { paymentRepository.findById(validated.id) } returns validated
         coEvery { schemeGatewayPort.submit(any()) } throws
-            SchemeGatewayUnavailableException(RuntimeException("connection refused"))
+            SchemeGatewayUnavailableException(
+                RuntimeException("connection refused"),
+                requestLeftThisProcess = false,
+            )
 
         val result = activitiesWithScheme.submitScheme(validated.id)
 
         assertThat(result).isEqualTo(DomesticPaymentStatus.VALIDATED)
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+    }
+
+    // ---- #4218: a payment already dispatched to the scheme must never be dispatched twice ----
+
+    @Test
+    fun `submitScheme refuses to re-submit a VALIDATED payment that was already dispatched`() {
+        // The #4218 shape exactly: a successful submit whose status write failed leaves the row
+        // VALIDATED with the dispatch marker set. Before the guard this re-submitted, producing a
+        // second clearing item for one payment.
+        val stranded = payment(
+            status = DomesticPaymentStatus.VALIDATED,
+            schemeDispatchedAt = Instant.parse("2026-08-09T10:15:30Z"),
+        )
+        coEvery { paymentRepository.findById(stranded.id) } returns stranded
+
+        val result = activitiesWithScheme.submitScheme(stranded.id)
+
+        assertThat(result).isEqualTo(DomesticPaymentStatus.VALIDATED)
+        coVerify(exactly = 0) { schemeGatewayPort.submit(any()) }
+        coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+        coVerify(exactly = 0) { paymentRepository.markSchemeDispatched(any(), any()) }
+    }
+
+    @Test
+    fun `submitScheme marks the dispatch BEFORE calling the gateway`() {
+        // Ordering is the whole mechanism: a marker written after the call cannot survive a failure
+        // of the call's own bookkeeping, which is the case the guard above exists for.
+        val validated = payment(status = DomesticPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(validated.id) } returns validated
+        coEvery { schemeGatewayPort.submit(any()) } returns
+            SchemeSubmissionOutcome(accepted = true, reasonCode = null)
+
+        activitiesWithScheme.submitScheme(validated.id)
+
+        coVerifyOrder {
+            paymentRepository.markSchemeDispatched(validated.id, any())
+            schemeGatewayPort.submit(any())
+            paymentRepository.update(any(), any())
+        }
+    }
+
+    @Test
+    fun `submitScheme clears the dispatch marker only when the request provably never left`() {
+        val validated = payment(status = DomesticPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(validated.id) } returns validated
+        coEvery { schemeGatewayPort.submit(any()) } throws
+            SchemeGatewayUnavailableException(
+                java.net.ConnectException("Connection refused"),
+                requestLeftThisProcess = false,
+            )
+
+        val result = activitiesWithScheme.submitScheme(validated.id)
+
+        // Scheme is simply down: no clearing item exists, so the payment must stay re-drivable.
+        assertThat(result).isEqualTo(DomesticPaymentStatus.VALIDATED)
+        coVerify(exactly = 1) { paymentRepository.clearSchemeDispatched(validated.id) }
+    }
+
+    @Test
+    fun `submitScheme keeps the dispatch marker when the failure is ambiguous`() {
+        val validated = payment(status = DomesticPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(validated.id) } returns validated
+        // A timeout: the gateway may have accepted the pacs.008 and merely answered too late.
+        coEvery { schemeGatewayPort.submit(any()) } throws
+            SchemeGatewayUnavailableException(java.util.concurrent.TimeoutException("read timeout"))
+
+        val result = activitiesWithScheme.submitScheme(validated.id)
+
+        assertThat(result).isEqualTo(DomesticPaymentStatus.VALIDATED)
+        coVerify(exactly = 0) { paymentRepository.clearSchemeDispatched(any()) }
+    }
+
+    @Test
+    fun `submitScheme lets a failure of the status write propagate instead of hiding it`() {
+        // The defect was that this exception was caught and reported as "holding in VALIDATED",
+        // which is what made a submitted payment look unsubmitted. It must now surface, so Temporal
+        // retries the activity — and the marker written above makes that retry safe.
+        val validated = payment(status = DomesticPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(validated.id) } returns validated
+        coEvery { schemeGatewayPort.submit(any()) } returns
+            SchemeSubmissionOutcome(accepted = true, reasonCode = null)
+        coEvery { paymentRepository.update(any(), any()) } throws RuntimeException("db blip")
+
+        assertThatThrownBy { activitiesWithScheme.submitScheme(validated.id) }
+            .isInstanceOf(RuntimeException::class.java)
+            .hasMessageContaining("db blip")
+
+        coVerify(exactly = 1) { paymentRepository.markSchemeDispatched(validated.id, any()) }
+        coVerify(exactly = 0) { paymentRepository.clearSchemeDispatched(any()) }
     }
 
     @Test
@@ -477,7 +572,10 @@ class DomesticPaymentActivitiesImplTest {
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
     }
 
-    private fun payment(status: DomesticPaymentStatus = DomesticPaymentStatus.RECEIVED) = DomesticPayment(
+    private fun payment(
+        status: DomesticPaymentStatus = DomesticPaymentStatus.RECEIVED,
+        schemeDispatchedAt: Instant? = null,
+    ) = DomesticPayment(
         id = UUID.randomUUID(),
         idempotencyKey = "dom-idem-activity",
         status = status,
@@ -505,5 +603,6 @@ class DomesticPaymentActivitiesImplTest {
         settledAt = null,
         createdAt = Instant.now(),
         updatedAt = Instant.now(),
+        schemeDispatchedAt = schemeDispatchedAt,
     )
 }

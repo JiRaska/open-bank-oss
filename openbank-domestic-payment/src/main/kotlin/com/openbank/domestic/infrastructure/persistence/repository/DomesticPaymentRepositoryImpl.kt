@@ -92,4 +92,18 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
                 }
                 .flatMap { outboxRepository.persistWithinCurrentTransaction(outboxMessage).replaceWith(payment) }
         }.awaitSuspending()
+
+    // #4218. Its own transaction, deliberately: the point of the marker is to survive a failure of
+    // the update() above, so it must not share a transaction with anything that can roll back.
+    override suspend fun markSchemeDispatched(paymentId: UUID, dispatchedAt: Instant) {
+        Panache.withTransaction {
+            update("schemeDispatchedAt = ?1 where paymentId = ?2", dispatchedAt, paymentId)
+        }.awaitSuspending()
+    }
+
+    override suspend fun clearSchemeDispatched(paymentId: UUID) {
+        Panache.withTransaction {
+            update("schemeDispatchedAt = null where paymentId = ?1", paymentId)
+        }.awaitSuspending()
+    }
 }

@@ -38,6 +38,27 @@ interface DomesticPaymentRepository {
     suspend fun update(payment: DomesticPayment, outboxMessage: OutboxMessage): DomesticPayment
 
     /**
+     * Record that a `pacs.008` is about to be handed to the scheme (#4218).
+     *
+     * Committed in its OWN transaction, before the outbound call, precisely so it outlives the
+     * work that follows: if the status update after a successful submit fails, this marker is what
+     * stops a later re-drive submitting the same payment to the clearing scheme a second time.
+     * Carries no outbox message — it is internal bookkeeping, not a domain event, and nothing
+     * outside this service should react to a dispatch that has no confirmed outcome yet.
+     */
+    suspend fun markSchemeDispatched(paymentId: UUID, dispatchedAt: Instant)
+
+    /**
+     * Undo [markSchemeDispatched] once the gateway has PROVEN the request never left this process
+     * (connection refused, unknown host).
+     *
+     * Only that proof clears it. An ambiguous failure — a timeout above all — must keep the marker,
+     * because the scheme may hold a live clearing item; for an outbound money instruction a strand
+     * an operator can see beats a duplicate payment nobody can recall.
+     */
+    suspend fun clearSchemeDispatched(paymentId: UUID)
+
+    /**
      * Ids of payments still in `RECEIVED` that are worth screening again (#3266).
      *
      * A payment held because sanctions screening was unavailable has no other way out: the workflow
