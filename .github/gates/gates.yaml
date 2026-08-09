@@ -823,6 +823,33 @@ gates:
       python3 .github/scripts/check-advisory-gate-registration.py --expect-manifest
 
   # ==== registry =======================================================
+  # Refs #2365. `openbank-libs/governance/attestations.yaml` is the only hand-entered maturity
+  # input, and its header states an anti-rot contract: every attestation carries `date` +
+  # `ttl_days`, and after expiry the collector stops counting the bank-grade bonus so the
+  # dimension falls back to its derived score.
+  #
+  # HALF of that contract shipped. `collect-prod-readiness.mjs:attestFresh()` does the decay;
+  # nothing ever did the WARNING. So an attestation lapsing is indistinguishable from one that
+  # was never made — a cell goes 3 -> 2, the matrix renders, no signal fires. A control whose
+  # lapse looks exactly like calm.
+  #
+  # This is live, not hypothetical: two of the three entries carry `ttl_days: 21` on purpose, so
+  # that a dead CI lane expires its own attestation. That design only works if someone is told.
+  #
+  # ENFORCED, and the gate NEVER WRITES — there is no --fix. An attestation is a testimony that
+  # an event happened; a script that renews one manufactures evidence (#4247). Enforcement is
+  # therefore never a deadlock: the two honest exits are to perform the event again and record
+  # it, or to delete the entry and let the score show its derived value.
+  - id: attestation-ttl-watch
+    name: "attestation TTL watch (Refs #2365, attestations.yaml anti-rot)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-attestation-ttl.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-attestation-ttl.py --enforce
+
   # issue #669 scope item 3 / rules.yaml: slo. Every money_path_services entry needs a
   # matching availability + latency Pyrra ServiceLevelObjective whose target/window match
   # the governed values in rules.yaml — pyyaml is already installed by the step above.
