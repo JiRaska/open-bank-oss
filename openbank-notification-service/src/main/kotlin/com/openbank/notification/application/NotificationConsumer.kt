@@ -662,6 +662,10 @@ class NotificationConsumer {
                     .map { e ->
                         e?.also {
                             it.status = outcome.name
+                            // ADR-0252's counters answer "how is the channel doing"; this answers
+                            // "why did THIS message fail", durably. The outcome event carries the
+                            // same value but its outbox row is pruned after dispatch.
+                            it.failureReason = reason
                             if (accepted > 0) it.sentAt = Instant.now(clock)
                         }
                     }
@@ -690,6 +694,10 @@ class NotificationConsumer {
             .map { e ->
                 e?.also {
                     it.status = status.name
+                    // Persist the reason alongside the status (V13): the outcome event below
+                    // carries the same value, but its outbox row is pruned after dispatch, so
+                    // without this the table can only ever say FAILED.
+                    it.failureReason = reason
                     if (sent) it.sentAt = Instant.now(clock)
                 }
             }
