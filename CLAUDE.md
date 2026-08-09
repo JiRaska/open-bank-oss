@@ -204,6 +204,34 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   1970-01-01, and `FlagExposureTest` already asserted *every other* field of `of()`. Assert
   **recency** (`isBetween(before, now)`), never non-nullity, for any field meaning "when did this
   happen" (#3882). Grep the shape: `: Instant = Instant.EPOCH`.
+- **A sentinel default that is right for a REPORT becomes a defect the day something ALERTS on it,
+  and the alert's own comments will describe the value it wishes it had.**
+  `DomainMetrics.registerWorkflowLiveness` seeded its age gauge from `Instant.EPOCH`, so
+  `openbank_workflow_last_success_age_seconds` read ~1.8e9 seconds — decades — for any workflow not
+  yet successful, including every workflow on a freshly started pod. Fine while the only consumer
+  was the control-liveness-sentinel filing a daily finding ("never ran" is trivially over any
+  threshold, no special-casing needed — the KDoc said exactly that). Then ADR-0237 added
+  `WorkflowLivenessStale` (`age > 2 * expected_interval`, `for: 15m`) over the same gauge: for a
+  daily job the threshold is 2 days and a fresh pod reported decades, so it fired **15 minutes after
+  every deploy or restart, for every daily workflow**, until that workflow's next success — up to
+  24h, across ~28 call sites, and no `for:` helps because the condition genuinely persists. Noise on
+  the control that exists to make a dead scheduler visible is the one thing that hides a dead
+  scheduler. Both the rule's comments and the ADR asserted the gauge was "seeded at registration —
+  never as decades"; it was not, and the KDoc next to the code said so the whole time (#2239 Gap 2,
+  fixed by #4208). **When you point an alert at an existing metric, re-derive its value at t=0 on a
+  cold pod** — a boot-time reading is a fourth state next to healthy/degraded/absent, and prose in
+  the rule is not evidence anyone did.
+- **Fixing a magnitude-based defect makes every test that discriminated BY that magnitude vacuous —
+  silently, and they stay green.** The fleet's liveness tests asserted `age > FIFTY_YEARS_SECONDS`,
+  and that one assertion was doing two unrelated jobs: at a startup site it meant "registered, not
+  yet succeeded", and in the `a failed X run records no success` tests it was the *only* thing
+  separating a failed run from a successful one. Seeding the gauge at registration makes both read
+  ~0, so 18 services' failure-path tests would have kept passing while testing nothing. Before
+  changing a sentinel value, grep every assertion that mentions it and ask what each one is really
+  discriminating; where the answer is "the defect's magnitude", the test needs a different
+  observable, not a retuned bound (here `openbank_workflow_success_recorded`, 0/1). Same family as
+  the `isNotNull()` trap above, one step later: there the assertion never could fail, here it stops
+  being able to.
 - **Before calling a wrong-looking value a live defect, find out whether anything READS it — a
   field no code path consumes is a latent trap, not corruption, and the two need different fixes.**
   The audit envelope above looked like the worst case (evidentiary record, append-only store), and
@@ -396,11 +424,20 @@ fire from *outside* it, so they stay here:
   `.rego` reads as `data.rules.<key>`, and hash that. So an edit to one of the ~30 keys OPA never
   reads now changes **nothing** under `gitops/` (16 of the last 80 `rules.yaml` revisions touched
   the read set; the other 64 used to restamp ~78 files for nothing). When you DO touch the read
-  set, or any `.rego`, regenerate — the derived file FIRST, then every bundle:
+  set, or any `.rego`, regenerate — the derived files FIRST, then every bundle:
   ```
   python3 .github/scripts/gen-rules-opa-data.py
+  python3 .github/scripts/gen-agents-opa-data.py     # needs `opa` on PATH
   find openbank-infra/gitops/components -name 'gen-*opa-bundle*.sh' | sort | xargs -n1 bash
   ```
+  **`agents.yaml` gets the same treatment (#3927), one level deeper.** The bundles embed
+  `agents-opa-data.yaml`, and because `agents.rego` reads only `a.id`, `a.skills`,
+  `a.tools.allow` and `a.tools.deny` off each charter, the subset projects *inside* each entry —
+  50390 B becomes 5578 B. So editing a charter's `description`, `model`, `limits`, `schedule`,
+  `compliance` or `audit` block now restamps **nothing**. A field projection cannot be argued from
+  verbatim extraction, so `gen-agents-opa-data.py` proves it: it evaluates the real policy over an
+  input matrix derived from the charters under both the full document and the subset and requires
+  every MCP and REST decision to be identical before writing. That is why it needs `opa`.
   Commit the lot; never hand-edit a bundle or an annotation to dodge the diff. Such a PR has a
   short shelf life — merge with `--auto` (not `--admin`), or a competing governance PR conflicts it.
   Adding `data.rules.<newkey>` to a policy needs no list edit anywhere: the key set is derived from
@@ -738,6 +775,22 @@ fire from *outside* it, so they stay here:
   claims to have run your gate (`gh api .../actions/jobs/<id> --jq '.steps[]'`); a green job name
   is not evidence your step was in it. Fix is always the same: declare it in
   `.github/gates/gates.yaml` with a `group:`, never as an inline step in a conditional job.
+- **`main`'s own CI conclusion is the one signal with no reader — every check in this repo is
+  about a PR.** A red push-triggered run on `main` has no PR to carry it, no reviewer, and no
+  notification; it is a red dot in the Actions tab, and the next PR opened against that commit
+  *inherits* a failure it did not cause. `main` went red four times on 2026-08-07/08 in three
+  independent ways (`Services CI`/engagement-service, `CI`/Admin UI build, `Security scan`/Trivy
+  twice) and every one was found because a human happened to sweep; two PRs merged onto it
+  meanwhile. The near-miss that made it invisible is worth knowing on its own:
+  `deploy-drift-watch.yml` is *named* "Deployed == main watch" and compares the **deployed image**
+  to `main` — so a red commit that deployed reads as perfectly in sync. `main-red-watch.yml` +
+  `check-main-red-watch.py` now close it (#4019), and two details decide whether such a watcher
+  works at all: query `/actions/runs/<id>/attempts/<n>/jobs`, never the unscoped
+  `/actions/runs/<id>/jobs` (which returns the LATEST attempt, so one hand-re-run makes the
+  watcher answer about a different run than the event fired for, silently); and read
+  `.steps[].conclusion`, never the log, since a job log contains the step's own `run:` script.
+  Its coverage set is *derived*, not hand-kept — a new push-on-main workflow fails the
+  `main-red-watch-declaration` gate until it is watched or excluded with a reason.
 - **"Nothing reads this file" is a claim about the whole repo, not about the pipeline — grep
   before you delete a declaration.** The per-service `openbank-*/Dockerfile` files are documented
   as declaration-only with `EXPOSE` the single live field (#3016), so the tidy fix for a stale

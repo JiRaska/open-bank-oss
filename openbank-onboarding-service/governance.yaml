@@ -10,14 +10,20 @@ dataClassification: confidential
 retentionPolicy: 7 years
 evidenceExported: false
 lineage:
-  upstream:
+  upstream: []
+    # Removed (issue #3982): `kyc-service (api, "triggers KYC")` — kyc-service's only client is
+    # sanctions-service and its Deployment env carries no onboarding URL; onboarding-service has
+    # no kyc-service client. The edge exists in neither direction. (Consistent with the note
+    # below: onboarding is a read model, so nothing calls INTO it either.)
+  downstream:
+    # Direction corrected (issue #3982): declared as `upstream: party-service ("creates party")`,
+    # i.e. party-service calling onboarding-service. PartyServiceClient(configKey =
+    # "party-service") is onboarding-service's ONLY @RegisterRestClient — the read model reads
+    # party-service, party-service does not push to it.
     - serviceName: party-service
       relationType: api
-      description: creates party
-    - serviceName: kyc-service
-      relationType: api
-      description: triggers KYC
-  # No downstream edge: onboarding-service is a passive funnel-tracking read model
+      description: reads party state via PartyServiceClient
+  # No account-service downstream edge: onboarding-service is a passive funnel-tracking read model
   # (OnboardingEventConsumer projects party/kyc/sca events), not an orchestrator — it has
   # no AccountServiceClient and opens no account. Account opening is driven directly by
   # account-service's PartyEventConsumer on PARTY_CREATED (ADR-0073); the real edge is

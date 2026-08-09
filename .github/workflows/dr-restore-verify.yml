@@ -9,7 +9,8 @@
 # records measured RTO/RPO, and tears the namespace down.
 #
 # DISPATCH-ONLY and CLUSTER-GATED: needs a self-hosted runner in the deploy pool with
-# kubectl + read-only IRSA for the backup bucket. Skips with a notice on a hosted runner.
+# kubectl + read-only IRSA for the backup bucket. On a hosted runner it FAILS LOUDLY
+# rather than skipping to a green — see the gate step for why that changed (#4026).
 # Steps that require live infra are marked `# WIRING:` — the deliberate remaining work
 # (see the design doc's "Remaining wiring"). Promote to a quarterly schedule after the
 # first green manual run (bcp-policy.md cadence).
@@ -35,19 +36,28 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # This gate used to `::notice::` and set run=false, which SKIPPED the restore step
+      # and left the job GREEN. Measured on run 31278708228 (2026-08-08, the workflow's
+      # first ever dispatch, #4026): conclusion `success`, "Restore, verify, teardown"
+      # `skipped` — a DR drill that reports PASS having restored nothing. That is worse
+      # than red and worse than never running, because a green is what a compliance
+      # registry counts as evidence the control was exercised. It now FAILS instead: the
+      # workflow is dispatch-only and is not a required check, so a red costs nothing and
+      # says the true thing — this control cannot run here yet.
       - name: Gate on cluster access
-        id: gate
         run: |
           set -euo pipefail
           if command -v kubectl >/dev/null 2>&1 && kubectl auth can-i create namespace >/dev/null 2>&1; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::No cluster access (kubectl/IRSA) on this runner — skipping the DR restore. Run on a deploy-pool self-hosted runner. See docs/bcp/automated-dr-restore.md."
-            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Cluster access confirmed — proceeding with the restore."
+            exit 0
           fi
+          echo "::error::NOT A DR DRILL: no cluster access (kubectl/IRSA) on this runner, so nothing was restored and nothing was verified. This workflow needs a deploy-pool self-hosted runner that does not exist yet, and its restore step is still a WIRING-INCOMPLETE stub. See docs/bcp/automated-dr-restore.md; do not record this run as DR evidence."
+          exit 1
 
+      # No `if:` guard — the gate above now fails the job outright rather than setting an
+      # output, so reaching this step already means cluster access was proven. A guard
+      # here would silently re-introduce the skipped-but-green shape it just removed.
       - name: Restore, verify, teardown
-        if: steps.gate.outputs.run == 'true'
         env:
           FISCAL_YEAR: ${{ inputs.fiscal_year }}
         run: |

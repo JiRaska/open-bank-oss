@@ -50,13 +50,43 @@ dependencies {
     implementation(libs.bouncycastle.bcprov)
     implementation(libs.bouncycastle.bcpkix)
     testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    // ADR-0063: document-service is a pact PROVIDER. sepa-payment renders the customer's payment
+    // confirmation through this service's template list + preview endpoints (ADR-0248 #3), and
+    // until DocumentPactProviderVerificationTest nothing replayed that contract — the only cover
+    // was sepa-payment's own WireMock stub, which is written from the client and so cannot
+    // disagree with it (the #2269 shape).
+    testImplementation(libs.pact.provider)
+    // AuditEventTime — the ONE copy of the rule openbank-audit-service's AuditConsumer applies to
+    // a domain-event payload, so this service's producer tests assert against the real contract
+    // rather than a per-service restatement of it (#3914).
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+}
+
+// Pact: resolve the git-pact folder and forward broker config for provider verification
+// (ADR-0063). pactbroker.* / pact.provider.* props are injected by CI with -D; on a pull request
+// none of them are set, and DocumentPactProviderVerificationTest is @PactFolder-sourced, so it
+// runs regardless — that is the point (issue #2338).
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
 
 kover {

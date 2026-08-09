@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.2...statement-service-v0.8.3) (2026-08-09)
+
+
+### Bug Fixes
+
+* **statement:** freeze render inputs at close so a closed period re-renders byte-identically ([#4271](https://github.com/JiRaska/open-bank-oss/issues/4271)) ([20b8d85](https://github.com/JiRaska/open-bank-oss/commit/20b8d85508791854704cbaacd24c94b9a28f8b28)), closes [#3986](https://github.com/JiRaska/open-bank-oss/issues/3986) [#1302](https://github.com/JiRaska/open-bank-oss/issues/1302) [#3920](https://github.com/JiRaska/open-bank-oss/issues/3920)
+
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.1...statement-service-v0.8.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **customer-edge:** answer 400, not 500, for a missing required query parameter ([#4211](https://github.com/JiRaska/open-bank-oss/issues/4211)) ([4ddb6ef](https://github.com/JiRaska/open-bank-oss/commit/4ddb6efeb23864fe65a4f2624f8722e1fcae04fb)), closes [#3624](https://github.com/JiRaska/open-bank-oss/issues/3624)
+
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.0...statement-service-v0.8.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* send occurredAt on the four non-money-path domain-event producers ([#3926](https://github.com/JiRaska/open-bank-oss/issues/3926)) ([4a2080c](https://github.com/JiRaska/open-bank-oss/commit/4a2080c3a4de10b2a858b7111ac83d63c60114d1))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.7.0...statement-service-v0.8.0) (2026-08-07)
+
+
+### Features
+
+* **mcp-service:** add statement and payment confirmation query tools ([#4127](https://github.com/JiRaska/open-bank-oss/issues/4127)) ([98841b4](https://github.com/JiRaska/open-bank-oss/commit/98841b41dafd900429141744f3f3f57b1f0fa1b6))
+
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.6.0...statement-service-v0.7.0) (2026-08-07)
+
+
+### Features
+
+* **statement-service:** add customer-facing statement download endpoint ([#4125](https://github.com/JiRaska/open-bank-oss/issues/4125)) ([e78ea34](https://github.com/JiRaska/open-bank-oss/commit/e78ea34468c726bf16f813deeb0bc4e79c2e5f35))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.5.11...statement-service-v0.6.0) (2026-08-07)
 
 

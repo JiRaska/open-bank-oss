@@ -10,17 +10,24 @@ dataClassification: confidential
 retentionPolicy: 7 years
 evidenceExported: true
 lineage:
-  upstream:
-    - serviceName: ledger-service
-      relationType: api
-      description: queries GL entries for settlement batches
-    - serviceName: sepa-payment
-      relationType: topic
-      description: consumes payment events for settlement
-  downstream:
-    - serviceName: audit-service
-      relationType: topic
-      description: emits settlement audit events
+  upstream: []
+    # Removed (issue #3982), all three edges on this service:
+    #
+    # - `ledger-service (api, "queries GL entries for settlement batches")`: ledger-service's only
+    #   client is fx-service and its Deployment env carries no settlement URL; settlement-service's
+    #   own env lists only keycloak and tempo.
+    # - `sepa-payment (topic, "consumes payment events for settlement")`: settlement-service
+    #   produces and consumes ZERO Kafka topics. sepa-payment's "settlement" step is
+    #   SettlementAdapter, and it calls TRANSACTION-service over REST
+    #   (@RestClient TransactionServiceClient) — that edge is already declared on
+    #   transaction-service's upstream, so nothing is lost by dropping this one.
+    # - `audit-service (topic, "emits settlement audit events")` (was `downstream`): the
+    #   SettlementActivitiesImpl fix for #1502 emits AuditEvents onto the shared libs audit
+    #   pipeline, whose only implementation is LoggingAuditEventPublisher — it logs, it does not
+    #   publish to Kafka. audit-service consumes 21 topics and none of them is produced by
+    #   settlement-service. The declaration describes an intent the wiring does not yet deliver;
+    #   re-add it when a real producer exists.
+  downstream: []
 databaseLineage:
   ownedDatabases:
     - settlement

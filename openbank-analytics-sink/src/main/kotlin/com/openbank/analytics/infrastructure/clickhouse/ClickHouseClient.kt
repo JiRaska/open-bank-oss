@@ -59,9 +59,22 @@ open class ClickHouseClient {
     /** Runs a read [sql] and returns the raw response body. Callers choose the FORMAT and parse it. */
     open suspend fun query(sql: String): String = post(sql, null)
 
-    /** POSTs [sql] (as the `query` parameter) with an optional [body]; throws on a non-2xx response. */
+    /**
+     * POSTs [sql] (as the `query` parameter) with an optional [body]; throws on a non-2xx response.
+     *
+     * The `database` parameter sets the **session default** for the statement, so an unqualified
+     * table reference resolves against [database] and not against ClickHouse's `default`. Without it
+     * every read here (the F4/F5 reconciliation scans, the proposal store, the WORM anchor mirror)
+     * writes qualified and reads unqualified — an asymmetry that answers `HTTP 404 … (UNKNOWN_TABLE)`
+     * on a deployment whose tables live in `openbank_analytics` and whose `default` is empty (#3991).
+     * Setting it here rather than in the SQL strings keeps reads and writes symmetric through one
+     * place and covers every current and future caller.
+     */
     protected open suspend fun post(sql: String, body: String?): String = withContext(Dispatchers.IO) {
-        val uri = URI.create("${url.trimEnd('/')}/?query=${URLEncoder.encode(sql, StandardCharsets.UTF_8)}")
+        val uri = URI.create(
+            "${url.trimEnd('/')}/?database=${URLEncoder.encode(database, StandardCharsets.UTF_8)}" +
+                "&query=${URLEncoder.encode(sql, StandardCharsets.UTF_8)}",
+        )
         val request = HttpRequest.newBuilder(uri)
             .header("X-ClickHouse-User", username)
             .header("X-ClickHouse-Key", password.orElse(""))

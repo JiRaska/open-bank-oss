@@ -9,7 +9,7 @@ openbank-libs **není compliance hraniční kontrolou**, ale **kanálem pro impl
 | `BuildInfo` + `ServiceInfoResource` | DORA | Art. 8 (asset register) | Per-service runtime tech stack (Kotlin/Quarkus/JDK verze) je machine-readable přes `/api/v1/info` |
 | `BuildInfo` + per-service SBOM | DORA | Art. 28 (ICT third-party register) | CycloneDX SBOM per service v `build/reports/bom.json`, CI artefakty + admin UI download |
 | `BootstrapVerifier` | DORA, NIS2 | DORA Art. 9 (ICT security controls), NIS2 čl. 21 | Fail-fast guard proti dev-default secrets v prod (closes K1 z audit 2026-05-28) |
-| `PiiMasking` (`PiiMask`, `@MaskSensitive`) | GDPR | Art. 25 (privacy by design), Art. 32 (security of processing) | Single audit-grade implementation, PCI-DSS compliant card masking (first 4 + last 4) |
+| `PiiMasking` (`PiiMask`) | GDPR | Art. 25 (privacy by design), Art. 32 (security of processing) | Single audit-grade implementation, PCI-DSS compliant card masking (first 4 + last 4). Maskování aplikuje **explicitně** volající — deklarativní anotace neexistuje a neexistuje ani serializační filtr, který by ji ctil (#4011) |
 | `AuditEvent` + `AuditEventPublisher` | GDPR, DORA | GDPR Art. 30 (Records of Processing), DORA Art. 17 (incident reconstruction 24h) | Canonical envelope (actor, op, resource, ts, ip, result, traceId), pluggable publisher |
 | `Roles` (canonical constants) | PSD2, CNB | PSD2 RTS § technický standard, CNB vyhláška 163/2014 § přístupová oprávnění | Eliminuje string-typo bezpečnostní díry, audit ví, jaké role existují |
 | `BearerTokenClientHeadersFactory` | NIS2, DORA | NIS2 čl. 21 (cryptographic auth), DORA Art. 9 | Service-to-service mTLS-equivalent přes JWT Bearer, automatická correlation propagace |
@@ -37,7 +37,7 @@ graph LR
   subgraph LibsContrib["openbank-libs contribution"]
     BV[BootstrapVerifier]
     Roles[Roles canonical enum]
-    PiiMask[PiiMask + @MaskSensitive]
+    PiiMask[PiiMask deterministic masking]
     AuditEvent[AuditEvent envelope]
   end
 

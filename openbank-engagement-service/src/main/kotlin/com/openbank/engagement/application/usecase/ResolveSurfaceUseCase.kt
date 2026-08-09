@@ -4,6 +4,7 @@
 
 package com.openbank.engagement.application.usecase
 
+import com.openbank.engagement.application.port.out.AdverseStateRepository
 import com.openbank.engagement.application.port.out.EngagementEventRepository
 import com.openbank.engagement.domain.model.DismissalRule
 import com.openbank.engagement.domain.model.EligibilitySnapshot
@@ -13,20 +14,23 @@ import com.openbank.engagement.domain.model.SurfaceSlot
 import com.openbank.libs.contact.ContactClass
 import com.openbank.libs.contact.ContactGateDecision
 import com.openbank.libs.contact.ContactPolicyGate
+import com.openbank.libs.contact.MarketingCallSite
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
 /**
- * ADR-0220 D1 minus the pieces this slice does not build: eligibility snapshot materialisation
- * (no adverse-state event consumer exists yet, see the inline comment below) and NBA ranking
- * (blocked on ADR-0201 D5, unchanged from the domain layer's own [SurfaceResolver] doc).
+ * ADR-0220 D1 minus the pieces this slice does not build: eligibility snapshot materialisation is
+ * now real for two of the four [com.openbank.engagement.domain.model.AdverseState] values (see
+ * the inline comment below), and NBA ranking stays out of scope, blocked on ADR-0201 D5
+ * (unchanged from the domain layer's own [SurfaceResolver] doc).
  */
 @ApplicationScoped
 class ResolveSurfaceUseCase(
     private val contactGate: ContactPolicyGate,
     private val events: EngagementEventRepository,
+    private val adverseState: AdverseStateRepository,
 ) {
 
     sealed interface Result {
@@ -38,6 +42,7 @@ class ResolveSurfaceUseCase(
         object Suppressed : Result
     }
 
+    @MarketingCallSite
     suspend fun resolve(partyId: UUID, slot: SurfaceSlot): Result {
         val decision = contactGate.check(
             partyId = partyId,
@@ -50,14 +55,28 @@ class ResolveSurfaceUseCase(
         val recent = events.recentForPartyAndSlot(partyId, slot, Instant.now().minus(DISMISSAL_LOOKBACK))
         if (DismissalRule.shouldSuppress(recent)) return Result.Suppressed
 
-        // No adverse-state materialisation pipeline exists yet (no consumer for fraud-hold,
-        // arrears, dispute-opened or erasure events) — every party is currently constructed with
-        // an EMPTY adverse-state set, i.e. always eligible for the D3.5 targeting exclusion. This
-        // is an honest gap, not a silent one: the platform is NOT yet excluding vulnerable
-        // customers from proactive surfaces, and that must be read as a launch blocker for
-        // D1/D3.5, not as "the exclusion is live". Wiring the real snapshot is follow-up scope
-        // alongside the adverse-state consumers themselves.
-        val eligibility = EligibilitySnapshot(partyId = partyId, adverseState = emptySet(), asOf = Instant.now())
+        // WHICH adverse states are materialised is NOT restated here (issue #2749). The answer is
+        // the set of @Incoming consumers in this service's infrastructure/kafka package, and
+        // AdverseState's own KDoc in Eligibility.kt tracks it. A second copy of that list in a
+        // comment is what went stale last time, and would go stale again the moment a consumer is
+        // added — which is exactly what #4297 does.
+        //
+        // What is worth keeping in place, because it is timeless and a deletion would erase it:
+        // the note that used to stand here was wrong on all three of its factual claims. It said
+        // neither the fraud nor the dispute signal is published anywhere in the fleet, that
+        // "fraud-service has no persisted hold state", and that "dispute-service emits only on
+        // resolution, never on open". Measured 2026-08-09: fraud-service persists holds
+        // (FraudHoldEntity/FraudHoldService), and dispute-service emits `dispute.opened`
+        // (DisputeService.openedOutboxMessage, landed #4087).
+        //
+        // The lesson that survives the fix: a signal missing HERE is not evidence the producer is
+        // missing. That note blamed the producing services, and a reader acting on it would have
+        // gone to fix two services that were already correct. The gap was always the consumer end.
+        val eligibility = EligibilitySnapshot(
+            partyId = partyId,
+            adverseState = adverseState.activeStates(partyId),
+            asOf = Instant.now(),
+        )
         return Result.Rendered(SurfaceResolver.resolve(slot, eligibility))
     }
 

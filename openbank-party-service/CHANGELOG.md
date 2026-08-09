@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.4](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.15.3...party-service-v0.15.4) (2026-08-09)
+
+
+### Bug Fixes
+
+* **libs:** stamp ApiError.timestamp at construction instead of serving 1970 ([#3880](https://github.com/JiRaska/open-bank-oss/issues/3880)) ([b3e6672](https://github.com/JiRaska/open-bank-oss/commit/b3e6672c9e13470fc6353ad8a5483e4075875b1f))
+
+## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.15.2...party-service-v0.15.3) (2026-08-09)
+
+
+### Bug Fixes
+
+* **party:** write party lifecycle events to the outbox, retire the direct emitter ([#4158](https://github.com/JiRaska/open-bank-oss/issues/4158)) ([5ef337c](https://github.com/JiRaska/open-bank-oss/commit/5ef337c1f432537f96644613ef5b2b1ae782268e))
+
 ## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.15.1...party-service-v0.15.2) (2026-08-02)
 
 

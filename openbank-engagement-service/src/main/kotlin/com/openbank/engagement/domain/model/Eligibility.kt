@@ -9,16 +9,22 @@ import java.util.UUID
 
 /**
  * The adverse-state set ADR-0220 D1/D3.5 names verbatim: fraud-hold, arrears, dispute-opened,
- * erasure. The platform already emits domain events for all four elsewhere in the fleet; this
- * enum names the set this ADR reads, not a new source of truth.
+ * erasure. All four now have a real event to materialise from (issues #2749 and #4262, verified
+ * against `origin/main` rather than assumed): [ARREARS] (`loan.stage_changed`),
+ * [ERASURE_REQUESTED] (`PARTY_ERASED`), [FRAUD_HOLD] (`fraud.hold_changed`, a new fraud-service
+ * signal — repeated REVIEW verdicts, deliberately not a new DECLINE rule; see `FraudHoldService`'s
+ * KDoc for why), and [DISPUTE_OPENED] (`dispute.opened`/`dispute.resolved`, which bracket the
+ * window a customer is in dispute). Do not assume "named in this enum" means "wired"; check the
+ * four consumers (`LendingArrearsEventConsumer`, `PartyErasureConsumer`, `FraudHoldEventConsumer`,
+ * `DisputeOpenedEventConsumer`) for what actually is.
  */
 enum class AdverseState { FRAUD_HOLD, ARREARS, DISPUTE_OPENED, ERASURE_REQUESTED }
 
 /**
- * A pre-computed eligibility snapshot for one party (ADR-0220 D1). In the shipped design this is
- * materialised event-driven into the engagement service's own store; this domain layer only
- * defines the shape and the rule over it, not the materialisation pipeline (infrastructure,
- * follow-up PR).
+ * A pre-computed eligibility snapshot for one party (ADR-0220 D1), materialised event-driven into
+ * `party_adverse_state` for the four signals that exist (see [AdverseState]'s KDoc) — this
+ * domain layer only defines the shape and the rule over it, not the materialisation pipeline
+ * itself.
  */
 data class EligibilitySnapshot(val partyId: UUID, val adverseState: Set<AdverseState>, val asOf: Instant)
 

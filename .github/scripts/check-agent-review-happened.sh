@@ -2,231 +2,143 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# Terminal accountability guard for `agent-review`: a run that reviewed nothing must not
-# be readable as a review (issue #3488; the fallback half is #2161).
+# PROOF THAT A REVIEW HAPPENED — the half of ADR-0251 that ADR-0154 got wrong.
 #
-# WHY THIS EXISTS — measured, not assumed
-#   120 `Agent review` runs sampled over 2026-08-02T15:52 .. 2026-08-03T11:18 (classified
-#   from step conclusions, not from log text) contained ZERO model reviews:
+# ADR-0154's workflow had a step named "Verify the Claude fallback actually reviewed". It
+# never ran. It carried the SAME `if:` condition as the review it was verifying, so the two
+# were switched off together, and across 10 consecutive runs both were `skipped` while every
+# run concluded `success` (#4281). A control that can be disabled by the thing it controls
+# is not a control.
 #
-#     75  deferred-to-human (sensitive scope — correct, no model was ever called)
-#     15  job skipped by the workflow `if:`
-#     27  primary reviewer failed -> dead Claude fallback -> job RED
-#      2  primary reviewer failed -> fallback SKIPPED  -> job GREEN, nothing reviewed
-#      1  checkout/git transport 503
-#      0  a review actually submitted by any model
+# So this script takes NO condition, reads the model's REPLY TEXT rather than the driver's
+# exit code, and is invoked from a step with `if: always()`. It exists to make the difference
+# between "reviewed and found nothing" and "never asked a model" impossible to confuse.
 #
-#   The trigger is not intermittent and it is not a rate limit. Every single call to the
-#   primary reviewer returned:
+# Why not the exit code: the previous driver (`claude-code-action`) exits 0 on its own
+# recorded failure — that is the #2161 finding. During ADR-0251's construction five separate
+# probe failures (workflow_dispatch needing the default branch, `Unsupported event type:
+# push`, a missing `id-token: write`, the GitHub App gate, and a dead token) would each have
+# reported a PASS to a verifier reading an exit code. Not one of them called a model.
 #
-#     410 GitHub Models is temporarily unavailable as part of a scheduled retirement brownout.
-#
-#   GitHub Models was fully retired on 2026-07-30 (GitHub Changelog, "GitHub Models is now
-#   retired"). The primary reviewer is therefore permanently dead, not flaky. The apparent
-#   ~40% pass rate in #3488 was runs that never called a model at all: the successes are
-#   deferred-to-human and skipped runs, and 100% of runs that attempted a review failed.
-#   Successes and failures interleaving minute by minute is that mix, not concurrency.
-#
-#   Two of the sampled runs are the reason this file exists rather than a tweak to
-#   check-claude-fallback-result.sh. That guard is gated on the Claude step having RUN
-#   (`steps.claude.outcome != 'skipped'`), so when the fallback is skipped — a Dependabot or
-#   fork PR, where `secrets.CLAUDE_CODE_OAUTH_TOKEN` is empty in the job context — the guard
-#   is skipped too and the job finishes GREEN having reviewed nothing. On the PR page a green
-#   `agent-review` reads exactly like a review that happened. That is the default reading once
-#   the fallback stops running for any reason, so it is the state worth closing.
-#
-# WHAT IT CHECKS
-#   Drives off STEP OUTCOMES, never log text (a job log embeds each step's own `run:` script,
-#   so grepping it matches strings that never executed). Passes only when a review demonstrably
-#   happened or was deliberately not attempted:
-#
-#     scope deferred to a human            -> PASS (a human was told, in a PR comment)
-#     primary verdict submitted            -> PASS (a real review was posted)
-#     fallback ran and check-claude-
-#       fallback-result.sh passed on its
-#       transcript                         -> PASS
-#     anything else                        -> FAIL, with the reason named
-#
-#   The transcript itself is NOT re-read here. check-claude-fallback-result.sh already does
-#   that, in its own step, unchanged; its step outcome arrives as FALLBACK_GUARD_OUTCOME.
-#   Two scripts each invoked directly by the workflow, rather than one calling the other —
-#   check-gate-script-registration.py deliberately does not count a caller that lives in
-#   .github/scripts, so delegating would have left the #2161 guard reading as an orphan.
-#
-#   Naming the reason is the point. Every failure in the sample was annotated as the #2161
-#   signature, so four separate causes — a retired primary, a dead OAuth token, the action
-#   refusing a bot actor, and a skipped fallback — all read as one known issue that nobody
-#   could act on. This guard reports which one it was.
-#
-#   When it fails it also posts the verdict as a PR comment (best-effort; the token is
-#   read-only on Dependabot and fork PRs). The job conclusion alone is a weak carrier: it is
-#   read as "the reviewer is broken again", and it is the only place the state appears today.
-#
-# Usage:  check-agent-review-happened.sh
+# Usage:  check-agent-review-happened.sh <review-output-file>
 #         check-agent-review-happened.sh --self-test
 #
-# Environment (all optional; absent is treated as the pessimistic case):
-#   SCOPE_SKIP        "true" when the scope gate deferred to a human
-#   PRIMARY_OUTCOME   `steps.ghmodels.outcome`  (success|failure|skipped)
-#   SUBMIT_OUTCOME    `steps.submit.outcome`    (success|failure|skipped)
-#   CLAUDE_OUTCOME    `steps.claude.outcome`    (success|failure|skipped)
-#   FALLBACK_GUARD_OUTCOME
-#                     `steps.fallback_guard.outcome` — the #2161 transcript guard's verdict
-#   HAS_CLAUDE        "true" when the OAuth secret is visible in this job context
-#   PR, GH_TOKEN      used only for the best-effort PR comment
+# Exit 0  a review demonstrably happened (findings, or an explicit no-findings verdict)
+# Exit 1  no review happened, or the output cannot be told apart from one that did not
 
 set -uo pipefail
 
-# Set by evaluate(): a one-line, human-first statement of what happened.
-VERDICT=""
+# The reviewer is required to end with exactly one of these. Requiring a POSITIVE marker for
+# the clean case is the point: an empty file, a crashed driver and a genuinely clean review
+# are otherwise identical, and the last one is the only one that may pass.
+VERDICT_FINDINGS='REVIEW-VERDICT: FINDINGS'
+VERDICT_CLEAN='REVIEW-VERDICT: NO FINDINGS'
 
-evaluate() {
-  local scope_skip="${SCOPE_SKIP:-false}"
-  local primary="${PRIMARY_OUTCOME:-unknown}"
-  local submit="${SUBMIT_OUTCOME:-unknown}"
-  local claude="${CLAUDE_OUTCOME:-unknown}"
-  local has_claude="${HAS_CLAUDE:-false}"
-  local guard="${FALLBACK_GUARD_OUTCOME:-unknown}"
+# Substrings that prove the driver never reached a model. Matched case-insensitively. These
+# are the real strings observed on this repo, not invented ones.
+declare -a DEAD_MARKERS=(
+  'OAuth access token is invalid'
+  'Failed to authenticate'
+  'Claude Code is not installed on this repository'
+  'Unsupported event type'
+  'Could not fetch an OIDC token'
+  'Credit balance is too low'
+  'rate limit'
+)
 
-  echo "step outcomes: scope_skip=$scope_skip primary=$primary submit=$submit claude=$claude guard=$guard has_claude=$has_claude"
+verify() {
+  local f="${1:-}"
 
-  if [ "$scope_skip" = "true" ]; then
-    VERDICT="No agent review — the change is in the sensitive class and was deliberately deferred to a human reviewer."
-    echo "$VERDICT"
-    return 0
+  if [ -z "$f" ] || [ ! -f "$f" ]; then
+    echo "::error::no review output file at '${f:-<empty>}' — NO REVIEW HAPPENED." >&2
+    return 1
   fi
 
-  if [ "$submit" = "success" ]; then
-    VERDICT="Reviewed by the primary reviewer."
-    echo "$VERDICT"
-    return 0
+  # An empty or whitespace-only file is the shape a crashed driver leaves behind. It is not
+  # a clean review, and the distinction is the whole reason this script exists.
+  if [ ! -s "$f" ] || ! grep -q '[^[:space:]]' "$f"; then
+    echo "::error::review output is empty — NO REVIEW HAPPENED (a crashed driver and a clean review look identical without a verdict line)." >&2
+    return 1
   fi
 
-  # Nothing was submitted by the primary. Name why, so the failure is actionable rather
-  # than another instance of "the known reviewer breakage".
-  local why
-  case "$primary" in
-    failure)
-      why="the primary reviewer (GitHub Models) failed. GitHub Models was RETIRED on 2026-07-30 and now answers every inference call with HTTP 410, so this is permanent, not transient — see the 'GitHub Models review' step for the exact error (#3488)." ;;
-    skipped)
-      why="the primary reviewer step did not run." ;;
-    success)
-      why="the primary reviewer answered but its verdict was not submitted (submit outcome=$submit)." ;;
-    *)
-      why="the primary reviewer's outcome could not be determined (outcome=$primary)." ;;
-  esac
-
-  case "$claude" in
-    skipped)
-      if [ "$has_claude" = "true" ]; then
-        VERDICT="NO REVIEW HAPPENED: $why The Claude fallback did not run."
-      else
-        VERDICT="NO REVIEW HAPPENED: $why The Claude fallback could not run either — CLAUDE_CODE_OAUTH_TOKEN is not visible in this job context, which is normal for a Dependabot or fork PR. Nothing reviewed this change; without this guard the job would be GREEN."
-      fi
-      echo "::error title=agent-review reviewed nothing::$VERDICT"
+  local m
+  for m in "${DEAD_MARKERS[@]}"; do
+    if grep -qiF -- "$m" "$f"; then
+      echo "::error::review output contains '${m}' — the driver never reached a model. NO REVIEW HAPPENED." >&2
       return 1
-      ;;
-    unknown)
-      VERDICT="NO REVIEW HAPPENED: $why The Claude fallback's outcome could not be determined, so there is no evidence any review took place."
-      echo "::error title=agent-review reviewed nothing::$VERDICT"
-      return 1
-      ;;
-  esac
+    fi
+  done
 
-  # The fallback ran. Its own step outcome carries no information (the action exits 0 on a
-  # recorded failure), so the evidence is the transcript — read by the preceding
-  # `Verify the Claude fallback actually reviewed` step, whose outcome arrives here.
-  if [ "$guard" = "success" ]; then
-    VERDICT="Reviewed by the Claude fallback."
-    echo "$VERDICT"
+  if grep -qF -- "$VERDICT_FINDINGS" "$f"; then
+    echo "review happened: findings reported."
+    return 0
+  fi
+  if grep -qF -- "$VERDICT_CLEAN" "$f"; then
+    echo "review happened: no findings."
     return 0
   fi
 
-  if [ "$guard" = "failure" ]; then
-    VERDICT="NO REVIEW HAPPENED: $why The Claude fallback ran but its transcript shows it did not review — see that step's annotations for which signature it was (a gateway rejection at turn 1 is #2161; a refusal to act for a bot actor is the action's own allowed_bots policy, not a credential problem)."
-  else
-    VERDICT="NO REVIEW HAPPENED: $why The Claude fallback ran, but the transcript guard did not report a verdict (outcome=$guard), so the run cannot be shown to have reviewed anything."
-  fi
-  echo "::error title=agent-review reviewed nothing::$VERDICT"
+  echo "::error::review output carries neither '${VERDICT_FINDINGS}' nor '${VERDICT_CLEAN}' — cannot distinguish a clean review from a review that never ran. NO REVIEW HAPPENED." >&2
   return 1
 }
 
-# Best-effort: make the state visible where humans read, not only in the job conclusion.
-post_pr_comment() {
-  local body="$1"
-  [ -n "${PR:-}" ] || return 0
-  [ -n "${GH_TOKEN:-}" ] || return 0
-  command -v gh >/dev/null 2>&1 || return 0
-  printf '%s\n' \
-    "⚠️ **Agent review did not review this PR.**" \
-    "" \
-    "$body" \
-    "" \
-    "_This job is advisory and not a required check — the PR is not rejected. It is red because no review happened, which must not be reported as a review (#3488)._" \
-    > /tmp/agent-review-no-review.md 2>/dev/null || return 0
-  gh pr comment "$PR" --body-file /tmp/agent-review-no-review.md >/dev/null 2>&1 \
-    || echo "::warning::could not post the no-review comment (the token is read-only on Dependabot and fork PRs)"
-}
-
-# ---------------------------------------------------------------------------------------
-
 self_test() {
-  local fails=0
+  local tmp rc fails=0
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' RETURN
 
-  check() { # <label> <expected-rc> <env assignments...>
-    local label="$1" want="$2"; shift 2
-    local got
-    ( unset SCOPE_SKIP PRIMARY_OUTCOME SUBMIT_OUTCOME CLAUDE_OUTCOME FALLBACK_GUARD_OUTCOME \
-            HAS_CLAUDE PR GH_TOKEN
-      # shellcheck disable=SC2163  # each "$@" element is a literal NAME=value assignment
-      export "$@"
-      evaluate >/dev/null 2>&1 )
-    got=$?
-    if [ "$got" -ne "$want" ]; then
-      echo "  FAIL: $label expected rc=$want got rc=$got"
+  # check <label> <expected-rc> <file-or-empty> [required-substring-of-the-message]
+  #
+  # The 4th argument is not decoration. Several branches here reject the same input for
+  # different reasons, so asserting only on the exit code leaves the earlier branch
+  # unfalsifiable: deleting the empty-file check kept this self-test GREEN, because an empty
+  # file also carries no verdict line and failed one branch later. An unfalsifiable branch
+  # inside the proof-of-review script is precisely the defect this whole file exists to
+  # avoid, so where two branches agree on the verdict the message is what tells them apart.
+  check() {
+    local label="$1" want="$2" file="${3:-}" want_msg="${4:-}"
+    local msg
+    msg=$(verify "$file" 2>&1); rc=$?
+    if [ "$rc" -ne "$want" ]; then
+      echo "::error::self-test: ${label} — expected rc=${want}, got rc=${rc}" >&2
       fails=$((fails + 1))
-    else
-      echo "  ok:   $label (rc=$got)"
+    elif [ -n "$want_msg" ] && ! printf '%s' "$msg" | grep -qF -- "$want_msg"; then
+      echo "::error::self-test: ${label} — rc was right but the reason was not: expected a message containing '${want_msg}', got '${msg}'" >&2
+      fails=$((fails + 1))
     fi
   }
 
-  echo "self-test — each branch is fed the input it must classify:"
-  # Passes. A guard that only ever reds is not a signal.
-  check "deferred to a human"              0 SCOPE_SKIP=true PRIMARY_OUTCOME=skipped SUBMIT_OUTCOME=skipped CLAUDE_OUTCOME=skipped
-  check "primary submitted a verdict"      0 SCOPE_SKIP=false PRIMARY_OUTCOME=success SUBMIT_OUTCOME=success CLAUDE_OUTCOME=skipped
-  check "fallback reviewed for real"       0 SCOPE_SKIP=false PRIMARY_OUTCOME=failure SUBMIT_OUTCOME=skipped CLAUDE_OUTCOME=success FALLBACK_GUARD_OUTCOME=success HAS_CLAUDE=true
-  # Fails. Each is a state observed in the 120-run sample.
-  check "410 primary + dead fallback"      1 SCOPE_SKIP=false PRIMARY_OUTCOME=failure SUBMIT_OUTCOME=skipped CLAUDE_OUTCOME=success FALLBACK_GUARD_OUTCOME=failure HAS_CLAUDE=true
-  check "410 primary + fallback SKIPPED"   1 SCOPE_SKIP=false PRIMARY_OUTCOME=failure SUBMIT_OUTCOME=skipped CLAUDE_OUTCOME=skipped HAS_CLAUDE=false
-  check "410 primary + guard not reached"  1 SCOPE_SKIP=false PRIMARY_OUTCOME=failure SUBMIT_OUTCOME=skipped CLAUDE_OUTCOME=failure FALLBACK_GUARD_OUTCOME=skipped HAS_CLAUDE=true
-  check "primary ok, submit failed"        1 SCOPE_SKIP=false PRIMARY_OUTCOME=success SUBMIT_OUTCOME=failure CLAUDE_OUTCOME=skipped HAS_CLAUDE=true
-  check "no environment at all"            1 IGNORED=1
+  # MUST PASS. Only these two shapes are a review.
+  printf 'blah\n%s\n' "$VERDICT_CLEAN"    > "$tmp/clean";    check "a clean verdict must pass"    0 "$tmp/clean"
+  printf 'x: bug\n%s\n' "$VERDICT_FINDINGS" > "$tmp/findings"; check "a findings verdict must pass" 0 "$tmp/findings"
+
+  # MUST FAIL. Each of these is a way the previous control reported success having done nothing.
+  check "a missing file must fail"        1 "$tmp/does-not-exist"
+  check "no argument at all must fail"    1 ""
+  # These two must fail FOR THE EMPTINESS, not for the missing verdict line — see check().
+  : > "$tmp/empty"
+  check "an empty file must fail as empty"     1 "$tmp/empty" "review output is empty"
+  printf '   \n\t\n' > "$tmp/blank"
+  check "a whitespace file must fail as empty" 1 "$tmp/blank" "review output is empty"
+  printf 'Looks fine to me, no problems found.\n' > "$tmp/prose"
+  check "plausible prose without a verdict line must fail" 1 "$tmp/prose"
+
+  # The measured dead-driver outputs. These are the exact strings this repo has seen, and
+  # each one accompanied a run that read as successful somewhere.
+  printf 'Failed to authenticate. API Error: 401 OAuth access token is invalid.\n' > "$tmp/dead401"
+  check "a 401 must fail" 1 "$tmp/dead401"
+  printf 'Claude Code is not installed on this repository.\n%s\n' "$VERDICT_CLEAN" > "$tmp/app"
+  check "a dead marker must beat a verdict line" 1 "$tmp/app"
 
   if [ "$fails" -gt 0 ]; then
-    echo "self-test FAILED ($fails case(s))"
+    echo "self-test FAILED (${fails} case(s))" >&2
     return 1
   fi
-  echo "self-test OK — 8 cases."
+  echo "self-test ok: proof-of-review is falsifiable (9 cases)"
   return 0
 }
 
-# ---------------------------------------------------------------------------------------
-
-if [ "${1:-}" = "--self-test" ]; then
-  self_test
-  exit $?
-fi
-
-evaluate
-rc=$?
-if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-  printf '### Agent review outcome\n\n%s\n' "$VERDICT" >> "$GITHUB_STEP_SUMMARY"
-fi
-if [ "$rc" -ne 0 ]; then
-  post_pr_comment "$VERDICT"
-  echo
-  echo "This job is advisory and NOT a required check, so the PR is not rejected. It is red"
-  echo "because nothing reviewed this change — see #3488 for the retired primary reviewer and"
-  echo "#2161 for the fallback credential."
-fi
-exit "$rc"
+case "${1:-}" in
+  --self-test) self_test ;;
+  *)           verify "${1:-}" ;;
+esac
