@@ -78,8 +78,11 @@ class OnnxFraudModel(
 
     companion object {
         private val log = Logger.getLogger(OnnxFraudModel::class.java)
-        private const val MODEL_RESOURCE_PATH = "ml/baseline-fraud-v1.onnx"
-        private const val MODEL_CARD_PATH = "ml/baseline-fraud-v1.card.json"
+
+        // internal (not private): OnnxServingSmoke runs the identical load path in-image, and
+        // OnnxFraudModelTest exercises the load-failure branch directly.
+        internal const val MODEL_RESOURCE_PATH = "ml/baseline-fraud-v1.onnx"
+        internal const val MODEL_CARD_PATH = "ml/baseline-fraud-v1.card.json"
         private const val INPUT_NAME = "features"
         private val INPUT_SHAPE = longArrayOf(1, 2)
         private val mapper = ObjectMapper()
@@ -101,7 +104,7 @@ class OnnxFraudModel(
          * `catch (ex: Exception)` in [loadSession] below never saw them and the class documented a
          * degradation it could not perform.
          *
-         * What that cost: the deploy image is `eclipse-temurin:25-jre-alpine` (musl, no libstdc++),
+         * What that cost: the deploy image was `eclipse-temurin:25-jre-alpine` (musl, no libstdc++),
          * onnxruntime's `libonnxruntime.so` is built against glibc, so `getEnvironment()` threw in
          * a FIELD INITIALIZER — construction of the bean failed, and CDI then failed every
          * injection point of it. `FraudResource.reviewQueue` is a read-only analyst query that

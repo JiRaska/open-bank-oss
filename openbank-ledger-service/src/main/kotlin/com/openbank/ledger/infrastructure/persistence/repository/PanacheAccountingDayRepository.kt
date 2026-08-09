@@ -33,6 +33,14 @@ class PanacheAccountingDayRepository(
         find("status = ?1 order by businessDate desc", AccountingDayStatus.OPEN.name).firstResult()
     }.awaitSuspending()?.toDomain()
 
+    override suspend fun findLatest(): AccountingDayRecord? = Panache.withSession {
+        find("order by businessDate desc").firstResult()
+    }.awaitSuspending()?.toDomain()
+
+    override suspend fun findInStatus(status: AccountingDayStatus): List<AccountingDayRecord> = Panache.withSession {
+        find("status = ?1 order by businessDate asc", status.name).list()
+    }.awaitSuspending().map { it.toDomain() }
+
     override suspend fun findRange(from: LocalDate, to: LocalDate): List<AccountingDayRecord> = Panache.withSession {
         find("businessDate >= ?1 and businessDate <= ?2 order by businessDate asc", from, to).list()
     }.awaitSuspending().map { it.toDomain() }

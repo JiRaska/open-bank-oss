@@ -9,11 +9,13 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.CampaignRepository
+import com.openbank.campaign.application.port.out.ConversionContext
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.application.port.out.StepOutcomeCount
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.DeliveryStatus
@@ -70,6 +72,25 @@ class CampaignEntity : PanacheEntityBase() {
     // reason as stepsJson.
     @Column(columnDefinition = "text")
     var stopConditionJson: String? = null
+
+    /** ADR-0245 D1: a catalogue key, not a serialised rule — the rule itself lives in code. */
+    @Column(length = 64)
+    var conversionRule: String? = null
+
+    /**
+     * Cadence key from `ScheduleCatalog` (V6), or null for a one-shot campaign. Two plain columns
+     * rather than a JSON blob like `stepsJson`: a schedule is two scalars, and keeping the cadence
+     * queryable is what lets an operator ask which campaigns run on a Monday.
+     */
+    @Column(length = 64)
+    var scheduleCadence: String? = null
+
+    @Column
+    var scheduleEndAt: Instant? = null
+
+    /** TriggerCatalog key (V7). Column is `trigger_event`: `trigger` is a reserved SQL word. */
+    @Column(name = "trigger_event", length = 64)
+    var triggerEvent: String? = null
 
     @Column(nullable = false)
     lateinit var state: String
@@ -176,6 +197,12 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
     override suspend fun list(): List<Campaign> =
         Panache.withSession { listAll() }.awaitSuspending().map { it.toDomain() }
 
+    // Filtered in SQL, not in Kotlin: this runs once per matching product event, so loading every
+    // campaign to discard almost all of them would put the whole table on a consumer's hot path.
+    override suspend fun findActiveByTrigger(trigger: String): List<Campaign> = Panache.withSession {
+        list("triggerEvent = ?1 and state = ?2", trigger, CampaignState.ACTIVE.name)
+    }.awaitSuspending().map { it.toDomain() }
+
     // merge, not persist: application-assigned @Id, so persist() would INSERT on every lifecycle
     // transition and fail on the PK (the fleet's standard upsert, cf. consent-service).
     override suspend fun save(campaign: Campaign): Campaign = Panache.withTransaction {
@@ -190,6 +217,10 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         segmentVersion = this@toEntity.segmentRef.version
         stepsJson = mapper.writeValueAsString(this@toEntity.steps)
         stopConditionJson = this@toEntity.stopCondition?.let { mapper.writeValueAsString(it) }
+        conversionRule = this@toEntity.conversionRule
+        scheduleCadence = this@toEntity.schedule?.cadence
+        scheduleEndAt = this@toEntity.schedule?.endAt
+        triggerEvent = this@toEntity.trigger
         state = this@toEntity.state.name
         createdBy = this@toEntity.createdBy
         approvedBy = this@toEntity.approvedBy
@@ -204,6 +235,11 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         segmentRef = SegmentRef(segmentName, segmentVersion),
         steps = mapper.readValue<List<CampaignStep>>(stepsJson),
         stopCondition = stopConditionJson?.let { mapper.readValue<StopCondition>(it) },
+        conversionRule = conversionRule,
+        // Reconstructed only when a cadence is present: an end instant on its own would be a
+        // schedule with nothing to fire, so the cadence is what decides whether one exists.
+        schedule = scheduleCadence?.let { CampaignSchedule(it, scheduleEndAt) },
+        trigger = triggerEvent,
         state = CampaignState.valueOf(state),
         createdBy = createdBy,
         approvedBy = approvedBy,
@@ -268,6 +304,15 @@ class PanacheEnrolmentRepository :
 }
 
 @ApplicationScoped
+/**
+ * Detekt caps a class at 11 functions and fires AT the threshold, which this repository now sits on.
+ * Suppressed rather than split: the count is ten interface methods plus one private query helper,
+ * and the helper cannot move out of the class because it calls Panache's `find`. Splitting the
+ * INTERFACE to satisfy a lint rule would fragment one aggregate's persistence across two ports for
+ * no reader's benefit. If a twelfth method is ever needed, that is the moment to ask whether the
+ * send log is really one thing.
+ */
+@Suppress("TooManyFunctions")
 class PanacheSendLogRepository :
     SendLogRepository,
     PanacheRepository<SendLogEntity> {
@@ -422,6 +467,21 @@ class PanacheSendLogRepository :
             SendOutcome.SKIPPED_CONDITION.name,
         ).firstResult<SendLogEntity>()
     }.awaitSuspending()?.let { DeliveryStatus.valueOf(it.deliveryStatus) }
+
+    override suspend fun conversionContextFor(campaignId: UUID, partyId: UUID): ConversionContext =
+        Panache.withSession {
+            find(
+                "campaignId = ?1 and partyId = ?2 and outcome in ?3 order by occurredAt asc",
+                campaignId,
+                partyId,
+                listOf(SendOutcome.SENT.name, SendOutcome.CONVERTED.name),
+            ).list<SendLogEntity>().map { rows ->
+                ConversionContext(
+                    firstSentAt = rows.firstOrNull { it.outcome == SendOutcome.SENT.name }?.occurredAt,
+                    alreadyConverted = rows.any { it.outcome == SendOutcome.CONVERTED.name },
+                )
+            }
+        }.awaitSuspending()
 
     override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID): Int = Panache.withSession {
         count(

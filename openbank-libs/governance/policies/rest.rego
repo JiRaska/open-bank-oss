@@ -179,10 +179,23 @@ allowed_reasons contains "operator-read-any" if {
 # ADR-0224 D2: staff agent-session lifecycle (issue/read/revoke). Operator/admin only — sessions
 # are issued to the authenticated operator themselves (subject = principal), and revocation is
 # live-checked by the OBO resolver, so this grant only ever reaches the caller's own sessions.
+#
+# The `service-account-` exclusion is what makes "operator only" true (issue #3765). Without it the
+# rule reads as staff-only and is not: Keycloak client_credentials tokens never produce
+# principal.type == SERVICE (rules.yaml: authz_policy.principal_type_service_unreachable), and the
+# shared backend client's service-account-openbank-services carries ROLE_OPERATOR in the realm — so
+# HUMAN + operator-role alone admits the fleet's M2M identity to minting, binding and revoking MCP
+# sessions. Same idiom and same reason as operator-compose-message directly below.
+#
+# Nothing legitimate is cut: the only consumer of these endpoints is admin-ui's OBO relay
+# (src/app/api/agent/obo-mcp/route.ts), which exchanges a token for a signed-in operator, so
+# "mcp-service sees a HUMAN principal whose realm roles were bounded at issuance" — a real person,
+# never a service account.
 allowed_reasons contains "operator-mcp-session" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
+	not startswith(input.principal.id, "service-account-")
 	startswith(input.action, "mcp.session.")
 }
 
@@ -292,6 +305,18 @@ allowed_reasons contains "edge-service-consent" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
 	input.action in {"consent.list", "consent.revoke"}
+}
+
+# The customer-edge proxying the app's in-app engagement surfaces (ADR-0220 D1): the app
+# resolves what to show in a slot and records the customer's reaction to it. Same edge
+# principal and same guard as edge-service-consent — the edge injects the caller's
+# authoritative partyId from the JWT, so a client-supplied partyId never reaches
+# engagement-service on its own authority. Scoped to the two exact actions the app uses —
+# NOT an `engagement.` family — least privilege, matching edge-service-consent's shape.
+allowed_reasons contains "edge-service-engagement" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
+	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
 }
 
 # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log

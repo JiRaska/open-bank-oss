@@ -38,6 +38,25 @@ class CnbRateIngestionService(
     private val clock: Clock,
 ) : CnbRateIngestionUseCase {
 
+    /**
+     * The ČNB **publication** calendar, deliberately NOT the accounting day
+     * ([com.openbank.libs.domain.calendar.AccountingClock.BANK_ZONE]) — issue #2963 asked which of
+     * the two this means, and the answer is the publication one.
+     *
+     * The ČNB declares a fixing for a named business day and publishes it at 14:30 Prague time;
+     * that day's boundaries are properties of the *publisher*, so `validFrom`/`validTo` here mark
+     * the window a published fixing is the current one, not a window in the bank's books. The
+     * distinction is invisible today because the ČNB is a Prague institution and this bank keeps
+     * its books in Prague, so the two constants hold the same value — but they are answers to
+     * different questions and would have to move independently if either ever changed (a
+     * non-Czech entity consuming the ČNB fixing; a ČNB calendar change). Binding this to
+     * `AccountingClock` would make the coincidence look like a dependency.
+     *
+     * This is why the `check-accounting-clock.py` ALLOWLIST entry for this file is KEPT rather
+     * than removed: the gate's rule ("the accounting zone is declared once") is correct and this
+     * value is not the accounting zone. The entry's reason now records a decision instead of an
+     * open question.
+     */
     private val zone: ZoneId = ZoneId.of("Europe/Prague")
 
     private val enabled: Set<String>

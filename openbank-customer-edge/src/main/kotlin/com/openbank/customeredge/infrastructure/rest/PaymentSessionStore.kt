@@ -9,10 +9,27 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * In-edge nearby-payment session store (ADR-0087). The receiver creates a short-lived session
+ * In-edge nearby-payment session store (ADR-0095).
+ *
+ * The citation used to read ADR-0087, and that was not a typo: it is `openbank-app`'s OWN
+ * ADR-0087, carried across a repo boundary into a monorepo where 0087 already means the
+ * Observability Correlation & Profiling Layer. ADR-0095 records that the nearby-pay ADR this
+ * number pointed at "was never actually written" here, and ADR-0147 explains why `openbank-app`
+ * numbers its ADRs independently. Without this note the wrong number simply returns — the next
+ * reader greps `openbank-app`, finds an ADR-0087 about nearby-pay, and is correct about the
+ * other repo.
+ *
+ * The receiver creates a short-lived session
  * bound to ONE of their own accounts and broadcasts the returned opaque token over BLE; the payer
- * resolves the token to a display name + requested amount + a MASKED account before signing. The
- * real creditor account never leaves the edge — only the edge can map the token back to it.
+ * resolves the token to a display name + requested amount + a MASKED account before signing. Only
+ * the edge can map the token back to the real account, so nothing the payer holds BEFORE paying
+ * discloses it.
+ *
+ * That is the whole of the guarantee, and it is a request-side one. It is not "the real creditor
+ * account never leaves the edge": the edge sends it upstream to address the instruction, and the
+ * payment confirmation returns it to the payer verbatim (issue #3890, pinned by
+ * NearbyPayCreditorDisclosureTest). The mask defeats free harvesting through the directory, not
+ * disclosure to someone who has actually paid.
  *
  * Why a store inside the edge rather than a microservice: the session is an ephemeral, ~minutes-TTL
  * token→creditor mapping with no reporting/ledger value once it expires. A dedicated service +
@@ -115,7 +132,7 @@ class PaymentSessionStore {
 
         /**
          * Mask a Czech IBAN to country + last 4 ("CZ…6789"), the only account form a payer is shown
-         * (ADR-0087). Falls back to a generic mask for anything not IBAN-shaped. Package-visible for
+         * (ADR-0095). Falls back to a generic mask for anything not IBAN-shaped. Package-visible for
          * unit tests.
          */
         fun maskIban(iban: String?): String {

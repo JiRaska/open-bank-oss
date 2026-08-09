@@ -4,6 +4,7 @@
 
 package com.openbank.audit.infrastructure.persistence
 
+import com.openbank.audit.domain.model.AttributionSource
 import com.openbank.audit.domain.model.AuditEntry
 import com.openbank.audit.domain.model.OccurredAtSource
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -74,6 +75,19 @@ class AuditEntryEntity : PanacheEntity() {
     @Column(name = "occurred_at_source", length = 8)
     var occurredAtSource: String? = null
 
+    /**
+     * Provenance of [sourceService] — `EVENT`, `TOPIC` or `ABSENT` ([AttributionSource]), NULL on
+     * any row written before V13 (#3994).
+     *
+     * Same contract as [occurredAtSource] above and for the same reasons: NULL stays NULL (the
+     * `DO INSTEAD NOTHING` rule from V2 makes a backfill a silent no-op, and there is nothing to
+     * backfill from — the topic a pre-V13 row arrived on was never stored), and it is NOT part of
+     * [chainHash], because it describes where the consumer got a value rather than asserting a new
+     * evidential fact. `source_service` itself remains chain-hashed exactly as before.
+     */
+    @Column(name = "source_service_source", length = 8)
+    var sourceServiceSource: String? = null
+
     // ── Tamper-evidence (hash chain, ADR-0023 spirit applied to the operational log) ──
     @Column(name = "prev_hash")
     var prevHash: String? = null
@@ -109,6 +123,15 @@ class AuditEntryEntity : PanacheEntity() {
 
     @Column(name = "session_id", length = 100)
     var sessionId: String? = null
+
+    // ── Delegated-action correlation (ADR-0232 D5): same rule as the V9 columns above — the
+    // producer's raw event JSON carries both verbatim and IS chain-hashed via `payload`, so these
+    // are a lookup path for the grantor transparency query, never evidence in their own right.
+    @Column(name = "on_behalf_of", length = 64)
+    var onBehalfOf: String? = null
+
+    @Column(name = "delegation_id", length = 64)
+    var delegationId: String? = null
 }
 
 @ApplicationScoped
@@ -147,10 +170,13 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
                 it.occurredAt = stored.occurredAt
                 it.recordedAt = stored.recordedAt
                 it.occurredAtSource = entry.occurredAtSource.name
+                it.sourceServiceSource = entry.sourceServiceSource.name
                 it.channel = entry.channel
                 it.actChain = entry.actChain.takeIf { chain -> chain.isNotEmpty() }
                     ?.let { chain -> actChainJson.writeValueAsString(chain) }
                 it.sessionId = entry.sessionId
+                it.onBehalfOf = entry.onBehalfOf
+                it.delegationId = entry.delegationId
                 it.prevHash = prevHash
                 it.recordHash = chainHash(prevHash, stored)
                 it.hashVersion = HASH_VERSION_MICROS
@@ -311,6 +337,44 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
             }
         }.awaitSuspending().map { it.toDomain() }
 
+    /**
+     * The grantor transparency query (ADR-0232 D5, #2990 AC10): every action taken ON BEHALF OF
+     * [grantorPartyId] by a delegate, newest first, optionally narrowed to one [delegatePartyId]
+     * (the actor) or one [delegationId] (the grant).
+     *
+     * Deliberately NOT the same question as [findByActorId] or [findByAggregateId]. The grantor is
+     * neither the actor nor the aggregate on a delegated action — the actor is the delegate and
+     * the aggregate is the delegate's own party — so before this column existed the grantor's own
+     * `/audit/customer/{partyId}` view showed nothing at all about what was done with their money.
+     *
+     * The narrowing parameters are ANDed and both are optional, which is why the query is
+     * assembled rather than written as one string: a null must mean "unfiltered", and a
+     * `(?3 IS NULL OR delegationId = ?3)` form silently defeats the partial index.
+     */
+    suspend fun findOnBehalfOf(
+        grantorPartyId: String,
+        delegatePartyId: String? = null,
+        delegationId: String? = null,
+        limit: Int = 100,
+    ): List<AuditEntry> {
+        val clauses = mutableListOf("onBehalfOf = :grantor")
+        // Panache's Parameters.with/.and are deprecated (flagged by CodeQL); the overload taking a
+        // plain Map is the supported one and reads the same here.
+        val params = mutableMapOf<String, Any>("grantor" to grantorPartyId)
+        delegatePartyId?.let {
+            clauses += "actorId = :delegate"
+            params["delegate"] = it
+        }
+        delegationId?.let {
+            clauses += "delegationId = :grant"
+            params["grant"] = it
+        }
+        val query = clauses.joinToString(" AND ") + " ORDER BY occurredAt DESC"
+        return Panache.withSession {
+            find(query, params).page(0, limit).list()
+        }.awaitSuspending().map { it.toDomain() }
+    }
+
     /** Current chain head (most-recently-inserted row) plus the total row count, for anchoring. */
     suspend fun chainHead(): ChainHead? {
         val head = Panache.withSession {
@@ -331,15 +395,15 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
         // NULL (pre-V11) reads back as INGEST: those rows may hold ingest time and cannot prove
         // otherwise, so the weaker claim is the honest one.
         occurredAtSource = occurredAtSource?.let { OccurredAtSource.valueOf(it) } ?: OccurredAtSource.INGEST,
+        // NULL (pre-V13) reads back as ABSENT for the same reason: those rows cannot say who
+        // supplied `source_service`, and for 76% of them the answer is that nobody did.
+        sourceServiceSource = sourceServiceSource?.let { AttributionSource.valueOf(it) } ?: AttributionSource.ABSENT,
         channel = channel,
         actChain = actChain?.let { actChainJson.readValue(it, stringListType) } ?: emptyList(),
         sessionId = sessionId,
+        onBehalfOf = onBehalfOf,
+        delegationId = delegationId,
     )
-
-    private fun chainLinkBroken(prevHash: String?, expectedPrev: String, recordHash: String, recomputed: String) =
-        prevHash != expectedPrev || recordHash != recomputed
-
-    private fun anchorMissed(found: Boolean, fromEntryId: UUID?) = !found && fromEntryId != null
 
     companion object {
         private const val GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -398,6 +462,11 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
  * File-scope rather than a method: it is a predicate about a ROW, and keeping it off the repository
  * also keeps that class under detekt's function-count threshold.
  */
+private fun chainLinkBroken(prevHash: String?, expectedPrev: String, recordHash: String, recomputed: String) =
+    prevHash != expectedPrev || recordHash != recomputed
+
+private fun anchorMissed(found: Boolean, fromEntryId: UUID?) = !found && fromEntryId != null
+
 private fun isLegacyHashVersion(e: AuditEntryEntity) = e.recordHash != null && e.hashVersion == null
 
 /** Chain head snapshot used to capture a signed anchor (see [AuditRepository.chainHead]). */

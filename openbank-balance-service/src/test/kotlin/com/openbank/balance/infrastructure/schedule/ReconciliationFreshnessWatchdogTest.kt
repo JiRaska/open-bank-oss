@@ -29,7 +29,8 @@ class ReconciliationFreshnessWatchdogTest {
     private val now = Instant.parse("2026-07-18T10:00:00Z")
     private val clock = Clock.fixed(now, ZoneOffset.UTC)
     private val records = mockk<ReconciliationRecordRepository>()
-    private val watchdog = ReconciliationFreshnessWatchdog(records, clock, NoOpClusterLock())
+    private val watchdog =
+        ReconciliationFreshnessWatchdog(records, clock, NoOpClusterLock(), domainMetrics = mockk(relaxed = true))
 
     private fun reportAge(age: Duration) = ReconciliationReport(
         asOf = LocalDate.of(2026, 7, 17),

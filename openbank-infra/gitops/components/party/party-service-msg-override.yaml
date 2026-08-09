@@ -1,0 +1,36 @@
+# Makes party-service's Kafka consumer `group.id` reach the connector from a config source
+# SmallRye does not mangle (#686, #2945). Full mechanism + rationale:
+# openbank-infra/gitops/components/accounts/account-service-msg-override.yaml.
+#
+# Short form: a dotted YAML leaf key under mp.messaging.incoming.<channel> registers only as the
+# QUOTED property name, so the connector never reads it and silently falls back to
+# quarkus.application.name. party-service's declared group.id happens to EQUAL that fallback, so
+# the broken key is a no-op by coincidence — until a rename or a channel-specific group makes it
+# one. Three channels share the single group here, which is exactly the shape that would want
+# per-channel groups one day; that edit is the one this file makes safe.
+# Deploying this changes no effective value: all three channels keep the group
+# `openbank-party-service`, which is what kafka-party-mtls.yaml grants Read on and where today's
+# committed offsets live.
+#
+# `auto.offset.reset: earliest` is declared for all three channels and is subject to the same bug
+# (effective value: the connector default `latest`). It is deliberately NOT set here — making it
+# effective would replay the retained kyc/aml/consent logs on the next offset expiry. Owner
+# decision, see #2945.
+#
+# Properties file rather than env vars: the hyphenated channel names hit the unresolved
+# quarkusio/quarkus#30106 / smallrye-reactive-messaging#2028 env-var split bug (SRMSG00071).
+# config_ordinal=500 outranks the baked application.yaml (~254); loaded via QUARKUS_CONFIG_LOCATIONS.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: party-service-msg-override
+  namespace: party
+  labels:
+    app.kubernetes.io/name: party-service
+    app.kubernetes.io/part-of: party
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.kyc-events-in.group.id=openbank-party-service
+    mp.messaging.incoming.aml-events-in.group.id=openbank-party-service
+    mp.messaging.incoming.consent-events-in.group.id=openbank-party-service

@@ -55,7 +55,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: onboarding-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-onboarding-service:sandbox-31e6692a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-onboarding-service:sandbox-2f2eb227
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -130,6 +130,12 @@ spec:
                 secretKeyRef:
                   name: onboarding-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # party-service in-cluster URL (issue #3931). This Deployment carried no override,
+            # so AbandonedRegistrationCleaner's PartyServiceClient used application.yaml's
+            # default `openbank-party-service:8090` — a hostname no Service in this cluster has
+            # ever had, on the wrong port. Same shape as customer-edge / statement-service.
+            - name: PARTY_SERVICE_URL
+              value: http://party-service.party.svc:8111
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG

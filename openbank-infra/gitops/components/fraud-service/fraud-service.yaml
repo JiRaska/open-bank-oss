@@ -23,7 +23,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-fraud-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a91c2ce3b8bc3ab2"
+        openbank.tech/policy-checksum: "051407d4673b5c48"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -33,7 +33,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: fraud-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fraud-service:sandbox-c1f2e5a5
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fraud-service:sandbox-bd1db8e4
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8133}
@@ -104,9 +104,24 @@ spec:
                   key: ca.password
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
-            # OIDC_CLIENT_SECRET removed (#2929): fraud-service has no rest-client carrying
-            # OidcClientRequestReactiveFilter, so it mints no M2M token and never read this. The
-            # ref pointed at a Secret nothing creates, which is only ever confusing.
+            # Re-added (ADR-0220 D3.5, #2749): fraud-service now has its first outbound rest-client
+            # (AccountServiceClient, oidc-client block in application.yaml) — #2929 removed this
+            # when there was none. See fraud-service-oidc.yaml (new in this PR, mirrors
+            # balance-service/aml-service's identical shape) for the ExternalSecret this reads.
+            - name: QUARKUS_OIDC_CLIENT_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: fraud-service-oidc
+                  key: OIDC_CLIENT_SECRET
+            # account-service listens on 8100 (its Service exposes http:8100) — same value every
+            # other AccountServiceClient caller in this fleet uses (balance-service, aml-service).
+            # Without this, AccountServiceClient falls back to application.yaml's
+            # http://localhost:8100 default and every partyId lookup fails closed (fraud-hold
+            # simply never raises — the fail-open contract by design, but silently so).
+            - name: ACCOUNT_SERVICE_URL
+              value: http://account-service.accounts.svc:8100
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG

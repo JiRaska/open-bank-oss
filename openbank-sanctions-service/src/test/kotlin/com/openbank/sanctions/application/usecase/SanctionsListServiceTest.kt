@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.TimeZone
 import java.util.UUID
 
 /**
@@ -297,6 +298,88 @@ class SanctionsListServiceTest {
 
         coVerify { repo.markUpdated("EU_CONSOLIDATED", 5) }
         coVerify(exactly = 0) { repo.markUpdated("OFAC_SDN", any()) }
+    }
+
+    // ──── scheduledRefresh — the same-minute de-duplication is zone-consistent (#2963) ─────────
+    //
+    // These two are the falsifying pair for the ZoneId.systemDefault() removal. They FORCE the JVM
+    // default zone to Europe/Prague, because the defect was invisible on a UTC host — and the
+    // production container is UTC, which is why nothing ever caught it. `now` comes from the
+    // injected clock (UTC here); `lastRunAt` used to come from the host default. On a +01:00 host
+    // the comparison was wrong in both directions, so the two tests below assert both. Each fails
+    // against the pre-#2963 code and passes after it; neither can pass by accident, since the
+    // assertion is on whether the importer ran at all.
+    //
+    // The default zone is restored in a finally block — leaving it set would silently retune every
+    // later test in this JVM.
+
+    private fun <T> withDefaultZone(zone: String, body: () -> T): T {
+        val previous = TimeZone.getDefault()
+        TimeZone.setDefault(TimeZone.getTimeZone(zone))
+        return try {
+            body()
+        } finally {
+            TimeZone.setDefault(previous)
+        }
+    }
+
+    @Test
+    fun `scheduledRefresh skips a list already refreshed this minute even off-UTC`() {
+        withDefaultZone("Europe/Prague") {
+            runBlocking {
+                // clock is fixed at 2024-01-15T12:00:00Z; this list is due at 12:00 and ALREADY ran
+                // at exactly that instant, so the same-minute guard must suppress it. Read in the
+                // host default the last run reads 13:00 local, which does not equal 12:00 UTC, and
+                // the guard used to conclude the list had never run.
+                val due = sampleList(
+                    listType = "OFAC_SDN",
+                    sourceUrl = "https://example.com/sdn.xml",
+                    cronHour = 12,
+                    cronMinute = 0,
+                ).copy(lastUpdatedAt = Instant.parse("2024-01-15T12:00:00Z"))
+                coEvery { repo.listSanctionsLists() } returns listOf(due)
+                // The refresh path is fully stubbed so that a wrongly-due list would SUCCEED. Left
+                // unstubbed, mockk throws inside refresh(), scheduledRefresh() swallows it, and
+                // `importList` is never reached — so the assertion below would hold for the wrong
+                // reason and pass against the very code it exists to reject.
+                coEvery { repo.findByListType("OFAC_SDN") } returns due
+                coEvery {
+                    importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml")
+                } returns 7
+                coEvery { repo.markUpdated("OFAC_SDN", 7) } returns due.copy(lastEntryCount = 7)
+
+                service.scheduledRefresh()
+
+                coVerify(exactly = 0) { importer.importList(any(), any()) }
+            }
+        }
+    }
+
+    @Test
+    fun `scheduledRefresh still refreshes when the previous run was an hour earlier off-UTC`() {
+        withDefaultZone("Europe/Prague") {
+            runBlocking {
+                // Previous run at 11:00Z is a DIFFERENT minute from now (12:00Z), so the list is
+                // due. Read in the host default 11:00Z is 12:00 local — which the old comparison
+                // matched against 12:00 UTC and used to skip a refresh that was genuinely owed.
+                val due = sampleList(
+                    listType = "OFAC_SDN",
+                    sourceUrl = "https://example.com/sdn.xml",
+                    cronHour = 12,
+                    cronMinute = 0,
+                ).copy(lastUpdatedAt = Instant.parse("2024-01-15T11:00:00Z"))
+                coEvery { repo.listSanctionsLists() } returns listOf(due)
+                coEvery { repo.findByListType("OFAC_SDN") } returns due
+                coEvery {
+                    importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml")
+                } returns 7
+                coEvery { repo.markUpdated("OFAC_SDN", 7) } returns due.copy(lastEntryCount = 7)
+
+                service.scheduledRefresh()
+
+                coVerify { importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml") }
+            }
+        }
     }
 
     private fun sampleList(

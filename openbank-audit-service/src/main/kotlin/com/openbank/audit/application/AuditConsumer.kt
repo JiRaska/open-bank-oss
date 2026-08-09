@@ -6,13 +6,19 @@ package com.openbank.audit.application
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.audit.domain.model.AttributionSource
 import com.openbank.audit.domain.model.AuditEntry
 import com.openbank.audit.domain.model.OccurredAtSource
 import com.openbank.audit.infrastructure.persistence.AuditRepository
+import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import io.micrometer.core.instrument.MeterRegistry
+import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.smallrye.reactive.messaging.kafka.api.IncomingKafkaRecordMetadata
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.reactive.messaging.Incoming
+import org.eclipse.microprofile.reactive.messaging.Message
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
@@ -31,16 +37,81 @@ class AuditConsumer {
 
     private val log = Logger.getLogger(AuditConsumer::class.java)
 
+    /**
+     * Records one audit event.
+     *
+     * **Why `Message<String>` and not `String` (#3994).** The old signature saw the message body
+     * and nothing else, so two facts the transport was already carrying were discarded at ingest:
+     * the outbox `ce-type` header (the event type — the body of an outbox-relayed event is the bare
+     * domain event and usually has no `eventType` key at all) and the topic (which names the
+     * producing service). Both fell through to the `"UNKNOWN"`/`"unknown"` sentinels, and 76% of
+     * the live trail is that `"unknown"`. Same signature, same two defaults and the same fix as the
+     * analytics sink's #2598.
+     *
+     * Body-first ordering is deliberate: broker metadata is consulted ONLY where the body yielded
+     * nothing. A producer that populates the field keeps its own value, so this can only turn a
+     * sentinel into a value — it can never re-attribute a row that is already attributed.
+     *
+     * **Nothing is rejected.** Every message that was stored before is still stored, with the same
+     * or better attribution; a message with no metadata and no body fields still lands on the
+     * sentinels rather than being dropped. An audit path that drops events is worse than one that
+     * under-attributes them, so the fallbacks stay and only become visible ([AttributionSource],
+     * `openbank.audit.attribution.missing`) instead of silent.
+     */
     @Incoming("audit-events-in")
-    suspend fun consume(payload: String) {
+    suspend fun consume(message: Message<String>) {
+        val payload = message.payload
+        try {
+            consume(payload, addressOf(message))
+        } finally {
+            // Switching the signature from `String` to `Message<String>` also switches SmallRye
+            // from auto-ack to MANUAL ack, so the ack must be explicit — and in a `finally`, or an
+            // un-storable message would stall the partition forever and the audit trail would stop
+            // dead. (`consume` already swallows its own exceptions, so this is belt-and-braces.)
+            Uni.createFrom().completionStage(message.ack()).awaitSuspending()
+        }
+    }
+
+    /** Lifts the broker metadata this consumer used to discard. Absent metadata is not an error. */
+    private fun addressOf(message: Message<String>): EventAddress {
+        val meta = message.getMetadata(IncomingKafkaRecordMetadata::class.java).orElse(null)
+            ?: return EventAddress.NONE
+
+        @Suppress("UNCHECKED_CAST")
+        val record = meta as IncomingKafkaRecordMetadata<Any?, String>
+        val ceType = record.headers
+            ?.lastHeader(OutboxKafkaHeaders.HEADER_EVENT_TYPE)
+            ?.value()
+            ?.toString(Charsets.UTF_8)
+            ?.takeIf { it.isNotBlank() }
+        return EventAddress(
+            topic = record.topic?.takeIf { it.isNotBlank() },
+            ceType = ceType,
+        )
+    }
+
+    /**
+     * As above, for a record with no broker addressing to offer. Visible for tests and for any
+     * replay path that has only the stored body.
+     */
+    suspend fun consume(payload: String): Unit = consume(payload, EventAddress.NONE)
+
+    suspend fun consume(payload: String, address: EventAddress) {
         try {
             val node: JsonNode = objectMapper.readTree(payload)
             val eventTime = eventTime(node)
+            val resolvedSource = resolveSourceService(node, address)
             val entry = AuditEntry(
                 id = UUID.randomUUID(),
                 // sepa.instant.events (KafkaSctInstEventPublisher) names its discriminator "type",
                 // not "eventType" — the only #996-consumed producer that does so.
-                eventType = node["eventType"]?.asText() ?: node["type"]?.asText() ?: "UNKNOWN",
+                // `ce-type` is the outbox event type, and it is the LAST resort before the
+                // sentinel: it is the producer's own value, carried by the transport rather than
+                // the body, so it is a recovery of a fact and not an inference (#3994).
+                eventType = node["eventType"]?.asText()
+                    ?: node["type"]?.asText()
+                    ?: address.ceType
+                    ?: "UNKNOWN",
                 aggregateType = node["aggregateType"]?.asText() ?: inferAggregateType(node),
                 aggregateId = inferAggregateId(node),
                 actorId = node["requestedBy"]?.asText()
@@ -49,7 +120,8 @@ class AuditConsumer {
                     ?: node["initiatedByPartyId"]?.asText(),
                 actorType = node["actorType"]?.asText(),
                 payload = payload,
-                sourceService = node["sourceService"]?.asText() ?: "unknown",
+                sourceService = resolvedSource.first,
+                sourceServiceSource = resolvedSource.second,
                 correlationId = node["correlationId"]?.asText(),
                 occurredAt = eventTime ?: Instant.now(clock),
                 recordedAt = Instant.now(clock),
@@ -59,8 +131,18 @@ class AuditConsumer {
                 channel = node["channel"]?.asText(),
                 actChain = node["actChain"]?.takeIf { it.isArray }?.map { it.asText() } ?: emptyList(),
                 sessionId = node["sessionId"]?.asText(),
+                // ADR-0232 D5: a delegated action names the grantor it was taken on behalf of and
+                // the grant that permitted it. customer-edge flattens its audit details into the
+                // event JSON, so both arrive as top-level fields. Absent = a direct action.
+                // (`takeIf { !it.isNull }` because Jackson's asText() on an explicit JSON null
+                // yields the STRING "null", which would index a delegated action that is not one.)
+                onBehalfOf = node["onBehalfOf"]?.takeIf { !it.isNull }?.asText(),
+                delegationId = node["delegationId"]?.takeIf { !it.isNull }?.asText(),
             )
             if (eventTime == null) countMissingEventTime(entry.sourceService)
+            if (entry.sourceServiceSource != AttributionSource.EVENT) {
+                countMissingAttribution(entry.sourceService, entry.sourceServiceSource)
+            }
             repo.save(entry)
         } catch (e: Exception) {
             log.errorf(e, "Failed to record audit entry: %s", payload.take(200))
@@ -83,6 +165,49 @@ class AuditConsumer {
         if (!::meterRegistry.isInitialized) return
         meterRegistry.counter("openbank.audit.event.time.missing", "source_service", sourceService)
             .increment()
+    }
+
+    /**
+     * The producing service, and who said so (#3994).
+     *
+     * Ordered strongest claim first:
+     *  1. the producer's own `sourceService` field — [AttributionSource.EVENT];
+     *  2. the Kafka topic, via the verified [TopicAttribution] table — [AttributionSource.TOPIC].
+     *     Sound because the topic is transport addressing rather than anything the producer chose
+     *     to omit, but it identifies the service and is not the service's own assertion;
+     *  3. neither — the `"unknown"` sentinel, [AttributionSource.ABSENT], exactly as before.
+     *
+     * The pair is returned together on purpose: a caller cannot take the value without also taking
+     * the provenance, so a derived attribution cannot be stored as if it were declared. That is
+     * the whole defect — `?: "unknown"` was a *successful parse* with no exception, no metric and
+     * no log line, and 76% of the trail went that way unnoticed.
+     */
+    private fun resolveSourceService(node: JsonNode, address: EventAddress): Pair<String, AttributionSource> {
+        node["sourceService"]?.asText()?.takeIf { it.isNotBlank() }?.let {
+            return it to AttributionSource.EVENT
+        }
+        TopicAttribution.sourceService(address.topic)?.let { return it to AttributionSource.TOPIC }
+        return "unknown" to AttributionSource.ABSENT
+    }
+
+    /**
+     * `openbank.audit.attribution.missing{source_service,provenance}` — rows whose producing
+     * service was not stated by the producer (#3994).
+     *
+     * Counted for TOPIC as well as ABSENT, not only the sentinel. A topic-derived row is a
+     * correctly attributed row AND an outstanding producer gap; folding the two together would
+     * make the gap disappear from the dashboard the moment this fix ships, which is precisely the
+     * kind of silence that let the original defect run to 76%.
+     */
+    private fun countMissingAttribution(sourceService: String, provenance: AttributionSource) {
+        if (!::meterRegistry.isInitialized) return
+        meterRegistry.counter(
+            "openbank.audit.attribution.missing",
+            "source_service",
+            sourceService,
+            "provenance",
+            provenance.name,
+        ).increment()
     }
 
     /**

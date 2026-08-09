@@ -146,6 +146,18 @@ openbank:
     # postings can be attributed rather than only counted.
     day-lock:
       mode: "${LEDGER_DAY_LOCK_MODE:shadow}"
+    # AccountingDayScheduler (ADR-0207 increment 2): reconciles the persisted day calendar
+    # toward the AccountingClock — opens the current day, cuts over past days, ties out days
+    # whose 06:00 tie-out verdict is OK, and publishes the stuck-CUTOFF gauge. Without it the
+    # day lock's shadow counter is vacuous: measured live 2026-08-07, ledger_accounting_day had
+    # zero rows while postings flowed, so every decision was no_day_record and enforcement had
+    # no evidence to read. LOCKED stays operator-driven (statement/period-close territory).
+    accounting-day:
+      max-catchup-days: 7
+      # Normal CUTOFF residence is ~6h (midnight tick -> 06:00 tie-out -> next tick). Over this
+      # threshold the day counts into openbank_ledger_accounting_day_stuck_cutoff_days, which
+      # pages via prometheus-rules-accounting-day.yaml.
+      stuck-cutoff-hours: 8
     # Period-granular lock (ADR-0096 D1). Modes: off | shadow | enforce. Same staged rollout and
     # the same reason as the day lock above — it ships in SHADOW and refuses nothing until the
     # counter openbank_ledger_period_lock_decisions_total{outcome="would_refuse"} reads zero (or

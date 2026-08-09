@@ -12,9 +12,9 @@
 # Local gate before a PR
 ./gradlew detekt ktlintCheck koverVerify build
 
-# Container image (multi-stage Dockerfile)
-#   build stage: eclipse-temurin:20-jdk + gradlew quarkusBuild (fast-jar)
-#   runtime stage: eclipse-temurin:25-jre-alpine, non-root user, -XX:+UseZGC
+# Container image (single-stage; the recipe is .github/workflows/Dockerfile.deploy)
+#   build: host-side, ./gradlew build -Dquarkus.package.jar.type=fast-jar
+#   runtime: eclipse-temurin:25-jre (glibc, #3354), non-root user, -XX:+UseZGC
 ```
 
 > Build uses the host-side Gradle build, fast-jar packaging (`-Dquarkus.package.jar.type=fast-jar`), per the repo GitOps rules — never in-Docker Gradle, never uber-jar.

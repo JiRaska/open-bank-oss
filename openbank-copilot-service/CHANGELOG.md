@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.11.0...copilot-service-v0.11.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* **copilot:** capture the erasure identity at write time so PARTY_ERASED actually deletes ([#4156](https://github.com/JiRaska/open-bank-oss/issues/4156)) ([44f2c6b](https://github.com/JiRaska/open-bank-oss/commit/44f2c6baf355e61f3cf2a4ef9816d54aaa18af59)), closes [#3881](https://github.com/JiRaska/open-bank-oss/issues/3881)
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.10.1...copilot-service-v0.11.0) (2026-08-07)
+
+
+### Features
+
+* **copilot:** register workflow liveness on conversation retention scheduler (ADR-0237) ([#3932](https://github.com/JiRaska/open-bank-oss/issues/3932)) ([e9cf66b](https://github.com/JiRaska/open-bank-oss/commit/e9cf66bce8227696683e471a1d81dbc4a660209f)), closes [#3345](https://github.com/JiRaska/open-bank-oss/issues/3345)
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.10.0...copilot-service-v0.10.1) (2026-08-06)
 
 

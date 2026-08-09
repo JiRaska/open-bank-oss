@@ -4,6 +4,7 @@
 
 package com.openbank.sanctions.it
 
+import com.openbank.libs.testing.audit.AuditEventTime
 import com.openbank.sanctions.application.port.`in`.ReviewCommand
 import com.openbank.sanctions.application.port.`in`.SanctionsUseCase
 import com.openbank.sanctions.domain.model.EntityType
@@ -155,6 +156,39 @@ class SanctionsReviewUpdateIT {
             .describedAs("the review decision is an event downstream AML/audit consumers must see")
             .isEqualTo(2)
         assertThat(storedStatus(stored.id)).isEqualTo("ESCALATED")
+    }
+
+    /**
+     * #3914: both outbox payloads must carry an event time `openbank-audit-service`'s
+     * `AuditConsumer` accepts, or the audit trail records ITS ingest clock as the business time of
+     * a sanctions screening — the GDPR Art. 30 "when" dimension for the highest-risk action in
+     * this service.
+     *
+     * Read from the real `sanctions_outbox` rows rather than from the repository's return value:
+     * the payload is what is durable and what the dispatcher publishes verbatim, and only a row
+     * read proves the value survived serialisation. Red before the fix on both rows, and each is
+     * checked for its OWN instant — the screening's `checkedAt` and the review's `reviewedAt` are
+     * genuinely different moments and a single blanket clock read would satisfy neither.
+     */
+    @Test
+    fun `both the screening and the review payloads carry their own instant as the audit event time`() {
+        val stored = onEventLoop { repository.saveWithEvent(hit("review-key-4"), "SanctionChecked") }
+
+        val reviewed = onEventLoop {
+            useCase.review(
+                ReviewCommand(stored.id, "operator-4", "confirmed", SanctionsCheckStatus.ESCALATED),
+            )
+        }
+
+        val payloads = outboxPayloadsOldestFirst()
+        assertThat(payloads).hasSize(2)
+        AuditEventTime.assertRecordedAsEventTime(payloads[0], stored.checkedAt)
+        AuditEventTime.assertRecordedAsEventTime(payloads[1], requireNotNull(reviewed.reviewedAt))
+    }
+
+    private fun outboxPayloadsOldestFirst(): List<String> = onEventLoop {
+        pool.query("SELECT payload FROM sanctions_outbox ORDER BY created_at, id").execute().awaitSuspending()
+            .map { it.getString("payload") }
     }
 
     /**

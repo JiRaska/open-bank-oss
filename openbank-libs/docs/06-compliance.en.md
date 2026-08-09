@@ -9,7 +9,7 @@ openbank-libs is **not a compliance boundary control**, but **a channel for impl
 | `BuildInfo` + `ServiceInfoResource` | DORA | Art. 8 (asset register) | Per-service runtime tech stack (Kotlin/Quarkus/JDK versions) is machine-readable via `/api/v1/info` |
 | `BuildInfo` + per-service SBOM | DORA | Art. 28 (ICT third-party register) | CycloneDX SBOM per service in `build/reports/bom.json`, CI artifacts + admin UI download |
 | `BootstrapVerifier` | DORA, NIS2 | DORA Art. 9 (ICT security controls), NIS2 Art. 21 | Fail-fast guard against dev-default secrets in prod (closes K1 from the 2026-05-28 audit) |
-| `PiiMasking` (`PiiMask`, `@MaskSensitive`) | GDPR | Art. 25 (privacy by design), Art. 32 (security of processing) | Single audit-grade implementation, PCI-DSS compliant card masking (first 4 + last 4) |
+| `PiiMasking` (`PiiMask`) | GDPR | Art. 25 (privacy by design), Art. 32 (security of processing) | Single audit-grade implementation, PCI-DSS compliant card masking (first 4 + last 4). Applied **explicitly** by the caller — there is no declarative masking annotation, and no serialization filter that would honour one (#4011) |
 | `AuditEvent` + `AuditEventPublisher` | GDPR, DORA | GDPR Art. 30 (Records of Processing), DORA Art. 17 (incident reconstruction 24 h) | Canonical envelope (actor, op, resource, ts, ip, result, traceId), pluggable publisher |
 | `Roles` (canonical constants) | PSD2, CNB | PSD2 RTS § technical standard, CNB decree 163/2014 § access permissions | Eliminates string-typo security holes; audit knows which roles exist |
 | `BearerTokenClientHeadersFactory` | NIS2, DORA | NIS2 Art. 21 (cryptographic auth), DORA Art. 9 | Service-to-service mTLS-equivalent via JWT Bearer, automatic correlation propagation |
@@ -37,7 +37,7 @@ graph LR
   subgraph LibsContrib["openbank-libs contribution"]
     BV[BootstrapVerifier]
     Roles[Roles canonical enum]
-    PiiMask[PiiMask + @MaskSensitive]
+    PiiMask[PiiMask deterministic masking]
     AuditEvent[AuditEvent envelope]
   end
 

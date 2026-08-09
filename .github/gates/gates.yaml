@@ -76,8 +76,7 @@
 #
 gates:
 
-  # ==== lint ==================================================================
-
+  # ==== lint ===========================================================
   # The runner's own falsification, riding the cheapest shard. run-gates.py decides for
   # every other gate in this file whether a non-zero exit fails the build, whether an
   # advisory warning is emitted, and — the part with no second opinion anywhere — whether a
@@ -149,17 +148,25 @@ gates:
         echo "No shell scripts under openbank-infra/scripts — skipping."
       fi
 
-  # ==== gitops ================================================================
-
+  # ==== gitops =========================================================
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
-  # mechanism-3 liveness gauge. ADVISORY with a baseline ratchet — the 37 files
-  # without a heartbeat at introduction are listed in the producer; a NEW job
-  # without one fails even now, and the baseline may only shrink. rules.yaml:
-  # scheduled_methods.liveness_adoption, enforce target 2026-09-30.
+  # mechanism-3 liveness gauge. ENFORCED as of #3931, ahead of the 2026-09-30
+  # target — a baseline ratchet, not a sweep gate: the 16 files still without a
+  # heartbeat are grandfathered in the producer's BASELINE, and only two things
+  # are red — a NEW domain @Scheduled job with no registerWorkflowLiveness, and a
+  # baseline entry that HEALED without being removed. Both directions, so the list
+  # cannot rot either way. rules.yaml: scheduled_methods.liveness_adoption.
+  #
+  # Why the mode had to move: the script already returned 1 on both of those
+  # branches, and `mode: advisory` converted it to a warning at the runner
+  # (run-gates.py:333-338). So the ratchet's forward half never blocked — #3875
+  # merged a heartbeat-less ConversationRetentionScheduler on the day the gate
+  # reported it, and account-service's SavingsProposalExpiryScheduler followed it
+  # in the same way. A ratchet whose forward half does not block is not a ratchet.
   - id: scheduler-liveness-adoption
-    name: "scheduler liveness adoption (ADR-0237, advisory)"
+    name: "scheduler liveness adoption (ADR-0237)"
     group: gitops
-    mode: advisory
+    mode: enforced
     selftest: |
       python3 .github/scripts/check-scheduler-liveness.py --self-test
     run: |
@@ -250,14 +257,22 @@ gates:
       python3 .github/scripts/check-oidc-secret-convention.py --enforce
 
   - id: single-replica-rollout-strategy
-    name: "one-replica workloads declare their rollout strategy (issue #3545, enforced, baseline-ratcheted)"
+    name: "one-replica workloads declare their rollout strategy AND their canary is realisable (issues #3545/#3806, enforced, baseline-ratcheted)"
     group: gitops
     mode: enforced
     selftest: python3 .github/scripts/check-single-replica-rollout-strategy.py --self-test
     selftest_expect: pass
     run: |
+      # Two independent questions over the same manifests. The first is #3545: did the workload
+      # SAY what it wants, or inherit maxSurge 1 / maxUnavailable 0 by accident. The second is
+      # #3806: a canary block counted as "declared" and stopped there, which is how 21 of 21
+      # canary Rollouts (17 money-path) declaring `setWeight: 10` on ONE replica were never
+      # findings — without trafficRouting a weight is pods-out-of-pods, so one pod expresses 0 or
+      # 100 and nothing else, while status.phase reads Healthy throughout. Separate baselines:
+      # #3545's is empty on purpose and must stay that way.
       python3 .github/scripts/check-single-replica-rollout-strategy.py --enforce \
-        --baseline .github/single-replica-rollout-strategy-baseline.txt
+        --baseline .github/single-replica-rollout-strategy-baseline.txt \
+        --canary-baseline .github/canary-rollout-realisable-baseline.txt
 
   - id: gen-network-policies-drift-gate
     name: "gen-network-policies drift gate (ADR-0081, issue #854)"
@@ -431,14 +446,20 @@ gates:
   # "schema-registry:8081" for the life of the service; the Service is apicurio-registry:8080 in
   # `messaging` (issue #1916). Needs no network: the resolvable set is fully declared in gitops.
   #
-  # ADVISORY (rules.yaml: incluster_hostnames, target_enforce_date 2026-10-31) — 6 pre-existing
-  # findings, all bare `openbank-<svc>` rest-client defaults on services whose pods override them
-  # by env. Four of the owners are money-path, so that cleanup takes the two-approval path rather
-  # than riding along with the guard that found it.
+  # ENFORCED since #3931, which drained the 6 pre-existing findings. The advisory note that stood
+  # here claimed all six were dead defaults "on services whose pods override them by env" — that
+  # was true of only THREE (account-service ×2, card-issuance ×1). The other three were live:
+  # settlement-service's Rollout and onboarding-service's Deployment carried no *_SERVICE_URL at
+  # all, so `openbank-balance-service:8080` / `openbank-ledger-service:8080` /
+  # `openbank-party-service:8090` were the EFFECTIVE values in the cluster — names that resolve
+  # nowhere, on wrong ports (8103 / 8101 / 8111). The triage note was written from the shape of
+  # the findings rather than from the deployed manifests, and being advisory is what let it sit.
+  # Generalize: an advisory gate's "these are all benign" note is itself an unverified claim, and
+  # advisory mode removes the pressure that would have checked it.
   - id: incluster-hostname-resolution
-    name: "in-cluster hostnames resolve to a declared Service (issue #1916, advisory)"
+    name: "in-cluster hostnames resolve to a declared Service (issue #1916, enforced)"
     group: gitops
-    mode: advisory
+    mode: enforced
     selftest: |
       python3 .github/scripts/check-incluster-hostnames.py --self-test
     selftest_expect: pass
@@ -501,8 +522,7 @@ gates:
       python3 .github/scripts/check-probe-port-listener.py --selftest
       python3 .github/scripts/check-probe-port-listener.py --enforce
 
-  # ==== supplychain ===========================================================
-
+  # ==== supplychain ====================================================
   - id: license-header-consistency
     name: "License header consistency (issue #2280, enforced)"
     group: supplychain
@@ -687,6 +707,23 @@ gates:
     run: |
       bash .github/scripts/probe-pact-version.sh --self-test
 
+  # The counterpart-verifiability probe (#3223). The classifier above says WHY a block
+  # happened; two of its classes end in a promise ("clears within one reconcile tick",
+  # "the reconcile re-drives it automatically") that was a hardcoded constant, not an
+  # observation — and on run 31080511057 all six blocked money-path services carried it
+  # while every counterpart version named was unverifiable by construction. This probe is
+  # what turns that promise into evidence, so its failure directions are what must be
+  # exercised: a contentless counterpart dominating a healthy one, and every probe failure
+  # degrading to `unknown` rather than to the reassuring answer.
+  - id: blocking-counterpart-probe-unit-test
+    name: "can-i-deploy counterpart verifiability probe (issue #3223, enforced)"
+    group: supplychain
+    mode: enforced
+    selftest: |
+      bash .github/scripts/probe-blocking-counterparts.sh --self-test
+    run: |
+      bash .github/scripts/probe-blocking-counterparts.sh --self-test
+
   # Workflow `run:` step size (#3082). GitHub rejects an oversized run script by making the
   # WHOLE workflow unparseable — zero jobs, no error message, every contributor's runs of that
   # file dead until someone reverts. It happened to auto-deploy.yml (#3135 -> #3139) and NOTHING
@@ -785,8 +822,7 @@ gates:
     run: |
       python3 .github/scripts/check-advisory-gate-registration.py --expect-manifest
 
-  # ==== registry ==============================================================
-
+  # ==== registry =======================================================
   # issue #669 scope item 3 / rules.yaml: slo. Every money_path_services entry needs a
   # matching availability + latency Pyrra ServiceLevelObjective whose target/window match
   # the governed values in rules.yaml — pyyaml is already installed by the step above.
@@ -928,6 +964,37 @@ gates:
     run: |
       bash .github/scripts/check-adr-registry.sh
 
+  # ADR `partial` delivery-status declares its follow-up (issue #3965).
+  #
+  # rules.yaml's `governance_followup` says an ADR's actionable tail gets an issue. A
+  # `partial` ADR has one by construction — something shipped, something did not — and
+  # that rule lived in prose with no gate: 85 of 241 ADRs record an unbuilt half.
+  #
+  # NOT AN ISSUE SEARCH, deliberately. Grepping the open backlog for `ADR-NNNN` goes red
+  # on ADRs that ARE tracked — by an issue that never types the number (5 false positives
+  # in a 13-ADR hand-triaged sample), in another repo by design (ADR-0075 says so), or on
+  # an ADR whose `partial` means an accepted limitation with no tail at all (ADR-0186).
+  # It is also unbaselineable: the same search gave 52, 55 and 64 on three consecutive
+  # days as issues CLOSED underneath it, with no ADR moving. So the gate is offline and
+  # reads one optional front-matter key the author writes, which can express all four
+  # states. Same offline contract as check-adr-registry.sh, which likewise declines to
+  # resolve issue references.
+  #
+  # RATCHET: today's 85 markerless `partial` ADRs are a BASELINE constant in the script,
+  # so this is enforced from day one and number 86 is red at PR time. A baseline entry
+  # that no longer applies — marker written, status no longer partial, file gone — FAILS,
+  # so the list cannot rot into furniture. Same contract as check-pact-provider-replay.py.
+  # Five were drained in the landing PR, so the committed baseline is 80.
+  - id: adr-partial-followup
+    name: "ADR partial delivery-status declares its follow-up (issue #3965, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-adr-partial-followup.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-adr-partial-followup.py --enforce
+
   # Agent charter parity (ADR-0031 / ADR-0156): every openbank-libs/governance/agents.yaml
   # id has a docs/agents/<id>.md and vice versa.
   #
@@ -946,6 +1013,19 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/check-agent-charter-registry.sh
+
+  - id: agent-case-schema
+    name: "agent case-coordination schema invariants (ADR-0244 D3/D6/D9, enforced)"
+    group: registry
+    mode: enforced
+    run: |
+      # #3771 added case_classes + case_capabilities to agents.yaml with no validator;
+      # a threshold of 1.30 or a second charter holding case.coordinate would parse as
+      # valid YAML and merge as a governance lie (budgets are the D6 stop-condition,
+      # single-coordinator the D3/D9 audit invariant). Falsified both directions by the
+      # 15-case self-test; the real file passes.
+      python3 .github/scripts/check-agent-case-schema.py --self-test
+      python3 .github/scripts/check-agent-case-schema.py --enforce
 
   # EU AI Act inventory drift (ADR-0148 rule #7, issue #1918).
   #
@@ -1098,6 +1178,21 @@ gates:
     run: |
       python3 .github/scripts/check-gates-not-deregistered.py --enforce
 
+  - id: dockerfile-runtime-only
+    name: "Dockerfiles are runtime-only, declare EXPOSE, share the deploy base (#3016/#3354, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-dockerfile-no-build-stage.py --self-test
+    selftest_expect: pass
+    run: |
+      # This lived as an inline step in ci.yml's `ui-build` job, which runs only when
+      # openbank-admin-ui/, */governance.yaml or the governance schema changed. So the gate
+      # that owns Dockerfile shape could not fire on a Dockerfile-only PR — the exact change
+      # it exists to catch — and reported nothing rather than reporting a skip. Found on
+      # #3629, whose 53 Dockerfile edits skipped it entirely. A shard runs unconditionally.
+      python3 .github/scripts/check-dockerfile-no-build-stage.py --enforce
+
   - id: gate-script-registration
     name: "every check-* script is actually run (#3240, enforced)"
     group: registry
@@ -1106,6 +1201,34 @@ gates:
       python3 .github/scripts/check-gate-script-registration.py --self-test
     run: |
       python3 .github/scripts/check-gate-script-registration.py --enforce
+
+  # The DECLARATION half of the main-red watch (issue #4019). `main`'s own CI conclusion was
+  # observed by nothing: the repo's only workflow_run listener re-runs spot-killed runs and
+  # escalates nothing, and deploy-drift-watch.yml — named "Deployed == main watch" — compares
+  # the DEPLOYED IMAGE, so a red commit that deployed reads as perfectly in sync. main went red
+  # four times on 2026-08-07/08 (Services CI/engagement-service, CI/Admin UI build, Security
+  # scan/Trivy twice) and each was found only because a human swept the Actions tab.
+  #
+  # The watch's coverage set is a hand-written `workflows:` list inside a workflow_run trigger,
+  # and this repo has already been bitten by a gate whose scope is a hand-kept list of the thing
+  # it checks (pact-drift-check.yml was green about modules it never regenerated). So the list is
+  # not maintained separately from the artifacts it covers: R1 requires every unconditional
+  # push-on-main workflow to be in it, R2 requires every path-filtered one to be either in it or
+  # in the script's NOT_WATCHED map with a reason, and a stale exclusion fails too.
+  #
+  # The binding copy is HERE, not in main-red-watch.yml: that workflow is workflow_run- and
+  # paths-triggered, so it can never be a required context and its verdict is advisory in
+  # practice. The runtime half (classify a completed run, escalate onto an issue) never gates a
+  # merge — main being red is not a defect in the PR at hand.
+  - id: main-red-watch-declaration
+    name: "every push-on-main workflow is watched or declared (issue #4019, enforced)"
+    group: registry
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-main-red-watch.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-main-red-watch.py --check-declaration
 
   - id: opa-sidecar-bundle-shape
     name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"
@@ -1245,18 +1368,53 @@ gates:
   # says in place that registering an operator write without it "is a money-path outage, not
   # a test failure".
   #
-  # ADVISORY, deliberately and temporarily. The script has no --enforce flag and exits 1 on
-  # the current tree with one real finding (`operator-mcp-session` in the shared rest.rego
-  # grants on ROLE_OPERATOR/ROLE_ADMIN without pinning input.principal.id). Registering it
-  # enforced would break main on a defect this PR is not fixing; registering it advisory is
-  # what makes that defect visible at all. Graduate to enforced once the finding is closed —
-  # tracked on #3240.
+  # GRADUATED TO ENFORCED by this PR, which is what the advisory note below asked for. It read:
+  # "Graduate to enforced once the finding is closed — tracked on #3240." The finding was
+  # `operator-mcp-session` granting on ROLE_OPERATOR/ROLE_ADMIN without pinning
+  # input.principal.id; this PR closes it with the `service-account-` exclusion, and clears the
+  # two stale BASELINE entries (operator-fx-approval-decide, operator-fx-trigger) that had
+  # accumulated meanwhile. Measured: origin/main exits 1 (1 new + 2 stale), this branch exits 0.
+  #
+  # `mode:` is the whole enforcement, and the run line deliberately does NOT pass --enforce.
+  # That is the ratchet: a NEW escaping rule and a STALE baseline entry each `return 1`
+  # unconditionally, so enforced blocks them, while today's 5 baselined rules print a warning
+  # and exit 0 so the debt can be worked down per rule. Passing --enforce would instead fail on
+  # the debt itself and make the gate unmergeable — a different lever, kept but not wired here.
+  #
+  # Advisory was doing less than it looked: those two `return 1` paths already existed, and
+  # `mode: advisory` converts a script's exit 1 into a warning at the runner. So a brand-new
+  # operator write escaping the prohibition was DETECTED and not blocked, on a rule whose own
+  # text says registering one without it "is a money-path outage, not a test failure".
   - id: operator-write-naming
-    name: "operator-write naming vs. shared-M2M prohibition (GHSA-58jq-9hq3-66jr, advisory)"
+    name: "operator-write naming vs. shared-M2M prohibition (GHSA-58jq-9hq3-66jr, enforced)"
     group: registry
-    mode: advisory
+    mode: enforced
     run: |
       python3 .github/scripts/check-operator-write-naming.py
+
+  # The OTHER half of the same exposure, and the half no policy can veto (#3765, #3734).
+  # check-operator-write-naming above governs role-only write RULES, so that a rule can at
+  # least become a candidate for `shared_m2m_write_prohibition.reasons`. It cannot see the
+  # matrix: `matrix-allows` grants straight out of `rules.yaml: authz.role_action_matrix`,
+  # is a base-layer reason no per-service ext can exclude, and can never join a register
+  # keyed by reason name without vetoing every legitimate matrix-granted call. So a write
+  # action added to the ROLE_OPERATOR grant list is a grant to whichever M2M service-account
+  # holds that role, with nothing anywhere to object.
+  #
+  # ENFORCED, not advisory, and the difference from its sibling is that the tree is CLEAN:
+  # the register was seeded with the measured 68 grants in the same change, so this blocks
+  # only what is NEW. Falsified against the real diff of PR #3697 (five sdd grants, one of
+  # them sdd.authorise — the call that books a debtor debit): 5 ::error:: lines, rc=1.
+  # `mode:` alone would be vacuous here as it was on threat-model-diff (#2392) — the script
+  # exits 0 without --enforce, so the flag below is the load-bearing half.
+  - id: matrix-write-grants
+    name: "matrix write grants reachable by an M2M service-account are declared (#3765, enforced)"
+    group: registry
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-matrix-write-grants.py --enforce
+    selftest: python3 .github/scripts/check-matrix-write-grants.py --self-test
+    selftest_expect: pass
 
   # Admin-ui IAOps governance snapshot drift (ADR-0029 D3 / ADR-0031).
   # openbank-admin-ui/ai-governance-snapshot.json is DERIVED from curated rollout prose
@@ -1271,8 +1429,7 @@ gates:
     run: |
       python3 .github/scripts/gen-ai-governance-snapshot.py --check
 
-  # ==== kotlin ================================================================
-
+  # ==== kotlin =========================================================
   # ADR-0160 mechanism 1 / rules.yaml: change_requirements.event_consumer_liveness.
   # Fleet-wide scan (not diff-scoped): every Kafka topic a service publishes must have a
   # real @Incoming consumer somewhere in the fleet, or a one-line-reasoned allowlist entry.
@@ -1329,6 +1486,35 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/check-exception-mapper-collision.sh .
+
+  # A required @QueryParam/@HeaderParam/@MatrixParam declared with a NON-NULLABLE
+  # Kotlin reference type answers 500 when the caller omits it, never 400 — the
+  # caller cannot tell "I sent a bad request" from "the server is broken", and on
+  # a money path that decides whether they retry (issue #3104). Same root shape as
+  # the null-body 500s of #3032/#3050, one argument position over.
+  #
+  # The trap this gate exists to stop being re-learned: writing requireNotNull in
+  # the BODY of a non-suspend handler is dead code. Kotlin emits
+  # Intrinsics.checkNotNullParameter at bytecode offset 0, so the NPE has already
+  # thrown (verified with javap; a suspend function gets no intrinsic at all, and
+  # the null then flows into the body instead). The parameter must be declared
+  # NULLABLE for any guard to be reachable; libs-runtime maps the resulting
+  # IllegalArgumentException to 400 — never add a service-local mapper (#526).
+  #
+  # Ratchet, not a flat fail: remediation is per-handler (required / @DefaultValue
+  # / genuinely optional) and only the handler knows which. The 24 money-path
+  # sites are fixed; the 39 remaining are baselined in the script with their
+  # service, so a NEW occurrence fails and a baseline entry that becomes fixed is
+  # reported too. Self-test first — the must-NOT-flag half is what matters here,
+  # since an outbound REST-client interface carries the identical annotation and
+  # is not a defect (52 of the 115 raw matches on main). ENFORCED.
+  - id: nonnull-jaxrs-param-ratchet
+    name: "non-nullable required JAX-RS param ratchet (issue #3104, enforced)"
+    group: kotlin
+    mode: enforced
+    run: |
+      python3 .github/scripts/check-nonnull-jaxrs-params.py --self-test
+      python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
 
   # openbank.outbox.dispatch-enabled guard (the CLAUDE.md "outbox footgun":
   # a service whose OutboxDispatcher actually gates on this flag silently
@@ -1420,17 +1606,61 @@ gates:
   # hexagonal invariant was documented in every PR template but never enforced,
   # and the fleet quietly accumulated violations (Quarkus @RegisterForReflection
   # on a domain type, Jackson JsonNode in domain models). Baseline-ratcheted
-  # (detekt pattern): the 11 pre-existing violations are grandfathered in
+  # (detekt pattern): pre-existing violations are grandfathered in
   # domain-purity-baseline.txt and burn down as touched; any NEW framework
-  # import in a domain layer fails outright. openbank-libs-runtime is module-
+  # reference in a domain layer fails outright. openbank-libs-runtime is module-
   # exempt (it IS the framework side of the ADR-0122 split; only its package
   # string says "domain"). ENFORCED from introduction (0 new on main).
+  #
+  # #3670 rewrote the bash version, which had two blind spots that intersected on
+  # @Authorize/@FeatureFlag — the fleet's most-used annotations, declared in
+  # openbank-libs-domain as jakarta.interceptor.InterceptorBinding, green every run:
+  #   (a) SCOPE was the `*/domain/*` package path, so 80 of libs-domain's 107 main
+  #       sources (com/openbank/libs/authz, .../flags, ...) were never opened. The
+  #       whole module is now in scope — it IS the domain side of ADR-0122.
+  #   (b) DETECTION was `^import <prefix>`; a fully-qualified reference has no import
+  #       line. Both forms are matched now, on comment- and string-stripped source.
+  # It also gained a --self-test the bash version never had.
   - id: domain-purity-gate
     name: "domain-purity gate — hexagonal invariant (ADR-0002, enforced)"
     group: kotlin
     mode: enforced
+    selftest: |
+      python3 .github/scripts/check-domain-purity.py --self-test
     run: |
-      bash .github/scripts/check-domain-purity.sh .
+      python3 .github/scripts/check-domain-purity.py .
+
+  # openbank-libs published three annotations — @Idempotent, @Audited, @MaskSensitive —
+  # that were plain RUNTIME markers: no @InterceptorBinding, no interceptor, zero usages.
+  # Applying one compiled, reviewed as correct, and did nothing; @Idempotent on a payment
+  # endpoint would have let a duplicate POST through while the source read as protected.
+  # Two were recorded as SHIPPED CONTROLS — ADR-0014 Phase 3 "✅ Shipped: PiiMask/
+  # @MaskSensitive", and the STRIDE Repudiation mitigation in the onboarding threat model —
+  # which is the half that actively misleads: an unimplemented idea had become evidence.
+  #
+  # Two rules, each falsified separately (#4011). RULE A: an annotation declared in an
+  # openbank-libs-* module must be @InterceptorBinding WITH an interceptor, or be applied at
+  # least once in some src/main — red on the pre-fix tree with exactly the three above.
+  # RULE B: a document in docs/adr, docs/threat-models or openbank-libs/docs may not name an
+  # @Annotation that no Kotlin source declares or imports — red on the intermediate state
+  # (annotations deleted, documents not yet corrected: 25 findings), which is precisely the
+  # shape that made this dangerous rather than untidy. The "real annotation" set is DERIVED
+  # from the sources, never hand-kept.
+  #
+  # Code-about-code precedence was decided BEFORE the first run, since a text guard always
+  # flags the prose explaining the defect it catches: naming an absent annotation is allowed
+  # when the surrounding paragraph cites an issue. Prose about deliberately-unadopted
+  # third-party annotations (ADR-0016's @RunOnVirtualThread, a residual-risk column's
+  # @RateLimited) sits in PROSE_ALLOWLIST with a reason each, and a STALE entry fails in
+  # either direction — an exemption and its removal move together.
+  - id: libs-annotations-implemented
+    name: "openbank-libs annotations are implemented, and no doc names a phantom one (#4011, enforced)"
+    group: kotlin
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-libs-annotations-implemented.py --self-test
+    run: |
+      python3 .github/scripts/check-libs-annotations-implemented.py .
 
   # ==== api ===================================================================
 
@@ -1450,6 +1680,67 @@ gates:
       python3 .github/scripts/check-pacticipant-matches-module.py --self-test
     run: |
       python3 .github/scripts/check-pacticipant-matches-module.py
+
+  # The resolver decides what record-deployment writes into the broker's environment record
+  # (#3223). Its core is a pure path classifier, so the self-test drives every branch — including
+  # the prefix-sibling near-miss (openbank-ledger vs openbank-ledger-service) and the
+  # "no exclude-paths declared" case, where src/test must COUNT rather than be assumed excluded.
+  # Falsified both ways before wiring in: breaking the exclusion makes it exit 1 with 4 failures.
+  - id: record-deployment-version-resolver
+    name: "record-deployment version resolver (issue #3223, enforced)"
+    group: api
+    mode: enforced
+    selftest: |
+      bash .github/scripts/resolve-record-deployment-version.sh --self-test
+    selftest_expect: pass
+    run: |
+      bash .github/scripts/resolve-record-deployment-version.sh --self-test
+
+  # The other half of every other gate in this file. Every other gate here reads committed text,
+  # because that is what CI can see; this one compares that text to what the cluster actually
+  # does. Only the COMPARISON runs in CI — it is a pure function of (snapshot, repo) and is what
+  # the self-test drives. Collection needs cluster credentials no workflow has yet, so it is
+  # dispatch-only for now (runtime-conformance.yml), the same split check-external-feeds.py uses.
+  #
+  # Falsified before wiring in: the 22-case self-test fails when any comparator is broken, and the
+  # first run against the LIVE estate exposed two defects in the tool itself — libs-runtime's
+  # abstract dispatcher counted as a service, and outbox facts keyed by table name never matched
+  # claims keyed by directory name, so nine real findings were silently skipped. Both are now
+  # self-test cases.
+  - id: runtime-conformance-comparators
+    name: "runtime conformance: claim-vs-cluster comparators (enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/runtime-conformance.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/runtime-conformance.py --self-test
+  # A service that ships an outbox must write to it (#4007). Eight do not: dispatcher, backlog
+  # gauge, migration and `dispatch-enabled: true`, with no OutboxMessage construction anywhere in
+  # src/main — so the dispatcher polls a table nothing writes to and the gauge reads 0, which is
+  # indistinguishable from a drained queue. Those events still reach consumers, through a second
+  # direct non-transactional emitter, so nothing downstream notices either.
+  #
+  # RATCHET: today's eight are baselined against #4007 (each needs a per-service wire-or-delete
+  # decision this gate does not make), so a NINTH cannot be added quietly. A baseline entry that
+  # becomes covered is also reported, so the list cannot quietly become permanent.
+  #
+  # Falsified both ways on the real tree before wiring in, reading the exit code directly rather
+  # than through a pipe: removing fx-service's writer -> rc=1 with the service named; adding a
+  # bogus baseline entry -> rc=1 as a stale entry; clean tree -> rc=0. The self-test additionally
+  # covers the code-about-code cases — a KDoc, a commented-out call, a NESTED block comment and a
+  # string literal naming the constructor must none of them count as a writer.
+  - id: outbox-has-writer
+    name: "a service shipping an outbox dispatcher must construct an OutboxMessage (#4007, enforced)"
+    group: kotlin
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-outbox-has-writer.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-outbox-has-writer.py --self-test
+      python3 .github/scripts/check-outbox-has-writer.py .
 
   - id: pact-provider-replay-coverage
     name: "Pact provider-replay coverage (issue #2338, enforced)"
@@ -1559,8 +1850,7 @@ gates:
     run: |
       python3 .github/scripts/check-openapi-server-port.py --enforce
 
-  # ==== data ==================================================================
-
+  # ==== data ===========================================================
   - id: kafka-topic-existence
     name: "Kafka topic existence (issue #2598, enforced)"
     group: data
@@ -1766,8 +2056,7 @@ gates:
       python3 .github/scripts/check-external-feeds.py --self-test
       python3 .github/scripts/check-external-feeds.py --root . --offline
 
-  # ==== security ==============================================================
-
+  # ==== security =======================================================
   # rules.yaml: alerting.critical_alerts_must_egress. A severity=critical alert must
   # reach a receiver that leaves the cluster. Guards the "severity inversion": critical
   # routed only to GoAlert/ntfy/Holmes — all cluster-internal with no Ingress
@@ -1972,6 +2261,21 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-realm-template-importable.py
+  - id: opa-bundle-parses
+    name: "OPA bundle must be loadable by OPA (generated artifact, not its sources)"
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-opa-bundle-parses.py --self-test
+    selftest_expect: pass
+    run: |
+      # sca shipped an unloadable bundle on 2026-08-07 (#3748, repaired by #3971): a source
+      # rego without a trailing newline made the generator emit `}  agents.rego: |`, which
+      # dropped a ConfigMap key and left the embedded policy unparseable. Every existing gate
+      # was green — `opa test` reads the SOURCE rego, and the drift check regenerates with the
+      # same broken generator, so committed and regenerated agreed. This one reads the
+      # ARTIFACT with the consumer's own parser, which is the only layer that can see it.
+      python3 .github/scripts/check-opa-bundle-parses.py --self-test
+      python3 .github/scripts/check-opa-bundle-parses.py --root .
   - id: opa-bundle-apply-size
     name: OPA bundle must be installable (client-side apply annotation ceiling)
     group: gitops
@@ -2060,3 +2364,18 @@ gates:
       # The attestation count prints on every run: a green reading "0 attestations" would be
       # a gate that never opened the file.
       python3 .github/scripts/check-readiness-attestations.py
+  - id: label-description-length
+    name: "a labels.yml description fits GitHub's 100-character cap (#4192)"
+    group: lint
+    mode: enforced
+    selftest: python3 .github/scripts/check-label-descriptions.py --self-test
+    selftest_expect: pass
+    run: |
+      # GitHub caps a label description at 100 characters and Label sync fails the whole apply on
+      # the first over-long entry, so ONE wordy label turns main red on a push-triggered workflow
+      # addressed to nobody. This has happened THREE times, each fixed by shortening the string —
+      # which leaves the next occurrence exactly as reachable. The limit is invisible from every
+      # angle a contributor uses: the YAML is valid, yamllint is clean, and the failure surfaces
+      # only after the merge. Falsified on the real file: the #4192 entry at 110 chars exits 1 and
+      # is named; at 100 it exits 0.
+      python3 .github/scripts/check-label-descriptions.py .

@@ -80,6 +80,13 @@ data class SendRecord(
  */
 enum class SendOutcome {
     SENT,
+
+    /**
+     * The party did the thing the campaign existed to cause (ADR-0245). Recorded by
+     * `ConversionConsumer` from a product event, never by the sending path — it is an OUTCOME, not
+     * a delivery, and the console must not add it to a send count.
+     */
+    CONVERTED,
     DRY_RUN,
     SUPPRESSED_CAP,
     SUPPRESSED_QUIET_HOURS,

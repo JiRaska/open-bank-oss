@@ -77,14 +77,26 @@ BASELINE = {
     # gate on a role the shared account does not hold (ROLE_COMPLIANCE / ROLE_CREDIT_RISK /
     # ROLE_LENDING_OFFICER), or are reads. Overstating a debt list is not a safe error: it hides
     # the real entries among noise and invites the whole thing being ignored.
+    # 2026-08-07: operator-fx-trigger and operator-fx-approval-decide removed. #3734 gave both
+    # the `not startswith(input.principal.id, "service-account-")` guard on 2026-08-05
+    # (fx_rest_ext.rego:50 and :96, recorded in docs/threat-models/openbank-fx-service.md), so
+    # the debt was paid and only the list lagged. The gate had been reporting both as stale on
+    # main ever since, in advisory mode, which is why nobody acted.
+    # 2026-08-08: operator-vop-verify removed (#4228). vop_rest_ext.rego now carries the
+    # `not startswith(input.principal.id, "service-account-")` guard. It needed no caller audit —
+    # unlike its siblings here, the legitimate M2M caller already had its OWN identity-pinned
+    # reason (`m2m-vop-verify`) in the same file, so `opa eval` against vop-opa-bundle.yaml showed
+    # the shared account resolving BOTH reasons and the role-only one was pure over-grant. The
+    # extension moved out of the generator heredoc into a real .rego in the same change, which is
+    # what let opa-policy.yml's file-pair discovery cover it (vop_rest_ext_test.rego).
     "operator-anacredit-create",
-    "operator-fx-approval-decide",
-    "operator-fx-trigger",
     "operator-party-status",
     "operator-pid-resolve",       # pid.resolve — a lookup; classified here pending confirmation
     "operator-standing-order-pause",
-    "operator-vop-verify",        # vop.verify — a verification; same caveat
-    "operator-year-close-attest",
+    # `operator-year-close-attest` was here and is GONE (#3765): the ledger ext rule now carries
+    # `not startswith(input.principal.id, "service-account-")`, so it is no longer role-only and
+    # this list must not name it. The removal was surfaced by this script's own stale-entry
+    # ratchet, not by anyone remembering — which is the argument for keeping that ratchet.
 }
 
 REASON_RE = re.compile(r'allowed_reasons\s+contains\s+"([^"]+)"\s+if\s*\{')

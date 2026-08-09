@@ -9,7 +9,9 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
 import com.openbank.mcp.application.port.out.MarketingReachPort
+import com.openbank.mcp.application.port.out.PaymentConfirmationReadPort
 import com.openbank.mcp.application.port.out.ProposalPort
+import com.openbank.mcp.application.port.out.StatementReadPort
 import com.openbank.mcp.application.protocol.ToolCallResult
 import com.openbank.mcp.application.protocol.ToolContent
 import com.openbank.mcp.application.protocol.ToolDefinition
@@ -25,6 +27,8 @@ import jakarta.enterprise.context.ApplicationScoped
 @ApplicationScoped
 class McpToolRegistry(
     private val accounts: AccountReadPort,
+    private val statements: StatementReadPort,
+    private val paymentConfirmations: PaymentConfirmationReadPort,
     private val proposals: ProposalPort,
     private val marketingReach: MarketingReachPort,
     private val masker: McpPiiMasker,
@@ -37,6 +41,8 @@ class McpToolRegistry(
         "get_balance" to "query.balance.readonly",
         "list_transactions" to "query.transaction.readonly",
         "list_consents" to "query.consent.readonly",
+        "get_statement" to "query.statement.readonly",
+        "get_payment_confirmation" to "query.payment_confirmation.readonly",
         "propose_payment" to "propose.payment",
         // ADR-0209 D5. No charter carries this capability yet, so the PDP denies every call — that is
         // the intended state, not an omission: the grant is a separate change (agents.yaml charter +
@@ -86,6 +92,52 @@ class McpToolRegistry(
             domain = "consent",
         ),
         ToolDefinition(
+            name = "get_statement",
+            description =
+            "Get a closed account statement as STRUCTURED DATA (period, opening/closing balance, " +
+                "the itemized entry list with a best-effort `category` per entry) — use this to " +
+                "answer 'summarize my March statement', 'what did I spend on groceries last month' " +
+                "or 'why was I charged X' by reasoning over the entries yourself; this tool returns " +
+                "data, not a rendered document or a written summary. Pass `legalSequence` (with " +
+                "`currency`) for one exact statement, or omit both to get the most recently closed " +
+                "one for the account (optionally narrowed to `currency`). `category` is a rule-based " +
+                "heuristic over each entry's description/counterparty — treat it as a hint, not fact. " +
+                "IBANs and counterparty names come back masked (only the account's own last 4 digits " +
+                "are kept) — amounts, dates, currency and category are not, and are enough to explain " +
+                "the statement.",
+            inputSchema = obj(
+                mapOf(
+                    "accountId" to strProp("Account id (must be within the consent)"),
+                    "currency" to strProp("ISO 4217 pocket currency; required together with legalSequence"),
+                    "legalSequence" to
+                        mapOf("type" to "integer", "description" to "Exact statement sequence; omit for the latest"),
+                ),
+                listOf("accountId"),
+            ),
+            service = "openbank-statement-service",
+            domain = "statements",
+        ),
+        ToolDefinition(
+            name = "get_payment_confirmation",
+            description =
+            "Get the confirmation details of a payment you already made — reference/end-to-end id, " +
+                "execution/settlement date, amount, currency, debtor/creditor account, payee name, " +
+                "remittance/reference text and status. Works for either a SEPA or a domestic (CZK) " +
+                "payment; you do not need to know which rail it went on. Use this to answer 'did my " +
+                "payment to X go through', 'when did payment Y settle' or to confirm the details of " +
+                "a specific past payment by its id — it does not list or search payments. IBANs and " +
+                "payee/payer names come back masked, same as every other tool on this surface.",
+            inputSchema = obj(
+                mapOf("paymentId" to strProp("The payment id (as returned when the payment was created)")),
+                listOf("paymentId"),
+            ),
+            // No single value: this tool reaches whichever of openbank-sepa-payment /
+            // openbank-domestic-payment actually holds [paymentId] (see the port KDoc) — a single
+            // string here would misrepresent the other rail rather than describe both accurately.
+            service = null,
+            domain = "payments",
+        ),
+        ToolDefinition(
             name = "count_marketing_consents",
             description =
             "Count ACTIVE marketing consents per scope (campaign reach). Returns COUNTS ONLY — " +
@@ -131,6 +183,16 @@ class McpToolRegistry(
                     arguments.path("limit").asInt(DEFAULT_TX_LIMIT),
                 )
             "list_consents" -> accounts.listConsents(ctx)
+            "get_statement" -> statements.getStatementSummary(
+                ctx,
+                arguments.reqText("accountId"),
+                arguments.path("currency").takeIf { it.isTextual }?.asText(),
+                arguments.path("legalSequence").takeIf { it.isIntegralNumber }?.asLong(),
+            )
+            "get_payment_confirmation" -> paymentConfirmations.getPaymentConfirmation(
+                ctx,
+                arguments.reqText("paymentId"),
+            )
             // `ctx` is deliberately NOT passed: this is an operator-plane aggregate with no consent to
             // intersect against, and MarketingReachPort's signature says so. See its kdoc before
             // "fixing" the inconsistency.

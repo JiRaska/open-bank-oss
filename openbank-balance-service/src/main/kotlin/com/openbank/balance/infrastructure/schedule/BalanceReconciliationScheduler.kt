@@ -5,11 +5,16 @@
 package com.openbank.balance.infrastructure.schedule
 
 import com.openbank.balance.application.port.`in`.ReconcileBalancesUseCase
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.libs.persistence.lock.ClusterLock
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.Duration
 import java.time.LocalDate
 
 /**
@@ -32,8 +37,15 @@ class BalanceReconciliationScheduler(
     private val reconcile: ReconcileBalancesUseCase,
     private val clock: Clock,
     private val clusterLock: ClusterLock,
+    private val domainMetrics: DomainMetrics,
 ) {
     private val log = Logger.getLogger(BalanceReconciliationScheduler::class.java)
+
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofDays(1))
+    }
 
     @Scheduled(
         cron = "{openbank.reconciliation.cron:0 30 23 * * ?}",
@@ -47,6 +59,7 @@ class BalanceReconciliationScheduler(
                 if (report.hasDrift) {
                     log.warnf("Daily balance reconciliation found drift: %s", report.driftedCurrencies)
                 }
+                liveness?.recordSuccess()
             } catch (ex: Exception) {
                 log.errorf(ex, "Daily balance reconciliation failed: %s", ex.message)
             }
@@ -58,5 +71,6 @@ class BalanceReconciliationScheduler(
 
     private companion object {
         const val JOB_NAME = "balance.reconciliation"
+        const val WORKFLOW_NAME = "balance-reconciliation"
     }
 }
