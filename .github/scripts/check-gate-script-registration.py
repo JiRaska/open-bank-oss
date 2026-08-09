@@ -77,7 +77,7 @@ HELPERS: dict[str, str] = {}
 # defect it exists to find.
 def invocation_re(name: str) -> re.Pattern[str]:
     # A COMMAND POSITION, not merely a path: after a runner, after `./`, after a workflow `run:`,
-    # or after a shell operator. `agent-review.yml:464` runs an executable script by bare relative
+    # or after a shell operator. `agent-review.yml:464` (retired #2161) ran an executable script by bare relative
     # path (`run: .github/scripts/check-claude-fallback-result.sh "$F"`), so `run:` has to count —
     # but a bare path anywhere is exactly the rules.yaml `ci_producer:` shape that #3240 was about.
     #
@@ -191,7 +191,7 @@ def selftest() -> int:
         "  ./check-demo.py",
         "python3 scripts/check-demo.py",
         # An executable run by bare relative path from a workflow step — the real shape in
-        # agent-review.yml, and the one the stricter first draft of this regex missed.
+        # agent-review.yml (retired #2161), and the one the stricter first draft of this regex missed.
         "        run: .github/scripts/check-demo.py \"$EXECUTION_FILE\"",
         "make thing && python3 check-demo.py",
     ]
