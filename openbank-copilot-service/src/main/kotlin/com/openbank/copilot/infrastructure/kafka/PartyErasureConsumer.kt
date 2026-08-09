@@ -6,6 +6,7 @@ package com.openbank.copilot.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.copilot.application.port.out.ConversationStore
+import com.openbank.copilot.infrastructure.observability.CopilotMetricsAdapter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.reactive.messaging.Incoming
@@ -49,6 +50,9 @@ class PartyErasureConsumer {
     @Inject
     lateinit var objectMapper: ObjectMapper
 
+    @Inject
+    lateinit var metrics: CopilotMetricsAdapter
+
     private val log = Logger.getLogger(PartyErasureConsumer::class.java)
 
     @Suppress("TooGenericExceptionCaught") // a consumer must never die on a single bad/foreign event
@@ -71,11 +75,25 @@ class PartyErasureConsumer {
 
         try {
             val erased = conversationStore.deleteForParty(partyId.toString())
-            log.infof(
-                "[party-events-in] GDPR Art. 17: erased %d copilot conversation(s) for party %s",
-                erased,
-                partyId,
-            )
+            if (erased == 0L) {
+                // Not necessarily a defect — a party that never chatted holds nothing. But it is
+                // also the exact shape of an erasure that looked in the wrong place (#4175), and at
+                // INFO the two were the same line. The counter is what an alert or a query can read;
+                // the WARN is so the party id is greppable when one is investigated.
+                metrics.recordPartyErasure(CopilotMetricsAdapter.OUTCOME_NO_MATCH)
+                log.warnf(
+                    "[party-events-in] GDPR Art. 17: erased 0 copilot conversation(s) for party %s — " +
+                        "either the party never chatted, or its rows carry no resolvable party id",
+                    partyId,
+                )
+            } else {
+                metrics.recordPartyErasure(CopilotMetricsAdapter.OUTCOME_ERASED)
+                log.infof(
+                    "[party-events-in] GDPR Art. 17: erased %d copilot conversation(s) for party %s",
+                    erased,
+                    partyId,
+                )
+            }
         } catch (e: Exception) {
             log.errorf(e, "[party-events-in] Failed to erase copilot conversations for party %s", partyId)
         }
