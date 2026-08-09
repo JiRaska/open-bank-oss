@@ -7,7 +7,9 @@
 - **Migrace:** Flyway, `migrate-at-start: true`, `db/migration/V1..V3`. Generace schématu Hibernate je `none` — schéma vlastní Flyway.
 - **Datová doména / klasifikace (governance.yaml):** `compliance`, `restricted`, retence **10 let**, role linie `both`.
 
-Definující datový princip (ADR-0035): **ukládej záznam, ne soubor.** Ukládá se pouze malý záznam `statement_period`. camt.053 / MT940 / PDF jsou deterministické, bajt po bajtu identické projekce renderované na vyžádání z tohoto záznamu plus zaúčtovaných položek přehraných z transaction-service — nikdy se neskladují.
+Definující datový princip (ADR-0035): **ukládej záznam, ne soubor.** Ukládá se pouze záznam `statement_period`. camt.053 / MT940 / PDF jsou deterministické, bajt po bajtu identické projekce renderované na vyžádání z tohoto záznamu — nikdy se neskladují.
+
+Od #3986 záznam nese vedle kotev i **zmrazené vstupy renderu** (`model_snapshot`). Předtím render přehrával zaúčtované položky a identitu účtu *živě*, takže položka doúčtovaná do již uzavřeného období nebo přejmenování majitele tiše změnily již vydanou právní stránku výpisu — pravý opak toho, co znamená „bajt po bajtu identický". Princip se nemění (žádné bajty camt/MT/PDF se neukládají); ukládá se kanonický **model**, což je varianta, kterou zvolily samotné „Alternatives considered" v ADR-0035.
 
 ## Tabulky
 
@@ -25,6 +27,7 @@ Definující datový princip (ADR-0035): **ukládej záznam, ne soubor.** Uklád
 | `status` | VARCHAR(16) | `CLOSED` (výchozí) / `SUPERSEDED` |
 | `supersedes_sequence` | BIGINT (null) | korekce nahrazuje předchozí uzávěrku |
 | `closed_at` | TIMESTAMPTZ | razítkováno při uzávěrce, řídí deterministické rendery |
+| `model_snapshot` | TEXT (null) | **V7** — zmrazené vstupy renderu jako JSON (`iban`, `holderName`, `entries`), zachycené při uzávěrce, aby byl re-render bajt po bajtu identický (#3986). NULL pro období uzavřená před V7, která stále přehrávají živá data; záměrně se nedoplňuje zpětně, protože živé projekce už mohly odplout a zmrazení dnešní odpovědi by z odchylky udělalo kanonický stav |
 
 Indexy: `ux_statement_period_window` (UNIQUE `account_id, pocket_currency, period_from, period_to` — idempotenční klíč), `ux_statement_period_legal_seq` (UNIQUE `account_id, pocket_currency, legal_sequence_number` — monotónní právní sekvence), `ix_statement_period_account` (`account_id, period_to DESC`).
 
@@ -47,6 +50,8 @@ Indexy: `ux_statement_period_window` (UNIQUE `account_id, pocket_currency, perio
 | V1 `init_statement` | `statement_period`, `statement_outbox` | `DROP TABLE statement_outbox; DROP TABLE statement_period;` |
 | V2 `account_registry` | projekce `account_registry` | `DROP TABLE account_registry;` |
 | V3 `close_run` | `statement_close_run`, `statement_close_failure` | `DROP TABLE statement_close_failure; DROP TABLE statement_close_run;` |
+| V6 `statement_period_restatement` | zúžení indexu okna na řádky mimo `SUPERSEDED` | `DROP INDEX ux_statement_period_window_active;` poté smazat řádky `SUPERSEDED` a obnovit striktní `ux_statement_period_window` (nemohou koexistovat) |
+| V7 `statement_period_model_snapshot` | `statement_period.model_snapshot` | `ALTER TABLE statement_period DROP COLUMN model_snapshot;` — beze ztráty pro ostatní sloupce; render při chybějícím snapshotu spadne zpět na živé projekce, takže drop obnoví chování před #3986 pro **všechna** období, nejen ta před V7 |
 
 Dle pravidla projektu: **nikdy neměň migraci po aplikaci na živou DB** (checksum mismatch → pád při startu).
 
@@ -56,11 +61,12 @@ Dle pravidla projektu: **nikdy neměň migraci po aplikaci na živou DB** (check
 |---|---|---|---|
 | `account_id` | všechny tabulky | pseudonymní identifikátor | ne přímo fyzická osoba |
 | `party_id` | `account_registry` | pseudonymní identifikátor | odkazuje na party-service (vlastník dat fyzické osoby) |
-| IBAN | **neuchováváno** | PII | přítomno jen v in-memory `StatementModel` a vyrenderovaném výstupu / payloadu outbox události; nikdy neuloženo jako řádek |
-| jméno majitele | **neuchováváno** | PII | rozlišeno při renderu z account/party; nikdy neuloženo |
-| zůstatky / položky | `statement_period` (jen kotvy); položky přehrávané z transaction-service | finanční | ukládají se jen počáteční/koncové kotvy; řádkové položky se neskladují |
+| IBAN | `statement_period.model_snapshot` (**od V7**) | PII | dříve se neukládalo; zmrazeno při uzávěrce jako součást vstupů renderu (#3986), přítomno i v payloadu outbox události |
+| jméno majitele | `statement_period.model_snapshot` (**od V7**) | PII | dříve rozlišováno živě při renderu; zmrazeno při uzávěrce, protože právě živé rozlišování přepisovalo hlavičku již vydaných výpisů |
+| zůstatky | `statement_period` (kotvy) | finanční | počáteční/koncové kotvy jako dosud |
+| řádkové položky | `statement_period.model_snapshot` (**od V7**) | finanční | řádkové položky (částka, data, popis, protistrana) se nyní pro uzavřené období uchovávají; dříve se při každém renderu přehrávaly z transaction-service |
 
-Protože vyrenderované výpisy se neukládají, osobní data na výpisu (IBAN, jméno majitele, popisy řádkových položek) žijí jen přechodně během renderu a v upstream službách, které je vlastní. Payload outbox události nese IBAN a zůstatky — stejný správce dat, intra-OpenBank (viz [06 — Compliance](./06-compliance.md)).
+**#3986 tuto sekci změnilo a nejde o kosmetiku.** Reprodukovatelnost uzavřeného výpisu vyžaduje uchovat, co na něm stálo, takže IBAN, jméno majitele a popisy řádkových položek se nyní ukládají na **10 let** do `model_snapshot`, místo aby žily jen přechodně během renderu. Druh dat se nemění (tytéž údaje už byly ve vyrenderovaném výstupu i v payloadu události `period.closed`, stejný správce, intra-OpenBank) a stávající klasifikace tabulky je pokrývá — `compliance` / `restricted` / retence 10 let. Změnilo se *umístění*: žádost o výmaz nebo export vůči uzavřenému období musí nyní sáhnout i do tohoto sloupce, ne jen k upstream vlastníkům. Viz [06 — Compliance](./06-compliance.md).
 
 ## Retence
 
