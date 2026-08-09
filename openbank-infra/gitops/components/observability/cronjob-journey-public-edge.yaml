@@ -55,6 +55,15 @@ data:
       tags: { journey: 'public-edge' },
     };
 
+    // Hosts come from __ENV with the production values as defaults, so the falsification the
+    // catalog promises is actually executable: set API_BASE to a host that serves 502 and the
+    // run must go red. A journey whose falsification instruction names a knob the script does
+    // not have is a falsification claim nobody can carry out, which is the same thing as an
+    // unfalsified journey.
+    const API_BASE = __ENV.API_BASE || 'https://api.open-bank.tech';
+    const CUSTOMER_BASE = __ENV.CUSTOMER_BASE || 'https://customer.open-bank.tech';
+    const ADMIN_BASE = __ENV.ADMIN_BASE || 'https://admin.open-bank.tech';
+
     // Status < 500 is the assertion, deliberately. A 401 from an authenticated route means
     // the service is up and challenged us; a 502 means it is not. Asserting `status == 200`
     // would make an auth challenge look like an outage, and asserting only "a response
@@ -65,17 +74,17 @@ data:
 
     export default function () {
       group('api info', () => {
-        const r = http.get('https://api.open-bank.tech/api/v1/info');
+        const r = http.get(`${API_BASE}/api/v1/info`);
         check(r, { 'api edge answers': reachable });
       });
       group('customer edge', () => {
         // Root path is empty — the ingress only routes /customer/v1, so 401 is the healthy
         // answer here: the route exists and demands a token.
-        const r = http.get('https://customer.open-bank.tech/customer/v1/accounts');
+        const r = http.get(`${CUSTOMER_BASE}/customer/v1/accounts`);
         check(r, { 'customer edge answers': reachable });
       });
       group('admin ui', () => {
-        const r = http.get('https://admin.open-bank.tech/');
+        const r = http.get(`${ADMIN_BASE}/`);
         check(r, { 'admin ui answers': reachable });
       });
     }
@@ -94,8 +103,11 @@ spec:
   # interval — change one and the other has to move with it.
   schedule: "*/5 * * * *"
   concurrencyPolicy: Forbid
-  # A run that has not finished in 4 minutes is stuck; kill it before the next one is due,
-  # so a hung run cannot mask the schedule.
+  # If the controller misses a scheduled start by more than 2 minutes (paused controller,
+  # node pressure), skip that slot rather than firing it late — a run attributed to the wrong
+  # window is worse than a missing one, because the staleness alert reads the timestamps.
+  # The 4-minute kill for a run that hangs is activeDeadlineSeconds below, one slot short of
+  # the next schedule.
   startingDeadlineSeconds: 120
   successfulJobsHistoryLimit: 3
   # failedJobsHistoryLimit: 1 — kube-prometheus-stack's KubeJobFailed fires per surviving
@@ -125,12 +137,20 @@ spec:
               type: RuntimeDefault
           containers:
             - name: k6
-              image: docker.io/grafana/k6:0.58.0
+              # 1.2.0, not 0.58.0: the `0.58.0` tag's binary self-reports `k6 v1.0.0-rc1`
+              # (measured with `docker run grafana/k6:0.58.0 version`), so that pin runs a
+              # release candidate in a production monitor while reading as the last stable
+              # 0.x. `1.2.0` reports `k6 v1.2.0`.
+              image: docker.io/grafana/k6:1.2.0
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
                 capabilities:
                   drop: ["ALL"]
+              # Measured against this image, read-only rootfs and UID 12345, before pinning:
+              # a failing threshold exits 99 and a passing run exits 0, which is the entire
+              # signal these alerts read. `-o experimental-prometheus-rw` is accepted by
+              # 1.2.0 (it is still the flag name, not yet promoted out of experimental).
               args:
                 - run
                 - --quiet
@@ -141,7 +161,10 @@ spec:
                 - /scripts/journey.js
               env:
                 # Same remote-write receiver the k6-operator TestRun used
-                # (enableRemoteWriteReceiver on kube-prometheus-stack).
+                # (enableRemoteWriteReceiver on kube-prometheus-stack). NOTE: a remote-write
+                # failure does NOT fail the run — k6 still exits 0 — so these metrics are for
+                # the dashboard and must never be what an alert depends on. That is the second
+                # reason prometheus-rules-journey.yaml reads kube-state-metrics instead.
                 - name: K6_PROMETHEUS_RW_SERVER_URL
                   value: http://kube-prometheus-stack-prometheus.observability.svc:9090/api/v1/write
                 - name: K6_PROMETHEUS_RW_TREND_STATS

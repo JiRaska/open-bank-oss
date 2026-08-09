@@ -70,6 +70,16 @@ RULES = "openbank-infra/gitops/components/observability/prometheus-rules-journey
 COMPONENTS = "openbank-infra/gitops/components"
 
 CRONJOB_PREFIX = "journey-"
+
+# PromQL string literals accept double quotes, single quotes AND backticks, and whitespace
+# around `=` is legal. Matching only `cronjob="journey-x"` would report a MISSING alert for a
+# journey that has one — a false positive, so it fails closed rather than silently, but it
+# would still be a gate wrong about the tree. `=` only, deliberately: `=~` is the regex form
+# this gate exists to reject, since absent() over a regex cannot detect one journey going away
+# while its siblings still report.
+LABEL_MATCH_RE = re.compile(
+    rf"""cronjob\s*=\s*(?P<q>["'`]){CRONJOB_PREFIX}(?P<id>[a-z0-9-]+)(?P=q)"""
+)
 REQUIRED_ALWAYS = ("id", "title", "capability", "status", "severity", "money_moving", "falsification")
 REQUIRED_ACTIVE = ("cronjob", "schedule")
 VALID_STATUS = ("active", "planned")
@@ -169,8 +179,8 @@ def alerted_journeys(root: pathlib.Path):
                 expr = str(rule.get("expr", ""))
                 if "absent(" not in expr:
                     continue
-                for match in re.finditer(rf'cronjob\s*=\s*"{CRONJOB_PREFIX}([a-z0-9-]+)"', expr):
-                    covered.add(match.group(1))
+                for match in LABEL_MATCH_RE.finditer(expr):
+                    covered.add(match.group("id"))
     return covered, None
 
 
@@ -387,6 +397,12 @@ def self_test():
 
     # The alert-coverage check must read EXPRESSIONS, not the file: a rules file whose prose
     # names the journey but whose expression does not still has no alert for it.
+    for quote, label in (("'", "single quotes"), ("`", "backticks")):
+        run(f"control: an absent() matcher written with {label} still counts",
+            SELF_TEST_CATALOG_OK, SELF_TEST_CRONJOB,
+            SELF_TEST_RULES.replace('cronjob="journey-demo"', f"cronjob = {quote}journey-demo{quote}"),
+            expect_finding=False)
+
     run("journey named only in an alert's prose, not its expression",
         SELF_TEST_CATALOG_OK, SELF_TEST_CRONJOB,
         SELF_TEST_RULES.replace(

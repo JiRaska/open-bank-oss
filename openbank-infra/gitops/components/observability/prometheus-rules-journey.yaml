@@ -30,6 +30,13 @@ spec:
       rules:
         # A journey run failed. Fires per CronJob, not per Job object, so a journey failing
         # every 5 minutes is one alert rather than a stream of them.
+        #
+        # WHAT THIS RULE STRUCTURALLY CANNOT SEE: a journey that has NEVER succeeded. Until a
+        # first success, kube-state-metrics emits no kube_cronjob_status_last_successful_time
+        # for it at all, and a binary comparison with a missing right-hand side yields nothing
+        # — no result, no alert. Same for JourneyStale below. That case belongs entirely to
+        # JourneyMissing, which is why that rule is not redundant and must not be "simplified"
+        # away: it is the only one of the three that can fire on a journey broken from birth.
         - alert: JourneyFailing
           expr: |
             max by (namespace, cronjob) (
@@ -77,10 +84,12 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: "The public-edge journey CronJob is gone"
+            summary: "The public-edge journey has never succeeded, or its CronJob is gone"
             description: >-
               No kube-state-metrics series exists for journey-public-edge. The CronJob has been
-              deleted, renamed, or has never completed a run since it was created. This alert is
+              deleted, renamed, or has never completed a single successful run — the last of
+              which the two rules above cannot see at all, since both compare against a series
+              that does not exist yet. This alert is
               named per journey on purpose: a regex cannot detect the absence of something, so
               every `active` journey in openbank-libs/governance/journeys.yaml needs its own
               instance of this rule, and check-journey-catalog.py enforces that.
