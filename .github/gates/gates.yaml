@@ -76,8 +76,7 @@
 #
 gates:
 
-  # ==== lint ==================================================================
-
+  # ==== lint ===========================================================
   # The runner's own falsification, riding the cheapest shard. run-gates.py decides for
   # every other gate in this file whether a non-zero exit fails the build, whether an
   # advisory warning is emitted, and — the part with no second opinion anywhere — whether a
@@ -149,8 +148,7 @@ gates:
         echo "No shell scripts under openbank-infra/scripts — skipping."
       fi
 
-  # ==== gitops ================================================================
-
+  # ==== gitops =========================================================
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
   # mechanism-3 liveness gauge. ADVISORY with a baseline ratchet — the 37 files
   # without a heartbeat at introduction are listed in the producer; a NEW job
@@ -507,8 +505,7 @@ gates:
       python3 .github/scripts/check-probe-port-listener.py --selftest
       python3 .github/scripts/check-probe-port-listener.py --enforce
 
-  # ==== supplychain ===========================================================
-
+  # ==== supplychain ====================================================
   - id: license-header-consistency
     name: "License header consistency (issue #2280, enforced)"
     group: supplychain
@@ -808,8 +805,7 @@ gates:
     run: |
       python3 .github/scripts/check-advisory-gate-registration.py --expect-manifest
 
-  # ==== registry ==============================================================
-
+  # ==== registry =======================================================
   # issue #669 scope item 3 / rules.yaml: slo. Every money_path_services entry needs a
   # matching availability + latency Pyrra ServiceLevelObjective whose target/window match
   # the governed values in rules.yaml — pyyaml is already installed by the step above.
@@ -1416,8 +1412,7 @@ gates:
     run: |
       python3 .github/scripts/gen-ai-governance-snapshot.py --check
 
-  # ==== kotlin ================================================================
-
+  # ==== kotlin =========================================================
   # ADR-0160 mechanism 1 / rules.yaml: change_requirements.event_consumer_liveness.
   # Fleet-wide scan (not diff-scoped): every Kafka topic a service publishes must have a
   # real @Incoming consumer somewhere in the fleet, or a one-line-reasoned allowlist entry.
@@ -1684,6 +1679,26 @@ gates:
     run: |
       bash .github/scripts/resolve-record-deployment-version.sh --self-test
 
+  # The other half of every other gate in this file. Every other gate here reads committed text,
+  # because that is what CI can see; this one compares that text to what the cluster actually
+  # does. Only the COMPARISON runs in CI — it is a pure function of (snapshot, repo) and is what
+  # the self-test drives. Collection needs cluster credentials no workflow has yet, so it is
+  # dispatch-only for now (runtime-conformance.yml), the same split check-external-feeds.py uses.
+  #
+  # Falsified before wiring in: the 22-case self-test fails when any comparator is broken, and the
+  # first run against the LIVE estate exposed two defects in the tool itself — libs-runtime's
+  # abstract dispatcher counted as a service, and outbox facts keyed by table name never matched
+  # claims keyed by directory name, so nine real findings were silently skipped. Both are now
+  # self-test cases.
+  - id: runtime-conformance-comparators
+    name: "runtime conformance: claim-vs-cluster comparators (enforced)"
+    group: gitops
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/runtime-conformance.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/runtime-conformance.py --self-test
   # A service that ships an outbox must write to it (#4007). Eight do not: dispatcher, backlog
   # gauge, migration and `dispatch-enabled: true`, with no OutboxMessage construction anywhere in
   # src/main — so the dispatcher polls a table nothing writes to and the gauge reads 0, which is
@@ -1818,8 +1833,7 @@ gates:
     run: |
       python3 .github/scripts/check-openapi-server-port.py --enforce
 
-  # ==== data ==================================================================
-
+  # ==== data ===========================================================
   - id: kafka-topic-existence
     name: "Kafka topic existence (issue #2598, enforced)"
     group: data
@@ -2025,8 +2039,7 @@ gates:
       python3 .github/scripts/check-external-feeds.py --self-test
       python3 .github/scripts/check-external-feeds.py --root . --offline
 
-  # ==== security ==============================================================
-
+  # ==== security =======================================================
   # rules.yaml: alerting.critical_alerts_must_egress. A severity=critical alert must
   # reach a receiver that leaves the cluster. Guards the "severity inversion": critical
   # routed only to GoAlert/ntfy/Holmes — all cluster-internal with no Ingress

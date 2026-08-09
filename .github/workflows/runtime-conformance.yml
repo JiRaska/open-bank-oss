@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Runtime conformance: does what the repo claims match what the cluster does?
+#
+# WHY DISPATCH-ONLY, NOT SCHEDULED
+# Collection needs cluster + registry reads, and no workflow in this repo has those credentials
+# today — `dr-restore-verify.yml` is the only one that tries and has never run. Putting cluster
+# read credentials into Actions is a decision for the owner, not something a workflow should
+# quietly assume. So this runs on demand and prints its findings; promote it to a `schedule:`
+# once (and only once) that credential question is answered, exactly as the file header of
+# api-fuzz-authenticated.yml intends for itself.
+#
+# The COMPARISON half needs none of that and is already enforced on every PR as the gate
+# `runtime-conformance-comparators` — it is a pure function of (snapshot, repo) with a 22-case
+# self-test. This workflow only adds the facts.
+#
+# WHAT A RED RUN MEANS
+# Not "CI is broken" — every text-level gate can be green while this is red, and that gap is the
+# entire reason the script exists. A finding here is a control that is declared, wired, reporting
+# success, and carrying nothing.
+name: Runtime conformance
+
+on:
+  workflow_dispatch:
+    inputs:
+      snapshot:
+        description: "Optional path to a pre-collected snapshot JSON (skips collection)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    name: claim-vs-cluster
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      # The comparators are the part that can be wrong in a way nobody notices, so prove them
+      # before trusting anything they say about the estate.
+      - name: Self-test the comparators first
+        run: python3 .github/scripts/runtime-conformance.py --self-test
+
+      - name: Collect a snapshot of the live estate
+        id: collect
+        env:
+          SNAPSHOT_IN: ${{ inputs.snapshot }}
+        run: |
+          set -uo pipefail
+          if [ -n "${SNAPSHOT_IN}" ] && [ -f "${SNAPSHOT_IN}" ]; then
+            echo "using the supplied snapshot ${SNAPSHOT_IN}"
+            cp "${SNAPSHOT_IN}" /tmp/snapshot.json
+          elif command -v kubectl >/dev/null 2>&1 && kubectl version --request-timeout=5s >/dev/null 2>&1; then
+            python3 .github/scripts/runtime-conformance.py --collect > /tmp/snapshot.json
+          else
+            # No cluster reachable. Emit an EMPTY snapshot rather than skipping the job: the
+            # comparator prints "NOT CHECKED (this is not a pass)" per probe, so the run is
+            # visibly uninformative instead of quietly green. A skipped job and a clean run look
+            # identical in the checks list, which is the failure this avoids.
+            echo '{"schema":1,"facts":{}}' > /tmp/snapshot.json
+            echo "::warning::no cluster reachable — every probe will report NOT CHECKED, not PASS"
+          fi
+
+      - name: Compare the snapshot against what the repo claims
+        run: python3 .github/scripts/runtime-conformance.py --check /tmp/snapshot.json --root .
+
+      - name: Keep the snapshot as evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: runtime-conformance-snapshot
+          path: /tmp/snapshot.json
+          retention-days: 30
