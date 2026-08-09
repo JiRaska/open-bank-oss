@@ -55,23 +55,23 @@ class ResolveSurfaceUseCase(
         val recent = events.recentForPartyAndSlot(partyId, slot, Instant.now().minus(DISMISSAL_LOOKBACK))
         if (DismissalRule.shouldSuppress(recent)) return Result.Suppressed
 
-        // Three of four adverse states are materialised (issue #2749): ARREARS
-        // (LendingArrearsEventConsumer, openbank.lending.events), ERASURE_REQUESTED
-        // (PartyErasureConsumer, openbank.party.events) and FRAUD_HOLD (FraudHoldEventConsumer,
-        // fraud-hold-events-in). DISPUTE_OPENED is the one gap: a party with an open dispute is
-        // NOT currently excluded.
+        // WHICH adverse states are materialised is NOT restated here (issue #2749). The answer is
+        // the set of @Incoming consumers in this service's infrastructure/kafka package, and
+        // AdverseState's own KDoc in Eligibility.kt tracks it. A second copy of that list in a
+        // comment is what went stale last time, and would go stale again the moment a consumer is
+        // added — which is exactly what #4297 does.
         //
-        // The previous version of this note was wrong on all three of its factual claims, and is
-        // corrected rather than deleted so the next reader learns it was superseded rather than
-        // that it never existed. It said neither signal is published anywhere in the fleet,
-        // "fraud-service has no persisted hold state" and "dispute-service emits only on
-        // resolution, never on open". Measured on this sha: fraud-service persists holds
-        // (FraudHoldEntity/FraudHoldService) and dispute-service does emit `dispute.opened`
+        // What is worth keeping in place, because it is timeless and a deletion would erase it:
+        // the note that used to stand here was wrong on all three of its factual claims. It said
+        // neither the fraud nor the dispute signal is published anywhere in the fleet, that
+        // "fraud-service has no persisted hold state", and that "dispute-service emits only on
+        // resolution, never on open". Measured 2026-08-09: fraud-service persists holds
+        // (FraudHoldEntity/FraudHoldService), and dispute-service emits `dispute.opened`
         // (DisputeService.openedOutboxMessage, landed #4087).
         //
-        // So the REASON DISPUTE_OPENED is missing is not the producer — it exists — but that this
-        // service has no @Incoming for openbank.dispute.events. A note that blames the wrong layer
-        // sends the next person to fix a service that is already correct.
+        // The lesson that survives the fix: a signal missing HERE is not evidence the producer is
+        // missing. That note blamed the producing services, and a reader acting on it would have
+        // gone to fix two services that were already correct. The gap was always the consumer end.
         val eligibility = EligibilitySnapshot(
             partyId = partyId,
             adverseState = adverseState.activeStates(partyId),
