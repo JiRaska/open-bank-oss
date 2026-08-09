@@ -2385,3 +2385,36 @@ gates:
       # only after the merge. Falsified on the real file: the #4192 entry at 110 chars exits 1 and
       # is named; at 100 it exits 0.
       python3 .github/scripts/check-label-descriptions.py .
+
+  # rules.yaml pr_file_overlap. Every other check in this repo is scoped to ONE pull request
+  # against ONE base, so two PRs editing the same file are structurally invisible to CI — and
+  # the failures that produces are precisely the ones git calls CLEAN. Three shapes, all
+  # measured here: a duplicate guard merged twice (#2984 vs #3009, the second fully GREEN on
+  # all five required contexts), two neighbouring list entries merging to one
+  # (.release-please-manifest.json, 56 -> 55, caught only by an unrelated registration gate),
+  # and two spec PRs claiming the same openapi info.version because each is classified against
+  # its own creation-time base (#481 x #524, and again from an already-MERGED PR in #3055).
+  #
+  # ADVISORY on purpose, and not on a graduation path: enforcing would red BOTH PRs the moment
+  # two of them touched rules.yaml, clearable only by the other merging first — a queue
+  # deadlock. The gate reports and classifies; a human decides which of the three real
+  # outcomes it is (identical content / true duplicate / genuine divergence).
+  #
+  # The one thing it decides rather than reports: `identical content`. The blob sha at each
+  # PR's head says whether the bytes already agree, which matters because the file list comes
+  # from the MERGE-BASE — after a competing PR squash-merges, the survivor still lists the
+  # overlap as a diff (#3103's security.yml matched main byte for byte). Without that
+  # comparison the gate would warn loudest exactly when the work was already done.
+  #
+  # PR-only: there is no "other open PR" to compare against on a push to main. Needs GH_TOKEN,
+  # which the shard job already exports. Exit 2 = the enumeration FAILED and the verdict is
+  # not clean — on GitHub a permission-shaped absence is byte-identical to a real one.
+  - id: pr-file-overlap
+    name: "PR file overlap (other open PRs editing the same files, advisory)"
+    group: lint
+    mode: advisory
+    when: pull_request
+    selftest: python3 .github/scripts/check-pr-file-overlap.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-pr-file-overlap.py

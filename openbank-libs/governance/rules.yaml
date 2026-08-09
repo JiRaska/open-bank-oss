@@ -2787,3 +2787,49 @@ shared_m2m_matrix_write_grants:
     - settlement.create
     - transaction.create
     - transaction.reverse
+
+# ---------------------------------------------------------------------------------------
+pr_file_overlap:
+  # Every check in this repo is scoped to ONE pull request, computed against ONE base. So
+  # two PRs editing the same file are invisible to CI, and the failures that produces are
+  # exactly the ones git calls CLEAN: a duplicate guard merged twice (#2984 vs #3009, the
+  # second fully green), a list whose two neighbouring entries merge to one
+  # (.release-please-manifest.json, 56 -> 55), or two spec PRs claiming the same
+  # openapi info.version because each was classified against its own creation-time base
+  # (#481 x #524, and again from an ALREADY-MERGED PR in #3055).
+  #
+  # The habit that catches these — "what else touched this file today" — was manual. This
+  # makes it automatic: one REST call per open PR, no model, no clone.
+  detect: ["any pull_request: this PR's changed files vs every other OPEN PR's"]
+  require:
+    - "an overlap is reported with the competing PR number, not silently merged past"
+    - "an overlap on a shared registry (gates.yaml, rules.yaml, the release manifests, gitops) needs an explicit merge ORDER; whoever lands second re-reads the file on origin/main and confirms their entry survived"
+    - "an overlap on an openapi.yaml means info.version is re-read from LIVE origin/main, never from the PR's base"
+  gate: pr-file-overlap
+  # ADVISORY, and deliberately not on a graduation path to enforce. Enforcing would red BOTH
+  # PRs the moment two of them touched rules.yaml, and neither author could clear it without
+  # the other merging first — the queue-deadlock shape this repo has already paid for. The
+  # date below is the review point for the CLASSIFIER (are the reports still true and
+  # actionable), not a promise to flip --enforce.
+  enforced: advisory
+  target_enforce_date: "2026-11-01"   # ADR-0144 — review the classifier, not a flip to enforce
+  # CI producer is LIVE (advisory): .github/scripts/check-pr-file-overlap.py runs in the
+  # `gates (lint)` shard on every pull_request. It compares the BLOB SHA of each overlapping
+  # file at both PR heads, so an overlap where the content already agrees is reported as
+  # such rather than as a divergence — the file list itself comes from the merge-base, so a
+  # competing PR that already merged still appears in it (#3103's security.yml matched main
+  # byte for byte). Exit 2 means the open-PR enumeration FAILED and is not a clean verdict.
+  ci_producer: ".github/scripts/check-pr-file-overlap.py"
+  # Paths whose overlap is an ordering problem rather than a coincidence. This is a list of
+  # external FACTS (which files are shared registries), not the gate's scope — the gate reads
+  # every overlapping file either way, so a path missing here is still reported, only without
+  # the louder header. Kept in sync with SERIALIZED in the script.
+  serialized_paths:
+    - ".github/gates/gates.yaml"
+    - "openbank-libs/governance/rules.yaml"
+    - "openbank-libs/governance/agents.yaml"
+    - ".release-please-manifest.json"
+    - "release-please-config.json"
+    - ".github/workflows/ci.yml"
+    - ".github/workflows/auto-deploy.yml"
+    - "openbank-infra/gitops/"
