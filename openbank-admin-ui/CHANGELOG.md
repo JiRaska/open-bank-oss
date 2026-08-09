@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.107.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.106.0...admin-ui-v0.107.0) (2026-08-09)
+
+
+### Features
+
+* **case-coordinator:** deploy the swarm case-coordinator runtime via GitOps ([#4187](https://github.com/JiRaska/open-bank-oss/issues/4187)) ([#4236](https://github.com/JiRaska/open-bank-oss/issues/4236)) ([46a8066](https://github.com/JiRaska/open-bank-oss/commit/46a8066ae0c0d91fdf37799db5e2b61b9b585532))
+
 ## [0.106.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.105.0...admin-ui-v0.106.0) (2026-08-09)
 
 
