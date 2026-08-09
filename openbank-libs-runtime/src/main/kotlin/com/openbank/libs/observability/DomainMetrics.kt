@@ -339,6 +339,36 @@ class DomainMetrics {
         }
     }
 
+    /**
+     * Register the outbox **dead-letter** gauge: rows parked in terminal [
+     * com.openbank.libs.persistence.outbox.OutboxStatus.DEAD] (ADR-0050 N5) and therefore excluded
+     * from `listProcessable`/`claimProcessable` forever. `openbank.outbox.backlog` cannot see them
+     * — its whole point is that DEAD is *not* backlog — so a service that has dead-lettered every
+     * event it ever produced reads as a flat zero backlog, which is indistinguishable from healthy
+     * (#4005).
+     *
+     * A **gauge and not the [outboxDead] counter**, because the counter answers "did we dead-letter
+     * anything since this process started" and the operational question is "are there dead rows
+     * sitting in the table right now". A pod restart resets the counter while the rows remain, and
+     * a Micrometer counter is not even *created* until its first increment — so a service whose
+     * dead-lettering happened before the current pod exports no `openbank_outbox_dead_total` series
+     * at all, and any alert on it silently matches nothing.
+     *
+     * Same lifecycle contract as [registerOutboxBacklog]: call once at startup with a cheap
+     * supplier (`SELECT count(*) ... WHERE status = 'DEAD'`), re-registration is a no-op.
+     *
+     * @param service      service name (e.g. `card-issuance`)
+     * @param deadLettered cheap supplier of the current DEAD row count
+     */
+    fun registerOutboxDeadLettered(service: String, deadLettered: () -> Number) {
+        reg()?.let { r ->
+            Gauge.builder("openbank.outbox.dead_lettered", deadLettered) { it.invoke().toDouble() }
+                .tag("service", service)
+                .strongReference(true)
+                .register(r)
+        }
+    }
+
     // ── Workflow liveness (ADR-0160 mechanism 3) ────────────────────────────────
 
     /**
