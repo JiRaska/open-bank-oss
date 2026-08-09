@@ -4,10 +4,11 @@
 # real gateway with the real CI credential rather than assuming either way. Delete after.
 name: probe claude token
 on:
-  push:
-    branches: [ci/probe-claude-token]
+  pull_request:
+    branches: [main]
 permissions:
   contents: read
+  pull-requests: read
 jobs:
   probe:
     runs-on: ubuntu-latest
