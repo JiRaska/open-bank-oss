@@ -56,7 +56,9 @@ import org.junit.jupiter.api.extension.ExtendWith
  *
  * IMPORTANT: if any of the three consumer tests changes the contract, regenerate that consumer's
  * pact (`./gradlew :<consumer-module>:test --rerun --tests "*.contract.*PactConsumerTest"`) and
- * commit the updated `pacts/*-openbank-document-service.json` in the same PR, or this test replays
+ * commit that consumer's updated `<consumer>-openbank-document-service.json` under `pacts` in the
+ * same PR (spelled without a leading slash-star on purpose: Kotlin block comments NEST, so a glob
+ * written as a path prefix inside a KDoc opens a comment that never closes), or this test replays
  * a stale contract. `pact-drift-check.yml` enforces it over a scope derived from the `@Pact`
  * annotations, so a new consumer module is in scope automatically.
  */
