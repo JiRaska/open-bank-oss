@@ -1016,6 +1016,23 @@ gates:
   # the catalog is COMPLETE — deriving the customer-visible capability set is the unbuilt
   # half, and the file's own header says so, because a coverage claim nobody can falsify is
   # the failure mode this whole ADR exists to end.
+  # Money-path journey accountability (ADR-0252 phase 2, #4348). The sibling gate above makes
+  # the catalog's own claims checkable; this one holds it against an EXTERNAL list — the
+  # money-path services in rules.yaml — so the catalog cannot be silently short. Both
+  # directions: an unaccounted money-path service is red, and so is an entry for a service
+  # that is no longer money-path.
+  - id: journey-money-path-accountability
+    name: "every money-path service is watched by a journey or accounted for (ADR-0252)"
+    group: registry
+    mode: enforced
+    selftest: python3 .github/scripts/check-journey-coverage.py --self-test
+    selftest_expect: pass
+    min_subjects: 20   # 23 money-path services today (2026-08-09)
+    run: |
+      # Falsified against the REAL tree before wiring in: deleting one service's entry makes it
+      # exit 2 naming that service, and it returns to OK when restored.
+      python3 .github/scripts/check-journey-coverage.py --root . --enforce
+
   - id: journey-catalog-integrity
     name: "journey catalog is consistent with the manifests and alerts it claims (ADR-0252)"
     group: registry
