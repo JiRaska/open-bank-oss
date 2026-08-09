@@ -23,8 +23,12 @@ spec:
   groups:
     - name: openbank.notification.delivery
       rules:
-        # SCA is the one template where a lost push blocks the customer outright: without the
-        # approval prompt the payment cannot be authorised. Fires on a single occurrence.
+        # SCA is the template where a lost push hurts most: it is the prompt telling the customer
+        # a payment is waiting. It is NOT the only route — the app also lists live challenges via
+        # GET /customer/v1/sca/pending — so a customer who opens the app can still approve. What
+        # they lose is any notice that they need to. Deliberately worded to that, not to "the
+        # payment cannot be authorised": an alert that overstates its own severity is one people
+        # learn to discount.
         - alert: ScaApprovalPushUndeliverable
           expr: |
             increase(openbank_notification_delivery_total{
@@ -37,9 +41,10 @@ spec:
           annotations:
             summary: "An SCA approval push could not be delivered"
             description: >-
-              An SCA_APPROVAL push ended FAILED (reason={{ $labels.reason }}) in the last 15m.
-              The customer cannot authorise their payment without it. `no_active_device` means the
-              party has no registered device — check whether the app ever registered one.
+              An SCA_APPROVAL push ended FAILED (reason={{ $labels.reason }}) in the last 15m, so
+              the customer was never prompted that a payment is waiting on them. They can still
+              approve it by opening the app (pending-approvals list), but will not know to.
+              `no_active_device` means the party has no registered device at all.
 
         - alert: PushDeliveryFailureRatioHigh
           expr: |
