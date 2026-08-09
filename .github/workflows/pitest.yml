@@ -70,7 +70,7 @@ jobs:
           java-version: "25"
           distribution: temurin
 
-      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         with:
           # READ-ONLY. setup-java's own `cache: gradle` SAVES a whole Gradle-home entry
           # (~1.1 GB) on this job's key, into a pool already over the 10 GB ceiling — so
@@ -82,7 +82,7 @@ jobs:
           cache-read-only: true
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
       - name: Run pitest on domain layer
         run: ./gradlew :${{ matrix.service }}:pitest
