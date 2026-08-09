@@ -229,6 +229,14 @@ spec:
         # a DEAD row, and there is no automatic drain — a single one is a permanently lost event
         # until an operator requeues it via POST /api/v1/cards/outbox/requeue. The 15m `for:`
         # only outlives a rollout window, in which the old and new pod both publish the gauge.
+        #
+        # EXPECTED TO FIRE ON DEPLOY, 2026-08-09. card-issuance holds the #4005 backlog — rows that
+        # were never published at all — so this goes critical ~15m after the first roll and stays
+        # there until an operator drains them through the requeue endpoint this change ships. That
+        # is intended, and it is also the one way this alert can go wrong: a critical that is always
+        # on stops being read, and this repo has already produced one. Drain the backlog in the same
+        # session as the deploy. If this note is still here and the alert is still firing, the
+        # backlog was not drained — that is the bug, not the alert.
         - alert: CardIssuanceOutboxDeadLettered
           expr: openbank_outbox_dead_lettered{service="card-issuance"} > 0
           for: 15m
