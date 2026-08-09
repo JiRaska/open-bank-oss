@@ -210,8 +210,18 @@ jobs:
           # way to tell whether the model was reachable at all — the first fix (1 -> 3 turns)
           # was a guess, and it was wrong. The probe answers that in one line, permanently.
           probe=$(claude -p "Reply with exactly the word ALIVE and nothing else." \
-                    --max-turns 3 --disallowed-tools Bash Read Write Edit MultiEdit Glob Grep WebFetch WebSearch Task TodoWrite NotebookEdit 2>&1 | tail -3)
+                    --max-turns 3 --disallowed-tools Bash Read Write Edit Glob Grep WebFetch WebSearch Task TodoWrite NotebookEdit BashOutput KillShell SlashCommand 2>&1 | tail -3)
           echo "control-probe: ${probe}"
+          # ASSERT, do not merely print. Run 5 printed `Permission deny rule "MultiEdit"
+          # matches no known tool` here and the job still went green: an invented tool name
+          # had silently invalidated the restriction, which is the security property. A probe
+          # whose output nobody checks is the thing this repo keeps rediscovering.
+          case "${probe}" in
+            *ALIVE*) : ;;
+            *) echo "::error::control probe did not answer ALIVE — the invocation or the"
+               echo "::error::credential is broken, and any review below is not trustworthy:"
+               echo "::error::${probe}"; exit 1 ;;
+          esac
           {
             echo "You are reviewing a pull request in a banking platform monorepo."
             echo "Title: ${PR_TITLE}"
@@ -248,7 +258,7 @@ jobs:
           # The one run that succeeded used 3 tools and simply had headroom, so "it worked"
           # was luck, not restriction. This is also what makes the header's no-tools claim
           # true, on the second attempt: an empty string reads as "no restriction specified".
-          claude -p "$(cat /tmp/prompt.txt)" --max-turns 12 --disallowed-tools Bash Read Write Edit MultiEdit Glob Grep WebFetch WebSearch Task TodoWrite NotebookEdit \
+          claude -p "$(cat /tmp/prompt.txt)" --max-turns 12 --disallowed-tools Bash Read Write Edit Glob Grep WebFetch WebSearch Task TodoWrite NotebookEdit BashOutput KillShell SlashCommand \
             --output-format stream-json --verbose > /tmp/review.raw 2>&1
           echo "cli_rc=$?"
           # Recover the assistant text from the stream; fall back to the raw file so a
@@ -283,6 +293,21 @@ jobs:
           EXTRACT
           echo "--- turn accounting ---"
           command grep -o '"type":"[a-z_]*"' /tmp/review.raw | sort | uniq -c | head
+          echo "--- tools the model actually reached for ---"
+          command grep -o '"name":"[A-Za-z]*"' /tmp/review.raw | sort | uniq -c | head
+          # ASSERT THE PROPERTY, not the deny-list. A hand-kept list of tool names can never
+          # be proven complete — this repo's own rule about hand-kept scope — and two rounds
+          # of it were wrong: `--allowed-tools ''` restricted nothing, then a deny-list with
+          # an invented name (`MultiEdit`) invalidated itself. Counting what was actually
+          # used makes an incomplete list visible instead of silently permissive.
+          used=$(command grep -c '"type":"tool_use"' /tmp/review.raw || true)
+          echo "tool_use events: ${used}"
+          if [ "${used}" -gt 0 ]; then
+            echo "::error::the reviewer used ${used} tool(s). The header claims it has none, and"
+            echo "::error::that claim is what bounds prompt injection from an attacker-authored"
+            echo "::error::diff. Refusing to treat this as a review."
+            exit 1
+          fi
           echo "----- review output -----"
           cat /tmp/review.txt
 
