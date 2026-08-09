@@ -197,6 +197,15 @@ jobs:
         run: |
           set +e
           npm install -g @anthropic-ai/claude-code >/dev/null 2>&1
+
+          # CONTROL PROBE, ~2s. Separates "the invocation or credential is broken" from "this
+          # particular review failed", which are otherwise the same red. Both live runs of
+          # this workflow died with `Reached max turns`, and without a control there was no
+          # way to tell whether the model was reachable at all — the first fix (1 -> 3 turns)
+          # was a guess, and it was wrong. The probe answers that in one line, permanently.
+          probe=$(claude -p "Reply with exactly the word ALIVE and nothing else." \
+                    --max-turns 3 --allowed-tools '' 2>&1 | tail -3)
+          echo "control-probe: ${probe}"
           {
             echo "You are reviewing a pull request in a banking platform monorepo."
             echo "Title: ${PR_TITLE}"
@@ -224,9 +233,35 @@ jobs:
           # that sentence was an unbacked claim about the one thing bounding prompt injection
           # — a diff can address the reviewer, and until this flag it could have asked for
           # more than an opinion.
-          claude -p "$(cat /tmp/prompt.txt)" --max-turns 3 --allowed-tools '' \
-            > /tmp/review.txt 2>&1
+          # --verbose + stream-json so a turn-exhaustion failure says WHAT consumed the
+          # turns, instead of only that they ran out. The plain text format prints the
+          # error and nothing else, which is how two rounds of guessing happened.
+          claude -p "$(cat /tmp/prompt.txt)" --max-turns 12 --allowed-tools '' \
+            --output-format stream-json --verbose > /tmp/review.raw 2>&1
           echo "cli_rc=$?"
+          # Recover the assistant text from the stream; fall back to the raw file so a
+          # parse failure cannot masquerade as an empty review.
+          python3 - <<'EXTRACT' > /tmp/review.txt || cp /tmp/review.raw /tmp/review.txt
+          import json, sys
+          out = []
+          for line in open("/tmp/review.raw"):
+              line = line.strip()
+              if not line.startswith("{"):
+                  out.append(line); continue
+              try:
+                  d = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if d.get("type") == "assistant":
+                  for c in (d.get("message", {}).get("content") or []):
+                      if c.get("type") == "text":
+                          out.append(c["text"])
+              elif d.get("type") == "result" and d.get("is_error"):
+                  out.append(str(d.get("result") or d.get("error") or "error"))
+          sys.stdout.write("\n".join(out))
+          EXTRACT
+          echo "--- turn accounting ---"
+          command grep -o '"type":"[a-z_]*"' /tmp/review.raw | sort | uniq -c | head
           echo "----- review output -----"
           cat /tmp/review.txt
 
