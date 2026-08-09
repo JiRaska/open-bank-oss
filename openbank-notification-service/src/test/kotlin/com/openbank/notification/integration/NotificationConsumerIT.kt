@@ -442,6 +442,38 @@ class NotificationConsumerIT {
     }
 
     /**
+     * ADR-0252 phase 0 — a fan-out where every adapter is DISABLED must not read as a delivery.
+     *
+     * This is the production shape that hid a dead push channel: `ApnsPushSender` is
+     * `enabled=false` by default and returns `PushResult.skipped(...)`, which is `success = true`.
+     * The fan-out counted `success`, so the row committed SENT with `sentAt` set, and an
+     * environment holding no APNs credentials was indistinguishable from a working one — in the
+     * status column, in the outcome stream, and in the logs.
+     *
+     * Asserted through the real consumer path rather than on the mapping function alone: the unit
+     * test pins the mapping, this pins that the fan-out actually calls it.
+     */
+    @Test
+    fun `PUSH with every adapter disabled is SUPPRESSED, never SENT`() {
+        val partyId = UUID.randomUUID()
+        seedActiveDevice(partyId, OffContextPushSender.DISABLED_TOKEN)
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.WELCOME,
+                recipient = "push-disabled@example.com",
+                variables = mapOf("name" to "Push"),
+            ),
+        )
+
+        assertThat(statusFor(partyId)).isEqualTo("SUPPRESSED")
+        // Nothing was rejected, so the token stays usable the moment the adapter is switched on.
+        assertThat(deviceStatusFor(OffContextPushSender.DISABLED_TOKEN)).isEqualTo("ACTIVE")
+    }
+
+    /**
      * ADR-0135 §3 + issue #1182: the push payload that leaves the service must carry NO transaction
      * amount, account number, or other PII. Pre-fix `sendPush` shipped `htmlToPlain(body)` — the
      * fully-rendered "Transaction of 12345.67 EUR completed" — as the PushMessage body, landing on
@@ -497,10 +529,11 @@ class OffContextPushSender : PushSender {
         // Record what actually crosses the transport boundary so a test can assert the payload
         // is PII-free (ADR-0135 §3, issue #1182).
         SENT.add(message)
-        val result = if (message.token == GOOD_TOKEN) {
-            PushResult.ok("apns-id-it")
-        } else {
-            PushResult.failed("BadDeviceToken", "invalid token", invalidToken = true)
+        val result = when (message.token) {
+            GOOD_TOKEN -> PushResult.ok("apns-id-it")
+            // ADR-0252 phase 0: what a DISABLED adapter returns — a successful no-op.
+            DISABLED_TOKEN -> PushResult.skipped("adapter disabled")
+            else -> PushResult.failed("BadDeviceToken", "invalid token", invalidToken = true)
         }
         return Uni.createFrom().completionStage(CompletableFuture.supplyAsync({ result }, EXECUTOR))
     }
@@ -508,6 +541,9 @@ class OffContextPushSender : PushSender {
     companion object {
         const val GOOD_TOKEN = "apns-good-token-it"
         const val BAD_TOKEN = "apns-bad-token-it"
+
+        /** Token whose send comes back *skipped*, i.e. the adapter is switched off. */
+        const val DISABLED_TOKEN = "apns-disabled-adapter-token-it"
         private val EXECUTOR = Executors.newSingleThreadExecutor()
 
         /** Messages the adapter was asked to deliver, in order — inspected by the PII assertion. */

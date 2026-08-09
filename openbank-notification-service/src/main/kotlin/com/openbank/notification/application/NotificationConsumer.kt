@@ -17,6 +17,7 @@ import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.notification.application.port.out.NotificationOutboxRepository
 import com.openbank.notification.application.port.out.OversightWebhookPublisher
 import com.openbank.notification.application.port.out.PushMessage
+import com.openbank.notification.application.port.out.PushMetricsPort
 import com.openbank.notification.application.port.out.PushSender
 import com.openbank.notification.domain.HtmlEscape
 import com.openbank.notification.domain.RecipientAddress
@@ -28,6 +29,8 @@ import com.openbank.notification.domain.model.NotificationRequest
 import com.openbank.notification.domain.model.NotificationStatus
 import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushPlatform
+import com.openbank.notification.domain.model.PushResult
+import com.openbank.notification.domain.model.PushSendOutcome
 import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.client.PartyContactClient
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
@@ -52,6 +55,7 @@ import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
+import java.util.UUID
 import java.util.concurrent.Executor
 
 @ApplicationScoped
@@ -76,6 +80,31 @@ class NotificationConsumer {
             NotificationChannel.EMAIL -> "MARKETING_COMMS_EMAIL"
             NotificationChannel.PUSH -> "MARKETING_COMMS_PUSH"
         }
+
+        /**
+         * Terminal status of a PUSH fan-out from its accepted/skipped tally (ADR-0252 phase 0).
+         *
+         * Visible for tests, and deliberately a pure function of two numbers: this mapping is the
+         * defect. The previous form asked `success > 0`, which is true for a SKIPPED send, so an
+         * environment with every push adapter disabled recorded SENT and looked healthy.
+         *
+         * A fan-out that was only skipped is SUPPRESSED, not FAILED — nothing was rejected and
+         * nothing is retryable; the channel is switched off. Merging it into FAILED would put a
+         * configuration state into the delivery-failure series and make that series unusable for
+         * alerting, which is the mirror image of the bug being fixed.
+         */
+        fun pushOutcomeOf(accepted: Int, skipped: Int): NotificationOutcome = when {
+            accepted > 0 -> NotificationOutcome.SENT
+            skipped > 0 -> NotificationOutcome.SUPPRESSED
+            else -> NotificationOutcome.FAILED
+        }
+
+        /** Reason code accompanying [pushOutcomeOf]; null exactly when something was accepted. */
+        fun pushReasonOf(accepted: Int, skipped: Int): String? = when {
+            accepted > 0 -> null
+            skipped > 0 -> NotificationOutcomeEvent.REASON_PUSH_ADAPTER_DISABLED
+            else -> NotificationOutcomeEvent.REASON_PUSH_REJECTED
+        }
     }
 
     @Inject lateinit var mailer: ReactiveMailer
@@ -96,6 +125,12 @@ class NotificationConsumer {
     @Inject lateinit var preferenceRepo: NotificationPreferenceRepository
 
     @Inject lateinit var pushSender: PushSender
+
+    /**
+     * ADR-0252 phase 0. Field injection for the same reason as [outboxRepo] above — detekt's
+     * `LongParameterList` fires AT `constructorThreshold: 9` and this bean is at the ceiling.
+     */
+    @Inject lateinit var pushMetrics: PushMetricsPort
 
     @Inject lateinit var clock: Clock
 
@@ -527,12 +562,20 @@ class NotificationConsumer {
     /**
      * Deliver a PUSH notification by fanning out to every ACTIVE device token registered for
      * the party. The inbound request carries no token (the producer does not know it) — the
-     * registry is the source of truth. Status is SENT if at least one device accepted the push,
-     * FAILED if there were no devices or every send failed. Tokens the provider rejects
-     * (UNREGISTERED / BadDeviceToken) are retired so they drop out of future fan-out.
+     * registry is the source of truth. Tokens the provider rejects (UNREGISTERED /
+     * BadDeviceToken) are retired so they drop out of future fan-out.
      *
-     * Adapters are off by default; a disabled adapter returns a *skipped* (successful) result,
-     * so in the sandbox a push is recorded SENT without any egress (mirrors the EMAIL stub).
+     * Terminal status, from the three-state [PushSendOutcome] rather than from `success`:
+     * - **SENT** — at least one provider ACCEPTED the push. Accepted, not delivered: APNs returns
+     *   HTTP 200 to mean accepted for delivery and issues no receipt, so this process cannot
+     *   observe whether a device received anything. Device-side acknowledgement is ADR-0252
+     *   phase 3 (#4348).
+     * - **SUPPRESSED** / `push_adapter_disabled` — nothing was accepted and at least one send was
+     *   skipped because the adapter is off. This used to be SENT: a skipped result is
+     *   `success = true`, the fan-out counted `success`, and so an environment with no APNs
+     *   credentials produced byte-identical telemetry and status to a working one. That is half
+     *   the reason a dead push channel went unnoticed until a customer reported it.
+     * - **FAILED** — no devices, or every send was rejected.
      */
     private fun sendPush(req: NotificationRequest, subject: String, entity: NotificationEntity): Uni<Void> {
         // ADR-0135 §3 + issue #1182: push payloads must carry NO amount / account number / PII.
@@ -553,6 +596,7 @@ class NotificationConsumer {
             .chain { tokens ->
                 if (tokens.isEmpty()) {
                     log.infof("PUSH: no active devices for party=%s template=%s", req.partyId, req.template)
+                    pushMetrics.recordFanOut(NotificationOutcome.FAILED, 0)
                     return@chain markStatus(
                         req,
                         entity,
@@ -566,46 +610,66 @@ class NotificationConsumer {
                 val sends = targets.map { (deviceId, platform, token) ->
                     pushSender.send(
                         PushMessage(platform, token, subject, pushText, mapOf("template" to req.template.name)),
-                    ).map { result -> deviceId to result }
+                    ).map { result ->
+                        // Recorded here, where the platform is in scope. Counter increments are
+                        // thread-safe, so running off the event loop (the adapters complete on the
+                        // JDK HttpClient pool) is fine — unlike the Panache work further down.
+                        pushMetrics.recordSend(platform, result.outcome, result.errorCode)
+                        deviceId to result
+                    }
                 }
                 Uni.join().all(sends).andCollectFailures()
                     // The sends completed off the Vert.x event loop; hop back onto the captured
                     // context so the Panache.withTransaction below has a context (issue #1548).
                     .emitOn(Executor { command -> vertxContext?.runOnContext { command.run() } ?: command.run() })
-                    .chain { results ->
-                        val delivered = results.count { it.second.success }
-                        val invalidIds = results.filter { it.second.invalidToken }.map { it.first }
-                        log.infof(
-                            "PUSH fan-out party=%s template=%s devices=%d delivered=%d invalidated=%d",
-                            req.partyId,
-                            req.template,
-                            results.size,
-                            delivered,
-                            invalidIds.size,
-                        )
-                        val outcome =
-                            if (delivered > 0) NotificationOutcome.SENT else NotificationOutcome.FAILED
-                        val reason =
-                            if (delivered > 0) null else NotificationOutcomeEvent.REASON_PUSH_REJECTED
-                        Panache.withTransaction {
-                            deviceTokenRepo.invalidate(invalidIds).chain { _ ->
-                                notificationRepo.find("notificationId", entity.notificationId).firstResult()
-                                    .map { e ->
-                                        e?.also {
-                                            it.status = outcome.name
-                                            if (delivered > 0) it.sentAt = Instant.now(clock)
-                                        }
-                                    }
-                                    .chain { _ ->
-                                        outboxRepo.persistInTransaction(
-                                            outcomeMessage(req, entity, outcome, reason),
-                                        )
-                                    }
-                            }
-                        }
-                    }
+                    .chain { results -> persistPushFanOut(req, entity, results) }
                     .replaceWithVoid()
             }
+    }
+
+    /**
+     * Tally one PUSH fan-out, then commit its status and outcome event in a single transaction.
+     *
+     * Split out of [sendPush] to keep that method under detekt's `LongMethod` ceiling; it runs on
+     * the Vert.x context [sendPush] hopped back onto, which is what lets the Panache work below
+     * function at all (issue #1548).
+     */
+    private fun persistPushFanOut(
+        req: NotificationRequest,
+        entity: NotificationEntity,
+        results: List<Pair<UUID, PushResult>>,
+    ): Uni<*> {
+        // `accepted`, not `delivered`, and it excludes SKIPPED — counting `success` here merged
+        // "the provider took it" with "the adapter is off" (ADR-0252 phase 0).
+        val accepted = results.count { it.second.outcome == PushSendOutcome.ACCEPTED }
+        val skipped = results.count { it.second.outcome == PushSendOutcome.SKIPPED }
+        val invalidIds = results.filter { it.second.invalidToken }.map { it.first }
+        log.infof(
+            "PUSH fan-out party=%s template=%s devices=%d accepted=%d skipped=%d invalidated=%d",
+            req.partyId,
+            req.template,
+            results.size,
+            accepted,
+            skipped,
+            invalidIds.size,
+        )
+        val outcome = pushOutcomeOf(accepted, skipped)
+        val reason = pushReasonOf(accepted, skipped)
+        pushMetrics.recordFanOut(outcome, results.size)
+        return Panache.withTransaction {
+            deviceTokenRepo.invalidate(invalidIds).chain { _ ->
+                notificationRepo.find("notificationId", entity.notificationId).firstResult()
+                    .map { e ->
+                        e?.also {
+                            it.status = outcome.name
+                            if (accepted > 0) it.sentAt = Instant.now(clock)
+                        }
+                    }
+                    .chain { _ ->
+                        outboxRepo.persistInTransaction(outcomeMessage(req, entity, outcome, reason))
+                    }
+            }
+        }
     }
 
     /**
