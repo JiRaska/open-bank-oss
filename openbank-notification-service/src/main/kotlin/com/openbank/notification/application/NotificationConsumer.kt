@@ -596,7 +596,7 @@ class NotificationConsumer {
             .chain { tokens ->
                 if (tokens.isEmpty()) {
                     log.infof("PUSH: no active devices for party=%s template=%s", req.partyId, req.template)
-                    pushMetrics.recordFanOut(NotificationOutcome.FAILED, 0)
+                    pushMetrics.recordFanOut(req.template, NotificationOutcome.FAILED, 0)
                     return@chain markStatus(
                         req,
                         entity,
@@ -655,13 +655,17 @@ class NotificationConsumer {
         )
         val outcome = pushOutcomeOf(accepted, skipped)
         val reason = pushReasonOf(accepted, skipped)
-        pushMetrics.recordFanOut(outcome, results.size)
+        pushMetrics.recordFanOut(req.template, outcome, results.size)
         return Panache.withTransaction {
             deviceTokenRepo.invalidate(invalidIds).chain { _ ->
                 notificationRepo.find("notificationId", entity.notificationId).firstResult()
                     .map { e ->
                         e?.also {
                             it.status = outcome.name
+                            // ADR-0252's counters answer "how is the channel doing"; this answers
+                            // "why did THIS message fail", durably. The outcome event carries the
+                            // same value but its outbox row is pruned after dispatch.
+                            it.failureReason = reason
                             if (accepted > 0) it.sentAt = Instant.now(clock)
                         }
                     }
@@ -690,6 +694,10 @@ class NotificationConsumer {
             .map { e ->
                 e?.also {
                     it.status = status.name
+                    // Persist the reason alongside the status (V13): the outcome event below
+                    // carries the same value, but its outbox row is pruned after dispatch, so
+                    // without this the table can only ever say FAILED.
+                    it.failureReason = reason
                     if (sent) it.sentAt = Instant.now(clock)
                 }
             }

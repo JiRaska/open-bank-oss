@@ -103,6 +103,10 @@ class NotificationConsumerIT {
         Panache.withSession { repository.find("partyId", partyId).firstResult() }
     }?.body
 
+    private fun failureReasonFor(partyId: UUID): String? = VertxContextSupport.subscribeAndAwait {
+        Panache.withSession { repository.find("partyId", partyId).firstResult() }
+    }?.failureReason
+
     private fun notificationIdFor(partyId: UUID): UUID? = VertxContextSupport.subscribeAndAwait {
         Panache.withSession { repository.find("partyId", partyId).firstResult() }
     }?.notificationId
@@ -439,6 +443,9 @@ class NotificationConsumerIT {
         // The provider-rejected token was retired in the same transaction (pre-fix: stayed ACTIVE).
         assertThat(deviceStatusFor(OffContextPushSender.BAD_TOKEN)).isEqualTo("INVALID")
         assertThat(deviceStatusFor(OffContextPushSender.GOOD_TOKEN)).isEqualTo("ACTIVE")
+        // A delivered push carries no failure reason — the column means "why this FAILED", so a
+        // stale value on a SENT row would be worse than none.
+        assertThat(failureReasonFor(partyId)).isNull()
     }
 
     /**
@@ -512,6 +519,28 @@ class NotificationConsumerIT {
         // The amount and account never appear anywhere in the transported payload.
         assertThat(msg.title).doesNotContain(amount).doesNotContain(account)
         assertThat(msg.body).doesNotContain(amount).doesNotContain(account)
+    }
+
+    @Test
+    fun `a push to a party with no device records WHY it failed, not just that it did`() {
+        // No seedActiveDevice: this party has never registered one, which is the overwhelmingly
+        // common case in the live estate — 40 of the 43 parties with a failed push.
+        val partyId = UUID.randomUUID()
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.TRANSACTION_COMPLETED,
+                recipient = "no-device@example.com",
+                variables = mapOf("amount" to "10.00", "currency" to "CZK"),
+            ),
+        )
+
+        assertThat(statusFor(partyId)).isEqualTo("FAILED")
+        // The point of the change: FAILED alone cannot distinguish "no device registered" from
+        // "the provider rejected the token", and those need entirely different fixes.
+        assertThat(failureReasonFor(partyId)).isEqualTo("no_active_device")
     }
 }
 

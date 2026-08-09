@@ -6,6 +6,7 @@ package com.openbank.notification.infrastructure.observability
 
 import com.openbank.notification.application.port.out.PushMetricsPort
 import com.openbank.notification.domain.model.NotificationOutcome
+import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushPlatform
 import com.openbank.notification.domain.model.PushSendOutcome
 import io.micrometer.core.instrument.Counter
@@ -60,10 +61,11 @@ class PushMetricsAdapter(private val registry: MeterRegistry?) : PushMetricsPort
         }
     }
 
-    override fun recordFanOut(outcome: NotificationOutcome, devices: Int) {
+    override fun recordFanOut(template: NotificationTemplate, outcome: NotificationOutcome, devices: Int) {
         registry?.let { r ->
             Counter.builder("openbank.notification.push.fanouts")
                 .tag("service", SERVICE)
+                .tag("template", template.name)
                 .tag("outcome", outcome.name)
                 .tag("devices_bucket", deviceBucket(devices))
                 .register(r)
