@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.3.0...case-coordinator-agent-v0.4.0) (2026-08-09)
+
+
+### Features
+
+* **case-coordinator:** deploy the swarm case-coordinator runtime via GitOps ([#4187](https://github.com/JiRaska/open-bank-oss/issues/4187)) ([#4236](https://github.com/JiRaska/open-bank-oss/issues/4236)) ([46a8066](https://github.com/JiRaska/open-bank-oss/commit/46a8066ae0c0d91fdf37799db5e2b61b9b585532))
+
+
+### Bug Fixes
+
+* **ci:** re-align case-coordinator-agent's Dockerfile FROM with the deploy recipe ([#4392](https://github.com/JiRaska/open-bank-oss/issues/4392)) ([cd3d010](https://github.com/JiRaska/open-bank-oss/commit/cd3d010f27e1b5eca829dac390d0843e99f0f841))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.2.0...case-coordinator-agent-v0.3.0) (2026-08-08)
 
 
