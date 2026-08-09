@@ -55,9 +55,9 @@ class StatementResource(
     @Operation(summary = "Close a month for every pocket of an account (assigns sequences, reconciles fail-closed)")
     fun close(
         @PathParam("accountId") accountId: UUID,
-        @QueryParam("from") from: String,
-        @QueryParam("to") to: String,
-    ): Uni<Response> = closePeriod.closeMonth(accountId, LocalDate.parse(from), LocalDate.parse(to))
+        @QueryParam("from") from: String?,
+        @QueryParam("to") to: String?,
+    ): Uni<Response> = closePeriod.closeMonth(accountId, requiredDate(from, "from"), requiredDate(to, "to"))
         .map { Response.ok(it).build() }
         .onFailure(ReconciliationException::class.java)
         .recoverWithItem { e ->
@@ -75,10 +75,10 @@ class StatementResource(
     fun restate(
         @PathParam("accountId") accountId: UUID,
         @PathParam("currency") currency: String,
-        @QueryParam("from") from: String,
-        @QueryParam("to") to: String,
+        @QueryParam("from") from: String?,
+        @QueryParam("to") to: String?,
     ): Uni<Response> =
-        restatePeriod.restatePocketPeriod(accountId, currency, LocalDate.parse(from), LocalDate.parse(to))
+        restatePeriod.restatePocketPeriod(accountId, currency, requiredDate(from, "from"), requiredDate(to, "to"))
             .map { Response.ok(it).build() }
             .onFailure(NoClosedPeriodToRestateException::class.java)
             .recoverWithItem { e ->
@@ -167,13 +167,38 @@ class StatementResource(
     fun export(
         @PathParam("accountId") accountId: UUID,
         @PathParam("currency") currency: String,
-        @QueryParam("from") from: String,
-        @QueryParam("to") to: String,
+        @QueryParam("from") from: String?,
+        @QueryParam("to") to: String?,
         @QueryParam("format") @DefaultValue("PDF") format: String,
-    ): Uni<Response> =
-        adHocExport.export(accountId, currency, LocalDate.parse(from), LocalDate.parse(to), parseFormat(format))
-            .map { rendered -> Response.ok(rendered.body).type(rendered.contentType).build() }
+    ): Uni<Response> = adHocExport.export(
+        accountId,
+        currency,
+        requiredDate(from, "from"),
+        requiredDate(to, "to"),
+        parseFormat(format),
+    )
+        .map { rendered -> Response.ok(rendered.body).type(rendered.contentType).build() }
 
     private fun parseFormat(raw: String): StatementFormat =
         StatementFormat.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) } ?: StatementFormat.PDF
+
+    /**
+     * `from`/`to` are genuinely required — a period is never guessed.
+     *
+     * The parameter MUST be declared nullable for this to be reachable at all: JAX-RS injects `null`
+     * for an absent query parameter, and on a non-`suspend` handler a non-nullable Kotlin type
+     * compiles to an `Intrinsics.checkNotNullParameter` at offset 0, so the NPE lands before the
+     * first statement of the body and the generic mapper answers 500 (issue #3104/#3624). With the
+     * type nullable, `requireNotNull` runs and libs-runtime's `IllegalArgumentExceptionMapper`
+     * renders 400 + `ApiError`.
+     *
+     * No `@DefaultValue` here on purpose: a period close assigns LEGAL SEQUENCES and is idempotent
+     * on `(account, currency, period)`, so a guessed "last month" range does not fail — it writes
+     * the WRONG statement. `format` on the same handlers genuinely is defaultable and keeps its
+     * `@DefaultValue`.
+     */
+    private fun requiredDate(raw: String?, name: String): LocalDate {
+        requireNotNull(raw) { "query parameter '$name' is required" }
+        return LocalDate.parse(raw)
+    }
 }

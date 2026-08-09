@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.1...statement-service-v0.8.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **customer-edge:** answer 400, not 500, for a missing required query parameter ([#4211](https://github.com/JiRaska/open-bank-oss/issues/4211)) ([4ddb6ef](https://github.com/JiRaska/open-bank-oss/commit/4ddb6efeb23864fe65a4f2624f8722e1fcae04fb)), closes [#3624](https://github.com/JiRaska/open-bank-oss/issues/3624)
+
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.0...statement-service-v0.8.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* send occurredAt on the four non-money-path domain-event producers ([#3926](https://github.com/JiRaska/open-bank-oss/issues/3926)) ([4a2080c](https://github.com/JiRaska/open-bank-oss/commit/4a2080c3a4de10b2a858b7111ac83d63c60114d1))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.7.0...statement-service-v0.8.0) (2026-08-07)
 
 
