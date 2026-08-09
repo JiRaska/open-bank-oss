@@ -108,36 +108,34 @@ class AuditConsumer {
                 // `ce-type` is the outbox event type, and it is the LAST resort before the
                 // sentinel: it is the producer's own value, carried by the transport rather than
                 // the body, so it is a recovery of a fact and not an inference (#3994).
-                eventType = node["eventType"]?.asText()
-                    ?: node["type"]?.asText()
+                eventType = node.textOrNull("eventType")
+                    ?: node.textOrNull("type")
                     ?: address.ceType
                     ?: "UNKNOWN",
-                aggregateType = node["aggregateType"]?.asText() ?: inferAggregateType(node),
+                aggregateType = node.textOrNull("aggregateType") ?: inferAggregateType(node),
                 aggregateId = inferAggregateId(node),
-                actorId = node["requestedBy"]?.asText()
-                    ?: node["actorId"]?.asText()
+                actorId = node.textOrNull("requestedBy")
+                    ?: node.textOrNull("actorId")
                     // transaction.initiated events carry the customer identity here (ADR-0021).
-                    ?: node["initiatedByPartyId"]?.asText(),
-                actorType = node["actorType"]?.asText(),
+                    ?: node.textOrNull("initiatedByPartyId"),
+                actorType = node.textOrNull("actorType"),
                 payload = payload,
                 sourceService = resolvedSource.first,
                 sourceServiceSource = resolvedSource.second,
-                correlationId = node["correlationId"]?.asText(),
+                correlationId = node.textOrNull("correlationId"),
                 occurredAt = eventTime ?: Instant.now(clock),
                 recordedAt = Instant.now(clock),
                 occurredAtSource = if (eventTime != null) OccurredAtSource.EVENT else OccurredAtSource.INGEST,
                 // ADR-0226: cross-channel dimensions, additive — producers adopt them channel by
                 // channel, so absence stays null (unknown), never a guessed default.
-                channel = node["channel"]?.asText(),
+                channel = node.textOrNull("channel"),
                 actChain = node["actChain"]?.takeIf { it.isArray }?.map { it.asText() } ?: emptyList(),
-                sessionId = node["sessionId"]?.asText(),
+                sessionId = node.textOrNull("sessionId"),
                 // ADR-0232 D5: a delegated action names the grantor it was taken on behalf of and
                 // the grant that permitted it. customer-edge flattens its audit details into the
                 // event JSON, so both arrive as top-level fields. Absent = a direct action.
-                // (`takeIf { !it.isNull }` because Jackson's asText() on an explicit JSON null
-                // yields the STRING "null", which would index a delegated action that is not one.)
-                onBehalfOf = node["onBehalfOf"]?.takeIf { !it.isNull }?.asText(),
-                delegationId = node["delegationId"]?.takeIf { !it.isNull }?.asText(),
+                onBehalfOf = node.textOrNull("onBehalfOf"),
+                delegationId = node.textOrNull("delegationId"),
             )
             if (eventTime == null) countMissingEventTime(entry.sourceService)
             if (entry.sourceServiceSource != AttributionSource.EVENT) {
@@ -183,7 +181,7 @@ class AuditConsumer {
      * no log line, and 76% of the trail went that way unnoticed.
      */
     private fun resolveSourceService(node: JsonNode, address: EventAddress): Pair<String, AttributionSource> {
-        node["sourceService"]?.asText()?.takeIf { it.isNotBlank() }?.let {
+        node.textOrNull("sourceService")?.let {
             return it to AttributionSource.EVENT
         }
         TopicAttribution.sourceService(address.topic)?.let { return it to AttributionSource.TOPIC }
@@ -230,7 +228,7 @@ class AuditConsumer {
      *    operation entirely. It is now an INGEST-sourced row: a degraded entry beats no entry.
      */
     private fun eventTime(node: JsonNode): Instant? {
-        val raw = node["occurredAt"]?.asText() ?: return null
+        val raw = node.textOrNull("occurredAt") ?: return null
         return runCatching { Instant.parse(raw) }.getOrElse {
             log.warnf("Unparseable occurredAt %s; recording ingest time instead", raw.take(MAX_LOGGED_RAW_TIME_CHARS))
             null
@@ -264,18 +262,23 @@ class AuditConsumer {
         "id" to "SANCTIONS_CHECK",
     )
 
+    // Both halves test the SAME predicate ([textOrNull], not `has`) on purpose. `has` is true for a
+    // field explicitly set to JSON null, so the old pair disagreed on exactly that input: the type
+    // side claimed the aggregate ("accountId": null -> ACCOUNT) while the id side produced the
+    // string "null" — a typed aggregate pointing at an id that identifies nothing. Keeping the
+    // predicate identical is what makes the two sides answer about the same field (#3994).
     private fun inferAggregateId(node: JsonNode): String {
-        node["incident"]?.get("id")?.asText()?.let { return it }
+        node["incident"]?.textOrNull("id")?.let { return it }
         for ((field, _) in aggregateFields) {
-            node[field]?.asText()?.let { return it }
+            node.textOrNull(field)?.let { return it }
         }
         return "unknown"
     }
 
     private fun inferAggregateType(node: JsonNode): String {
-        if (node.has("incident")) return "ICT_INCIDENT"
+        if (node["incident"]?.textOrNull("id") != null) return "ICT_INCIDENT"
         for ((field, type) in aggregateFields) {
-            if (node.has(field)) return type
+            if (node.textOrNull(field) != null) return type
         }
         return "UNKNOWN"
     }
@@ -285,3 +288,32 @@ class AuditConsumer {
         const val MAX_LOGGED_RAW_TIME_CHARS = 64
     }
 }
+
+/**
+ * One string field of a producer's payload, or null when the producer did not supply one (#3994).
+ *
+ * **Why this exists rather than `node[field]?.asText()`.** Jackson's `asText()` on a `NullNode`
+ * returns the four-character STRING `"null"`, so `{"actorId": null}` — a producer explicitly
+ * saying it has no actor — stored `actorId = "null"` as though that were somebody. Measured on the
+ * live audit database: **7 rows carry `actor_id = 'null'`**, all `TransactionInitiated`, all
+ * money-path. That is worse than the NULL it replaces and is why it survived: a NULL actor reads
+ * as a known gap and gets counted, whereas `"null"` reads as an attributed row. It is also
+ * chain-hashed into `record_hash` (`actorId` is in `chainHash`'s canonical string), returned by
+ * the ADR-0226 `findByActorId` cross-channel person query, and served to data subjects by the
+ * GDPR Art. 15 access log — so a query for actor `"null"` returns seven real transactions
+ * belonging to nobody, and a real actor's own access log is missing them.
+ *
+ * The trap was already known here — [AuditConsumer]'s `onBehalfOf`/`delegationId` carried a
+ * hand-written `takeIf { !it.isNull }` guard and a comment explaining precisely this — but the
+ * guard was applied at two of the eleven call sites that needed it. That is the argument for one
+ * shared accessor over eleven guards: a guard that has to be remembered per field is a guard that
+ * documents the defect at the two places it does not occur.
+ *
+ * Blank is folded in with null for the same reason: `""` is not an actor, an event type or a
+ * service name, and letting it through only moves the empty value one layer downstream.
+ *
+ * Free-standing rather than a member so it also reads on the nested `incident` node, and so the
+ * class stays under detekt's function-count threshold.
+ */
+private fun JsonNode.textOrNull(field: String): String? =
+    this[field]?.takeIf { !it.isNull }?.asText()?.takeIf { it.isNotBlank() }
