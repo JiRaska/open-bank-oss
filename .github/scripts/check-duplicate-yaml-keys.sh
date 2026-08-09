@@ -54,25 +54,36 @@ YML
 # Exclude build outputs and isolated git worktrees (.claude/worktrees) so we only
 # gate the committed source tree. (find|xargs, not mapfile — the macOS pool member
 # ships bash 3.2; service paths contain no spaces.)
+# ...and openbank-libs/governance/*.yaml, which has the same failure with a wider blast
+# radius. `rules.yaml` is what CI enforces, and nothing lints it: yamllint's own gate covers
+# `openbank-infra .github` only, so a key added above an existing one is dropped by SnakeYAML
+# with no error anywhere and the rule simply stops applying (#2457 found this the hard way, by
+# diffing yamllint finding sets by hand). Measured 2026-08-09: those 15 files have zero
+# duplicates today, so this lands green and can only fire on a regression.
 files="$(
   find "$ROOT" \
     \( -type d \( -name build -o -name node_modules -o -name .git -o -name .claude \) -prune \) -o \
-    \( -path '*/src/main/resources/application.yaml' -print \)
+    \( -path '*/src/main/resources/application.yaml' -print \) -o \
+    \( -path '*/openbank-libs/governance/*.yaml' -print \)
 )"
 
 if [ -z "$files" ]; then
-  echo "check-duplicate-yaml-keys: no service application.yaml found under '$ROOT' — nothing to check."
-  exit 0
+  # Not "nothing to check" — this gate has two corpora and both are large. An empty list
+  # means the scope moved, and reporting that as a pass is the #4339 failure exactly.
+  echo "::error::check-duplicate-yaml-keys: no application.yaml and no governance yaml found" \
+       "under '$ROOT' — the scope moved, the gate did not."
+  exit 1
 fi
 
 # yamllint prints nothing (and exits 0) when clean; with only key-duplicates
 # enabled, any output is a real duplicate. `|| true` keeps set -e from aborting on
 # the non-zero exit so we can annotate the findings ourselves.
 count_files="$(printf '%s\n' "$files" | grep -c . || true)"
+echo "SUBJECTS=$count_files"
 violations="$(printf '%s\n' "$files" | xargs yamllint -f parsable -c "$CFG" || true)"
 
 if [ -z "$violations" ]; then
-  echo "check-duplicate-yaml-keys: $count_files application.yaml file(s) checked, no duplicate keys."
+  echo "check-duplicate-yaml-keys: $count_files file(s) checked (service application.yaml + openbank-libs/governance), no duplicate keys."
   exit 0
 fi
 

@@ -178,7 +178,7 @@ def discover_ext_rego(root: Path, module_dirs: set[str]) -> dict[str, list[ExtRu
                 file=sys.stderr,
             )
             continue
-        for body, filename in zip(heredocs, filenames):
+        for body, filename in zip(heredocs, filenames, strict=False):
             try:
                 rules = _parse_ext_rego(body, filename)
             except ValueError as e:

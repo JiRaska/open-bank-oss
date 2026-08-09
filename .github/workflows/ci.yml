@@ -104,17 +104,14 @@ jobs:
       - name: Type-check
         run: npm run type-check
 
-      # ADR-0071 Phase 4: manifest.ts must stay types-only — no hand-edited versions
-      # or inline data. Enforced (hard failure). Runs from repo root so the script
-      # can resolve the relative path to manifest.ts.
-      - name: manifest.ts types-only gate (ADR-0071 Phase 4, enforced)
-        working-directory: ${{ github.workspace }}
-        run: bash .github/scripts/check-manifest-types-only.sh
-
       # ADR-0071: the governance manifest is code-derived from per-service
       # governance.yaml. Regenerate and fail on any module missing/with an invalid
       # governance.yaml. Phase 4: flipped from advisory (::warning::) to enforce
       # (exit 1) — the fleet completed the governance.yaml sweep in phases 1-3.
+      #
+      # The manifest.ts types-only gate used to sit here too. It is now declared in
+      # .github/gates/gates.yaml (`manifest-types-only`), because this job is conditional
+      # and a gate must not inherit a scope nobody declared (#3629, #4339).
       - name: Governance manifest gate (ADR-0071, enforced)
         working-directory: openbank-admin-ui
         run: |
