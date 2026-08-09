@@ -1,0 +1,79 @@
+# Kafka mTLS identity + ACLs for case-coordinator-agent (ADR-0137 fleet gate, ADR-0244).
+#
+# case-coordinator-agent is producer-only: the transactional outbox (case_outbox) dispatches
+# the terminal HITL proposal of every case to `proposal-events`. No consumer side.
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for all of
+# this service's Kafka traffic. The User resources live in `messaging` (where the Strimzi User
+# Operator watches); the minted secrets are projected into `platform` by the ExternalSecrets
+# below — the same cross-namespace pattern agent-service established for this namespace.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # Certs (KafkaUser → Strimzi secret → ESO projection) must land before the Deployment
+    # rolls pods onto mTLS; lower waves sync first.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: case-coordinator
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      # Produce case-terminal HITL proposals (ADR-0244 D7).
+      - resource:
+          type: topic
+          name: proposal-events
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+---
+# ── ExternalSecret: case-coordinator keystore ───────────────────────────────
+# `dataFrom.extract` copies every key of the source secret verbatim, preserving the BINARY
+# PKCS#12 (`user.p12`) byte-for-byte. deletionPolicy: Retain so a transient store/RBAC blip
+# never deletes a live keystore out from under a running pod.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: case-coordinator-kafka-keystore
+  namespace: platform
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: case-coordinator-kafka-keystore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: case-coordinator
+---
+# ── ExternalSecret: cluster CA truststore ───────────────────────────────────
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kafka-cluster-ca-truststore
+  namespace: platform
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: kafka-messaging-certs
+  target:
+    name: kafka-cluster-ca-truststore
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - extract:
+        key: openbank-cluster-cluster-ca-cert
