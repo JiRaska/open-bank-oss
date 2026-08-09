@@ -251,3 +251,7 @@ V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:178: plai
 # instead (https is not an available alternative here, same as analytics-sink -> Apicurio above).
 # Paid off by the Layer 1 mesh-mTLS work, not before, and not by this PR alone.
 V9.1 openbank-infra/gitops/components/fraud-service/fraud-service.yaml:124: plaintext http:// env value http://account-service.accounts.svc:8100
+V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:477: plaintext http:// env value http://fraud-service.fraud.svc:8133
+V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:832: plaintext http:// env value http://fraud-service.fraud.svc:8133
+V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:1160: plaintext http:// env value http://fraud-service.fraud.svc:8133
+V9.1 openbank-infra/gitops/components/fx-service/fx-service.yaml:89: plaintext http:// env value http://fraud-service.fraud.svc:8133
