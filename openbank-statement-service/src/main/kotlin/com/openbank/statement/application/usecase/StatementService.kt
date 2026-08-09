@@ -8,6 +8,8 @@ import com.openbank.statement.application.port.`in`.ClosePeriodUseCase
 import com.openbank.statement.application.port.`in`.ClosePocketUseCase
 import com.openbank.statement.application.port.`in`.ListStatementsUseCase
 import com.openbank.statement.application.port.`in`.RenderStatementUseCase
+import com.openbank.statement.application.port.`in`.StatementModelUseCase
+import com.openbank.statement.application.port.`in`.SummarizeStatementUseCase
 import com.openbank.statement.application.port.out.AccountInfoPort
 import com.openbank.statement.application.port.out.BalancePort
 import com.openbank.statement.application.port.out.BookedEntryPort
@@ -15,17 +17,18 @@ import com.openbank.statement.application.port.out.PocketAccountInfo
 import com.openbank.statement.application.port.out.StatementOutboxMessage
 import com.openbank.statement.application.port.out.StatementPeriodRepository
 import com.openbank.statement.domain.model.BalanceAnchor
-import com.openbank.statement.domain.model.CreditDebit
 import com.openbank.statement.domain.model.PeriodCloseStatus
 import com.openbank.statement.domain.model.StatementEntry
 import com.openbank.statement.domain.model.StatementFormat
 import com.openbank.statement.domain.model.StatementModel
 import com.openbank.statement.domain.model.StatementPeriod
+import com.openbank.statement.domain.model.StatementSnapshot
 import com.openbank.statement.domain.reconcile.ReconciliationPolicy
 import com.openbank.statement.domain.render.StatementRenderer
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
+import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -42,6 +45,11 @@ import java.util.UUID
  * The reconciliation/sequence/projection logic lives in the (framework-free) domain; this use case
  * only wires the ports together.
  */
+// TooManyFunctions: this is the single lifecycle orchestrator for close/render/export/list (see
+// KDoc above) — ADR-0248 added statementModel() as the shared lookup both render() and the new
+// customer-facing document use case (StatementDocumentService) replay, so it belongs here rather
+// than duplicating the reconciliation/lookup logic in a second class.
+@Suppress("TooManyFunctions")
 @ApplicationScoped
 class StatementService(
     private val accountInfo: AccountInfoPort,
@@ -51,8 +59,12 @@ class StatementService(
 ) : ClosePeriodUseCase,
     ClosePocketUseCase,
     RenderStatementUseCase,
+    StatementModelUseCase,
     ListStatementsUseCase,
-    AdHocExportUseCase {
+    AdHocExportUseCase,
+    SummarizeStatementUseCase {
+
+    private val log = Logger.getLogger(StatementService::class.java)
 
     /** Clock seam: `closedAt` is stamped at close time and then *stored*, so renders stay deterministic
      *  (ADR-0035 §F). Overridable in tests; CDI uses the default. */
@@ -96,7 +108,7 @@ class StatementService(
     ): Uni<StatementPeriod> = bookedEntries.bookedEntries(account.accountId, currency, from, to).flatMap { entries ->
         openingBalance(account.accountId, currency, from).flatMap { opening ->
             balance.closingBalance(account.accountId, currency, to).flatMap { reported ->
-                val net = netMovement(entries)
+                val net = netMovementOf(entries)
                 when (val r = ReconciliationPolicy.reconcile(opening, net, reported.amount)) {
                     is ReconciliationPolicy.Result.Mismatch ->
                         Uni.createFrom().failure(
@@ -131,6 +143,9 @@ class StatementService(
             entryCount = entries.size,
             closedAt = clock(),
             status = PeriodCloseStatus.CLOSED,
+            // Freeze the render inputs from the reads this close already did (#3986). No extra
+            // query, and no second clock read — `closedAt` above stays the single time anchor.
+            snapshot = StatementSnapshot(account.iban, account.holderName, entries),
         )
         // Atomic: the period record and its `period.closed` outbox event commit together,
         // so a crash can't leave a closed period whose event was never emitted (was two
@@ -153,18 +168,47 @@ class StatementService(
         currency: String,
         legalSequence: Long,
         format: StatementFormat,
-    ): Uni<StatementRenderer.Rendered> = periods.findBySequence(accountId, currency, legalSequence).flatMap { period ->
-        if (period == null) {
-            Uni.createFrom().failure(StatementNotFoundException(accountId, currency, legalSequence))
-        } else {
-            accountInfo.pocketAccount(accountId).flatMap { account ->
-                bookedEntries.bookedEntries(accountId, currency, period.periodFrom, period.periodTo)
-                    .map { entries ->
-                        StatementRenderer.render(modelFromPeriod(account, period, entries), format)
+    ): Uni<StatementRenderer.Rendered> =
+        statementModel(accountId, currency, legalSequence).map { model -> StatementRenderer.render(model, format) }
+
+    /** [SummarizeStatementUseCase]: the same closed period as [render] and [statementModel], as the canonical model — no renderer. */
+    override fun summary(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementModel> =
+        statementModel(accountId, currency, legalSequence)
+
+    /**
+     * The canonical model of a CLOSED period (issue #3986).
+     *
+     * A period with a [StatementSnapshot] is replayed **purely from stored state** — no
+     * `pocketAccount` read, no `bookedEntries` read — so two renders of the same `legalSequence`
+     * are byte-identical however much the live projections have moved since (ADR-0035 §D/§F).
+     *
+     * A period closed *before* #3986 has no snapshot and still replays the live projections. That
+     * is the old, non-deterministic behaviour, kept deliberately: those renders were never frozen,
+     * and inventing a snapshot from today's data would freeze whatever drift has already happened
+     * and present it as the issued document. It is logged, not silently equivalent.
+     */
+    override fun statementModel(accountId: UUID, currency: String, legalSequence: Long): Uni<StatementModel> =
+        periods.findBySequence(accountId, currency, legalSequence).flatMap { period ->
+            when {
+                period == null ->
+                    Uni.createFrom().failure(StatementNotFoundException(accountId, currency, legalSequence))
+                period.snapshot != null ->
+                    Uni.createFrom().item(modelFromSnapshot(period, period.snapshot!!))
+                else -> {
+                    log.warnf(
+                        "Statement %s/%s seq=%d closed before the render snapshot existed (#3986); " +
+                            "replaying live projections — this render is NOT guaranteed to match the issued document",
+                        accountId,
+                        currency,
+                        legalSequence,
+                    )
+                    accountInfo.pocketAccount(accountId).flatMap { account ->
+                        bookedEntries.bookedEntries(accountId, currency, period.periodFrom, period.periodTo)
+                            .map { entries -> modelFromPeriod(account, period, entries) }
                     }
+                }
             }
         }
-    }
 
     override fun export(
         accountId: UUID,
@@ -175,7 +219,7 @@ class StatementService(
     ): Uni<StatementRenderer.Rendered> = accountInfo.pocketAccount(accountId).flatMap { account ->
         bookedEntries.bookedEntries(accountId, currency, from, to).flatMap { entries ->
             openingBalance(accountId, currency, from).map { opening ->
-                val closing = opening.add(netMovement(entries))
+                val closing = opening.add(netMovementOf(entries))
                 // Non-sequenced informational export (legal/electronic sequence = 0).
                 val model = StatementModel(
                     accountId = accountId,
@@ -198,6 +242,27 @@ class StatementService(
 
     override fun list(accountId: UUID): Uni<List<StatementPeriod>> = periods.listForAccount(accountId)
 
+    /**
+     * The deterministic replay path: every field comes from the closed period or its frozen
+     * snapshot, so this function reads no live data and takes no clock (#3986).
+     */
+    private fun modelFromSnapshot(period: StatementPeriod, snapshot: StatementSnapshot): StatementModel =
+        StatementModel(
+            accountId = period.accountId,
+            iban = snapshot.iban,
+            currency = period.pocketCurrency,
+            holderName = snapshot.holderName,
+            periodFrom = period.periodFrom,
+            periodTo = period.periodTo,
+            openingBalance = BalanceAnchor(period.openingBalance, period.pocketCurrency, period.periodFrom),
+            closingBalance = BalanceAnchor(period.closingBalance, period.pocketCurrency, period.periodTo),
+            entries = snapshot.entries,
+            legalSequenceNumber = period.legalSequenceNumber,
+            electronicSequenceNumber = period.electronicSequenceNumber,
+            closedAt = period.closedAt,
+            supersedesSequence = period.supersedesSequence,
+        )
+
     private fun modelFromPeriod(
         account: PocketAccountInfo,
         period: StatementPeriod,
@@ -218,13 +283,15 @@ class StatementService(
         supersedesSequence = period.supersedesSequence,
     )
 
-    private fun netMovement(entries: List<StatementEntry>): BigDecimal = entries.fold(BigDecimal.ZERO) { acc, e ->
-        when (e.creditDebit) {
-            CreditDebit.CRDT -> acc.add(e.amount)
-            CreditDebit.DBIT -> acc.subtract(e.amount)
-        }
-    }
-
+    /**
+     * `occurredAt` is [StatementPeriod.closedAt] — the period-close instant this event announces —
+     * and NOT a clock read taken while serialising (#3914).
+     *
+     * That distinction is load-bearing in this service specifically: closedAt is the anchor every
+     * renderer takes its timestamps from ("determinism is load-bearing", see the service's
+     * CLAUDE.md), so it is the one instant a statement is already defined by. A close replayed or
+     * re-emitted later must carry the same `occurredAt`, which a serialisation-time clock would not.
+     */
     private fun periodClosedEvent(account: PocketAccountInfo, period: StatementPeriod): StatementOutboxMessage {
         val payload = """
             {"eventType":"account.statement.period.closed.v1",
@@ -238,7 +305,8 @@ class StatementService(
             "openingBalance":${period.openingBalance.toPlainString()},
             "closingBalance":${period.closingBalance.toPlainString()},
             "entryCount":${period.entryCount},
-            "closedAt":"${period.closedAt}"}
+            "closedAt":"${period.closedAt}",
+            "occurredAt":"${period.closedAt}"}
         """.trimIndent().replace("\n", "")
         return StatementOutboxMessage(
             eventId = UUID.randomUUID(),

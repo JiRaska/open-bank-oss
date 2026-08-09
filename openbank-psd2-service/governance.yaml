@@ -14,9 +14,13 @@ lineage:
     - serviceName: consent-service
       relationType: api
       description: checks
-    - serviceName: sca-service
-      relationType: api
-      description: triggers
+    # Removed (issue #3982): `sca-service (api, "triggers")`. psd2-service's only REST client is
+    # ConsentServiceRestClient, and its Deployment env reaches consent-service and
+    # tpp-registry-service only — never sca-service. SCA is reached INDIRECTLY: psd2 returns an
+    # `scaRedirect` link and consent-service holds the ScaChallengeClient. The mirror of this
+    # same edge was declared a second time on sca-service's `upstream` under a different
+    # `openbank-` spelling, and both halves counted as separate findings until the audit learned
+    # to canonicalize edge keys.
     - serviceName: tpp-registry-service
       relationType: api
       description: validates

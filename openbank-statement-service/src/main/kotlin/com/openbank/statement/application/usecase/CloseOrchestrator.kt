@@ -204,6 +204,10 @@ class CloseOrchestrator(
         e: Throwable,
     ): Uni<Void> {
         val detail = jsonEscape((e.message ?: e.javaClass.simpleName).take(500))
+        // One clock read, used for both names: `failedAt` is this event's business instant, so
+        // `occurredAt` must be the SAME value, not a second read. Two reads would put two "when"s
+        // on one failure and let them drift under load.
+        val failedAt = clock()
         val payload = """
             {"eventType":"account.statement.period.close_failed.v1",
             "accountId":"$accountId",
@@ -212,7 +216,8 @@ class CloseOrchestrator(
             "periodTo":"$to",
             "reason":"$reason",
             "detail":"$detail",
-            "failedAt":"${clock()}"}
+            "failedAt":"$failedAt",
+            "occurredAt":"$failedAt"}
         """.trimIndent().replace("\n", "")
         return outbox.append(
             StatementOutboxMessage(

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.7.1...control-liveness-sentinel-v0.7.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **libs:** seed the workflow-liveness age gauge at registration, not at Instant.EPOCH ([#4208](https://github.com/JiRaska/open-bank-oss/issues/4208)) ([73d5f0d](https://github.com/JiRaska/open-bank-oss/commit/73d5f0dc4eabb2349ddb9ca02da9c8a3e81453f2))
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.7.0...control-liveness-sentinel-v0.7.1) (2026-08-02)
 
 

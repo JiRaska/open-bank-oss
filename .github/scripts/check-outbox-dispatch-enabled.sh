@@ -111,5 +111,6 @@ done < <(
     | sort
 )
 
+echo "SUBJECTS=$checked"
 echo "check-outbox-dispatch-enabled: $checked dispatch-gated service(s) checked, $skipped skipped (no gated dispatcher), $( [ "$fail" -eq 0 ] && echo "all set dispatch-enabled: true." || echo "VIOLATIONS above." )"
 exit "$fail"

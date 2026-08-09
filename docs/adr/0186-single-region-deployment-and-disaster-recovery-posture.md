@@ -2,6 +2,7 @@
 date: 2026-07-23
 decision-status: accepted
 delivery-status: partial
+followup: "#669, #2365 — tested restore runbooks and DR drill cadence; M6 multi-region is roadmap, not a tail"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []

@@ -76,6 +76,10 @@ export default function NewCampaignPage() {
   const [steps, setSteps] = useState<EditorStep[]>([newStep()])
   const [selected, setSelected] = useState<number | null>(0)
   const [reach, setReach] = useState<number | null>(null)
+  // Null = no cap, which is the service's own default (absent stopCondition runs every step).
+  const [stopAfter, setStopAfter] = useState<number | null>(null)
+  // Null = measure nothing, which is the service's default and an honest state rather than a gap.
+  const [conversionRule, setConversionRule] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -158,10 +162,13 @@ export default function NewCampaignPage() {
         goal: goal.trim(),
         segmentName: segName,
         segmentVersion: Number(segVersion),
+        ...(stopAfter !== null ? { stopCondition: { maxSendsPerParty: stopAfter } } : {}),
+        ...(conversionRule ? { conversionRule } : {}),
         steps: steps.map((s, i) => ({
           order: i + 1,
           template: s.template,
           channel: s.channel,
+          ...(s.condition ? { condition: s.condition } : {}),
           variables: s.variables,
           delaySeconds: s.delaySeconds,
         })),
@@ -297,6 +304,7 @@ export default function NewCampaignPage() {
           onAdd={addStep}
           onRemove={removeStep}
           templateLabels={templateLabels}
+          stopAfter={stopAfter}
         />
 
         {/* No gap and no separate card: the panel is the selected node opened, so it continues the
@@ -315,6 +323,79 @@ export default function NewCampaignPage() {
           />
         )}
 
+        </div>
+
+        {/* What "it worked" means, asked at authoring time because it cannot be answered later:
+            attribution runs from the first send, so a rule added after the fact measures nothing
+            retroactively (ADR-0245 D2). The options are a closed catalogue — a marketer picks what
+            the bank already observes and cannot invent a metric (D1). */}
+        <div className="max-w-2xl rounded-lg border p-3 space-y-2">
+          <span className="text-sm font-medium">{t('Co znamená úspěch', 'What counts as success')}</span>
+          <div className="flex flex-wrap gap-2">
+            {[null, 'ACCOUNT_OPENED', 'CARD_ISSUED'].map(r => (
+              <button
+                key={r ?? 'NONE'}
+                type="button"
+                data-conversion-pick={r ?? 'NONE'}
+                data-selected={conversionRule === r ? 'true' : 'false'}
+                onClick={() => setConversionRule(r)}
+                className="btn"
+                style={
+                  conversionRule === r
+                    ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' }
+                    : undefined
+                }
+              >
+                {r === null
+                  ? t('Neměřit', 'Do not measure')
+                  : r === 'ACCOUNT_OPENED'
+                    ? t('Založení účtu', 'Account opened')
+                    : t('Vydání karty', 'Card issued')}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'Počítá se skutečná událost v bance, ne otevření e-mailu ani proklik — ty se nesledují.',
+              'Counted from a real banking event, never an email open or a click — those are not tracked.',
+            )}
+          </p>
+        </div>
+
+        {/* The one contact rule a campaign DOES own. The platform-wide ones below are read-only; this
+            cap is per-campaign by design (ADR-0200 D1), so it is offered here rather than described. */}
+        <div className="max-w-2xl rounded-lg border p-3 space-y-2">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input
+              type="checkbox"
+              data-stop-enabled
+              checked={stopAfter !== null}
+              onChange={e => setStopAfter(e.target.checked ? 2 : null)}
+            />
+            {t('Ukončit cestu po několika zprávách', 'End the journey after a few messages')}
+          </label>
+          {stopAfter !== null && (
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="1"
+                data-stop-after
+                className="input"
+                style={{ width: '5.5rem' }}
+                value={stopAfter}
+                onChange={e => setStopAfter(Math.max(1, Number(e.target.value) || 1))}
+              />
+              <span className="text-sm text-muted-foreground">
+                {t('zprávách na člověka — pak cesta skončí', 'messages per person — then the journey ends')}
+              </span>
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'Počítají se skutečně odeslané zprávy, ne kroky. Potlačený krok se nezapočítá.',
+              'Counts messages actually sent, not steps. A suppressed step does not count.',
+            )}
+          </p>
         </div>
 
         {/* Read-only on purpose: the contact policy is a single enforcement point, and a per-campaign

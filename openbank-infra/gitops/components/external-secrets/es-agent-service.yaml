@@ -5,7 +5,10 @@
 # source and same shape as copilot's COPILOT_MODEL_API_KEY (es-copilot-service.yaml), each on its
 # own budgeted virtual key rather than the shared master key.
 #
-# OIDC_CLIENT_SECRET (openbank-services realm client) is unchanged.
+# OIDC_CLIENT_SECRET is the openbank-services realm client's secret, read from the SHARED KV entry
+# `account-service`. It used to read `agent-service`; there is exactly one such realm client, so
+# that entry was a hand-seeded copy of this same value — see #3485 and
+# rules.yaml: oidc_secret_convention for why the copy is cost without isolation.
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
@@ -39,5 +42,5 @@ spec:
         property: KEY_AGENT_SERVICE
     - secretKey: OIDC_CLIENT_SECRET
       remoteRef:
-        key: agent-service
+        key: account-service
         property: OIDC_CLIENT_SECRET

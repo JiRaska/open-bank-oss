@@ -59,36 +59,24 @@ ALLOWLIST = {
     "openbank-control-liveness-sentinel/src/main/kotlin/com/openbank/liveness/infrastructure/schedule/LivenessCheckScheduler.kt",
 }
 
-# Today's non-compliant set (first scan 2026-08-03, 37 files), money-path first
-# (ADR-0237 rollout order). Each entry disappears in its adoption PR; the gate
-# fails if the list GROWS or if an entry healed without being removed here.
+# Today's non-compliant set (first scan 2026-08-03, 37 files; 27 at the 2026-08-07
+# re-derivation; 16 here). Each entry disappears in its adoption PR; the gate fails
+# if the list GROWS or if an entry healed without being removed here.
+#
+# The money-path block is EMPTY as of 2026-08-08 (#3931) — all 11 money-path entries
+# adopted the heartbeat and were removed in the same PR that flipped this gate to
+# `mode: enforced`. Their being left here after healing is what kept the gate at
+# exit 1, which `mode: advisory` then converted to a warning; nothing else noticed.
 BASELINE = [
-    # money-path
-    "openbank-balance-service/src/main/kotlin/com/openbank/balance/infrastructure/schedule/BalanceReconciliationScheduler.kt",
-    "openbank-balance-service/src/main/kotlin/com/openbank/balance/infrastructure/schedule/ReconciliationFreshnessWatchdog.kt",
-    "openbank-domestic-payment/src/main/kotlin/com/openbank/domestic/infrastructure/observability/DomesticPaymentStrandedGauge.kt",
-    "openbank-domestic-payment/src/main/kotlin/com/openbank/domestic/infrastructure/scheduler/ScreeningRedriveScheduler.kt",
-    "openbank-interest-service/src/main/kotlin/com/openbank/interest/infrastructure/scheduler/InterestAccrualScheduler.kt",
-    "openbank-interest-service/src/main/kotlin/com/openbank/interest/infrastructure/scheduler/InterestCapitalizationScheduler.kt",
-    "openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/partition/JournalPartitionMaintainer.kt",
-    "openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/schedule/TieOutFreshnessWatchdog.kt",
-    "openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/servicing/InterestAccrualScheduler.kt",
-    "openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/servicing/ProvisioningCycleScheduler.kt",
-    "openbank-sdd-service/src/main/kotlin/com/openbank/sdd/infrastructure/scheduler/MandateExpiryScheduler.kt",
     # non-money-path
     "openbank-agent-service/src/main/kotlin/com/openbank/agent/application/OversightService.kt",
     "openbank-agent-service/src/main/kotlin/com/openbank/agent/infrastructure/observability/AgentMetricsAdapter.kt",
-    "openbank-aml-service/src/main/kotlin/com/openbank/aml/infrastructure/scheduler/PartyResolutionScheduler.kt",
-    "openbank-analytics-sink/src/main/kotlin/com/openbank/analytics/infrastructure/reconcile/ReconciliationJob.kt",
     "openbank-audit-service/src/main/kotlin/com/openbank/audit/application/AuditAnchorService.kt",
     "openbank-audit-service/src/main/kotlin/com/openbank/audit/infrastructure/retention/SessionLogRetentionScheduler.kt",
-    "openbank-authz-policy-auditor/src/main/kotlin/com/openbank/authzaudit/infrastructure/schedule/AuthzPolicyCheckScheduler.kt",
     "openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/infrastructure/retention/CardPiiRetentionScheduler.kt",
     "openbank-consent-service/src/main/kotlin/com/openbank/consent/infrastructure/ConsentExpirationJob.kt",
     "openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/DelegationExpirationJob.kt",
     "openbank-dispute-service/src/main/kotlin/com/openbank/dispute/infrastructure/observability/ComplaintDeadlineGauge.kt",
-    "openbank-docs-truth-agent/src/main/kotlin/com/openbank/docstruth/infrastructure/schedule/DocsTruthCheckScheduler.kt",
-    "openbank-finops-agent/src/main/kotlin/com/openbank/finops/infrastructure/schedule/FinOpsAnalysisScheduler.kt",
     "openbank-kyc-service/src/main/kotlin/com/openbank/kyc/infrastructure/retention/KycRetentionScheduler.kt",
     "openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/DeviceTokenSweepJob.kt",
     "openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/NotificationOutboxDeadLetterJanitorJob.kt",

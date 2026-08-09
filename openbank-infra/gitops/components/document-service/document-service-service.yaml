@@ -32,6 +32,15 @@ metadata:
     app.kubernetes.io/part-of: documents
 spec:
   replicas: 1
+  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
+  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
+  # resources - on a full cluster the rollout never completes while reporting 1/1 READY.
+  # No HA to lose: this workload is already unavailable for the moment its pod is replaced.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: document-service
@@ -43,7 +52,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-document-service-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "6c500a6f3b582bd1"
+        openbank.tech/policy-checksum: "9a9a4e73759b7ae9"
     spec:
       # ADR-0162 D4 (continued): a dedicated SA (not `default`) is what OpenBao's Kubernetes-auth
       # role `document-service-signing` is bound to — least-privilege, one identity per consumer.
@@ -57,7 +66,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: document-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-document-service:sandbox-95b652dd
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-document-service:sandbox-5a04f196
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -204,6 +213,13 @@ spec:
             # the fine-grained PEP.
             - name: AUTHZ_ENFORCE
               value: "true"
+            # #686 / #2945: load the account-created-in group.id override
+            # (document-service-msg-override ConfigMap, mounted below) as an external Quarkus
+            # config source, so the dotted YAML key's declared value actually reaches the Kafka
+            # connector instead of silently falling back to quarkus.application.name.
+            # Optional location: if the file is absent Quarkus warns and continues.
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /mnt/msg-config/override.properties
           startupProbe:
             httpGet:
               path: /q/health/started
@@ -240,6 +256,9 @@ spec:
               readOnly: true
             - name: signing-keystore
               mountPath: /mnt/signing-keystore
+              readOnly: true
+            - name: msg-override
+              mountPath: /mnt/msg-config
               readOnly: true
           resources:
             requests:
@@ -348,6 +367,9 @@ spec:
           secret:
             secretName: document-service-signing-keystore
             optional: true
+        - name: msg-override
+          configMap:
+            name: document-service-msg-override
             items:
               - key: keystore.p12
                 path: keystore.p12

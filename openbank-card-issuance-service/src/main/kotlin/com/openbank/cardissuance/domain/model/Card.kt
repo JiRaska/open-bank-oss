@@ -8,7 +8,31 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
-enum class CardStatus { PENDING, ACTIVE, SUSPENDED, BLOCKED, EXPIRED, CANCELLED }
+enum class CardStatus {
+    PENDING,
+    ACTIVE,
+    SUSPENDED,
+    BLOCKED,
+    EXPIRED,
+    CANCELLED,
+
+    /**
+     * A single-use card that has been used. Terminal.
+     *
+     * Distinct from CANCELLED and EXPIRED because it is the promise being kept, not a failure: the
+     * card authorised once and closed itself. Collapsing it into CANCELLED would tell a customer
+     * their disposable card was cancelled, which reads as something going wrong.
+     */
+    CONSUMED,
+}
+
+/** Why a card reached a terminal status. Null while the card is alive. */
+enum class CardClosedReason {
+    SINGLE_USE_CONSUMED,
+    VALIDITY_EXPIRED,
+    LOST_OR_STOLEN,
+    CUSTOMER_CANCEL,
+}
 
 /**
  * Form factor of a card.
@@ -57,6 +81,15 @@ data class Card(
     val abroadEnabled: Boolean = true,
     // Synthetic PAN vault (#4): AES-256-GCM ciphertext, never the clear value. Nullable because
     // cards issued before the pan_encrypted/cvv_encrypted migration have no stored PAN at all.
+    /**
+     * When a SINGLE_USE card stops being usable even if never presented. Null for every other type.
+     * A disposable card that is never spent must still stop being a live PAN.
+     */
+    val expiresAt: Instant? = null,
+
+    /** Why the card reached a terminal status; null while it is alive. */
+    val closedReason: CardClosedReason? = null,
+
     val panEncrypted: String? = null,
     val cvvEncrypted: String? = null,
 ) {
@@ -71,6 +104,34 @@ data class Card(
         require(status in setOf(CardStatus.ACTIVE, CardStatus.SUSPENDED)) { "Cannot block card in status $status" }
         require(reason.isNotBlank()) { "Block reason required" }
     }.copy(status = CardStatus.BLOCKED, blockedAt = now, blockedReason = reason, updatedAt = now)
+
+    /**
+     * The single-use card authorised once and closed itself.
+     *
+     * Driven by the processor's lifecycle event, not by us: the authorize-once guarantee lives at
+     * the processor, and this records the outcome so the customer can see it. Only SINGLE_USE
+     * reaches it — marking any other card CONSUMED would be a lie about why it stopped working.
+     */
+    fun consume(now: Instant = Instant.EPOCH) = also {
+        require(cardType == CardType.SINGLE_USE) { "Only SINGLE_USE cards can be consumed, this is $cardType" }
+        require(status == CardStatus.ACTIVE) { "Only ACTIVE cards can be consumed, current: $status" }
+    }.copy(
+        status = CardStatus.CONSUMED,
+        closedReason = CardClosedReason.SINGLE_USE_CONSUMED,
+        updatedAt = now,
+    )
+
+    /**
+     * The card's validity window ran out before it was ever used. EXPIRED rather than CONSUMED:
+     * nothing was spent, and the difference is what the customer is told.
+     */
+    fun expireUnused(now: Instant = Instant.EPOCH) = also {
+        require(status in LIVE_STATUSES) { "Cannot expire card in status $status" }
+    }.copy(
+        status = CardStatus.EXPIRED,
+        closedReason = CardClosedReason.VALIDITY_EXPIRED,
+        updatedAt = now,
+    )
 
     fun suspend(now: Instant = Instant.EPOCH) = also {
         require(status == CardStatus.ACTIVE) { "Only ACTIVE cards can be suspended" }
@@ -150,6 +211,6 @@ data class Card(
          * is dead: no transition applies, and nothing should be provisioned for it (the PAN-vault
          * backfill skips them for exactly that reason).
          */
-        val TERMINAL_STATUSES = setOf(CardStatus.CANCELLED, CardStatus.EXPIRED)
+        val TERMINAL_STATUSES = setOf(CardStatus.CANCELLED, CardStatus.EXPIRED, CardStatus.CONSUMED)
     }
 }

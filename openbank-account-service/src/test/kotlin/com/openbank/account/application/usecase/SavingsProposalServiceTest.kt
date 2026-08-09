@@ -175,12 +175,105 @@ class SavingsProposalServiceTest {
         }.isInstanceOf(ProposalScaException::class.java)
     }
 
+    @Test
+    fun `approve accepts a PENDING decoupled challenge and lets consume promote it`(): Unit = runBlocking {
+        // The state every customer-driven approval is actually in. The previous
+        // `status == "COMPLETED"` pre-check rejected exactly this, so no owner could ever approve
+        // a proposal — and no test noticed, because every fixture handed the service a COMPLETED
+        // challenge, a state customer-edge cannot produce. Same defect as #3537 in
+        // delegation-service.
+        val proposal = proposal()
+        stubOwnerAndProposal(proposal)
+        coEvery { approvalStore.decide("approval-1", owner.toString(), true) } returns
+            pendingApproval(delegate).copy(status = ApprovalStatus.APPROVED)
+        coEvery { proposalRepository.save(any<WithdrawalProposal>(), any()) } answers { firstArg() }
+
+        val decided = service.decide(accountId, proposal.id, owner, true, UUID.randomUUID())
+
+        assertThat(decided.status).isEqualTo(WithdrawalProposalStatus.APPROVED)
+        // Approval is still enforced — by consume, which owns it.
+        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), owner) }
+    }
+
+    @Test
+    fun `the challenge is SPENT, not merely read`(): Unit = runBlocking {
+        // Without consume, one approved challenge authorised every PENDING proposal on the
+        // account: single-use is the whole point of a second factor.
+        val proposal = proposal()
+        stubOwnerAndProposal(proposal)
+        coEvery { approvalStore.decide("approval-1", owner.toString(), true) } returns
+            pendingApproval(delegate).copy(status = ApprovalStatus.APPROVED)
+        coEvery { proposalRepository.save(any<WithdrawalProposal>(), any()) } answers { firstArg() }
+
+        service.decide(accountId, proposal.id, owner, true, UUID.randomUUID())
+
+        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), owner) }
+    }
+
+    @Test
+    fun `a refused consume blocks the decision`(): Unit = runBlocking {
+        // sca-service answers 409 for an already-spent challenge and refuses one never approved.
+        val proposal = proposal()
+        stubOwnerAndProposal(proposal)
+        coEvery { scaClient.consumeChallenge(any(), owner) } throws IllegalStateException("already consumed")
+
+        assertThatThrownBy {
+            runBlocking { service.decide(accountId, proposal.id, owner, true, UUID.randomUUID()) }
+        }.isInstanceOf(ProposalScaException::class.java)
+        coVerify(exactly = 0) { approvalStore.decide(any(), any(), any()) }
+    }
+
+    @Test
+    fun `an expired proposal cannot be approved and does not burn the challenge`(): Unit = runBlocking {
+        val stale = proposal().copy(createdAt = now.minusDays(30), expiresAt = now.minusDays(23))
+        stubOwnerAndProposal(stale)
+
+        assertThatThrownBy {
+            runBlocking { service.decide(accountId, stale.id, owner, true, UUID.randomUUID()) }
+        }.isInstanceOf(ProposalExpiredException::class.java)
+
+        // Checked before the SCA leg: a doomed decision must not spend the owner's one-shot factor.
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { approvalStore.decide(any(), any(), any()) }
+    }
+
+    @Test
+    fun `expiry is decided by the window, not by the sweep having run`(): Unit = runBlocking {
+        // The stored status is still PENDING — the sweep has not reached it. Approval must still
+        // refuse, or the gap between the window closing and the sweep running is an open door.
+        val stale = proposal().copy(createdAt = now.minusDays(30), expiresAt = now.minusSeconds(1))
+        assertThat(stale.status).isEqualTo(WithdrawalProposalStatus.PENDING)
+        assertThat(stale.isExpiredAt(now)).isTrue()
+    }
+
+    @Test
+    fun `the sweep expires only closed-window proposals`(): Unit = runBlocking {
+        val stale = proposal().copy(createdAt = now.minusDays(30), expiresAt = now.minusDays(23))
+        coEvery { proposalRepository.findExpirable(any(), any()) } returns listOf(stale)
+        coEvery { proposalRepository.save(any<WithdrawalProposal>()) } answers { firstArg() }
+
+        val count = service.expireStale()
+
+        assertThat(count).isEqualTo(1)
+        coVerify(exactly = 1) {
+            proposalRepository.save(match<WithdrawalProposal> { it.status == WithdrawalProposalStatus.EXPIRED })
+        }
+    }
+
     private fun stubOwnerAndProposal(proposal: WithdrawalProposal) {
         val account = mockk<Account>()
         io.mockk.every { account.partyId } returns owner
         coEvery { accountRepository.findById(accountId) } returns account
         coEvery { proposalRepository.findById(proposal.id) } returns proposal
+        // PENDING, not COMPLETED: the state a decoupled challenge is actually in when the owner
+        // approves from their phone. Nothing a customer can reach calls sca-service's verify().
         coEvery { scaClient.getChallenge(any()) } returns ScaChallengeSnapshot(
+            id = UUID.randomUUID(),
+            partyId = owner,
+            purpose = "SAVINGS_WITHDRAW_APPROVAL",
+            status = "PENDING",
+        )
+        coEvery { scaClient.consumeChallenge(any(), owner) } returns ScaChallengeSnapshot(
             id = UUID.randomUUID(),
             partyId = owner,
             purpose = "SAVINGS_WITHDRAW_APPROVAL",
@@ -196,5 +289,6 @@ class SavingsProposalServiceTest {
         currency = "CZK",
         approvalId = "approval-1",
         createdAt = now,
+        expiresAt = now.plusDays(7),
     )
 }

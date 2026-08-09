@@ -58,6 +58,9 @@ class WithdrawalProposalEntity : PanacheEntityBase() {
     @Column(name = "created_at", nullable = false, updatable = false)
     lateinit var createdAt: OffsetDateTime
 
+    @Column(name = "expires_at", nullable = false)
+    lateinit var expiresAt: OffsetDateTime
+
     fun toDomain(): WithdrawalProposal = WithdrawalProposal(
         id = id,
         accountId = accountId,
@@ -71,6 +74,7 @@ class WithdrawalProposalEntity : PanacheEntityBase() {
         decidedAt = decidedAt,
         scaSessionId = scaSessionId,
         createdAt = createdAt,
+        expiresAt = expiresAt,
     )
 
     companion object {
@@ -87,6 +91,7 @@ class WithdrawalProposalEntity : PanacheEntityBase() {
             decidedAt = p.decidedAt
             scaSessionId = p.scaSessionId
             createdAt = p.createdAt
+            expiresAt = p.expiresAt
         }
     }
 }

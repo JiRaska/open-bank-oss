@@ -22,10 +22,15 @@ ROOT="${1:-.}"
 violations="$(
   find "$ROOT" \
        \( -type d \( -name node_modules -o -name build -o -name .claude -o -name .git \) -prune \) -o \
-       \( -path '*/src/test/*' -name '*.kt' -print \) 2>/dev/null \
-    | xargs grep -nE 'fun [A-Za-z`].*\) = runBlocking ?\{' 2>/dev/null \
+       \( -path '*/src/test/*' -name '*.kt' -exec \
+            grep -nE 'fun [A-Za-z`].*\) = runBlocking ?\{' {} + \) 2>/dev/null \
     | grep -v ': Unit' || true
 )"
+
+scanned="$(find "$ROOT" \
+     \( -type d \( -name node_modules -o -name build -o -name .claude -o -name .git \) -prune \) -o \
+     \( -path '*/src/test/*' -name '*.kt' -print \) 2>/dev/null | wc -l | tr -d ' ')"
+echo "SUBJECTS=$scanned"
 
 if [ -n "$violations" ]; then
   count="$(printf '%s\n' "$violations" | grep -c . || true)"

@@ -218,6 +218,24 @@ function AgentDetailContent() {
             </div>
           )}
 
+          {agentId === 'case-coordinator' && (
+            <Card>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <Bot size={14} style={{ color: '#6366f1' }} />
+                <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Swarm case', 'Swarm cases')}</span>
+              </div>
+              <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '0 0 10px' }}>
+                {t(
+                  'Koordinační případy, ve kterých agenti přispívají do sdíleného vlákna (Temporal CaseWorkflow, ADR-0244/0246).',
+                  'Coordination cases agents contribute to in a shared thread (Temporal CaseWorkflow, ADR-0244/0246).',
+                )}
+              </p>
+              <Link href="/iaops/cases" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', fontWeight: 700, color: 'var(--accent-text)', textDecoration: 'none' }}>
+                {t('Otevřít vlákna case', 'Open case threads')}
+              </Link>
+            </Card>
+          )}
+
           {/* Tools + operating profile (agents.yaml — enforced fields) */}
           {data.charter && (
             <Card>

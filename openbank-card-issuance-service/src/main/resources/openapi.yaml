@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Card Issuance Service API
-  version: 1.4.0
+  version: 1.6.0
   description: Debit/credit card lifecycle — issue, activate, block, suspend, resume, cancel;
     synthetic PAN vault and product-catalog entitlements.
   license:
@@ -324,6 +324,155 @@ paths:
               schema:
                 $ref: '#/components/schemas/CardResponse'
 
+  /api/v1/cards/category-taxonomy:
+    get:
+      tags: [Cards]
+      summary: Merchant category taxonomy — ids, labels, MCC ranges, what may be blocked
+      description: >
+        Served rather than hardcoded in clients. A client that hardcoded "gambling is MCC 7995"
+        would keep letting spend through after the bank added a code, on every build already
+        installed; publishing the taxonomy makes the enforcement point and the screen agree by
+        construction.
+      operationId: getCardCategoryTaxonomy
+      responses:
+        '200':
+          description: Taxonomy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categories:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        label: { type: string }
+                        mccRanges:
+                          type: array
+                          items: { type: string }
+                          description: 'Inclusive ranges ("7800-7802") or single codes ("7995").'
+                        blockable:
+                          type: boolean
+                          description: >
+                            False for OTHER — blocking everything unclassified would decline
+                            arbitrary legitimate spend as the acquirer estate changes, and the
+                            customer could never see what they had turned off.
+                        limitable: { type: boolean }
+                  unmappedMccCategory:
+                    type: string
+                    description: Category an unrecognised or absent MCC falls into.
+  /api/v1/cards/{id}/category-limits:
+    get:
+      tags: [Cards]
+      summary: A card's per-category blocks and monthly caps
+      operationId: getCardCategoryLimits
+      parameters:
+        - $ref: '#/components/parameters/cardId'
+      responses:
+        '200':
+          description: Category rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryLimits'
+    put:
+      tags: [Cards]
+      summary: Replace a card's per-category blocks and monthly caps
+      description: >
+        Whole-state replacement, not a patch: the payload is what the caller wants to be true, so a
+        client is never in a read-modify-write race with itself, and a rule removed from the screen
+        genuinely stops being enforced. SCA for raising a cap or unblocking a category is enforced
+        at the customer edge, where the challenge lives.
+      operationId: replaceCardCategoryLimits
+      parameters:
+        - $ref: '#/components/parameters/cardId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                limits:
+                  type: array
+                  items:
+                    type: object
+                    required: [category]
+                    properties:
+                      category: { type: string }
+                      monthlyLimitMinorUnits:
+                        type: integer
+                        format: int64
+                        nullable: true
+                        description: 'Null = uncapped. Zero is a real cap of nothing, which is different.'
+                      blocked: { type: boolean }
+      responses:
+        '200':
+          description: Rules replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryLimits'
+        '400':
+          description: 'CATEGORY_UNKNOWN or CATEGORY_NOT_BLOCKABLE'
+  /api/v1/cards/{id}/authorizations:
+    post:
+      tags: [Cards]
+      summary: Decide a card authorization against status, channel controls and category rules
+      description: >
+        The card authorization decision point. Until it existed the channel controls
+        (contactless / online / ATM / abroad) were stored, returned by the API and read by nothing —
+        a customer who switched off payments abroad changed a boolean and nothing else. An unknown
+        card is DECLINED rather than 404: an acquirer needs an answer, and the safe answer to "may
+        this unknown card spend" is no.
+      operationId: decideCardAuthorization
+      parameters:
+        - $ref: '#/components/parameters/cardId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amountMinorUnits, channel]
+              properties:
+                amountMinorUnits: { type: integer, format: int64 }
+                channel:
+                  type: string
+                  enum: [CONTACTLESS, ONLINE, ATM, CHIP_AND_PIN]
+                  description: >
+                    CHIP_AND_PIN has no customer toggle by design — a customer able to disable every
+                    rail could lock themselves out of every terminal with no way back.
+                mcc: { type: string, nullable: true }
+                countryCode:
+                  type: string
+                  nullable: true
+                  description: >
+                    ISO-3166 alpha-2 of the acquirer. Absent counts as domestic: declining on
+                    missing data would break ordinary spend at terminals with sparse messages.
+                spentTodayMinorUnits: { type: integer, format: int64 }
+                spentThisMonthMinorUnits: { type: integer, format: int64 }
+                spentThisMonthInCategoryMinorUnits: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Decision (an approved and a declined authorization both answer 200)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  approved: { type: boolean }
+                  declineReason:
+                    type: string
+                    nullable: true
+                    enum: [CARD_NOT_ACTIVE, CHANNEL_DISABLED, ABROAD_DISABLED, CATEGORY_BLOCKED, CATEGORY_LIMIT_EXCEEDED, DAILY_LIMIT_EXCEEDED, MONTHLY_LIMIT_EXCEEDED]
+                  category:
+                    type: string
+                    description: Category the request was judged as — present on approval too.
+        '400':
+          description: CHANNEL_UNKNOWN
   /api/v1/cards/{id}/controls:
     put:
       tags: [Cards]
@@ -417,6 +566,23 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    CategoryLimits:
+      type: object
+      properties:
+        limits:
+          type: array
+          items:
+            type: object
+            properties:
+              category: { type: string }
+              monthlyLimitMinorUnits: { type: integer, format: int64, nullable: true }
+              blocked: { type: boolean }
+        spendTracking:
+          type: boolean
+          description: >
+            False while per-category spend is not tracked. Present so a client renders "no data"
+            rather than a progress ring against a zero that looks measured.
+
     IssueCardRequest:
       type: object
       required: [partyId, accountId, cardType, cardNetwork]
@@ -466,7 +632,27 @@ components:
           type: string
         status:
           type: string
-          enum: [PENDING, ACTIVE, SUSPENDED, BLOCKED, EXPIRED, CANCELLED]
+          enum: [PENDING, ACTIVE, SUSPENDED, BLOCKED, EXPIRED, CANCELLED, CONSUMED]
+          description: >
+            CONSUMED is terminal and applies only to SINGLE_USE cards: the card authorised once and
+            closed itself. Kept distinct from CANCELLED because it is the promise being kept, not a
+            failure — telling a customer their disposable card was "cancelled" reads as something
+            going wrong.
+        closedReason:
+          type: string
+          nullable: true
+          enum: [SINGLE_USE_CONSUMED, VALIDITY_EXPIRED, LOST_OR_STOLEN, CUSTOMER_CANCEL]
+          description: >
+            Why the card reached a terminal status; absent while it is alive. Without it, "cancelled"
+            covered a customer closing a card, a lost card, and a disposable card doing exactly what
+            it promised — three things a customer is owed three different sentences about.
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            SINGLE_USE only: when the card stops being usable even if never presented. A disposable
+            card that is never spent must still stop being a live PAN.
         expiryDate:
           type: string
           example: "12/27"

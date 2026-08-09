@@ -206,14 +206,12 @@ def build() -> tuple[str, list[str]]:
 #
 # So: today's one occurrence is declared with its reason and its issue, and anything NEW fails. A
 # declaration that becomes resolvable is reported too, so this cannot quietly become permanent.
-UNRESOLVABLE_DECLARED: dict[str, str] = {
-    "shared_m2m_write_prohibition": (
-        "nested under `change_requirements:` in rules.yaml, so it cannot be selected as a top-level "
-        "key. Promoting it is a POLICY DECISION, not an edit: 128 currently-reachable writes depend "
-        "on the very reasons the register names, so promotion denies live money-path callers. "
-        "Tracked in #3765/#3734 — remove this entry in the same change that promotes the key."
-    ),
-}
+# Emptied 2026-08-07: `shared_m2m_write_prohibition` was promoted to a top-level key in the same
+# change, so it is now selected into rules-opa-data.yaml and the declaration above it is history
+# rather than debt. The registry stays in place — a NEW referenced-but-unselectable key still
+# fails, and a declaration that becomes resolvable is still reported, which is what forced this
+# entry to be removed here rather than left to rot.
+UNRESOLVABLE_DECLARED: dict[str, str] = {}
 
 
 def report_missing(missing: list[str]) -> int:

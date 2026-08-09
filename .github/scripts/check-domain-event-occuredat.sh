@@ -41,6 +41,7 @@ violations="$(
 if [ -z "$violations" ]; then
   count="$(find "$ROOT" -name "*.kt" -not -path "*/build/*" -not -path "*/.claude/*" | wc -l | tr -d ' ')"
   echo "check-domain-event-occuredat: $count .kt files checked — all DomainEvent subclasses pass occurredAt to super constructor."
+  echo "SUBJECTS=$count"
   exit 0
 fi
 

@@ -88,6 +88,59 @@ object DocumentTemplateSeed {
             locale = "en",
             bodyHtml = ACCOUNT_AGREEMENT_EN_BODY,
         ),
+        // ADR-0248: monthly statement, PAD Art. 5 annual statement of fees, and payment
+        // confirmation. All three render only through the existing non-persisting
+        // `POST /api/v1/documents/templates/preview` endpoint — never stored, never a
+        // `Document` row, never a `document.generated` outbox event (ADR-0248 Decision). New
+        // codes at version 1.0.0, not superseding any existing row.
+        template(
+            id = "1e575a01-0000-4000-9000-000000000017",
+            code = "MESICNI_VYPIS_CS",
+            version = "1.0.0",
+            name = "Měsíční výpis z účtu",
+            locale = "cs",
+            bodyHtml = MONTHLY_STATEMENT_CS_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000018",
+            code = "MESICNI_VYPIS_EN",
+            version = "1.0.0",
+            name = "Monthly Account Statement",
+            locale = "en",
+            bodyHtml = MONTHLY_STATEMENT_EN_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000019",
+            code = "ROCNI_VYPIS_POPLATKU_CS",
+            version = "1.0.0",
+            name = "Roční výpis poplatků",
+            locale = "cs",
+            bodyHtml = ANNUAL_FEE_STATEMENT_CS_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000020",
+            code = "ROCNI_VYPIS_POPLATKU_EN",
+            version = "1.0.0",
+            name = "Annual Statement of Fees",
+            locale = "en",
+            bodyHtml = ANNUAL_FEE_STATEMENT_EN_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000021",
+            code = "POTVRZENI_O_PLATBE_CS",
+            version = "1.0.0",
+            name = "Potvrzení o provedení platby",
+            locale = "cs",
+            bodyHtml = PAYMENT_CONFIRMATION_CS_BODY,
+        ),
+        template(
+            id = "1e575a01-0000-4000-9000-000000000022",
+            code = "POTVRZENI_O_PLATBE_EN",
+            version = "1.0.0",
+            name = "Payment Confirmation",
+            locale = "en",
+            bodyHtml = PAYMENT_CONFIRMATION_EN_BODY,
+        ),
     )
 
     private fun template(id: String, code: String, version: String, name: String, locale: String, bodyHtml: String) =
@@ -456,4 +509,312 @@ manner agreed in the GTC.</p>
 </p>
 <p>For the Bank: _________________________</p>
 <p>Customer: {{#if signature.block}}{{signature.block}}{{else}}_________________________ {{party.name}}{{/if}}</p>
+"""
+
+// ---------------------------------------------------------------------------------------------
+// Měsíční výpis z účtu / Monthly Account Statement (ADR-0248 §1, PSD2 Art. 58(2))
+// ---------------------------------------------------------------------------------------------
+
+private const val MONTHLY_STATEMENT_CS_BODY = """$LETTERHEAD_CS
+<h1>Měsíční výpis z účtu</h1>
+<p style="color:#64748b;font-size:12px;">
+  OpenBank a.s. &middot; výpis za období {{document.periodFrom}} &ndash; {{document.periodTo}}
+</p>
+
+<h2>Identifikace účtu</h2>
+<p>
+  Majitel účtu: <strong>{{party.name}}</strong><br/>
+  Číslo účtu (IBAN): <strong>{{account.iban}}</strong><br/>
+  Měna kapsy: {{account.currency}}
+</p>
+
+<h2>Přehled zůstatků</h2>
+<table style="width:100%;border-collapse:collapse;font-size:13px;">
+<tbody>
+<tr><td>Počáteční zůstatek k {{document.periodFrom}}</td><td style="text-align:right;"><strong>{{document.openingBalance}} {{account.currency}}</strong></td></tr>
+<tr><td>Konečný zůstatek k {{document.periodTo}}</td><td style="text-align:right;"><strong>{{document.closingBalance}} {{account.currency}}</strong></td></tr>
+</tbody>
+</table>
+
+<h2>Přehled transakcí</h2>
+<table style="width:100%;border-collapse:collapse;font-size:12px;" border="1" cellpadding="4">
+<thead>
+<tr>
+<th>Datum zaúčtování</th><th>Datum valuty</th><th>Protistrana</th><th>Reference / VS</th><th style="text-align:right;">Částka</th>
+</tr>
+</thead>
+<tbody>
+{{#each document.entries}}
+<tr>
+<td>{{this.bookingDate}}</td>
+<td>{{this.valueDate}}</td>
+<td>{{this.counterparty}}</td>
+<td>{{this.reference}}</td>
+<td style="text-align:right;">{{this.amount}} {{this.currency}}</td>
+</tr>
+{{/each}}
+</tbody>
+</table>
+
+<h2>Identifikace výpisu</h2>
+<p>
+  Právní pořadové číslo výpisu: {{document.legalSequenceNumber}}<br/>
+  Elektronické pořadové číslo výpisu: {{document.electronicSequenceNumber}}<br/>
+  Výpis vygenerován dne: {{document.generatedAt}}
+</p>
+
+<hr/>
+<p style="font-size:11px;color:#64748b;">
+  Tento výpis je Klientovi poskytnut na trvalém nosiči dat ve smyslu čl. 58 odst. 2 směrnice
+  Evropského parlamentu a Rady (EU) 2015/2366 (PSD2), a to způsobem umožňujícím jeho uložení a
+  reprodukci v nezměněné podobě.
+</p>
+"""
+
+private const val MONTHLY_STATEMENT_EN_BODY = """$LETTERHEAD_EN
+<h1>Monthly Account Statement</h1>
+<p style="color:#64748b;font-size:12px;">
+  OpenBank a.s. &middot; statement for the period {{document.periodFrom}} &ndash; {{document.periodTo}}
+</p>
+
+<h2>Account identification</h2>
+<p>
+  Account holder: <strong>{{party.name}}</strong><br/>
+  Account number (IBAN): <strong>{{account.iban}}</strong><br/>
+  Pocket currency: {{account.currency}}
+</p>
+
+<h2>Balance summary</h2>
+<table style="width:100%;border-collapse:collapse;font-size:13px;">
+<tbody>
+<tr><td>Opening balance as of {{document.periodFrom}}</td><td style="text-align:right;"><strong>{{document.openingBalance}} {{account.currency}}</strong></td></tr>
+<tr><td>Closing balance as of {{document.periodTo}}</td><td style="text-align:right;"><strong>{{document.closingBalance}} {{account.currency}}</strong></td></tr>
+</tbody>
+</table>
+
+<h2>Transaction list</h2>
+<table style="width:100%;border-collapse:collapse;font-size:12px;" border="1" cellpadding="4">
+<thead>
+<tr>
+<th>Booking date</th><th>Value date</th><th>Counterparty</th><th>Reference</th><th style="text-align:right;">Amount</th>
+</tr>
+</thead>
+<tbody>
+{{#each document.entries}}
+<tr>
+<td>{{this.bookingDate}}</td>
+<td>{{this.valueDate}}</td>
+<td>{{this.counterparty}}</td>
+<td>{{this.reference}}</td>
+<td style="text-align:right;">{{this.amount}} {{this.currency}}</td>
+</tr>
+{{/each}}
+</tbody>
+</table>
+
+<h2>Statement identification</h2>
+<p>
+  Legal sequence number: {{document.legalSequenceNumber}}<br/>
+  Electronic sequence number: {{document.electronicSequenceNumber}}<br/>
+  Generated on: {{document.generatedAt}}
+</p>
+
+<hr/>
+<p style="font-size:11px;color:#64748b;">
+  This statement is provided to the Customer on a durable medium within the meaning of Article
+  58(2) of Directive (EU) 2015/2366 (PSD2), in a way that allows the Customer to store and
+  reproduce it unchanged.
+</p>
+"""
+
+// ---------------------------------------------------------------------------------------------
+// Roční výpis poplatků / Annual Statement of Fees (ADR-0248 §2, PAD (EU) 2014/92 Art. 5)
+// ---------------------------------------------------------------------------------------------
+
+private const val ANNUAL_FEE_STATEMENT_CS_BODY = """$LETTERHEAD_CS
+<h1>Roční výpis poplatků</h1>
+<p style="color:#64748b;font-size:12px;">OpenBank a.s. &middot; kalendářní rok {{document.year}}</p>
+
+<h2>Identifikace účtu</h2>
+<p>
+  Majitel účtu: <strong>{{party.name}}</strong><br/>
+  Číslo účtu (IBAN): <strong>{{account.iban}}</strong><br/>
+  Měna: {{document.currency}}
+</p>
+
+<h2>Přehled poplatků</h2>
+<table style="width:100%;border-collapse:collapse;font-size:12px;" border="1" cellpadding="4">
+<thead>
+<tr><th>Název poplatku</th><th>Kategorie (příloha II)</th><th style="text-align:right;">Částka</th></tr>
+</thead>
+<tbody>
+{{#each document.fees}}
+<tr>
+<td>{{this.name}}</td>
+<td>{{this.category}}</td>
+<td style="text-align:right;">{{this.amount}} {{../document.currency}}</td>
+</tr>
+{{/each}}
+</tbody>
+</table>
+
+<h2>Celková výše poplatků</h2>
+<p>Celková výše poplatků účtovaných v roce {{document.year}}: <strong>{{document.totalFees}} {{document.currency}}</strong></p>
+
+{{#if document.interestRate}}
+<h2>Úročení</h2>
+<p>Úroková sazba uplatněná na účet v uvedeném období: <strong>{{document.interestRate}} % p.a.</strong></p>
+{{/if}}
+
+<h2>Vydání dokumentu</h2>
+<p>Datum vydání: {{document.issueDate}}</p>
+
+<hr/>
+<p style="font-size:11px;color:#64748b;">
+  Tento dokument je ročním výpisem poplatků ve smyslu čl. 5 a přílohy II směrnice Evropského
+  parlamentu a Rady (EU) 2014/92 o porovnatelnosti poplatků souvisejících s platebními účty,
+  změně platebního účtu a přístupu k platebním účtům se základními prvky (PAD).
+</p>
+"""
+
+private const val ANNUAL_FEE_STATEMENT_EN_BODY = """$LETTERHEAD_EN
+<h1>Annual Statement of Fees</h1>
+<p style="color:#64748b;font-size:12px;">OpenBank a.s. &middot; calendar year {{document.year}}</p>
+
+<h2>Account identification</h2>
+<p>
+  Account holder: <strong>{{party.name}}</strong><br/>
+  Account number (IBAN): <strong>{{account.iban}}</strong><br/>
+  Currency: {{document.currency}}
+</p>
+
+<h2>Itemized list of fees</h2>
+<table style="width:100%;border-collapse:collapse;font-size:12px;" border="1" cellpadding="4">
+<thead>
+<tr><th>Fee name</th><th>Annex II category</th><th style="text-align:right;">Amount</th></tr>
+</thead>
+<tbody>
+{{#each document.fees}}
+<tr>
+<td>{{this.name}}</td>
+<td>{{this.category}}</td>
+<td style="text-align:right;">{{this.amount}} {{../document.currency}}</td>
+</tr>
+{{/each}}
+</tbody>
+</table>
+
+<h2>Total fees charged</h2>
+<p>Total fees charged for the year {{document.year}}: <strong>{{document.totalFees}} {{document.currency}}</strong></p>
+
+{{#if document.interestRate}}
+<h2>Interest</h2>
+<p>Interest rate applied to the account during the period: <strong>{{document.interestRate}}% p.a.</strong></p>
+{{/if}}
+
+<h2>Issue</h2>
+<p>Issue date: {{document.issueDate}}</p>
+
+<hr/>
+<p style="font-size:11px;color:#64748b;">
+  This document is the annual statement of fees within the meaning of Article 5 and Annex II of
+  Directive (EU) 2014/92 on the comparability of fees related to payment accounts, payment
+  account switching and access to payment accounts with basic features (PAD).
+</p>
+"""
+
+// ---------------------------------------------------------------------------------------------
+// Potvrzení o provedení platby / Payment Confirmation (ADR-0248 §3, PSD2 Art. 45/48)
+// ---------------------------------------------------------------------------------------------
+
+private const val PAYMENT_CONFIRMATION_CS_BODY = """$LETTERHEAD_CS
+<h1>Potvrzení o provedení platby</h1>
+
+<h2>Identifikace platby</h2>
+<p>
+  Reference platby: <strong>{{payment.reference}}</strong><br/>
+  Jedinečný identifikátor transakce (End-to-End ID): <strong>{{payment.endToEndId}}</strong>
+</p>
+
+<h2>Datum a čas provedení</h2>
+<p>
+  Datum a čas provedení: {{payment.executedAt}}<br/>
+  {{#if payment.settledAt}}Datum a čas zúčtování: {{payment.settledAt}}{{/if}}
+</p>
+
+<h2>Částka platby</h2>
+<p style="font-size:16px;"><strong>{{payment.amount}} {{payment.currency}}</strong></p>
+
+<h2>Plátce a příjemce</h2>
+<p>
+  IBAN plátce: {{payment.payerIban}}<br/>
+  IBAN příjemce: {{payment.payeeIban}}<br/>
+  Název příjemce: {{payment.payeeName}}
+</p>
+
+<h2>Informace pro příjemce</h2>
+<p>{{payment.remittanceInfo}}</p>
+
+<h2>Stav platby</h2>
+<p><strong>{{payment.status}}</strong></p>
+
+{{#if payment.scaEvidenceRef}}
+<h2>Ověření platby</h2>
+<p>
+  Reference na důkaz o silném ověření klienta (SCA), kterým byla platba autorizována:
+  {{payment.scaEvidenceRef}}
+</p>
+{{/if}}
+
+<hr/>
+<p style="font-size:11px;color:#64748b;">
+  Toto potvrzení je informací poskytovanou plátci/příjemci po provedení platební transakce ve
+  smyslu čl. 45 a 48 směrnice Evropského parlamentu a Rady (EU) 2015/2366 (PSD2).
+</p>
+"""
+
+private const val PAYMENT_CONFIRMATION_EN_BODY = """$LETTERHEAD_EN
+<h1>Payment Confirmation</h1>
+
+<h2>Payment identification</h2>
+<p>
+  Payment reference: <strong>{{payment.reference}}</strong><br/>
+  Unique end-to-end identifier: <strong>{{payment.endToEndId}}</strong>
+</p>
+
+<h2>Execution date and time</h2>
+<p>
+  Executed on: {{payment.executedAt}}<br/>
+  {{#if payment.settledAt}}Settled on: {{payment.settledAt}}{{/if}}
+</p>
+
+<h2>Payment amount</h2>
+<p style="font-size:16px;"><strong>{{payment.amount}} {{payment.currency}}</strong></p>
+
+<h2>Payer and payee</h2>
+<p>
+  Payer IBAN: {{payment.payerIban}}<br/>
+  Payee IBAN: {{payment.payeeIban}}<br/>
+  Payee name: {{payment.payeeName}}
+</p>
+
+<h2>Remittance information</h2>
+<p>{{payment.remittanceInfo}}</p>
+
+<h2>Payment status</h2>
+<p><strong>{{payment.status}}</strong></p>
+
+{{#if payment.scaEvidenceRef}}
+<h2>Payment authorisation</h2>
+<p>
+  Reference to the Strong Customer Authentication (SCA) evidence that authorised this payment:
+  {{payment.scaEvidenceRef}}
+</p>
+{{/if}}
+
+<hr/>
+<p style="font-size:11px;color:#64748b;">
+  This confirmation is information provided to the payer/payee following execution of a payment
+  transaction within the meaning of Articles 45 and 48 of Directive (EU) 2015/2366 (PSD2).
+</p>
 """

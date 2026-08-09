@@ -25,7 +25,7 @@
 # see requireValid()/checkConflict() in LedgerExceptions.kt for a drop-in replacement).
 #
 # stdlib-only (grep); no Kotlin-parser dependency, matching
-# check-no-service-principal-type.sh / check-domain-purity.sh. ENFORCED.
+# check-no-service-principal-type.sh / check-domain-purity.py. ENFORCED.
 # Usage: check-exception-mapper-collision.sh [root]   (default root: .)
 set -euo pipefail
 root="${1:-.}"
@@ -53,5 +53,6 @@ done < <(find "$root"/openbank-*/src/main/kotlin -name '*.kt' \
   -not -path '*/openbank-libs-runtime/*' \
   -not -path '*/build/*' | sort)
 
+echo "SUBJECTS=$checked"
 echo "check-exception-mapper-collision: $checked service source file(s) checked, $( [ "$fail" -eq 0 ] && echo "none collide with a libs-runtime-owned ExceptionMapper type." || echo "VIOLATIONS above." )"
 exit "$fail"

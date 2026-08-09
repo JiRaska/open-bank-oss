@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.16.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.16.0...transaction-service-v1.16.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* **sanctions:** make the scheduled-refresh de-duplication zone-consistent, and retire two accounting-clock exemptions ([#3889](https://github.com/JiRaska/open-bank-oss/issues/3889)) ([6b0ad07](https://github.com/JiRaska/open-bank-oss/commit/6b0ad078e1fed00599943752f5f3c61c8df55d46))
+
+## [1.16.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.15.5...transaction-service-v1.16.0) (2026-08-07)
+
+
+### Features
+
+* **transaction:** resolve card merchants to a name and a shop location (D5) ([#4010](https://github.com/JiRaska/open-bank-oss/issues/4010)) ([78139e0](https://github.com/JiRaska/open-bank-oss/commit/78139e03d49298557ef3385436d7664ab23fd335))
+
 ## [1.15.5](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.15.4...transaction-service-v1.15.5) (2026-08-02)
 
 

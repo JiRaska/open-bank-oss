@@ -85,9 +85,38 @@
 # deployment manifest dials it, the platform believes it exists.
 #
 # This is genuinely weaker evidence than a `kind: Service`, and it is reported separately
-# in the output so the distinction is never lost. It also means the guard cannot catch a
-# host that is wrong in application.yaml AND wrong the same way in the gitops env. That is
-# a real hole; it is stated here rather than papered over.
+# in the output so the distinction is never lost.
+#
+# THE GITOPS ENV LAYER (#3966) — and why corroboration cannot be reused for it
+# The hole this header used to state — "the guard cannot catch a host that is wrong in
+# application.yaml AND wrong the same way in the gitops env" — was larger than described,
+# because the fleet-standard fix for a bad host MOVES the host out of application.yaml and
+# into the workload env (localhost dev default + real URL in gitops). So the remedy handed
+# the checked claim to an unchecked file, and four live defects sat in that gap: vop-service
+# dialling `party-service.parties.svc` (namespace never existed) and `account-service…:8101`
+# (ledger's port), the openbao secret-rotator dialling `keycloak.keycloak.svc` (Keycloak is
+# in `iam`), psd2 + security-scanner dialling `tpp-registry-service.tpp.svc` (the namespace
+# is `tpp-registry`), and clearing-simulator + standing-order dialling
+# `sepa-payment-service.payments.svc` (the Service is `sepa-payment`).
+#
+# So workload env values are now CHECKED, not merely read. The subtlety that makes this more
+# than a loop over a second file set: the corroboration tier above is derived FROM those env
+# values, so reusing it here would be circular — every env host would corroborate itself and
+# nothing could ever be flagged. Corroboration is evidence only when the CLAIM and the
+# CORROBORATION come from independently-authored places (application.yaml vs. the manifest);
+# applied to the manifest itself it is the same statement twice.
+#
+# The env layer therefore resolves against declared Services only, plus HELM_PROVIDED below.
+# That list is the honest cost of dropping corroboration here, and it is checked BOTH ways —
+# an entry that stops being needed fails the gate — so it cannot rot into permanent scope.
+#
+# ALSO FIXED HERE: an explicit `.svc` host in an UNDECLARED namespace used to be skipped.
+# The header claimed form (a) was "unambiguous, always checked" and the code disagreed:
+# `if ns not in namespaces: continue` treated it as external. But `.svc` is a cluster suffix
+# by definition — an unknown namespace there means it cannot resolve, which is precisely the
+# namespace-typo case (`parties`, `keycloak`, `tpp`). Now flagged in both layers. The short
+# `<name>.<ns>` form keeps the old skip: there an unknown second label really is ambiguous
+# with an external domain.
 #
 # Usage:
 #   check-incluster-hostnames.py                 # gate
@@ -101,6 +130,8 @@ import ipaddress
 import re
 import sys
 from pathlib import Path
+
+import gatelib
 
 try:
     import yaml
@@ -158,6 +189,33 @@ BARE_HOST_PORT = re.compile(r"(?<![A-Za-z0-9_.:/\-])([a-z][a-z0-9\-]*(?:\.[a-z0-
 # This is matched on the PARSED key path, so it exempts the value, not the file.
 NON_DIALLED_KEY_SUFFIXES = ("cors.origins",)
 
+# Services that exist in the cluster and CANNOT be declared here: they are created by a Helm
+# chart that gitops references as an ArgoCD Application (kube-prometheus-stack, loki, tempo,
+# pyroscope, temporal, openbao, holmesgpt), so no `kind: Service` in this repo names them.
+#
+# For application.yaml the corroboration tier covers these without a list. The env layer has
+# no such option (corroboration is derived from the env — see the header), so they are named.
+# Each was verified against the live sandbox cluster on 2026-08-07 with
+# `kubectl -n <ns> get svc <name>`; the port column is recorded so a future reader can re-run
+# the same check rather than trusting the line.
+#
+# CHECKED BOTH WAYS: an entry no workload env dials any more is reported as stale and fails
+# the gate. That is what stops this from becoming the hand-kept scope list the header rejects
+# — it can only shrink by being noticed, never rot silently. Adding an entry means asserting
+# a Service exists that this repo does not create; do it only with the kubectl output in the PR.
+HELM_PROVIDED = {
+    ("alertmanager-operated", "observability"),              # 9093/9094 — prometheus-operator
+    ("holmesgpt-holmes", "observability"),                   # 80        — holmesgpt chart
+    ("kube-prometheus-stack-alertmanager", "observability"),  # 9093/8080 — kube-prometheus-stack
+    ("kube-prometheus-stack-prometheus", "observability"),   # 9090/8080 — kube-prometheus-stack
+    ("loki", "observability"),                               # 3100/9095 — loki chart
+    ("openbao", "vault"),                                    # 8200/8201 — openbao chart
+    ("prometheus-operated", "observability"),                # 9090      — prometheus-operator
+    ("pyroscope", "observability"),                          # 4040      — pyroscope chart
+    ("tempo", "observability"),                              # 4317/3200 — tempo chart
+    ("temporal-frontend", "temporal"),                       # 7233/7243 — temporal chart
+}
+
 
 def is_dialled(ypath: str) -> bool:
     p = ypath.lstrip(".")
@@ -173,32 +231,37 @@ def is_ip(host: str) -> bool:
 
 
 def normalise(host: str):
-    """Reduce an in-cluster hostname to (name, namespace); namespace None means bare.
+    """Reduce an in-cluster hostname to (name, namespace, explicit_svc).
+
+    `namespace` None means a bare single-label name. `explicit_svc` is True when the host
+    carried a literal `.svc` / `.svc.cluster.local` suffix, which makes it in-cluster BY
+    DEFINITION — the caller must then treat an undeclared namespace as unresolvable rather
+    than as an external domain. Without the suffix a two-label host is ambiguous with a real
+    domain (`api.github.com` is not `api` in namespace `github`), so the caller stays quiet.
 
     Returns None when the host is not an in-cluster candidate at all.
-    `bare_ok` is decided by the caller (only URL positions accept a bare name).
     """
     h = host.rstrip(".").lower()
     if not h or h in LOOPBACK or is_ip(h):
         return None
     if h.endswith(".svc.cluster.local"):
-        h = h[: -len(".svc.cluster.local")]
+        h, explicit = h[: -len(".svc.cluster.local")], True
     elif h.endswith(".svc"):
-        h = h[: -len(".svc")]
+        h, explicit = h[: -len(".svc")], True
     else:
         # not an explicit cluster form; the caller decides using the namespace set
         parts = h.split(".")
         if len(parts) == 1:
-            return (h, None)
+            return (h, None, False)
         if len(parts) == 2:
-            return (parts[0], parts[1])
+            return (parts[0], parts[1], False)
         return None
     parts = h.split(".")
     if len(parts) == 2:
-        return (parts[0], parts[1])
+        return (parts[0], parts[1], explicit)
     if len(parts) == 1:
         # `<name>.svc` — malformed but unambiguously meant as in-cluster
-        return (parts[0], None)
+        return (parts[0], None, explicit)
     return None
 
 
@@ -223,13 +286,18 @@ def hosts_in(text: str):
 
 
 def gitops_facts(gitops: Path):
-    """-> (services, namespaces, corroborated) — all derived, nothing hand-written."""
-    services, namespaces, corroborated = set(), set(), set()
-    if not gitops.is_dir():
-        return services, namespaces, corroborated
+    """-> (services, namespaces, corroborated, env_sites) — all derived from the tree.
 
-    for path in sorted(gitops.rglob("*.yaml")):
-        text = path.read_text(encoding="utf-8", errors="ignore")
+    `env_sites` is every host a workload env/arg names, WITH provenance, so the same host
+    can be both corroboration (for application.yaml) and a checked claim (for itself).
+    Each entry is (path, ypath, host, workload-name).
+    """
+    services, namespaces, corroborated, env_sites = set(), set(), set(), []
+    if not gitops.is_dir():
+        return services, namespaces, corroborated, env_sites
+
+    for path in gatelib.rglob(gitops, "*.yaml"):
+        text = gatelib.read_text(path, errors="ignore")
         if not KIND_LINE.search(text):
             continue  # declares nothing this guard reads — see READ_KINDS
         try:
@@ -256,25 +324,33 @@ def gitops_facts(gitops: Path):
                 for suffix in ("kafka-bootstrap", "kafka-brokers"):
                     services.add((f"{name}-{suffix}", ns))
 
-            # Corroboration tier: a host the deployment manifest itself dials.
-            blobs = []
+            # Corroboration tier (for application.yaml) AND the checked env layer (#3966):
+            # the same values serve both, which is exactly why corroboration must not be
+            # reused when checking them — see the header.
+            blobs = []  # (ypath, value)
             if kind in WORKLOAD_KINDS:
                 spec = doc.get("spec") or {}
                 tmpl = ((spec.get("jobTemplate") or {}).get("spec", {}).get("template")
                         if kind == "CronJob" else spec.get("template")) or {}
                 ps = tmpl.get("spec") or {}
                 for c in (ps.get("containers") or []) + (ps.get("initContainers") or []):
+                    cn = c.get("name") or "?"
                     for e in c.get("env") or []:
                         if isinstance(e.get("value"), str):
-                            blobs.append(e["value"])
-                    blobs.extend(a for a in (c.get("args") or []) if isinstance(a, str))
-            for blob in blobs:
-                for host, _from_url in hosts_in(blob):
+                            blobs.append((f"{cn}.env.{e.get('name') or '?'}", e["value"]))
+                    for i, a in enumerate(c.get("args") or []):
+                        if isinstance(a, str):
+                            blobs.append((f"{cn}.args[{i}]", a))
+            for ypath, blob in blobs:
+                for host, from_url in hosts_in(blob):
                     got = normalise(host)
-                    if got and got[1]:
-                        corroborated.add(got)
+                    if not got:
+                        continue
+                    if got[1]:
+                        corroborated.add((got[0], got[1]))
+                    env_sites.append((path, f"{name}.{ypath}", host, from_url))
 
-    return services, namespaces, corroborated
+    return services, namespaces, corroborated, env_sites
 
 
 def service_yamls(root: Path):
@@ -290,7 +366,7 @@ def scan(files, services, namespaces, corroborated):
     known_bare = {n for n, _ns in services}
     for path in files:
         try:
-            docs = [d for d in yaml.safe_load_all(path.read_text(encoding="utf-8")) if isinstance(d, dict)]
+            docs = [d for d in gatelib.load_yaml_all(path) if isinstance(d, dict)]
         except yaml.YAMLError as exc:
             findings.append((path, "<file>", "-", f"unparseable YAML: {exc}"))
             continue
@@ -299,54 +375,110 @@ def scan(files, services, namespaces, corroborated):
                 if not is_dialled(ypath):
                     continue
                 for host, from_url in hosts_in(value):
-                    got = normalise(host)
-                    if got is None:
+                    verdict = classify(host, from_url, services, namespaces,
+                                       known_bare, corroborated)
+                    if verdict is None:
                         continue
-                    name, ns = got
-                    if ns is None:
-                        # bare single-label name: only a URL position implies a Service
-                        if not from_url:
-                            continue
-                        checked += 1
-                        if name not in known_bare:
-                            findings.append((path, ypath, host,
-                                             "no Service of this name is declared in any namespace"))
-                        continue
-                    if ns not in namespaces:
-                        continue  # not a cluster namespace -> external host, not our business
                     checked += 1
-                    if (name, ns) in services or (name, ns) in corroborated:
-                        continue
-                    findings.append((path, ypath, host,
-                                     f"namespace '{ns}' exists in gitops but declares no "
-                                     f"Service '{name}'"))
+                    if verdict:
+                        findings.append((path, ypath, host, verdict))
     return findings, checked
 
 
+def classify(host, from_url, services, namespaces, known_bare, believed):
+    """-> None (not our business) | "" (resolves) | reason string (does not resolve).
+
+    `believed` is whatever the CALLER accepts as existing beyond declared Services: the
+    corroboration tier for application.yaml, HELM_PROVIDED for the gitops env. Keeping it a
+    parameter is what stops the env layer from corroborating itself (header).
+    """
+    got = normalise(host)
+    if got is None:
+        return None
+    name, ns, explicit = got
+    if ns is None:
+        # bare single-label name: only a URL position implies a Service
+        if not from_url:
+            return None
+        return "" if name in known_bare else (
+            "no Service of this name is declared in any namespace")
+    if ns not in namespaces:
+        if not explicit:
+            return None  # `<a>.<b>` with an unknown second label -> an external domain
+        # A literal `.svc` is a cluster suffix, so an unknown namespace cannot resolve.
+        # This is the namespace-typo case the gate used to skip (#3966).
+        return (f"namespace '{ns}' is not declared anywhere in gitops, and a `.svc` host "
+                f"can only resolve inside the cluster")
+    if (name, ns) in services or (name, ns) in believed:
+        return ""
+    return f"namespace '{ns}' exists in gitops but declares no Service '{name}'"
+
+
+def scan_env(env_sites, services, namespaces):
+    """Check the gitops workload env layer against declared Services + HELM_PROVIDED.
+
+    Deliberately NOT given the corroboration set: it is derived from these very values, so
+    passing it here would let every host vouch for itself (header). `used` is returned so
+    run_gate can report a HELM_PROVIDED entry nothing dials any more.
+    """
+    findings, checked, used = [], 0, set()
+    known_bare = {n for n, _ns in services}
+    for path, ypath, host, from_url in env_sites:
+        verdict = classify(host, from_url, services, namespaces, known_bare, HELM_PROVIDED)
+        if verdict is None:
+            continue
+        checked += 1
+        got = normalise(host)
+        if got and (got[0], got[1]) in HELM_PROVIDED:
+            used.add((got[0], got[1]))
+        if verdict:
+            findings.append((path, ypath, host, verdict))
+    return findings, checked, used
+
+
 def run_gate(enforce: bool) -> int:
-    services, namespaces, corroborated = gitops_facts(GITOPS)
+    services, namespaces, corroborated, env_sites = gitops_facts(GITOPS)
     if not services:
         print(f"::error::no Services found under {GITOPS} — run from the repo root.")
         return 2
     files = service_yamls(REPO)
-    findings, checked = scan(files, services, namespaces, corroborated)
+    app_findings, app_checked = scan(files, services, namespaces, corroborated)
+    env_findings, env_checked, helm_used = scan_env(env_sites, services, namespaces)
+    findings = app_findings + env_findings
 
-    print(f"check-incluster-hostnames: {len(files)} application.yaml files, "
-          f"{checked} in-cluster hostnames checked against {len(services)} declared "
-          f"Services (+{len(corroborated)} corroborated by a gitops workload env) "
-          f"across {len(namespaces)} namespaces")
-    if not findings:
-        print("OK: every in-cluster hostname resolves to a Service gitops declares.")
+    print(f"check-incluster-hostnames: {len(files)} application.yaml files "
+          f"({app_checked} hostnames) + {len(env_sites)} gitops workload env/arg values "
+          f"({env_checked} hostnames), against {len(services)} declared Services "
+          f"(+{len(corroborated)} corroborated, application.yaml layer only; "
+          f"+{len(HELM_PROVIDED)} Helm-provided, env layer) across {len(namespaces)} namespaces")
+
+    # Both-ways: a HELM_PROVIDED entry nothing dials is scope that has stopped being needed.
+    # Reported as a finding in its own right so the list cannot rot into permanent breadth.
+    stale = sorted(HELM_PROVIDED - helm_used)
+    level = "error" if enforce else "warning"
+    for name, ns in stale:
+        print(f"::{level}::STALE HELM_PROVIDED entry in {Path(__file__).name}: "
+              f"('{name}', '{ns}') is dialled by no gitops workload env any more — delete "
+              f"the line. A declaration that outlives its use is how an exception list turns "
+              f"into permanent unchecked scope.")
+
+    if not findings and not stale:
+        print("OK: every in-cluster hostname resolves — in application.yaml AND in the "
+              "gitops workload env.")
         return 0
 
-    level = "error" if enforce else "warning"
     for path, ypath, host, reason in findings:
         rel = path.relative_to(REPO) if path.is_absolute() and REPO in path.parents else path
         print(f"::{level} file={rel}::in-cluster host '{host}' at `{ypath.lstrip('.')}` "
               f"does not resolve: {reason}. Nothing in this repo's test layers can catch "
               f"this — a unit test stubs the client and an IT serves localhost — so fix the "
               f"hostname, or declare the Service in openbank-infra/gitops/.")
-    print(f"\n{len(findings)} unresolvable in-cluster hostname(s).")
+    if findings:
+        print(f"\n{len(findings)} unresolvable in-cluster hostname(s) "
+              f"({len(app_findings)} in application.yaml, {len(env_findings)} in a gitops "
+              f"workload env).")
+    if stale:
+        print(f"{len(stale)} stale HELM_PROVIDED entr(y/ies).")
     return 1 if enforce else 0
 
 
@@ -357,8 +489,14 @@ def self_test() -> int:
 
     failures = []
     services = {("apicurio-registry", "messaging"), ("keycloak", "iam"), ("admin-ui", "admin-ui")}
-    namespaces = {"messaging", "iam", "admin-ui", "analytics", "temporal"}
-    corroborated = {("temporal-frontend", "temporal")}
+    # `observability` must be here for the HELM_PROVIDED cases below to exercise the Helm
+    # tier rather than the undeclared-namespace rule; `tpp` and `keda` are deliberately
+    # absent, since those are the real undeclared-namespace defects (#3966).
+    namespaces = {"messaging", "iam", "admin-ui", "analytics", "temporal", "observability"}
+    # Two entries on purpose: one that is ALSO in HELM_PROVIDED (temporal-frontend) and one
+    # that is not (only-corroborated). The pair is what proves the two layers judge against
+    # different sets — see the circularity assertion at the end.
+    corroborated = {("temporal-frontend", "temporal"), ("only-corroborated", "temporal")}
 
     def check(label, body, must_flag):
         with tempfile.TemporaryDirectory() as td:
@@ -413,6 +551,61 @@ def self_test() -> int:
           "quarkus:\n  rest-client:\n    x:\n      url: http://openbank-admin-ui:3000\n", True)
     check("a plain word is not treated as a host", "a:\n  b: earliest\n", False)
     check("a duration/number scalar is not treated as a host", "a:\n  b: PT24H\n", False)
+
+    # ---- the namespace-typo hole this gate used to skip (#3966) -----------------------
+    # `.svc` is a cluster suffix by definition, so an undeclared namespace cannot resolve.
+    # Both real cases: vop's `parties` (should be `party`) and openbao's `keycloak` (`iam`).
+    check("an explicit .svc host in an UNDECLARED namespace IS flagged",
+          "a:\n  b: http://party-service.parties.svc:8100\n", True)
+    check("the .svc.cluster.local form of the same typo is flagged",
+          "a:\n  b: http://keycloak.keycloak.svc.cluster.local:8080\n", True)
+    # ...but the short form stays quiet, because there the second label is ambiguous with a
+    # real domain. This asymmetry is the whole reason `explicit_svc` exists.
+    check("the SHORT <name>.<ns> form with an unknown ns is NOT flagged (external domain)",
+          "a:\n  b: http://something.keda:8080\n", False)
+
+    # ---- the gitops env layer ---------------------------------------------------------
+    def check_env(label, sites, must_flag):
+        found, _, _ = scan_env(sites, services, namespaces)
+        ok = bool(found) == must_flag
+        print(f"  {'ok  ' if ok else 'FAIL'} {label}"
+              + ("" if ok else f"  (findings={[x[2] for x in found]})"))
+        if not ok:
+            failures.append(label)
+
+    P = Path("openbank-infra/gitops/components/x/x.yaml")
+    check_env("a workload env naming a Service that does not exist IS flagged",
+              [(P, "x.c.env.URL", "schema-registry.messaging.svc", True)], True)
+    check_env("a workload env naming a real Service is clean",
+              [(P, "x.c.env.URL", "apicurio-registry.messaging.svc", True)], False)
+    check_env("a workload env in an undeclared namespace IS flagged",
+              [(P, "x.c.env.URL", "tpp-registry-service.tpp.svc", True)], True)
+    check_env("a Helm-provided Service is NOT flagged in the env layer",
+              [(P, "x.c.env.URL", "tempo.observability.svc", True)], False)
+    check_env("localhost in a workload env is never flagged",
+              [(P, "x.c.env.URL", "localhost", True)], False)
+    check_env("an external host in a workload env is never flagged",
+              [(P, "x.c.env.URL", "api.github.com", True)], False)
+
+    # THE circularity assertion, and the reason this gate is more than a second file loop.
+    # `temporal-frontend.temporal` is corroborated for application.yaml BY a workload env.
+    # If scan_env were handed that corroboration set, this host would vouch for itself and
+    # the env layer could never flag anything. It must be judged on HELM_PROVIDED alone —
+    # so a corroborated-but-NOT-Helm-provided host is a finding here while staying clean in
+    # the application.yaml layer above.
+    check("a corroborated-only host is clean in the application.yaml layer",
+          "a:\n  b: http://only-corroborated.temporal.svc:1234\n", False)
+    check_env("...and the SAME host IS flagged in the env layer (no self-corroboration)",
+              [(P, "x.c.env.URL", "only-corroborated.temporal.svc", True)], True)
+
+    # The stale half of both-ways: an entry nothing dials must be reported, or the list rots.
+    _, _, used = scan_env([(P, "x.c.env.URL", "tempo.observability.svc", True)],
+                          services, namespaces)
+    stale_ok = used == {("tempo", "observability")} and bool(HELM_PROVIDED - used)
+    print(f"  {'ok  ' if stale_ok else 'FAIL'} scan_env reports which HELM_PROVIDED entries "
+          f"were actually dialled (stale detection)")
+    if not stale_ok:
+        failures.append("HELM_PROVIDED stale detection")
 
     if failures:
         print(f"\n::error::self-test failed: {', '.join(failures)}")

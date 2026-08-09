@@ -53,7 +53,7 @@ try:
     import yaml
 except ImportError:  # pragma: no cover
     print("PyYAML is required", file=sys.stderr)
-    raise SystemExit(2)
+    raise SystemExit(2) from None
 
 WORKFLOWS = Path(".github/workflows")
 

@@ -148,6 +148,26 @@ replacing the former in-memory stub), so settlement state is durable across rest
 4. **2-approval gate** — money-path rule requires 2 approvals. This PR has 1 (automated review).
    Second approval from a human committer required before merge per rules.yaml.
 
+5. **Both outbound money-path edges were pointed at unresolvable hostnames for the life of the
+   service (#3931).** The Rollout carried no `BALANCE_SERVICE_URL` / `LEDGER_SERVICE_URL`, so the
+   debit, credit and ledger-book adapters (`BalanceDebitAdapter`, `BalanceCreditAdapter`,
+   `LedgerBookAdapter`) used `application.yaml`'s defaults `http://openbank-balance-service:8080`
+   and `http://openbank-ledger-service:8080`. No Service of either name is declared in any
+   namespace, and the ports were wrong for the real Services too (`balance-service:8103` in
+   `balances`, `ledger-service:8101` in `ledger`). **This is an availability, not a confidentiality
+   or integrity, finding**: the trust boundary itself did not move — the same two edges to the same
+   two services, over the same NetworkPolicy (`payments` was already permitted to both) — the
+   requests simply never left the pod. It does not change any STRIDE row above; every mitigation
+   listed for S2/T1/R2 applies unchanged once the calls actually arrive.
+
+   Worth recording as a residual risk because of *how it survived*: no test layer in this repo can
+   observe a hostname (the unit tests stub both ports, an IT serves localhost, a consumer pact
+   answers whatever path the client asks for), and the failure mode of a settlement whose debit
+   activity cannot connect is a Temporal retry loop, not a visible integrity breach. The
+   `incluster-hostname-resolution` gate is the only control that can see it, and it is enforced as
+   of #3931. Config is now the fleet shape: localhost dev default in `application.yaml`, real URL
+   from the workload env in gitops.
+
 ---
 
 ## DORA / PSD2 / PCI alignment

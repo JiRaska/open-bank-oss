@@ -22,6 +22,6 @@
     <ID>MatchingDeclarationName:CloseRunPorts.kt$CloseRunRepository</ID>
     <ID>TooGenericExceptionCaught:AccountRegistryConsumer.kt$AccountRegistryConsumer$e: Exception</ID>
     <ID>TooManyFunctions:CloseOrchestrator.kt$CloseOrchestrator : RunCloseUseCaseCloseRunQueryUseCase</ID>
-    <ID>TooManyFunctions:StatementService.kt$StatementService : ClosePeriodUseCaseClosePocketUseCaseRenderStatementUseCaseListStatementsUseCaseAdHocExportUseCase</ID>
+    <ID>TooManyFunctions:StatementService.kt$StatementService : ClosePeriodUseCaseClosePocketUseCaseRenderStatementUseCaseListStatementsUseCaseAdHocExportUseCaseSummarizeStatementUseCase</ID>
   </CurrentIssues>
 </SmellBaseline>

@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.2...domestic-payment-v0.13.3) (2026-08-09)
+
+
+### Bug Fixes
+
+* **domestic-payment:** never submit a payment to the clearing scheme twice ([#4218](https://github.com/JiRaska/open-bank-oss/issues/4218)) ([#4275](https://github.com/JiRaska/open-bank-oss/issues/4275)) ([11be465](https://github.com/JiRaska/open-bank-oss/commit/11be4658b2ac4224fdd9256925419c4b90ae3306))
+
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.1...domestic-payment-v0.13.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **libs:** stamp ApiError.timestamp at construction instead of serving 1970 ([#3880](https://github.com/JiRaska/open-bank-oss/issues/3880)) ([b3e6672](https://github.com/JiRaska/open-bank-oss/commit/b3e6672c9e13470fc6353ad8a5483e4075875b1f))
+
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.0...domestic-payment-v0.13.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* **domestic-payment:** make validatePayment re-entrant so a stranded payment can be re-driven ([#4200](https://github.com/JiRaska/open-bank-oss/issues/4200)) ([305b98c](https://github.com/JiRaska/open-bank-oss/commit/305b98c75e209505dc52b4432b51498d8133bfa6)), closes [#4182](https://github.com/JiRaska/open-bank-oss/issues/4182)
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.12.0...domestic-payment-v0.13.0) (2026-08-08)
+
+
+### Features
+
+* **domestic-payment:** add customer-facing payment confirmation download endpoint ([#4126](https://github.com/JiRaska/open-bank-oss/issues/4126)) ([3f6d80c](https://github.com/JiRaska/open-bank-oss/commit/3f6d80c9ad0ec083de1d8f0c8c5762fbf26863b0))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.11.4...domestic-payment-v0.12.0) (2026-08-07)
+
+
+### Features
+
+* **domestic-payment:** register workflow liveness on stranded-gauge and screening-redrive (ADR-0237) ([#3704](https://github.com/JiRaska/open-bank-oss/issues/3704)) ([7db0e56](https://github.com/JiRaska/open-bank-oss/commit/7db0e56efb819439965aebb602dc63ed92b20681))
+
 ## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.11.3...domestic-payment-v0.11.4) (2026-08-02)
 
 

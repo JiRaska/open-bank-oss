@@ -13,7 +13,7 @@
 openbank-infra/scripts/build-push-service.sh customer-edge
 ```
 
-The `Dockerfile` builds the fast-jar in an `eclipse-temurin:25-jdk-alpine` stage and runs it on `eclipse-temurin:25-jre-alpine` with `-XX:+UseZGC`, exposing port 8128.
+The image is built by `.github/workflows/Dockerfile.deploy` from a host-side fast-jar — runtime base `eclipse-temurin:25-jre` (glibc, #3354), non-root `openbank` user, `-XX:+UseZGC`, port 8128. `openbank-customer-edge/Dockerfile` builds nothing (#3016); the pipeline reads exactly one thing from it, the `EXPOSE` line.
 
 ## Endpoints
 
