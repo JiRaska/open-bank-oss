@@ -154,9 +154,7 @@ class StatementDocumentServicePactConsumerTest {
 
     @Test
     @PactTestFor(pactMethod = "previewTemplatePact")
-    fun `preview returns the rendered document HTML for the template body and statement data`(
-        mockServer: MockServer,
-    ) {
+    fun `preview returns the rendered document HTML for the template body and statement data`(mockServer: MockServer) {
         assertThat(previewPath).isEqualTo(PREVIEW_PATH)
 
         val body = given()
